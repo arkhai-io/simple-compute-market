@@ -18,11 +18,6 @@ from zoneinfo import ZoneInfo
 
 import google.auth
 from google.adk.agents import Agent
-from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill
-
-
-# from app.tools.weather import get_current_time, get_weather
 
 use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
 if use_vertex_ai:
@@ -76,45 +71,3 @@ root_agent = Agent(
     instruction="You are a helpful AI assistant designed to provide accurate and useful information.",
     tools=[get_weather, get_current_time],
 )
-
-# Create a2a app
-
-# Define the skill for the root agent
-# In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
-
-weather_skill = AgentSkill(
-    id="get_weather",
-    name="Get Weather",
-    description="Get the weather for a given location",
-    tags=["Weather", "Information"],
-    examples=[
-        "What is the weather in San Francisco?",
-    ],
-    input_modes=["text/plain"],
-    output_modes=["text/plain"],
-)
-
-time_skill = AgentSkill(
-    id="get_current_time",
-    name="Get Current Time",
-    description="Get the current time for a given location",
-    tags=["Time", "Information"],
-    examples=[
-        "What is the current time in San Francisco?",
-    ],
-    input_modes=["text/plain"],
-    output_modes=["text/plain"],
-)
-
-public_agent_card = AgentCard(
-    name="A2A Agent",
-    description="A helpful AI assistant designed to provide accurate and useful information.",
-    url="https://tourism-tee-chi-committed.trycloudflare.com/",
-    version="0.1.0",
-    default_input_modes=["text"],
-    default_output_modes=["text"],
-    skills=[weather_skill, time_skill],
-    capabilities=AgentCapabilities(streaming=True),
-)
-
-a2a_app = to_a2a(root_agent, port=8000, agent_card=public_agent_card)
