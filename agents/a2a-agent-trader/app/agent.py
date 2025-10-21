@@ -51,11 +51,14 @@ def adjust_trader_stock(item: str, quantity: int) -> int:
     Returns:
         The new stock level if successful, otherwise -1.
     """
-    if item in inventory:
-        new_stock = inventory[item]["stock"] + quantity
-        if new_stock >= 0:
-            inventory[item]["stock"] = new_stock
-            return new_stock
+    if item not in inventory:
+        inventory[item] = {"stock": 0, "price": 0}
+
+    new_stock = inventory[item]["stock"] + quantity
+
+    if new_stock >= 0:
+        inventory[item]["stock"] = new_stock
+        return new_stock
     return -1
 
 def get_trader_stock() -> dict:
@@ -68,7 +71,7 @@ def get_trader_stock() -> dict:
 
 farmer_agent = RemoteA2aAgent(
     name="farmer_agent",
-    description="A helpful AI assistant designed to trade resources with others.",
+    description="A helpful AI assistant designed to farm resources and trade with others.",
     agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}",
 )
 
@@ -79,7 +82,8 @@ root_agent = Agent(
         You are a helpful AI assistant designed to trade resources.
         If the user wants to farm resources, delegate to the farmer agent.
         If internal inventory is insufficient for a trade, attempt to buy stock from the farmer.
-        You can ask the farmer for their own stock information.
+        You can ask the farmer for their own stock level.
+        Buying or selling comprises adjusting both your own and the farmer's stock levels for the resource and money.
     """,
     tools=[adjust_trader_stock, get_trader_stock],
     sub_agents=[farmer_agent],
@@ -98,6 +102,7 @@ adjust_trader_stock_skill = AgentSkill(
     examples=[
         "Add 5 apples to the inventory.",
         "Remove 2 bananas from the inventory.",
+        "Buy 10 apples.",
     ],
     input_modes=["text/plain"],
     output_modes=["text/plain"],

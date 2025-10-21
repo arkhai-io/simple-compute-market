@@ -20,7 +20,7 @@ playground:
 	@echo "|                                                                             |"
 	@echo "| 🔍 IMPORTANT: Select the 'app' folder to interact with your agent.          |"
 	@echo "==============================================================================="
-	uv run adk web . --port 8502 --reload_agents --env-file .env
+	uv run adk web . --port 8502 --reload_agents
 
 # Serve the A2A version of the app
 # Usage: make serve-a2a [PORT=8001]

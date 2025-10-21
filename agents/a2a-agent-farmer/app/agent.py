@@ -18,6 +18,8 @@ import random
 import google.auth
 from google.adk.agents import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
+from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
+from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 
@@ -68,11 +70,14 @@ def adjust_farmer_stock(item: str, quantity: int) -> int:
     Returns:
         The new stock level if successful, otherwise -1.
     """
-    if item in inventory:
-        new_stock = inventory[item]["stock"] + quantity
-        if new_stock >= 0:
-            inventory[item]["stock"] = new_stock
-            return new_stock
+    if item not in inventory:
+        inventory[item] = {"stock": 0, "price": 0}
+
+    new_stock = inventory[item]["stock"] + quantity
+
+    if new_stock >= 0:
+        inventory[item]["stock"] = new_stock
+        return new_stock
     return -1
 
 def get_farmer_stock() -> dict:
@@ -83,12 +88,19 @@ def get_farmer_stock() -> dict:
     """
     return inventory
 
+trader_agent = RemoteA2aAgent(
+    name="trader_agent",
+    description="A helpful AI assistant designed to trade resources with others.",
+    agent_card=f"http://localhost:8000{AGENT_CARD_WELL_KNOWN_PATH}",
+)
+
 root_agent = Agent(
     name="root_agent",
     model="gemini-2.5-flash",
     instruction="""
         You are a helpful AI assistant designed to farm resources and trade them with others.
         If resources are insufficient for a trade, you can harvest crops to add to your inventory.
+        Buying or selling comprises adjusting both your own and the trader's stock levels for the resource and money.
         """,
     tools=[adjust_farmer_stock, get_farmer_stock, harvest_crop],
 )
@@ -109,6 +121,7 @@ adjust_farmer_stock_skill = AgentSkill(
     ],
     input_modes=["text/plain"],
     output_modes=["text/plain"],
+    sub_agents=[trader_agent],
 )
 
 get_farmer_stock_skill = AgentSkill(

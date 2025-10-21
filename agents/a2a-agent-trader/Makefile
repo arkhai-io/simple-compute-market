@@ -20,7 +20,7 @@ playground:
 	@echo "|                                                                             |"
 	@echo "| 🔍 IMPORTANT: Select the 'app' folder to interact with your agent.          |"
 	@echo "==============================================================================="
-	uv run adk web . --port 8501 --reload_agents --env-file .env
+	uv run adk web . --port 8501 --reload_agents
 
 # Serve the A2A version of the app
 # Usage: make serve-a2a [PORT=8000]
@@ -33,7 +33,7 @@ serve-a2a:
 	@echo "|                                                                             |"
 	@echo "| 💡 Try asking: How many apples do you have?                                 |"
 	@echo "==============================================================================="
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --env-file .env --host 0.0.0.0 --port $(or $(PORT),8000) --reload
+	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload --env-file .env
 
 # ==============================================================================
 # Backend Deployment Targets
