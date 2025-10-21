@@ -169,3 +169,10 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
+
+# Infra
+infra/*/*.tfvars
+infra/*/*.tfstate
+infra/*/*.tfstate.backup
+infra/*/.terraform*
+infra/*/*.plan
