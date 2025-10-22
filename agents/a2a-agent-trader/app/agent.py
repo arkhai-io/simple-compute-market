@@ -61,6 +61,23 @@ def adjust_trader_stock(item: str, quantity: int) -> int:
         return new_stock
     return -1
 
+def bulk_adjust_trader_stock(adjustments: dict) -> dict:
+    """Adjusts the stock of multiple items in the inventory.
+    Prefer using this function over multiple calls to adjust_trader_stock for efficiency.
+
+    Args:
+        adjustments: A dictionary where keys are item names and values are quantities to adjust.
+                     For example: {"apple": 5, "banana": -2, "money": -10}
+
+    Returns:
+        A dictionary with the new stock levels for each item adjusted.
+    """
+    results = {}
+    for item, quantity in adjustments.items():
+        new_stock = adjust_trader_stock(item, quantity)
+        results[item] = new_stock
+    return results
+
 def get_trader_stock() -> dict:
     """Gets the current stock of all items in the inventory.
     
@@ -83,9 +100,10 @@ root_agent = Agent(
         If the user wants to farm resources, delegate to the farmer agent.
         If internal inventory is insufficient for a trade, attempt to buy stock from the farmer.
         You can ask the farmer for their own stock level.
-        Buying or selling comprises adjusting both your own and the farmer's stock levels for the resource and money.
+        Buying or selling comprises of adjusting both your own and the farmer's stock levels for the resource and money.
+        First adjust the farmer's stock. If it succeeds, then adjust your own stock.
     """,
-    tools=[adjust_trader_stock, get_trader_stock],
+    tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock],
     sub_agents=[farmer_agent],
 )
 
@@ -108,6 +126,20 @@ adjust_trader_stock_skill = AgentSkill(
     output_modes=["text/plain"],
 )
 
+bulk_adjust_trader_stock_skill = AgentSkill(
+    id="bulk_adjust_trader_stock",
+    name="Bulk Adjust Trader Stock",
+    description="Adjust the stock of multiple items in the inventory at once. Product keys are always singular lowercase nouns.",
+    tags=["Inventory", "Management"],
+    examples=[
+        "Add 5 apples and 3 bananas to the inventory, and remove 10 money.",
+        "Sell 2 bananas and buy 4 apples",
+        "Buy 10 apples for 20 money.",
+    ],
+    input_modes=["application/json"],
+    output_modes=["application/json"],
+)
+
 get_trader_stock_skill = AgentSkill(
     id="get_trader_stock",
     name="Get Stock",
@@ -128,7 +160,7 @@ public_agent_card = AgentCard(
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
-    skills=[adjust_trader_stock_skill, get_trader_stock_skill],
+    skills=[adjust_trader_stock_skill, bulk_adjust_trader_stock_skill, get_trader_stock_skill],
     capabilities=AgentCapabilities(streaming=True),
 )
 

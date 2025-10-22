@@ -80,6 +80,23 @@ def adjust_farmer_stock(item: str, quantity: int) -> int:
         return new_stock
     return -1
 
+def bulk_adjust_farmer_stock(adjustments: dict) -> dict:
+    """Adjusts the stock of multiple items in the inventory.
+    Prefer using this function over multiple calls to adjust_farmer_stock for efficiency.
+
+    Args:
+        adjustments: A dictionary where keys are item names and values are quantities to adjust.
+                     For example: {"apple": 5, "banana": -2, "money": -10}
+
+    Returns:
+        A dictionary with the new stock levels for each item adjusted.
+    """
+    results = {}
+    for item, quantity in adjustments.items():
+        new_stock = adjust_farmer_stock(item, quantity)
+        results[item] = new_stock
+    return results
+
 def get_farmer_stock() -> dict:
     """Gets the current stock of all items in the inventory.
     
@@ -102,7 +119,7 @@ root_agent = Agent(
         If resources are insufficient for a trade, you can harvest crops to add to your inventory.
         Buying or selling comprises adjusting both your own and the trader's stock levels for the resource and money.
         """,
-    tools=[adjust_farmer_stock, get_farmer_stock, harvest_crop],
+    tools=[adjust_farmer_stock, bulk_adjust_farmer_stock, get_farmer_stock, harvest_crop],
 )
 
 # Create a2a app
@@ -122,6 +139,20 @@ adjust_farmer_stock_skill = AgentSkill(
     input_modes=["text/plain"],
     output_modes=["text/plain"],
     sub_agents=[trader_agent],
+)
+
+bulk_adjust_farmer_stock_skill = AgentSkill(
+    id="bulk_adjust_farmer_stock",
+    name="Bulk Adjust Farmer Stock",
+    description="Adjust the stock of multiple items in the inventory at once. Product keys are always singular lowercase nouns.",
+    tags=["Inventory", "Management"],
+    examples=[
+        "Add 5 apples and 3 bananas to the inventory, and remove 10 money.",
+        "Sell 2 bananas and buy 4 apples",
+        "Buy 10 apples for 20 money.",
+    ],
+    input_modes=["application/json"],
+    output_modes=["application/json"],
 )
 
 get_farmer_stock_skill = AgentSkill(
@@ -157,7 +188,7 @@ public_agent_card = AgentCard(
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
-    skills=[adjust_farmer_stock_skill, get_farmer_stock_skill, harvest_crop_skill],
+    skills=[adjust_farmer_stock_skill, bulk_adjust_farmer_stock_skill, get_farmer_stock_skill, harvest_crop_skill],
     capabilities=AgentCapabilities(streaming=True),
 )
 
