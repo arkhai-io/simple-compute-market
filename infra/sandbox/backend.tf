@@ -7,7 +7,7 @@ terraform {
     }
   }
   backend "gcs" {
-    bucket = "principia-sandbox-tfstate"
+    bucket = "principia-infrastructure-dev-tfstate-zca4g"
     prefix = "terraform/state"
   }
 }

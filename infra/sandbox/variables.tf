@@ -12,12 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-variable "project_name" {
-  type        = string
-  description = "Project name used as a base for resource naming"
-  default     = "agent-engine-a2a-agent"
-}
-
 variable "gcp_project_name" {
   type        = string
   description = "**Dev** Google Cloud Project ID for resource deployment."
