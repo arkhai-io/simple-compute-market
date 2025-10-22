@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import google.auth
 from google.adk.agents import Agent
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
 if use_vertex_ai:
@@ -69,4 +70,40 @@ root_agent = Agent(
     model="gemini-2.5-flash",
     instruction="You are a helpful AI assistant designed to provide accurate and useful information.",
     tools=[get_weather, get_current_time],
+)
+
+weather_skill = AgentSkill(
+    id="get_weather",
+    name="Get Weather",
+    description="Get the weather for a given location",
+    tags=["Weather", "Information"],
+    examples=[
+        "What is the weather in San Francisco?",
+    ],
+    input_modes=["text/plain"],
+    output_modes=["text/plain"],
+)
+
+time_skill = AgentSkill(
+    id="get_current_time",
+    name="Get Current Time",
+    description="Get the current time for a given location",
+    tags=["Time", "Information"],
+    examples=[
+        "What is the current time in San Francisco?",
+    ],
+    input_modes=["text/plain"],
+    output_modes=["text/plain"],
+)
+
+public_agent_card = AgentCard(
+    name="A2A Agent",
+    description="A helpful AI assistant designed to provide accurate and useful information.",
+    url="https://asia-southeast1-aiplatform.googleapis.com/v1beta1/projects/611115061575/locations/asia-southeast1/reasoningEngines/5622920056632508416",
+    preferredTransport= "HTTP+JSON",
+    version="0.1.0",
+    default_input_modes=["text"],
+    default_output_modes=["text"],
+    skills=[weather_skill, time_skill],
+    capabilities=AgentCapabilities(streaming=False),
 )
