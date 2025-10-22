@@ -29,7 +29,7 @@ from vertexai._genai.types import AgentEngine, AgentEngineConfig
 from vertexai.agent_engines.templates.adk import AdkApp
 from vertexai.preview.reasoning_engines import A2aAgent
 
-from app.agent import root_agent, public_agent_card
+from app.agent import root_agent, public_agent_card, AgentExecutorWithRunner
 from app.utils.deployment import (
     parse_env_vars,
     print_deployment_success,
@@ -174,9 +174,9 @@ def deploy_agent_engine_app(
         requirements = f.read().strip().split("\n")
 
     a2a_agent = A2aAgent(
-        agent_card=public_agent_card,                               # your A2A AgentCard
-        agent_executor_builder=lambda:lambda: GcsArtifactService(
-            bucket_name=artifacts_bucket_name
+        agent_card=public_agent_card,
+        agent_executor_builder=lambda: AgentExecutorWithRunner(
+            agent=root_agent
         ),
     )
     a2a_agent.set_up()
