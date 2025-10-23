@@ -13,13 +13,18 @@
 # limitations under the License.
 
 import os
+import json
 from zoneinfo import ZoneInfo
 
 import google.auth
+from fastapi import APIRouter, FastAPI, HTTPException
 from google.adk.agents import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types as genai_types
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 
@@ -164,4 +169,70 @@ public_agent_card = AgentCard(
     capabilities=AgentCapabilities(streaming=True),
 )
 
+a2a_alert_router = APIRouter()
+
+ALERTS_APP_NAME = "alerts"
+ALERTS_USER_ID = "resource-monitor"
+
+async def _run_alert_conversation(alert: dict) -> str:
+    """Route alert details through the root agent so it can decide on next steps."""
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=ALERTS_APP_NAME,
+        user_id=ALERTS_USER_ID,
+    )
+    runner = Runner(
+        agent=root_agent,
+        app_name=ALERTS_APP_NAME,
+        session_service=session_service,
+    )
+
+    message = genai_types.Content(
+        role="user",
+        parts=[
+            genai_types.Part.from_text(
+                text=(
+                    "Inventory monitor alert. Evaluate the current stock and decide whether "
+                    "to buy more of this resource from the farmer agent if stock levels are low. "
+                    f"Alert payload: {json.dumps(alert)}"
+                )
+            )
+        ],
+    )
+
+    final_response: str | None = None
+    async for event in runner.run_async(
+        user_id=ALERTS_USER_ID,
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            text_parts = [
+                part.text
+                for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            ]
+            if text_parts:
+                final_response = "".join(text_parts)
+                break
+
+    if not final_response:
+        raise HTTPException(
+            status_code=500,
+            detail="root_agent did not provide a response to the resource alert.",
+        )
+    return final_response
+
+
+@a2a_alert_router.post("/alerts/resource")
+async def handle_resource_alert(alert: dict) -> dict[str, object]:
+    """Expose an endpoint that forwards resource alerts to the root agent."""
+    response_text = await _run_alert_conversation(alert)
+    response = dict(alert)
+    response["root_agent_response"] = response_text
+
+    return response
+
+
 a2a_app = to_a2a(root_agent, port=8000, agent_card=public_agent_card)
+# TODO: Add the alert_response_route

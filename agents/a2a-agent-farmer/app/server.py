@@ -60,8 +60,7 @@ if use_vertex_ai:
         session_service_uri=session_service_uri,
     )
     app.title = "a2a-agent"
-    app.description = "API for interacting with the Agent a2a-agent"
-
+    app.description = "API for interacting with the Agent a2a-agent-farmer"
 
     @app.post("/feedback")
     def collect_feedback(feedback: Feedback) -> dict[str, str]:
