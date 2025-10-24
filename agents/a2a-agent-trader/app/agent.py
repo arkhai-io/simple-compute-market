@@ -106,11 +106,23 @@ root_agent = Agent(
     model="gemini-2.5-flash",
     instruction="""
         You are a helpful AI assistant designed to trade resources.
-        If the user wants to farm resources, delegate to the farmer agent.
-        If internal inventory is insufficient for a trade, attempt to buy stock from the farmer.
-        You can ask the farmer for their own stock level.
-        Buying or selling comprises of adjusting both your own and the farmer's stock levels for the resource and money.
-        First adjust the farmer's stock. If it succeeds, then adjust your own stock.
+
+        FOR USER REQUESTS: If the user wants to farm resources, delegate to the farmer agent.
+
+        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute trades according to the alert instructions:
+        - Check your current inventory first using get_trader_stock()
+        - If conditions are met (stock <= 0 and enough money), buy from farmer
+        - Always use bulk_adjust_trader_stock() for efficient trading
+        - Trade format: {"apple": 5, "money": -10} to buy 5 apples for 10 money
+        - Follow the exact quantities and prices specified in the alert
+
+        TRADING RULES:
+        - Always adjust farmer's stock first, then your own stock
+        - Cost is 2 money per fruit item
+        - Only trade if you have sufficient money
+        - Report transaction details and new inventory levels
+
+        You can ask the farmer for their stock level before trading if needed.
     """,
     tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock],
     sub_agents=[farmer_agent],
@@ -194,9 +206,20 @@ async def _run_alert_conversation(alert: dict) -> str:
         parts=[
             genai_types.Part.from_text(
                 text=(
-                    "Inventory monitor alert. Evaluate the current stock and decide whether "
-                    "to buy more of this resource from the farmer agent if stock levels are low. "
-                    f"Alert payload: {json.dumps(alert)}"
+                    "INVENTORY ALERT - AUTOMATIC RESTOCKING REQUIRED\n\n"
+                    "You must automatically execute trades based on this alert. This is not a request for evaluation - "
+                    "you must take action now.\n\n"
+                    "RESTOCKING RULES:\n"
+                    "- If apple stock <= 0 and you have at least 10 money, buy exactly 5 apples from farmer\n"
+                    "- If banana stock <= 0 and you have at least 10 money, buy exactly 5 bananas from farmer\n"
+                    "- Cost is 2 money per item\n"
+                    "- Always adjust farmer's stock first, then your own stock\n\n"
+                    "ALERT DETAILS:\n"
+                    f"{json.dumps(alert, indent=2)}\n\n"
+                    "Execute the appropriate trade now and report the results. Include:\n"
+                    "- What action you took (buy/no-action)\n"
+                    "- New inventory levels for both trader and farmer\n"
+                    "- Transaction details if a purchase was made"
                 )
             )
         ],
