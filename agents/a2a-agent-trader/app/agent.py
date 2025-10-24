@@ -17,7 +17,11 @@ import json
 from zoneinfo import ZoneInfo
 
 import google.auth
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import HTTPException
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 from google.adk.agents import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
@@ -169,8 +173,6 @@ public_agent_card = AgentCard(
     capabilities=AgentCapabilities(streaming=True),
 )
 
-a2a_alert_router = APIRouter()
-
 ALERTS_APP_NAME = "alerts"
 ALERTS_USER_ID = "resource-monitor"
 
@@ -224,15 +226,28 @@ async def _run_alert_conversation(alert: dict) -> str:
     return final_response
 
 
-@a2a_alert_router.post("/alerts/resource")
-async def handle_resource_alert(alert: dict) -> dict[str, object]:
+async def handle_resource_alert(request: Request) -> JSONResponse:
     """Expose an endpoint that forwards resource alerts to the root agent."""
+    try:
+        alert = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"error": "Invalid JSON in request body"},
+            status_code=400
+        )
+
     response_text = await _run_alert_conversation(alert)
     response = dict(alert)
     response["root_agent_response"] = response_text
 
-    return response
+    return JSONResponse(response)
+
+
+# Create Starlette route for the alert endpoint
+alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 
 
 a2a_app = to_a2a(root_agent, port=8000, agent_card=public_agent_card)
-# TODO: Add the alert_response_route
+
+# Add the alert route to the A2A app
+a2a_app.routes.append(alert_route)
