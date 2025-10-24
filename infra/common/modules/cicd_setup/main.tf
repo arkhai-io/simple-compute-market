@@ -28,41 +28,41 @@ resource "google_service_account" "cicd_runner_sa" {
 
 # Assign roles for the CICD project
 resource "google_project_iam_member" "cicd_project_roles" {
-  depends_on = [ google_service_account.cicd_runner_sa ]
-  for_each = toset(var.cicd_roles)
+  depends_on = [google_service_account.cicd_runner_sa]
+  for_each   = toset(var.cicd_roles)
 
-  project    = var.cicd_gcp_project_name
-  role       = each.value
-  member     = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
+  project = var.cicd_gcp_project_name
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
 }
 
 # Assign roles for the general project
 resource "google_project_iam_member" "general_project_roles" {
-  depends_on = [ google_service_account.cicd_runner_sa ]
+  depends_on = [google_service_account.cicd_runner_sa]
   for_each = {
     for pair in setproduct([var.gcp_project_env], var.cicd_sa_deployment_required_roles) :
     "${pair[0]}-${pair[1]}" => {
       project = var.gcp_project_name
-      role       = pair[1]
+      role    = pair[1]
     }
   }
 
-  project    = each.value.project
-  role       = each.value.role
-  member     = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
+  project = each.value.project
+  role    = each.value.role
+  member  = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
 }
 
 # Allow Cloud Run service SA to pull containers stored in the CICD project
 resource "google_project_iam_member" "cicd_run_invoker_artifact_registry_reader" {
-  project  = var.cicd_gcp_project_name
+  project = var.cicd_gcp_project_name
 
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:service-${data.google_project.project.number}@serverless-robot-prod.iam.gserviceaccount.com"
+  role   = "roles/artifactregistry.reader"
+  member = "serviceAccount:service-${data.google_project.project.number}@serverless-robot-prod.iam.gserviceaccount.com"
 }
 
 # Special assignment: Allow the CICD SA to create tokens
 resource "google_service_account_iam_member" "cicd_run_invoker_token_creator" {
-  depends_on = [ google_service_account.cicd_runner_sa ]
+  depends_on         = [google_service_account.cicd_runner_sa]
   service_account_id = google_service_account.cicd_runner_sa.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
@@ -70,7 +70,7 @@ resource "google_service_account_iam_member" "cicd_run_invoker_token_creator" {
 
 # Special assignment: Allow the CICD SA to impersonate himself for trigger creation
 resource "google_service_account_iam_member" "cicd_run_invoker_account_user" {
-  depends_on = [ google_service_account.cicd_runner_sa ]
+  depends_on         = [google_service_account.cicd_runner_sa]
   service_account_id = google_service_account.cicd_runner_sa.name
   role               = "roles/iam.serviceAccountUser"
   member             = "serviceAccount:${google_service_account.cicd_runner_sa.email}"
@@ -104,7 +104,7 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
   attribute_mapping = {
-    "google.subject"         = "assertion.sub"
+    "google.subject"             = "assertion.sub"
     "attribute.repository"       = "assertion.repository"
     "attribute.repository_owner" = "assertion.repository_owner"
   }

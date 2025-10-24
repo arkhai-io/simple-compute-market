@@ -1,12 +1,12 @@
-resource "google_cloud_run_v2_service" "app_service" {  
+resource "google_cloud_run_v2_service" "app_service" {
   name                = "${var.gcp_project_prefix}${var.agent_name}-service"
   location            = var.gcp_project_region
   project             = var.gcp_project_name
   deletion_protection = false
   ingress             = "INGRESS_TRAFFIC_ALL"
   labels = {
-    "created-by"                  = "adk"
-    "environment"                 = var.gcp_project_env
+    "created-by"  = "adk"
+    "environment" = var.gcp_project_env
   }
 
   template {
@@ -23,7 +23,7 @@ resource "google_cloud_run_v2_service" "app_service" {
       }
     }
 
-    service_account                = var.app_sa_email
+    service_account                  = var.app_sa_email
     max_instance_request_concurrency = 40
 
     scaling {

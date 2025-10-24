@@ -9,7 +9,7 @@ output "wif_pool_id" {
 }
 
 output "wif_provider_id" {
-  value = google_iam_workload_identity_pool_provider.github_provider.workload_identity_pool_provider_id
+  value       = google_iam_workload_identity_pool_provider.github_provider.workload_identity_pool_provider_id
   description = "The Workload Identity Federation Provider ID for GitHub Actions."
 }
 

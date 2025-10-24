@@ -20,7 +20,7 @@ resource "google_service_account" "app_sa" {
 
 # Grant application SA the required permissions to run the application
 resource "google_project_iam_member" "app_sa_roles" {
-  depends_on = [ google_service_account.app_sa ]
+  depends_on = [google_service_account.app_sa]
   for_each = {
     for pair in setproduct([var.gcp_project_env], var.app_sa_roles) :
     join(",", pair) => {
@@ -29,9 +29,9 @@ resource "google_project_iam_member" "app_sa_roles" {
     }
   }
 
-  project    = each.value.project
-  role       = each.value.role
-  member     = "serviceAccount:${google_service_account.app_sa.email}"
+  project = each.value.project
+  role    = each.value.role
+  member  = "serviceAccount:${google_service_account.app_sa.email}"
 }
 
 resource "google_storage_bucket" "logs_data_bucket" {

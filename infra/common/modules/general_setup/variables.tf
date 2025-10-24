@@ -1,10 +1,10 @@
 variable "gcp_project_name" {
-  type = string
+  type        = string
   description = "Google Cloud Project ID for the GCP resources."
 }
 
 variable "gcp_project_env" {
-  type = string
+  type        = string
   description = "The environment of the GCP project (e.g., dev, staging, prod)."
 }
 
@@ -20,12 +20,12 @@ variable "gcp_project_region" {
 }
 
 variable "deploy_project_services" {
-  type = list(string)
+  type        = list(string)
   description = "List of services to be deployed in the GCP project."
 }
 
 variable "app_sa_roles" {
-  type = list(string)
+  type        = list(string)
   description = "List of roles to be assigned to the application service account."
   default = [
     "roles/aiplatform.user",

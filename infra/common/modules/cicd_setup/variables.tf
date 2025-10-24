@@ -1,10 +1,10 @@
 variable "gcp_project_name" {
-  type = string
+  type        = string
   description = "Google Cloud Project ID for the GCP resources."
 }
 
 variable "gcp_project_env" {
-  type = string
+  type        = string
   description = "The environment of the GCP project (e.g., dev, staging, prod)."
 }
 
@@ -25,7 +25,7 @@ variable "cicd_gcp_project_region" {
 }
 
 variable "cicd_services" {
-  type = list(string)
+  type        = list(string)
   description = "List of services to be deployed in the CICD GCP project."
   default = [
     "aiplatform.googleapis.com",
@@ -39,7 +39,7 @@ variable "cicd_services" {
 }
 
 variable "cicd_roles" {
-  type = list(string)
+  type        = list(string)
   description = "List of roles to be assigned to the CICD service account."
   default = [
     "roles/run.invoker",
@@ -54,10 +54,10 @@ variable "cicd_roles" {
 }
 
 variable "cicd_sa_deployment_required_roles" {
-  type = list(string)
+  type        = list(string)
   description = "List of roles required for the CICD service account to deploy to other projects."
   default = [
-    "roles/run.developer",    
+    "roles/run.developer",
     "roles/iam.serviceAccountUser",
     "roles/aiplatform.user",
     "roles/storage.admin"

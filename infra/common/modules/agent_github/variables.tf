@@ -30,7 +30,7 @@ variable "bucket_load_test_results_name" {
 
 variable "logs_data_bucket_url" {
   description = "The URL of the logs data storage bucket."
-  type        = string  
+  type        = string
 }
 
 variable "artifact_registry_repo_name" {

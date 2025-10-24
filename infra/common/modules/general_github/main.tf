@@ -39,7 +39,7 @@ resource "github_actions_variable" "staging_project_id" {
   repository    = var.repository_name
   variable_name = "${local.env_prefix}PROJECT_ID"
   value         = var.gcp_project_name
-  depends_on      = [data.github_repository.existing_repo]
+  depends_on    = [data.github_repository.existing_repo]
 }
 
 resource "github_actions_variable" "region" {

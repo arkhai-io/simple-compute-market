@@ -1,5 +1,5 @@
 variable "gcp_project_name" {
-  type = string
+  type        = string
   description = "Google Cloud Project ID for the GCP resources."
 }
 
