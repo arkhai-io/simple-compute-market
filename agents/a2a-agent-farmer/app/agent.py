@@ -22,6 +22,9 @@ from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
 from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
+BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8001")
+PORT = os.getenv("PORT", 8001)
+REMOTE_AGENT_URL_OVERRIDE = os.getenv("REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8000")
 
 use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
 print('Vertex AI value is:', use_vertex_ai)
@@ -184,7 +187,7 @@ harvest_crop_skill = AgentSkill(
 public_agent_card = AgentCard(
     name="A2A Agent",
     description="A helpful AI assistant designed to farm resources and trade them with others.",
-    url="http://localhost:8001/",
+    url=BASE_URL_OVERRIDE,
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
@@ -192,4 +195,4 @@ public_agent_card = AgentCard(
     capabilities=AgentCapabilities(streaming=True),
 )
 
-a2a_app = to_a2a(root_agent, port=8001, agent_card=public_agent_card)
+a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)

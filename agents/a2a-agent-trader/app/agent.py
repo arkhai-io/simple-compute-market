@@ -31,6 +31,9 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
+BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
+PORT = os.getenv("PORT", 8000)
+REMOTE_AGENT_URL_OVERRIDE = os.getenv("REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001")
 
 use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
 if use_vertex_ai:
@@ -98,7 +101,7 @@ def get_trader_stock() -> dict:
 farmer_agent = RemoteA2aAgent(
     name="farmer_agent",
     description="A helpful AI assistant designed to farm resources and trade with others.",
-    agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}",
+    agent_card=f"{REMOTE_AGENT_URL_OVERRIDE}{AGENT_CARD_WELL_KNOWN_PATH}",
 )
 
 root_agent = Agent(
@@ -177,7 +180,7 @@ get_trader_stock_skill = AgentSkill(
 public_agent_card = AgentCard(
     name="A2A Agent",
     description="You are a helpful AI assistant designed to trade resources with others.",
-    url="http://localhost:8000/",
+    url=BASE_URL_OVERRIDE,
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
@@ -270,7 +273,7 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
 alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 
 
-a2a_app = to_a2a(root_agent, port=8000, agent_card=public_agent_card)
+a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
 # Add the alert route to the A2A app
 a2a_app.routes.append(alert_route)
