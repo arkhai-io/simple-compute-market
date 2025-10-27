@@ -12,30 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import json
-from zoneinfo import ZoneInfo
+import os
 
 import google.auth
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
-from google.adk.agents import Agent
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
-from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
+from google.adk.agents import Agent
+from google.adk.agents.remote_a2a_agent import (
+    AGENT_CARD_WELL_KNOWN_PATH,
+    RemoteA2aAgent,
+)
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types as genai_types
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
 PORT = os.getenv("PORT", 8000)
-REMOTE_AGENT_URL_OVERRIDE = os.getenv("REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001")
+REMOTE_AGENT_URL_OVERRIDE = os.getenv(
+    "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
+)
 
-use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
+use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 if use_vertex_ai:
     if not os.getenv("GOOGLE_CLOUD_PROJECT"):
         try:
@@ -45,13 +51,16 @@ if use_vertex_ai:
             # If default credentials are not available, continue without setting the project.
             # Downstream code should handle missing configuration gracefully or via env vars.
             pass
-    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+    os.environ.setdefault(
+        "GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global")
+    )
 
 inventory = {
     "apple": {"stock": 0, "price": 0},
     "banana": {"stock": 0, "price": 0},
     "money": {"stock": 100, "price": 1},
 }
+
 
 def adjust_trader_stock(item: str, quantity: int) -> int:
     """Adjusts the stock of an item in the inventory.
@@ -73,6 +82,7 @@ def adjust_trader_stock(item: str, quantity: int) -> int:
         return new_stock
     return -1
 
+
 def bulk_adjust_trader_stock(adjustments: dict) -> dict:
     """Adjusts the stock of multiple items in the inventory.
     Prefer using this function over multiple calls to adjust_trader_stock for efficiency.
@@ -90,13 +100,15 @@ def bulk_adjust_trader_stock(adjustments: dict) -> dict:
         results[item] = new_stock
     return results
 
+
 def get_trader_stock() -> dict:
     """Gets the current stock of all items in the inventory.
-    
+
     Returns:
         A dictionary representing the current inventory stock.
     """
     return inventory
+
 
 farmer_agent = RemoteA2aAgent(
     name="farmer_agent",
@@ -184,12 +196,17 @@ public_agent_card = AgentCard(
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
-    skills=[adjust_trader_stock_skill, bulk_adjust_trader_stock_skill, get_trader_stock_skill],
+    skills=[
+        adjust_trader_stock_skill,
+        bulk_adjust_trader_stock_skill,
+        get_trader_stock_skill,
+    ],
     capabilities=AgentCapabilities(streaming=True),
 )
 
 ALERTS_APP_NAME = "alerts"
 ALERTS_USER_ID = "resource-monitor"
+
 
 async def _run_alert_conversation(alert: dict) -> str:
     """Route alert details through the root agent so it can decide on next steps."""
@@ -257,10 +274,7 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
     try:
         alert = await request.json()
     except Exception:
-        return JSONResponse(
-            {"error": "Invalid JSON in request body"},
-            status_code=400
-        )
+        return JSONResponse({"error": "Invalid JSON in request body"}, status_code=400)
 
     response_text = await _run_alert_conversation(alert)
     response = dict(alert)

@@ -57,9 +57,7 @@ class CloudTraceLoggingSpanExporter(CloudTraceSpanExporter):
         )
         self.logger = self.logging_client.logger(__name__)
         self.storage_client = storage_client or storage.Client(project=self.project_id)
-        self.bucket_name = (
-            bucket_name or f"{self.project_id}-a2a-agent-logs"
-        )
+        self.bucket_name = bucket_name or f"{self.project_id}-a2a-agent-logs"
         self.bucket = self.storage_client.bucket(self.bucket_name)
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:

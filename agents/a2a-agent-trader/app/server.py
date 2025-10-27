@@ -17,7 +17,7 @@ import os
 from fastapi import FastAPI
 
 # Import the use_vertex_ai flag and a2a_app from agent.py
-from app.agent import use_vertex_ai, a2a_app
+from app.agent import a2a_app, use_vertex_ai
 
 # Conditional imports based on use_vertex_ai flag
 if use_vertex_ai:
@@ -35,7 +35,9 @@ if use_vertex_ai:
     logging_client = google_cloud_logging.Client()
     logger = logging_client.logger(__name__)
     allow_origins = (
-        os.getenv("ALLOW_ORIGINS", "").split(",") if os.getenv("ALLOW_ORIGINS") else None
+        os.getenv("ALLOW_ORIGINS", "").split(",")
+        if os.getenv("ALLOW_ORIGINS")
+        else None
     )
 
     bucket_name = f"gs://{project_id}-a2a-agent-logs"

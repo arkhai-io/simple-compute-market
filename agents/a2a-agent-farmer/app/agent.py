@@ -16,18 +16,26 @@ import os
 import random
 
 import google.auth
-from google.adk.agents import Agent
-from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from google.adk.agents.remote_a2a_agent import AGENT_CARD_WELL_KNOWN_PATH
-from google.adk.agents.remote_a2a_agent import RemoteA2aAgent
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from google.adk.a2a.utils.agent_to_a2a import to_a2a
+from google.adk.agents import Agent
+from google.adk.agents.remote_a2a_agent import (
+    AGENT_CARD_WELL_KNOWN_PATH,
+    RemoteA2aAgent,
+)
 
 BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8001")
 PORT = os.getenv("PORT", 8001)
-REMOTE_AGENT_URL_OVERRIDE = os.getenv("REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8000")
+REMOTE_AGENT_URL_OVERRIDE = os.getenv(
+    "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8000"
+)
 
-use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in ("true", "1", "yes")
-print('Vertex AI value is:', use_vertex_ai)
+use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in (
+    "true",
+    "1",
+    "yes",
+)
+print("Vertex AI value is:", use_vertex_ai)
 if use_vertex_ai:
     if not os.getenv("GOOGLE_CLOUD_PROJECT"):
         try:
@@ -37,7 +45,9 @@ if use_vertex_ai:
             # If default credentials are not available, continue without setting the project.
             # Downstream code should handle missing configuration gracefully or via env vars.
             pass
-    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+    os.environ.setdefault(
+        "GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global")
+    )
 
 print("Vertex AI use:", use_vertex_ai)
 
@@ -47,13 +57,14 @@ inventory = {
     "money": {"stock": 20, "price": 1},
 }
 
+
 def harvest_crop(crop: str) -> int:
     """Harvests crop and adds it to the inventory.
     A random amount between 1 and 5 is harvested.
 
     Args:
         crop: The name of the crop to harvest.
-    
+
     Returns:
         The new stock level.
     """
@@ -62,6 +73,7 @@ def harvest_crop(crop: str) -> int:
     harvested_amount = random.randint(1, 5)
     inventory[crop]["stock"] += harvested_amount
     return inventory[crop]["stock"]
+
 
 def adjust_farmer_stock(item: str, quantity: int) -> int:
     """Adjusts the stock of an item in the inventory.
@@ -83,6 +95,7 @@ def adjust_farmer_stock(item: str, quantity: int) -> int:
         return new_stock
     return -1
 
+
 def bulk_adjust_farmer_stock(adjustments: dict) -> dict:
     """Adjusts the stock of multiple items in the inventory.
     Prefer using this function over multiple calls to adjust_farmer_stock for efficiency.
@@ -100,13 +113,15 @@ def bulk_adjust_farmer_stock(adjustments: dict) -> dict:
         results[item] = new_stock
     return results
 
+
 def get_farmer_stock() -> dict:
     """Gets the current stock of all items in the inventory.
-    
+
     Returns:
         A dictionary representing the current inventory stock.
     """
     return inventory
+
 
 trader_agent = RemoteA2aAgent(
     name="trader_agent",
@@ -122,7 +137,12 @@ root_agent = Agent(
         If resources are insufficient for a trade, you can harvest crops to add to your inventory.
         Buying or selling comprises adjusting both your own and the trader's stock levels for the resource and money.
         """,
-    tools=[adjust_farmer_stock, bulk_adjust_farmer_stock, get_farmer_stock, harvest_crop],
+    tools=[
+        adjust_farmer_stock,
+        bulk_adjust_farmer_stock,
+        get_farmer_stock,
+        harvest_crop,
+    ],
 )
 
 # Create a2a app
@@ -141,7 +161,6 @@ adjust_farmer_stock_skill = AgentSkill(
     ],
     input_modes=["text/plain"],
     output_modes=["text/plain"],
-    sub_agents=[trader_agent],
 )
 
 bulk_adjust_farmer_stock_skill = AgentSkill(
@@ -191,7 +210,12 @@ public_agent_card = AgentCard(
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
-    skills=[adjust_farmer_stock_skill, bulk_adjust_farmer_stock_skill, get_farmer_stock_skill, harvest_crop_skill],
+    skills=[
+        adjust_farmer_stock_skill,
+        bulk_adjust_farmer_stock_skill,
+        get_farmer_stock_skill,
+        harvest_crop_skill,
+    ],
     capabilities=AgentCapabilities(streaming=True),
 )
 
