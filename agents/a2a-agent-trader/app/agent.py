@@ -129,7 +129,7 @@ def get_resource_portfolio() -> dict:
 def rebalance_internal_resources():
     """Reallocates internal resources to optimize usage.
     """
-    print("Rebalancing resources...")
+    print("[TOOL] Rebalancing resources...")
     return
 
 def make_order(order_tag: OrderTag):
@@ -138,30 +138,63 @@ def make_order(order_tag: OrderTag):
     Returns:
         True if the order was successfully created.
     """
-    print(f"Creating order of type {order_tag} for resource.")
+    print(f"[TOOL] Creating order of type {order_tag} for resource.")
     return True
 
 def make_sell_order() -> bool:
     """Create a SELL order in the market.
 
+    After order creation, signal for the remote_agent to evaluate the order on their end.
+
     Returns:
         True if the order was successfully created.
     """
-    return make_order(OrderTag.BUY)
+    return make_order(OrderTag.SELL)
 
 def make_buy_order() -> bool:
     """Create a BUY order in the market.
+    
+    After order creation, signal for the remote_agent to evaluate the order on their end.
 
     Returns:
         True if the order was successfully created.
     """
     return make_order(OrderTag.BUY)
+
+def reject_offer() -> bool:
+    """Reject a received offer.
+
+    Returns:
+        True if the rejection was successfully communicated.
+    """
+    print("[TOOL] Rejecting received offer.")
+    return True
+
+def accept_offer() -> bool:
+    """Accept a received offer.
+
+    Returns:
+        True if the rejection was successfully communicated.
+    """
+    print("[TOOL] Accepting received offer.")
+    return True
+
+def evaluate_received_offer() -> str:
+    """Given a make_offer event, evaluate whether or not to accept it.
+    This should lead into invocation of either accept_offer or reject_offer.
+
+    Returns:
+        String with policy recommendation of next action to take.
+    """
+    policy_recommendation = consult_policy(EventType.MAKE_OFFER.value)
+
+    return policy_recommendation
 
 def consult_policy(event_type: str) -> str | None:
     """Given a triggering event, use the history store to determine the next action to take.
     The subsequent action to take will be summarized in CAPITALS.
 
-    The available event types are:
+    The available event trigger types are:
         make_offer
         resource_imbalance
 
@@ -190,7 +223,7 @@ def consult_policy(event_type: str) -> str | None:
         case _:
             result = "INVALID. Invalid event type."
     
-    print(f"Response to {event_type}: {result}")
+    print(f"[TOOL] Response to {event_type}: {result}")
     return result
 
 remote_agent = RemoteA2aAgent(
@@ -205,9 +238,10 @@ root_agent = Agent(
     instruction="""
         You are a helpful AI assistant designed to manage, trade, and balance compute resources.
 
-        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute trades according to the policy recommendation:
+        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute action according to the policy recommendation:
         - Check your current inventory first using get_resource_portfolio()
         - Report transaction details and new inventory levels
+        - After creation of offers in the market, instruct the remote agent to check received offers.
     """,
     tools=[
         get_resource_portfolio,
@@ -215,7 +249,10 @@ root_agent = Agent(
         rebalance_internal_resources,
         make_buy_order,
         make_sell_order,
-        # AgentTool(remote_agent)
+        evaluate_received_offer,
+        accept_offer,
+        reject_offer,
+        AgentTool(remote_agent),
         ],
     sub_agents=[],
 )
@@ -240,7 +277,7 @@ get_resource_portfolio_skill = AgentSkill(
 
 public_agent_card = AgentCard(
     name="A2A Agent",
-    description="You are a helpful AI assistant designed to trade resources with others.",
+    description="You are a helpful AI assistant designed to trade compute resources with others.",
     url=BASE_URL_OVERRIDE,
     version="0.1.0",
     default_input_modes=["text"],
@@ -288,8 +325,6 @@ async def _run_alert_conversation(alert: dict) -> str:
             )
         ],
     )
-
-    print("Sending alert to Agent.")
 
     final_response: str | None = None
     async for event in runner.run_async(
