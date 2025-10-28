@@ -15,7 +15,9 @@
 import json
 import os
 import random
-from dataclasses import dataclass
+import uuid
+from dataclasses import asdict, dataclass
+from typing import Optional
 from enum import Enum
 
 import google.auth
@@ -84,14 +86,13 @@ class EventType(str, Enum):
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
 
 class OrderTag(str, Enum):
-    """Types of orders in the market. May be BUY or SELL.
-    """
+    """Types of orders in the market. May be BUY or SELL."""
 
     BUY = "buy"
     SELL = "sell"
 
 
-@dataclass(frozen=True)
+@dataclass
 class ComputeResource:
     """Describes an allocatable compute resource node managed by the trader."""
 
@@ -102,64 +103,114 @@ class ComputeResource:
 
 
 # In-memory stand-in for compute nodes under the Agent's control. 
-resource_portfolio = [
-    ComputeResource(
+resource_portfolio = {
+    "us-node-1a": ComputeResource(
         gpu_model=GPUModel.H200,
         quantity=3,
-        sla=90,
+        sla=90.0,
         region=Region.CALIFORNIA_US
         ),
-    ComputeResource(
+    "jp-node-7b": ComputeResource(
         gpu_model=GPUModel.TESLA_V100,
         quantity=2,
         sla=99.9,
         region=Region.TOKYO_JP
         )
-]
+}
+
+@dataclass
+class Order:
+    """Describes an order on the market."""
+
+    order_id: str
+    tag: OrderTag
+    order_maker: str # Card URL  (TODO: Replace this with the Agent's later on ID.)
+    compute_resource: ComputeResource
+    duration: int  # duration in days
+    offer_token: str
+    offer_value: float
+    buyer_attestation: Optional[str] = None  # To be filled after negotation
+    seller_attestation: Optional[str] = None # To be filled after negotation
+
 
 
 def get_resource_portfolio() -> dict:
-    """Gets the current stock of all resources managed by the node portfolio.
+    """Get the current stock of all resources managed by the node portfolio.
 
     Returns:
         A dictionary representing the current portfolio stock.
     """
     return resource_portfolio
 
-def rebalance_internal_resources():
-    """Reallocates internal resources to optimize usage.
+def rebalance_internal_resources() -> bool:
+    """Reallocate internal resources to optimize usage.
+
+    Returns:
+        True if the process was successfully initiated.
     """
     print("[TOOL] Rebalancing resources...")
-    return
-
-def make_order(order_tag: OrderTag):
-    """Create an order in the market.
-
-    Returns:
-        True if the order was successfully created.
-    """
-    print(f"[TOOL] Creating order of type {order_tag} for resource.")
     return True
 
-def make_sell_order() -> bool:
-    """Create a SELL order in the market.
+def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+    """Create an order in the market.
 
-    After order creation, signal for the remote_agent to evaluate the order on their end.
-
-    Returns:
-        True if the order was successfully created.
-    """
-    return make_order(OrderTag.SELL)
-
-def make_buy_order() -> bool:
-    """Create a BUY order in the market.
-    
-    After order creation, signal for the remote_agent to evaluate the order on their end.
+    Args:
+        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
+        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
+        sla: SLA required for the order.
+        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
 
     Returns:
-        True if the order was successfully created.
+        The created order as a dictionary if the order was successfully created, or None otherwise.
+        This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    return make_order(OrderTag.BUY)
+    print(f"[TOOL] Creating order of type {order_tag} for resource.")
+    order = Order(
+        order_id=str(uuid.uuid4()),
+        tag=order_tag,
+        order_maker=BASE_URL_OVERRIDE,
+        compute_resource=ComputeResource(
+            gpu_model=GPUModel(gpu_model_str),
+            quantity=1,
+            sla=sla,
+            region=Region(region_str),
+        ),
+        duration=1, # 1 Day
+        offer_token="USDT",
+        offer_value=9*100,
+    )
+    return asdict(order)
+
+def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+    """Create a SELL order in the market, selling available resources. After order creation,
+    report to confirm order details, and signal for the remote_agent to evaluate the order on their end.
+    Provide the remote_agent the order_id.
+
+    Args:
+        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
+        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
+        sla: SLA required for the order.
+        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+
+    Returns:
+        The order as a dictionary if the order was successfully created, or None otherwise.
+    """
+    return make_order(OrderTag.SELL, gpu_model_str, sla, region_str)
+
+def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+    """Create a BUY order in the market. After order creation, report to confirm order details,
+    and signal for the remote_agent to evaluate the order on their end. Provide the remote_agent the order_id.
+
+    Args:
+        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
+        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
+        sla: SLA required for the order.
+        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+
+    Returns:
+        The order as a dictionary if the order was successfully created, or None otherwise.
+    """
+    return make_order(OrderTag.BUY, gpu_model_str, sla, region_str)
 
 def reject_offer() -> bool:
     """Reject a received offer.
@@ -179,13 +230,14 @@ def accept_offer() -> bool:
     print("[TOOL] Accepting received offer.")
     return True
 
-def evaluate_received_offer() -> str:
-    """Given a make_offer event, evaluate whether or not to accept it.
-    This should lead into invocation of either accept_offer or reject_offer.
+def evaluate_received_offer(order_id: str) -> str:
+    """Given a make_offer event denoting an INCOMING offer from another agent, evaluate whether or not to accept it.
+    Following the recommendation, invoke either accept_offer or reject_offer.
 
     Returns:
         String with policy recommendation of next action to take.
     """
+
     policy_recommendation = consult_policy(EventType.MAKE_OFFER.value)
 
     return policy_recommendation
@@ -213,7 +265,7 @@ def consult_policy(event_type: str) -> str | None:
                 ])
         case EventType.RESOURCE_IMBALANCE.value:
             result = random.choice([
-                "MAKE OFFER. Create market order. If resource usage is HIGH, then make a BUY order. If resource usage is LOW, then make a SELL order to sell the excess.",
+                "MAKE OFFER. Create market order. If resource usage is HIGH, then make a BUY order matching the resource model and region. If resource usage is LOW, then make a SELL order to sell the excess.",
                 "RESOLVE INTERALLY. Run rebalance_internal_resources utility.",
                 ])
         case EventType.CRON_JOB.value:
@@ -239,9 +291,10 @@ root_agent = Agent(
         You are a helpful AI assistant designed to manage, trade, and balance compute resources.
 
         FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute action according to the policy recommendation:
-        - Check your current inventory first using get_resource_portfolio()
-        - Report transaction details and new inventory levels
-        - After creation of offers in the market, instruct the remote agent to check received offers.
+        - Check your current resource portfolio first using get_resource_portfolio()
+        - Report transaction details after actions taken.
+        - If an Order was created, report the details (especially Order ID) of the created Order.
+        - After creation of offers in the market, instruct the remote agent to check received offers, and report the remote agent's response.
     """,
     tools=[
         get_resource_portfolio,
