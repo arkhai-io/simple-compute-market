@@ -24,6 +24,16 @@ playground:
 
 # Serve the A2A version of the app
 # Usage: make serve-a2a [PORT=8000]
+
+ENV_FILE ?= .env
+ENV_ARG := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
+
+# Load .env variables into Make if the file exists
+ifneq (,$(wildcard $(ENV_FILE)))
+  include $(ENV_FILE)
+  export $(shell sed '/^\s*#/d;/^\s*$$/d;s/=.*//' $(ENV_FILE))
+endif
+
 serve-a2a:
 	@echo "==============================================================================="
 	@echo "| 🚀 Starting A2A agent server...                                             |"
@@ -33,7 +43,7 @@ serve-a2a:
 	@echo "|                                                                             |"
 	@echo "| 💡 Try asking: How many apples do you have?                                 |"
 	@echo "==============================================================================="
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload --env-file .env
+	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload $(ENV_ARG)
 
 # ==============================================================================
 # Backend Deployment Targets
