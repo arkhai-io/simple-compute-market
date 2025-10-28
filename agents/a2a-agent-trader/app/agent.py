@@ -15,6 +15,8 @@
 import json
 import os
 import random
+from dataclasses import dataclass
+from enum import Enum
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -57,60 +59,65 @@ if use_vertex_ai:
         "GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global")
     )
 
-inventory = {
-    "apple": {"stock": 0},
-    "banana": {"stock": 0},
-    "money": {"stock": 100},
-}
+
+class GPUModel(str, Enum):
+    """Supported GPU SKUs for compute resources."""
+
+    H200 = "H200"
+    TESLA_V100 = "Tesla V100"
+    RTX_5080 = "RTX 5080"
 
 
-def adjust_trader_stock(item: str, quantity: int) -> int:
-    """Adjusts the stock of an item in the inventory.
+class Region(str, Enum):
+    """Regions where compute resources can be provisioned."""
 
-    Args:
-        item: The name of the item to adjust.
-        quantity: The quantity to adjust (positive to add, negative to remove).
+    CALIFORNIA_US = "California, US"
+    NEW_YORK_US = "New York, US"
+    TOKYO_JP = "Tokyo, JP"
+
+class EventTypes(str, Enum):
+    """Events that can be handled by the Agent"""
+
+    MAKE_OFFER = "make_offer"
+    RESOURCE_IMBALANCE = "resource_imbalance"
+    CRON_JOB = "cron_job"
+    ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
+
+
+@dataclass(frozen=True)
+class ComputeResource:
+    """Describes an allocatable compute resource node managed by the trader."""
+
+    gpu_model: GPUModel
+    quantity: int
+    sla: float  # percentage value in the range [0, 100]
+    region: Region
+
+
+# In-memory stand-in for compute nodes under the Agent's control. 
+resource_portfolio = [
+    ComputeResource(
+        gpu_model=GPUModel.H200,
+        quantity=3,
+        sla=90,
+        region=Region.CALIFORNIA_US
+        ),
+    ComputeResource(
+        gpu_model=GPUModel.TESLA_V100,
+        quantity=2,
+        sla=99.9,
+        region=Region.TOKYO_JP
+        )
+]
+
+
+def get_resource_portfolio() -> dict:
+    """Gets the current stock of all resources managed by the node portfolio.
 
     Returns:
-        The new stock level if successful, otherwise -1.
+        A dictionary representing the current portfolio stock.
     """
-    if item not in inventory:
-        inventory[item] = {"stock": 0}
-
-    new_stock = inventory[item]["stock"] + quantity
-
-    if new_stock >= 0:
-        inventory[item]["stock"] = new_stock
-        return new_stock
-    return -1
-
-
-def bulk_adjust_trader_stock(adjustments: dict) -> dict:
-    """Adjusts the stock of multiple items in the inventory.
-    Prefer using this function over multiple calls to adjust_trader_stock for efficiency.
-
-    Args:
-        adjustments: A dictionary where keys are item names and values are quantities to adjust.
-                     For example: {"apple": 5, "banana": -2, "money": -10}
-
-    Returns:
-        A dictionary with the new stock levels for each item adjusted.
-    """
-    results = {}
-    print(f"Adjusting stock as follows: {adjustments}")
-    for item, quantity in adjustments.items():
-        new_stock = adjust_trader_stock(item, quantity)
-        results[item] = new_stock
-    return results
-
-
-def get_trader_stock() -> dict:
-    """Gets the current stock of all items in the inventory.
-
-    Returns:
-        A dictionary representing the current inventory stock.
-    """
-    return inventory
+    return resource_portfolio
 
 def rebalance_internal_resources():
     """Reallocates internal resources to optimize usage.
@@ -121,12 +128,17 @@ def consult_policy(event_type, history=[]) -> str | None:
     """Given a triggering event, use the history store to determine the next action to take.
     The subsequent action to take will be summarized in CAPITALS.
 
+    The available event types are:
+        make_offer
+        resource_imbalance
+
     Returns:
         A string representing the action to take, and (if applicable) the corresponding
-        tool and the arguments to supply.
+        tool and the arguments to supply, or None if no action is available for the event type.
+        A valid event with no available actions will be distinct from an invalid, unrecognized event type.
     """
     match event_type:
-        case "make_offer":
+        case EventTypes.MAKE_OFFER:
             result = random.choice([
                 "ACCEPT the offer.",
                 "REJECT the offer.",
@@ -135,19 +147,19 @@ def consult_policy(event_type, history=[]) -> str | None:
                 ])
             print(f"Response to offer: {result}")
             return None
-        case "resource_imbalance":
+        case EventTypes.RESOURCE_IMBALANCE:
             result = random.choice([
                 "MAKE OFFER. Create market order.",
                 "RESOLVE INTERALLY. Execute rebalance_internal_resources tool.",
                 ])
             print(f"Response to imbalance: {result}")
             return result
-        case "cron_job":
-            return None
-        case "arbitrage_opportunity":
-            return None
+        case EventTypes.CRON_JOB:
+            return "UNAVAILABLE. No actions available for event type."
+        case EventTypes.ARBITRAGE_OPPORTUNITY:
+            return "UNAVAILABLE. No actions available for event type."
         case _:
-            return None
+            return "INVALID. Invalid event type."
 
 farmer_agent = RemoteA2aAgent(
     name="farmer_agent",
@@ -164,7 +176,7 @@ root_agent = Agent(
         FOR USER REQUESTS: If the user wants to farm resources, delegate to the farmer agent.
 
         FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute trades according to the alert instructions:
-        - Check your current inventory first using get_trader_stock()
+        - Check your current inventory first using get_resource_portfolio()
         - If conditions are met (stock <= 0 and enough money), buy from farmer
         - Always use bulk_adjust_trader_stock() for efficient trading
         - Trade format: {"apple": 5, "money": -10} to buy 5 apples for 10 money
@@ -180,10 +192,7 @@ root_agent = Agent(
         Ask the farmer for their stock level before trading if needed.
     """,
     tools=[
-        adjust_trader_stock,
-        bulk_adjust_trader_stock,
-        get_trader_stock,
-
+        get_resource_portfolio,
         consult_policy,
         rebalance_internal_resources,
 
@@ -196,36 +205,8 @@ root_agent = Agent(
 # Define the skill for the root agent
 # In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
 
-adjust_trader_stock_skill = AgentSkill(
-    id="adjust_trader_stock",
-    name="Adjust Stock",
-    description="Adjust the stock of an item in the inventory. Product keys are always singular lowercase nouns.",
-    tags=["Inventory", "Management"],
-    examples=[
-        "Add 5 apples to the inventory.",
-        "Remove 2 bananas from the inventory.",
-        "Buy 10 apples.",
-    ],
-    input_modes=["text/plain"],
-    output_modes=["text/plain"],
-)
-
-bulk_adjust_trader_stock_skill = AgentSkill(
-    id="bulk_adjust_trader_stock",
-    name="Bulk Adjust Trader Stock",
-    description="Adjust the stock of multiple items in the inventory at once. Product keys are always singular lowercase nouns.",
-    tags=["Inventory", "Management"],
-    examples=[
-        "Add 5 apples and 3 bananas to the inventory, and remove 10 money.",
-        "Sell 2 bananas and buy 4 apples",
-        "Buy 10 apples for 20 money.",
-    ],
-    input_modes=["application/json"],
-    output_modes=["application/json"],
-)
-
-get_trader_stock_skill = AgentSkill(
-    id="get_trader_stock",
+get_resource_portfolio_skill = AgentSkill(
+    id="get_resource_portfolio",
     name="Get Stock",
     description="Get the current stock of an item in the inventory",
     tags=["Inventory", "Information"],
@@ -245,9 +226,7 @@ public_agent_card = AgentCard(
     default_input_modes=["text"],
     default_output_modes=["text"],
     skills=[
-        # adjust_trader_stock_skill,
-        # bulk_adjust_trader_stock_skill,
-        get_trader_stock_skill,
+        # get_resource_portfolio_skill,
     ],
     capabilities=AgentCapabilities(streaming=True),
 )
