@@ -14,6 +14,7 @@
 
 import json
 import os
+import random
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -111,6 +112,42 @@ def get_trader_stock() -> dict:
     """
     return inventory
 
+def rebalance_internal_resources():
+    """Reallocates internal resources to optimize usage.
+    """
+    return
+
+def consult_policy(event_type, history=[]) -> str | None:
+    """Given a triggering event, use the history store to determine the next action to take.
+    The subsequent action to take will be summarized in CAPITALS.
+
+    Returns:
+        A string representing the action to take, and (if applicable) the corresponding
+        tool and the arguments to supply.
+    """
+    match event_type:
+        case "make_offer":
+            result = random.choice([
+                "ACCEPT the offer.",
+                "REJECT the offer.",
+                # "Counter-propose."
+                # "No-op."
+                ])
+            print(f"Response to offer: {result}")
+            return None
+        case "resource_imbalance":
+            result = random.choice([
+                "MAKE OFFER. Create market order.",
+                "RESOLVE INTERALLY. Execute rebalance_internal_resources tool.",
+                ])
+            print(f"Response to imbalance: {result}")
+            return result
+        case "cron_job":
+            return None
+        case "arbitrage_opportunity":
+            return None
+        case _:
+            return None
 
 farmer_agent = RemoteA2aAgent(
     name="farmer_agent",
@@ -142,7 +179,15 @@ root_agent = Agent(
 
         Ask the farmer for their stock level before trading if needed.
     """,
-    tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock, AgentTool(farmer_agent)],
+    tools=[
+        adjust_trader_stock,
+        bulk_adjust_trader_stock,
+        get_trader_stock,
+
+        consult_policy,
+        rebalance_internal_resources,
+
+        AgentTool(farmer_agent)],
     sub_agents=[],
 )
 
