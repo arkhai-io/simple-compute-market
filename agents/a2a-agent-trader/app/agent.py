@@ -262,19 +262,6 @@ root_agent = Agent(
 # Define the skill for the root agent
 # In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
 
-get_resource_portfolio_skill = AgentSkill(
-    id="get_resource_portfolio",
-    name="Get Stock",
-    description="Get the current stock of an item in the inventory",
-    tags=["Inventory", "Information"],
-    examples=[
-        "What resources are you selling?",
-        "Are you buying compute?",
-    ],
-    input_modes=["text/plain"],
-    output_modes=["text/plain"],
-)
-
 public_agent_card = AgentCard(
     name="A2A Agent",
     description="You are a helpful AI assistant designed to trade compute resources with others.",
@@ -282,9 +269,7 @@ public_agent_card = AgentCard(
     version="0.1.0",
     default_input_modes=["text"],
     default_output_modes=["text"],
-    skills=[
-        # get_resource_portfolio_skill,
-    ],
+    skills=[],
     capabilities=AgentCapabilities(streaming=True),
 )
 
