@@ -75,13 +75,20 @@ class Region(str, Enum):
     NEW_YORK_US = "New York, US"
     TOKYO_JP = "Tokyo, JP"
 
-class EventTypes(str, Enum):
+class EventType(str, Enum):
     """Events that can be handled by the Agent"""
 
     MAKE_OFFER = "make_offer"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
+
+class OrderTag(str, Enum):
+    """Types of orders in the market. May be BUY or SELL.
+    """
+
+    BUY = "buy"
+    SELL = "sell"
 
 
 @dataclass(frozen=True)
@@ -122,9 +129,35 @@ def get_resource_portfolio() -> dict:
 def rebalance_internal_resources():
     """Reallocates internal resources to optimize usage.
     """
+    print("Rebalancing resources...")
     return
 
-def consult_policy(event_type, history=[]) -> str | None:
+def make_order(order_tag: OrderTag):
+    """Create an order in the market.
+
+    Returns:
+        True if the order was successfully created.
+    """
+    print(f"Creating order of type {order_tag} for resource.")
+    return True
+
+def make_sell_order() -> bool:
+    """Create a SELL order in the market.
+
+    Returns:
+        True if the order was successfully created.
+    """
+    return make_order(OrderTag.BUY)
+
+def make_buy_order() -> bool:
+    """Create a BUY order in the market.
+
+    Returns:
+        True if the order was successfully created.
+    """
+    return make_order(OrderTag.BUY)
+
+def consult_policy(event_type: str) -> str | None:
     """Given a triggering event, use the history store to determine the next action to take.
     The subsequent action to take will be summarized in CAPITALS.
 
@@ -138,32 +171,31 @@ def consult_policy(event_type, history=[]) -> str | None:
         A valid event with no available actions will be distinct from an invalid, unrecognized event type.
     """
     match event_type:
-        case EventTypes.MAKE_OFFER:
+        case EventType.MAKE_OFFER.value:
             result = random.choice([
                 "ACCEPT the offer.",
                 "REJECT the offer.",
                 # "Counter-propose."
                 # "No-op."
                 ])
-            print(f"Response to offer: {result}")
-            return None
-        case EventTypes.RESOURCE_IMBALANCE:
+        case EventType.RESOURCE_IMBALANCE.value:
             result = random.choice([
-                "MAKE OFFER. Create market order.",
-                "RESOLVE INTERALLY. Execute rebalance_internal_resources tool.",
+                "MAKE OFFER. Create market order. If resource usage is HIGH, then make a BUY order. If resource usage is LOW, then make a SELL order to sell the excess.",
+                "RESOLVE INTERALLY. Run rebalance_internal_resources utility.",
                 ])
-            print(f"Response to imbalance: {result}")
-            return result
-        case EventTypes.CRON_JOB:
-            return "UNAVAILABLE. No actions available for event type."
-        case EventTypes.ARBITRAGE_OPPORTUNITY:
-            return "UNAVAILABLE. No actions available for event type."
+        case EventType.CRON_JOB.value:
+            result = "UNAVAILABLE. No actions available for event type."
+        case EventType.ARBITRAGE_OPPORTUNITY.value:
+            result = "UNAVAILABLE. No actions available for event type."
         case _:
-            return "INVALID. Invalid event type."
+            result = "INVALID. Invalid event type."
+    
+    print(f"Response to {event_type}: {result}")
+    return result
 
-farmer_agent = RemoteA2aAgent(
-    name="farmer_agent",
-    description="A helpful AI assistant designed to farm resources and trade with others.",
+remote_agent = RemoteA2aAgent(
+    name="remote_agent",
+    description="A helpful AI assistant trading compute resources with others.",
     agent_card=f"{REMOTE_AGENT_URL_OVERRIDE}{AGENT_CARD_WELL_KNOWN_PATH}",
 )
 
@@ -171,32 +203,20 @@ root_agent = Agent(
     name="root_agent",
     model="gemini-2.5-flash",
     instruction="""
-        You are a helpful AI assistant designed to trade resources.
+        You are a helpful AI assistant designed to manage, trade, and balance compute resources.
 
-        FOR USER REQUESTS: If the user wants to farm resources, delegate to the farmer agent.
-
-        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute trades according to the alert instructions:
+        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute trades according to the policy recommendation:
         - Check your current inventory first using get_resource_portfolio()
-        - If conditions are met (stock <= 0 and enough money), buy from farmer
-        - Always use bulk_adjust_trader_stock() for efficient trading
-        - Trade format: {"apple": 5, "money": -10} to buy 5 apples for 10 money
-        - Follow the exact quantities and prices specified in the alert
-
-        TRADING RULES:
-        - ONLY after farmer confirms their has been stock adjusted, adjust your own stock
-        - If farmer rejects trade, then do not adjust stock.
-        - Cost is 2 money per fruit item
-        - Only trade if you have sufficient money
         - Report transaction details and new inventory levels
-
-        Ask the farmer for their stock level before trading if needed.
     """,
     tools=[
         get_resource_portfolio,
         consult_policy,
         rebalance_internal_resources,
-
-        AgentTool(farmer_agent)],
+        make_buy_order,
+        make_sell_order,
+        # AgentTool(remote_agent)
+        ],
     sub_agents=[],
 )
 
@@ -211,8 +231,8 @@ get_resource_portfolio_skill = AgentSkill(
     description="Get the current stock of an item in the inventory",
     tags=["Inventory", "Information"],
     examples=[
-        "How many apples do you have?",
-        "What is the stock of bananas?",
+        "What resources are you selling?",
+        "Are you buying compute?",
     ],
     input_modes=["text/plain"],
     output_modes=["text/plain"],
@@ -248,26 +268,22 @@ async def _run_alert_conversation(alert: dict) -> str:
         session_service=session_service,
     )
 
+    event_type = EventType.RESOURCE_IMBALANCE.value
+    policy_recommendation = consult_policy(event_type)
+
     message = genai_types.Content(
         role="user",
         parts=[
             genai_types.Part.from_text(
                 text=(
-                    "INVENTORY ALERT - AUTOMATIC RESTOCKING REQUIRED\n\n"
-                    "You must automatically execute trades based on this alert. This is not a request for evaluation - "
-                    "you must take action now.\n\n"
-                    "RESTOCKING RULES:\n"
-                    "- If apple stock <= 0 and you have at least 10 money, buy exactly 5 apples from farmer\n"
-                    "- If banana stock <= 0 and you have at least 10 money, buy exactly 5 bananas from farmer\n"
-                    "- Cost is 2 money per item\n"
-                    "- Always wait for farmer's stock to be adjusted first, then your own stock\n"
-                    "- If the farmer refuses the sale, then do not adjust stock.\n\n"
+                    "RESOURCE MONITORING ALERT RECEIVED\n\n"
                     "ALERT DETAILS:\n"
                     f"{json.dumps(alert, indent=2)}\n\n"
-                    "Attempt to execute the appropriate trade now and report the results. Include:\n"
-                    "- What action you took (buy/no-action)\n"
-                    "- New inventory levels for both trader and farmer\n"
-                    "- Transaction details if a purchase was made"
+                    "POLICY RECOMMENDATION:\n"
+                    f"{json.dumps(policy_recommendation, indent=2)}\n\n"
+                    "Execute the corresponding tool now and report the results. Include:\n"
+                    "- What action was taken\n"
+                    "- Whether the action had a result, and if so, what it was"
                 )
             )
         ],
