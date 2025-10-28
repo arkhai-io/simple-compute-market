@@ -52,9 +52,9 @@ if use_vertex_ai:
 print("Vertex AI use:", use_vertex_ai)
 
 inventory = {
-    "apple": {"stock": 10, "price": 5},
-    "banana": {"stock": 5, "price": 2},
-    "money": {"stock": 20, "price": 1},
+    "apple": {"stock": 10},
+    "banana": {"stock": 5},
+    "money": {"stock": 20},
 }
 
 
@@ -69,7 +69,7 @@ def harvest_crop(crop: str) -> int:
         The new stock level.
     """
     if crop not in inventory:
-        inventory[crop] = {"stock": 0, "price": 0}
+        inventory[crop] = {"stock": 0}
     harvested_amount = random.randint(1, 5)
     inventory[crop]["stock"] += harvested_amount
     return inventory[crop]["stock"]
@@ -86,7 +86,7 @@ def adjust_farmer_stock(item: str, quantity: int) -> int:
         The new stock level if successful, otherwise -1.
     """
     if item not in inventory:
-        inventory[item] = {"stock": 0, "price": 0}
+        inventory[item] = {"stock": 0}
 
     new_stock = inventory[item]["stock"] + quantity
 
@@ -108,6 +108,7 @@ def bulk_adjust_farmer_stock(adjustments: dict) -> dict:
         A dictionary with the new stock levels for each item adjusted.
     """
     results = {}
+    print(f"Adjusting stock as follows: {adjustments}")
     for item, quantity in adjustments.items():
         new_stock = adjust_farmer_stock(item, quantity)
         results[item] = new_stock
@@ -122,6 +123,15 @@ def get_farmer_stock() -> dict:
     """
     return inventory
 
+def consult_policy() -> bool:
+    """Determines whether to accept or reject a trade offer.
+
+    Returns:
+        A boolean whether to ACCEPT (true) or REJEcT (false).
+    """
+    result = random.random() <0.5
+    print(f"Policy decision: {result}")
+    return result
 
 trader_agent = RemoteA2aAgent(
     name="trader_agent",
@@ -136,12 +146,14 @@ root_agent = Agent(
         You are a helpful AI assistant designed to farm resources and trade them with others.
         If resources are insufficient for a trade, you can harvest crops to add to your inventory.
         Buying or selling comprises adjusting both your own and the trader's stock levels for the resource and money.
+        When approached with a trade offer, CONSULT POLICY to determine whether or not to accept the offer.
         """,
     tools=[
         adjust_farmer_stock,
         bulk_adjust_farmer_stock,
         get_farmer_stock,
         harvest_crop,
+        consult_policy,
     ],
 )
 
@@ -211,10 +223,10 @@ public_agent_card = AgentCard(
     default_input_modes=["text"],
     default_output_modes=["text"],
     skills=[
-        adjust_farmer_stock_skill,
-        bulk_adjust_farmer_stock_skill,
+        # adjust_farmer_stock_skill,
+        # bulk_adjust_farmer_stock_skill,
         get_farmer_stock_skill,
-        harvest_crop_skill,
+        # harvest_crop_skill,
     ],
     capabilities=AgentCapabilities(streaming=True),
 )

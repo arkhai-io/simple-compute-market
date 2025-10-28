@@ -26,6 +26,7 @@ from google.adk.agents.remote_a2a_agent import (
 )
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.adk.tools.agent_tool import AgentTool
 from google.genai import types as genai_types
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -56,9 +57,9 @@ if use_vertex_ai:
     )
 
 inventory = {
-    "apple": {"stock": 0, "price": 0},
-    "banana": {"stock": 0, "price": 0},
-    "money": {"stock": 100, "price": 1},
+    "apple": {"stock": 0},
+    "banana": {"stock": 0},
+    "money": {"stock": 100},
 }
 
 
@@ -73,7 +74,7 @@ def adjust_trader_stock(item: str, quantity: int) -> int:
         The new stock level if successful, otherwise -1.
     """
     if item not in inventory:
-        inventory[item] = {"stock": 0, "price": 0}
+        inventory[item] = {"stock": 0}
 
     new_stock = inventory[item]["stock"] + quantity
 
@@ -95,6 +96,7 @@ def bulk_adjust_trader_stock(adjustments: dict) -> dict:
         A dictionary with the new stock levels for each item adjusted.
     """
     results = {}
+    print(f"Adjusting stock as follows: {adjustments}")
     for item, quantity in adjustments.items():
         new_stock = adjust_trader_stock(item, quantity)
         results[item] = new_stock
@@ -139,8 +141,8 @@ root_agent = Agent(
 
         You can ask the farmer for their stock level before trading if needed.
     """,
-    tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock],
-    sub_agents=[farmer_agent],
+    tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock, AgentTool(farmer_agent)],
+    sub_agents=[],
 )
 
 # Create a2a app
@@ -197,8 +199,8 @@ public_agent_card = AgentCard(
     default_input_modes=["text"],
     default_output_modes=["text"],
     skills=[
-        adjust_trader_stock_skill,
-        bulk_adjust_trader_stock_skill,
+        # adjust_trader_stock_skill,
+        # bulk_adjust_trader_stock_skill,
         get_trader_stock_skill,
     ],
     capabilities=AgentCapabilities(streaming=True),
@@ -233,10 +235,11 @@ async def _run_alert_conversation(alert: dict) -> str:
                     "- If apple stock <= 0 and you have at least 10 money, buy exactly 5 apples from farmer\n"
                     "- If banana stock <= 0 and you have at least 10 money, buy exactly 5 bananas from farmer\n"
                     "- Cost is 2 money per item\n"
-                    "- Always adjust farmer's stock first, then your own stock\n\n"
+                    "- Always adjust farmer's stock first, then your own stock\n"
+                    "- If the farmer refuses the sale, then do not adjust stock.\n\n"
                     "ALERT DETAILS:\n"
                     f"{json.dumps(alert, indent=2)}\n\n"
-                    "Execute the appropriate trade now and report the results. Include:\n"
+                    "Attempt to execute the appropriate trade now and report the results. Include:\n"
                     "- What action you took (buy/no-action)\n"
                     "- New inventory levels for both trader and farmer\n"
                     "- Transaction details if a purchase was made"
@@ -245,12 +248,15 @@ async def _run_alert_conversation(alert: dict) -> str:
         ],
     )
 
+    print("Sending alert to Agent.")
+
     final_response: str | None = None
     async for event in runner.run_async(
         user_id=ALERTS_USER_ID,
         session_id=session.id,
         new_message=message,
     ):
+        # print(event)
         if event.is_final_response() and event.content and event.content.parts:
             text_parts = [
                 part.text
