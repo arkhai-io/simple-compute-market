@@ -129,8 +129,9 @@ def consult_policy() -> bool:
     Returns:
         A boolean whether to ACCEPT (true) or REJEcT (false).
     """
-    result = random.random() <0.5
-    print(f"Policy decision: {result}")
+    random_roll = random.random()
+    result = random_roll < 0.5
+    print(f"Policy decision: {random_roll}, {result}")
     return result
 
 trader_agent = RemoteA2aAgent(
@@ -147,6 +148,7 @@ root_agent = Agent(
         If resources are insufficient for a trade, you can harvest crops to add to your inventory.
         Buying or selling comprises adjusting both your own and the trader's stock levels for the resource and money.
         When approached with a trade offer, CONSULT POLICY to determine whether or not to accept the offer.
+        If CONSULT_POLICY returns FALSE, reject the offer.
         """,
     tools=[
         adjust_farmer_stock,

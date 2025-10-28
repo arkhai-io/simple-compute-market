@@ -134,12 +134,13 @@ root_agent = Agent(
         - Follow the exact quantities and prices specified in the alert
 
         TRADING RULES:
-        - Always adjust farmer's stock first, then your own stock
+        - ONLY after farmer confirms their has been stock adjusted, adjust your own stock
+        - If farmer rejects trade, then do not adjust stock.
         - Cost is 2 money per fruit item
         - Only trade if you have sufficient money
         - Report transaction details and new inventory levels
 
-        You can ask the farmer for their stock level before trading if needed.
+        Ask the farmer for their stock level before trading if needed.
     """,
     tools=[adjust_trader_stock, bulk_adjust_trader_stock, get_trader_stock, AgentTool(farmer_agent)],
     sub_agents=[],
@@ -235,7 +236,7 @@ async def _run_alert_conversation(alert: dict) -> str:
                     "- If apple stock <= 0 and you have at least 10 money, buy exactly 5 apples from farmer\n"
                     "- If banana stock <= 0 and you have at least 10 money, buy exactly 5 bananas from farmer\n"
                     "- Cost is 2 money per item\n"
-                    "- Always adjust farmer's stock first, then your own stock\n"
+                    "- Always wait for farmer's stock to be adjusted first, then your own stock\n"
                     "- If the farmer refuses the sale, then do not adjust stock.\n\n"
                     "ALERT DETAILS:\n"
                     f"{json.dumps(alert, indent=2)}\n\n"
