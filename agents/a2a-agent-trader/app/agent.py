@@ -32,11 +32,13 @@ from google.adk.agents.remote_a2a_agent import (
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.agent_tool import AgentTool
+from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
 from google.genai import types as genai_types
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
 BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
 PORT = os.getenv("PORT", 8000)
 REMOTE_AGENT_URL_OVERRIDE = os.getenv(
@@ -182,7 +184,7 @@ def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: 
     return asdict(order)
 
 def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a SELL order in the market, selling available resources. After order creation,
+    """Create a SELL order in the market, selling available resources. After order creation, save it to Redis,
     report to confirm order details, and signal for the remote_agent to evaluate the order on their end.
     Provide the remote_agent the order_id.
 
@@ -198,7 +200,7 @@ def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | N
     return make_order(OrderTag.SELL, gpu_model_str, sla, region_str)
 
 def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a BUY order in the market. After order creation, report to confirm order details,
+    """Create a BUY order in the market. After order creation, report to confirm order details, save it to Redis,
     and signal for the remote_agent to evaluate the order on their end. Provide the remote_agent the order_id.
 
     Args:
@@ -225,7 +227,7 @@ def accept_offer() -> bool:
     """Accept a received offer.
 
     Returns:
-        True if the rejection was successfully communicated.
+        String UUID with which to fill up if the rejection was successfully communicated.
     """
     print("[TOOL] Accepting received offer.")
     return True
@@ -294,6 +296,10 @@ root_agent = Agent(
         - Check your current resource portfolio first using get_resource_portfolio()
         - Report transaction details after actions taken.
         - If an Order was created, report the details (especially Order ID) of the created Order.
+        - Save created Orders to Redis keyed by Order ID.
+        - Existing Orders can be retrieved from Redis via Order ID.
+        - Upon being notified of a new Order from another agent, retrieve it from Redis, then use evaluate_received_offer.
+        - Based on the result of evaluate_received_offer, accept or reject the incoming Order.
         - After creation of offers in the market, instruct the remote agent to check received offers, and report the remote agent's response.
     """,
     tools=[
@@ -306,6 +312,11 @@ root_agent = Agent(
         accept_offer,
         reject_offer,
         AgentTool(remote_agent),
+        MCPToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url=MCP_SERVER_URL
+            )
+        ),
         ],
     sub_agents=[],
 )
