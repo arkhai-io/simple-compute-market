@@ -106,23 +106,6 @@ class ComputeResource:
     sla: float  # percentage value in the range [0, 100]
     region: Region
 
-
-# In-memory stand-in for compute nodes under the Agent's control. 
-resource_portfolio = {
-    "us-node-1a": ComputeResource(
-        gpu_model=GPUModel.H200,
-        quantity=3,
-        sla=90.0,
-        region=Region.CALIFORNIA_US
-        ),
-    "jp-node-7b": ComputeResource(
-        gpu_model=GPUModel.TESLA_V100,
-        quantity=2,
-        sla=99.9,
-        region=Region.TOKYO_JP
-        )
-}
-
 @dataclass
 class Order:
     """Describes an order on the market."""
@@ -136,16 +119,6 @@ class Order:
     offer_value: float
     buyer_attestation: Optional[str] = None  # To be filled after negotation
     seller_attestation: Optional[str] = None # To be filled after negotation
-
-
-
-def get_resource_portfolio() -> dict:
-    """Get the current stock of all resources managed by the node portfolio.
-
-    Returns:
-        A dictionary representing the current portfolio stock.
-    """
-    return resource_portfolio
 
 def rebalance_internal_resources() -> bool:
     """Reallocate internal resources to optimize usage.
@@ -247,42 +220,6 @@ def evaluate_received_offer(order_id: str) -> str:
 
     return policy_recommendation
 
-def consult_policy(event_type: str) -> str | None:
-    """Given a triggering event, use the history store to determine the next action to take.
-    The subsequent action to take will be summarized in CAPITALS.
-
-    The available event trigger types are:
-        make_offer
-        resource_imbalance
-
-    Returns:
-        A string representing the action to take, and (if applicable) the corresponding
-        tool and the arguments to supply, or None if no action is available for the event type.
-        A valid event with no available actions will be distinct from an invalid, unrecognized event type.
-    """
-    match event_type:
-        case EventType.MAKE_OFFER.value:
-            result = random.choice([
-                "ACCEPT the offer.",
-                "REJECT the offer.",
-                # "Counter-propose."
-                # "No-op."
-                ])
-        case EventType.RESOURCE_IMBALANCE.value:
-            result = random.choice([
-                "MAKE OFFER. Create market order. If resource usage is HIGH, then make a BUY order matching the resource model and region. If resource usage is LOW, then make a SELL order to sell the excess.",
-                "RESOLVE INTERALLY. Run rebalance_internal_resources utility.",
-                ])
-        case EventType.CRON_JOB.value:
-            result = "UNAVAILABLE. No actions available for event type."
-        case EventType.ARBITRAGE_OPPORTUNITY.value:
-            result = "UNAVAILABLE. No actions available for event type."
-        case _:
-            result = "INVALID. Invalid event type."
-    
-    logger.info(f"[TOOL] Response to {event_type}: {result}")
-    return result
-
 
 def _extract_text_from_content(content: genai_types.Content | None) -> str:
     """Concatenate text parts from generative content."""
@@ -317,10 +254,10 @@ class TraderAgent(BaseAgent):
     """
     Custom agent for trading computational resources.
     """
+    resource_portfolio: dict
 
     def __init__(
         self,
-        # tools,
         name: str,
     ):
         """
@@ -328,10 +265,80 @@ class TraderAgent(BaseAgent):
         """
 
         logger.info("Starting TraderAgent.")
+
         super().__init__(
             name=name,
-            # tools=tools,
+            resource_portfolio={}
         )
+
+        # In-memory stand-in for compute nodes under the Agent's control.
+        self.resource_portfolio = {
+            "us-node-1a": ComputeResource(
+                gpu_model=GPUModel.H200,
+                quantity=3,
+                sla=90.0,
+                region=Region.CALIFORNIA_US
+                ),
+            "jp-node-7b": ComputeResource(
+                gpu_model=GPUModel.TESLA_V100,
+                quantity=2,
+                sla=99.9,
+                region=Region.TOKYO_JP
+                )
+            }
+
+    async def get_resource_portfolio(self) -> dict:
+        """Get the current stock of all resources managed by the node portfolio.
+
+        Returns:
+            A dictionary representing the current portfolio stock.
+        """
+        return self.resource_portfolio
+
+    async def _build_domain_context(self, event: Event):
+        resource_portfolio = await self.get_resource_portfolio()
+        return (event, resource_portfolio)
+
+    def _consult_policy(self, context) -> str | None:
+        """Given a triggering event, use the history store to determine the next action to take.
+        The subsequent action to take will be summarized in CAPITALS.
+
+        The available event trigger types are:
+            make_offer
+            resource_imbalance
+
+        Returns:
+            A string representing the action to take, and (if applicable) the corresponding
+            tool and the arguments to supply, or None if no action is available for the event type.
+            A valid event with no available actions will be distinct from an invalid, unrecognized event type.
+        """
+        event, _ = context
+        # logger.info(event)
+        content = _extract_tool_payload(event.content)
+        _, domain_event_payload = content
+        event_type = domain_event_payload.get('event_type', None)
+        match event_type:
+            case EventType.MAKE_OFFER.value:
+                result = random.choice([
+                    "ACCEPT the offer.",
+                    "REJECT the offer.",
+                    # "Counter-propose."
+                    # "No-op."
+                    ])
+            case EventType.RESOURCE_IMBALANCE.value:
+                result = random.choice([
+                    "MAKE OFFER. Create market order. If resource usage is HIGH, then make a BUY order matching the resource model and region. If resource usage is LOW, then make a SELL order to sell the excess.",
+                    "RESOLVE INTERALLY. Run rebalance_internal_resources utility.",
+                    ])
+            case EventType.CRON_JOB.value:
+                result = "UNAVAILABLE. No actions available for event type."
+            case EventType.ARBITRAGE_OPPORTUNITY.value:
+                result = "UNAVAILABLE. No actions available for event type."
+            case _:
+                result = "INVALID. Invalid event type."
+
+        logger.info(f"[TOOL] Response to {event_type}: {result}")
+        return result
 
     @override
     async def _run_async_impl(
@@ -355,7 +362,10 @@ class TraderAgent(BaseAgent):
         name, content = _extract_tool_payload(last_event.content)
         logger.info(f"{name}: {content}")
 
-        policy_recommendation = consult_policy(content.get('event_type', None))
+        context = await self._build_domain_context(last_event)
+
+        policy_recommendation = self._consult_policy(context)
+
         logger.info(f"Policy recommendation: {policy_recommendation}")
         # logger.info("[%s] User text: %s", self.name, user_text)
 
