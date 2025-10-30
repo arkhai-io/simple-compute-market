@@ -17,18 +17,19 @@ import os
 import random
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import Optional, override, AsyncGenerator
 from enum import Enum
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from google.adk.agents import Agent
+from google.adk.agents import Agent, BaseAgent,  InvocationContext
 from google.adk.agents.remote_a2a_agent import (
     AGENT_CARD_WELL_KNOWN_PATH,
     RemoteA2aAgent,
 )
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.adk.tools.agent_tool import AgentTool
@@ -37,6 +38,8 @@ from google.genai import types as genai_types
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+import logging
+logger = logging.getLogger(__name__)
 
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
 BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
@@ -150,7 +153,7 @@ def rebalance_internal_resources() -> bool:
     Returns:
         True if the process was successfully initiated.
     """
-    print("[TOOL] Rebalancing resources...")
+    logger.info("[TOOL] Rebalancing resources...")
     return True
 
 def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
@@ -166,7 +169,7 @@ def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: 
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    print(f"[TOOL] Creating order of type {order_tag} for resource.")
+    logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
     order = Order(
         order_id=str(uuid.uuid4()),
         tag=order_tag,
@@ -220,7 +223,7 @@ def reject_offer() -> bool:
     Returns:
         True if the rejection was successfully communicated.
     """
-    print("[TOOL] Rejecting received offer.")
+    logger.info("[TOOL] Rejecting received offer.")
     return True
 
 def accept_offer() -> bool:
@@ -229,7 +232,7 @@ def accept_offer() -> bool:
     Returns:
         String UUID with which to fill up if the rejection was successfully communicated.
     """
-    print("[TOOL] Accepting received offer.")
+    logger.info("[TOOL] Accepting received offer.")
     return True
 
 def evaluate_received_offer(order_id: str) -> str:
@@ -277,48 +280,109 @@ def consult_policy(event_type: str) -> str | None:
         case _:
             result = "INVALID. Invalid event type."
     
-    print(f"[TOOL] Response to {event_type}: {result}")
+    logger.info(f"[TOOL] Response to {event_type}: {result}")
     return result
 
+
+def _extract_text_from_content(content: genai_types.Content | None) -> str:
+    """Concatenate text parts from generative content."""
+    if not content or not getattr(content, "parts", None):
+        return ""
+    text_parts: list[str] = []
+    for part in content.parts:
+        if getattr(part, "text", None):
+            text_parts.append(part.text)  # type: ignore[arg-type]
+    return "".join(text_parts).strip()
+
+
 remote_agent = RemoteA2aAgent(
-    name="remote_agent",
+    name=f"remote_agent_{PORT}",
     description="A helpful AI assistant trading compute resources with others.",
     agent_card=f"{REMOTE_AGENT_URL_OVERRIDE}{AGENT_CARD_WELL_KNOWN_PATH}",
 )
 
-root_agent = Agent(
-    name="root_agent",
-    model="gemini-2.5-flash",
-    instruction="""
-        You are a helpful AI assistant designed to manage, trade, and balance compute resources.
+class TraderAgent(BaseAgent):
+    """
+    Custom agent for trading computational resources.
+    """
 
-        FOR AUTOMATED ALERTS: When you receive inventory alerts, you must immediately execute action according to the policy recommendation:
-        - Check your current resource portfolio first using get_resource_portfolio()
-        - Report transaction details after actions taken.
-        - If an Order was created, report the details (especially Order ID) of the created Order.
-        - Save created Orders to Redis keyed by Order ID.
-        - Existing Orders can be retrieved from Redis via Order ID.
-        - Upon being notified of a new Order from another agent, retrieve it from Redis, then use evaluate_received_offer.
-        - Based on the result of evaluate_received_offer, accept or reject the incoming Order.
-        - After creation of offers in the market, instruct the remote agent to check received offers, and report the remote agent's response.
-    """,
-    tools=[
-        get_resource_portfolio,
-        consult_policy,
-        rebalance_internal_resources,
-        make_buy_order,
-        make_sell_order,
-        evaluate_received_offer,
-        accept_offer,
-        reject_offer,
-        AgentTool(remote_agent),
-        MCPToolset(
-            connection_params=StreamableHTTPConnectionParams(
-                url=MCP_SERVER_URL
-            )
-        ),
-        ],
-    sub_agents=[],
+    def __init__(
+        self,
+        # tools,
+        name: str,
+    ):
+        """
+        Initializes the Trader Agent.
+        """
+
+        logger.info("Starting TraderAgent.")
+        super().__init__(
+            name=name,
+            # tools=tools,
+        )
+
+    @override
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        user_text = _extract_text_from_content(ctx.user_content)
+        logger.info("[%s] User text: %s", self.name, user_text)
+
+        previous_text = _extract_text_from_content(ctx.session.events[-1].content)
+        logger.info("[%s] Previous text: %s", self.name, previous_text)
+
+        if "User" not in previous_text:
+            # I'm in Step 1. Add "User()".
+            text_to_remote = f"User({previous_text})"
+            next_text = text_to_remote
+
+            await ctx.session_service.append_event(ctx.session, Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_text(text=text_to_remote)],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            ))
+
+            async for event in remote_agent.run_async(ctx):
+                text_from_remote = _extract_text_from_content(event.content)
+                next_text = f"Local({text_from_remote})"
+
+        elif "User" in previous_text and "Remote" not in previous_text:
+            # I'm in Step 2. Add "Remote()".
+            next_text = f"Remote({previous_text})"
+
+        yield Event(
+            author=self.name,
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part.from_text(text=next_text)],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
+
+root_agent = TraderAgent(
+    name="root_agent",
+    # tools=[
+    #     get_resource_portfolio,
+    #     consult_policy,
+    #     rebalance_internal_resources,
+    #     make_buy_order,
+    #     make_sell_order,
+    #     evaluate_received_offer,
+    #     accept_offer,
+    #     reject_offer,
+    #     AgentTool(remote_agent),
+    #     MCPToolset(
+    #         connection_params=StreamableHTTPConnectionParams(
+    #             url=MCP_SERVER_URL
+    #         )
+    #     ),
+    #     ],
+    # sub_agents=[],
 )
 
 # Create a2a app
@@ -328,7 +392,7 @@ root_agent = Agent(
 
 public_agent_card = AgentCard(
     name="A2A Agent",
-    description="You are a helpful AI assistant designed to trade compute resources with others.",
+    description="A helpful AI assistant designed to trade compute resources with others.",
     url=BASE_URL_OVERRIDE,
     version="0.1.0",
     default_input_modes=["text"],
@@ -362,14 +426,10 @@ async def _run_alert_conversation(alert: dict) -> str:
         parts=[
             genai_types.Part.from_text(
                 text=(
-                    "RESOURCE MONITORING ALERT RECEIVED\n\n"
-                    "ALERT DETAILS:\n"
-                    f"{json.dumps(alert, indent=2)}\n\n"
-                    "POLICY RECOMMENDATION:\n"
-                    f"{json.dumps(policy_recommendation, indent=2)}\n\n"
-                    "Execute the corresponding tool now and report the results. Include:\n"
-                    "- What action was taken\n"
-                    "- Whether the action had a result, and if so, what it was"
+                    # "ALERT DETAILS:\n"
+                    f"{json.dumps(alert, indent=2)}"
+                    # "POLICY RECOMMENDATION:\n"
+                    # f"{json.dumps(policy_recommendation, indent=2)}\n\n"
                 )
             )
         ],
@@ -381,7 +441,6 @@ async def _run_alert_conversation(alert: dict) -> str:
         session_id=session.id,
         new_message=message,
     ):
-        # print(event)
         if event.is_final_response() and event.content and event.content.parts:
             text_parts = [
                 part.text
