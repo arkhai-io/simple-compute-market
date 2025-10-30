@@ -307,33 +307,21 @@ class TraderAgent(BaseAgent):
         policy_recommendation = self._consult_policy(context)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
-        # logger.info("[%s] User text: %s", self.name, user_text)
 
-        # previous_text = _extract_text_from_content(ctx.session.events[-1].content)
-        # logger.info("[%s] Previous text: %s", self.name, previous_text)
-
-        # if "User" not in previous_text:
-        #     # I'm in Step 1. Add "User()".
-        #     text_to_remote = f"User({previous_text})"
-        #     next_text = text_to_remote
-
-        #     await ctx.session_service.append_event(ctx.session, Event(
-        #         author=self.name,
-        #         content=genai_types.Content(
-        #             role="model",
-        #             parts=[genai_types.Part.from_text(text=text_to_remote)],
-        #         ),
-        #         invocation_id=ctx.invocation_id,
-        #         branch=ctx.branch,
-        #     ))
-
-        #     async for event in remote_agent.run_async(ctx):
-        #         text_from_remote = _extract_text_from_content(event.content)
-        #         next_text = f"Local({text_from_remote})"
-
-        # elif "User" in previous_text and "Remote" not in previous_text:
-        #     # I'm in Step 2. Add "Remote()".
-        #     next_text = f"Remote({previous_text})"
+        # Send a message to a remote agent with:
+        # await ctx.session_service.append_event(ctx.session, Event(
+        #     author=self.name,
+        #     content=genai_types.Content(
+        #         role="model",
+        #         parts=[genai_types.Part.from_text(text="hello there")],
+        #     ),
+        #     invocation_id=ctx.invocation_id,
+        #     branch=ctx.branch,
+        # ))
+        #
+        # Then receive the response from the remote agent:
+        # async for event in remote_agent.run_async(ctx):
+        #     text_from_remote = _extract_text_from_content(event.content)
 
         yield Event(
             author=self.name,
@@ -347,23 +335,6 @@ class TraderAgent(BaseAgent):
 
 root_agent = TraderAgent(
     name="root_agent",
-    # tools=[
-    #     get_resource_portfolio,
-    #     consult_policy,
-    #     rebalance_internal_resources,
-    #     make_buy_order,
-    #     make_sell_order,
-    #     evaluate_received_offer,
-    #     accept_offer,
-    #     reject_offer,
-    #     AgentTool(remote_agent),
-    #     MCPToolset(
-    #         connection_params=StreamableHTTPConnectionParams(
-    #             url=MCP_SERVER_URL
-    #         )
-    #     ),
-    #     ],
-    # sub_agents=[],
 )
 
 # Create a2a app
