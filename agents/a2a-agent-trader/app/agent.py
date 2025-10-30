@@ -47,13 +47,7 @@ PORT = CONFIG.port
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 
 
-class EventType(str, Enum):
-    """Events that can be handled by the Agent"""
-
-    MAKE_OFFER = "make_offer"
-    RESOURCE_IMBALANCE = "resource_imbalance"
-    CRON_JOB = "cron_job"
-    ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
+from .schema.pydantic_models import EventType
 
 from .schema.pydantic_models import (
     GPUModel,

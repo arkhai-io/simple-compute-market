@@ -1,5 +1,8 @@
 from enum import Enum
+from datetime import datetime
+from typing import Any
 from pydantic import BaseModel, Field
+from pydantic import ConfigDict
 
 
 class GPUModel(str, Enum):
@@ -138,5 +141,124 @@ class MarketOrder(BaseModel):
     def is_closed(self) -> bool:
         """Check if this is a closed order (has attestation)"""
         return self.attestation is not None
+
+
+# =============================
+# Event models for A2A workflow
+# =============================
+
+
+class EventType(str, Enum):
+    """Events that can be handled by the Agent"""
+
+    MAKE_OFFER = "make_offer"
+    RESOURCE_IMBALANCE = "resource_imbalance"
+    CRON_JOB = "cron_job"
+    ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
+    MARKET_ORDER = "market_order"
+    NEGOTIATION = "negotiation"
+
+
+class Event(BaseModel):
+    """Base event model"""
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    event_id: str = Field(description="Unique event identifier")
+    event_type: EventType = Field(description="Type of event")
+    timestamp: datetime = Field(
+        default_factory=datetime.now,
+        description="When the event occurred",
+    )
+    source: str = Field(description="Source of the event (agent_id, system, etc.)")
+    data: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Event-specific data payload",
+    )
+
+
+class MarketOrderEvent(Event):
+    """Event triggered when a market order is broadcast"""
+
+    event_type: EventType = Field(default=EventType.MARKET_ORDER)
+    order: MarketOrder = Field(description="The market order that was broadcast")
+
+    @classmethod
+    def from_order(cls, order: MarketOrder) -> "MarketOrderEvent":
+        """Create event from a market order"""
+        return cls(
+            event_id=f"evt_{order.order_id}",
+            source=order.order_maker,
+            order=order,
+            data={
+                "order_id": order.order_id,
+                "tag": order.tag.value,
+                "gpu_model": order.compute_resource.gpu_model.value,
+                "quantity": order.quantity,
+                "duration": order.duration,
+            },
+        )
+
+
+class ResourceImbalanceEvent(Event):
+    """Event triggered when resource imbalance is detected"""
+
+    event_type: EventType = Field(default=EventType.RESOURCE_IMBALANCE)
+    resource: ComputeResource = Field(description="The imbalanced resource")
+    imbalance_type: str = Field(description="Type of imbalance: surplus or deficit")
+    severity: float = Field(description="Severity of imbalance (0.0-1.0)")
+
+    @classmethod
+    def create(
+        cls,
+        event_id: str,
+        source: str,
+        resource: ComputeResource,
+        imbalance_type: str,
+        severity: float,
+    ) -> "ResourceImbalanceEvent":
+        """Create a resource imbalance event"""
+        return cls(
+            event_id=event_id,
+            source=source,
+            resource=resource,
+            imbalance_type=imbalance_type,
+            severity=severity,
+            data={
+                "gpu_model": resource.gpu_model.value,
+                "quantity": resource.quantity,
+                "region": resource.region.value,
+                "imbalance_type": imbalance_type,
+                "severity": severity,
+            },
+        )
+
+
+class NegotiationEvent(Event):
+    """Event triggered when a negotiation message is received"""
+
+    event_type: EventType = Field(default=EventType.NEGOTIATION)
+    negotiation_id: str = Field(description="ID of the negotiation thread")
+    message_type: str = Field(description="Type of negotiation message")
+    sender: str = Field(description="Agent who sent the message")
+
+    @classmethod
+    def create(
+        cls,
+        event_id: str,
+        negotiation_id: str,
+        message_type: str,
+        sender: str,
+        data: dict[str, Any],
+    ) -> "NegotiationEvent":
+        """Create a negotiation event"""
+        return cls(
+            event_id=event_id,
+            source=sender,
+            negotiation_id=negotiation_id,
+            message_type=message_type,
+            sender=sender,
+            data=data,
+        )
 
 
