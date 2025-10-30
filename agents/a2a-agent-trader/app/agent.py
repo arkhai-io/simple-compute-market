@@ -17,14 +17,14 @@ import os
 import random
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Optional, override, AsyncGenerator
+from typing import Optional, override, AsyncGenerator, Any, Dict, Tuple
 from enum import Enum
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from google.adk.agents import Agent, BaseAgent,  InvocationContext
+from google.adk.agents import BaseAgent,  InvocationContext
 from google.adk.agents.remote_a2a_agent import (
     AGENT_CARD_WELL_KNOWN_PATH,
     RemoteA2aAgent,
@@ -294,6 +294,18 @@ def _extract_text_from_content(content: genai_types.Content | None) -> str:
             text_parts.append(part.text)  # type: ignore[arg-type]
     return "".join(text_parts).strip()
 
+def _extract_tool_payload(
+    content: Optional[genai_types.Content],
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Return (tool_name, response_dict) if the message contains a functionResponse part."""
+    if not content:
+        return None, None
+    for part in content.parts or []:
+        function_response = getattr(part, "function_response", None)
+        if function_response:
+            # function_response has .name and .response (dict-like)
+            return getattr(function_response, "name", None), getattr(function_response, "response", None)
+    return None, None
 
 remote_agent = RemoteA2aAgent(
     name=f"remote_agent_{PORT}",
@@ -325,40 +337,59 @@ class TraderAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        user_text = _extract_text_from_content(ctx.user_content)
-        logger.info("[%s] User text: %s", self.name, user_text)
+        logger.info(f"[{self.name}]: {ctx}")
+        last_event = ctx.session.events[-1]
+        logger.info("CONTENT:")
 
-        previous_text = _extract_text_from_content(ctx.session.events[-1].content)
-        logger.info("[%s] Previous text: %s", self.name, previous_text)
-
-        if "User" not in previous_text:
-            # I'm in Step 1. Add "User()".
-            text_to_remote = f"User({previous_text})"
-            next_text = text_to_remote
-
-            await ctx.session_service.append_event(ctx.session, Event(
+        if last_event.content is None:
+            yield Event(
                 author=self.name,
                 content=genai_types.Content(
                     role="model",
-                    parts=[genai_types.Part.from_text(text=text_to_remote)],
+                    parts=[genai_types.Part.from_text(text="No content provided.")],
                 ),
                 invocation_id=ctx.invocation_id,
                 branch=ctx.branch,
-            ))
+            )
 
-            async for event in remote_agent.run_async(ctx):
-                text_from_remote = _extract_text_from_content(event.content)
-                next_text = f"Local({text_from_remote})"
+        name, content = _extract_tool_payload(last_event.content)
+        logger.info(f"{name}: {content}")
 
-        elif "User" in previous_text and "Remote" not in previous_text:
-            # I'm in Step 2. Add "Remote()".
-            next_text = f"Remote({previous_text})"
+        policy_recommendation = consult_policy(content.get('event_type', None))
+        logger.info(f"Policy recommendation: {policy_recommendation}")
+        # logger.info("[%s] User text: %s", self.name, user_text)
+
+        # previous_text = _extract_text_from_content(ctx.session.events[-1].content)
+        # logger.info("[%s] Previous text: %s", self.name, previous_text)
+
+        # if "User" not in previous_text:
+        #     # I'm in Step 1. Add "User()".
+        #     text_to_remote = f"User({previous_text})"
+        #     next_text = text_to_remote
+
+        #     await ctx.session_service.append_event(ctx.session, Event(
+        #         author=self.name,
+        #         content=genai_types.Content(
+        #             role="model",
+        #             parts=[genai_types.Part.from_text(text=text_to_remote)],
+        #         ),
+        #         invocation_id=ctx.invocation_id,
+        #         branch=ctx.branch,
+        #     ))
+
+        #     async for event in remote_agent.run_async(ctx):
+        #         text_from_remote = _extract_text_from_content(event.content)
+        #         next_text = f"Local({text_from_remote})"
+
+        # elif "User" in previous_text and "Remote" not in previous_text:
+        #     # I'm in Step 2. Add "Remote()".
+        #     next_text = f"Remote({previous_text})"
 
         yield Event(
             author=self.name,
             content=genai_types.Content(
                 role="model",
-                parts=[genai_types.Part.from_text(text=next_text)],
+                parts=[genai_types.Part.from_text(text=f"{policy_recommendation}")],
             ),
             invocation_id=ctx.invocation_id,
             branch=ctx.branch,
@@ -418,19 +449,13 @@ async def _run_alert_conversation(alert: dict) -> str:
         session_service=session_service,
     )
 
-    event_type = EventType.RESOURCE_IMBALANCE.value
-    policy_recommendation = consult_policy(event_type)
-
+    alert['event_type'] = EventType.RESOURCE_IMBALANCE.value
     message = genai_types.Content(
         role="user",
         parts=[
-            genai_types.Part.from_text(
-                text=(
-                    # "ALERT DETAILS:\n"
-                    f"{json.dumps(alert, indent=2)}"
-                    # "POLICY RECOMMENDATION:\n"
-                    # f"{json.dumps(policy_recommendation, indent=2)}\n\n"
-                )
+            genai_types.Part.from_function_response(
+                name="get_alert",
+                response=alert
             )
         ],
     )
