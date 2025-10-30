@@ -16,7 +16,6 @@ import json
 import os
 import random
 import uuid
-from dataclasses import asdict, dataclass
 from typing import Optional, override, AsyncGenerator, Any, Dict, Tuple
 from enum import Enum
 
@@ -41,84 +40,23 @@ from starlette.routing import Route
 import logging
 logger = logging.getLogger(__name__)
 
-MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
-BASE_URL_OVERRIDE = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
-PORT = os.getenv("PORT", 8000)
-REMOTE_AGENT_URL_OVERRIDE = os.getenv(
-    "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
+from .utils.config import CONFIG
+MCP_SERVER_URL = CONFIG.mcp_server_url
+BASE_URL_OVERRIDE = CONFIG.base_url_override
+PORT = CONFIG.port
+REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
+
+
+from .schema.pydantic_models import EventType
+
+from .schema.pydantic_models import (
+    GPUModel,
+    Region,
+    Tag,
+    ComputeResource,
+    ComputeResourcePortfolio,
+    MarketOrder,
 )
-
-use_vertex_ai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "False").lower() in (
-    "true",
-    "1",
-    "yes",
-)
-if use_vertex_ai:
-    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
-        try:
-            _, project_id = google.auth.default()
-            os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project_id)
-        except Exception:
-            # If default credentials are not available, continue without setting the project.
-            # Downstream code should handle missing configuration gracefully or via env vars.
-            pass
-    os.environ.setdefault(
-        "GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global")
-    )
-
-
-class GPUModel(str, Enum):
-    """Supported GPU SKUs for compute resources."""
-
-    H200 = "H200"
-    TESLA_V100 = "Tesla V100"
-    RTX_5080 = "RTX 5080"
-
-
-class Region(str, Enum):
-    """Regions where compute resources can be provisioned."""
-
-    CALIFORNIA_US = "California, US"
-    NEW_YORK_US = "New York, US"
-    TOKYO_JP = "Tokyo, JP"
-
-class EventType(str, Enum):
-    """Events that can be handled by the Agent"""
-
-    MAKE_OFFER = "make_offer"
-    RESOURCE_IMBALANCE = "resource_imbalance"
-    CRON_JOB = "cron_job"
-    ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
-
-class OrderTag(str, Enum):
-    """Types of orders in the market. May be BUY or SELL."""
-
-    BUY = "buy"
-    SELL = "sell"
-
-
-@dataclass
-class ComputeResource:
-    """Describes an allocatable compute resource node managed by the trader."""
-
-    gpu_model: GPUModel
-    quantity: int
-    sla: float  # percentage value in the range [0, 100]
-    region: Region
-
-@dataclass
-class Order:
-    """Describes an order on the market."""
-
-    order_id: str
-    tag: OrderTag
-    order_maker: str # Card URL  (TODO: Replace this with the Agent's later on ID.)
-    compute_resource: ComputeResource
-    duration: int  # duration in days
-    offer_token: str
-    offer_value: float
-    buyer_attestation: Optional[str] = None  # To be filled after negotation
-    seller_attestation: Optional[str] = None # To be filled after negotation
 
 def rebalance_internal_resources() -> bool:
     """Reallocate internal resources to optimize usage.
@@ -129,7 +67,7 @@ def rebalance_internal_resources() -> bool:
     logger.info("[TOOL] Rebalancing resources...")
     return True
 
-def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
     """Create an order in the market.
 
     Args:
@@ -143,7 +81,7 @@ def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: 
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
     logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
-    order = Order(
+    order = MarketOrder(
         order_id=str(uuid.uuid4()),
         tag=order_tag,
         order_maker=BASE_URL_OVERRIDE,
@@ -153,11 +91,11 @@ def make_order(order_tag: OrderTag, gpu_model_str: str, sla: float, region_str: 
             sla=sla,
             region=Region(region_str),
         ),
-        duration=1, # 1 Day
-        offer_token="USDT",
-        offer_value=9*100,
+        quantity=1,
+        duration=1,
+        attestation=None,
     )
-    return asdict(order)
+    return order.model_dump()
 
 def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
     """Create a SELL order in the market, selling available resources. After order creation, save it to Redis,
@@ -173,7 +111,7 @@ def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | N
     Returns:
         The order as a dictionary if the order was successfully created, or None otherwise.
     """
-    return make_order(OrderTag.SELL, gpu_model_str, sla, region_str)
+    return make_order(Tag.SELL, gpu_model_str, sla, region_str)
 
 def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
     """Create a BUY order in the market. After order creation, report to confirm order details, save it to Redis,
@@ -188,7 +126,7 @@ def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | No
     Returns:
         The order as a dictionary if the order was successfully created, or None otherwise.
     """
-    return make_order(OrderTag.BUY, gpu_model_str, sla, region_str)
+    return make_order(Tag.BUY, gpu_model_str, sla, region_str)
 
 def reject_offer() -> bool:
     """Reject a received offer.
@@ -272,20 +210,22 @@ class TraderAgent(BaseAgent):
         )
 
         # In-memory stand-in for compute nodes under the Agent's control.
-        self.resource_portfolio = {
-            "us-node-1a": ComputeResource(
-                gpu_model=GPUModel.H200,
-                quantity=3,
-                sla=90.0,
-                region=Region.CALIFORNIA_US
+        self.resource_portfolio =  ComputeResourcePortfolio(
+            resources=[
+                ComputeResource(
+                    gpu_model=GPUModel.H200,
+                    quantity=3,
+                    sla=90.0,
+                    region=Region.CALIFORNIA_US,
                 ),
-            "jp-node-7b": ComputeResource(
-                gpu_model=GPUModel.TESLA_V100,
-                quantity=2,
-                sla=99.9,
-                region=Region.TOKYO_JP
-                )
-            }
+                ComputeResource(
+                    gpu_model=GPUModel.TESLA_V100,
+                    quantity=2,
+                    sla=99.9,
+                    region=Region.TOKYO_JP,
+                ),
+            ]
+        )
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
@@ -293,7 +233,7 @@ class TraderAgent(BaseAgent):
         Returns:
             A dictionary representing the current portfolio stock.
         """
-        return self.resource_portfolio
+        return self.resource_portfolio.model_dump()
 
     async def _build_domain_context(self, event: Event):
         resource_portfolio = await self.get_resource_portfolio()

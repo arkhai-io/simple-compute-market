@@ -17,10 +17,11 @@ import os
 from fastapi import FastAPI
 
 # Import the use_vertex_ai flag and a2a_app from agent.py
-from app.agent import a2a_app, use_vertex_ai
+from app.agent import a2a_app
+from app.utils.config import CONFIG
 
 # Conditional imports based on use_vertex_ai flag
-if use_vertex_ai:
+if CONFIG.use_vertex_ai:
     import google.auth
     from google.adk.cli.fast_api import get_fast_api_app
     from google.cloud import logging as google_cloud_logging
