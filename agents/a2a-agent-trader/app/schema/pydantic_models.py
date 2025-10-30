@@ -159,7 +159,7 @@ class EventType(str, Enum):
     NEGOTIATION = "negotiation"
 
 
-class Event(BaseModel):
+class DomainEvent(BaseModel):
     """Base event model"""
 
     model_config = ConfigDict(use_enum_values=True)
@@ -177,7 +177,7 @@ class Event(BaseModel):
     )
 
 
-class MarketOrderEvent(Event):
+class MarketOrderEvent(DomainEvent):
     """Event triggered when a market order is broadcast"""
 
     event_type: EventType = Field(default=EventType.MARKET_ORDER)
@@ -200,7 +200,7 @@ class MarketOrderEvent(Event):
         )
 
 
-class ResourceImbalanceEvent(Event):
+class ResourceImbalanceEvent(DomainEvent):
     """Event triggered when resource imbalance is detected"""
 
     event_type: EventType = Field(default=EventType.RESOURCE_IMBALANCE)
@@ -234,7 +234,7 @@ class ResourceImbalanceEvent(Event):
         )
 
 
-class NegotiationEvent(Event):
+class NegotiationEvent(DomainEvent):
     """Event triggered when a negotiation message is received"""
 
     event_type: EventType = Field(default=EventType.NEGOTIATION)
