@@ -1,8 +1,9 @@
 import asyncio
+import os
 
 from fastmcp import Client
 
-MCP_URL="https://redis-mcp.fly.dev/mcp"
+MCP_URL = os.getenv("MCP_URL", "https://redis-mcp.fly.dev/mcp")
 # MCP_URL="http://localhost:8080/mcp"
 
 async def test_server():
