@@ -27,6 +27,12 @@ class Config:
     remote_agent_url_override: str
     use_vertex_ai: bool
     policy_db_path: str
+    event_validation_mode: str  # "warn" or "strict"
+    enable_redis_ingest: bool
+    redis_url: str
+    redis_channels: str  # comma-separated
+    enable_event_queue: bool
+    market_provider: str  # "static" or "redis"
 
 
 def load_config() -> Config:
@@ -39,6 +45,12 @@ def load_config() -> Config:
         ),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         policy_db_path=os.getenv("POLICY_DB_PATH", "/tmp/policies.db"),
+        event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),
+        enable_redis_ingest=_get_bool_env("ENABLE_REDIS_INGEST", False),
+        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
+        redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
+        enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
+        market_provider=os.getenv("MARKET_PROVIDER", "static"),
     )
 
 
