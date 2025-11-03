@@ -26,6 +26,7 @@ class Config:
     port: int
     remote_agent_url_override: str
     use_vertex_ai: bool
+    policy_db_path: str
 
 
 def load_config() -> Config:
@@ -37,6 +38,7 @@ def load_config() -> Config:
             "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
         ),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
+        policy_db_path=os.getenv("POLICY_DB_PATH", "/tmp/policies.db"),
     )
 
 

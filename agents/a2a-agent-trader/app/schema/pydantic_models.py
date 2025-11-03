@@ -262,3 +262,117 @@ class NegotiationEvent(DomainEvent):
         )
 
 
+# =============================
+# Decision and Action domain models for reactive agents
+# =============================
+
+
+class ActionType(str, Enum):
+    """Types of actions an agent can take."""
+
+    # Market entry actions
+    RESPOND_TO_ORDER = "respond_to_order"
+    IGNORE_ORDER = "ignore_order"
+    CREATE_ORDER = "create_order"
+
+    # Negotiation actions
+    ACCEPT_OFFER = "accept_offer"
+    REJECT_OFFER = "reject_offer"
+    COUNTER_OFFER = "counter_offer"
+    EXIT_NEGOTIATION = "exit_negotiation"
+
+    # Resource management actions
+    RESOLVE_INTERNALLY = "resolve_internally"
+    OUTSOURCE = "outsource"
+
+    # No-op
+    NOOP = "noop"
+
+
+class Action(BaseModel):
+    """An action to be taken by an agent."""
+
+    action_type: ActionType = Field(description="Type of action")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Action-specific parameters",
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now,
+        description="When the action was created",
+    )
+
+
+class DecisionContext(BaseModel):
+    """Context information for making a reactive decision."""
+
+    # Trigger information
+    event: DomainEvent = Field(description="The triggering event")
+
+    # Agent state
+    agent_id: str = Field(description="Agent making the decision")
+    available_resources: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Agent's current resource state",
+    )
+
+    # Historical context
+    past_experiences: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Relevant past experiences",
+    )
+
+    # Market context
+    market_state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Current market conditions",
+    )
+
+    # Negotiation context (if applicable)
+    negotiation_history: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="History of current negotiation thread",
+    )
+
+    def get_event_type(self) -> EventType:
+        """Get the type of triggering event."""
+        return self.event.event_type
+
+    def has_negotiation_context(self) -> bool:
+        """Check if this context includes negotiation history."""
+        return len(self.negotiation_history) > 0
+
+
+class Decision(BaseModel):
+    """A decision made by a reactive agent."""
+
+    decision_id: str = Field(description="Unique decision identifier")
+    agent_id: str = Field(description="Agent who made the decision")
+    context: DecisionContext = Field(description="Context that led to the decision")
+    action: Action = Field(description="The chosen action")
+    policy_used: str = Field(description="Policy that produced this decision")
+    confidence: float = Field(
+        default=1.0,
+        description="Confidence in the decision (0.0-1.0)",
+    )
+    timestamp: datetime = Field(
+        default_factory=datetime.now,
+        description="When the decision was made",
+    )
+
+    # Outcome tracking (filled in later)
+    outcome: dict[str, Any] | None = Field(
+        default=None,
+        description="Outcome of executing this decision",
+    )
+    utility: float | None = Field(
+        default=None,
+        description="Utility gained from this decision",
+    )
+
+    def record_outcome(self, outcome: dict[str, Any], utility: float) -> None:
+        """Record the outcome and utility of this decision."""
+        self.outcome = outcome
+        self.utility = utility
+
+

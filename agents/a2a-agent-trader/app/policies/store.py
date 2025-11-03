@@ -76,7 +76,7 @@ class PolicyStore:
 
 def simple_negotiation_random(threshold_unused: float | None = None) -> Callable[[DecisionContext], Action | None]:
     import random
-    from app.policies.schema import ActionType
+    from app.schema.pydantic_models import ActionType
 
     def _impl(context: DecisionContext) -> Action | None:
         # 50/50 accept/reject for offers
@@ -92,7 +92,7 @@ def simple_negotiation_random(threshold_unused: float | None = None) -> Callable
 
 
 def simple_negotiation_callable(gpu_threshold: int = 1) -> Callable[[DecisionContext], Action | None]:
-    from app.policies.schema import ActionType
+    from app.schema.pydantic_models import ActionType
 
     def _impl(context: DecisionContext) -> Action | None:
         if context.event.event_type != "negotiation":

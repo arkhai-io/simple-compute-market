@@ -6,7 +6,15 @@ from typing import Any, Callable, Iterable
 
 from pydantic import BaseModel, Field
 
-from app.schema.pydantic_models import Event, EventType, ComputeResource, MarketOrder
+from app.schema.pydantic_models import (
+    DomainEvent as Event,
+    EventType,
+    ComputeResource,
+    MarketOrder,
+    Action as DecisionAction,
+    ActionType as DecisionActionType,
+    DecisionContext,
+)
 
 
 class ComparisonOperator(str, Enum):
@@ -37,14 +45,8 @@ class ConditionGroup(BaseModel):
     conditions: list[Condition]
 
 
-class ActionType(str, Enum):
-    ACCEPT_OFFER = "accept_offer"
-    REJECT_OFFER = "reject_offer"
-    RESPOND_TO_ORDER = "respond_to_order"
-
-
 class Action(BaseModel):
-    action_type: str | ActionType
+    action_type: str | DecisionActionType
     parameters: dict[str, Any] = Field(default_factory=dict)
     confidence: float | None = None
 
@@ -62,15 +64,6 @@ class PolicyRule(BaseModel):
     conditions: list[Condition] | ConditionGroup
     action: ActionSelection
     priority: int = 0
-
-
-class DecisionContext(BaseModel):
-    agent_id: str
-    event: Event
-    available_resources: dict[str, Any] = Field(default_factory=dict)
-    market_state: dict[str, Any] = Field(default_factory=dict)
-    negotiation_history: list[dict[str, Any]] = Field(default_factory=list)
-    past_experiences: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _get_field_from_context(context: DecisionContext, path: str) -> Any:
