@@ -117,37 +117,6 @@ def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) 
     )
     return order.model_dump()
 
-def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a SELL order in the market, selling available resources. After order creation, save it to Redis,
-    report to confirm order details, and signal for the remote_agent to evaluate the order on their end.
-    Provide the remote_agent the order_id.
-
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
-
-    Returns:
-        The order as a dictionary if the order was successfully created, or None otherwise.
-    """
-    return make_order(Tag.SELL, gpu_model_str, sla, region_str)
-
-def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a BUY order in the market. After order creation, report to confirm order details, save it to Redis,
-    and signal for the remote_agent to evaluate the order on their end. Provide the remote_agent the order_id.
-
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
-
-    Returns:
-        The order as a dictionary if the order was successfully created, or None otherwise.
-    """
-    return make_order(Tag.BUY, gpu_model_str, sla, region_str)
-
 def reject_offer() -> bool:
     """Reject a received offer.
 

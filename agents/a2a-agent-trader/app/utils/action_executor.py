@@ -16,7 +16,7 @@ async def execute_action(action: Action) -> dict[str, Any]:
     TODO: Replace simulation with real tool function calls:
     - ACCEPT_OFFER: call accept_offer() tool
     - REJECT_OFFER: call reject_offer() tool
-    - CREATE_ORDER/MAKE_OFFER: call make_buy_order() or make_sell_order() with params
+    - CREATE_ORDER/MAKE_OFFER: call make_order() with params
     - RESOLVE_INTERNALLY: call rebalance_internal_resources() tool
     - Other actions: implement corresponding tool functions
     """
@@ -53,9 +53,9 @@ async def execute_action(action: Action) -> dict[str, Any]:
         case ActionType.CREATE_ORDER.value | ActionType.MAKE_OFFER.value:
             # TODO: Replace with: 
             #   if parameters.get("tag") == "buy":
-            #       result = make_buy_order(parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
+            #       result = make_order(Tag.BUY, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
             #   else:
-            #       result = make_sell_order(parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
+            #       result = make_order(Tag.SELL, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
             gpu_model = parameters.get("gpu_model", "unknown")
             tag = parameters.get("tag", "unknown")
             logger.info(f"[ACTION] [SIMULATED] Creating {tag} order for {gpu_model} with params: {parameters}")
