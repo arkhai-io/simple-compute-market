@@ -49,6 +49,7 @@ POLICY_DB_PATH = CONFIG.policy_db_path
 from .schema.pydantic_models import (
     EventType,
     DomainEvent,
+    MarketOrder,
     MarketOrderEvent,
     ResourceImbalanceEvent,
     NegotiationEvent,
