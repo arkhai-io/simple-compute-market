@@ -5,7 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.schema.pydantic_models import Action, ActionType
+from app.schema.pydantic_models import (
+    Action,
+    ActionType,
+    MarketOrder,
+    Tag
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,33 +44,33 @@ async def execute_action(action: Action) -> dict[str, Any]:
     
     match action_type_str:
         case ActionType.ACCEPT_OFFER.value:
-            # TODO: Replace with: result = accept_offer()
             logger.info(f"[ACTION] [SIMULATED] Accepting offer with params: {parameters}")
-            outcome["result"] = True
+            result = accept_offer()
+            outcome["result"] = result
             outcome["message"] = "Offer accepted (simulated)"
             
         case ActionType.REJECT_OFFER.value:
-            # TODO: Replace with: result = reject_offer()
+            result = reject_offer()
             logger.info(f"[ACTION] [SIMULATED] Rejecting offer with params: {parameters}")
-            outcome["result"] = True
+            outcome["result"] = result
             outcome["message"] = "Offer rejected (simulated)"
             
         case ActionType.MAKE_OFFER.value:
-            # TODO: Replace with: 
-            #   if parameters.get("tag") == "buy":
-            #       result = create_order(Tag.BUY, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
-            #   else:
-            #       result = create_order(Tag.SELL, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
             gpu_model = parameters.get("gpu_model", "unknown")
             tag = parameters.get("tag", "unknown")
-            logger.info(f"[ACTION] [SIMULATED] Creating {tag} order for {gpu_model} with params: {parameters}")
+            logger.info(f"[ACTION] Creating {tag} order for {gpu_model} with params: {parameters}")
+            if parameters.get("tag") == "buy":
+                order = create_order(Tag.BUY, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
+            else:
+                order = create_order(Tag.SELL, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
-            outcome["message"] = f"Order created (simulated): {tag} for {gpu_model}"
+            outcome["message"] = f"Order created: {tag} for {gpu_model}"
+            # Then, call make_offer to propagate to the network.
             
         case ActionType.RESOLVE_INTERNALLY.value:
-            # TODO: Replace with: result = rebalance_internal_resources()
+            result = rebalance_internal_resources()
             logger.info(f"[ACTION] [SIMULATED] Resolving resource imbalance internally with params: {parameters}")
-            outcome["result"] = True
+            outcome["result"] = result
             outcome["message"] = "Resources rebalanced internally (simulated)"
             
         case ActionType.COUNTER_OFFER.value:
@@ -96,3 +101,81 @@ async def execute_action(action: Action) -> dict[str, Any]:
     
     return outcome
 
+
+def rebalance_internal_resources() -> bool:
+    """Reallocate internal resources to optimize usage.
+
+    Returns:
+        True if the process was successfully initiated.
+    """
+    logger.info("[TOOL] Rebalancing resources...")
+    return True
+
+
+def reject_offer() -> bool:
+    """Reject a received offer.
+
+    Returns:
+        True if the rejection was successfully communicated.
+    """
+    logger.info("[TOOL] Rejecting received offer.")
+    return True
+
+
+def accept_offer() -> bool:
+    """Accept a received offer.
+
+    Returns:
+        String UUID with which to fill up if the rejection was successfully communicated.
+    """
+    logger.info("[TOOL] Accepting received offer.")
+    return True
+
+
+def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+    """Create an order in the market.
+
+    This only locally assembles the details of an order, without yet propagating it into the market,
+    and so should be considered a helper function towards making the offer.
+
+    Not to be confused with make_offer, which propagates the order to the market.
+
+    Args:
+        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
+        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
+        sla: SLA required for the order.
+        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+
+    Returns:
+        The created order as a dictionary if the order was successfully created, or None otherwise.
+        This creates a UUID identifying the new order, and the details should match the provided arguments.
+    """
+    logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
+    order = MarketOrder(
+        order_id=str(uuid.uuid4()),
+        tag=order_tag,
+        order_maker=BASE_URL_OVERRIDE,
+        order_taker=None,
+        offer_resource=ComputeResource(
+            gpu_model=GPUModel(gpu_model_str),
+            quantity=1,
+            sla=sla,
+            region=Region(region_str),
+        ),
+        demand_resource=TokenResource(
+            token="USDT",
+            amount=9 * 10**18
+        ),
+        quantity=1,
+        duration=1,
+        maker_attestation=None,
+        taker_attestation=None
+    )
+    return order.model_dump()
+
+def make_offer(order: MarketOrder):
+    """Propegate an offer to the network.
+
+    [PROTOTYPE] This is currently set to send a message to one other remote agent.
+    """
+    return None
