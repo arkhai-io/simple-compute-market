@@ -88,8 +88,13 @@ def rebalance_internal_resources() -> bool:
     logger.info("[TOOL] Rebalancing resources...")
     return True
 
-def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
     """Create an order in the market.
+
+    This only locally assembles the details of an order, without yet propagating it into the market,
+    and so should be considered a helper function towards making the offer.
+
+    Not to be confused with make_offer, which propagates the order to the market.
 
     Args:
         order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
@@ -543,7 +548,6 @@ class TraderAgent(BaseAgent):
             "counter_offer": "COUNTER the offer.",
             "make_offer": "MAKE OFFER. Create market order.",
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
-            "create_order": "CREATE ORDER.",
             "noop": "NOOP. No action required.",
         }
         

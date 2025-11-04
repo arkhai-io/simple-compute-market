@@ -296,7 +296,7 @@ class ActionType(str, Enum):
     # Market entry actions
     RESPOND_TO_ORDER = "respond_to_order"
     IGNORE_ORDER = "ignore_order"
-    CREATE_ORDER = "create_order"
+    MAKE_OFFER = "make_offer"
 
     # Negotiation actions
     ACCEPT_OFFER = "accept_offer"
