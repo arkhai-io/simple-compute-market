@@ -72,6 +72,7 @@ from .utils.event_ingestion import (
 )
 from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
+from .utils.serializer import json_serializer
 from pydantic import PrivateAttr
 
 def _extract_content_payload(
@@ -460,13 +461,13 @@ class TraderAgent(BaseAgent):
                 action_type=action_type_str,
                 confidence=decision.confidence,
                 timestamp=decision.timestamp.isoformat(),
-                context_json=json_lib.dumps(decision.context.model_dump()),
+                context_json=decision.context.model_dump_json(),
             )
             
             await self._sqlite_client.save_decision_outcome(
                 decision_id=decision.decision_id,
                 utility=outcome.get("utility"),
-                outcome_json=json_lib.dumps(outcome),
+                outcome_json=json_lib.dumps(outcome, default=json_serializer),
                 timestamp=datetime.now().isoformat(),
             )
             logger.info(f"[PIPELINE] Recorded decision {decision.decision_id} with outcome")
