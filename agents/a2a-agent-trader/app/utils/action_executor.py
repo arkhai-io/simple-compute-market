@@ -281,5 +281,6 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
     try:
         result = await send_to_remote_agent(ctx, event)
         logger.info(result)
-    except Exception:
-        logger.error("[TOOL] Failed to make offer.")
+        return result
+    except Exception as e:
+        logger.error(f"[TOOL] Failed to make offer: {e}.")

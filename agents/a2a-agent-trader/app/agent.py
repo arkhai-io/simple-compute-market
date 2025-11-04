@@ -74,6 +74,50 @@ from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
 from pydantic import PrivateAttr
 
+def _extract_content_payload(
+    content: Optional[genai_types.Content],
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Return (tool_name, response) if the message contains a functionResponse part.
+
+    FOR DEMO USE ONLY.
+
+    Interim solution for issue https://github.com/google/adk-python/issues/3260
+    with WIP PR https://github.com/google/adk-python/pull/3262
+    """
+    if not content:
+        return None, None
+
+    tool_name = None
+    response_dict = None
+
+    for part in content.parts or []:
+
+        # Skip context messages
+        text = getattr(part, "text", None)
+        if text:
+            if text == "For context":
+                continue
+            if "make_offer" in text:
+                tool_name = "A2A"
+                response_dict = {
+                    "event_type": EventType.MAKE_OFFER.value,
+                    "message": text
+                }
+                return tool_name, response_dict
+
+        function_response = getattr(part, "function_response", None)
+        if function_response:
+            # function_response has .name and .response (dict-like)
+            this_part_tool_name = getattr(function_response, "name", None)
+            this_part_response = getattr(function_response, "response", None)
+
+            if this_part_tool_name and this_part_response:
+                tool_name = this_part_tool_name
+                response_dict = this_part_response
+
+
+    return tool_name, response_dict
+
 def _extract_text_from_content(content: genai_types.Content | None) -> str:
     """Concatenate text parts from generative content."""
     if not content or not getattr(content, "parts", None):
@@ -159,6 +203,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             logger.warning(f"Failed to create NegotiationEvent: {e}, falling back to DomainEvent")
     
     # Fallback to base DomainEvent
+    logger.info(f"[PARSE DOMAIN EVENT] Falling back to event_type {event_type}")
     return DomainEvent(
         event_id=event_id,
         event_type=event_type or EventType.MAKE_OFFER,  # Default if unknown
@@ -261,7 +306,9 @@ class TraderAgent(BaseAgent):
             resource_portfolio = await self.get_resource_portfolio()
             
             # Extract domain event payload
-            content = _extract_tool_payload(event.content)
+            # A2A messages come in as text
+            content = _extract_content_payload(event.content)
+            # content = _extract_tool_payload(event.content)
             _, domain_event_payload = content
             
             # Convert payload dict to DomainEvent instance
@@ -354,16 +401,27 @@ class TraderAgent(BaseAgent):
         domain_event, context_data = domain_context
         
         # [3] Policy evaluation
+        action = None
         # action = await self._consult_policy(domain_context)
-        action = Action(
-            action_type=ActionType.MAKE_OFFER,
-            parameters={
-                "tag": 'sell',
-                "gpu_model": domain_event.resource.gpu_model,
-                "sla": domain_event.resource.sla,
-                "region": domain_event.resource.region
-                }
-            )
+        if domain_event.event_type is EventType.RESOURCE_IMBALANCE:
+            logger.info("[PROCESS EVENT] Resource imbalance, making offer.")
+            action = Action(
+                action_type=ActionType.MAKE_OFFER,
+                parameters={
+                    "tag": 'sell',
+                    "gpu_model": domain_event.resource.gpu_model,
+                    "sla": domain_event.resource.sla,
+                    "region": domain_event.resource.region
+                    }
+                )
+        elif domain_event.event_type is EventType.MAKE_OFFER:
+            logger.info("[PROCESS EVENT] Offer received, accepting offer.")
+            action = Action(
+                action_type=ActionType.ACCEPT_OFFER,
+                parameters={}
+                )
+        else:
+            logger.info(f"[PROCESS EVENT] Domain event: {domain_event}")
 
         if not action:
             logger.warning(f"[PIPELINE] No action determined for event {domain_event.event_id}")
@@ -432,8 +490,19 @@ class TraderAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        logger.info(f"[{self.name}]: {ctx}")
+        if len(ctx.session.events[-1].content.parts) > 10:
+            yield Event(
+            author=self.name,
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part.from_text(text=f"Too many message parts. Aborting.")],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
         last_event = ctx.session.events[-1]
+        logger.info(f"[RUN ASYNC]: Last Event {last_event}")
+
         logger.info("CONTENT:")
 
         if last_event.content is None:
@@ -447,7 +516,7 @@ class TraderAgent(BaseAgent):
                 branch=ctx.branch,
             )
 
-        name, content = _extract_tool_payload(last_event.content)
+        name, content = _extract_content_payload(last_event.content)
         logger.info(f"{name}: {content}")
 
         # Process through full reactive pipeline

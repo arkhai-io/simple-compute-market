@@ -185,7 +185,7 @@ class EventType(str, Enum):
 class DomainEvent(BaseModel):
     """Base event model"""
 
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=False)
 
     event_id: str = Field(description="Unique event identifier")
     event_type: EventType = Field(description="Type of event")
