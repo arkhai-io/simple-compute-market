@@ -440,9 +440,7 @@ class TraderAgent(BaseAgent):
         logger.info(f"{name}: {content}")
 
         # Process through full reactive pipeline
-        context = await self._build_domain_context(last_event)
-        domain_event, _ = context
-        
+        domain_event = _parse_domain_event(content)
         policy_recommendation = await self._process_event_with_pipeline(domain_event)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
