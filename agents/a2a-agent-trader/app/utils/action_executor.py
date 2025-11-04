@@ -257,7 +257,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
     [PROTOTYPE] This is currently set to send a message to one other remote agent.
     """
     event = Event(
-          author=f"remote_agent_{PORT}",
+          author=f"agent_{PORT}",
           content=genai_types.Content(
               role="model",
               parts=[
@@ -272,5 +272,4 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
           invocation_id=ctx.invocation_id,
           branch=ctx.branch,
       )
-    await send_to_remote_agent(ctx, event)
-    return None
+    return await send_to_remote_agent(ctx, event)
