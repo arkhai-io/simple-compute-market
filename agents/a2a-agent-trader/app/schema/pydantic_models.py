@@ -32,16 +32,32 @@ class Attestation(BaseModel):
     """Describes the attestation of an agent with respect to a compute resource.
 
     Who bought and who sold the compute resource.
-    The attestation is a signed message from the buyer to the seller,
-    and a signed message from the seller to the buyer.
+    The attestation is a signed message from the maker to the taker,
+    and a signed message from the taker to the maker.
     """
 
-    buyer_attestation: str = Field(description="The attestation of the buyer")
-    seller_attestation: str = Field(description="The attestation of the seller")
+    maker_attestation: str = Field(description="The attestation of the maker")
+    taker_attestation: str = Field(description="The attestation of the taker")
 
 
-class ComputeResource(BaseModel):
-    """Describes the resources that are available to each Agent,
+class Resource(BaseModel):
+    """Generic resource.
+    """
+
+
+class TokenResource(Resource):
+    """Describes a given value and amount of a token used for trade.
+
+    Note that while USDT and USDC are precise to 6 decimal places, ERC-20 uses 18 as standard.
+    Thus, we use 18 decimal places.
+    """
+    token: str = Field(description="Token or currency")
+    amount: int = Field(description=
+        "Integer amount for the token, up to 18 decimal places (e.g. 10 units = 10 * 10**18)"
+    )
+
+class ComputeResource(Resource):
+    """Describes the compute resources that are available to each Agent,
     and may be put on the market. This is before any valuation.
     Not all resources in the resource portfolio are on sale
     """
@@ -111,27 +127,34 @@ class MarketOrder(BaseModel):
     """Describes an open order on the market, which contains information about
     the resources being offered or sought, and parameters are used for matching
     agents before the negotiation begins.
-    An open order is one with blank attestations (buyer_attestation and seller_attestation).
-    A closed order is one with filled out buyer_attestation and seller_attestation.
+    An open order is one with blank attestations (maker_attestation and taker_attestation).
+    A closed order is one with filled out maker_attestation and taker_attestation.
     """
 
     order_id: str = Field(description="The id of the order")
     tag: Tag = Field(description="The tag of the order (buy or sell)")
     order_maker: str = Field(description="The card URL of the agent who made the order")
-    order_taker: str = Field(
+    order_taker: str | None = Field(
         default="",
         description="The card URL of the agent who took the order",
     )
-    compute_resource: ComputeResource = Field(
-        description="The compute resource being offered or sought"
+    offer_resource: Resource = Field(
+        description="The resource being offered, which may be a token or compute resource."
+    )
+    demand_resource: Resource = Field(
+        description="The resource being demanded, which may be a token or compute resource."
     )
     quantity: int = Field(
         description="The quantity of the compute resource being offered or sought"
     )
     duration: int = Field(description="The duration of the order in days")
-    attestation: Attestation | None = Field(
+    maker_attestation: Attestation | None = Field(
         default=None,
-        description="The attestation of the order (None for open orders)",
+        description="The attestation for the offer in escrow (None for open orders)",
+    )
+    taker_attestation: Attestation | None = Field(
+        default=None,
+        description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
 
     def is_open(self) -> bool:
@@ -162,7 +185,7 @@ class EventType(str, Enum):
 class DomainEvent(BaseModel):
     """Base event model"""
 
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=False)
 
     event_id: str = Field(description="Unique event identifier")
     event_type: EventType = Field(description="Type of event")
@@ -273,7 +296,7 @@ class ActionType(str, Enum):
     # Market entry actions
     RESPOND_TO_ORDER = "respond_to_order"
     IGNORE_ORDER = "ignore_order"
-    CREATE_ORDER = "create_order"
+    MAKE_OFFER = "make_offer"
 
     # Negotiation actions
     ACCEPT_OFFER = "accept_offer"

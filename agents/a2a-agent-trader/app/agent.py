@@ -26,10 +26,6 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import BaseAgent,  InvocationContext
-from google.adk.agents.remote_a2a_agent import (
-    AGENT_CARD_WELL_KNOWN_PATH,
-    RemoteA2aAgent,
-)
 from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -43,25 +39,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils.config import CONFIG
-MCP_SERVER_URL = CONFIG.mcp_server_url
+
 BASE_URL_OVERRIDE = CONFIG.base_url_override
+MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
-REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 POLICY_DB_PATH = CONFIG.policy_db_path
 
 
 from .schema.pydantic_models import (
+    ActionType,
     EventType,
     DomainEvent,
+    MarketOrder,
     MarketOrderEvent,
     ResourceImbalanceEvent,
     NegotiationEvent,
     GPUModel,
     Region,
-    Tag,
     ComputeResource,
     ComputeResourcePortfolio,
-    MarketOrder,
 )
 
 from .policies.store import PolicyStore, simple_negotiation_random
@@ -78,105 +74,49 @@ from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
 from pydantic import PrivateAttr
 
-def rebalance_internal_resources() -> bool:
-    """Reallocate internal resources to optimize usage.
+def _extract_content_payload(
+    content: Optional[genai_types.Content],
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Return (tool_name, response) if the message contains a functionResponse part.
 
-    Returns:
-        True if the process was successfully initiated.
+    FOR DEMO USE ONLY.
+
+    Interim solution for issue https://github.com/google/adk-python/issues/3260
+    with WIP PR https://github.com/google/adk-python/pull/3262
     """
-    logger.info("[TOOL] Rebalancing resources...")
-    return True
+    if not content:
+        return None, None
 
-def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create an order in the market.
+    tool_name = None
+    response_dict = None
 
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+    for part in content.parts or []:
 
-    Returns:
-        The created order as a dictionary if the order was successfully created, or None otherwise.
-        This creates a UUID identifying the new order, and the details should match the provided arguments.
-    """
-    logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
-    order = MarketOrder(
-        order_id=str(uuid.uuid4()),
-        tag=order_tag,
-        order_maker=BASE_URL_OVERRIDE,
-        compute_resource=ComputeResource(
-            gpu_model=GPUModel(gpu_model_str),
-            quantity=1,
-            sla=sla,
-            region=Region(region_str),
-        ),
-        quantity=1,
-        duration=1,
-        attestation=None,
-    )
-    return order.model_dump()
+        # Skip context messages
+        text = getattr(part, "text", None)
+        if text:
+            if text == "For context":
+                continue
+            if "make_offer" in text:
+                tool_name = "A2A"
+                response_dict = {
+                    "event_type": EventType.MAKE_OFFER.value,
+                    "message": text
+                }
+                return tool_name, response_dict
 
-def make_sell_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a SELL order in the market, selling available resources. After order creation, save it to Redis,
-    report to confirm order details, and signal for the remote_agent to evaluate the order on their end.
-    Provide the remote_agent the order_id.
+        function_response = getattr(part, "function_response", None)
+        if function_response:
+            # function_response has .name and .response (dict-like)
+            this_part_tool_name = getattr(function_response, "name", None)
+            this_part_response = getattr(function_response, "response", None)
 
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+            if this_part_tool_name and this_part_response:
+                tool_name = this_part_tool_name
+                response_dict = this_part_response
 
-    Returns:
-        The order as a dictionary if the order was successfully created, or None otherwise.
-    """
-    return make_order(Tag.SELL, gpu_model_str, sla, region_str)
 
-def make_buy_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create a BUY order in the market. After order creation, report to confirm order details, save it to Redis,
-    and signal for the remote_agent to evaluate the order on their end. Provide the remote_agent the order_id.
-
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
-
-    Returns:
-        The order as a dictionary if the order was successfully created, or None otherwise.
-    """
-    return make_order(Tag.BUY, gpu_model_str, sla, region_str)
-
-def reject_offer() -> bool:
-    """Reject a received offer.
-
-    Returns:
-        True if the rejection was successfully communicated.
-    """
-    logger.info("[TOOL] Rejecting received offer.")
-    return True
-
-def accept_offer() -> bool:
-    """Accept a received offer.
-
-    Returns:
-        String UUID with which to fill up if the rejection was successfully communicated.
-    """
-    logger.info("[TOOL] Accepting received offer.")
-    return True
-
-def evaluate_received_offer(order_id: str) -> str:
-    """Given a make_offer event denoting an INCOMING offer from another agent, evaluate whether or not to accept it.
-    Following the recommendation, invoke either accept_offer or reject_offer.
-
-    Returns:
-        String with policy recommendation of next action to take.
-    """
-    # This function is kept for backward compatibility but will be handled by PolicyStore
-    logger.info(f"[TOOL] Evaluating received offer {order_id}.")
-    return "ACCEPT or REJECT based on policy evaluation."
-
+    return tool_name, response_dict
 
 def _extract_text_from_content(content: genai_types.Content | None) -> str:
     """Concatenate text parts from generative content."""
@@ -263,6 +203,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             logger.warning(f"Failed to create NegotiationEvent: {e}, falling back to DomainEvent")
     
     # Fallback to base DomainEvent
+    logger.info(f"[PARSE DOMAIN EVENT] Falling back to event_type {event_type}")
     return DomainEvent(
         event_id=event_id,
         event_type=event_type or EventType.MAKE_OFFER,  # Default if unknown
@@ -270,15 +211,6 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
         source=source,
         data=data,
     )
-
-def connect_to_remote_agent(agent_url=REMOTE_AGENT_URL_OVERRIDE):
-    agent_card_url=f"{agent_url}{AGENT_CARD_WELL_KNOWN_PATH}"
-    remote_agent = RemoteA2aAgent(
-        name=f"remote_agent_{PORT}",
-        description="A helpful AI assistant trading compute resources with others.",
-        agent_card=agent_card_url,
-    )
-    return remote_agent
 
 class TraderAgent(BaseAgent):
     """
@@ -341,46 +273,6 @@ class TraderAgent(BaseAgent):
         # We'll handle this in an async initialization if needed, or save it here sync
         # For now, we'll let it be registered and saved on-demand
 
-    async def send_to_remote_agent(self, ctx, event: Event, remote_agent = None):
-        if remote_agent is None:
-            remote_agent = connect_to_remote_agent()
-
-        # Examples of Events:
-        # Text:
-        #   Event(
-        #       author=self.name,
-        #       content=genai_types.Content(
-        #           role="model",
-        #           parts=[genai_types.Part.from_text(text="Offer successfully received.")],
-        #       ),
-        #       invocation_id=ctx.invocation_id,
-        #       branch=ctx.branch,
-        #   ))
-        # Structured:
-        #   Event(
-        #       author=self.name,
-        #       content=genai_types.Content(
-        #           role="model",
-        #           # parts=[genai_types.Part.from_text(text="This is an offer.")],
-        #           parts=[
-        #               genai_types.Part.from_function_response(
-        #                   name="make_offer",
-        #                   response={
-        #                       "event_type": EventType.MAKE_OFFER,
-        #                       "offer": order
-        #                   })
-        #               ],
-        #       ),
-        #       invocation_id=ctx.invocation_id,
-        #       branch=ctx.branch,
-        #   ))
-
-        await ctx.session_service.append_event(ctx.session, event)
-        async for event in remote_agent.run_async(ctx):
-            #text_from_remote = _extract_text_from_content(event.content)
-            if event.is_final_response():
-                return event
-
 
     async def _ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store."""
@@ -414,7 +306,9 @@ class TraderAgent(BaseAgent):
             resource_portfolio = await self.get_resource_portfolio()
             
             # Extract domain event payload
-            content = _extract_tool_payload(event.content)
+            # A2A messages come in as text
+            content = _extract_content_payload(event.content)
+            # content = _extract_tool_payload(event.content)
             _, domain_event_payload = content
             
             # Convert payload dict to DomainEvent instance
@@ -499,16 +393,36 @@ class TraderAgent(BaseAgent):
         
         return None
     
-    async def _process_event_with_pipeline(self, domain_event: DomainEvent) -> str:
+    async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: InvocationContext | None = None) -> str:
         """Process event through full reactive pipeline: context -> policy -> action -> execution -> recording."""
         # [1] Event detection - already done (domain_event received)
         # [2] Context building
-        context = await self._build_domain_context(domain_event)
-        domain_event, context_data = context
+        domain_context = await self._build_domain_context(domain_event)
+        domain_event, context_data = domain_context
         
         # [3] Policy evaluation
-        action = await self._consult_policy(context)
-        
+        action = None
+        # action = await self._consult_policy(domain_context)
+        if domain_event.event_type is EventType.RESOURCE_IMBALANCE:
+            logger.info("[PROCESS EVENT] Resource imbalance, making offer.")
+            action = Action(
+                action_type=ActionType.MAKE_OFFER,
+                parameters={
+                    "tag": 'sell',
+                    "gpu_model": domain_event.resource.gpu_model,
+                    "sla": domain_event.resource.sla,
+                    "region": domain_event.resource.region
+                    }
+                )
+        elif domain_event.event_type is EventType.MAKE_OFFER:
+            logger.info("[PROCESS EVENT] Offer received, accepting offer.")
+            action = Action(
+                action_type=ActionType.ACCEPT_OFFER,
+                parameters={}
+                )
+        else:
+            logger.info(f"[PROCESS EVENT] Domain event: {domain_event}")
+
         if not action:
             logger.warning(f"[PIPELINE] No action determined for event {domain_event.event_id}")
             return "NO ACTION. No policy matched."
@@ -531,7 +445,7 @@ class TraderAgent(BaseAgent):
         )
         
         # [4] Action execution (simulated)
-        outcome = await execute_action(action)
+        outcome = await execute_action(action=action, ctx=ctx)
         
         # [5] Experience recording
         try:
@@ -567,18 +481,30 @@ class TraderAgent(BaseAgent):
             "counter_offer": "COUNTER the offer.",
             "make_offer": "MAKE OFFER. Create market order.",
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
-            "create_order": "CREATE ORDER.",
             "noop": "NOOP. No action required.",
         }
-        
-        return action_mappings.get(action_type_str.lower(), f"{action_type_str.upper()} action executed.")
+        outcome_message = outcome.get("message", None)
+        fallback_message = action_mappings.get(action_type_str.lower(), f"{action_type_str.upper()} action executed.")
+        logger.info(f"{outcome} {outcome_message}")
+        return outcome_message or fallback_message
 
     @override
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        logger.info(f"[{self.name}]: {ctx}")
+        if len(ctx.session.events[-1].content.parts) > 10:
+            yield Event(
+            author=self.name,
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part.from_text(text=f"Too many message parts. Aborting.")],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
         last_event = ctx.session.events[-1]
+        logger.info(f"[RUN ASYNC]: Last Event {last_event}")
+
         logger.info("CONTENT:")
 
         if last_event.content is None:
@@ -592,14 +518,12 @@ class TraderAgent(BaseAgent):
                 branch=ctx.branch,
             )
 
-        name, content = _extract_tool_payload(last_event.content)
+        name, content = _extract_content_payload(last_event.content)
         logger.info(f"{name}: {content}")
 
         # Process through full reactive pipeline
-        context = await self._build_domain_context(last_event)
-        domain_event, _ = context
-        
-        policy_recommendation = await self._process_event_with_pipeline(domain_event)
+        domain_event = _parse_domain_event(content)
+        policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
 
@@ -640,7 +564,9 @@ ALERTS_USER_ID = "resource-monitor"
 async def _run_alert_conversation(alert: dict) -> str:
     """Route alert details through the root agent so it can decide on next steps."""
     # Validate and queue event if enabled
-    queue_event(alert)
+    if CONFIG.enable_event_queue:
+        queue_event(alert)
+        return "Alert processing queued."
     
     session_service = InMemorySessionService()
     session = session_service.create_session_sync(
@@ -659,16 +585,6 @@ async def _run_alert_conversation(alert: dict) -> str:
         alert['source'] = ALERTS_USER_ID
     if 'event_id' not in alert:
         alert['event_id'] = f"alert_{uuid.uuid4()}"
-    
-    # Parse as DomainEvent and process through pipeline
-    try:
-        domain_event = _parse_domain_event(alert)
-        response_text = await root_agent._process_event_with_pipeline(domain_event)
-        return response_text
-    except Exception as e:
-        logger.error(f"Error processing alert through pipeline: {e}")
-        # Fallback to original method
-        pass
     
     message = genai_types.Content(
         role="user",
@@ -729,6 +645,7 @@ a2a_app.routes.append(alert_route)
 
 
 # Background task to process queued events
+# TODO Refactor this to run through _run_async_impl for it to have access to ctx
 async def process_queued_events():
     """Background task to process events from queue."""
     while True:
