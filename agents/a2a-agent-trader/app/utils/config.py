@@ -24,6 +24,7 @@ class Config:
     mcp_server_url: str
     base_url_override: str
     port: int
+    remote_agent_port: int
     remote_agent_url_override: str
     use_vertex_ai: bool
     policy_db_path: str
@@ -40,6 +41,7 @@ def load_config() -> Config:
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
         base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
         port=_get_int_env("PORT", 8000),
+        remote_agent_port=_get_int_env("REMOTE_AGENT_PORT", 8000),
         remote_agent_url_override=os.getenv(
             "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
         ),

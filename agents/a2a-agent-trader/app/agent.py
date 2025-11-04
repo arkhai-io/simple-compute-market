@@ -26,10 +26,6 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import BaseAgent,  InvocationContext
-from google.adk.agents.remote_a2a_agent import (
-    AGENT_CARD_WELL_KNOWN_PATH,
-    RemoteA2aAgent,
-)
 from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -43,10 +39,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 from .utils.config import CONFIG
-MCP_SERVER_URL = CONFIG.mcp_server_url
+
 BASE_URL_OVERRIDE = CONFIG.base_url_override
+MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
-REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 POLICY_DB_PATH = CONFIG.policy_db_path
 
 
@@ -169,15 +165,6 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
         data=data,
     )
 
-def connect_to_remote_agent(agent_url=REMOTE_AGENT_URL_OVERRIDE):
-    agent_card_url=f"{agent_url}{AGENT_CARD_WELL_KNOWN_PATH}"
-    remote_agent = RemoteA2aAgent(
-        name=f"remote_agent_{PORT}",
-        description="A helpful AI assistant trading compute resources with others.",
-        agent_card=agent_card_url,
-    )
-    return remote_agent
-
 class TraderAgent(BaseAgent):
     """
     Custom agent for trading computational resources.
@@ -238,46 +225,6 @@ class TraderAgent(BaseAgent):
         # Save policy for negotiation events (will be done asynchronously on first use)
         # We'll handle this in an async initialization if needed, or save it here sync
         # For now, we'll let it be registered and saved on-demand
-
-    async def send_to_remote_agent(self, ctx, event: Event, remote_agent = None):
-        if remote_agent is None:
-            remote_agent = connect_to_remote_agent()
-
-        # Examples of Events:
-        # Text:
-        #   Event(
-        #       author=self.name,
-        #       content=genai_types.Content(
-        #           role="model",
-        #           parts=[genai_types.Part.from_text(text="Offer successfully received.")],
-        #       ),
-        #       invocation_id=ctx.invocation_id,
-        #       branch=ctx.branch,
-        #   ))
-        # Structured:
-        #   Event(
-        #       author=self.name,
-        #       content=genai_types.Content(
-        #           role="model",
-        #           # parts=[genai_types.Part.from_text(text="This is an offer.")],
-        #           parts=[
-        #               genai_types.Part.from_function_response(
-        #                   name="make_offer",
-        #                   response={
-        #                       "event_type": EventType.MAKE_OFFER,
-        #                       "offer": order
-        #                   })
-        #               ],
-        #       ),
-        #       invocation_id=ctx.invocation_id,
-        #       branch=ctx.branch,
-        #   ))
-
-        await ctx.session_service.append_event(ctx.session, event)
-        async for event in remote_agent.run_async(ctx):
-            #text_from_remote = _extract_text_from_content(event.content)
-            if event.is_final_response():
-                return event
 
 
     async def _ensure_negotiation_policy(self) -> None:

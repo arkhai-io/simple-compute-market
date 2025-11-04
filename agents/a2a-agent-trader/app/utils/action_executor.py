@@ -5,17 +5,38 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from google.adk.agents import InvocationContext
+from google.adk.events import Event
+from google.adk.agents.remote_a2a_agent import (
+    AGENT_CARD_WELL_KNOWN_PATH,
+    RemoteA2aAgent,
+)
+
+from google.genai import types as genai_types
+
 from app.schema.pydantic_models import (
     Action,
     ActionType,
+    ComputeResource,
+    EventType,
+    GPUModel,
     MarketOrder,
-    Tag
+    Region,
+    Tag,
+    TokenResource
 )
+
+from .config import CONFIG
+
+BASE_URL_OVERRIDE = CONFIG.base_url_override
+REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
+PORT = CONFIG.port
+REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 
 logger = logging.getLogger(__name__)
 
 
-async def execute_action(action: Action) -> dict[str, Any]:
+async def execute_action(action: Action, ctx: InvocationContext) -> dict[str, Any]:
     """Execute an action and return outcome. Currently simulated/logged only.
     
     TODO: Replace simulation with real tool function calls:
@@ -66,6 +87,7 @@ async def execute_action(action: Action) -> dict[str, Any]:
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created: {tag} for {gpu_model}"
             # Then, call make_offer to propagate to the network.
+            make_offer_result = await make_offer(order)
             
         case ActionType.RESOLVE_INTERNALLY.value:
             result = rebalance_internal_resources()
@@ -100,6 +122,62 @@ async def execute_action(action: Action) -> dict[str, Any]:
     outcome["utility"] = utility
     
     return outcome
+
+
+def connect_to_remote_agent(agent_url=REMOTE_AGENT_URL_OVERRIDE):
+    agent_card_url=f"{agent_url}{AGENT_CARD_WELL_KNOWN_PATH}"
+    remote_agent = RemoteA2aAgent(
+        name=f"remote_agent_{REMOTE_AGENT_PORT}",
+        description="A helpful AI assistant trading compute resources with others.",
+        agent_card=agent_card_url,
+    )
+    return remote_agent
+
+async def send_to_remote_agent(
+    ctx: InvocationContext,
+    event: Event,
+    remote_agent: RemoteA2aAgent = None
+):
+    """Takes an event and sends it to a specified remote agent via A2A.
+
+    Examples of Events:
+        Text:
+            Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_text(text="Offer successfully received.")],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
+
+        Structured:
+            Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[
+                        genai_types.Part.from_function_response(
+                            name="make_offer",
+                            response={
+                                "event_type": EventType.MAKE_OFFER,
+                                "offer": order
+                            })
+                        ],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
+    """
+    if remote_agent is None:
+        remote_agent = connect_to_remote_agent()
+
+    await ctx.session_service.append_event(ctx.session, event)
+    async for event in remote_agent.run_async(ctx):
+        #text_from_remote = _extract_text_from_content(event.content)
+        if event.is_final_response():
+            return event
 
 
 def rebalance_internal_resources() -> bool:
@@ -173,9 +251,26 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
     )
     return order.model_dump()
 
-def make_offer(order: MarketOrder):
+async def make_offer(ctx: InvocationContext, order: MarketOrder):
     """Propegate an offer to the network.
 
     [PROTOTYPE] This is currently set to send a message to one other remote agent.
     """
+    event = Event(
+          author=f"remote_agent_{PORT}",
+          content=genai_types.Content(
+              role="model",
+              parts=[
+                  genai_types.Part.from_function_response(
+                      name="make_offer",
+                      response={
+                          "event_type": EventType.MAKE_OFFER,
+                          "offer": order
+                      })
+                  ],
+          ),
+          invocation_id=ctx.invocation_id,
+          branch=ctx.branch,
+      )
+    await send_to_remote_agent(ctx, event)
     return None
