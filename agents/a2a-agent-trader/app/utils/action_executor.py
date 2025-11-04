@@ -69,7 +69,7 @@ async def execute_action(action: Action, ctx: InvocationContext | None = None) -
             logger.info(f"[ACTION] [SIMULATED] Accepting offer with params: {parameters}")
             result = accept_offer()
             outcome["result"] = result
-            outcome["message"] = "Offer accepted (simulated)"
+            outcome["message"] = "Offer accepted"
             
         case ActionType.REJECT_OFFER.value:
             result = reject_offer()
@@ -91,6 +91,9 @@ async def execute_action(action: Action, ctx: InvocationContext | None = None) -
             outcome["message"] = f"Order created: {tag} for {gpu_model}"
             # Then, call make_offer to propagate to the network.
             make_offer_result = await make_offer(ctx=ctx, order=order)
+            for part in getattr(make_offer_result.content, "parts", []):
+                logger.info(f"[ACTION] Received response: {part.text}")
+                outcome["message"] = part.text
             
         case ActionType.RESOLVE_INTERNALLY.value:
             result = rebalance_internal_resources()

@@ -483,8 +483,10 @@ class TraderAgent(BaseAgent):
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
             "noop": "NOOP. No action required.",
         }
-        
-        return action_mappings.get(action_type_str.lower(), f"{action_type_str.upper()} action executed.")
+        outcome_message = outcome.get("message", None)
+        fallback_message = action_mappings.get(action_type_str.lower(), f"{action_type_str.upper()} action executed.")
+        logger.info(f"{outcome} {outcome_message}")
+        return outcome_message or fallback_message
 
     @override
     async def _run_async_impl(
