@@ -40,8 +40,21 @@ class Attestation(BaseModel):
     taker_attestation: str = Field(description="The attestation of the taker")
 
 
-class ComputeResource(BaseModel):
-    """Describes the resources that are available to each Agent,
+class Resource(BaseModel):
+    """Generic resource.
+    """
+
+
+class TokenResource(Resource):
+    """Describes a given value and amount of a token used for trade.
+    """
+    token: str = Field(description="Token or currency")
+    amount: int = Field(description=
+        "Integer amount for the token, up to 10 decimal places (e.g. 10 units = 10 * 10**18)"
+    )
+
+class ComputeResource(Resource):
+    """Describes the compute resources that are available to each Agent,
     and may be put on the market. This is before any valuation.
     Not all resources in the resource portfolio are on sale
     """
