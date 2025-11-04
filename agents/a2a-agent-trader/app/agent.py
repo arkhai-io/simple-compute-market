@@ -58,11 +58,8 @@ from .schema.pydantic_models import (
     NegotiationEvent,
     GPUModel,
     Region,
-    Tag,
-    TokenResource,
     ComputeResource,
     ComputeResourcePortfolio,
-    MarketOrder,
 )
 
 from .policies.store import PolicyStore, simple_negotiation_random
@@ -78,86 +75,6 @@ from .utils.event_ingestion import (
 from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
 from pydantic import PrivateAttr
-
-def rebalance_internal_resources() -> bool:
-    """Reallocate internal resources to optimize usage.
-
-    Returns:
-        True if the process was successfully initiated.
-    """
-    logger.info("[TOOL] Rebalancing resources...")
-    return True
-
-def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
-    """Create an order in the market.
-
-    This only locally assembles the details of an order, without yet propagating it into the market,
-    and so should be considered a helper function towards making the offer.
-
-    Not to be confused with make_offer, which propagates the order to the market.
-
-    Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
-
-    Returns:
-        The created order as a dictionary if the order was successfully created, or None otherwise.
-        This creates a UUID identifying the new order, and the details should match the provided arguments.
-    """
-    logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
-    order = MarketOrder(
-        order_id=str(uuid.uuid4()),
-        tag=order_tag,
-        order_maker=BASE_URL_OVERRIDE,
-        order_taker=None,
-        offer_resource=ComputeResource(
-            gpu_model=GPUModel(gpu_model_str),
-            quantity=1,
-            sla=sla,
-            region=Region(region_str),
-        ),
-        demand_resource=TokenResource(
-            token="USDT",
-            amount=9 * 10**18
-        ),
-        quantity=1,
-        duration=1,
-        maker_attestation=None,
-        taker_attestation=None
-    )
-    return order.model_dump()
-
-def reject_offer() -> bool:
-    """Reject a received offer.
-
-    Returns:
-        True if the rejection was successfully communicated.
-    """
-    logger.info("[TOOL] Rejecting received offer.")
-    return True
-
-def accept_offer() -> bool:
-    """Accept a received offer.
-
-    Returns:
-        String UUID with which to fill up if the rejection was successfully communicated.
-    """
-    logger.info("[TOOL] Accepting received offer.")
-    return True
-
-def evaluate_received_offer(order_id: str) -> str:
-    """Given a make_offer event denoting an INCOMING offer from another agent, evaluate whether or not to accept it.
-    Following the recommendation, invoke either accept_offer or reject_offer.
-
-    Returns:
-        String with policy recommendation of next action to take.
-    """
-    # This function is kept for backward compatibility but will be handled by PolicyStore
-    logger.info(f"[TOOL] Evaluating received offer {order_id}.")
-    return "ACCEPT or REJECT based on policy evaluation."
-
 
 def _extract_text_from_content(content: genai_types.Content | None) -> str:
     """Concatenate text parts from generative content."""
