@@ -47,7 +47,7 @@ class Order:
     duration: int  # duration in days
     offer_token: str
     offer_value: float
-    buyer_attestation: Optional[str] = None  # To be filled after negotation
-    seller_attestation: Optional[str] = None  # To be filled after negotation
+    maker_attestation: Optional[str] = None  # To be filled after negotation
+    taker_attestation: Optional[str] = None  # To be filled after negotation
 
 

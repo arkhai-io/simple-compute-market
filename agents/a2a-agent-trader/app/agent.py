@@ -105,6 +105,7 @@ def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) 
         order_id=str(uuid.uuid4()),
         tag=order_tag,
         order_maker=BASE_URL_OVERRIDE,
+        order_taker=None,
         compute_resource=ComputeResource(
             gpu_model=GPUModel(gpu_model_str),
             quantity=1,
@@ -113,7 +114,8 @@ def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) 
         ),
         quantity=1,
         duration=1,
-        attestation=None,
+        maker_attestation=None,
+        taker_attestation=None
     )
     return order.model_dump()
 

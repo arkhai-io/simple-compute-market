@@ -32,12 +32,12 @@ class Attestation(BaseModel):
     """Describes the attestation of an agent with respect to a compute resource.
 
     Who bought and who sold the compute resource.
-    The attestation is a signed message from the buyer to the seller,
-    and a signed message from the seller to the buyer.
+    The attestation is a signed message from the maker to the taker,
+    and a signed message from the taker to the maker.
     """
 
-    buyer_attestation: str = Field(description="The attestation of the buyer")
-    seller_attestation: str = Field(description="The attestation of the seller")
+    maker_attestation: str = Field(description="The attestation of the maker")
+    taker_attestation: str = Field(description="The attestation of the taker")
 
 
 class ComputeResource(BaseModel):
@@ -111,8 +111,8 @@ class MarketOrder(BaseModel):
     """Describes an open order on the market, which contains information about
     the resources being offered or sought, and parameters are used for matching
     agents before the negotiation begins.
-    An open order is one with blank attestations (buyer_attestation and seller_attestation).
-    A closed order is one with filled out buyer_attestation and seller_attestation.
+    An open order is one with blank attestations (maker_attestation and taker_attestation).
+    A closed order is one with filled out maker_attestation and taker_attestation.
     """
 
     order_id: str = Field(description="The id of the order")
