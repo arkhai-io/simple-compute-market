@@ -47,6 +47,7 @@ POLICY_DB_PATH = CONFIG.policy_db_path
 
 
 from .schema.pydantic_models import (
+    ActionType,
     EventType,
     DomainEvent,
     MarketOrder,
@@ -345,16 +346,25 @@ class TraderAgent(BaseAgent):
         
         return None
     
-    async def _process_event_with_pipeline(self, domain_event: DomainEvent) -> str:
+    async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: InvocationContext | None = None) -> str:
         """Process event through full reactive pipeline: context -> policy -> action -> execution -> recording."""
         # [1] Event detection - already done (domain_event received)
         # [2] Context building
-        context = await self._build_domain_context(domain_event)
-        domain_event, context_data = context
+        domain_context = await self._build_domain_context(domain_event)
+        domain_event, context_data = domain_context
         
         # [3] Policy evaluation
-        action = await self._consult_policy(context)
-        
+        # action = await self._consult_policy(domain_context)
+        action = Action(
+            action_type=ActionType.MAKE_OFFER,
+            parameters={
+                "tag": 'sell',
+                "gpu_model": domain_event.resource.gpu_model,
+                "sla": domain_event.resource.sla,
+                "region": domain_event.resource.region
+                }
+            )
+
         if not action:
             logger.warning(f"[PIPELINE] No action determined for event {domain_event.event_id}")
             return "NO ACTION. No policy matched."
@@ -377,7 +387,7 @@ class TraderAgent(BaseAgent):
         )
         
         # [4] Action execution (simulated)
-        outcome = await execute_action(action)
+        outcome = await execute_action(action=action, ctx=ctx)
         
         # [5] Experience recording
         try:
@@ -442,7 +452,7 @@ class TraderAgent(BaseAgent):
 
         # Process through full reactive pipeline
         domain_event = _parse_domain_event(content)
-        policy_recommendation = await self._process_event_with_pipeline(domain_event)
+        policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
 
@@ -483,7 +493,9 @@ ALERTS_USER_ID = "resource-monitor"
 async def _run_alert_conversation(alert: dict) -> str:
     """Route alert details through the root agent so it can decide on next steps."""
     # Validate and queue event if enabled
-    queue_event(alert)
+    if CONFIG.enable_event_queue:
+        queue_event(alert)
+        return "Alert processing queued."
     
     session_service = InMemorySessionService()
     session = session_service.create_session_sync(
@@ -502,16 +514,6 @@ async def _run_alert_conversation(alert: dict) -> str:
         alert['source'] = ALERTS_USER_ID
     if 'event_id' not in alert:
         alert['event_id'] = f"alert_{uuid.uuid4()}"
-    
-    # Parse as DomainEvent and process through pipeline
-    try:
-        domain_event = _parse_domain_event(alert)
-        response_text = await root_agent._process_event_with_pipeline(domain_event)
-        return response_text
-    except Exception as e:
-        logger.error(f"Error processing alert through pipeline: {e}")
-        # Fallback to original method
-        pass
     
     message = genai_types.Content(
         role="user",
@@ -572,6 +574,7 @@ a2a_app.routes.append(alert_route)
 
 
 # Background task to process queued events
+# TODO Refactor this to run through _run_async_impl for it to have access to ctx
 async def process_queued_events():
     """Background task to process events from queue."""
     while True:

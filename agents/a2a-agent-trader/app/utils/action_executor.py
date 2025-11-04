@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 import logging
 from typing import Any
 
@@ -36,7 +37,7 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 logger = logging.getLogger(__name__)
 
 
-async def execute_action(action: Action, ctx: InvocationContext) -> dict[str, Any]:
+async def execute_action(action: Action, ctx: InvocationContext | None = None) -> dict[str, Any]:
     """Execute an action and return outcome. Currently simulated/logged only.
     
     TODO: Replace simulation with real tool function calls:
@@ -80,14 +81,16 @@ async def execute_action(action: Action, ctx: InvocationContext) -> dict[str, An
             gpu_model = parameters.get("gpu_model", "unknown")
             tag = parameters.get("tag", "unknown")
             logger.info(f"[ACTION] Creating {tag} order for {gpu_model} with params: {parameters}")
-            if parameters.get("tag") == "buy":
-                order = create_order(Tag.BUY, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
-            else:
-                order = create_order(Tag.SELL, parameters.get("gpu_model"), parameters.get("sla"), parameters.get("region"))
+            order = create_order(
+                order_tag=parameters.get("tag"),
+                gpu_model_str=parameters.get("gpu_model"),
+                sla=parameters.get("sla"),
+                region_str=parameters.get("region")
+            )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created: {tag} for {gpu_model}"
             # Then, call make_offer to propagate to the network.
-            make_offer_result = await make_offer(order)
+            make_offer_result = await make_offer(ctx=ctx, order=order)
             
         case ActionType.RESOLVE_INTERNALLY.value:
             result = rebalance_internal_resources()
@@ -173,10 +176,13 @@ async def send_to_remote_agent(
     if remote_agent is None:
         remote_agent = connect_to_remote_agent()
 
+    logger.info(f"[A2A] Sending event to remote agent: {event}")
+
     await ctx.session_service.append_event(ctx.session, event)
     async for event in remote_agent.run_async(ctx):
         #text_from_remote = _extract_text_from_content(event.content)
         if event.is_final_response():
+            logger.info(f"[A2A] Received from remote agent: {event}")
             return event
 
 
@@ -272,4 +278,8 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
           invocation_id=ctx.invocation_id,
           branch=ctx.branch,
       )
-    return await send_to_remote_agent(ctx, event)
+    try:
+        result = await send_to_remote_agent(ctx, event)
+        logger.info(result)
+    except Exception:
+        logger.error("[TOOL] Failed to make offer.")

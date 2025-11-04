@@ -134,7 +134,7 @@ class MarketOrder(BaseModel):
     order_id: str = Field(description="The id of the order")
     tag: Tag = Field(description="The tag of the order (buy or sell)")
     order_maker: str = Field(description="The card URL of the agent who made the order")
-    order_taker: str = Field(
+    order_taker: str | None = Field(
         default="",
         description="The card URL of the agent who took the order",
     )
