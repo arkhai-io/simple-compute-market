@@ -59,6 +59,7 @@ from .schema.pydantic_models import (
     GPUModel,
     Region,
     Tag,
+    TokenResource,
     ComputeResource,
     ComputeResourcePortfolio,
     MarketOrder,
@@ -106,11 +107,15 @@ def make_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) 
         tag=order_tag,
         order_maker=BASE_URL_OVERRIDE,
         order_taker=None,
-        compute_resource=ComputeResource(
+        offer_resource=ComputeResource(
             gpu_model=GPUModel(gpu_model_str),
             quantity=1,
             sla=sla,
             region=Region(region_str),
+        ),
+        demand_resource=TokenResource(
+            token="USDT",
+            amount=9 * 10**18
         ),
         quantity=1,
         duration=1,

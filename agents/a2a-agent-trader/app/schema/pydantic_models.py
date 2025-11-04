@@ -47,10 +47,13 @@ class Resource(BaseModel):
 
 class TokenResource(Resource):
     """Describes a given value and amount of a token used for trade.
+
+    Note that while USDT and USDC are precise to 6 decimal places, ERC-20 uses 18 as standard.
+    Thus, we use 18 decimal places.
     """
     token: str = Field(description="Token or currency")
     amount: int = Field(description=
-        "Integer amount for the token, up to 10 decimal places (e.g. 10 units = 10 * 10**18)"
+        "Integer amount for the token, up to 18 decimal places (e.g. 10 units = 10 * 10**18)"
     )
 
 class ComputeResource(Resource):
@@ -135,8 +138,11 @@ class MarketOrder(BaseModel):
         default="",
         description="The card URL of the agent who took the order",
     )
-    compute_resource: ComputeResource = Field(
-        description="The compute resource being offered or sought"
+    offer_resource: Resource = Field(
+        description="The resource being offered, which may be a token or compute resource."
+    )
+    demand_resource: Resource = Field(
+        description="The resource being demanded, which may be a token or compute resource."
     )
     quantity: int = Field(
         description="The quantity of the compute resource being offered or sought"
