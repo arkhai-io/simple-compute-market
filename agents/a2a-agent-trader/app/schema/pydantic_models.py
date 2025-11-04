@@ -129,9 +129,13 @@ class MarketOrder(BaseModel):
         description="The quantity of the compute resource being offered or sought"
     )
     duration: int = Field(description="The duration of the order in days")
-    attestation: Attestation | None = Field(
+    maker_attestation: Attestation | None = Field(
         default=None,
-        description="The attestation of the order (None for open orders)",
+        description="The attestation for the offer in escrow (None for open orders)",
+    )
+    taker_attestation: Attestation | None = Field(
+        default=None,
+        description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
 
     def is_open(self) -> bool:
