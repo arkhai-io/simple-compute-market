@@ -38,9 +38,8 @@ class Config:
 
 
 def load_config() -> Config:
-    # Resolve agent identity from env with hostname fallback
-    agent_id=(os.getenv("AGENT_ID") or os.uname().nodename or "root_agent"),
     return Config(
+        agent_id=(os.getenv("AGENT_ID") or os.uname().nodename or "root_agent"),
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
         base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
         port=_get_int_env("PORT", 8000),
