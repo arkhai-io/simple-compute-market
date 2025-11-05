@@ -129,3 +129,163 @@ ORDER BY position;
 - No action returned: confirm trigger matches and composite components exist and are named correctly
 - Callables not running: ensure discovery imported the module and the decorator name matches `callable_ref`
 - Enum/string mismatches: `EventType` is serialized as strings (e.g., `"negotiation"`)
+
+## Code snippets (current implementation)
+
+### Decorated guard/action callables
+```python
+from app.policies.registry import policy_callable
+from app.policies.schema import Action as PolicyAction, DecisionContext
+
+@policy_callable("ri.guard.trigger_is_resource_imbalance")
+def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> PolicyAction | None:
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "resource_imbalance":
+        return None
+    return None
+
+@policy_callable("ri.guard.resource_present")
+def ri_guard_resource_present(context: DecisionContext) -> PolicyAction | None:
+    res = getattr(context.event, "resource", None)
+    if not res:
+        return None
+    return None
+
+@policy_callable("ri.action.make_offer_from_resource")
+def ri_action_make_offer_from_resource(context: DecisionContext) -> PolicyAction | None:
+    from app.schema.pydantic_models import ActionType
+    res = getattr(context.event, "resource", None)
+    if not res:
+        return None
+    return PolicyAction(
+        action_type=ActionType.MAKE_OFFER,
+        parameters={"tag": "sell","gpu_model": res.gpu_model,"sla": res.sla,"region": res.region},
+    )
+
+@policy_callable("mo.guard.trigger_is_make_offer")
+def mo_guard_trigger_is_make_offer(context: DecisionContext) -> PolicyAction | None:
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "make_offer":
+        return None
+    return None
+
+@policy_callable("mo.action.accept_offer")
+def mo_action_accept_offer(context: DecisionContext) -> PolicyAction | None:
+    from app.schema.pydantic_models import ActionType
+    return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+```
+
+### Discovery and bulk registration at startup
+```python
+# app/agent.py
+from app.policies.discovery import discover_and_register
+from app.policies.registry import CALLABLE_REGISTRY
+
+discover_and_register("app.policies")
+self._policy_store.register_callables(CALLABLE_REGISTRY)
+```
+
+### Saving composite policies and ordered components
+```python
+# app/agent.py
+await self._policy_store.save_policy(
+    agent_id=self.name,
+    policy_name="resource_imbalance_default_v1",
+    trigger_type=EventType.RESOURCE_IMBALANCE.value,
+    callable_ref="resource_imbalance.default.v1",
+)
+await self._sqlite_client.save_policy_composite(
+    agent_id=self.name,
+    policy_name="resource_imbalance.default.v1",
+    components=[
+        "ri.guard.trigger_is_resource_imbalance",
+        "ri.guard.resource_present",
+        "ri.action.make_offer_from_resource",
+    ],
+)
+
+await self._policy_store.save_policy(
+    agent_id=self.name,
+    policy_name="make_offer_default_v1",
+    trigger_type=EventType.MAKE_OFFER.value,
+    callable_ref="make_offer.default.v1",
+)
+await self._sqlite_client.save_policy_composite(
+    agent_id=self.name,
+    policy_name="make_offer.default.v1",
+    components=[
+        "mo.guard.trigger_is_make_offer",
+        "mo.action.accept_offer",
+    ],
+)
+```
+
+### Evaluation expands composites and runs sub-callables in order
+```python
+# app/policies/store.py
+policy_action = None
+for ref in data["callables"]:
+    if ref in self._registry:
+        ce = CallableEvaluator(self._registry[ref])
+        policy_action = await ce.evaluate(context)
+        if policy_action is not None:
+            break
+    components = await self._sqlite.load_policy_composite(agent_id=agent_id, policy_name=ref)
+    if components:
+        for comp in components:
+            func = self._registry.get(comp)
+            if not func:
+                continue
+            ce = CallableEvaluator(func)
+            policy_action = await ce.evaluate(context)
+            if policy_action is not None:
+                break
+        if policy_action is not None:
+            break
+```
+
+## Built-in policies (as shipped)
+
+Two default policies are provisioned at startup; they are callable-only and expressed as composites in the DB. Their leaf callables are registered via decorators in `app/policies/store.py`.
+
+- Resource Imbalance
+  - Policy name: `resource_imbalance_default_v1`
+  - Trigger: `resource_imbalance`
+  - callable_ref (composite): `resource_imbalance.default.v1`
+  - Ordered sub-callables:
+    1. `ri.guard.trigger_is_resource_imbalance`: checks the incoming event is `resource_imbalance`
+    2. `ri.guard.resource_present`: ensures `event.resource` exists
+    3. `ri.action.make_offer_from_resource`: returns `ActionType.MAKE_OFFER` with parameters from the resource
+
+- Make Offer
+  - Policy name: `make_offer_default_v1`
+  - Trigger: `make_offer`
+  - callable_ref (composite): `make_offer.default.v1`
+  - Ordered sub-callables:
+    1. `mo.guard.trigger_is_make_offer`: checks the incoming event is `make_offer`
+    2. `mo.action.accept_offer`: returns `ActionType.ACCEPT_OFFER`
+
+SQL to inspect these after startup (use your `AGENT_ID`):
+
+```sql
+SELECT name, trigger_type, callable_ref, priority
+FROM policies
+WHERE agent_id = ?
+ORDER BY trigger_type, priority DESC;
+```
+
+```sql
+-- Resource imbalance components
+SELECT position, component_name
+FROM policy_composites
+WHERE agent_id = ? AND policy_name = 'resource_imbalance.default.v1'
+ORDER BY position;
+
+-- Make offer components
+SELECT position, component_name
+FROM policy_composites
+WHERE agent_id = ? AND policy_name = 'make_offer.default.v1'
+ORDER BY position;
+```
