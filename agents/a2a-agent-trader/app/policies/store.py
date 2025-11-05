@@ -53,7 +53,6 @@ class PolicyStore:
             name=policy_name,
             trigger_type=trigger_type,
             callable_ref=callable_ref,
-            priority=0,
         )
         # If this references a registered composite, persist its ordered components for SQL queries
         if callable_ref and callable_ref in self._composites:

@@ -28,7 +28,7 @@ A policy maps context (event + resources + market state) to an Action, e.g., "ac
   - `past_experiences` (list)
 
 ## Evaluation flow (callable-only)
-1. Load policies for `(agent_id, trigger_type)` ordered by `priority` (desc).
+1. Load policies for `(agent_id, trigger_type)`.
 2. For each policy:
    - If `callable_ref` is a registered callable name, execute it. If it returns an Action, stop.
    - Otherwise treat it as a composite name: load `policy_composites` rows by `(agent_id, policy_name = callable_ref)` and execute each sub-callable in order until one returns an Action.
@@ -106,10 +106,10 @@ if action:
 List policies and composite components:
 
 ```sql
-SELECT name, trigger_type, callable_ref, priority
+SELECT name, trigger_type, callable_ref
 FROM policies
 WHERE agent_id = ?
-ORDER BY trigger_type, priority DESC;
+ORDER BY trigger_type;
 ```
 
 ```sql

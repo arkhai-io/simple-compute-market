@@ -23,7 +23,6 @@ class SQLiteClient:
                   name TEXT NOT NULL,
                   trigger_type TEXT NOT NULL,
                   callable_ref TEXT,
-                  priority INTEGER,
                   PRIMARY KEY(agent_id, name)
                 )
                 """
@@ -91,7 +90,6 @@ class SQLiteClient:
         name: str,
         trigger_type: str,
         callable_ref: str | None,
-        priority: int,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -99,14 +97,13 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref, priority)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT(agent_id, name) DO UPDATE SET
                         trigger_type=excluded.trigger_type,
-                        callable_ref=excluded.callable_ref,
-                        priority=excluded.priority
+                        callable_ref=excluded.callable_ref
                     """,
-                    (agent_id, name, trigger_type, callable_ref, priority),
+                    (agent_id, name, trigger_type, callable_ref),
                 )
                 conn.commit()
             finally:
@@ -120,17 +117,16 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT name, callable_ref, priority FROM policies WHERE agent_id=? AND trigger_type=?",
+                    "SELECT name, callable_ref FROM policies WHERE agent_id=? AND trigger_type=?",
                     (agent_id, trigger_type),
                 )
                 rows = cur.fetchall()
                 result: list[dict[str, Any]] = []
-                for (name, callable_ref, priority) in rows:
+                for (name, callable_ref) in rows:
                     result.append(
                         {
                             "name": name,
                             "callable_ref": callable_ref,
-                            "priority": priority,
                         }
                     )
                 return result
