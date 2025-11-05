@@ -15,17 +15,29 @@ class SQLiteClient:
         conn = sqlite3.connect(self.db_path)
         try:
             cur = conn.cursor()
-            # Policies table
+            # Policies table (callable-only)
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS policies (
                   agent_id TEXT NOT NULL,
                   name TEXT NOT NULL,
                   trigger_type TEXT NOT NULL,
-                  rule_json TEXT,
                   callable_ref TEXT,
                   priority INTEGER,
                   PRIMARY KEY(agent_id, name)
+                )
+                """
+            )
+            # Policy composites (ordered components per policy)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS policy_composites (
+                  agent_id TEXT NOT NULL,
+                  policy_name TEXT NOT NULL,
+                  position INTEGER NOT NULL,
+                  component_name TEXT NOT NULL,
+                  PRIMARY KEY(agent_id, policy_name, position),
+                  FOREIGN KEY(agent_id, policy_name) REFERENCES policies(agent_id, name)
                 )
                 """
             )
@@ -79,7 +91,6 @@ class SQLiteClient:
         agent_id: str,
         name: str,
         trigger_type: str,
-        rule_json: str | None,
         callable_ref: str | None,
         priority: int,
     ) -> None:
@@ -89,15 +100,14 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    INSERT INTO policies(agent_id, name, trigger_type, rule_json, callable_ref, priority)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref, priority)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(agent_id, name) DO UPDATE SET
                         trigger_type=excluded.trigger_type,
-                        rule_json=excluded.rule_json,
                         callable_ref=excluded.callable_ref,
                         priority=excluded.priority
                     """,
-                    (agent_id, name, trigger_type, rule_json, callable_ref, priority),
+                    (agent_id, name, trigger_type, callable_ref, priority),
                 )
                 conn.commit()
             finally:
@@ -111,21 +121,65 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT name, rule_json, callable_ref, priority FROM policies WHERE agent_id=? AND trigger_type=?",
+                    "SELECT name, callable_ref, priority FROM policies WHERE agent_id=? AND trigger_type=?",
                     (agent_id, trigger_type),
                 )
                 rows = cur.fetchall()
                 result: list[dict[str, Any]] = []
-                for (name, rule_json, callable_ref, priority) in rows:
+                for (name, callable_ref, priority) in rows:
                     result.append(
                         {
                             "name": name,
-                            "rule_json": rule_json,
                             "callable_ref": callable_ref,
                             "priority": priority,
                         }
                     )
                 return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def save_policy_composite(self, *, agent_id: str, policy_name: str, components: list[str]) -> None:
+        """Persist ordered component names for a composite policy."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Clear existing components to avoid duplicates
+                cur.execute(
+                    "DELETE FROM policy_composites WHERE agent_id=? AND policy_name=?",
+                    (agent_id, policy_name),
+                )
+                # Insert ordered components
+                for idx, comp in enumerate(components):
+                    cur.execute(
+                        """
+                        INSERT INTO policy_composites(agent_id, policy_name, position, component_name)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (agent_id, policy_name, idx, comp),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_policy_composite(self, *, agent_id: str, policy_name: str) -> list[str]:
+        def _load() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT component_name from policy_composites
+                    WHERE agent_id=? AND policy_name=?
+                    ORDER BY position ASC
+                    """,
+                    (agent_id, policy_name),
+                )
+                return [row[0] for row in cur.fetchall()]
             finally:
                 conn.close()
 

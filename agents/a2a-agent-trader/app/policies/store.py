@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
-from app.policies.schema import Action as PolicyAction, DecisionContext, PolicyRule
+from app.policies.schema import Action as PolicyAction, DecisionContext
 from app.schema.pydantic_models import Action as DomainAction, ActionType as DomainActionType
 from app.policies.sqlite_client import SQLiteClient
 
@@ -41,18 +41,14 @@ class PolicyStore:
         agent_id: str,
         policy_name: str,
         trigger_type: str,
-        rule: PolicyRule | None = None,
         callable_ref: str | None = None,
     ) -> None:
-        priority = rule.priority if rule else 0
-        rule_json = rule.model_dump_json() if rule else None
         await self._sqlite.save_policy(
             agent_id=agent_id,
             name=policy_name,
             trigger_type=trigger_type,
-            rule_json=rule_json,
             callable_ref=callable_ref,
-            priority=priority,
+            priority=0,
         )
         # If this references a registered composite, persist its ordered components for SQL queries
         if callable_ref and callable_ref in self._composites:
@@ -72,19 +68,11 @@ class PolicyStore:
         if key in self._cache:
             return self._cache[key]
         rows = await self._sqlite.load_policies_by_trigger(agent_id=agent_id, trigger_type=trigger_type)
-        rules: List[PolicyRule] = []
         callables: List[str] = []
         for row in rows:
-            if row.get("rule_json"):
-                try:
-                    rules.append(PolicyRule.model_validate_json(row["rule_json"]))
-                except Exception:
-                    continue
             if row.get("callable_ref"):
                 callables.append(row["callable_ref"]) 
-        # sort rules by priority desc
-        rules.sort(key=lambda r: r.priority, reverse=True)
-        data = {"rules": rules, "callables": callables}
+        data = {"callables": callables}
         self._cache[key] = data
         return data
 
