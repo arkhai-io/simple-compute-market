@@ -45,12 +45,11 @@ class SQLiteClient:
                 )
                 """
             )
-            # Decision outcomes table
+            # Decision outcomes table (no utility column)
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS decision_outcomes (
                   decision_id TEXT PRIMARY KEY,
-                  utility REAL,
                   outcome_json TEXT,
                   timestamp TEXT NOT NULL,
                   FOREIGN KEY(decision_id) REFERENCES decisions(decision_id)
@@ -166,7 +165,6 @@ class SQLiteClient:
         self,
         *,
         decision_id: str,
-        utility: float | None,
         outcome_json: str | None,
         timestamp: str,
     ) -> None:
@@ -177,10 +175,10 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    INSERT OR REPLACE INTO decision_outcomes(decision_id, utility, outcome_json, timestamp)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR REPLACE INTO decision_outcomes(decision_id, outcome_json, timestamp)
+                    VALUES (?, ?, ?)
                     """,
-                    (decision_id, utility, outcome_json, timestamp),
+                    (decision_id, outcome_json, timestamp),
                 )
                 conn.commit()
             finally:

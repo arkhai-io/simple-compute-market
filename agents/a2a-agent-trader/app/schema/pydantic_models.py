@@ -384,14 +384,9 @@ class Decision(BaseModel):
         default=None,
         description="Outcome of executing this decision",
     )
-    utility: float | None = Field(
-        default=None,
-        description="Utility gained from this decision",
-    )
 
-    def record_outcome(self, outcome: dict[str, Any], utility: float) -> None:
-        """Record the outcome and utility of this decision."""
+    def record_outcome(self, outcome: dict[str, Any]) -> None:
+        """Record the outcome of this decision."""
         self.outcome = outcome
-        self.utility = utility
 
 

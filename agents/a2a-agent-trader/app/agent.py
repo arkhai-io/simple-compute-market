@@ -484,7 +484,6 @@ class TraderAgent(BaseAgent):
             
             await self._sqlite_client.save_decision_outcome(
                 decision_id=decision.decision_id,
-                utility=outcome.get("utility"),
                 outcome_json=json_lib.dumps(outcome, default=json_serializer),
                 timestamp=datetime.now().isoformat(),
             )
