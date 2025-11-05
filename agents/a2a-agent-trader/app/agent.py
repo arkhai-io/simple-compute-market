@@ -556,7 +556,7 @@ class TraderAgent(BaseAgent):
         )
 
 root_agent = TraderAgent(
-    name="root_agent",
+    name=CONFIG.agent_id,
 )
 
 # Create a2a app
