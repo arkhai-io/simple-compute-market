@@ -51,13 +51,12 @@ class SQLiteClient:
                   agent_id TEXT NOT NULL,
                   policy_used TEXT,
                   action_type TEXT NOT NULL,
-                  confidence REAL,
                   timestamp TEXT NOT NULL,
                   context_json TEXT
                 )
                 """
             )
-            # Decision outcomes table (no utility column)
+            # Decision outcomes table
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS decision_outcomes (
@@ -204,8 +203,8 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, confidence, timestamp, context_json)
-                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                    INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json),
                 )

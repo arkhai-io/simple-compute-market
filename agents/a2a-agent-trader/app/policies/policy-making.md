@@ -6,8 +6,8 @@ This document explains how to write callable policies with decorators, how disco
 A policy maps context (event + resources + market state) to an Action, e.g., "accept_offer" or "reject_offer". Policies are Python callables (for custom logic). Composites are ordered chains of callable names stored in the DB.
 
 ## Key modules
-- `app/policies/schema.py`
-  - Action (PolicyAction), DecisionContext
+- `app/schema/pydantic_models.py`
+  - Domain Action, DecisionContext
 - `app/policies/registry.py`
   - `CALLABLE_REGISTRY`, `@policy_callable(name)` decorator
 - `app/policies/discovery.py`
@@ -39,12 +39,11 @@ Callable policies accept a `DecisionContext` and return `Action | None`. Use the
 
 ```python
 from app.policies.registry import policy_callable
-from app.policies.schema import Action as PolicyAction, DecisionContext
-from app.schema.pydantic_models import ActionType
+from app.schema.pydantic_models import Action as Action, ActionType, DecisionContext
 
 @policy_callable("mo.action.accept_offer")
-def mo_action_accept_offer(ctx: DecisionContext) -> PolicyAction | None:
-    return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+def mo_action_accept_offer(ctx: DecisionContext) -> Action | None:
+    return Action(action_type=ActionType.ACCEPT_OFFER, parameters={})
 ```
 
 ## Discovery & bulk registration
@@ -135,10 +134,10 @@ ORDER BY position;
 ### Decorated guard/action callables
 ```python
 from app.policies.registry import policy_callable
-from app.policies.schema import Action as PolicyAction, DecisionContext
+from app.schema.pydantic_models import Action as Action, DecisionContext
 
 @policy_callable("ri.guard.trigger_is_resource_imbalance")
-def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> PolicyAction | None:
+def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> Action | None:
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "resource_imbalance":
@@ -146,25 +145,25 @@ def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> PolicyAc
     return None
 
 @policy_callable("ri.guard.resource_present")
-def ri_guard_resource_present(context: DecisionContext) -> PolicyAction | None:
+def ri_guard_resource_present(context: DecisionContext) -> Action | None:
     res = getattr(context.event, "resource", None)
     if not res:
         return None
     return None
 
 @policy_callable("ri.action.make_offer_from_resource")
-def ri_action_make_offer_from_resource(context: DecisionContext) -> PolicyAction | None:
+def ri_action_make_offer_from_resource(context: DecisionContext) -> Action | None:
     from app.schema.pydantic_models import ActionType
     res = getattr(context.event, "resource", None)
     if not res:
         return None
-    return PolicyAction(
+    return Action(
         action_type=ActionType.MAKE_OFFER,
         parameters={"tag": "sell","gpu_model": res.gpu_model,"sla": res.sla,"region": res.region},
     )
 
 @policy_callable("mo.guard.trigger_is_make_offer")
-def mo_guard_trigger_is_make_offer(context: DecisionContext) -> PolicyAction | None:
+def mo_guard_trigger_is_make_offer(context: DecisionContext) -> Action | None:
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "make_offer":
@@ -172,9 +171,9 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> PolicyAction | N
     return None
 
 @policy_callable("mo.action.accept_offer")
-def mo_action_accept_offer(context: DecisionContext) -> PolicyAction | None:
+def mo_action_accept_offer(context: DecisionContext) -> Action | None:
     from app.schema.pydantic_models import ActionType
-    return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+    return Action(action_type=ActionType.ACCEPT_OFFER, parameters={})
 ```
 
 ### Discovery and bulk registration at startup

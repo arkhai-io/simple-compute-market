@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import logging
 from typing import Callable, Dict
-
-from app.policies.schema import Action as PolicyAction, DecisionContext
+from app.schema.pydantic_models import Action as DomainAction, DecisionContext
 
 logger = logging.getLogger(__name__)
 
-CALLABLE_REGISTRY: Dict[str, Callable[[DecisionContext], PolicyAction | None]] = {}
+CALLABLE_REGISTRY: Dict[str, Callable[[DecisionContext], DomainAction | None]] = {}
 
 
 def policy_callable(name: str):
@@ -21,7 +20,7 @@ def policy_callable(name: str):
         def my_guard(ctx: DecisionContext) -> PolicyAction | None: ...
     """
 
-    def _wrap(fn: Callable[[DecisionContext], PolicyAction | None]):
+    def _wrap(fn: Callable[[DecisionContext], DomainAction | None]):
         if name in CALLABLE_REGISTRY:
             logger.warning("Duplicate policy callable name '%s' will be overwritten", name)
         CALLABLE_REGISTRY[name] = fn

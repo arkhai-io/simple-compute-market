@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from app.policies.schema import Action, DecisionContext
+from app.schema.pydantic_models import Action, DecisionContext
 
 
 class CallableEvaluator:
