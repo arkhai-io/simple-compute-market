@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
 from app.policies.schema import Action as PolicyAction, DecisionContext
+from app.policies.registry import policy_callable
 from app.schema.pydantic_models import Action as DomainAction, ActionType as DomainActionType
 from app.policies.sqlite_client import SQLiteClient
 
@@ -24,6 +25,10 @@ class PolicyStore:
 
     def register_callable(self, name: str, func: Callable[[DecisionContext], PolicyAction | None]) -> None:
         self._registry[name] = func
+
+    def register_callables(self, mapping: Dict[str, Callable[[DecisionContext], PolicyAction | None]]) -> None:
+        for name, func in mapping.items():
+            self._registry[name] = func
 
     def register_composite(self, name: str, components: List[str]) -> None:
         """Record composite chain membership for discovery and auditing."""
@@ -82,15 +87,31 @@ class PolicyStore:
         et = context.event.event_type
         trigger_type = et.value if hasattr(et, "value") else str(et)
         data = await self._load_cached(agent_id=agent_id, trigger_type=trigger_type)
-        # Only evaluate callables (rule-based evaluation removed)
+        # Evaluate policies by callable_ref; support composite by expanding from DB
         policy_action = None
-        for name in data["callables"]:
-            if name not in self._registry:
-                continue
-            ce = CallableEvaluator(self._registry[name])
-            policy_action = await ce.evaluate(context)
-            if policy_action is not None:
-                break
+        for ref in data["callables"]:
+            # Direct callable
+            if ref in self._registry:
+                ce = CallableEvaluator(self._registry[ref])
+                policy_action = await ce.evaluate(context)
+                if policy_action is not None:
+                    break
+            # Composite: expand ordered components from DB and execute
+            try:
+                components = await self._sqlite.load_policy_composite(agent_id=agent_id, policy_name=ref)
+            except Exception:
+                components = []
+            if components:
+                for comp in components:
+                    func = self._registry.get(comp)
+                    if not func:
+                        continue
+                    ce = CallableEvaluator(func)
+                    policy_action = await ce.evaluate(context)
+                    if policy_action is not None:
+                        break
+                if policy_action is not None:
+                    break
         if policy_action is None:
             return None
         # Convert PolicyAction (policies.schema.Action) -> DomainAction (pydantic Action)
@@ -247,58 +268,53 @@ def ri_make_offer_from_resource() -> Callable[[DecisionContext], PolicyAction | 
 
 # ----- Named guard/action callables for versioned composites -----
 
-def ri_guard_trigger_is_resource_imbalance() -> Callable[[DecisionContext], PolicyAction | None]:
-    def _impl(context: DecisionContext) -> PolicyAction | None:
-        et = context.event.event_type
-        trigger = et.value if hasattr(et, "value") else str(et)
-        if trigger != "resource_imbalance":
-            return None
+@policy_callable("ri.guard.trigger_is_resource_imbalance")
+def ri_guard_trigger_is_resource_imbalance(context: DecisionContext) -> PolicyAction | None:
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "resource_imbalance":
         return None
-    return _impl
+    return None
 
 
-def ri_guard_resource_present() -> Callable[[DecisionContext], PolicyAction | None]:
-    def _impl(context: DecisionContext) -> PolicyAction | None:
-        res = getattr(context.event, "resource", None)
-        if not res:
-            return None
+@policy_callable("ri.guard.resource_present")
+def ri_guard_resource_present(context: DecisionContext) -> PolicyAction | None:
+    res = getattr(context.event, "resource", None)
+    if not res:
         return None
-    return _impl
+    return None
 
 
-def ri_action_make_offer_from_resource() -> Callable[[DecisionContext], PolicyAction | None]:
+@policy_callable("ri.action.make_offer_from_resource")
+def ri_action_make_offer_from_resource(context: DecisionContext) -> PolicyAction | None:
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
-        res = getattr(context.event, "resource", None)
-        if not res:
-            return None
-        return PolicyAction(
-            action_type=ActionType.MAKE_OFFER,
-            parameters={
-                "tag": "sell",
-                "gpu_model": res.gpu_model,
-                "sla": res.sla,
-                "region": res.region,
-            },
-        )
-    return _impl
-
-
-def mo_guard_trigger_is_make_offer() -> Callable[[DecisionContext], PolicyAction | None]:
-    def _impl(context: DecisionContext) -> PolicyAction | None:
-        et = context.event.event_type
-        trigger = et.value if hasattr(et, "value") else str(et)
-        if trigger != "make_offer":
-            return None
+    res = getattr(context.event, "resource", None)
+    if not res:
         return None
-    return _impl
+    return PolicyAction(
+        action_type=ActionType.MAKE_OFFER,
+        parameters={
+            "tag": "sell",
+            "gpu_model": res.gpu_model,
+            "sla": res.sla,
+            "region": res.region,
+        },
+    )
 
 
-def mo_action_accept_offer() -> Callable[[DecisionContext], PolicyAction | None]:
+@policy_callable("mo.guard.trigger_is_make_offer")
+def mo_guard_trigger_is_make_offer(context: DecisionContext) -> PolicyAction | None:
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "make_offer":
+        return None
+    return None
+
+
+@policy_callable("mo.action.accept_offer")
+def mo_action_accept_offer(context: DecisionContext) -> PolicyAction | None:
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
-        return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
-    return _impl
+    return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
 

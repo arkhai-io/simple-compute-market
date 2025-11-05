@@ -60,12 +60,9 @@ from .schema.pydantic_models import (
     ComputeResourcePortfolio,
 )
 
-from .policies.store import (
-    PolicyStore,
-    simple_negotiation_random,
-    resource_imbalance_make_offer,
-    make_offer_accept_offer,
-)
+from .policies.store import PolicyStore
+from .policies.discovery import discover_and_register
+from .policies.registry import CALLABLE_REGISTRY
 from .policies.sqlite_client import SQLiteClient
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
@@ -266,20 +263,9 @@ class TraderAgent(BaseAgent):
         # Initialize PolicyStore (private attribute to avoid Pydantic field requirements)
         self._policy_store = PolicyStore(self._sqlite_client)
         
-        # Register simple_negotiation_random callable
-        self._policy_store.register_callable(
-            "simple_negotiation_random",
-            simple_negotiation_random()
-        )
-        # Register default callables to mirror previous hardcoded behavior
-        self._policy_store.register_callable(
-            "resource_imbalance_make_offer",
-            resource_imbalance_make_offer(),
-        )
-        self._policy_store.register_callable(
-            "make_offer_accept_offer",
-            make_offer_accept_offer(),
-        )
+        # Auto-discover and bulk-register callable policies
+        discover_and_register("app.policies")
+        self._policy_store.register_callables(CALLABLE_REGISTRY)
         
         # Initialize market provider
         self._market_provider = create_market_provider()
@@ -306,18 +292,39 @@ class TraderAgent(BaseAgent):
         try:
             await self._policy_store.save_policy(
                 agent_id=self.name,
-                policy_name="resource_imbalance_default",
+                policy_name="resource_imbalance_default_v1",
                 trigger_type=EventType.RESOURCE_IMBALANCE.value,
-                callable_ref="resource_imbalance_make_offer",
+                callable_ref="resource_imbalance.default.v1",
+            )
+            # Persist composite components for resource_imbalance.default.v1
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self.name,
+                policy_name="resource_imbalance.default.v1",
+                components=[
+                    "ri.guard.trigger_is_resource_imbalance",
+                    "ri.guard.resource_present",
+                    "ri.action.make_offer_from_resource",
+                ],
             )
         except Exception as e:
             logger.warning(f"Failed to save resource_imbalance policy: {e}")
+
+        # Make-offer policy (composite saved in DB)
         try:
             await self._policy_store.save_policy(
                 agent_id=self.name,
-                policy_name="make_offer_default",
+                policy_name="make_offer_default_v1",
                 trigger_type=EventType.MAKE_OFFER.value,
-                callable_ref="make_offer_accept_offer",
+                callable_ref="make_offer.default.v1",
+            )
+            # Persist composite components for make_offer.default.v1
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self.name,
+                policy_name="make_offer.default.v1",
+                components=[
+                    "mo.guard.trigger_is_make_offer",
+                    "mo.action.accept_offer",
+                ],
             )
         except Exception as e:
             logger.warning(f"Failed to save make_offer policy: {e}")
