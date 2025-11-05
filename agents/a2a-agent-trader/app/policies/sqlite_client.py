@@ -141,7 +141,6 @@ class SQLiteClient:
         agent_id: str,
         policy_used: str,
         action_type: str,
-        confidence: float,
         timestamp: str,
         context_json: str | None,
     ) -> None:
@@ -153,9 +152,9 @@ class SQLiteClient:
                 cur.execute(
                     """
                     INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, confidence, timestamp, context_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
                     """,
-                    (decision_id, event_id, event_type, agent_id, policy_used, action_type, confidence, timestamp, context_json),
+                    (decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json),
                 )
                 conn.commit()
             finally:
@@ -204,7 +203,7 @@ class SQLiteClient:
                 if event_type:
                     cur.execute(
                         """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, confidence, timestamp, context_json
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp, context_json
                         FROM decisions
                         WHERE agent_id = ? AND event_type = ?
                         ORDER BY timestamp DESC
@@ -215,7 +214,7 @@ class SQLiteClient:
                 else:
                     cur.execute(
                         """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, confidence, timestamp, context_json
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp, context_json
                         FROM decisions
                         WHERE agent_id = ?
                         ORDER BY timestamp DESC
@@ -232,9 +231,8 @@ class SQLiteClient:
                         "event_type": row[2],
                         "policy_used": row[3],
                         "action_type": row[4],
-                        "confidence": row[5],
-                        "timestamp": row[6],
-                        "context_json": row[7],
+                        "timestamp": row[5],
+                        "context_json": row[6],
                     })
                 return result
             finally:

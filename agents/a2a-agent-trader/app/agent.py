@@ -60,7 +60,12 @@ from .schema.pydantic_models import (
     ComputeResourcePortfolio,
 )
 
-from .policies.store import PolicyStore, simple_negotiation_random
+from .policies.store import (
+    PolicyStore,
+    simple_negotiation_random,
+    resource_imbalance_make_offer,
+    make_offer_accept_offer,
+)
 from .policies.sqlite_client import SQLiteClient
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
@@ -266,6 +271,15 @@ class TraderAgent(BaseAgent):
             "simple_negotiation_random",
             simple_negotiation_random()
         )
+        # Register default callables to mirror previous hardcoded behavior
+        self._policy_store.register_callable(
+            "resource_imbalance_make_offer",
+            resource_imbalance_make_offer(),
+        )
+        self._policy_store.register_callable(
+            "make_offer_accept_offer",
+            make_offer_accept_offer(),
+        )
         
         # Initialize market provider
         self._market_provider = create_market_provider()
@@ -286,6 +300,27 @@ class TraderAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Failed to save negotiation policy: {e}")
+
+    async def _ensure_default_policies(self) -> None:
+        """Ensure default policies are saved for resource imbalance and make offer."""
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self.name,
+                policy_name="resource_imbalance_default",
+                trigger_type=EventType.RESOURCE_IMBALANCE.value,
+                callable_ref="resource_imbalance_make_offer",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save resource_imbalance policy: {e}")
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self.name,
+                policy_name="make_offer_default",
+                trigger_type=EventType.MAKE_OFFER.value,
+                callable_ref="make_offer_accept_offer",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save make_offer policy: {e}")
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
@@ -366,6 +401,9 @@ class TraderAgent(BaseAgent):
         domain_event, context_data = context
         event_type = domain_event.event_type
         
+        # Ensure default policies exist
+        await self._ensure_default_policies()
+
         # Ensure negotiation policy is saved for negotiation events
         if event_type == EventType.NEGOTIATION:
             await self._ensure_negotiation_policy()
@@ -402,27 +440,9 @@ class TraderAgent(BaseAgent):
         domain_event, context_data = domain_context
         
         # [3] Policy evaluation
-        action = None
-        # action = await self._consult_policy(domain_context)
-        if domain_event.event_type is EventType.RESOURCE_IMBALANCE:
-            logger.info("[PROCESS EVENT] Resource imbalance, making offer.")
-            action = Action(
-                action_type=ActionType.MAKE_OFFER,
-                parameters={
-                    "tag": 'sell',
-                    "gpu_model": domain_event.resource.gpu_model,
-                    "sla": domain_event.resource.sla,
-                    "region": domain_event.resource.region
-                    }
-                )
-        elif domain_event.event_type is EventType.MAKE_OFFER:
-            logger.info("[PROCESS EVENT] Offer received, accepting offer.")
-            action = Action(
-                action_type=ActionType.ACCEPT_OFFER,
-                parameters={}
-                )
-        else:
-            logger.info(f"[PROCESS EVENT] Domain event: {domain_event}")
+        action = await self._consult_policy(domain_context)
+        if not action:
+            logger.info(f"[PROCESS EVENT] No policy matched for event: {domain_event}")
 
         if not action:
             logger.warning(f"[PIPELINE] No action determined for event {domain_event.event_id}")
@@ -442,7 +462,6 @@ class TraderAgent(BaseAgent):
             ),
             action=action,
             policy_used=action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type),
-            confidence=getattr(action, "confidence", 1.0),
         )
         
         # [4] Action execution (simulated)
@@ -459,7 +478,6 @@ class TraderAgent(BaseAgent):
                 agent_id=self.name,
                 policy_used=decision.policy_used,
                 action_type=action_type_str,
-                confidence=decision.confidence,
                 timestamp=decision.timestamp.isoformat(),
                 context_json=decision.context.model_dump_json(),
             )
