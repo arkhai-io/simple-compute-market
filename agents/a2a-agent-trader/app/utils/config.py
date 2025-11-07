@@ -21,6 +21,7 @@ def _get_int_env(var_name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Config:
+    agent_id: str
     mcp_server_url: str
     base_url_override: str
     port: int
@@ -38,6 +39,7 @@ class Config:
 
 def load_config() -> Config:
     return Config(
+        agent_id=(os.getenv("AGENT_ID") or os.uname().nodename or "root_agent"),
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
         base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
         port=_get_int_env("PORT", 8000),

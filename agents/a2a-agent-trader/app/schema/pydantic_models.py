@@ -374,10 +374,6 @@ class Decision(BaseModel):
     context: DecisionContext = Field(description="Context that led to the decision")
     action: Action = Field(description="The chosen action")
     policy_used: str = Field(description="Policy that produced this decision")
-    confidence: float = Field(
-        default=1.0,
-        description="Confidence in the decision (0.0-1.0)",
-    )
     timestamp: datetime = Field(
         default_factory=datetime.now,
         description="When the decision was made",
@@ -388,14 +384,9 @@ class Decision(BaseModel):
         default=None,
         description="Outcome of executing this decision",
     )
-    utility: float | None = Field(
-        default=None,
-        description="Utility gained from this decision",
-    )
 
-    def record_outcome(self, outcome: dict[str, Any], utility: float) -> None:
-        """Record the outcome and utility of this decision."""
+    def record_outcome(self, outcome: dict[str, Any]) -> None:
+        """Record the outcome of this decision."""
         self.outcome = outcome
-        self.utility = utility
 
 

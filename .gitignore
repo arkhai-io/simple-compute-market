@@ -177,3 +177,4 @@ infra/*/*.tfstate
 infra/*/*.tfstate.backup
 infra/*/.terraform*
 infra/*/*.plan
+policies.db

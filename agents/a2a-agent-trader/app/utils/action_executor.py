@@ -116,17 +116,6 @@ async def execute_action(action: Action, ctx: InvocationContext | None = None) -
             outcome["result"] = None
             outcome["message"] = f"Unknown action type (simulated): {action_type_str}"
     
-    # Calculate simple utility (can be enhanced later)
-    utility = 0.5  # Default neutral utility
-    if outcome.get("result") is True:
-        utility = 1.0
-    elif outcome.get("result") is False:
-        utility = 0.0
-    elif outcome.get("result") is not None:
-        utility = 0.75  # Partial success
-    
-    outcome["utility"] = utility
-    
     return outcome
 
 
