@@ -1,7 +1,7 @@
 from enum import Enum
 from datetime import datetime
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 from pydantic import ConfigDict
 
 
@@ -138,10 +138,10 @@ class MarketOrder(BaseModel):
         default="",
         description="The card URL of the agent who took the order",
     )
-    offer_resource: Resource = Field(
+    offer_resource: SerializeAsAny[Resource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
-    demand_resource: Resource = Field(
+    demand_resource: SerializeAsAny[Resource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
     quantity: int = Field(

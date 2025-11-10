@@ -187,11 +187,12 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             )
         except (ValueError, KeyError, TypeError) as e:
             logger.warning(f"Failed to create ResourceImbalanceEvent: {e}, falling back to DomainEvent")
-    
-    elif event_type == EventType.MARKET_ORDER:
+    elif event_type == EventType.MAKE_OFFER:
         try:
-            order_data = data.get("order", data)
-            order = MarketOrder.model_validate(order_data)
+            offer_data = data.get("offer", data)
+            logger.info(f"Received offer: {offer_data}")
+            order = MarketOrder.model_validate(offer_data)
+            logger.info(f"Parsed order: {offer_data}")
             return MarketOrderEvent.from_order(order)
         except (ValueError, KeyError, TypeError) as e:
             logger.warning(f"Failed to create MarketOrderEvent: {e}, falling back to DomainEvent")

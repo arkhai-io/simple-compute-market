@@ -248,7 +248,7 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
         maker_attestation=None,
         taker_attestation=None
     )
-    return order.model_dump()
+    return order.model_dump(mode='json')
 
 async def make_offer(ctx: InvocationContext, order: MarketOrder):
     """Propegate an offer to the network.
