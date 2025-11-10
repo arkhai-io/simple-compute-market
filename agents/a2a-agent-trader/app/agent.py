@@ -146,28 +146,6 @@ def _extract_content_payload(
 
     return tool_name, response_dict
 
-def _extract_text_from_content(content: genai_types.Content | None) -> str:
-    """Concatenate text parts from generative content."""
-    if not content or not getattr(content, "parts", None):
-        return ""
-    text_parts: list[str] = []
-    for part in content.parts:
-        if getattr(part, "text", None):
-            text_parts.append(part.text)  # type: ignore[arg-type]
-    return "".join(text_parts).strip()
-
-def _extract_tool_payload(
-    content: Optional[genai_types.Content],
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Return (tool_name, response_dict) if the message contains a functionResponse part."""
-    if not content:
-        return None, None
-    for part in content.parts or []:
-        function_response = getattr(part, "function_response", None)
-        if function_response:
-            # function_response has .name and .response (dict-like)
-            return getattr(function_response, "name", None), getattr(function_response, "response", None)
-    return None, None
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     """Convert a domain event payload dictionary to a DomainEvent instance."""
