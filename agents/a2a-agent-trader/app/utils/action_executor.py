@@ -33,6 +33,7 @@ BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
 REMOTE_AGENT_PORT = CONFIG.remote_agent_port
+AGENT_ID = CONFIG.agent_id
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
     [PROTOTYPE] This is currently set to send a message to one other remote agent.
     """
     event = Event(
-          author=f"agent_{PORT}",
+          author=AGENT_ID,
           content=genai_types.Content(
               role="model",
               parts=[
