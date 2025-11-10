@@ -262,7 +262,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
                   genai_types.Part.from_function_response(
                       name="make_offer",
                       response={
-                          "event_type": EventType.MAKE_OFFER,
+                          "event_type": EventType.MAKE_OFFER.value,
                           "offer": order
                       })
                   ],
@@ -272,7 +272,6 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
       )
     try:
         result = await send_to_remote_agent(ctx, event)
-        logger.info(result)
         return result
     except Exception as e:
         logger.error(f"[TOOL] Failed to make offer: {e}.")

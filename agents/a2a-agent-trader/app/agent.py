@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, override, AsyncGenerator, Any, Dict, Tuple
 from enum import Enum
+import re
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -77,12 +78,16 @@ from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
 from pydantic import PrivateAttr
 
+
+INCOMING_A2A_PATTERN = re.compile(
+    r"""\[(?P<agent>[^\]]+)\] `(?P<tool>[^`]+)` tool returned result: (?P<payload>\{.*\})*$""",
+    re.DOTALL
+)
+
 def _extract_content_payload(
     content: Optional[genai_types.Content],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Return (tool_name, response) if the message contains a functionResponse part.
-
-    FOR DEMO USE ONLY.
+    """Parse functionResponse and A2A communications.
 
     Interim solution for issue https://github.com/google/adk-python/issues/3260
     with WIP PR https://github.com/google/adk-python/pull/3262
@@ -90,25 +95,45 @@ def _extract_content_payload(
     if not content:
         return None, None
 
+    if len(content.parts) == 0:
+        return None, None
+
     tool_name = None
     response_dict = None
 
-    for part in content.parts or []:
+    # Get the most recent part
+    part = content.parts[-1]
 
-        # Skip context messages
-        text = getattr(part, "text", None)
-        if text:
-            if text == "For context":
-                continue
-            if "make_offer" in text:
-                tool_name = "A2A"
-                response_dict = {
-                    "event_type": EventType.MAKE_OFFER.value,
-                    "message": text
-                }
-                return tool_name, response_dict
+    logger.info(f"[CONTENT PART]: {part}")
 
+    # Skip context messages
+    text = getattr(part, "text", None)
+
+    if text:
+        tool_pattern_match = INCOMING_A2A_PATTERN.search(text)
+        if tool_pattern_match:
+            logger.info("[CONTENT PART] Received A2A message:")
+
+            agent_text = tool_pattern_match.group("agent").strip()
+            tool_name = tool_pattern_match.group("tool").strip()
+            payload_str = tool_pattern_match.group("payload").strip()
+
+            logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_text}")
+            logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
+            logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
+
+            response_dict = {
+                "source": agent_text,
+                "event_type": tool_name,
+                "message": payload_str
+            }
+            return tool_name, response_dict
+        else:
+            logger.error(f"Unknown text message received: {text}")
+            return None, None
+    else:
         function_response = getattr(part, "function_response", None)
+
         if function_response:
             # function_response has .name and .response (dict-like)
             this_part_tool_name = getattr(function_response, "name", None)
@@ -530,7 +555,7 @@ class TraderAgent(BaseAgent):
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
 
-        logger.info("CONTENT:")
+        logger.info("[RUN ASYNC] CONTENT:")
 
         if last_event.content is None:
             yield Event(
