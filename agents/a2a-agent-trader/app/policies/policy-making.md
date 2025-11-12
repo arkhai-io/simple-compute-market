@@ -16,6 +16,8 @@ A policy maps context (event + resources + market state) to an Action, e.g., "ac
   - SQLite tables: `policies` and `policy_composites`
 - `app/policies/store.py`
   - `PolicyStore` that bulk-registers discovered callables and evaluates by callable name or composite components
+- `app/policies/composite.py`
+  - Utilities for programmatically building composite callables: `chain_callables()`, `build_composite_callable()`
 
 ## Domain models used in policies
 - `Event`, `EventType`, `ComputeResource`, `MarketOrder` live in `app/schema/pydantic_models.py`.
@@ -63,6 +65,21 @@ Composites are stored as data in the DB. A policy row points to a composite name
 Evaluation executes sub-callables in order and returns the first non-None action.
 
 Recommended naming: `domain.variant.vN` (e.g., `resource_imbalance.default.v1`).
+
+### Programmatically building composites
+For programmatic composite creation, use utilities from `app.policies.composite`:
+
+```python
+from app.policies.composite import build_composite_callable
+
+# Build a composite callable and register it in the store
+composite_func = build_composite_callable(
+    store=policy_store,
+    name="my_composite.v1",
+    component_names=["guard.check_condition", "action.perform_action"]
+)
+# The composite is now registered and can be used as a callable_ref
+```
 
 ## Saving policies (single or composite)
 Use `PolicyStore.save_policy(...)` to save a policy row. `callable_ref` can be either a callable name or a composite name.
@@ -176,6 +193,47 @@ def mo_action_accept_offer(context: DecisionContext) -> Action | None:
     return Action(action_type=ActionType.ACCEPT_OFFER, parameters={})
 ```
 
+### Negotiation policies
+```python
+from app.policies.registry import policy_callable
+from app.schema.pydantic_models import Action as Action, ActionType, DecisionContext
+import random
+
+@policy_callable("simple_negotiation_random")
+def simple_negotiation_random(context: DecisionContext) -> Action | None:
+    """50/50 accept/reject for negotiation offers."""
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+    
+    # Check message_type - could be on event attribute or in data
+    msg_type = getattr(context.event, "message_type", None) or context.event.data.get("message_type")
+    if msg_type != "offer":
+        return None
+    
+    choice = random.choice([ActionType.ACCEPT_OFFER, ActionType.REJECT_OFFER])
+    return Action(action_type=choice, parameters={})
+
+@policy_callable("simple_negotiation_callable")
+def simple_negotiation_callable(context: DecisionContext) -> Action | None:
+    """Accept offer if GPU threshold is met, otherwise reject."""
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+    
+    msg_type = getattr(context.event, "message_type", None) or context.event.data.get("message_type")
+    if msg_type != "offer":
+        return None
+    
+    total_gpus = int(context.available_resources.get("total_gpus", 0))
+    gpu_threshold = 1  # Default threshold
+    if total_gpus < gpu_threshold:
+        return Action(action_type=ActionType.REJECT_OFFER, parameters={})
+    return Action(action_type=ActionType.ACCEPT_OFFER, parameters={})
+```
+
 ### Discovery and bulk registration at startup
 ```python
 # app/agent.py
@@ -247,7 +305,7 @@ for ref in data["callables"]:
 
 ## Built-in policies (as shipped)
 
-Two default policies are provisioned at startup; they are callable-only and expressed as composites in the DB. Their leaf callables are registered via decorators in `app/policies/store.py`.
+Default policies are provisioned at startup; they are callable-only and expressed as composites in the DB. Their leaf callables are registered via decorators in `app/policies/store.py`.
 
 - Resource Imbalance
   - Policy name: `resource_imbalance_default_v1`
@@ -265,6 +323,13 @@ Two default policies are provisioned at startup; they are callable-only and expr
   - Ordered sub-callables:
     1. `mo.guard.trigger_is_make_offer`: checks the incoming event is `make_offer`
     2. `mo.action.accept_offer`: returns `ActionType.ACCEPT_OFFER`
+
+- Negotiation (single callable)
+  - Policy name: `simple_negotiation_random`
+  - Trigger: `negotiation`
+  - callable_ref: `simple_negotiation_random`
+  - Behavior: 50/50 random accept/reject for negotiation offers
+  - Alternative: `simple_negotiation_callable` - accepts if GPU threshold is met, otherwise rejects
 
 SQL to inspect these after startup (use your `AGENT_ID`):
 

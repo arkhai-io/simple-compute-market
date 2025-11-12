@@ -7,7 +7,6 @@ from app.schema.pydantic_models import Action as DomainAction, ActionType as Dom
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
 
-
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
 
