@@ -63,8 +63,7 @@ from .schema.pydantic_models import (
 )
 
 from .policies.store import PolicyStore
-from .policies.discovery import discover_and_register
-from .policies.registry import CALLABLE_REGISTRY
+from .policies.manager import PolicyManager
 from .policies.sqlite_client import SQLiteClient
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
@@ -265,6 +264,7 @@ class TraderAgent(BaseAgent):
     """
     resource_portfolio: dict
     _policy_store: PolicyStore = PrivateAttr()
+    _policy_manager: PolicyManager = PrivateAttr()
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
 
@@ -307,71 +307,16 @@ class TraderAgent(BaseAgent):
         # Initialize PolicyStore (private attribute to avoid Pydantic field requirements)
         self._policy_store = PolicyStore(self._sqlite_client)
         
-        # Auto-discover and bulk-register callable policies
-        discover_and_register("app.policies")
-        self._policy_store.register_callables(CALLABLE_REGISTRY)
+        # Initialize PolicyManager for policy lifecycle management
+        self._policy_manager = PolicyManager(
+            policy_store=self._policy_store,
+            sqlite_client=self._sqlite_client,
+            agent_id=self.name,
+        )
+        self._policy_manager.initialize()
         
         # Initialize market provider
         self._market_provider = create_market_provider()
-        
-        # Save policy for negotiation events (will be done asynchronously on first use)
-        # We'll handle this in an async initialization if needed, or save it here sync
-        # For now, we'll let it be registered and saved on-demand
-
-
-    async def _ensure_negotiation_policy(self) -> None:
-        """Ensure negotiation policy is saved to the store."""
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self.name,
-                policy_name="simple_negotiation_random",
-                trigger_type=EventType.NEGOTIATION.value,
-                callable_ref="simple_negotiation_random",
-            )
-        except Exception as e:
-            logger.warning(f"Failed to save negotiation policy: {e}")
-
-    async def _ensure_default_policies(self) -> None:
-        """Ensure default policies are saved for resource imbalance and make offer."""
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self.name,
-                policy_name="resource_imbalance_default_v1",
-                trigger_type=EventType.RESOURCE_IMBALANCE.value,
-                callable_ref="resource_imbalance.default.v1",
-            )
-            # Persist composite components for resource_imbalance.default.v1
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self.name,
-                policy_name="resource_imbalance.default.v1",
-                components=[
-                    "ri.guard.trigger_is_resource_imbalance",
-                    "ri.guard.resource_present",
-                    "ri.action.make_offer_from_resource",
-                ],
-            )
-        except Exception as e:
-            logger.warning(f"Failed to save resource_imbalance policy: {e}")
-
-        # Make-offer policy (composite saved in DB)
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self.name,
-                policy_name="make_offer_default_v1",
-                trigger_type=EventType.MAKE_OFFER.value,
-                callable_ref="make_offer.default.v1",
-            )
-            # Persist composite components for make_offer.default.v1
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self.name,
-                policy_name="make_offer.default.v1",
-                components=[
-                    "mo.guard.trigger_is_make_offer",
-                    "mo.action.accept_offer",
-                ],
-            )
-        except Exception as e:
-            logger.warning(f"Failed to save make_offer policy: {e}")
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
@@ -452,12 +397,8 @@ class TraderAgent(BaseAgent):
         domain_event, context_data = context
         event_type = domain_event.event_type
         
-        # Ensure default policies exist
-        await self._ensure_default_policies()
-
-        # Ensure negotiation policy is saved for negotiation events
-        if event_type == EventType.NEGOTIATION:
-            await self._ensure_negotiation_policy()
+        # Ensure policy exists for this event type (lazy policy setup)
+        await self._policy_manager.ensure_policy_for_event_type(event_type)
         
         # Build DecisionContext for PolicyStore
         decision_context = DecisionContext(
