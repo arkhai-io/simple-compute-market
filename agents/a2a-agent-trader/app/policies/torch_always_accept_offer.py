@@ -16,29 +16,29 @@ from app.schema.pydantic_models import Action as DomainAction, ActionType, Decis
 logger = logging.getLogger(__name__)
 
 
-_MODEL_PATH = Path(__file__).resolve().parent / "models" / "rps_policy.ts"
+_MODEL_PATH = Path(__file__).resolve().parent / "models" / "torch_always_accept_offer.ts"
 _loaded_model: Optional[Any] = None
 
 
 def _get_model() -> Optional[Any]:
-    """Lazily load the TorchScript RPS policy model."""
+    """Lazily load the TorchScript ALWAYS ACCEPT POLICY model."""
     if torch is None:
-        logger.warning("[RPS POLICY] PyTorch not available; skipping model load")
+        logger.warning("[ALWAYS ACCEPT POLICY] PyTorch not available; skipping model load")
         return None
     global _loaded_model
     if _loaded_model is not None:
         return _loaded_model
 
     if not _MODEL_PATH.exists():
-        logger.warning("[RPS POLICY] TorchScript model not found at %s", _MODEL_PATH)
+        logger.warning("[ALWAYS ACCEPT POLICY] TorchScript model not found at %s", _MODEL_PATH)
         return None
 
     try:
         _loaded_model = torch.jit.load(str(_MODEL_PATH))
         _loaded_model.eval()
-        logger.info("[RPS POLICY] Loaded TorchScript model from %s", _MODEL_PATH)
+        logger.info("[ALWAYS ACCEPT POLICY] Loaded TorchScript model from %s", _MODEL_PATH)
     except Exception as exc:  # pragma: no cover - torch errors vary
-        logger.error("[RPS POLICY] Failed to load TorchScript model: %s", exc)
+        logger.error("[ALWAYS ACCEPT POLICY] Failed to load TorchScript model: %s", exc)
         _loaded_model = None
     return _loaded_model
 
@@ -61,8 +61,8 @@ def _select_action(logits: Any) -> DomainAction:
     return DomainAction(action_type=action_type)
 
 
-@policy_callable("mo.action.rps_torch_offer")
-def mo_action_rps_torch_offer(context: DecisionContext) -> DomainAction | None:
+@policy_callable("mo.action.torch_always_accept_offer")
+def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainAction | None:
     """TorchScript-driven offer response conforming to make_offer composite standard.
 
     The proof-of-concept feeds a zero tensor into the TorchScript model and
@@ -76,7 +76,7 @@ def mo_action_rps_torch_offer(context: DecisionContext) -> DomainAction | None:
 
     model = _get_model()
     if model is None or torch is None:
-        logger.warning("[RPS POLICY] PyTorch not available; returning None")
+        logger.warning("[ALWAYS ACCEPT POLICY] PyTorch not available; returning None")
         return None
 
     # TODO: Replace this with a real feature vector constructed from the context
@@ -86,11 +86,11 @@ def mo_action_rps_torch_offer(context: DecisionContext) -> DomainAction | None:
         with torch.no_grad():
             logits = model(example_input)
     except Exception as exc:  # pragma: no cover - inference errors vary
-        logger.error("[RPS POLICY] Inference failed: %s", exc)
+        logger.error("[ALWAYS ACCEPT POLICY] Inference failed: %s", exc)
         return None
 
     if logits is None or logits.shape[0] == 0:
-        logger.warning("[RPS POLICY] Model returned empty logits")
+        logger.warning("[ALWAYS ACCEPT POLICY] Model returned empty logits")
         return None
 
     return _select_action(logits)
