@@ -243,7 +243,6 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
             token="USDT",
             amount=9 * 10**18
         ),
-        quantity=1,
         duration=1,
         maker_attestation=None,
         taker_attestation=None

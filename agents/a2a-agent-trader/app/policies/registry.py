@@ -17,7 +17,7 @@ def policy_callable(name: str):
 
     Usage:
         @policy_callable("ri.guard.trigger_is_resource_imbalance")
-        def my_guard(ctx: DecisionContext) -> PolicyAction | None: ...
+        def my_guard(ctx: DecisionContext) -> DomainAction | None: ...
     """
 
     def _wrap(fn: Callable[[DecisionContext], DomainAction | None]):

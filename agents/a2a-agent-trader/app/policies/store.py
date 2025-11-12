@@ -116,11 +116,11 @@ class PolicyStore:
 
 # ----- Built-in sample callable policies -----
 
-def simple_negotiation_random(threshold_unused: float | None = None) -> Callable[[DecisionContext], PolicyAction | None]:
+def simple_negotiation_random(threshold_unused: float | None = None) -> Callable[[DecisionContext], DomainAction | None]:
     import random
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         # 50/50 accept/reject for offers
         if context.event.event_type != "negotiation":
             return None
@@ -128,15 +128,15 @@ def simple_negotiation_random(threshold_unused: float | None = None) -> Callable
         if msg_type != "offer":
             return None
         choice = random.choice([ActionType.ACCEPT_OFFER, ActionType.REJECT_OFFER])
-        return PolicyAction(action_type=choice, parameters={})
+        return DomainAction(action_type=choice, parameters={})
 
     return _impl
 
 
-def simple_negotiation_callable(gpu_threshold: int = 1) -> Callable[[DecisionContext], PolicyAction | None]:
+def simple_negotiation_callable(gpu_threshold: int = 1) -> Callable[[DecisionContext], DomainAction | None]:
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         if context.event.event_type != "negotiation":
             return None
         msg_type = context.event.data.get("message_type")
@@ -144,18 +144,18 @@ def simple_negotiation_callable(gpu_threshold: int = 1) -> Callable[[DecisionCon
             return None
         total_gpus = int(context.available_resources.get("total_gpus", 0))
         if total_gpus < gpu_threshold:
-            return PolicyAction(action_type=ActionType.REJECT_OFFER, parameters={})
-        return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+            return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={})
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
 
     return _impl
 
 
 # ----- New callable policies to mirror existing hardcoded behavior -----
 
-def resource_imbalance_make_offer() -> Callable[[DecisionContext], PolicyAction | None]:
+def resource_imbalance_make_offer() -> Callable[[DecisionContext], DomainAction | None]:
     from app.schema.pydantic_models import ActionType, ComputeResource
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         # Trigger must be resource_imbalance
         et = context.event.event_type
         trigger = et.value if hasattr(et, "value") else str(et)
@@ -175,7 +175,7 @@ def resource_imbalance_make_offer() -> Callable[[DecisionContext], PolicyAction 
                 )
             except Exception:
                 return None
-        return PolicyAction(
+        return DomainAction(
             action_type=ActionType.MAKE_OFFER,
             parameters={
                 "tag": "sell",
@@ -188,23 +188,23 @@ def resource_imbalance_make_offer() -> Callable[[DecisionContext], PolicyAction 
     return _impl
 
 
-def make_offer_accept_offer() -> Callable[[DecisionContext], PolicyAction | None]:
+def make_offer_accept_offer() -> Callable[[DecisionContext], DomainAction | None]:
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         et = context.event.event_type
         trigger = et.value if hasattr(et, "value") else str(et)
         if trigger != "make_offer":
             return None
-        return PolicyAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
 
     return _impl
 
 
 # ----- Composite chaining support -----
 
-def chain_callables(names: list[str], *, registry: Dict[str, Callable[[DecisionContext], PolicyAction | None]]) -> Callable[[DecisionContext], PolicyAction | None]:
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+def chain_callables(names: list[str], *, registry: Dict[str, Callable[[DecisionContext], DomainAction | None]]) -> Callable[[DecisionContext], DomainAction | None]:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         for name in names:
             func = registry.get(name)
             if not func:
@@ -215,7 +215,7 @@ def chain_callables(names: list[str], *, registry: Dict[str, Callable[[DecisionC
         return None
     return _impl
 
-def build_composite_callable(store: "PolicyStore", name: str, component_names: List[str]) -> Callable[[DecisionContext], PolicyAction | None]:
+def build_composite_callable(store: "PolicyStore", name: str, component_names: List[str]) -> Callable[[DecisionContext], DomainAction | None]:
     """Create a composite callable from registered sub-callables and record its components."""
     store.register_composite(name, component_names)
     return chain_callables(component_names, registry=store._registry)
@@ -223,8 +223,8 @@ def build_composite_callable(store: "PolicyStore", name: str, component_names: L
 
 # ----- Resource imbalance split into sub-callables -----
 
-def ri_validate_and_extract() -> Callable[[DecisionContext], PolicyAction | None]:
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+def ri_validate_and_extract() -> Callable[[DecisionContext], DomainAction | None]:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         et = context.event.event_type
         trigger = et.value if hasattr(et, "value") else str(et)
         if trigger != "resource_imbalance":
@@ -238,14 +238,14 @@ def ri_validate_and_extract() -> Callable[[DecisionContext], PolicyAction | None
     return _impl
 
 
-def ri_make_offer_from_resource() -> Callable[[DecisionContext], PolicyAction | None]:
+def ri_make_offer_from_resource() -> Callable[[DecisionContext], DomainAction | None]:
     from app.schema.pydantic_models import ActionType
 
-    def _impl(context: DecisionContext) -> PolicyAction | None:
+    def _impl(context: DecisionContext) -> DomainAction | None:
         res = getattr(context.event, "resource", None)
         if not res:
             return None
-        return PolicyAction(
+        return DomainAction(
             action_type=ActionType.MAKE_OFFER,
             parameters={
                 "tag": "sell",
