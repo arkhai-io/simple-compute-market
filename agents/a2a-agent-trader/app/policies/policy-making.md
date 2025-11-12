@@ -191,6 +191,40 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> Action | None:
 def mo_action_accept_offer(context: DecisionContext) -> Action | None:
     from app.schema.pydantic_models import ActionType
     return Action(action_type=ActionType.ACCEPT_OFFER, parameters={})
+
+@policy_callable("mo.action.rps_torch_offer")
+def mo_action_rps_torch_offer(context: DecisionContext) -> Action | None:
+    """Example TorchScript-backed offer policy.
+
+    This mirrors the proof-of-concept in `app/policies/rps_torch_policy.py`:
+    it loads `models/rps_policy.ts`, runs inference on a placeholder tensor,
+    and maps logits to ACCEPT/REJECT/COUNTER.
+    """
+    import torch
+
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "make_offer":
+        return None
+
+    model = torch.jit.load("app/policies/models/rps_policy.ts")
+    model.eval()
+
+    with torch.no_grad():
+        logits = model(torch.zeros((1, 3), dtype=torch.float32))
+
+    probs = torch.softmax(logits[0], dim=0)
+    choice = int(torch.argmax(probs).item())
+    if choice == 0:
+        action_type = ActionType.REJECT_OFFER
+    elif choice == 1:
+        action_type = ActionType.ACCEPT_OFFER
+    else:
+        action_type = ActionType.COUNTER_OFFER
+
+    return Action(
+        action_type=action_type
+    )
 ```
 
 ### Negotiation policies
@@ -322,7 +356,8 @@ Default policies are provisioned at startup; they are callable-only and expresse
   - callable_ref (composite): `make_offer.default.v1`
   - Ordered sub-callables:
     1. `mo.guard.trigger_is_make_offer`: checks the incoming event is `make_offer`
-    2. `mo.action.accept_offer`: returns `ActionType.ACCEPT_OFFER`
+    2. `mo.action.rps_torch_offer`: TorchScript-driven decision (accept/reject/counter)
+       - `mo.action.accept_offer` remains available as a simpler deterministic fallback
 
 - Negotiation (single callable)
   - Policy name: `simple_negotiation_random`
