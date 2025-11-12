@@ -203,7 +203,7 @@ def accept_offer() -> bool:
     """Accept a received offer.
 
     Returns:
-        String UUID with which to fill up if the rejection was successfully communicated.
+        True if the acceptance was successfully communicated.
     """
     logger.info("[TOOL] Accepting received offer.")
     return True
