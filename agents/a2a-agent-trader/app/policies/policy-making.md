@@ -196,7 +196,7 @@ def mo_action_accept_offer(context: DecisionContext) -> Action | None:
 def mo_action_torch_always_accept_offer(context: DecisionContext) -> Action | None:
     """Example TorchScript-backed offer policy.
 
-    This mirrors the proof-of-concept in `app/policies/rps_torch_policy.py`:
+    This mirrors the proof-of-concept in `app/policies/torch_always_accept_offer_policy.py.py`:
     it loads `models/torch_always_accept_offer.ts`, runs inference on a placeholder tensor,
     and maps logits to ACCEPT/REJECT/COUNTER.
     """

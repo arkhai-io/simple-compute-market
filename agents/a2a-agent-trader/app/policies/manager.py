@@ -96,7 +96,7 @@ class PolicyManager:
                 components=[
                     "mo.guard.trigger_is_make_offer",
                     # "mo.action.accept_offer", # Uncomment this to use the default accept offer policy
-                    "mo.action.torch_always_accept_offer", # Uncomment this to use the RPS TorchScript policy
+                    "mo.action.torch_always_accept_offer", # Uncomment this to use the Always Accept offer TorchScript policy
                 ],
             )
             logger.debug("[POLICY MANAGER] Ensured make_offer policy")
