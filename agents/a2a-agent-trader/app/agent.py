@@ -114,16 +114,16 @@ def _extract_content_payload(
         if tool_pattern_match:
             logger.info("[CONTENT PART] Received A2A message:")
 
-            agent_text = tool_pattern_match.group("agent").strip()
+            agent_str = tool_pattern_match.group("agent").strip()
             tool_name = tool_pattern_match.group("tool").strip()
             payload_str = tool_pattern_match.group("payload").strip()
 
-            logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_text}")
+            logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
 
             response_dict = {
-                "source": agent_text,
+                "source": agent_str,
                 "event_type": tool_name,
                 "message": payload_str
             }
