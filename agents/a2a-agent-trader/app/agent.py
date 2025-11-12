@@ -18,7 +18,8 @@ import os
 import random
 import uuid
 from datetime import datetime
-from typing import Optional, override, AsyncGenerator, Any, Dict, Tuple
+import ast
+from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
 
@@ -84,6 +85,44 @@ INCOMING_A2A_PATTERN = re.compile(
     re.DOTALL
 )
 
+# Convert "<EventType.MAKE_OFFER: 'make_offer'>" → "'make_offer'"
+ENUM_REPR_PATTERN = re.compile(
+    r"<[A-Za-z_][\w.]*:\s*'([^'\\]*(?:\\.[^'\\]*)*)'>"
+)
+
+def normalize_enums(payload_text: str) -> str:
+    """
+    Replace enum reprs like <Enum.Member: 'value'> with just 'value'.
+    Handles escaped quotes inside the value.
+    """
+    return ENUM_REPR_PATTERN.sub(r"'\1'", payload_text)
+
+
+def safe_literal_eval(payload_text: str, *, max_len: int = 50_000) -> Any:
+    """
+    Safely parse a Python-literal string (dict/list/tuple/set/str/num/bool/None).
+    Guards against large inputs and rejects non-literals.
+
+    Raises:
+        TypeError, ValueError on invalid input or policy violations.
+    """
+    if not isinstance(payload_text, str):
+        raise TypeError("payload must be a string")
+
+    if len(payload_text) > max_len:
+        raise ValueError(f"payload too large (>{max_len} bytes)")
+
+    leading_trimmed = payload_text.lstrip()
+    trailing_trimmed = payload_text.rstrip()
+    if not leading_trimmed.startswith("{") or not trailing_trimmed.endswith("}"):
+        raise ValueError("payload is not a dict literal (must start with '{' and end with '}')")
+
+    try:
+        return ast.literal_eval(payload_text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
+        raise ValueError(f"failed to parse payload: {exc}") from exc
+
+
 def _extract_content_payload(
     content: Optional[genai_types.Content],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -118,6 +157,9 @@ def _extract_content_payload(
             tool_name = tool_pattern_match.group("tool").strip()
             payload_str = tool_pattern_match.group("payload").strip()
 
+            enum_normalized_payload = normalize_enums(payload_str)
+            payload_dict = safe_literal_eval(enum_normalized_payload)
+
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
@@ -125,7 +167,8 @@ def _extract_content_payload(
             response_dict = {
                 "source": agent_str,
                 "event_type": tool_name,
-                "message": payload_str
+                "message": None,
+                "data": payload_dict
             }
             return tool_name, response_dict
         else:
@@ -142,7 +185,6 @@ def _extract_content_payload(
             if this_part_tool_name and this_part_response:
                 tool_name = this_part_tool_name
                 response_dict = this_part_response
-
 
     return tool_name, response_dict
 
@@ -190,9 +232,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     elif event_type == EventType.MAKE_OFFER:
         try:
             offer_data = data.get("offer", data)
-            logger.info(f"Received offer: {offer_data}")
             order = MarketOrder.model_validate(offer_data)
-            logger.info(f"Parsed order: {offer_data}")
             return MarketOrderEvent.from_order(order)
         except (ValueError, KeyError, TypeError) as e:
             logger.warning(f"Failed to create MarketOrderEvent: {e}, falling back to DomainEvent")

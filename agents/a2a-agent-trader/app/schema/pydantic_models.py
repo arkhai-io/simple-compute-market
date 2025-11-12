@@ -216,8 +216,8 @@ class MarketOrderEvent(DomainEvent):
             data={
                 "order_id": order.order_id,
                 "tag": order.tag.value,
-                "gpu_model": order.compute_resource.gpu_model.value,
-                "quantity": order.quantity,
+                "offer_resource": order.offer_resource,
+                "demand_resource": order.demand_resource,
                 "duration": order.duration,
             },
         )
