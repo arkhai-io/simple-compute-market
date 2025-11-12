@@ -144,9 +144,6 @@ class MarketOrder(BaseModel):
     demand_resource: SerializeAsAny[Resource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
-    quantity: int = Field(
-        description="The quantity of the compute resource being offered or sought"
-    )
     duration: int = Field(description="The duration of the order in days")
     maker_attestation: Attestation | None = Field(
         default=None,
