@@ -178,7 +178,6 @@ class EventType(str, Enum):
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
-    MARKET_ORDER = "market_order"
     NEGOTIATION = "negotiation"
 
 
@@ -200,14 +199,14 @@ class DomainEvent(BaseModel):
     )
 
 
-class MarketOrderEvent(DomainEvent):
+class MakeOfferEvent(DomainEvent):
     """Event triggered when a market order is broadcast"""
 
-    event_type: EventType = Field(default=EventType.MARKET_ORDER)
+    event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
 
     @classmethod
-    def from_order(cls, order: MarketOrder) -> "MarketOrderEvent":
+    def from_order(cls, order: MarketOrder) -> "MakeOfferEvent":
         """Create event from a market order"""
         return cls(
             event_id=f"evt_{order.order_id}",

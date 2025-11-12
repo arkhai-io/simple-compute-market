@@ -53,7 +53,7 @@ from .schema.pydantic_models import (
     EventType,
     DomainEvent,
     MarketOrder,
-    MarketOrderEvent,
+    MakeOfferEvent,
     ResourceImbalanceEvent,
     NegotiationEvent,
     GPUModel,
@@ -233,7 +233,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
         try:
             offer_data = data.get("offer", data)
             order = MarketOrder.model_validate(offer_data)
-            return MarketOrderEvent.from_order(order)
+            return MakeOfferEvent.from_order(order)
         except (ValueError, KeyError, TypeError) as e:
             logger.warning(f"Failed to create MarketOrderEvent: {e}, falling back to DomainEvent")
     
