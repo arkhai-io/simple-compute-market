@@ -3,7 +3,15 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
-from app.schema.pydantic_models import Action as DomainAction, ActionType as DomainActionType, DecisionContext
+from app.schema.pydantic_models import (
+    Action as DomainAction,
+    ActionType as DomainActionType,
+    DecisionContext,
+    MakeOfferEvent,
+    ComputeResource,
+    TokenResource,
+    ComputeResourcePortfolio,
+)
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
 
@@ -199,9 +207,79 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | N
     return None
 
 
+def _extract_resources_from_event(context: DecisionContext) -> tuple[ComputeResource | None, ComputeResource | None, TokenResource | None, TokenResource | None]:
+    """Safely extract offer_resource and demand_resource from MakeOfferEvent.
+    
+    Returns: (offer_compute, demand_compute, offer_token, demand_token)
+    """
+    if not isinstance(context.event, MakeOfferEvent):
+        return None, None, None, None
+    
+    order = context.event.order
+    offer_resource = order.offer_resource
+    demand_resource = order.demand_resource
+    
+    offer_compute = offer_resource if isinstance(offer_resource, ComputeResource) else None
+    offer_token = offer_resource if isinstance(offer_resource, TokenResource) else None
+    demand_compute = demand_resource if isinstance(demand_resource, ComputeResource) else None
+    demand_token = demand_resource if isinstance(demand_resource, TokenResource) else None
+    
+    return offer_compute, demand_compute, offer_token, demand_token
+
+
 @policy_callable("mo.action.accept_offer")
 def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
+    """Accept offer policy that validates resources and checks agent capacity.
+    
+    Extracts offer_resource and demand_resource from MakeOfferEvent.
+    Checks if agent has capacity for demand_resource if it's a ComputeResource.
+    Includes resource details in action parameters.
+    """
     from app.schema.pydantic_models import ActionType
-
-    return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+    
+    # Only process MakeOfferEvent
+    if not isinstance(context.event, MakeOfferEvent):
+        return None
+    
+    order = context.event.order
+    offer_resource = order.offer_resource
+    demand_resource = order.demand_resource
+    
+    # Validate resource types
+    offer_compute = offer_resource if isinstance(offer_resource, ComputeResource) else None
+    offer_token = offer_resource if isinstance(offer_resource, TokenResource) else None
+    demand_compute = demand_resource if isinstance(demand_resource, ComputeResource) else None
+    demand_token = demand_resource if isinstance(demand_resource, TokenResource) else None
+    
+    # Check agent capacity for demand resource if it's a ComputeResource
+    if demand_compute:
+        # Get portfolio from available_resources
+        portfolio_dict = context.available_resources
+        if portfolio_dict and "resources" in portfolio_dict:
+            try:
+                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
+                if not portfolio.has_capacity(demand_compute):
+                    # Agent doesn't have capacity - reject
+                    return DomainAction(
+                        action_type=ActionType.REJECT_OFFER,
+                        parameters={
+                            "reason": "insufficient_capacity",
+                            "demand_resource": demand_compute.model_dump(mode='json'),
+                        }
+                    )
+            except Exception as e:
+                # If portfolio validation fails, log and continue
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
+    
+    # Accept offer with resource details
+    return DomainAction(
+        action_type=ActionType.ACCEPT_OFFER,
+        parameters={
+            "order_id": order.order_id,
+            "offer_resource": offer_resource.model_dump(mode='json'),
+            "demand_resource": demand_resource.model_dump(mode='json'),
+        }
+    )
 
