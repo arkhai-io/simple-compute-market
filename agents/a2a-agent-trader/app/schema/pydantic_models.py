@@ -1,7 +1,7 @@
 from enum import Enum
 from datetime import datetime
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializeAsAny
 from pydantic import ConfigDict
 
 
@@ -138,14 +138,11 @@ class MarketOrder(BaseModel):
         default="",
         description="The card URL of the agent who took the order",
     )
-    offer_resource: Resource = Field(
+    offer_resource: SerializeAsAny[Resource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
-    demand_resource: Resource = Field(
+    demand_resource: SerializeAsAny[Resource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
-    )
-    quantity: int = Field(
-        description="The quantity of the compute resource being offered or sought"
     )
     duration: int = Field(description="The duration of the order in days")
     maker_attestation: Attestation | None = Field(
@@ -178,7 +175,6 @@ class EventType(str, Enum):
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
-    MARKET_ORDER = "market_order"
     NEGOTIATION = "negotiation"
 
 
@@ -200,14 +196,14 @@ class DomainEvent(BaseModel):
     )
 
 
-class MarketOrderEvent(DomainEvent):
+class MakeOfferEvent(DomainEvent):
     """Event triggered when a market order is broadcast"""
 
-    event_type: EventType = Field(default=EventType.MARKET_ORDER)
+    event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
 
     @classmethod
-    def from_order(cls, order: MarketOrder) -> "MarketOrderEvent":
+    def from_order(cls, order: MarketOrder) -> "MakeOfferEvent":
         """Create event from a market order"""
         return cls(
             event_id=f"evt_{order.order_id}",
@@ -216,8 +212,8 @@ class MarketOrderEvent(DomainEvent):
             data={
                 "order_id": order.order_id,
                 "tag": order.tag.value,
-                "gpu_model": order.compute_resource.gpu_model.value,
-                "quantity": order.quantity,
+                "offer_resource": order.offer_resource,
+                "demand_resource": order.demand_resource,
                 "duration": order.duration,
             },
         )

@@ -33,6 +33,7 @@ BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
 REMOTE_AGENT_PORT = CONFIG.remote_agent_port
+AGENT_ID = CONFIG.agent_id
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ def accept_offer() -> bool:
     """Accept a received offer.
 
     Returns:
-        String UUID with which to fill up if the rejection was successfully communicated.
+        True if the acceptance was successfully communicated.
     """
     logger.info("[TOOL] Accepting received offer.")
     return True
@@ -242,12 +243,11 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
             token="USDT",
             amount=9 * 10**18
         ),
-        quantity=1,
         duration=1,
         maker_attestation=None,
         taker_attestation=None
     )
-    return order.model_dump()
+    return order.model_dump(mode='json')
 
 async def make_offer(ctx: InvocationContext, order: MarketOrder):
     """Propegate an offer to the network.
@@ -255,14 +255,14 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
     [PROTOTYPE] This is currently set to send a message to one other remote agent.
     """
     event = Event(
-          author=f"agent_{PORT}",
+          author=AGENT_ID,
           content=genai_types.Content(
               role="model",
               parts=[
                   genai_types.Part.from_function_response(
                       name="make_offer",
                       response={
-                          "event_type": EventType.MAKE_OFFER,
+                          "event_type": EventType.MAKE_OFFER.value,
                           "offer": order
                       })
                   ],
@@ -272,7 +272,6 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
       )
     try:
         result = await send_to_remote_agent(ctx, event)
-        logger.info(result)
         return result
     except Exception as e:
         logger.error(f"[TOOL] Failed to make offer: {e}.")

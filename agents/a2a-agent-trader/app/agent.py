@@ -18,8 +18,10 @@ import os
 import random
 import uuid
 from datetime import datetime
-from typing import Optional, override, AsyncGenerator, Any, Dict, Tuple
+import ast
+from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
+import re
 
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
@@ -51,7 +53,7 @@ from .schema.pydantic_models import (
     EventType,
     DomainEvent,
     MarketOrder,
-    MarketOrderEvent,
+    MakeOfferEvent,
     ResourceImbalanceEvent,
     NegotiationEvent,
     GPUModel,
@@ -76,12 +78,54 @@ from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
 from pydantic import PrivateAttr
 
+
+INCOMING_A2A_PATTERN = re.compile(
+    r"""\[(?P<agent>[^\]]+)\] `(?P<tool>[^`]+)` tool returned result: (?P<payload>\{.*\})*$""",
+    re.DOTALL
+)
+
+# Convert "<EventType.MAKE_OFFER: 'make_offer'>" → "'make_offer'"
+ENUM_REPR_PATTERN = re.compile(
+    r"<[A-Za-z_][\w.]*:\s*'([^'\\]*(?:\\.[^'\\]*)*)'>"
+)
+
+def normalize_enums(payload_text: str) -> str:
+    """
+    Replace enum reprs like <Enum.Member: 'value'> with just 'value'.
+    Handles escaped quotes inside the value.
+    """
+    return ENUM_REPR_PATTERN.sub(r"'\1'", payload_text)
+
+
+def safe_literal_eval(payload_text: str, *, max_len: int = 50_000) -> Any:
+    """
+    Safely parse a Python-literal string (dict/list/tuple/set/str/num/bool/None).
+    Guards against large inputs and rejects non-literals.
+
+    Raises:
+        TypeError, ValueError on invalid input or policy violations.
+    """
+    if not isinstance(payload_text, str):
+        raise TypeError("payload must be a string")
+
+    if len(payload_text) > max_len:
+        raise ValueError(f"payload too large (>{max_len} bytes)")
+
+    leading_trimmed = payload_text.lstrip()
+    trailing_trimmed = payload_text.rstrip()
+    if not leading_trimmed.startswith("{") or not trailing_trimmed.endswith("}"):
+        raise ValueError("payload is not a dict literal (must start with '{' and end with '}')")
+
+    try:
+        return ast.literal_eval(payload_text)
+    except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
+        raise ValueError(f"failed to parse payload: {exc}") from exc
+
+
 def _extract_content_payload(
     content: Optional[genai_types.Content],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Return (tool_name, response) if the message contains a functionResponse part.
-
-    FOR DEMO USE ONLY.
+    """Parse functionResponse and A2A communications.
 
     Interim solution for issue https://github.com/google/adk-python/issues/3260
     with WIP PR https://github.com/google/adk-python/pull/3262
@@ -89,25 +133,59 @@ def _extract_content_payload(
     if not content:
         return None, None
 
+    if len(content.parts) == 0:
+        return None, None
+
     tool_name = None
     response_dict = None
 
-    for part in content.parts or []:
+    # Get the most recent part
+    part = content.parts[-1]
 
-        # Skip context messages
-        text = getattr(part, "text", None)
-        if text:
-            if text == "For context":
-                continue
-            if "make_offer" in text:
-                tool_name = "A2A"
-                response_dict = {
-                    "event_type": EventType.MAKE_OFFER.value,
-                    "message": text
-                }
-                return tool_name, response_dict
+    logger.info(f"[CONTENT PART]: {part}")
 
+    # Skip context messages
+    text = getattr(part, "text", None)
+
+    if text:
+        tool_pattern_match = INCOMING_A2A_PATTERN.search(text)
+        if tool_pattern_match:
+            logger.info("[CONTENT PART] Received A2A message:")
+
+            agent_str = tool_pattern_match.group("agent").strip()
+            tool_name = tool_pattern_match.group("tool").strip()
+            payload_str = tool_pattern_match.group("payload").strip()
+
+            try:
+                enum_normalized_payload = normalize_enums(payload_str)
+                payload_dict = safe_literal_eval(enum_normalized_payload)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse A2A payload: {e}")
+                return None, None
+
+            logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
+            logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
+            logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
+             try:
+                EventType(tool_name)
+            except ValueError:
+                logger.warning(
+                    f"Unknown event_type from tool '{tool_name}'. "
+                    f"Known types: {[e.value for e in EventType]}"
+                )
+            response_dict = {
+                "source": agent_str,
+                "event_type": tool_name,
+                "message": None,
+                "data": payload_dict
+            }
+            return tool_name, response_dict
+        else:
+            logger.error(f"Unknown text message received: {text}")
+            return None, None
+    else:
         function_response = getattr(part, "function_response", None)
+
         if function_response:
             # function_response has .name and .response (dict-like)
             this_part_tool_name = getattr(function_response, "name", None)
@@ -117,31 +195,8 @@ def _extract_content_payload(
                 tool_name = this_part_tool_name
                 response_dict = this_part_response
 
-
     return tool_name, response_dict
 
-def _extract_text_from_content(content: genai_types.Content | None) -> str:
-    """Concatenate text parts from generative content."""
-    if not content or not getattr(content, "parts", None):
-        return ""
-    text_parts: list[str] = []
-    for part in content.parts:
-        if getattr(part, "text", None):
-            text_parts.append(part.text)  # type: ignore[arg-type]
-    return "".join(text_parts).strip()
-
-def _extract_tool_payload(
-    content: Optional[genai_types.Content],
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Return (tool_name, response_dict) if the message contains a functionResponse part."""
-    if not content:
-        return None, None
-    for part in content.parts or []:
-        function_response = getattr(part, "function_response", None)
-        if function_response:
-            # function_response has .name and .response (dict-like)
-            return getattr(function_response, "name", None), getattr(function_response, "response", None)
-    return None, None
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     """Convert a domain event payload dictionary to a DomainEvent instance."""
@@ -183,14 +238,13 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             )
         except (ValueError, KeyError, TypeError) as e:
             logger.warning(f"Failed to create ResourceImbalanceEvent: {e}, falling back to DomainEvent")
-    
-    elif event_type == EventType.MARKET_ORDER:
+    elif event_type == EventType.MAKE_OFFER:
         try:
-            order_data = data.get("order", data)
-            order = MarketOrder.model_validate(order_data)
-            return MarketOrderEvent.from_order(order)
+            offer_data = data.get("offer", data)
+            order = MarketOrder.model_validate(offer_data)
+            return MakeOfferEvent.from_order(order)
         except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to create MarketOrderEvent: {e}, falling back to DomainEvent")
+            logger.warning(f"Failed to create MakeOfferEvent: {e}, falling back to DomainEvent")
     
     elif event_type == EventType.NEGOTIATION:
         try:
@@ -471,7 +525,7 @@ class TraderAgent(BaseAgent):
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
 
-        logger.info("CONTENT:")
+        logger.info("[RUN ASYNC] CONTENT:")
 
         if last_event.content is None:
             yield Event(
