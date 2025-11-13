@@ -40,9 +40,15 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from pydantic import ValidationError
 import logging
-logger = logging.getLogger(__name__)
 
+# Import config first
 from .utils.config import CONFIG
+
+# Setup file-based logging early, before any other imports that might log
+from .utils.logging_config import setup_file_logging
+setup_file_logging(CONFIG.log_file_path, CONFIG.log_level)
+
+logger = logging.getLogger(__name__)
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
