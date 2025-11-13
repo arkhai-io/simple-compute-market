@@ -166,7 +166,7 @@ def _extract_content_payload(
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
-             try:
+            try:
                 EventType(tool_name)
             except ValueError:
                 logger.warning(
