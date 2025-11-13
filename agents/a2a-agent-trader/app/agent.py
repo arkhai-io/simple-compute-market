@@ -553,6 +553,16 @@ class TraderAgent(BaseAgent):
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
 
+        # TODO: Take this out and put this in the acceptance logic
+        address = f"0x{'%040x' % random.randrange(16**40)}"
+        logger.info(f"[ALKAHEST]: Random address: {address}")
+        hash = await self._alkahest_client.erc20.approve(
+            {"address": address, "value": 100},
+            "escrow"
+        )
+
+        logger.info(f"[ALKAHEST]: Hash: {hash}")
+
         yield Event(
             author=self.name,
             content=genai_types.Content(
