@@ -46,7 +46,8 @@ BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
 POLICY_DB_PATH = CONFIG.policy_db_path
-
+AGENT_PRIV_KEY = CONFIG.agent_priv_key
+CHAIN_RPC_URL = CONFIG.chain_rpc_url
 
 from .schema.pydantic_models import (
     ActionType,
