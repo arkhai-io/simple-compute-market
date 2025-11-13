@@ -166,7 +166,13 @@ def _extract_content_payload(
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
-
+             try:
+                EventType(tool_name)
+            except ValueError:
+                logger.warning(
+                    f"Unknown event_type from tool '{tool_name}'. "
+                    f"Known types: {[e.value for e in EventType]}"
+                )
             response_dict = {
                 "source": agent_str,
                 "event_type": tool_name,
