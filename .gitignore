@@ -122,6 +122,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -169,3 +170,11 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
+
+# Infra
+infra/*/*.tfvars
+infra/*/*.tfstate
+infra/*/*.tfstate.backup
+infra/*/.terraform*
+infra/*/*.plan
+policies.db
