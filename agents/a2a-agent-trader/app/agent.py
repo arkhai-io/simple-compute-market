@@ -156,8 +156,12 @@ def _extract_content_payload(
             tool_name = tool_pattern_match.group("tool").strip()
             payload_str = tool_pattern_match.group("payload").strip()
 
-            enum_normalized_payload = normalize_enums(payload_str)
-            payload_dict = safe_literal_eval(enum_normalized_payload)
+            try:
+                enum_normalized_payload = normalize_enums(payload_str)
+                payload_dict = safe_literal_eval(enum_normalized_payload)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse A2A payload: {e}")
+                return None, None
 
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
