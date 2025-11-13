@@ -20,6 +20,7 @@ from app.schema.pydantic_models import (
     TokenResource,
     ComputeResourcePortfolio,
 )
+from app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 
@@ -106,15 +107,14 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
     if not isinstance(context.event, MakeOfferEvent):
         return None
 
-    order = context.event.order
+    # Extract order and resources using utility function
+    order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+    
+    if order is None:
+        return None
+    
     offer_resource = order.offer_resource
     demand_resource = order.demand_resource
-    
-    # Validate resource types
-    offer_compute = offer_resource if isinstance(offer_resource, ComputeResource) else None
-    offer_token = offer_resource if isinstance(offer_resource, TokenResource) else None
-    demand_compute = demand_resource if isinstance(demand_resource, ComputeResource) else None
-    demand_token = demand_resource if isinstance(demand_resource, TokenResource) else None
     
     # Check agent capacity for demand resource if it's a ComputeResource
     # If insufficient capacity, reject immediately without running model

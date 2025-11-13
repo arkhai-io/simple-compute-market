@@ -14,6 +14,7 @@ from app.schema.pydantic_models import (
 )
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
+from app.utils.validation import extract_resources_from_make_offer_event
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
@@ -207,26 +208,6 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | N
     return None
 
 
-def _extract_resources_from_event(context: DecisionContext) -> tuple[ComputeResource | None, ComputeResource | None, TokenResource | None, TokenResource | None]:
-    """Safely extract offer_resource and demand_resource from MakeOfferEvent.
-    
-    Returns: (offer_compute, demand_compute, offer_token, demand_token)
-    """
-    if not isinstance(context.event, MakeOfferEvent):
-        return None, None, None, None
-    
-    order = context.event.order
-    offer_resource = order.offer_resource
-    demand_resource = order.demand_resource
-    
-    offer_compute = offer_resource if isinstance(offer_resource, ComputeResource) else None
-    offer_token = offer_resource if isinstance(offer_resource, TokenResource) else None
-    demand_compute = demand_resource if isinstance(demand_resource, ComputeResource) else None
-    demand_token = demand_resource if isinstance(demand_resource, TokenResource) else None
-    
-    return offer_compute, demand_compute, offer_token, demand_token
-
-
 @policy_callable("mo.action.accept_offer")
 def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     """Accept offer policy that validates resources and checks agent capacity.
@@ -241,15 +222,14 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     if not isinstance(context.event, MakeOfferEvent):
         return None
     
-    order = context.event.order
+    # Extract order and resources using utility function
+    order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+    
+    if order is None:
+        return None
+    
     offer_resource = order.offer_resource
     demand_resource = order.demand_resource
-    
-    # Validate resource types
-    offer_compute = offer_resource if isinstance(offer_resource, ComputeResource) else None
-    offer_token = offer_resource if isinstance(offer_resource, TokenResource) else None
-    demand_compute = demand_resource if isinstance(demand_resource, ComputeResource) else None
-    demand_token = demand_resource if isinstance(demand_resource, TokenResource) else None
     
     # Check agent capacity for demand resource if it's a ComputeResource
     if demand_compute:

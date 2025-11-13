@@ -137,6 +137,14 @@ class MarketOrder(BaseModel):
     agents before the negotiation begins.
     An open order is one with blank attestations (maker_attestation and taker_attestation).
     A closed order is one with filled out maker_attestation and taker_attestation.
+    
+    Resource Parsing:
+        The `parse_resources` model_validator automatically converts offer_resource and
+        demand_resource from dictionaries to proper Resource types (ComputeResource or
+        TokenResource) during validation. Resources are identified by:
+        - TokenResource: presence of 'token' key in dict
+        - ComputeResource: presence of 'gpu_model' key in dict
+        If a resource dict doesn't match either pattern, ValidationError is raised.
     """
 
     order_id: str = Field(description="The id of the order")
@@ -165,7 +173,18 @@ class MarketOrder(BaseModel):
     @model_validator(mode='before')
     @classmethod
     def parse_resources(cls, data: Any) -> Any:
-        """Parse offer_resource and demand_resource from dicts to proper Resource types."""
+        """Parse offer_resource and demand_resource from dicts to proper Resource types.
+        
+        Resource type detection:
+        - If dict contains 'token' key → TokenResource (takes precedence)
+        - If dict contains 'gpu_model' key → ComputeResource
+        - If dict contains both keys → TokenResource (token takes precedence)
+        - If already a Resource instance → passes through unchanged
+        - If neither key present → raises ValueError
+        
+        Note: When both 'token' and 'gpu_model' are present, TokenResource is created
+        and 'gpu_model' is ignored. This ensures deterministic parsing behavior.
+        """
         if not isinstance(data, dict):
             return data
         
@@ -173,6 +192,7 @@ class MarketOrder(BaseModel):
         if 'offer_resource' in data:
             offer_res = data['offer_resource']
             if isinstance(offer_res, dict):
+                # TokenResource takes precedence if both keys are present
                 if 'token' in offer_res:
                     data['offer_resource'] = TokenResource(**offer_res)
                 elif 'gpu_model' in offer_res:
@@ -188,6 +208,7 @@ class MarketOrder(BaseModel):
         if 'demand_resource' in data:
             demand_res = data['demand_resource']
             if isinstance(demand_res, dict):
+                # TokenResource takes precedence if both keys are present
                 if 'token' in demand_res:
                     data['demand_resource'] = TokenResource(**demand_res)
                 elif 'gpu_model' in demand_res:

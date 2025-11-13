@@ -24,7 +24,9 @@ from app.utils.validation import (
     validate_market_order,
     extract_compute_resource,
     extract_token_resource,
+    extract_resources_from_make_offer_event,
 )
+from app.schema.pydantic_models import DecisionContext
 
 
 class TestResourceAlertRequest:
@@ -185,6 +187,59 @@ class TestMarketOrderResourceDeserialization:
         }
         with pytest.raises(ValidationError):
             MarketOrder.model_validate(order_data)
+    
+    def test_resource_with_both_keys_prioritizes_token(self):
+        """Test that resource with both token and gpu_model is parsed as TokenResource.
+        
+        When a resource dict contains both 'token' and 'gpu_model' keys, the parser
+        prioritizes 'token' and creates a TokenResource. The 'gpu_model' key is ignored.
+        This behavior ensures deterministic parsing when ambiguous data is provided.
+        """
+        order_data = {
+            "order_id": "test_order",
+            "tag": "sell",
+            "order_maker": "agent1",
+            "offer_resource": {
+                "token": "USDT",
+                "amount": 1000000000000000000,
+                "gpu_model": "H200",  # Should be ignored - token takes precedence
+                "quantity": 1,  # This would be invalid for TokenResource but ignored
+            },
+            "demand_resource": {
+                "token": "USDT",
+                "amount": 9000000000000000000,
+            },
+            "duration": 1,
+        }
+        order = MarketOrder.model_validate(order_data)
+        assert isinstance(order.offer_resource, TokenResource)
+        assert order.offer_resource.token == "USDT"
+        # Verify gpu_model was not used
+        assert not hasattr(order.offer_resource, 'gpu_model')
+    
+    def test_resource_already_instance_passes_through(self):
+        """Test that Resource instances (not dicts) pass through unchanged."""
+        compute_res = ComputeResource(
+            gpu_model=GPUModel.H200,
+            quantity=1,
+            sla=90.0,
+            region=Region.CALIFORNIA_US,
+        )
+        token_res = TokenResource(token="USDT", amount=1000000000000000000)
+        
+        # Create order with Resource instances directly
+        order = MarketOrder(
+            order_id="test_order",
+            tag=Tag.SELL,
+            order_maker="agent1",
+            offer_resource=compute_res,
+            demand_resource=token_res,
+            duration=1,
+        )
+        
+        # Resources should be unchanged
+        assert order.offer_resource is compute_res
+        assert order.demand_resource is token_res
 
 
 class TestParseDomainEvent:
@@ -327,4 +382,106 @@ class TestValidationUtilities:
         
         assert extract_token_resource(token_res) == token_res
         assert extract_token_resource(compute_res) is None
+    
+    def test_extract_resources_from_make_offer_event_valid(self):
+        """Test extract_resources_from_make_offer_event with valid MakeOfferEvent."""
+        order = MarketOrder(
+            order_id="test_order",
+            tag=Tag.SELL,
+            order_maker="agent1",
+            offer_resource=ComputeResource(
+                gpu_model=GPUModel.H200,
+                quantity=1,
+                sla=90.0,
+                region=Region.CALIFORNIA_US,
+            ),
+            demand_resource=TokenResource(token="USDT", amount=1000000000000000000),
+            duration=1,
+        )
+        make_offer_event = MakeOfferEvent.from_order(order)
+        
+        context = DecisionContext(
+            event=make_offer_event,
+            available_resources={},
+            agent_id="test_agent",
+        )
+        
+        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        
+        assert order is not None
+        assert order.order_id == "test_order"
+        assert offer_compute is not None
+        assert isinstance(offer_compute, ComputeResource)
+        assert offer_compute.gpu_model == GPUModel.H200
+        assert demand_compute is None
+        assert offer_token is None
+        assert demand_token is not None
+        assert isinstance(demand_token, TokenResource)
+        assert demand_token.token == "USDT"
+    
+    def test_extract_resources_from_make_offer_event_mixed(self):
+        """Test extract_resources_from_make_offer_event with mixed resource types."""
+        order = MarketOrder(
+            order_id="test_order",
+            tag=Tag.BUY,
+            order_maker="agent1",
+            offer_resource=TokenResource(token="USDT", amount=10000000000000000000),
+            demand_resource=ComputeResource(
+                gpu_model=GPUModel.TESLA_V100,
+                quantity=2,
+                sla=99.9,
+                region=Region.NEW_YORK_US,
+            ),
+            duration=1,
+        )
+        make_offer_event = MakeOfferEvent.from_order(order)
+        
+        context = DecisionContext(
+            event=make_offer_event,
+            available_resources={},
+            agent_id="test_agent",
+        )
+        
+        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        
+        assert order is not None
+        assert order.order_id == "test_order"
+        assert offer_compute is None
+        assert offer_token is not None
+        assert isinstance(offer_token, TokenResource)
+        assert offer_token.token == "USDT"
+        assert demand_compute is not None
+        assert isinstance(demand_compute, ComputeResource)
+        assert demand_compute.gpu_model == GPUModel.TESLA_V100
+        assert demand_token is None
+    
+    def test_extract_resources_from_make_offer_event_non_make_offer(self):
+        """Test extract_resources_from_make_offer_event with non-MakeOfferEvent returns all None."""
+        # Create a different event type
+        resource_event = ResourceImbalanceEvent(
+            event_id="test_event",
+            source="test_source",
+            resource=ComputeResource(
+                gpu_model=GPUModel.H200,
+                quantity=1,
+                sla=90.0,
+                region=Region.CALIFORNIA_US,
+            ),
+            imbalance_type="surplus",
+            severity=0.5,
+        )
+        
+        context = DecisionContext(
+            event=resource_event,
+            available_resources={},
+            agent_id="test_agent",
+        )
+        
+        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        
+        assert order is None
+        assert offer_compute is None
+        assert demand_compute is None
+        assert offer_token is None
+        assert demand_token is None
 
