@@ -19,6 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
+from alkahest_py.alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
@@ -278,6 +279,7 @@ class TraderAgent(BaseAgent):
     _policy_manager: PolicyManager = PrivateAttr()
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
+    _alkahest_client: Any = PrivateAttr()
 
     def __init__(
         self,
@@ -328,6 +330,9 @@ class TraderAgent(BaseAgent):
         
         # Initialize market provider
         self._market_provider = create_market_provider()
+
+        # Initialize Alkahest client
+        self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
