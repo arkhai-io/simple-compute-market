@@ -234,7 +234,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             order = MarketOrder.model_validate(offer_data)
             return MakeOfferEvent.from_order(order)
         except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to create MarketOrderEvent: {e}, falling back to DomainEvent")
+            logger.warning(f"Failed to create MakeOfferEvent: {e}, falling back to DomainEvent")
     
     elif event_type == EventType.NEGOTIATION:
         try:
