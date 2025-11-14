@@ -87,9 +87,9 @@ def _select_action(logits: Any, order_id: str | None = None, offer_resource: Any
     if order_id:
         parameters["order_id"] = order_id
     if offer_resource:
-        parameters["offer_resource"] = offer_resource.model_dump(mode='json') if hasattr(offer_resource, 'model_dump') else offer_resource
+        parameters["offer_resource"] = offer_resource.model_dump(mode="json") if hasattr(offer_resource, "model_dump") else offer_resource
     if demand_resource:
-        parameters["demand_resource"] = demand_resource.model_dump(mode='json') if hasattr(demand_resource, 'model_dump') else demand_resource
+        parameters["demand_resource"] = demand_resource.model_dump(mode="json") if hasattr(demand_resource, "model_dump") else demand_resource
 
     return DomainAction(action_type=action_type, parameters=parameters)
 
