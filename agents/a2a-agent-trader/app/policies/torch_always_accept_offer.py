@@ -99,9 +99,12 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
     """TorchScript-driven offer response conforming to make_offer composite standard.
 
     Extracts resources from MakeOfferEvent, validates resource types, checks agent
-    capacity, and includes resource details in action parameters. The model currently
-    uses a placeholder feature vector, but in production should derive features from
-    the extracted resources and context.
+    capacity, and includes resource details in action parameters.
+    - If demand is a ComputeResource: checks agent capacity, rejects if insufficient.
+    - If demand is a TokenResource: accepts immediately (simulated assumption: we have enough tokens).
+    - Otherwise: runs TorchScript model to make decision.
+    The model currently uses a placeholder feature vector, but in production should derive
+    features from the extracted resources and context.
     """
     # Only process MakeOfferEvent
     if not isinstance(context.event, MakeOfferEvent):
@@ -138,6 +141,18 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
             except Exception as e:
                 # If portfolio validation fails, log and continue to model
                 logger.warning(f"[TORCH POLICY] Failed to validate portfolio: {e}")
+    elif demand_token:
+        # If demand is a TokenResource, accept the offer immediately
+        # Simulated assumption: we have enough tokens in our wallet
+        logger.info("[TORCH POLICY] Demand is TokenResource, accepting offer (assuming sufficient tokens)")
+        return DomainAction(
+            action_type=ActionType.ACCEPT_OFFER,
+            parameters={
+                "order_id": order.order_id,
+                "offer_resource": offer_resource.model_dump(mode='json'),
+                "demand_resource": demand_resource.model_dump(mode='json'),
+            }
+        )
 
     model = _get_model()
     if model is None or torch is None:

@@ -212,7 +212,8 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     """Accept offer policy that validates resources and checks agent capacity.
     
     Extracts offer_resource and demand_resource from MakeOfferEvent.
-    Checks if agent has capacity for demand_resource if it's a ComputeResource.
+    - If demand is a ComputeResource: checks if agent has sufficient capacity, rejects if not.
+    - If demand is a TokenResource: accepts the offer (simulated assumption: we have enough tokens).
     Includes resource details in action parameters.
     """
     from app.schema.pydantic_models import ActionType
@@ -251,6 +252,10 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
+    elif demand_token:
+        # If demand is a TokenResource, accept the offer
+        # Simulated assumption: we have enough tokens in our wallet
+        pass
     
     # Accept offer with resource details
     return DomainAction(
