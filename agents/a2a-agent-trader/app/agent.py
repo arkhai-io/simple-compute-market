@@ -440,6 +440,21 @@ class TraderAgent(BaseAgent):
         
         return None
     
+    async def _demo_alkahest(self) -> None:
+        # Token address of USDC
+        ADDRESS_USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+
+        # TODO: Take this out and put this in the acceptance logic
+        logger.info(f"[ALKAHEST]: Using USDC: {ADDRESS_USDC}")
+
+        # Approve a demo escrow transaction
+        hash = await self._alkahest_client.erc20.approve(
+            {"address": ADDRESS_USDC, "value": 100},
+            "escrow"
+        )
+
+        logger.info(f"[ALKAHEST]: Hash: {hash}")
+
     async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: InvocationContext | None = None) -> str:
         """Process event through full reactive pipeline: context -> policy -> action -> execution -> recording."""
         # [1] Event detection - already done (domain_event received)
@@ -552,17 +567,6 @@ class TraderAgent(BaseAgent):
         policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
-
-        ADDRESS_USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
-
-        # TODO: Take this out and put this in the acceptance logic
-        logger.info(f"[ALKAHEST]: Using USDC: {ADDRESS_USDC}")
-        hash = await self._alkahest_client.erc20.approve(
-            {"address": ADDRESS_USDC, "value": 100},
-            "escrow"
-        )
-
-        logger.info(f"[ALKAHEST]: Hash: {hash}")
 
         yield Event(
             author=self.name,
