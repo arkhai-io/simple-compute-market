@@ -56,7 +56,7 @@ def _select_action(logits: Any, order_id: str | None = None, offer_resource: Any
     """Map model logits to a domain action with resource details.
     
     Args:
-        logits: Model output logits
+        logits: PyTorch Model output logits
         order_id: Optional order ID to include in parameters
         offer_resource: Optional offer resource to include in parameters
         demand_resource: Optional demand resource to include in parameters
