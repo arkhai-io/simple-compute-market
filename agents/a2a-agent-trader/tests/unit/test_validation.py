@@ -498,18 +498,16 @@ class TestValidationUtilities:
             agent_id="test_agent",
         )
         
-        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
         
         assert order is not None
         assert order.order_id == "test_order"
-        assert offer_compute is not None
-        assert isinstance(offer_compute, ComputeResource)
-        assert offer_compute.gpu_model == GPUModel.H200
-        assert demand_compute is None
-        assert offer_token is None
-        assert demand_token is not None
-        assert isinstance(demand_token, TokenResource)
-        assert demand_token.token == "USDT"
+        assert offer_resource is not None
+        assert isinstance(offer_resource, ComputeResource)
+        assert offer_resource.gpu_model == GPUModel.H200
+        assert demand_resource is not None
+        assert isinstance(demand_resource, TokenResource)
+        assert demand_resource.token == "USDT"
     
     def test_extract_resources_from_make_offer_event_mixed(self):
         """Test extract_resources_from_make_offer_event with mixed resource types."""
@@ -533,18 +531,16 @@ class TestValidationUtilities:
             agent_id="test_agent",
         )
         
-        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
         
         assert order is not None
         assert order.order_id == "test_order"
-        assert offer_compute is None
-        assert offer_token is not None
-        assert isinstance(offer_token, TokenResource)
-        assert offer_token.token == "USDT"
-        assert demand_compute is not None
-        assert isinstance(demand_compute, ComputeResource)
-        assert demand_compute.gpu_model == GPUModel.TESLA_V100
-        assert demand_token is None
+        assert offer_resource is not None
+        assert isinstance(offer_resource, TokenResource)
+        assert offer_resource.token == "USDT"
+        assert demand_resource is not None
+        assert isinstance(demand_resource, ComputeResource)
+        assert demand_resource.gpu_model == GPUModel.TESLA_V100
     
     def test_extract_resources_from_make_offer_event_non_make_offer(self):
         """Test extract_resources_from_make_offer_event with non-MakeOfferEvent returns all None."""
@@ -568,11 +564,9 @@ class TestValidationUtilities:
             agent_id="test_agent",
         )
         
-        order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+        order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
         
         assert order is None
-        assert offer_compute is None
-        assert demand_compute is None
-        assert offer_token is None
-        assert demand_token is None
+        assert offer_resource is None
+        assert demand_resource is None
 

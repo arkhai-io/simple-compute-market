@@ -111,22 +111,19 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
         return None
 
     # Extract order and resources using utility function
-    order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+    order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
     
     if order is None:
         return None
     
-    offer_resource = order.offer_resource
-    demand_resource = order.demand_resource
-    
     # Check agent capacity for demand resource if it's a ComputeResource
     # If insufficient capacity, reject immediately without running model
-    if demand_compute:
+    if isinstance(demand_resource, ComputeResource):
         portfolio_dict = context.available_resources
         if portfolio_dict and "resources" in portfolio_dict:
             try:
                 portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_compute):
+                if not portfolio.has_capacity(demand_resource):
                     # Agent doesn't have capacity - reject with resource details
                     logger.info("[TORCH POLICY] Insufficient capacity, rejecting offer")
                     return DomainAction(
@@ -134,14 +131,14 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
                         parameters={
                             "reason": "insufficient_capacity",
                             "order_id": order.order_id,
-                            "demand_resource": demand_compute.model_dump(mode='json'),
-                            "offer_resource": offer_resource.model_dump(mode='json'),
+                            "demand_resource": demand_resource.model_dump(mode="json"),
+                            "offer_resource": offer_resource.model_dump(mode="json"),
                         }
                     )
             except Exception as e:
                 # If portfolio validation fails, log and continue to model
                 logger.warning(f"[TORCH POLICY] Failed to validate portfolio: {e}")
-    elif demand_token:
+    elif isinstance(demand_resource, TokenResource):
         # If demand is a TokenResource, accept the offer immediately
         # Simulated assumption: we have enough tokens in our wallet
         logger.info("[TORCH POLICY] Demand is TokenResource, accepting offer (assuming sufficient tokens)")
@@ -149,8 +146,8 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
             action_type=ActionType.ACCEPT_OFFER,
             parameters={
                 "order_id": order.order_id,
-                "offer_resource": offer_resource.model_dump(mode='json'),
-                "demand_resource": demand_resource.model_dump(mode='json'),
+                "offer_resource": offer_resource.model_dump(mode="json"),
+                "demand_resource": demand_resource.model_dump(mode="json"),
             }
         )
 

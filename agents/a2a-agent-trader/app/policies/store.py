@@ -223,28 +223,25 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
         return None
     
     # Extract order and resources using utility function
-    order, offer_compute, demand_compute, offer_token, demand_token = extract_resources_from_make_offer_event(context)
+    order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
     
     if order is None:
         return None
     
-    offer_resource = order.offer_resource
-    demand_resource = order.demand_resource
-    
     # Check agent capacity for demand resource if it's a ComputeResource
-    if demand_compute:
+    if isinstance(demand_resource, ComputeResource):
         # Get portfolio from available_resources
         portfolio_dict = context.available_resources
         if portfolio_dict and "resources" in portfolio_dict:
             try:
                 portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_compute):
+                if not portfolio.has_capacity(demand_resource):
                     # Agent doesn't have capacity - reject
                     return DomainAction(
                         action_type=ActionType.REJECT_OFFER,
                         parameters={
                             "reason": "insufficient_capacity",
-                            "demand_resource": demand_compute.model_dump(mode='json'),
+                            "demand_resource": demand_resource.model_dump(mode="json"),
                         }
                     )
             except Exception as e:
@@ -252,7 +249,7 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
-    elif demand_token:
+    elif isinstance(demand_resource, TokenResource):
         # If demand is a TokenResource, accept the offer
         # Simulated assumption: we have enough tokens in our wallet
         pass
