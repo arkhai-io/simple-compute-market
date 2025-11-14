@@ -340,8 +340,19 @@ class TraderAgent(BaseAgent):
         # Initialize market provider
         self._market_provider = create_market_provider()
 
-        # Initialize Alkahest client
-        self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
+        # Initialize Alkahest client (only if both keys are provided and non-empty)
+        has_priv_key = AGENT_PRIV_KEY and isinstance(AGENT_PRIV_KEY, str) and AGENT_PRIV_KEY.strip()
+        has_rpc_url = CHAIN_RPC_URL and isinstance(CHAIN_RPC_URL, str) and CHAIN_RPC_URL.strip()
+        
+        if has_priv_key and has_rpc_url:
+            try:
+                self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
+            except Exception as e:
+                logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
+                self._alkahest_client = None
+        else:
+            logger.debug("[ALKAHEST]: AGENT_PRIV_KEY or CHAIN_RPC_URL not set. Alkahest client will not be initialized.")
+            self._alkahest_client = None
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
