@@ -32,13 +32,6 @@ class Region(str, Enum):
     TOKYO_JP = "Tokyo, JP"
 
 
-class Tag(str, Enum):
-    """Order type tags"""
-
-    BUY = "buy"
-    SELL = "sell"
-
-
 class Attestation(BaseModel):
     """Describes the attestation of an agent with respect to a compute resource.
 
@@ -148,7 +141,6 @@ class MarketOrder(BaseModel):
     """
 
     order_id: str = Field(description="The id of the order")
-    tag: Tag = Field(description="The tag of the order (buy or sell)")
     order_maker: str = Field(description="The card URL of the agent who made the order")
     order_taker: str | None = Field(
         default="",
@@ -279,7 +271,6 @@ class MakeOfferEvent(DomainEvent):
             order=order,
             data={
                 "order_id": order.order_id,
-                "tag": order.tag.value,
                 "offer_resource": order.offer_resource.model_dump(mode='json'),
                 "demand_resource": order.demand_resource.model_dump(mode='json'),
                 "duration": order.duration,

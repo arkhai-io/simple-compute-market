@@ -16,7 +16,6 @@ from app.schema.pydantic_models import (
     MakeOfferEvent,
     GPUModel,
     Region,
-    Tag,
 )
 from app.agent import _parse_domain_event
 from app.utils.validation import (
@@ -123,7 +122,6 @@ class TestMarketOrderResourceDeserialization:
         """Test MarketOrder with ComputeResource as offer_resource."""
         order_data = {
             "order_id": "test_order",
-            "tag": "sell",
             "order_maker": "agent1",
             "offer_resource": {
                 "gpu_model": "H200",
@@ -148,7 +146,6 @@ class TestMarketOrderResourceDeserialization:
         """Test MarketOrder with TokenResource as offer_resource."""
         order_data = {
             "order_id": "test_order",
-            "tag": "buy",
             "order_maker": "agent1",
             "offer_resource": {
                 "token": "USDT",
@@ -173,7 +170,6 @@ class TestMarketOrderResourceDeserialization:
         """Test that invalid resource structure raises ValidationError."""
         order_data = {
             "order_id": "test_order",
-            "tag": "sell",
             "order_maker": "agent1",
             "offer_resource": {
                 # Missing both token and gpu_model
@@ -197,7 +193,6 @@ class TestMarketOrderResourceDeserialization:
         """
         order_data = {
             "order_id": "test_order",
-            "tag": "sell",
             "order_maker": "agent1",
             "offer_resource": {
                 "token": "USDT",
@@ -230,7 +225,6 @@ class TestMarketOrderResourceDeserialization:
         # Create order with Resource instances directly
         order = MarketOrder(
             order_id="test_order",
-            tag=Tag.SELL,
             order_maker="agent1",
             offer_resource=compute_res,
             demand_resource=token_res,
@@ -278,7 +272,6 @@ class TestParseDomainEvent:
             "data": {
                 "offer": {
                     "order_id": "test_order",
-                    "tag": "sell",
                     "order_maker": "agent1",
                     "offer_resource": {
                         "gpu_model": "H200",
@@ -340,7 +333,6 @@ class TestValidationUtilities:
         """Test validate_market_order utility."""
         order_data = {
             "order_id": "test_order",
-            "tag": "sell",
             "order_maker": "agent1",
             "offer_resource": {
                 "gpu_model": "H200",
@@ -387,7 +379,6 @@ class TestValidationUtilities:
         """Test extract_resources_from_make_offer_event with valid MakeOfferEvent."""
         order = MarketOrder(
             order_id="test_order",
-            tag=Tag.SELL,
             order_maker="agent1",
             offer_resource=ComputeResource(
                 gpu_model=GPUModel.H200,
@@ -423,7 +414,6 @@ class TestValidationUtilities:
         """Test extract_resources_from_make_offer_event with mixed resource types."""
         order = MarketOrder(
             order_id="test_order",
-            tag=Tag.BUY,
             order_maker="agent1",
             offer_resource=TokenResource(token="USDT", amount=10000000000000000000),
             demand_resource=ComputeResource(

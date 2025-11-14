@@ -191,7 +191,6 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
     return DomainAction(
         action_type=ActionType.MAKE_OFFER,
         parameters={
-            "tag": "sell",
             "gpu_model": res.gpu_model,
             "sla": res.sla,
             "region": res.region,
