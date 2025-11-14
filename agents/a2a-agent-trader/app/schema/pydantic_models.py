@@ -47,6 +47,46 @@ class Attestation(BaseModel):
 class Resource(BaseModel):
     """Generic resource.
     """
+    
+    @classmethod
+    def parse_from_dict(cls, data: Any) -> "Resource":
+        """Parse a resource from a dictionary or return existing Resource instance.
+        
+        Converts dictionary payloads into the appropriate Resource subclass:
+        - If data is already a Resource instance → returns it unchanged
+        - If dict contains 'token' key → returns TokenResource (takes precedence)
+        - If dict contains 'gpu_model' key → returns ComputeResource
+        - If dict contains both keys → returns TokenResource (token takes precedence)
+        - If dict contains neither key → raises ValueError
+        - If data is not a dict and not a Resource → returns data unchanged
+        
+        Args:
+            data: Dictionary with resource data, existing Resource instance, or other value
+            
+        Returns:
+            Resource instance (TokenResource, ComputeResource, or existing Resource)
+            
+        Raises:
+            ValueError: If data is a dict but doesn't contain required keys for any resource type
+        """
+        # If already a Resource instance, return it unchanged
+        if isinstance(data, Resource):
+            return data
+        
+        # If not a dict, return as-is (pass through)
+        if not isinstance(data, dict):
+            return data
+        
+        # TokenResource takes precedence if both keys are present
+        if "token" in data:
+            return TokenResource(**data)
+        elif "gpu_model" in data:
+            return ComputeResource(**data)
+        else:
+            raise ValueError(
+                "Resource dict must have either 'token' (TokenResource) "
+                "or 'gpu_model' (ComputeResource) key"
+            )
 
 
 class TokenResource(Resource):
@@ -134,8 +174,9 @@ class MarketOrder(BaseModel):
     Resource Parsing:
         The `parse_resources` model_validator automatically converts offer_resource and
         demand_resource from dictionaries to proper Resource types (ComputeResource or
-        TokenResource) during validation. Resources are identified by:
-        - TokenResource: presence of 'token' key in dict
+        TokenResource) during validation using Resource.parse_from_dict() helper.
+        Resources are identified by:
+        - TokenResource: presence of 'token' key in dict (takes precedence)
         - ComputeResource: presence of 'gpu_model' key in dict
         If a resource dict doesn't match either pattern, ValidationError is raised.
     """
@@ -162,17 +203,17 @@ class MarketOrder(BaseModel):
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def parse_resources(cls, data: Any) -> Any:
         """Parse offer_resource and demand_resource from dicts to proper Resource types.
         
-        Resource type detection:
-        - If dict contains 'token' key → TokenResource (takes precedence)
-        - If dict contains 'gpu_model' key → ComputeResource
-        - If dict contains both keys → TokenResource (token takes precedence)
-        - If already a Resource instance → passes through unchanged
-        - If neither key present → raises ValueError
+        Uses Resource.parse_from_dict() helper to convert dictionaries to appropriate
+        Resource subclasses (TokenResource or ComputeResource). The helper handles:
+        - TokenResource: presence of 'token' key in dict (takes precedence)
+        - ComputeResource: presence of 'gpu_model' key in dict
+        - Existing Resource instances: passes through unchanged
+        - Invalid dicts: raises ValueError
         
         Note: When both 'token' and 'gpu_model' are present, TokenResource is created
         and 'gpu_model' is ignored. This ensures deterministic parsing behavior.
@@ -180,37 +221,13 @@ class MarketOrder(BaseModel):
         if not isinstance(data, dict):
             return data
         
-        # Parse offer_resource
-        if 'offer_resource' in data:
-            offer_res = data['offer_resource']
-            if isinstance(offer_res, dict):
-                # TokenResource takes precedence if both keys are present
-                if 'token' in offer_res:
-                    data['offer_resource'] = TokenResource(**offer_res)
-                elif 'gpu_model' in offer_res:
-                    data['offer_resource'] = ComputeResource(**offer_res)
-                else:
-                    raise ValueError(
-                        "offer_resource dict must have either 'token' (TokenResource) "
-                        "or 'gpu_model' (ComputeResource) key"
-                    )
-            # If already a Resource instance, pass through
+        # Parse offer_resource using Resource helper
+        if "offer_resource" in data:
+            data["offer_resource"] = Resource.parse_from_dict(data["offer_resource"])
         
-        # Parse demand_resource
-        if 'demand_resource' in data:
-            demand_res = data['demand_resource']
-            if isinstance(demand_res, dict):
-                # TokenResource takes precedence if both keys are present
-                if 'token' in demand_res:
-                    data['demand_resource'] = TokenResource(**demand_res)
-                elif 'gpu_model' in demand_res:
-                    data['demand_resource'] = ComputeResource(**demand_res)
-                else:
-                    raise ValueError(
-                        "demand_resource dict must have either 'token' (TokenResource) "
-                        "or 'gpu_model' (ComputeResource) key"
-                    )
-            # If already a Resource instance, pass through
+        # Parse demand_resource using Resource helper
+        if "demand_resource" in data:
+            data["demand_resource"] = Resource.parse_from_dict(data["demand_resource"])
         
         return data
 
@@ -271,8 +288,8 @@ class MakeOfferEvent(DomainEvent):
             order=order,
             data={
                 "order_id": order.order_id,
-                "offer_resource": order.offer_resource.model_dump(mode='json'),
-                "demand_resource": order.demand_resource.model_dump(mode='json'),
+                "offer_resource": order.offer_resource.model_dump(mode="json"),
+                "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration": order.duration,
             },
         )
@@ -299,11 +316,11 @@ class ResourceAlertRequest(BaseModel):
     label: str = Field(description="Alert label (e.g., 'LOW UTILIZATION')")
     threshold: str = Field(description="Threshold string (e.g., '<=0.30')")
     
-    @field_validator('resource')
+    @field_validator("resource")
     @classmethod
     def validate_resource(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Validate resource dict has all required fields."""
-        required_fields = ['gpu_model', 'quantity', 'sla', 'region']
+        required_fields = ["gpu_model", "quantity", "sla", "region"]
         missing = [field for field in required_fields if field not in v]
         if missing:
             raise ValueError(f"Resource dict missing required fields: {missing}")
@@ -319,10 +336,10 @@ class ResourceAlertRequest(BaseModel):
         Maps value -> severity, extracts resource fields, stores label/threshold in data.
         """
         # Extract and validate resource fields
-        gpu_model = GPUModel(self.resource['gpu_model'])
-        quantity = int(self.resource['quantity'])
-        sla = float(self.resource['sla'])
-        region = Region(self.resource['region'])
+        gpu_model = GPUModel(self.resource["gpu_model"])
+        quantity = int(self.resource["quantity"])
+        sla = float(self.resource["sla"])
+        region = Region(self.resource["region"])
         
         # Create ComputeResource
         compute_resource = ComputeResource(
@@ -368,7 +385,7 @@ class ResourceImbalanceEvent(DomainEvent):
     imbalance_type: str = Field(description="Type of imbalance: surplus or deficit")
     severity: float = Field(description="Severity of imbalance (0.0-1.0)")
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def parse_resource(cls, data: Any) -> Any:
         """Parse resource from dict to ComputeResource if needed.
@@ -379,35 +396,35 @@ class ResourceImbalanceEvent(DomainEvent):
             return data
         
         # Handle nested data structure - extract fields from data dict
-        if 'data' in data and isinstance(data['data'], dict):
-            nested_data = data['data']
+        if "data" in data and isinstance(data["data"], dict):
+            nested_data = data["data"]
             
             # Extract resource from nested data
-            if 'resource' in nested_data:
-                resource_dict = nested_data['resource']
+            if "resource" in nested_data:
+                resource_dict = nested_data["resource"]
                 if isinstance(resource_dict, dict):
                     # Validate required fields
-                    required_fields = ['gpu_model', 'quantity', 'sla', 'region']
+                    required_fields = ["gpu_model", "quantity", "sla", "region"]
                     missing = [f for f in required_fields if f not in resource_dict]
                     if missing:
                         raise ValueError(f"Resource missing required fields: {missing}")
                     # Convert to ComputeResource
-                    data['resource'] = ComputeResource.model_validate(resource_dict)
+                    data["resource"] = ComputeResource.model_validate(resource_dict)
             
             # Extract imbalance_type and severity from nested data if not at top level
-            if 'imbalance_type' in nested_data and 'imbalance_type' not in data:
-                data['imbalance_type'] = nested_data['imbalance_type']
-            if 'severity' in nested_data and 'severity' not in data:
-                data['severity'] = nested_data['severity']
+            if "imbalance_type" in nested_data and "imbalance_type" not in data:
+                data["imbalance_type"] = nested_data["imbalance_type"]
+            if "severity" in nested_data and "severity" not in data:
+                data["severity"] = nested_data["severity"]
         
         # If resource is at top level as dict, convert it
-        elif 'resource' in data and isinstance(data['resource'], dict):
-            resource_dict = data['resource']
-            required_fields = ['gpu_model', 'quantity', 'sla', 'region']
+        elif "resource" in data and isinstance(data["resource"], dict):
+            resource_dict = data["resource"]
+            required_fields = ["gpu_model", "quantity", "sla", "region"]
             missing = [f for f in required_fields if f not in resource_dict]
             if missing:
                 raise ValueError(f"Resource missing required fields: {missing}")
-            data['resource'] = ComputeResource.model_validate(resource_dict)
+            data["resource"] = ComputeResource.model_validate(resource_dict)
         
         return data
 
