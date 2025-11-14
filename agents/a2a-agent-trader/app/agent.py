@@ -553,11 +553,12 @@ class TraderAgent(BaseAgent):
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
 
+        ADDRESS_USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+
         # TODO: Take this out and put this in the acceptance logic
-        address = f"0x{'%040x' % random.randrange(16**40)}"
-        logger.info(f"[ALKAHEST]: Random address: {address}")
+        logger.info(f"[ALKAHEST]: Using USDC: {ADDRESS_USDC}")
         hash = await self._alkahest_client.erc20.approve(
-            {"address": address, "value": 100},
+            {"address": ADDRESS_USDC, "value": 100},
             "escrow"
         )
 
