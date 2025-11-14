@@ -19,6 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
+from alkahest_py.alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
@@ -46,7 +47,8 @@ BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
 POLICY_DB_PATH = CONFIG.policy_db_path
-
+AGENT_PRIV_KEY = CONFIG.agent_priv_key
+CHAIN_RPC_URL = CONFIG.chain_rpc_url
 
 from .schema.pydantic_models import (
     ActionType,
@@ -277,6 +279,7 @@ class TraderAgent(BaseAgent):
     _policy_manager: PolicyManager = PrivateAttr()
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
+    _alkahest_client: Any = PrivateAttr()
 
     def __init__(
         self,
@@ -327,6 +330,9 @@ class TraderAgent(BaseAgent):
         
         # Initialize market provider
         self._market_provider = create_market_provider()
+
+        # Initialize Alkahest client
+        self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
@@ -434,6 +440,21 @@ class TraderAgent(BaseAgent):
         
         return None
     
+    async def _demo_alkahest(self) -> None:
+        # Token address of USDC
+        ADDRESS_USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+
+        # TODO: Take this out and put this in the acceptance logic
+        logger.info(f"[ALKAHEST]: Using USDC: {ADDRESS_USDC}")
+
+        # Approve a demo escrow transaction
+        hash = await self._alkahest_client.erc20.approve(
+            {"address": ADDRESS_USDC, "value": 100},
+            "escrow"
+        )
+
+        logger.info(f"[ALKAHEST]: Hash: {hash}")
+
     async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: InvocationContext | None = None) -> str:
         """Process event through full reactive pipeline: context -> policy -> action -> execution -> recording."""
         # [1] Event detection - already done (domain_event received)
