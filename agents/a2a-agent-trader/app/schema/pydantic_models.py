@@ -5,6 +5,16 @@ from pydantic import BaseModel, Field, SerializeAsAny
 from pydantic import ConfigDict
 
 
+class ERC20TokenMetadata(BaseModel):
+    """Describes registry metadata for an ERC-20 token."""
+
+    symbol: str = Field(description="Ticker symbol, e.g. USDC")
+    contract_address: str = Field(description="Checksummed ERC-20 contract address")
+    decimals: int = Field(
+        description="Number of decimal places the token uses", ge=0, le=30
+    )
+
+
 class GPUModel(str, Enum):
     """GPU hardware models available in the marketplace"""
 
@@ -46,14 +56,11 @@ class Resource(BaseModel):
 
 
 class TokenResource(Resource):
-    """Describes a given value and amount of a token used for trade.
+    """Describes a given value and amount of a token used for trade."""
 
-    Note that while USDT and USDC are precise to 6 decimal places, ERC-20 uses 18 as standard.
-    Thus, we use 18 decimal places.
-    """
-    token: str = Field(description="Token or currency")
-    amount: int = Field(description=
-        "Integer amount for the token, up to 18 decimal places (e.g. 10 units = 10 * 10**18)"
+    token: ERC20TokenMetadata = Field(description="Token metadata resolved from registry")
+    amount: int = Field(
+        description="Integer amount in base units (token amount * 10**decimals)"
     )
 
 class ComputeResource(Resource):
@@ -384,5 +391,3 @@ class Decision(BaseModel):
     def record_outcome(self, outcome: dict[str, Any]) -> None:
         """Record the outcome of this decision."""
         self.outcome = outcome
-
-
