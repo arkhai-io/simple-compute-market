@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def _get_bool_env(var_name: str, default: bool = False) -> bool:
@@ -37,6 +38,12 @@ class Config:
     redis_channels: str  # comma-separated
     enable_event_queue: bool
     market_provider: str  # "static" or "redis"
+    token_registry_path: str
+
+
+DEFAULT_TOKEN_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
+)
 
 
 def load_config() -> Config:
@@ -59,6 +66,9 @@ def load_config() -> Config:
         redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
         enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
         market_provider=os.getenv("MARKET_PROVIDER", "static"),
+        token_registry_path=os.getenv(
+            "TOKEN_REGISTRY_PATH", str(DEFAULT_TOKEN_REGISTRY_PATH)
+        ),
     )
 
 
@@ -82,5 +92,3 @@ def ensure_google_defaults_if_needed(cfg: Config) -> None:
 # Module-level singleton for convenience
 CONFIG = load_config()
 ensure_google_defaults_if_needed(CONFIG)
-
-

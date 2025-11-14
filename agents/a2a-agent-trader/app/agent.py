@@ -78,6 +78,7 @@ from .utils.event_ingestion import (
 from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
+from .utils.token_registry import TOKEN_REGISTRY
 from pydantic import PrivateAttr
 
 
@@ -441,16 +442,18 @@ class TraderAgent(BaseAgent):
         return None
     
     async def _demo_alkahest(self) -> None:
-        # Token address of USDC
-        ADDRESS_USDC = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+        token = TOKEN_REGISTRY.require("USDC")
+        logger.info(
+            "[ALKAHEST] Using %s (%s) with %s decimals",
+            token.symbol,
+            token.contract_address,
+            token.decimals,
+        )
 
-        # TODO: Take this out and put this in the acceptance logic
-        logger.info(f"[ALKAHEST]: Using USDC: {ADDRESS_USDC}")
-
-        # Approve a demo escrow transaction
+        approval_value = 100 * (10 ** token.decimals)
         hash = await self._alkahest_client.erc20.approve(
-            {"address": ADDRESS_USDC, "value": 100},
-            "escrow"
+            {"address": token.contract_address, "value": approval_value},
+            "escrow",
         )
 
         logger.info(f"[ALKAHEST]: Hash: {hash}")

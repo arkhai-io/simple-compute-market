@@ -28,6 +28,7 @@ from app.schema.pydantic_models import (
 )
 
 from .config import CONFIG
+from .token_registry import TOKEN_REGISTRY
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
@@ -228,6 +229,8 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
     logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
+    settlement_token = TOKEN_REGISTRY.require("USDC")
+
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
         tag=order_tag,
@@ -240,8 +243,8 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
             region=Region(region_str),
         ),
         demand_resource=TokenResource(
-            token="USDT",
-            amount=9 * 10**18
+            token=settlement_token,
+            amount=9 * 10**settlement_token.decimals
         ),
         duration=1,
         maker_attestation=None,
