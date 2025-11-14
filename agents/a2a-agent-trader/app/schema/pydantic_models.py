@@ -224,7 +224,7 @@ class MarketOrder(BaseModel):
 
     def is_open(self) -> bool:
         """Check if this is an open order (no attestation)"""
-        return self.maker_attestation is None and self.taker_attestation is None
+        return self.maker_attestation is None or self.taker_attestation is None
 
     def is_closed(self) -> bool:
         """Check if this is a closed order (has attestation)"""
