@@ -237,7 +237,7 @@ def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None
             region=Region(region_str),
         ),
         demand_resource=TokenResource(
-            token=settlement_token.symbol,
+            token=settlement_token,
             amount=9 * 10**settlement_token.decimals,
         ),
         duration=1,

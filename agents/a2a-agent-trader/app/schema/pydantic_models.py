@@ -48,6 +48,21 @@ class Resource(BaseModel):
     """Generic resource.
     """
     
+    @staticmethod
+    def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
+        """Convert token identifiers into ERC20TokenMetadata."""
+        if isinstance(token_value, ERC20TokenMetadata):
+            return token_value
+        if isinstance(token_value, dict):
+            return ERC20TokenMetadata(**token_value)
+        if isinstance(token_value, str):
+            from app.utils.token_registry import TOKEN_REGISTRY
+
+            return TOKEN_REGISTRY.require(token_value)
+        raise ValueError(
+            "Token value must be a symbol string, ERC20TokenMetadata dict, or ERC20TokenMetadata instance"
+        )
+    
     @classmethod
     def parse_from_dict(cls, data: Any) -> "Resource":
         """Parse a resource from a dictionary or return existing Resource instance.
@@ -79,6 +94,8 @@ class Resource(BaseModel):
         
         # TokenResource takes precedence if both keys are present
         if "token" in data:
+            data = dict(data)  # copy to avoid mutating caller input
+            data["token"] = cls._resolve_token_metadata(data["token"])
             return TokenResource(**data)
         elif "gpu_model" in data:
             return ComputeResource(**data)
@@ -92,7 +109,9 @@ class Resource(BaseModel):
 class TokenResource(Resource):
     """Describes a given value and amount of a token used for trade."""
 
-    token: ERC20TokenMetadata = Field(description="Token metadata resolved from registry")
+    token: SerializeAsAny[ERC20TokenMetadata] = Field(
+        description="Token metadata resolved from registry"
+    )
     amount: int = Field(
         description="Integer amount in base units (token amount * 10**decimals)"
     )

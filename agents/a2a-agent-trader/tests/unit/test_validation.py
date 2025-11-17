@@ -17,6 +17,7 @@ from app.schema.pydantic_models import (
     MakeOfferEvent,
     GPUModel,
     Region,
+    ERC20TokenMetadata,
 )
 from app.agent import _parse_domain_event
 from app.utils.validation import (
@@ -27,6 +28,12 @@ from app.utils.validation import (
     extract_resources_from_make_offer_event,
 )
 from app.schema.pydantic_models import DecisionContext
+
+USDT_METADATA = ERC20TokenMetadata(
+    symbol="USDT",
+    contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+    decimals=6,
+)
 
 
 class TestResourceAlertRequest:
@@ -128,7 +135,7 @@ class TestResourceParseFromDict:
         resource = Resource.parse_from_dict(token_dict)
         
         assert isinstance(resource, TokenResource)
-        assert resource.token == "USDT"
+        assert resource.token.symbol == "USDT"
         assert resource.amount == 1000000000000000000
     
     def test_parse_compute_resource_from_dict(self):
@@ -158,7 +165,7 @@ class TestResourceParseFromDict:
         resource = Resource.parse_from_dict(mixed_dict)
         
         assert isinstance(resource, TokenResource)
-        assert resource.token == "USDT"
+        assert resource.token.symbol == "USDT"
         assert not hasattr(resource, "gpu_model")
     
     def test_parse_invalid_dict_raises_value_error(self):
@@ -187,7 +194,7 @@ class TestResourceParseFromDict:
     
     def test_parse_existing_token_resource_passes_through(self):
         """Test that existing TokenResource instance passes through unchanged."""
-        token_res = TokenResource(token="USDT", amount=1000000000000000000)
+        token_res = TokenResource(token=USDT_METADATA, amount=1000000000000000000)
         result = Resource.parse_from_dict(token_res)
         
         assert result is token_res
@@ -241,7 +248,7 @@ class TestMarketOrderResourceDeserialization:
         assert isinstance(order.offer_resource, ComputeResource)
         assert order.offer_resource.gpu_model == GPUModel.H200
         assert isinstance(order.demand_resource, TokenResource)
-        assert order.demand_resource.token == "USDT"
+        assert order.demand_resource.token.symbol == "USDT"
     
     def test_token_resource_offer(self):
         """Test MarketOrder with TokenResource as offer_resource."""
@@ -263,7 +270,7 @@ class TestMarketOrderResourceDeserialization:
         order = MarketOrder.model_validate(order_data)
         
         assert isinstance(order.offer_resource, TokenResource)
-        assert order.offer_resource.token == "USDT"
+        assert order.offer_resource.token.symbol == "USDT"
         assert isinstance(order.demand_resource, ComputeResource)
         assert order.demand_resource.gpu_model == GPUModel.TESLA_V100
     
@@ -309,7 +316,7 @@ class TestMarketOrderResourceDeserialization:
         }
         order = MarketOrder.model_validate(order_data)
         assert isinstance(order.offer_resource, TokenResource)
-        assert order.offer_resource.token == "USDT"
+        assert order.offer_resource.token.symbol == "USDT"
         # Verify gpu_model was not used
         assert not hasattr(order.offer_resource, 'gpu_model')
     
@@ -321,7 +328,7 @@ class TestMarketOrderResourceDeserialization:
             sla=90.0,
             region=Region.CALIFORNIA_US,
         )
-        token_res = TokenResource(token="USDT", amount=1000000000000000000)
+        token_res = TokenResource(token=USDT_METADATA, amount=1000000000000000000)
         
         # Create order with Resource instances directly
         order = MarketOrder(
@@ -458,7 +465,7 @@ class TestValidationUtilities:
             sla=90.0,
             region=Region.CALIFORNIA_US,
         )
-        token_res = TokenResource(token="USDT", amount=1000000000000000000)
+        token_res = TokenResource(token=USDT_METADATA, amount=1000000000000000000)
         
         assert extract_compute_resource(compute_res) == compute_res
         assert extract_compute_resource(token_res) is None
@@ -471,7 +478,7 @@ class TestValidationUtilities:
             sla=90.0,
             region=Region.CALIFORNIA_US,
         )
-        token_res = TokenResource(token="USDT", amount=1000000000000000000)
+        token_res = TokenResource(token=USDT_METADATA, amount=1000000000000000000)
         
         assert extract_token_resource(token_res) == token_res
         assert extract_token_resource(compute_res) is None
@@ -487,7 +494,7 @@ class TestValidationUtilities:
                 sla=90.0,
                 region=Region.CALIFORNIA_US,
             ),
-            demand_resource=TokenResource(token="USDT", amount=1000000000000000000),
+            demand_resource=TokenResource(token=USDT_METADATA, amount=1000000000000000000),
             duration=1,
         )
         make_offer_event = MakeOfferEvent.from_order(order)
@@ -507,14 +514,14 @@ class TestValidationUtilities:
         assert offer_resource.gpu_model == GPUModel.H200
         assert demand_resource is not None
         assert isinstance(demand_resource, TokenResource)
-        assert demand_resource.token == "USDT"
+        assert demand_resource.token.symbol == "USDT"
     
     def test_extract_resources_from_make_offer_event_mixed(self):
         """Test extract_resources_from_make_offer_event with mixed resource types."""
         order = MarketOrder(
             order_id="test_order",
             order_maker="agent1",
-            offer_resource=TokenResource(token="USDT", amount=10000000000000000000),
+            offer_resource=TokenResource(token=USDT_METADATA, amount=10000000000000000000),
             demand_resource=ComputeResource(
                 gpu_model=GPUModel.TESLA_V100,
                 quantity=2,
@@ -537,7 +544,7 @@ class TestValidationUtilities:
         assert order.order_id == "test_order"
         assert offer_resource is not None
         assert isinstance(offer_resource, TokenResource)
-        assert offer_resource.token == "USDT"
+        assert offer_resource.token.symbol == "USDT"
         assert demand_resource is not None
         assert isinstance(demand_resource, ComputeResource)
         assert demand_resource.gpu_model == GPUModel.TESLA_V100
