@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 import logging
 from typing import Any
 
@@ -12,6 +13,8 @@ from google.adk.agents.remote_a2a_agent import (
     AGENT_CARD_WELL_KNOWN_PATH,
     RemoteA2aAgent,
 )
+
+from alkahest_py.alkahest_py import AlkahestClient, StringObligationData
 
 from google.genai import types as genai_types
 
@@ -288,3 +291,79 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder):
         return result
     except Exception as e:
         logger.error(f"[TOOL] Failed to make offer: {e}.")
+
+
+def encode_compute_lease(
+    compute_resource: ComputeResource | dict[str, Any],
+    token_resource: TokenResource | dict[str, Any],
+    duration_days: int = 1,
+) -> bytes:
+    """Encode a compute-for-token trade as Alkahest StringObligationData.
+
+    Args:
+        compute_resource: ComputeResource (or dict payload) describing the offered compute.
+        token_resource: TokenResource (or dict) describing the payment token and amount (base units).
+        duration_days: Lease duration in days (defaults to 1, must be >=1).
+    """
+    compute = compute_resource
+    if isinstance(compute_resource, dict):
+        compute = ComputeResource.model_validate(compute_resource)
+    if not isinstance(compute, ComputeResource):
+        raise ValueError("encode_compute_lease expects a ComputeResource")
+
+    payment = token_resource
+    if isinstance(token_resource, dict):
+        payment = TokenResource.model_validate(token_resource)
+    if not isinstance(payment, TokenResource):
+        raise ValueError("encode_compute_lease expects a TokenResource")
+
+    if duration_days < 1:
+        raise ValueError("duration_days must be >= 1")
+
+    token_meta = payment.token
+    human_total_price = Decimal(payment.amount) / Decimal(10**token_meta.decimals)
+    human_price_per_day = human_total_price / Decimal(duration_days)
+
+    lease_terms = {
+        "gpu_model": compute.gpu_model.value if hasattr(compute.gpu_model, "value") else str(compute.gpu_model),
+        "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
+        "quantity": compute.quantity,
+        "sla": compute.sla,
+        "duration_days": duration_days,
+        "token_symbol": token_meta.symbol,
+        "token_address": token_meta.contract_address,
+        "price_per_day": float(human_price_per_day),
+        "total_price": float(human_total_price),
+    }
+
+    logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
+    encoded = StringObligationData.encode_json_object(lease_terms)
+    return encoded
+
+
+async def approve_token_escrow(
+    token_resource: TokenResource | dict[str, Any],
+    *,
+    client: AlkahestClient | None = None,
+) -> str:
+    """Approve an ERC20 escrow for the provided token resource."""
+    if isinstance(token_resource, TokenResource):
+        payment = token_resource
+    elif isinstance(token_resource, dict):
+        payment = TokenResource.model_validate(token_resource)
+    else:
+        raise ValueError("approve_token_escrow expects a TokenResource or compatible dict")
+    token_meta = payment.token
+    if client is None:
+        raise RuntimeError("approve_token_escrow requires an AlkahestClient (pass agent._alkahest_client)")
+    alkahest_client = client
+
+    price_data = {"address": token_meta.contract_address, "value": payment.amount}
+    logger.info(
+        "[ALKAHEST] Approving escrow for %s %s (%s decimal places) -> %s",
+        payment.amount,
+        token_meta.symbol,
+        token_meta.decimals,
+        price_data,
+    )
+    return await alkahest_client.erc20.approve(price_data, "escrow")
