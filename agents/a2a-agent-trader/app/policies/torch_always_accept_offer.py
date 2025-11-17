@@ -52,7 +52,36 @@ def _get_model() -> Optional[Any]:
     return _loaded_model
 
 
-def _select_action(logits: Any, order_id: str | None = None, offer_resource: Any = None, demand_resource: Any = None) -> DomainAction:
+def _build_action_parameters(
+    order_id: str | None = None,
+    offer_resource: Any = None,
+    demand_resource: Any = None,
+) -> dict[str, Any]:
+    """Build parameter payload with optional resource/order info."""
+    parameters: dict[str, Any] = {}
+    if order_id:
+        parameters["order_id"] = order_id
+    if offer_resource:
+        parameters["offer_resource"] = (
+            offer_resource.model_dump(mode="json")
+            if hasattr(offer_resource, "model_dump")
+            else offer_resource
+        )
+    if demand_resource:
+        parameters["demand_resource"] = (
+            demand_resource.model_dump(mode="json")
+            if hasattr(demand_resource, "model_dump")
+            else demand_resource
+        )
+    return parameters
+
+
+def _select_action(
+    logits: Any,
+    order_id: str | None = None,
+    offer_resource: Any = None,
+    demand_resource: Any = None,
+) -> DomainAction:
     """Map model logits to a domain action with resource details.
     
     Args:
@@ -62,14 +91,8 @@ def _select_action(logits: Any, order_id: str | None = None, offer_resource: Any
         demand_resource: Optional demand resource to include in parameters
     """
     if torch is None:
-        params = {}
-        if order_id:
-            params["order_id"] = order_id
-        if offer_resource:
-            params["offer_resource"] = offer_resource.model_dump(mode="json") if hasattr(offer_resource, "model_dump") else offer_resource
-        if demand_resource:
-            params["demand_resource"] = demand_resource.model_dump(mode="json") if hasattr(demand_resource, "model_dump") else demand_resource
-        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters=params)
+        parameters = _build_action_parameters(order_id, offer_resource, demand_resource)
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters=parameters)
     
     # Expect logits shape [batch, 3]; take first entry
     probs = torch.softmax(logits[0], dim=0)
@@ -82,15 +105,7 @@ def _select_action(logits: Any, order_id: str | None = None, offer_resource: Any
     else:
         action_type = ActionType.COUNTER_OFFER
 
-    # Include resource details in parameters
-    parameters = {}
-    if order_id:
-        parameters["order_id"] = order_id
-    if offer_resource:
-        parameters["offer_resource"] = offer_resource.model_dump(mode="json") if hasattr(offer_resource, "model_dump") else offer_resource
-    if demand_resource:
-        parameters["demand_resource"] = demand_resource.model_dump(mode="json") if hasattr(demand_resource, "model_dump") else demand_resource
-
+    parameters = _build_action_parameters(order_id, offer_resource, demand_resource)
     return DomainAction(action_type=action_type, parameters=parameters)
 
 

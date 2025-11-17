@@ -168,7 +168,8 @@ class MarketOrder(BaseModel):
     """Describes an open order on the market, which contains information about
     the resources being offered or sought, and parameters are used for matching
     agents before the negotiation begins.
-    An open order is one with blank attestations (maker_attestation and taker_attestation).
+    An open order is one with a filled maker_attestation and a blank taker_attestation
+    (taker_attestation is None until an offer is accepted).
     A closed order is one with filled out maker_attestation and taker_attestation.
     
     Resource Parsing:

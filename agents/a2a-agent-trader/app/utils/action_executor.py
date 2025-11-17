@@ -224,7 +224,8 @@ def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    logger.info(f"[TOOL] Creating order for resource.")
+    settlement_token = TOKEN_REGISTRY.require("USDC")
+    logger.info("[TOOL] Creating order for resource.")
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
         order_maker=BASE_URL_OVERRIDE,
@@ -236,8 +237,8 @@ def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None
             region=Region(region_str),
         ),
         demand_resource=TokenResource(
-            token=settlement_token,
-            amount=9 * 10**settlement_token.decimals
+            token=settlement_token.symbol,
+            amount=9 * 10**settlement_token.decimals,
         ),
         duration=1,
         maker_attestation=None,
