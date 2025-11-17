@@ -26,7 +26,6 @@ from app.schema.pydantic_models import (
     GPUModel,
     MarketOrder,
     Region,
-    Tag,
     TokenResource
 )
 
@@ -84,16 +83,14 @@ async def execute_action(action: Action, ctx: InvocationContext | None = None) -
             
         case ActionType.MAKE_OFFER.value:
             gpu_model = parameters.get("gpu_model", "unknown")
-            tag = parameters.get("tag", "unknown")
-            logger.info(f"[ACTION] Creating {tag} order for {gpu_model} with params: {parameters}")
+            logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
             order = create_order(
-                order_tag=parameters.get("tag"),
                 gpu_model_str=parameters.get("gpu_model"),
                 sla=parameters.get("sla"),
                 region_str=parameters.get("region")
             )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
-            outcome["message"] = f"Order created: {tag} for {gpu_model}"
+            outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.
             make_offer_result = await make_offer(ctx=ctx, order=order)
             for part in getattr(make_offer_result.content, "parts", []):
@@ -223,7 +220,7 @@ def accept_offer() -> bool:
     return True
 
 
-def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
     """Create an order in the market.
 
     This only locally assembles the details of an order, without yet propagating it into the market,
@@ -232,7 +229,6 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
     Not to be confused with make_offer, which propagates the order to the market.
 
     Args:
-        order_tag: The type of transaction (OrderTag.BUY or OrderTag.SELL).
         gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
         sla: SLA required for the order.
         region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
@@ -241,12 +237,10 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    logger.info(f"[TOOL] Creating order of type {order_tag} for resource.")
     settlement_token = TOKEN_REGISTRY.require("USDC")
-
+    logger.info("[TOOL] Creating order for resource.")
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
-        tag=order_tag,
         order_maker=BASE_URL_OVERRIDE,
         order_taker=None,
         offer_resource=ComputeResource(
@@ -257,7 +251,7 @@ def create_order(order_tag: Tag, gpu_model_str: str, sla: float, region_str: str
         ),
         demand_resource=TokenResource(
             token=settlement_token,
-            amount=9 * 10**settlement_token.decimals
+            amount=9 * 10**settlement_token.decimals,
         ),
         duration=1,
         maker_attestation=None,

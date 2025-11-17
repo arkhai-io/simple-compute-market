@@ -38,10 +38,17 @@ from google.genai import types as genai_types
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from pydantic import ValidationError
 import logging
-logger = logging.getLogger(__name__)
 
+# Import config first
 from .utils.config import CONFIG
+
+# Setup file-based logging early, before any other imports that might log
+from .utils.logging_config import setup_file_logging
+setup_file_logging(CONFIG.log_file_path, CONFIG.log_level)
+
+logger = logging.getLogger(__name__)
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
@@ -57,6 +64,7 @@ from .schema.pydantic_models import (
     MarketOrder,
     MakeOfferEvent,
     ResourceImbalanceEvent,
+    ResourceAlertRequest,
     NegotiationEvent,
     GPUModel,
     Region,
@@ -202,74 +210,74 @@ def _extract_content_payload(
 
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
-    """Convert a domain event payload dictionary to a DomainEvent instance."""
+    """Convert a domain event payload dictionary to a DomainEvent instance.
+    
+    Uses Pydantic validation for strict type checking. Raises ValidationError
+    for invalid data instead of silently falling back to defaults.
+    """
     if not payload:
         raise ValueError("Cannot parse empty payload as DomainEvent")
     
     event_type_str = payload.get("event_type")
     if not event_type_str:
-        raise ValueError("Missing event_type in payload")
+        raise ValueError("Missing required field: event_type")
     
     try:
         event_type = EventType(event_type_str)
     except ValueError:
-        # If it's not a known EventType, create a basic DomainEvent
-        event_type = None
+        # Unknown event type - log warning and create basic DomainEvent
+        logger.warning(f"[PARSE DOMAIN EVENT] Unknown event_type: {event_type_str}, creating basic DomainEvent")
+        return DomainEvent.model_validate(payload)
     
-    event_id = payload.get("event_id", f"evt_{uuid.uuid4()}")
-    source = payload.get("source", "unknown")
-    timestamp_str = payload.get("timestamp")
-    timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
-    data = payload.get("data", payload.copy())  # Use data if available, otherwise use payload
+    # Extract data - prefer nested 'data' field, fallback to payload itself
+    data = payload.get("data", payload)
     
-    # Try to create specific event types
-    if event_type == EventType.RESOURCE_IMBALANCE:
-        resource_data = data.get("resource", data)
-        try:
-            resource = ComputeResource(
-                gpu_model=GPUModel(resource_data.get("gpu_model", data.get("gpu_model", "H200"))),
-                quantity=resource_data.get("quantity", data.get("quantity", 1)),
-                sla=resource_data.get("sla", data.get("sla", 90.0)),
-                region=Region(resource_data.get("region", data.get("region", "California, US"))),
-            )
-            return ResourceImbalanceEvent.create(
-                event_id=event_id,
-                source=source,
-                resource=resource,
-                imbalance_type=data.get("imbalance_type", "surplus"),
-                severity=float(data.get("severity", 0.5)),
-            )
-        except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to create ResourceImbalanceEvent: {e}, falling back to DomainEvent")
-    elif event_type == EventType.MAKE_OFFER:
-        try:
+    # Use Pydantic validation for each event type
+    try:
+        if event_type == EventType.RESOURCE_IMBALANCE:
+            # Use ResourceImbalanceEvent.model_validate - model_validator handles resource conversion
+            # Ensure resource is present in data for validation
+            if "resource" not in data and "resource" not in payload:
+                raise ValueError("Missing required field 'resource' in ResourceImbalanceEvent")
+            
+            # Ensure required fields exist in data
+            if "imbalance_type" not in data:
+                raise ValueError("Missing required field 'imbalance_type' in ResourceImbalanceEvent data")
+            if "severity" not in data:
+                raise ValueError("Missing required field 'severity' in ResourceImbalanceEvent data")
+            
+            # Use model_validate - model_validator will handle resource dict conversion
+            return ResourceImbalanceEvent.model_validate(payload)
+            
+        elif event_type == EventType.MAKE_OFFER:
+            # Extract offer data - could be in 'offer' key or directly in 'data'
             offer_data = data.get("offer", data)
+            if not isinstance(offer_data, dict):
+                raise ValueError("MakeOfferEvent requires 'offer' or order data as dictionary")
+            
+            # Validate MarketOrder (which will validate resources via model_validator)
             order = MarketOrder.model_validate(offer_data)
             return MakeOfferEvent.from_order(order)
-        except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to create MakeOfferEvent: {e}, falling back to DomainEvent")
-    
-    elif event_type == EventType.NEGOTIATION:
-        try:
-            return NegotiationEvent.create(
-                event_id=event_id,
-                negotiation_id=data.get("negotiation_id", event_id),
-                message_type=data.get("message_type", "offer"),
-                sender=data.get("sender", source),
-                data=data,
-            )
-        except (ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to create NegotiationEvent: {e}, falling back to DomainEvent")
-    
-    # Fallback to base DomainEvent
-    logger.info(f"[PARSE DOMAIN EVENT] Falling back to event_type {event_type}")
-    return DomainEvent(
-        event_id=event_id,
-        event_type=event_type or EventType.MAKE_OFFER,  # Default if unknown
-        timestamp=timestamp,
-        source=source,
-        data=data,
-    )
+            
+        elif event_type == EventType.NEGOTIATION:
+            # Validate NegotiationEvent with required fields
+            required_fields = ["negotiation_id", "message_type", "sender"]
+            missing = [f for f in required_fields if f not in data]
+            if missing:
+                raise ValueError(f"NegotiationEvent missing required fields in data: {missing}")
+            
+            return NegotiationEvent.model_validate(payload)
+            
+        else:
+            # For other known event types, use model_validate
+            return DomainEvent.model_validate(payload)
+            
+    except ValidationError as e:
+        logger.error(f"[PARSE DOMAIN EVENT] Validation failed for {event_type}: {e.errors()}")
+        raise ValueError(f"Failed to validate {event_type} event: {e}") from e
+    except (ValueError, KeyError, TypeError) as e:
+        logger.error(f"[PARSE DOMAIN EVENT] Error parsing {event_type}: {e}")
+        raise ValueError(f"Failed to parse {event_type} event: {e}") from e
 
 class TraderAgent(BaseAgent):
     """
@@ -332,8 +340,19 @@ class TraderAgent(BaseAgent):
         # Initialize market provider
         self._market_provider = create_market_provider()
 
-        # Initialize Alkahest client
-        self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
+        # Initialize Alkahest client (only if both keys are provided and non-empty)
+        has_priv_key = AGENT_PRIV_KEY and isinstance(AGENT_PRIV_KEY, str) and AGENT_PRIV_KEY.strip()
+        has_rpc_url = CHAIN_RPC_URL and isinstance(CHAIN_RPC_URL, str) and CHAIN_RPC_URL.strip()
+        
+        if has_priv_key and has_rpc_url:
+            try:
+                self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
+            except Exception as e:
+                logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
+                self._alkahest_client = None
+        else:
+            logger.debug("[ALKAHEST]: AGENT_PRIV_KEY or CHAIN_RPC_URL not set. Alkahest client will not be initialized.")
+            self._alkahest_client = None
 
     async def get_resource_portfolio(self) -> dict:
         """Get the current stock of all resources managed by the node portfolio.
@@ -605,11 +624,17 @@ ALERTS_APP_NAME = "alerts"
 ALERTS_USER_ID = "resource-monitor"
 
 
-async def _run_alert_conversation(alert: dict) -> str:
+async def _run_alert_conversation(alert_request: ResourceAlertRequest) -> str:
     """Route alert details through the root agent so it can decide on next steps."""
+    # Convert alert to ResourceImbalanceEvent
+    resource_event = alert_request.to_resource_imbalance_event(
+        event_id=f"alert_{uuid.uuid4()}",
+        source=ALERTS_USER_ID,
+    )
+    
     # Validate and queue event if enabled
     if CONFIG.enable_event_queue:
-        queue_event(alert)
+        queue_event(resource_event.model_dump(mode='json'))
         return "Alert processing queued."
     
     session_service = InMemorySessionService()
@@ -623,19 +648,20 @@ async def _run_alert_conversation(alert: dict) -> str:
         session_service=session_service,
     )
 
-    # Convert alert dict to ResourceImbalanceEvent structure
-    alert['event_type'] = EventType.RESOURCE_IMBALANCE.value
-    if 'source' not in alert:
-        alert['source'] = ALERTS_USER_ID
-    if 'event_id' not in alert:
-        alert['event_id'] = f"alert_{uuid.uuid4()}"
+    # Convert ResourceImbalanceEvent to function response format
+    alert_payload = {
+        "event_type": EventType.RESOURCE_IMBALANCE.value,
+        "event_id": resource_event.event_id,
+        "source": resource_event.source,
+        "data": resource_event.model_dump(mode='json'),
+    }
     
     message = genai_types.Content(
         role="user",
         parts=[
             genai_types.Part.from_function_response(
                 name="get_alert",
-                response=alert
+                response=alert_payload
             )
         ],
     )
@@ -665,17 +691,74 @@ async def _run_alert_conversation(alert: dict) -> str:
 
 
 async def handle_resource_alert(request: Request) -> JSONResponse:
-    """Expose an endpoint that forwards resource alerts to the root agent."""
+    """Expose an endpoint that forwards resource alerts to the root agent.
+    
+    Validates alert structure using ResourceAlertRequest with strict validation.
+    Returns 400 with detailed error messages if validation fails.
+    """
     try:
-        alert = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON in request body"}, status_code=400)
+        alert_data = await request.json()
+    except Exception as e:
+        return JSONResponse(
+            {"error": "Invalid JSON in request body", "detail": str(e)},
+            status_code=400
+        )
+    
+    try:
+        # Strict validation - all fields required, no defaults
+        alert_request = ResourceAlertRequest.model_validate(alert_data)
+    except ValidationError as e:
+        # Convert validation errors to JSON-serializable format
+        error_details = []
+        for error in e.errors():
+            # Convert error dict to JSON-serializable format
+            serializable_error = {
+                "type": error.get("type"),
+                "loc": error.get("loc"),
+                "msg": error.get("msg"),
+                "input": error.get("input"),
+            }
+            # Handle ctx field which may contain non-serializable exceptions
+            if "ctx" in error:
+                ctx = error["ctx"]
+                if isinstance(ctx, dict):
+                    serializable_ctx = {}
+                    for key, value in ctx.items():
+                        if isinstance(value, Exception):
+                            serializable_ctx[key] = str(value)
+                        else:
+                            serializable_ctx[key] = value
+                    serializable_error["ctx"] = serializable_ctx
+                else:
+                    serializable_error["ctx"] = str(ctx) if ctx else None
+            error_details.append(serializable_error)
+        
+        logger.error(f"[ALERT VALIDATION] Validation failed: {error_details}")
+        return JSONResponse(
+            {
+                "error": "Alert validation failed",
+                "details": error_details,
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"[ALERT VALIDATION] Unexpected error: {e}")
+        return JSONResponse(
+            {"error": "Failed to validate alert", "detail": str(e)},
+            status_code=400
+        )
 
-    response_text = await _run_alert_conversation(alert)
-    response = dict(alert)
-    response["root_agent_response"] = response_text
-
-    return JSONResponse(response)
+    try:
+        response_text = await _run_alert_conversation(alert_request)
+        response = alert_request.model_dump(mode='json')
+        response["root_agent_response"] = response_text
+        return JSONResponse(response)
+    except Exception as e:
+        logger.error(f"[ALERT PROCESSING] Error processing alert: {e}")
+        return JSONResponse(
+            {"error": "Failed to process alert", "detail": str(e)},
+            status_code=500
+        )
 
 
 # Create Starlette route for the alert endpoint
