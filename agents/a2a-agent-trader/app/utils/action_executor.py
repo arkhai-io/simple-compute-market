@@ -200,6 +200,16 @@ def reject_offer() -> bool:
     return True
 
 
+async def mock_provision_machine() -> str:
+    """Mock stand-in for provisioning a machine.
+
+    Return:
+        String with connection details.
+    """
+    logger.info("[TOOL] (Simulated) Machine provisioned.")
+    return "demo-user@node-01.example.net"
+
+
 def accept_offer() -> bool:
     """Accept a received offer.
 
