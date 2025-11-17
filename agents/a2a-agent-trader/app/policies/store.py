@@ -3,9 +3,18 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
-from app.schema.pydantic_models import Action as DomainAction, ActionType as DomainActionType, DecisionContext
+from app.schema.pydantic_models import (
+    Action as DomainAction,
+    ActionType as DomainActionType,
+    DecisionContext,
+    MakeOfferEvent,
+    ComputeResource,
+    TokenResource,
+    ComputeResourcePortfolio,
+)
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
+from app.utils.validation import extract_resources_from_make_offer_event
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
@@ -182,7 +191,6 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
     return DomainAction(
         action_type=ActionType.MAKE_OFFER,
         parameters={
-            "tag": "sell",
             "gpu_model": res.gpu_model,
             "sla": res.sla,
             "region": res.region,
@@ -201,7 +209,58 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | N
 
 @policy_callable("mo.action.accept_offer")
 def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
+    """Accept offer policy that validates resources and checks agent capacity.
+    
+    Extracts offer_resource and demand_resource from MakeOfferEvent.
+    - If demand is a ComputeResource: checks if agent has sufficient capacity, rejects if not.
+    - If demand is a TokenResource: accepts the offer (simulated assumption: we have enough tokens).
+    Includes resource details in action parameters.
+    """
     from app.schema.pydantic_models import ActionType
-
-    return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+    
+    # Only process MakeOfferEvent
+    if not isinstance(context.event, MakeOfferEvent):
+        return None
+    
+    # Extract order and resources using utility function
+    order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
+    
+    if order is None:
+        return None
+    
+    # Check agent capacity for demand resource if it's a ComputeResource
+    if isinstance(demand_resource, ComputeResource):
+        # Get portfolio from available_resources
+        portfolio_dict = context.available_resources
+        if portfolio_dict and "resources" in portfolio_dict:
+            try:
+                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
+                if not portfolio.has_capacity(demand_resource):
+                    # Agent doesn't have capacity - reject
+                    return DomainAction(
+                        action_type=ActionType.REJECT_OFFER,
+                        parameters={
+                            "reason": "insufficient_capacity",
+                            "demand_resource": demand_resource.model_dump(mode="json"),
+                        }
+                    )
+            except Exception as e:
+                # If portfolio validation fails, log and continue
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
+    elif isinstance(demand_resource, TokenResource):
+        # If demand is a TokenResource, accept the offer
+        # Simulated assumption: we have enough tokens in our wallet
+        pass
+    
+    # Accept offer with resource details
+    return DomainAction(
+        action_type=ActionType.ACCEPT_OFFER,
+        parameters={
+            "order_id": order.order_id,
+            "offer_resource": offer_resource.model_dump(mode='json'),
+            "demand_resource": demand_resource.model_dump(mode='json'),
+        }
+    )
 

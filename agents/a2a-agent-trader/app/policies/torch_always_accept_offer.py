@@ -11,7 +11,16 @@ except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
 from app.policies.registry import policy_callable
-from app.schema.pydantic_models import Action as DomainAction, ActionType, DecisionContext
+from app.schema.pydantic_models import (
+    Action as DomainAction,
+    ActionType,
+    DecisionContext,
+    MakeOfferEvent,
+    ComputeResource,
+    TokenResource,
+    ComputeResourcePortfolio,
+)
+from app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +52,48 @@ def _get_model() -> Optional[Any]:
     return _loaded_model
 
 
-def _select_action(logits: Any) -> DomainAction:
-    """Map model logits to a domain action."""
+def _build_action_parameters(
+    order_id: str | None = None,
+    offer_resource: Any = None,
+    demand_resource: Any = None,
+) -> dict[str, Any]:
+    """Build parameter payload with optional resource/order info."""
+    parameters: dict[str, Any] = {}
+    if order_id:
+        parameters["order_id"] = order_id
+    if offer_resource:
+        parameters["offer_resource"] = (
+            offer_resource.model_dump(mode="json")
+            if hasattr(offer_resource, "model_dump")
+            else offer_resource
+        )
+    if demand_resource:
+        parameters["demand_resource"] = (
+            demand_resource.model_dump(mode="json")
+            if hasattr(demand_resource, "model_dump")
+            else demand_resource
+        )
+    return parameters
+
+
+def _select_action(
+    logits: Any,
+    order_id: str | None = None,
+    offer_resource: Any = None,
+    demand_resource: Any = None,
+) -> DomainAction:
+    """Map model logits to a domain action with resource details.
+    
+    Args:
+        logits: PyTorch Model output logits
+        order_id: Optional order ID to include in parameters
+        offer_resource: Optional offer resource to include in parameters
+        demand_resource: Optional demand resource to include in parameters
+    """
     if torch is None:
-        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
+        parameters = _build_action_parameters(order_id, offer_resource, demand_resource)
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters=parameters)
+    
     # Expect logits shape [batch, 3]; take first entry
     probs = torch.softmax(logits[0], dim=0)
     choice = int(torch.argmax(probs).item())
@@ -58,39 +105,95 @@ def _select_action(logits: Any) -> DomainAction:
     else:
         action_type = ActionType.COUNTER_OFFER
 
-    return DomainAction(action_type=action_type)
+    parameters = _build_action_parameters(order_id, offer_resource, demand_resource)
+    return DomainAction(action_type=action_type, parameters=parameters)
 
 
 @policy_callable("mo.action.torch_always_accept_offer")
 def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainAction | None:
     """TorchScript-driven offer response conforming to make_offer composite standard.
 
-    The proof-of-concept feeds a zero tensor into the TorchScript model and
-    maps logits to ACCEPT/REJECT/COUNTER outcomes. In production, derive feature
-    vectors from `context` instead of using the placeholder tensor.
+    Extracts resources from MakeOfferEvent, validates resource types, checks agent
+    capacity, and includes resource details in action parameters.
+    - If demand is a ComputeResource: checks agent capacity, rejects if insufficient.
+    - If demand is a TokenResource: accepts immediately (simulated assumption: we have enough tokens).
+    - Otherwise: runs TorchScript model to make decision.
+    The model currently uses a placeholder feature vector, but in production should derive
+    features from the extracted resources and context.
     """
-    event_type = getattr(context.event, "event_type", None)
-    trigger = event_type.value if hasattr(event_type, "value") else str(event_type)
-    if trigger != "make_offer":
+    # Only process MakeOfferEvent
+    if not isinstance(context.event, MakeOfferEvent):
         return None
+
+    # Extract order and resources using utility function
+    order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
+    
+    if order is None:
+        return None
+    
+    # Check agent capacity for demand resource if it's a ComputeResource
+    # If insufficient capacity, reject immediately without running model
+    if isinstance(demand_resource, ComputeResource):
+        portfolio_dict = context.available_resources
+        if portfolio_dict and "resources" in portfolio_dict:
+            try:
+                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
+                if not portfolio.has_capacity(demand_resource):
+                    # Agent doesn't have capacity - reject with resource details
+                    logger.info("[TORCH POLICY] Insufficient capacity, rejecting offer")
+                    return DomainAction(
+                        action_type=ActionType.REJECT_OFFER,
+                        parameters={
+                            "reason": "insufficient_capacity",
+                            "order_id": order.order_id,
+                            "demand_resource": demand_resource.model_dump(mode="json"),
+                            "offer_resource": offer_resource.model_dump(mode="json"),
+                        }
+                    )
+            except Exception as e:
+                # If portfolio validation fails, log and continue to model
+                logger.warning(f"[TORCH POLICY] Failed to validate portfolio: {e}")
+    elif isinstance(demand_resource, TokenResource):
+        # If demand is a TokenResource, accept the offer immediately
+        # Simulated assumption: we have enough tokens in our wallet
+        logger.info("[TORCH POLICY] Demand is TokenResource, accepting offer (assuming sufficient tokens)")
+        return DomainAction(
+            action_type=ActionType.ACCEPT_OFFER,
+            parameters={
+                "order_id": order.order_id,
+                "offer_resource": offer_resource.model_dump(mode="json"),
+                "demand_resource": demand_resource.model_dump(mode="json"),
+            }
+        )
 
     model = _get_model()
     if model is None or torch is None:
-        logger.warning("[ALWAYS ACCEPT POLICY] PyTorch not available; returning None")
+        logger.warning("[TORCH POLICY] PyTorch not available; returning None")
         return None
 
-    # TODO: Replace this with a real feature vector constructed from the context
+    # TODO: Replace this with a real feature vector constructed from:
+    # - offer_resource and demand_resource details
+    # - agent portfolio state
+    # - market conditions
+    # - historical performance
+    # For now, use placeholder tensor
     example_input = torch.zeros((1, 3), dtype=torch.float32)
 
     try:
         with torch.no_grad():
             logits = model(example_input)
     except Exception as exc:  # pragma: no cover - inference errors vary
-        logger.error("[ALWAYS ACCEPT POLICY] Inference failed: %s", exc)
+        logger.error("[TORCH POLICY] Inference failed: %s", exc)
         return None
 
     if logits is None or logits.shape[0] == 0:
-        logger.warning("[ALWAYS ACCEPT POLICY] Model returned empty logits")
+        logger.warning("[TORCH POLICY] Model returned empty logits")
         return None
 
-    return _select_action(logits)
+    # Return action with resource details included
+    return _select_action(
+        logits,
+        order_id=order.order_id,
+        offer_resource=offer_resource,
+        demand_resource=demand_resource,
+    )

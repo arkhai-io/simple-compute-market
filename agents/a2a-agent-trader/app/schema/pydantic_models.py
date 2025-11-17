@@ -1,8 +1,9 @@
 from enum import Enum
 from datetime import datetime
-from typing import Any
-from pydantic import BaseModel, Field, SerializeAsAny
+from typing import Any, Literal, Union
+from pydantic import BaseModel, Field, SerializeAsAny, field_validator, model_validator
 from pydantic import ConfigDict
+import uuid
 
 
 class ERC20TokenMetadata(BaseModel):
@@ -31,13 +32,6 @@ class Region(str, Enum):
     TOKYO_JP = "Tokyo, JP"
 
 
-class Tag(str, Enum):
-    """Order type tags"""
-
-    BUY = "buy"
-    SELL = "sell"
-
-
 class Attestation(BaseModel):
     """Describes the attestation of an agent with respect to a compute resource.
 
@@ -53,12 +47,71 @@ class Attestation(BaseModel):
 class Resource(BaseModel):
     """Generic resource.
     """
+    
+    @staticmethod
+    def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
+        """Convert token identifiers into ERC20TokenMetadata."""
+        if isinstance(token_value, ERC20TokenMetadata):
+            return token_value
+        if isinstance(token_value, dict):
+            return ERC20TokenMetadata(**token_value)
+        if isinstance(token_value, str):
+            from app.utils.token_registry import TOKEN_REGISTRY
+
+            return TOKEN_REGISTRY.require(token_value)
+        raise ValueError(
+            "Token value must be a symbol string, ERC20TokenMetadata dict, or ERC20TokenMetadata instance"
+        )
+    
+    @classmethod
+    def parse_from_dict(cls, data: Any) -> "Resource":
+        """Parse a resource from a dictionary or return existing Resource instance.
+        
+        Converts dictionary payloads into the appropriate Resource subclass:
+        - If data is already a Resource instance → returns it unchanged
+        - If dict contains 'token' key → returns TokenResource (takes precedence)
+        - If dict contains 'gpu_model' key → returns ComputeResource
+        - If dict contains both keys → returns TokenResource (token takes precedence)
+        - If dict contains neither key → raises ValueError
+        - If data is not a dict and not a Resource → returns data unchanged
+        
+        Args:
+            data: Dictionary with resource data, existing Resource instance, or other value
+            
+        Returns:
+            Resource instance (TokenResource, ComputeResource, or existing Resource)
+            
+        Raises:
+            ValueError: If data is a dict but doesn't contain required keys for any resource type
+        """
+        # If already a Resource instance, return it unchanged
+        if isinstance(data, Resource):
+            return data
+        
+        # If not a dict, return as-is (pass through)
+        if not isinstance(data, dict):
+            return data
+        
+        # TokenResource takes precedence if both keys are present
+        if "token" in data:
+            data = dict(data)  # copy to avoid mutating caller input
+            data["token"] = cls._resolve_token_metadata(data["token"])
+            return TokenResource(**data)
+        elif "gpu_model" in data:
+            return ComputeResource(**data)
+        else:
+            raise ValueError(
+                "Resource dict must have either 'token' (TokenResource) "
+                "or 'gpu_model' (ComputeResource) key"
+            )
 
 
 class TokenResource(Resource):
     """Describes a given value and amount of a token used for trade."""
 
-    token: ERC20TokenMetadata = Field(description="Token metadata resolved from registry")
+    token: SerializeAsAny[ERC20TokenMetadata] = Field(
+        description="Token metadata resolved from registry"
+    )
     amount: int = Field(
         description="Integer amount in base units (token amount * 10**decimals)"
     )
@@ -134,21 +187,30 @@ class MarketOrder(BaseModel):
     """Describes an open order on the market, which contains information about
     the resources being offered or sought, and parameters are used for matching
     agents before the negotiation begins.
-    An open order is one with blank attestations (maker_attestation and taker_attestation).
+    An open order is one with a filled maker_attestation and a blank taker_attestation
+    (taker_attestation is None until an offer is accepted).
     A closed order is one with filled out maker_attestation and taker_attestation.
+    
+    Resource Parsing:
+        The `parse_resources` model_validator automatically converts offer_resource and
+        demand_resource from dictionaries to proper Resource types (ComputeResource or
+        TokenResource) during validation using Resource.parse_from_dict() helper.
+        Resources are identified by:
+        - TokenResource: presence of 'token' key in dict (takes precedence)
+        - ComputeResource: presence of 'gpu_model' key in dict
+        If a resource dict doesn't match either pattern, ValidationError is raised.
     """
 
     order_id: str = Field(description="The id of the order")
-    tag: Tag = Field(description="The tag of the order (buy or sell)")
     order_maker: str = Field(description="The card URL of the agent who made the order")
     order_taker: str | None = Field(
         default="",
         description="The card URL of the agent who took the order",
     )
-    offer_resource: SerializeAsAny[Resource] = Field(
+    offer_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
-    demand_resource: SerializeAsAny[Resource] = Field(
+    demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
     duration: int = Field(description="The duration of the order in days")
@@ -161,13 +223,41 @@ class MarketOrder(BaseModel):
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def parse_resources(cls, data: Any) -> Any:
+        """Parse offer_resource and demand_resource from dicts to proper Resource types.
+        
+        Uses Resource.parse_from_dict() helper to convert dictionaries to appropriate
+        Resource subclasses (TokenResource or ComputeResource). The helper handles:
+        - TokenResource: presence of 'token' key in dict (takes precedence)
+        - ComputeResource: presence of 'gpu_model' key in dict
+        - Existing Resource instances: passes through unchanged
+        - Invalid dicts: raises ValueError
+        
+        Note: When both 'token' and 'gpu_model' are present, TokenResource is created
+        and 'gpu_model' is ignored. This ensures deterministic parsing behavior.
+        """
+        if not isinstance(data, dict):
+            return data
+        
+        # Parse offer_resource using Resource helper
+        if "offer_resource" in data:
+            data["offer_resource"] = Resource.parse_from_dict(data["offer_resource"])
+        
+        # Parse demand_resource using Resource helper
+        if "demand_resource" in data:
+            data["demand_resource"] = Resource.parse_from_dict(data["demand_resource"])
+        
+        return data
+
     def is_open(self) -> bool:
         """Check if this is an open order (no attestation)"""
-        return self.attestation is None
+        return self.maker_attestation is None or self.taker_attestation is None
 
     def is_closed(self) -> bool:
         """Check if this is a closed order (has attestation)"""
-        return self.attestation is not None
+        return self.maker_attestation is not None and self.taker_attestation is not None
 
 
 # =============================
@@ -218,10 +308,91 @@ class MakeOfferEvent(DomainEvent):
             order=order,
             data={
                 "order_id": order.order_id,
-                "tag": order.tag.value,
-                "offer_resource": order.offer_resource,
-                "demand_resource": order.demand_resource,
+                "offer_resource": order.offer_resource.model_dump(mode="json"),
+                "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration": order.duration,
+            },
+        )
+
+
+class ResourceAlertRequest(BaseModel):
+    """Request model for resource imbalance alerts from monitoring systems.
+    
+    Validates incoming alert structure and provides conversion to ResourceImbalanceEvent.
+    All fields are required - strict validation with no defaults.
+    """
+    
+    event_type: Literal["resource_imbalance"] = Field(
+        description="Type of event (must be resource_imbalance)"
+    )
+    resource: dict[str, Any] = Field(
+        description="Resource details with required fields: gpu_model, quantity, sla, region"
+    )
+    value: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Utilization value (0.0-1.0) that maps to severity"
+    )
+    label: str = Field(description="Alert label (e.g., 'LOW UTILIZATION')")
+    threshold: str = Field(description="Threshold string (e.g., '<=0.30')")
+    
+    @field_validator("resource")
+    @classmethod
+    def validate_resource(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Validate resource dict has all required fields."""
+        required_fields = ["gpu_model", "quantity", "sla", "region"]
+        missing = [field for field in required_fields if field not in v]
+        if missing:
+            raise ValueError(f"Resource dict missing required fields: {missing}")
+        return v
+    
+    def to_resource_imbalance_event(
+        self,
+        event_id: str | None = None,
+        source: str | None = None,
+    ) -> "ResourceImbalanceEvent":
+        """Convert alert to ResourceImbalanceEvent.
+        
+        Maps value -> severity, extracts resource fields, stores label/threshold in data.
+        """
+        # Extract and validate resource fields
+        gpu_model = GPUModel(self.resource["gpu_model"])
+        quantity = int(self.resource["quantity"])
+        sla = float(self.resource["sla"])
+        region = Region(self.resource["region"])
+        
+        # Create ComputeResource
+        compute_resource = ComputeResource(
+            gpu_model=gpu_model,
+            quantity=quantity,
+            sla=sla,
+            region=region,
+        )
+        
+        # Map value to severity
+        severity = self.value
+        
+        # Determine imbalance_type from label/value (policy can override)
+        # Default to 'surplus' for low utilization, 'deficit' for high
+        imbalance_type = "surplus" if "LOW" in self.label.upper() else "deficit"
+        
+        # Create event with label and threshold in data for policy access
+        return ResourceImbalanceEvent(
+            event_id=event_id or f"alert_{uuid.uuid4()}",
+            source=source or "resource-monitor",
+            resource=compute_resource,
+            imbalance_type=imbalance_type,
+            severity=severity,
+            data={
+                "gpu_model": gpu_model.value,
+                "quantity": quantity,
+                "region": region.value,
+                "sla": sla,
+                "imbalance_type": imbalance_type,
+                "severity": severity,
+                "label": self.label,
+                "threshold": self.threshold,
+                "value": self.value,
             },
         )
 
@@ -233,6 +404,49 @@ class ResourceImbalanceEvent(DomainEvent):
     resource: ComputeResource = Field(description="The imbalanced resource")
     imbalance_type: str = Field(description="Type of imbalance: surplus or deficit")
     severity: float = Field(description="Severity of imbalance (0.0-1.0)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_resource(cls, data: Any) -> Any:
+        """Parse resource from dict to ComputeResource if needed.
+        
+        Also extracts imbalance_type and severity from nested data dict if present.
+        """
+        if not isinstance(data, dict):
+            return data
+        
+        # Handle nested data structure - extract fields from data dict
+        if "data" in data and isinstance(data["data"], dict):
+            nested_data = data["data"]
+            
+            # Extract resource from nested data
+            if "resource" in nested_data:
+                resource_dict = nested_data["resource"]
+                if isinstance(resource_dict, dict):
+                    # Validate required fields
+                    required_fields = ["gpu_model", "quantity", "sla", "region"]
+                    missing = [f for f in required_fields if f not in resource_dict]
+                    if missing:
+                        raise ValueError(f"Resource missing required fields: {missing}")
+                    # Convert to ComputeResource
+                    data["resource"] = ComputeResource.model_validate(resource_dict)
+            
+            # Extract imbalance_type and severity from nested data if not at top level
+            if "imbalance_type" in nested_data and "imbalance_type" not in data:
+                data["imbalance_type"] = nested_data["imbalance_type"]
+            if "severity" in nested_data and "severity" not in data:
+                data["severity"] = nested_data["severity"]
+        
+        # If resource is at top level as dict, convert it
+        elif "resource" in data and isinstance(data["resource"], dict):
+            resource_dict = data["resource"]
+            required_fields = ["gpu_model", "quantity", "sla", "region"]
+            missing = [f for f in required_fields if f not in resource_dict]
+            if missing:
+                raise ValueError(f"Resource missing required fields: {missing}")
+            data["resource"] = ComputeResource.model_validate(resource_dict)
+        
+        return data
 
     @classmethod
     def create(

@@ -176,7 +176,7 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> Action | Non
         return None
     return Action(
         action_type=ActionType.MAKE_OFFER,
-        parameters={"tag": "sell","gpu_model": res.gpu_model,"sla": res.sla,"region": res.region},
+        parameters={"gpu_model": res.gpu_model,"sla": res.sla,"region": res.region},
     )
 
 @policy_callable("mo.guard.trigger_is_make_offer")

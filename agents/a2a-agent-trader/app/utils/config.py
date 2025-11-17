@@ -38,6 +38,8 @@ class Config:
     redis_channels: str  # comma-separated
     enable_event_queue: bool
     market_provider: str  # "static" or "redis"
+    log_file_path: str | None  # Path to log file, None for default
+    log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
 
 
@@ -47,8 +49,19 @@ DEFAULT_TOKEN_REGISTRY_PATH = (
 
 
 def load_config() -> Config:
+    # Get agent_id with fallback
+    agent_id = os.getenv("AGENT_ID")
+    if not agent_id:
+        try:
+            agent_id = os.uname().nodename
+        except (AttributeError, OSError):
+            # os.uname() not available on all platforms
+            import socket
+            agent_id = socket.gethostname()
+    agent_id = agent_id or "root_agent"
+    
     return Config(
-        agent_id=(os.getenv("AGENT_ID") or os.uname().nodename or "root_agent"),
+        agent_id=agent_id,
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
         base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
         port=_get_int_env("PORT", 8000),
@@ -66,6 +79,8 @@ def load_config() -> Config:
         redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
         enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
         market_provider=os.getenv("MARKET_PROVIDER", "static"),
+        log_file_path=os.getenv("LOG_FILE_PATH"),  # None if not set
+        log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
             "TOKEN_REGISTRY_PATH", str(DEFAULT_TOKEN_REGISTRY_PATH)
         ),
