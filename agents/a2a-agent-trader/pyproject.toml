@@ -16,7 +16,7 @@ dependencies = [
     "a2a-sdk>=0.3.9",
     "torch>=2.7.0",
     "pufferlib>=3.0.0",
-    "alkahest-py @ git+https://github.com/wwald/alkahest-py@b082783d926ffdc23ada77e9662084e2126fac86",
+    "alkahest-py @ git+https://github.com/arkhai-io/alkahest-py@simplify-oracle",
     "eth-abi>=5.2.0",
 ]
 
