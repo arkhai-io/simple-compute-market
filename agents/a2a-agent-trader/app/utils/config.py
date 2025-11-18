@@ -30,6 +30,7 @@ class Config:
     remote_agent_url_override: str
     chain_rpc_url: str
     agent_priv_key: str
+    agent_wallet_address: str
     use_vertex_ai: bool
     policy_db_path: str
     event_validation_mode: str  # "warn" or "strict"
@@ -71,6 +72,7 @@ def load_config() -> Config:
         ),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
+        agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         policy_db_path=os.getenv("POLICY_DB_PATH", "/tmp/policies.db"),
         event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),

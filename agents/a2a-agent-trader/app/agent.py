@@ -19,7 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
-from alkahest_py.alkahest_py import AlkahestClient
+from alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re

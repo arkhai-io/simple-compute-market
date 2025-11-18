@@ -16,7 +16,8 @@ dependencies = [
     "a2a-sdk>=0.3.9",
     "torch>=2.7.0",
     "pufferlib>=3.0.0",
-    "alkahest-py>=0.1.0",
+    "alkahest-py @ git+https://github.com/wwald/alkahest-py@b082783d926ffdc23ada77e9662084e2126fac86",
+    "eth-abi>=5.2.0",
 ]
 
 requires-python = ">=3.10,<3.14"

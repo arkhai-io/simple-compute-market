@@ -14,7 +14,9 @@ from google.adk.agents.remote_a2a_agent import (
     RemoteA2aAgent,
 )
 
-from alkahest_py.alkahest_py import AlkahestClient, StringObligationData
+from alkahest_py import AlkahestClient
+from eth_abi import encode
+import json
 
 from google.genai import types as genai_types
 
@@ -292,7 +294,7 @@ def encode_compute_lease(
     token_resource: TokenResource | dict[str, Any],
     duration_days: int = 1,
 ) -> bytes:
-    """Encode a compute-for-token trade as Alkahest StringObligationData.
+    """Encode a compute-for-token trade as JSON bytes (Alkahest demand payload).
 
     Args:
         compute_resource: ComputeResource (or dict payload) describing the offered compute.
@@ -331,8 +333,8 @@ def encode_compute_lease(
     }
 
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
-    encoded = StringObligationData.encode_json_object(lease_terms)
-    return encoded
+    # Alkahest Python bindings currently expose only the client; encode the JSON payload directly.
+    return json.dumps(lease_terms, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
 async def approve_token_escrow(
