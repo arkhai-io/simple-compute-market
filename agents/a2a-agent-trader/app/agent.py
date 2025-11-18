@@ -90,8 +90,6 @@ from .utils.token_registry import TOKEN_REGISTRY
 from pydantic import PrivateAttr
 
 
-env = EnvTestManager()
-
 INCOMING_A2A_PATTERN = re.compile(
     r"""\[(?P<agent>[^\]]+)\] `(?P<tool>[^`]+)` tool returned result: (?P<payload>\{.*\})*$""",
     re.DOTALL
