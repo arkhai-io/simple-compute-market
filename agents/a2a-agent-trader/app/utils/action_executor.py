@@ -14,7 +14,10 @@ from google.adk.agents.remote_a2a_agent import (
     RemoteA2aAgent,
 )
 
-from alkahest_py import AlkahestClient
+from alkahest_py import (
+    AlkahestClient,
+    TrustedOracleArbiterDemandData
+)
 from eth_abi import encode
 import json
 
@@ -294,7 +297,7 @@ def encode_compute_lease(
     token_resource: TokenResource | dict[str, Any],
     duration_days: int = 1,
 ) -> bytes:
-    """Encode a compute-for-token trade as JSON bytes (Alkahest demand payload).
+    """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
 
     Args:
         compute_resource: ComputeResource (or dict payload) describing the offered compute.
@@ -333,7 +336,7 @@ def encode_compute_lease(
     }
 
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
-    # Alkahest Python bindings currently expose only the client; encode the JSON payload directly.
+
     return json.dumps(lease_terms, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
@@ -363,3 +366,63 @@ async def approve_token_escrow(
         price_data,
     )
     return await alkahest_client.erc20.approve(price_data, "escrow")
+
+
+async def buy_compute_with_erc20(
+    compute_resource: ComputeResource | dict[str, Any],
+    token_resource: TokenResource | dict[str, Any],
+    *,
+    oracle_address: str,
+    client: AlkahestClient,
+) -> Any:
+    """Create an ERC20 escrow for a compute lease using Alkahest.
+
+    This is from the point of view of someone with a TokenResource who
+    wishes to trade it for a ComputeResource.
+
+    Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
+    and purchases via buy_with_erc20. Expiration is set to 0 (non-expiring) for now.
+    """
+    if not client:
+        raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
+
+    TRUSTED_ORACLE_ARBITER = "0x361E0950534F4a54A39F8C4f1f642C323f6e66B9"
+    arbiter_address = TRUSTED_ORACLE_ARBITER
+
+    # 1) Encode lease terms into demand bytes
+    demand_data = TrustedOracleArbiterDemandData(
+        oracle_address,
+        encode_compute_lease(
+            compute_resource=compute_resource,
+            token_resource=token_resource,
+            duration_days=1,
+        )
+    )
+
+    demand_bytes = demand_data.encode_self()
+
+    # 2) Build price data from token resource
+    if isinstance(token_resource, TokenResource):
+        payment = token_resource
+    else:
+        payment = TokenResource.model_validate(token_resource)
+
+    price_data = {"address": payment.token.contract_address, "value": payment.amount}
+
+    # 3) Approve escrow spend
+    await approve_token_escrow(payment, client=client)
+
+    # 4) Buy with ERC20, tying demand to arbiter data
+    arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
+    expiration = 0  # non-expiring escrow for now; may become time-limited later
+
+    logger.info(
+        "[ALKAHEST] buy_with_erc20 price_data=%s arbiter=%s expiration=%s",
+        price_data,
+        arbiter_address,
+        expiration,
+    )
+
+    escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
+
+    return escrow_receipt
