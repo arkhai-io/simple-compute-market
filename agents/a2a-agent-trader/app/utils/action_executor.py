@@ -16,9 +16,9 @@ from google.adk.agents.remote_a2a_agent import (
 
 from alkahest_py import (
     AlkahestClient,
+    ArbitrateOptions,
     TrustedOracleArbiterDemandData
 )
-from eth_abi import encode
 import json
 
 from google.genai import types as genai_types
@@ -426,3 +426,46 @@ async def buy_compute_with_erc20(
     escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
 
     return escrow_receipt
+
+async def fulfill_compute_obligation(
+    client: AlkahestClient,
+    escrow_uid: str,
+    oracle_address: str
+):
+    connection_details = await mock_provision_machine()
+    fulfillment_uid = await client.string_obligation.do_obligation(
+        connection_details,
+        escrow_uid
+    )
+    await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+    return fulfillment_uid
+
+async def arbitrate_compute_fulfillment(
+    client: AlkahestClient,
+    fulfillment_uid: str,
+    oracle_address: str
+):
+    async def decision_function (attestation):
+        return True
+
+    def callback(decision):
+        pass
+
+    options = ArbitrateOptions(skip_arbitrated=False, only_new=False)
+
+    result = await client.oracle.listen_and_arbitrate_no_spawn(
+        decision_function,
+        callback,
+        options,
+        timeout_seconds=2.0
+    )
+
+    return result
+
+async def collect_escrow(
+    client: AlkahestClient,
+    escrow_uid: str,
+    fulfillment_uid: str
+):
+    await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+    return
