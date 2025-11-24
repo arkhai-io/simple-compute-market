@@ -299,8 +299,6 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
         logger.error(f"[PARSE DOMAIN EVENT] Error parsing {event_type}: {e}")
         raise ValueError(f"Failed to parse {event_type} event: {e}") from e
 
-env = EnvTestManager()
-
 class TraderAgent(BaseAgent):
     """
     Custom agent for trading computational resources.
@@ -368,13 +366,16 @@ class TraderAgent(BaseAgent):
         
         if TEST_ALKAHEST_CLIENT or (has_priv_key and has_rpc_url):
             try:
-                # self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
-                logger.info(f"[ALKAHEST] Client: {TEST_ALKAHEST_CLIENT}")
-                if TEST_ALKAHEST_CLIENT:
-                    alkahest_client = getattr(env, f"{TEST_ALKAHEST_CLIENT}_client")
-                    logger.info(f"[ALKAHEST] Env: {alkahest_client}")
-                    self._alkahest_client = alkahest_client
-                    logger.info("[ALKAHEST]: AlkahestClient intialized.")
+                # logger.info(f"[ALKAHEST] Client: {TEST_ALKAHEST_CLIENT}")
+                # if TEST_ALKAHEST_CLIENT:
+                #     alkahest_client = getattr(env, f"{TEST_ALKAHEST_CLIENT}_client")
+                #     logger.info(f"[ALKAHEST] Env: {alkahest_client}")
+                #     self._alkahest_client = alkahest_client
+                #     logger.info("[ALKAHEST]: AlkahestClient initialized.")
+                # else:
+                # self._alkahest_client = AlkahestClient(private_key=AGENT_PRIV_KEY, rpc_url=CHAIN_RPC_URL)
+                self._alkahest_client = None
+                logger.info(f"[ALKAHEST]: AlkahestClient initialized: {self._alkahest_client}.")
             except Exception as e:
                 logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
                 self._alkahest_client = None
@@ -489,7 +490,7 @@ class TraderAgent(BaseAgent):
         return None
     
     async def _demo_alkahest(self) -> None:
-        token = TOKEN_REGISTRY.require("USDC")
+        token = TOKEN_REGISTRY.require("MOCK")
         logger.info(
             "[ALKAHEST] Using %s (%s) with %s decimals",
             token.symbol,

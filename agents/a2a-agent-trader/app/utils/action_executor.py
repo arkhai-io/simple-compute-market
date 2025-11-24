@@ -45,7 +45,9 @@ PORT = CONFIG.port
 REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
-TRUSTED_ORACLE_ARBITER = "0x361E0950534F4a54A39F8C4f1f642C323f6e66B9"
+
+TRUSTED_ORACLE_ARBITER = "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0"
+DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +129,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=parameters.get("escrow_uid"),
-                oracle_address=parameters.get("oracle_address") or TRUSTED_ORACLE_ARBITER,
+                oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
                 ssh_public_key=parameters.get("ssh_public_key"),
             )
             # Include event_type for downstream parsing and propagate to remote agent.
@@ -420,7 +422,7 @@ def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    settlement_token = TOKEN_REGISTRY.require("USDC")
+    settlement_token = TOKEN_REGISTRY.require("MOCK")
     logger.info("[TOOL] Creating order for resource.")
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
@@ -515,7 +517,7 @@ def encode_compute_lease(
 
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
 
-    return json.dumps(lease_terms, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return json.dumps(lease_terms).encode("utf-8")
 
 
 async def approve_token_escrow(
@@ -582,6 +584,9 @@ async def buy_compute_with_erc20(
 
     demand_bytes = demand_data.encode_self()
 
+    logger.info(f"[ALKAHEST] Demand data: {demand_data}")
+    logger.info(f"[ALKAHEST] Demand bytes: {demand_bytes}")
+
     # 2) Build price data from token resource
     if isinstance(token_resource, TokenResource):
         payment = token_resource
@@ -604,7 +609,11 @@ async def buy_compute_with_erc20(
         expiration,
     )
 
-    escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
+    try:
+        escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
+        logger.info(f"[ALKAHEST]: {escrow_receipt}")
+    except Exception as buy_with_erc20_err:
+        logger.warning("[ALKAHEST] Failed to buy_with_erc20: %s", buy_with_erc20_err)
 
     return escrow_receipt
 
