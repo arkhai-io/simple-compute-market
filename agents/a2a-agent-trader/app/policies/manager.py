@@ -103,6 +103,18 @@ class PolicyManager:
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save make_offer policy: {e}")
 
+        # Accept-offer policy to trigger fulfillment
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="accept_offer_default_v1",
+                trigger_type=EventType.ACCEPT_OFFER.value,
+                callable_ref="ao.action.fulfill_after_accept",
+            )
+            logger.debug("[POLICY MANAGER] Ensured accept_offer policy")
+        except Exception as e:
+            logger.warning(f"[POLICY MANAGER] Failed to save accept_offer policy: {e}")
+
     async def ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store.
         
@@ -130,8 +142,11 @@ class PolicyManager:
         """
         if event_type == EventType.NEGOTIATION:
             await self.ensure_negotiation_policy()
-        elif event_type in (EventType.RESOURCE_IMBALANCE, EventType.MAKE_OFFER):
+        elif event_type in (
+            EventType.RESOURCE_IMBALANCE,
+            EventType.MAKE_OFFER,
+            EventType.ACCEPT_OFFER,
+        ):
             await self.ensure_default_policies()
         # Other event types may not have default policies yet
         # This method can be extended as needed
-

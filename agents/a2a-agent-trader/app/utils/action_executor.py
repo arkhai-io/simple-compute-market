@@ -118,6 +118,17 @@ async def execute_action(
             logger.info(f"[ACTION] [SIMULATED] Resolving resource imbalance internally with params: {parameters}")
             outcome["result"] = result
             outcome["message"] = "Resources rebalanced internally (simulated)"
+
+        case ActionType.FULFILL_COMPUTE_OBLIGATION.value:
+            logger.info(f"[ACTION] [SIMULATED] Fulfilling compute obligation with params: {parameters}")
+            result = await fulfill_compute_obligation(
+                client=None,  # No on-chain client in this demo path
+                escrow_uid=parameters.get("escrow_uid") or f"escrow_{uuid.uuid4()}",
+                oracle_address=parameters.get("oracle_address"),
+                ssh_public_key=parameters.get("ssh_public_key"),
+            )
+            outcome["result"] = result
+            outcome["message"] = result.get("message", "Compute obligation fulfilled (simulated)")
             
         case ActionType.COUNTER_OFFER.value:
             logger.info(f"[ACTION] [SIMULATED] Countering offer with params: {parameters}")
@@ -216,13 +227,16 @@ def reject_offer() -> bool:
     return True
 
 
-async def mock_provision_machine() -> str:
+async def mock_provision_machine(ssh_public_key: str | None = None) -> str:
     """Mock stand-in for provisioning a machine.
 
     Return:
         String with connection details.
     """
-    logger.info("[TOOL] (Simulated) Machine provisioned.")
+    if ssh_public_key:
+        logger.info("[TOOL] (Simulated) Machine provisioned with SSH key.")
+    else:
+        logger.info("[TOOL] (Simulated) Machine provisioned without SSH key.")
     return "demo-user@node-01.example.net"
 
 
@@ -517,18 +531,40 @@ async def buy_compute_with_erc20(
     return escrow_receipt
 
 async def fulfill_compute_obligation(
-    client: AlkahestClient,
+    client: AlkahestClient | None,
     escrow_uid: str,
-    oracle_address: str
+    oracle_address: str | None = None,
+    ssh_public_key: str | None = None,
 ):
+    """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
     # POV: Compute-seller
-    connection_details = await mock_provision_machine()
+    connection_details = await mock_provision_machine(ssh_public_key)
+    if not client or not oracle_address:
+        # Demo fallback: skip on-chain, return simulated fulfillment uid
+        fulfillment_uid = f"fulfill_{uuid.uuid4()}"
+        logger.info("[TOOL] (Simulated) Fulfilled compute obligation without on-chain client.")
+        return {
+            "status": "fulfilled",
+            "message": "Compute obligation fulfilled (simulated)",
+            "escrow_uid": escrow_uid,
+            "fulfillment_uid": fulfillment_uid,
+            "connection_details": connection_details,
+            "ssh_public_key": ssh_public_key,
+        }
+
     fulfillment_uid = await client.string_obligation.do_obligation(
         connection_details,
         escrow_uid
     )
     await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
-    return fulfillment_uid
+    return {
+        "status": "fulfilled",
+        "message": "Compute obligation fulfilled",
+        "escrow_uid": escrow_uid,
+        "fulfillment_uid": fulfillment_uid,
+        "connection_details": connection_details,
+        "ssh_public_key": ssh_public_key,
+    }
 
 async def arbitrate_compute_fulfillment(
     client: AlkahestClient,

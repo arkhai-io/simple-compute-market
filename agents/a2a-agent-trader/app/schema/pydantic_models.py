@@ -325,21 +325,32 @@ class AcceptOfferEvent(DomainEvent):
         default=None,
         description="Escrow receipt UID supplied by the taker",
     )
+    ssh_public_key: str | None = Field(
+        default=None,
+        description="Buyer-provided SSH public key for provisioning access",
+    )
 
     @classmethod
-    def from_order(cls, order: MarketOrder, escrow_uid: str | None = None) -> "AcceptOfferEvent":
+    def from_order(
+        cls,
+        order: MarketOrder,
+        escrow_uid: str | None = None,
+        ssh_public_key: str | None = None,
+    ) -> "AcceptOfferEvent":
         """Create an accept-offer event from a market order and optional escrow UID."""
         return cls(
             event_id=f"acc_{order.order_id}",
             source=order.order_taker or order.order_maker,
             order=order,
             escrow_uid=escrow_uid,
+            ssh_public_key=ssh_public_key,
             data={
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration": order.duration,
                 "escrow_uid": escrow_uid,
+                "ssh_public_key": ssh_public_key,
             },
         )
 
@@ -553,6 +564,7 @@ class ActionType(str, Enum):
     # Resource management actions
     RESOLVE_INTERNALLY = "resolve_internally"
     OUTSOURCE = "outsource"
+    FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
 
     # No-op
     NOOP = "noop"

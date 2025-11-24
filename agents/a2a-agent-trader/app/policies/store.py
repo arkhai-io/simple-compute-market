@@ -6,6 +6,7 @@ from app.policies.evaluator import CallableEvaluator
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
+    AcceptOfferEvent,
     DecisionContext,
     MakeOfferEvent,
     ComputeResource,
@@ -197,6 +198,25 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
         },
     )
 
+# Accept-offer -> fulfill flow
+@policy_callable("ao.action.fulfill_after_accept")
+def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
+    """When we receive an AcceptOfferEvent, move directly to fulfill compute obligation."""
+    if not isinstance(context.event, AcceptOfferEvent):
+        return None
+
+    escrow_uid = context.event.escrow_uid
+    ssh_key = context.event.ssh_public_key
+
+    return DomainAction(
+        action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
+        parameters={
+            "order": context.event.order.model_dump(mode="json"),
+            "escrow_uid": escrow_uid,
+            "ssh_public_key": ssh_key,
+        },
+    )
+
 
 @policy_callable("mo.guard.trigger_is_make_offer")
 def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | None:
@@ -263,4 +283,3 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "demand_resource": demand_resource.model_dump(mode='json'),
         }
     )
-

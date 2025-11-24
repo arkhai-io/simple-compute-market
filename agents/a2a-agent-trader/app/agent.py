@@ -267,7 +267,12 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
 
             order = MarketOrder.model_validate(offer_data)
             escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
-            return AcceptOfferEvent.from_order(order, escrow_uid=escrow_uid)
+            ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
+            return AcceptOfferEvent.from_order(
+                order,
+                escrow_uid=escrow_uid,
+                ssh_public_key=ssh_public_key,
+            )
             
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
