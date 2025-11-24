@@ -66,6 +66,7 @@ from .schema.pydantic_models import (
     MarketOrder,
     MakeOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
+    ArbitrationCompleteEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
     NegotiationEvent,
@@ -278,6 +279,9 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             return ReceiveComputeObligationFulfillmentEvent.from_payload(data)
+
+        elif event_type == EventType.ARBITRATION_COMPLETE:
+            return ArbitrationCompleteEvent.from_payload(data)
             
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
@@ -580,6 +584,7 @@ class TraderAgent(BaseAgent):
             "counter_offer": "COUNTER the offer.",
             "make_offer": "MAKE OFFER. Create market order.",
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
+            "collect_escrow": "COLLECT ESCROW. Collect escrow for completed fulfillment.",
             "noop": "NOOP. No action required.",
         }
         outcome_message = outcome.get("message", None)

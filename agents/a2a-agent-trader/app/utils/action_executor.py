@@ -162,7 +162,9 @@ async def execute_action(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
                 oracle_address=parameters.get("oracle_address"),
+                escrow_uid=parameters.get("escrow_uid"),
             )
+            result["escrow_uid"] = result.get("escrow_uid") or parameters.get("escrow_uid")
             decisions = result.get("decisions")
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
             if ctx:
@@ -179,6 +181,7 @@ async def execute_action(
                                         "decisions": decisions,
                                         "fulfillment_uid": result.get("fulfillment_uid"),
                                         "oracle_address": result.get("oracle_address"),
+                                        "escrow_uid": result.get("escrow_uid"),
                                         "status": result.get("status"),
                                     },
                                 )
@@ -192,6 +195,44 @@ async def execute_action(
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
             outcome["message"] = "Fulfillment trusted; arbitration completed"
+
+        case ActionType.COLLECT_ESCROW.value:
+            logger.info(f"[ACTION] Collecting escrow with params: {parameters}")
+            escrow_uid = parameters.get("escrow_uid")
+            fulfillment_uid = parameters.get("fulfillment_uid")
+
+            if not escrow_uid or not fulfillment_uid:
+                outcome["result"] = {
+                    "status": "error",
+                    "message": "Missing escrow_uid or fulfillment_uid for collect_escrow",
+                    "escrow_uid": escrow_uid,
+                    "fulfillment_uid": fulfillment_uid,
+                }
+                outcome["message"] = outcome["result"]["message"]
+                return outcome
+
+            try:
+                await collect_escrow(
+                    client=alkahest_client,
+                    escrow_uid=escrow_uid,
+                    fulfillment_uid=fulfillment_uid,
+                )
+                outcome["result"] = {
+                    "status": "collected",
+                    "message": "Escrow collected successfully",
+                    "escrow_uid": escrow_uid,
+                    "fulfillment_uid": fulfillment_uid,
+                }
+                outcome["message"] = outcome["result"]["message"]
+            except Exception as err:
+                logger.warning("[ACTION] Failed to collect escrow: %s", err)
+                outcome["result"] = {
+                    "status": "error",
+                    "message": f"Failed to collect escrow: {err}",
+                    "escrow_uid": escrow_uid,
+                    "fulfillment_uid": fulfillment_uid,
+                }
+                outcome["message"] = outcome["result"]["message"]
             
         case ActionType.COUNTER_OFFER.value:
             logger.info(f"[ACTION] [SIMULATED] Countering offer with params: {parameters}")
@@ -332,7 +373,7 @@ async def accept_offer(
     # If escrow_uid not provided, attempt on-chain buy to create it.
     if not escrow_uid and alkahest_client:
         try:
-            logger.info("[TOOL]: Putting tokens in escrow.")
+            logger.info("[ALKAHEST]: Putting tokens in escrow.")
             compute_resource = order_dict.get("offer_resource", {})
             token_resource = order_dict.get("demand_resource", {})
             escrow_receipt = await buy_compute_with_erc20(
@@ -342,13 +383,16 @@ async def accept_offer(
                 client=alkahest_client,
             )
             escrow_uid = escrow_receipt.get("log", {}).get("uid")
-            logger.info("[TOOL] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
+            logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
         except Exception as e:
-            logger.warning("[TOOL] Failed to create escrow via buy_with_erc20: %s", e)
+            logger.warning("[ALKAHEST] Failed to create escrow via buy_with_erc20: %s", e)
+    else:
+        logger.info("[ALKAHEST] No AlkahestClient, falling back to simulated escrow_uid.")
+        escrow_uid = f"escrow_{uuid.uuid4()}"
 
     if not escrow_uid and isinstance(escrow_receipt, dict):
         escrow_uid = escrow_receipt.get("log", {}).get("uid")
-        logger.info(f"[TOOL] Got escrow_uid: {escrow_uid}")
+        logger.info(f"[ALKAHEST] Got escrow_uid: {escrow_uid}")
 
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
@@ -657,7 +701,8 @@ async def fulfill_compute_obligation(
 async def arbitrate_compute_fulfillment(
     client: AlkahestClient | None,
     fulfillment_uid: str,
-    oracle_address: str | None
+    oracle_address: str | None,
+    escrow_uid: str | None = None,
 ):
     # POV: Compute-buyer.
     async def decision_function (attestation):
@@ -676,6 +721,7 @@ async def arbitrate_compute_fulfillment(
             "message": "Arbitration skipped (auto-approve)",
             "fulfillment_uid": fulfillment_uid,
             "oracle_address": oracle_address,
+            "escrow_uid": escrow_uid,
             "decisions": decisions,
         }
 
@@ -695,16 +741,22 @@ async def arbitrate_compute_fulfillment(
         "status": "trusted",
         "message": "Arbitration completed",
         "fulfillment_uid": fulfillment_uid,
+        "escrow_uid": escrow_uid,
         "oracle_address": oracle_address,
         "result": result,
         "decisions": decisions,
     }
 
 async def collect_escrow(
-    client: AlkahestClient,
+    client: AlkahestClient | None,
     escrow_uid: str,
     fulfillment_uid: str
 ):
     # POV: Compute-seller.
-    await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+    
+    if client:
+        await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+        logger.info("[ALKAHEST]: Escrow collected.")
+    else:
+        logger.info("[ALKAHEST] (Simulated) Escrow collected")
     return

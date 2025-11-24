@@ -214,11 +214,11 @@ class MarketOrder(BaseModel):
         description="The resource being demanded, which may be a token or compute resource."
     )
     duration: int = Field(description="The duration of the order in days")
-    maker_attestation: Attestation | None = Field(
+    maker_attestation: str | None = Field(
         default=None,
         description="The attestation for the offer in escrow (None for open orders)",
     )
-    taker_attestation: Attestation | None = Field(
+    taker_attestation: str | None = Field(
         default=None,
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
@@ -383,6 +383,53 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             fulfillment_uid=payload.get("fulfillment_uid"),
             connection_details=payload.get("connection_details"),
             data=payload,
+        )
+
+class ArbitrationCompleteEvent(DomainEvent):
+    """Event triggered when arbitration over fulfillment has completed."""
+
+    event_type: EventType = Field(default=EventType.ARBITRATION_COMPLETE)
+    decisions: list[Any] | None = Field(
+        default=None,
+        description="Arbiter decisions returned for the fulfillment",
+    )
+    fulfillment_uid: str | None = Field(
+        default=None,
+        description="UID of the fulfillment that was arbitrated",
+    )
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Escrow UID tied to the fulfillment (may be required to collect)",
+    )
+    oracle_address: str | None = Field(
+        default=None,
+        description="Oracle contract/address used for arbitration",
+    )
+    status: str | None = Field(
+        default=None,
+        description="Status string reported by the arbiter or workflow",
+    )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ArbitrationCompleteEvent":
+        """Create an arbitration-complete event from a payload dict."""
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            raise ValueError("ArbitrationCompleteEvent payload must be a dictionary")
+
+        fulfillment_uid = data.get("fulfillment_uid")
+        if not fulfillment_uid:
+            raise ValueError("ArbitrationCompleteEvent requires fulfillment_uid")
+
+        return cls(
+            event_id=data.get("event_id") or payload.get("event_id", f"arb_{uuid.uuid4()}"),
+            source=data.get("source") or payload.get("source", "unknown"),
+            decisions=data.get("decisions"),
+            fulfillment_uid=fulfillment_uid,
+            escrow_uid=data.get("escrow_uid"),
+            oracle_address=data.get("oracle_address"),
+            status=data.get("status"),
+            data=data,
         )
 
 class ResourceAlertRequest(BaseModel):
@@ -596,6 +643,7 @@ class ActionType(str, Enum):
     OUTSOURCE = "outsource"
     FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
     TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
+    COLLECT_ESCROW = "collect_escrow"
     VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
 
     # No-op

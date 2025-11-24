@@ -8,6 +8,7 @@ from app.schema.pydantic_models import (
     ActionType as DomainActionType,
     AcceptOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
+    ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
     ComputeResource,
@@ -231,6 +232,34 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
             "escrow_uid": context.event.escrow_uid,
             "fulfillment_uid": context.event.fulfillment_uid,
             "connection_details": context.event.connection_details,
+        },
+    )
+
+# Arbitration complete -> collect escrow
+@policy_callable("arb.action.collect_escrow_after_arbitration")
+def arb_action_collect_escrow_after_arbitration(context: DecisionContext) -> DomainAction | None:
+    """After arbitration completes, collect escrow for the fulfillment."""
+    event = context.event
+    if not (
+        isinstance(event, ArbitrationCompleteEvent)
+    ):
+        return None
+
+    data = getattr(event, "data", {}) or {}
+    escrow_uid = getattr(event, "escrow_uid", None) or data.get("escrow_uid")
+    fulfillment_uid = getattr(event, "fulfillment_uid", None) or data.get("fulfillment_uid")
+
+    if not escrow_uid or not fulfillment_uid:
+        return None
+
+    return DomainAction(
+        action_type=DomainActionType.COLLECT_ESCROW,
+        parameters={
+            "escrow_uid": escrow_uid,
+            "fulfillment_uid": fulfillment_uid,
+            "decisions": getattr(event, "decisions", None) or data.get("decisions"),
+            "oracle_address": getattr(event, "oracle_address", None) or data.get("oracle_address"),
+            "status": getattr(event, "status", None) or data.get("status"),
         },
     )
 

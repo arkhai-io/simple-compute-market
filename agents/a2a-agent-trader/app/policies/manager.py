@@ -127,6 +127,18 @@ class PolicyManager:
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save receive_fulfillment policy: {e}")
 
+        # Arbitration complete policy to collect escrow
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="arbitration_complete_default_v1",
+                trigger_type=EventType.ARBITRATION_COMPLETE.value,
+                callable_ref="arb.action.collect_escrow_after_arbitration",
+            )
+            logger.debug("[POLICY MANAGER] Ensured arbitration_complete policy")
+        except Exception as e:
+            logger.warning(f"[POLICY MANAGER] Failed to save arbitration_complete policy: {e}")
+
     async def ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store.
         
@@ -158,6 +170,8 @@ class PolicyManager:
             EventType.RESOURCE_IMBALANCE,
             EventType.MAKE_OFFER,
             EventType.ACCEPT_OFFER,
+            EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT,
+            EventType.ARBITRATION_COMPLETE,
         ):
             await self.ensure_default_policies()
         # Other event types may not have default policies yet
