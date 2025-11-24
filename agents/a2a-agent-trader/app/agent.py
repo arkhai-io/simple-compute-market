@@ -61,6 +61,7 @@ from .schema.pydantic_models import (
     ActionType,
     EventType,
     DomainEvent,
+    AcceptOfferEvent,
     MarketOrder,
     MakeOfferEvent,
     ResourceImbalanceEvent,
@@ -258,6 +259,15 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             # Validate MarketOrder (which will validate resources via model_validator)
             order = MarketOrder.model_validate(offer_data)
             return MakeOfferEvent.from_order(order)
+            
+        elif event_type == EventType.ACCEPT_OFFER:
+            offer_data = data.get("offer", data)
+            if not isinstance(offer_data, dict):
+                raise ValueError("AcceptOfferEvent requires 'offer' or order data as dictionary")
+
+            order = MarketOrder.model_validate(offer_data)
+            escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
+            return AcceptOfferEvent.from_order(order, escrow_uid=escrow_uid)
             
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
@@ -510,7 +520,11 @@ class TraderAgent(BaseAgent):
         )
         
         # [4] Action execution (simulated)
-        outcome = await execute_action(action=action, ctx=ctx)
+        outcome = await execute_action(
+            action=action,
+            ctx=ctx,
+            domain_event=domain_event,
+        )
         
         # [5] Experience recording
         try:

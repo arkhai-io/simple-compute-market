@@ -269,6 +269,7 @@ class EventType(str, Enum):
     """Events that can be handled by the Agent"""
 
     MAKE_OFFER = "make_offer"
+    ACCEPT_OFFER = "accept_offer"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
@@ -311,6 +312,34 @@ class MakeOfferEvent(DomainEvent):
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration": order.duration,
+            },
+        )
+
+
+class AcceptOfferEvent(DomainEvent):
+    """Event triggered when a taker accepts a market offer."""
+
+    event_type: EventType = Field(default=EventType.ACCEPT_OFFER)
+    order: MarketOrder = Field(description="The accepted market order with taker info")
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Escrow receipt UID supplied by the taker",
+    )
+
+    @classmethod
+    def from_order(cls, order: MarketOrder, escrow_uid: str | None = None) -> "AcceptOfferEvent":
+        """Create an accept-offer event from a market order and optional escrow UID."""
+        return cls(
+            event_id=f"acc_{order.order_id}",
+            source=order.order_taker or order.order_maker,
+            order=order,
+            escrow_uid=escrow_uid,
+            data={
+                "order_id": order.order_id,
+                "offer_resource": order.offer_resource.model_dump(mode="json"),
+                "demand_resource": order.demand_resource.model_dump(mode="json"),
+                "duration": order.duration,
+                "escrow_uid": escrow_uid,
             },
         )
 

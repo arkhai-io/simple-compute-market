@@ -27,9 +27,11 @@ from app.schema.pydantic_models import (
     Action,
     ActionType,
     ComputeResource,
+    DomainEvent,
     EventType,
     GPUModel,
     MarketOrder,
+    MakeOfferEvent,
     Region,
     TokenResource
 )
@@ -46,7 +48,11 @@ AGENT_ID = CONFIG.agent_id
 logger = logging.getLogger(__name__)
 
 
-async def execute_action(action: Action, ctx: InvocationContext | None = None) -> dict[str, Any]:
+async def execute_action(
+    action: Action,
+    ctx: InvocationContext | None = None,
+    domain_event: DomainEvent | None = None,
+) -> dict[str, Any]:
     """Execute an action and return outcome. Currently simulated/logged only.
     
     TODO: Replace simulation with real tool function calls:
@@ -76,9 +82,13 @@ async def execute_action(action: Action, ctx: InvocationContext | None = None) -
     match action_type_str:
         case ActionType.ACCEPT_OFFER.value:
             logger.info(f"[ACTION] [SIMULATED] Accepting offer with params: {parameters}")
-            result = accept_offer()
+            result = await accept_offer(
+                ctx=ctx,
+                domain_event=domain_event,
+                parameters=parameters,
+            )
             outcome["result"] = result
-            outcome["message"] = "Offer accepted"
+            outcome["message"] = result.get("message", "Offer accepted")
             
         case ActionType.REJECT_OFFER.value:
             result = reject_offer()
@@ -215,14 +225,90 @@ async def mock_provision_machine() -> str:
     return "demo-user@node-01.example.net"
 
 
-def accept_offer() -> bool:
-    """Accept a received offer.
+async def accept_offer(
+    *,
+    ctx: InvocationContext | None,
+    domain_event: DomainEvent | None,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Accept a received offer and send acceptance to the counterparty via A2A."""
+    parameters = parameters or {}
 
-    Returns:
-        True if the acceptance was successfully communicated.
-    """
-    logger.info("[TOOL] Accepting received offer.")
-    return True
+    # Prefer explicit order payload; fallback to the triggering MakeOfferEvent.
+    order_payload = parameters.get("order") or parameters.get("offer")
+    if order_payload is None and isinstance(domain_event, MakeOfferEvent):
+        order_payload = domain_event.order
+
+    if isinstance(order_payload, MarketOrder):
+        order_dict = order_payload.model_dump(mode="json")
+    elif isinstance(order_payload, dict):
+        order_dict = order_payload
+    else:
+        logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
+        return {"status": "error", "message": "Missing order payload for accept_offer"}
+
+    escrow_uid = parameters.get("escrow_uid")
+    escrow_receipt = parameters.get("escrow_receipt")
+    if not escrow_uid and isinstance(escrow_receipt, dict):
+        escrow_uid = escrow_receipt.get("log", {}).get("uid")
+    if not escrow_uid:
+        escrow_uid = f"escrow_{uuid.uuid4()}"
+
+    # Stamp taker metadata onto the order.
+    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    order_dict["taker_attestation"] = {
+        "maker_attestation": "",
+        "taker_attestation": escrow_uid,
+    }
+
+    event_payload = {
+        "event_type": EventType.ACCEPT_OFFER.value,
+        "offer": order_dict,
+        "escrow_uid": escrow_uid,
+    }
+
+    if ctx is None:
+        logger.warning("[TOOL] No invocation context; acceptance not sent.")
+        return {
+            **event_payload,
+            "status": "pending",
+            "message": "No invocation context available to send acceptance",
+        }
+
+    event = Event(
+        author=AGENT_ID,
+        content=genai_types.Content(
+            role="model",
+            parts=[
+                genai_types.Part.from_function_response(
+                    name="accept_offer",
+                    response=event_payload,
+                )
+            ],
+        ),
+        invocation_id=ctx.invocation_id,
+        branch=ctx.branch,
+    )
+
+    logger.info("[TOOL] Accepting offer and notifying counterparty: %s", event_payload)
+
+    try:
+        result = await send_to_remote_agent(ctx, event)
+        return {
+            "status": "sent",
+            "message": "Offer accepted and forwarded to counterparty",
+            "escrow_uid": escrow_uid,
+            "offer": order_dict,
+            "remote_response": getattr(result, "content", None),
+        }
+    except Exception as e:
+        logger.error("[TOOL] Failed to send acceptance: %s", e)
+        return {
+            "status": "error",
+            "message": f"Failed to send acceptance: {e}",
+            "escrow_uid": escrow_uid,
+            "offer": order_dict,
+        }
 
 
 def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
@@ -383,6 +469,7 @@ async def buy_compute_with_erc20(
     Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
     and purchases via buy_with_erc20. Expiration is set to 0 (non-expiring) for now.
     """
+    # POV: Compute-buyer
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
 
@@ -432,6 +519,7 @@ async def fulfill_compute_obligation(
     escrow_uid: str,
     oracle_address: str
 ):
+    # POV: Compute-seller
     connection_details = await mock_provision_machine()
     fulfillment_uid = await client.string_obligation.do_obligation(
         connection_details,
@@ -445,6 +533,7 @@ async def arbitrate_compute_fulfillment(
     fulfillment_uid: str,
     oracle_address: str
 ):
+    # POV: Compute-buyer.
     async def decision_function (attestation):
         return True
 
@@ -467,5 +556,6 @@ async def collect_escrow(
     escrow_uid: str,
     fulfillment_uid: str
 ):
+    # POV: Compute-seller.
     await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
     return
