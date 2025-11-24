@@ -42,6 +42,7 @@ class Config:
     log_file_path: str | None  # Path to log file, None for default
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
+    ssh_public_key: str
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -85,6 +86,10 @@ def load_config() -> Config:
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
             "TOKEN_REGISTRY_PATH", str(DEFAULT_TOKEN_REGISTRY_PATH)
+        ),
+        ssh_public_key=os.getenv(
+            "SSH_PUBLIC_KEY",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example",
         ),
     )
 

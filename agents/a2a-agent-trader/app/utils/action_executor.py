@@ -44,6 +44,7 @@ REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
 REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
+SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,7 @@ async def accept_offer(
         "event_type": EventType.ACCEPT_OFFER.value,
         "offer": order_dict,
         "escrow_uid": escrow_uid,
+        "ssh_public_key": SSH_PUBLIC_KEY,
     }
 
     if ctx is None:
