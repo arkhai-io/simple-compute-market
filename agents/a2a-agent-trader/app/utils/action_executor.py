@@ -521,7 +521,7 @@ def encode_compute_lease(
 async def approve_token_escrow(
     token_resource: TokenResource | dict[str, Any],
     *,
-    client: AlkahestClient | None = None,
+    alkahest_client: AlkahestClient | None = None,
 ) -> str:
     """Approve an ERC20 escrow for the provided token resource."""
     if isinstance(token_resource, TokenResource):
@@ -531,9 +531,8 @@ async def approve_token_escrow(
     else:
         raise ValueError("approve_token_escrow expects a TokenResource or compatible dict")
     token_meta = payment.token
-    if client is None:
-        raise RuntimeError("approve_token_escrow requires an AlkahestClient (pass agent._alkahest_client)")
-    alkahest_client = client
+    if alkahest_client is None:
+        raise RuntimeError("approve_token_escrow requires an AlkahestClient")
 
     price_data = {"address": token_meta.contract_address, "value": payment.amount}
     logger.info(
@@ -543,7 +542,9 @@ async def approve_token_escrow(
         token_meta.decimals,
         price_data,
     )
-    return await alkahest_client.erc20.approve(price_data, "escrow")
+    escrow_approval = await alkahest_client.erc20.approve(price_data, "escrow")
+    logger.info(f"[ALKAHEST]: Escrow approved: f{escrow_approval}")
+    return escrow_approval
 
 
 async def buy_compute_with_erc20(
@@ -564,6 +565,8 @@ async def buy_compute_with_erc20(
     # POV: Compute-buyer
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
+
+    logger.info(f"[ALKAHEST]: Buying compute with Client {client}")
 
     arbiter_address = TRUSTED_ORACLE_ARBITER
 
@@ -588,7 +591,7 @@ async def buy_compute_with_erc20(
     price_data = {"address": payment.token.contract_address, "value": payment.amount}
 
     # 3) Approve escrow spend
-    await approve_token_escrow(payment, client=client)
+    await approve_token_escrow(payment, alkahest_client=client)
 
     # 4) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
