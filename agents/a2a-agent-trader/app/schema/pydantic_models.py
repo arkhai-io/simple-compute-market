@@ -270,6 +270,8 @@ class EventType(str, Enum):
 
     MAKE_OFFER = "make_offer"
     ACCEPT_OFFER = "accept_offer"
+    RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
+    ARBITRATION_COMPLETE = "arbitration_complete"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
@@ -354,6 +356,34 @@ class AcceptOfferEvent(DomainEvent):
             },
         )
 
+
+class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
+    """Event triggered when the buyer receives compute fulfillment details."""
+
+    event_type: EventType = Field(default=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT)
+    escrow_uid: str = Field(description="Escrow UID tied to the fulfillment")
+    fulfillment_uid: str | None = Field(
+        default=None,
+        description="UID of the fulfillment (may be provided by seller/chain)",
+    )
+    connection_details: str | None = Field(
+        default=None,
+        description="Connection string/details for the provisioned compute",
+    )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
+        escrow_uid = payload.get("escrow_uid")
+        if not escrow_uid:
+            raise ValueError("ReceiveComputeObligationFulfillmentEvent requires escrow_uid")
+        return cls(
+            event_id=payload.get("event_id", f"rcf_{uuid.uuid4()}"),
+            source=payload.get("source", "unknown"),
+            escrow_uid=escrow_uid,
+            fulfillment_uid=payload.get("fulfillment_uid"),
+            connection_details=payload.get("connection_details"),
+            data=payload,
+        )
 
 class ResourceAlertRequest(BaseModel):
     """Request model for resource imbalance alerts from monitoring systems.
@@ -565,6 +595,8 @@ class ActionType(str, Enum):
     RESOLVE_INTERNALLY = "resolve_internally"
     OUTSOURCE = "outsource"
     FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
+    TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
+    VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
 
     # No-op
     NOOP = "noop"

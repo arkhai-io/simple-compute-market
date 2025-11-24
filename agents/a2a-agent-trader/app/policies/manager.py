@@ -115,6 +115,18 @@ class PolicyManager:
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save accept_offer policy: {e}")
 
+        # Receive fulfillment policy to trust and arbitrate
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="receive_fulfillment_default_v1",
+                trigger_type=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                callable_ref="rcf.action.trust_fulfillment",
+            )
+            logger.debug("[POLICY MANAGER] Ensured receive_fulfillment policy")
+        except Exception as e:
+            logger.warning(f"[POLICY MANAGER] Failed to save receive_fulfillment policy: {e}")
+
     async def ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store.
         

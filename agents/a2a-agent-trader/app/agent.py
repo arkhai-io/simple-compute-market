@@ -64,6 +64,7 @@ from .schema.pydantic_models import (
     AcceptOfferEvent,
     MarketOrder,
     MakeOfferEvent,
+    ReceiveComputeObligationFulfillmentEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
     NegotiationEvent,
@@ -273,6 +274,9 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
             )
+            
+        elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
+            return ReceiveComputeObligationFulfillmentEvent.from_payload(data)
             
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
@@ -529,6 +533,7 @@ class TraderAgent(BaseAgent):
             action=action,
             ctx=ctx,
             domain_event=domain_event,
+            alkahest_client=self._alkahest_client,
         )
         
         # [5] Experience recording

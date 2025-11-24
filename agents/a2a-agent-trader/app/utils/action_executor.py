@@ -45,12 +45,14 @@ PORT = CONFIG.port
 REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
+TRUSTED_ORACLE_ARBITER = "0x361E0950534F4a54A39F8C4f1f642C323f6e66B9"
 
 logger = logging.getLogger(__name__)
 
 
 async def execute_action(
     action: Action,
+    alkahest_client: Any,
     ctx: InvocationContext | None = None,
     domain_event: DomainEvent | None = None,
 ) -> dict[str, Any]:
@@ -84,6 +86,7 @@ async def execute_action(
         case ActionType.ACCEPT_OFFER.value:
             logger.info(f"[ACTION] [SIMULATED] Accepting offer with params: {parameters}")
             result = await accept_offer(
+                alkahest_client=alkahest_client,
                 ctx=ctx,
                 domain_event=domain_event,
                 parameters=parameters,
@@ -122,13 +125,71 @@ async def execute_action(
         case ActionType.FULFILL_COMPUTE_OBLIGATION.value:
             logger.info(f"[ACTION] [SIMULATED] Fulfilling compute obligation with params: {parameters}")
             result = await fulfill_compute_obligation(
-                client=None,  # No on-chain client in this demo path
-                escrow_uid=parameters.get("escrow_uid") or f"escrow_{uuid.uuid4()}",
-                oracle_address=parameters.get("oracle_address"),
+                client=alkahest_client,
+                escrow_uid=parameters.get("escrow_uid"),
+                oracle_address=parameters.get("oracle_address") or TRUSTED_ORACLE_ARBITER,
                 ssh_public_key=parameters.get("ssh_public_key"),
             )
+            # Include event_type for downstream parsing and propagate to remote agent.
+            result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+            if ctx:
+                try:
+                    event = Event(
+                        author=AGENT_ID,
+                        content=genai_types.Content(
+                            role="model",
+                            parts=[
+                                genai_types.Part.from_function_response(
+                                    name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                                    response=result,
+                                )
+                            ],
+                        ),
+                        invocation_id=ctx.invocation_id,
+                        branch=ctx.branch,
+                    )
+                    await send_to_remote_agent(ctx, event)
+                except Exception as send_err:
+                    logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             outcome["result"] = result
             outcome["message"] = result.get("message", "Compute obligation fulfilled (simulated)")
+
+        case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
+            logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
+            result = await arbitrate_compute_fulfillment(
+                client=alkahest_client,
+                fulfillment_uid=parameters.get("fulfillment_uid"),
+                oracle_address=parameters.get("oracle_address"),
+            )
+            decisions = result.get("decisions")
+            logger.info("[ACTION] Arbitration decisions: %s", decisions)
+            if ctx:
+                try:
+                    event = Event(
+                        author=AGENT_ID,
+                        content=genai_types.Content(
+                            role="model",
+                            parts=[
+                                genai_types.Part.from_function_response(
+                                    name=EventType.ARBITRATION_COMPLETE.value,
+                                    response={
+                                        "event_type": EventType.ARBITRATION_COMPLETE.value,
+                                        "decisions": decisions,
+                                        "fulfillment_uid": result.get("fulfillment_uid"),
+                                        "oracle_address": result.get("oracle_address"),
+                                        "status": result.get("status"),
+                                    },
+                                )
+                            ],
+                        ),
+                        invocation_id=ctx.invocation_id,
+                        branch=ctx.branch,
+                    )
+                    await send_to_remote_agent(ctx, event)
+                except Exception as send_err:
+                    logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
+            outcome["result"] = result
+            outcome["message"] = "Fulfillment trusted; arbitration completed"
             
         case ActionType.COUNTER_OFFER.value:
             logger.info(f"[ACTION] [SIMULATED] Countering offer with params: {parameters}")
@@ -242,6 +303,7 @@ async def mock_provision_machine(ssh_public_key: str | None = None) -> str:
 
 async def accept_offer(
     *,
+    alkahest_client: Any | None,
     ctx: InvocationContext | None,
     domain_event: DomainEvent | None,
     parameters: dict[str, Any] | None = None,
@@ -262,19 +324,33 @@ async def accept_offer(
         logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
         return {"status": "error", "message": "Missing order payload for accept_offer"}
 
-    escrow_uid = parameters.get("escrow_uid")
-    escrow_receipt = parameters.get("escrow_receipt")
+    escrow_uid = None
+    escrow_receipt = None
+
+    # If escrow_uid not provided, attempt on-chain buy to create it.
+    if not escrow_uid and alkahest_client:
+        try:
+            logger.info("[TOOL]: Putting tokens in escrow.")
+            compute_resource = order_dict.get("offer_resource", {})
+            token_resource = order_dict.get("demand_resource", {})
+            escrow_receipt = await buy_compute_with_erc20(
+                compute_resource=compute_resource,
+                token_resource=token_resource,
+                oracle_address=TRUSTED_ORACLE_ARBITER,
+                client=alkahest_client,
+            )
+            escrow_uid = escrow_receipt.get("log", {}).get("uid")
+            logger.info("[TOOL] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
+        except Exception as e:
+            logger.warning("[TOOL] Failed to create escrow via buy_with_erc20: %s", e)
+
     if not escrow_uid and isinstance(escrow_receipt, dict):
         escrow_uid = escrow_receipt.get("log", {}).get("uid")
-    if not escrow_uid:
-        escrow_uid = f"escrow_{uuid.uuid4()}"
+        logger.info(f"[TOOL] Got escrow_uid: {escrow_uid}")
 
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
-    order_dict["taker_attestation"] = {
-        "maker_attestation": "",
-        "taker_attestation": escrow_uid,
-    }
+    order_dict["taker_attestation"] = escrow_uid
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
@@ -489,7 +565,6 @@ async def buy_compute_with_erc20(
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
 
-    TRUSTED_ORACLE_ARBITER = "0x361E0950534F4a54A39F8C4f1f642C323f6e66B9"
     arbiter_address = TRUSTED_ORACLE_ARBITER
 
     # 1) Encode lease terms into demand bytes
@@ -556,6 +631,7 @@ async def fulfill_compute_obligation(
         connection_details,
         escrow_uid
     )
+    logger.info("[TOOL] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
     await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
     return {
         "status": "fulfilled",
@@ -567,9 +643,9 @@ async def fulfill_compute_obligation(
     }
 
 async def arbitrate_compute_fulfillment(
-    client: AlkahestClient,
+    client: AlkahestClient | None,
     fulfillment_uid: str,
-    oracle_address: str
+    oracle_address: str | None
 ):
     # POV: Compute-buyer.
     async def decision_function (attestation):
@@ -577,6 +653,19 @@ async def arbitrate_compute_fulfillment(
 
     def callback(decision):
         pass
+
+    # Demo path: no client/chain
+    if not client or not oracle_address:
+        logger.info("[TOOL] (Simulated) Arbitration trusted fulfillment.")
+        decisions = [True]
+        logger.info("[TOOL] Arbitration decisions (simulated): %s", decisions)
+        return {
+            "status": "trusted",
+            "message": "Arbitration skipped (auto-approve)",
+            "fulfillment_uid": fulfillment_uid,
+            "oracle_address": oracle_address,
+            "decisions": decisions,
+        }
 
     options = ArbitrateOptions(skip_arbitrated=False, only_new=False)
 
@@ -587,7 +676,17 @@ async def arbitrate_compute_fulfillment(
         timeout_seconds=2.0
     )
 
-    return result
+    decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
+    logger.info("[TOOL] Arbitration decisions: %s", decisions)
+
+    return {
+        "status": "trusted",
+        "message": "Arbitration completed",
+        "fulfillment_uid": fulfillment_uid,
+        "oracle_address": oracle_address,
+        "result": result,
+        "decisions": decisions,
+    }
 
 async def collect_escrow(
     client: AlkahestClient,

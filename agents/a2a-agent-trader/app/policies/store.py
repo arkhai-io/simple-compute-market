@@ -7,6 +7,7 @@ from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
     AcceptOfferEvent,
+    ReceiveComputeObligationFulfillmentEvent,
     DecisionContext,
     MakeOfferEvent,
     ComputeResource,
@@ -214,6 +215,22 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "order": context.event.order.model_dump(mode="json"),
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
+        },
+    )
+
+# Receive fulfillment -> trust arbitration path
+@policy_callable("rcf.action.trust_fulfillment")
+def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | None:
+    """When we receive compute fulfillment, trust it and move to arbitration."""
+    if not isinstance(context.event, ReceiveComputeObligationFulfillmentEvent):
+        return None
+
+    return DomainAction(
+        action_type=DomainActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT,
+        parameters={
+            "escrow_uid": context.event.escrow_uid,
+            "fulfillment_uid": context.event.fulfillment_uid,
+            "connection_details": context.event.connection_details,
         },
     )
 
