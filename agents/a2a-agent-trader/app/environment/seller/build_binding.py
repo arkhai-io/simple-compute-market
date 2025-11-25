@@ -63,7 +63,8 @@ def build_extension():
     env_binding_h = find_pufferlib_env_binding()
     if env_binding_h:
         print(f"✓ Found env_binding.h at: {env_binding_h}")
-        # Copy to parent directory (binding.c expects ../env_binding.h)
+        # Copy to environment directory (binding.c expects ../env_binding.h)
+        # env_dir is app/environment/seller, so env_dir.parent is app/environment
         parent_binding_h = env_dir.parent / "env_binding.h"
         if not parent_binding_h.exists() or Path(env_binding_h).stat().st_mtime > parent_binding_h.stat().st_mtime:
             shutil.copy2(env_binding_h, parent_binding_h)
@@ -97,8 +98,11 @@ def build_extension():
         from distutils.command.build_ext import build_ext
         
         # The binding.c expects ../env_binding.h, so we need to adjust include paths
-        app_dir = env_dir.parent
-        project_root = app_dir.parent
+        # env_dir is app/environment/seller
+        # env_dir.parent is app/environment (where env_binding.h should be)
+        # env_dir.parent.parent is app/ (parent of environment)
+        environment_dir = env_dir.parent  # app/environment
+        app_dir = env_dir.parent.parent    # app/
         
         # Get numpy include directory
         try:
@@ -108,8 +112,8 @@ def build_extension():
             numpy_include = None
         
         include_dirs = [
-            str(env_dir),      # For market.h
-            str(app_dir),      # For ../env_binding.h (relative to binding.c)
+            str(env_dir),           # For market.h (in seller/)
+            str(environment_dir),  # For ../env_binding.h (relative to binding.c in seller/)
         ]
         if numpy_include:
             include_dirs.append(numpy_include)

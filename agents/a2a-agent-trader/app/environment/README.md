@@ -1,15 +1,21 @@
 # Market Environment
 
-This directory contains the Market environment implementation for reinforcement learning.
+This directory contains Market environment implementations for reinforcement learning. The directory is organized by environment type to allow for multiple environment variants.
 
-## Files
+## Directory Structure
 
-- `market.py` - Python wrapper for the Market environment
-- `market.c` - C implementation of the Market environment
-- `market.h` - C header file with Market struct definitions
-- `binding.c` - C binding that connects Python to the C implementation
-- `market.ini` - Configuration file for training
-- `default.ini` - Default training configuration
+- `seller/` - Seller-side market environment
+  - `market.py` - Python wrapper for the Market environment
+  - `market.c` - C implementation of the Market environment
+  - `market.h` - C header file with Market struct definitions
+  - `binding.c` - C binding that connects Python to the C implementation
+  - `market.ini` - Configuration file for training
+  - `default.ini` - Default training configuration
+  - `train.py` - Training script
+  - `eval.py` - Evaluation script
+  - `build_binding.py` - Build script for C extension
+
+Future environments (e.g., `buyer/`) can be added as separate subdirectories following the same structure.
 
 ## Building the C Extension
 
@@ -31,7 +37,7 @@ make build-market-env
 ### Option 2: Build with uv directly
 
 ```bash
-cd agents/a2a-agent-trader/app/environment
+cd agents/a2a-agent-trader/app/environment/seller
 uv run python build_binding.py
 ```
 
@@ -40,15 +46,15 @@ uv run python build_binding.py
 If pufferlib is installed from source:
 
 ```bash
-cd agents/a2a-agent-trader/app/environment
+cd agents/a2a-agent-trader/app/environment/seller
 
 # Find and copy env_binding.h from pufferlib
 python3 -c "import pufferlib; import os; print(os.path.dirname(pufferlib.__file__))"
-# Copy env_binding.h to ../ (app/ directory)
+# Copy env_binding.h to ../ (app/environment/ directory)
 
 # Build using setuptools
 cd ../..  # Go to project root
-uv run python -m setuptools build_ext --inplace --build-lib app/environment
+uv run python -m setuptools build_ext --inplace --build-lib app/environment/seller
 ```
 
 ### Installing pufferlib from Source (if needed)
@@ -79,6 +85,8 @@ cd agents/a2a-agent-trader
 uv run test_market_env.py
 ```
 
+**Note:** The test script imports from `environment.seller.market`, but you can also import directly from `app.environment` which will automatically use the seller environment.
+
 ## Training
 
 Train a model on the Market environment using pufferlib. **Note:** Since this is a local environment (not registered with pufferlib's ocean package), we use pufferlib's Python API directly.
@@ -94,7 +102,7 @@ make train-market-env
 
 ```bash
 # Use custom config file
-make train-market-env CONFIG=app/environment/market.ini DEVICE=cuda
+make train-market-env CONFIG=app/environment/seller/market.ini DEVICE=cuda
 
 # Use CPU
 make train-market-env DEVICE=cpu
@@ -133,10 +141,10 @@ You can also use the Python scripts directly:
 
 ```bash
 # Train
-uv run python app/environment/train.py
+uv run python app/environment/seller/train.py
 
 # Evaluate
-uv run python app/environment/eval.py
+uv run python app/environment/seller/eval.py
 ```
 
 ### Using pufferlib CLI (if environment is registered)
@@ -145,7 +153,7 @@ If you register the Market environment with pufferlib's ocean package, you can u
 
 ```bash
 # Train
-uv run python -m pufferlib.pufferl train puffer_market --config app/environment/market.ini
+uv run python -m pufferlib.pufferl train puffer_market --config app/environment/seller/market.ini
 
 # Evaluate
 uv run python -m pufferlib.pufferl eval puffer_market --load-model-path latest
@@ -154,7 +162,67 @@ uv run python -m pufferlib.pufferl eval puffer_market --load-model-path latest
 uv run python -m pufferlib.pufferl sweep puffer_market --wandb --tag my_sweep
 ```
 
-See `market.ini` for training configuration options.
+See `seller/market.ini` for training configuration options.
+
+## Model Export
+
+Export trained model checkpoints to TorchScript format for deployment or inference in other environments.
+
+### Export with Make
+
+```bash
+# Export latest checkpoint (auto-detects from experiments/)
+make export-model
+
+# Export specific checkpoint
+make export-model CHECKPOINT=experiments/176397814556/model_000200.pt
+
+# Export with custom output path
+make export-model CHECKPOINT=experiments/176397814556/model_000200.pt OUTPUT=my_model.ts
+
+# Export using CUDA (faster if available)
+make export-model CHECKPOINT=experiments/176397814556/model_000200.pt DEVICE=cuda
+
+# Use torch.jit.script instead of trace (better for models with control flow)
+make export-model CHECKPOINT=experiments/176397814556/model_000200.pt SCRIPT=true
+```
+
+### Export with Python Script
+
+```bash
+# Export latest checkpoint
+uv run python app/environment/seller/export_model.py
+
+# Export specific checkpoint
+uv run python app/environment/seller/export_model.py experiments/176397814556/model_000200.pt
+
+# Export with custom output path
+uv run python app/environment/seller/export_model.py experiments/176397814556/model_000200.pt -o my_model.ts
+
+# Export with custom observation shape (if different from default)
+uv run python app/environment/seller/export_model.py experiments/176397814556/model_000200.pt --obs-shape 14
+
+# Use torch.jit.script method
+uv run python app/environment/seller/export_model.py experiments/176397814556/model_000200.pt --script
+```
+
+### Using Exported TorchScript Models
+
+```python
+import torch
+
+# Load the exported model
+model = torch.jit.load("my_model.ts")
+model.eval()
+
+# Create input (observation shape: 14 features)
+observation = torch.zeros((1, 14), dtype=torch.float32)
+
+# Run inference
+with torch.no_grad():
+    output = model(observation)
+    # output contains logits for action space MultiDiscrete([9, 2])
+```
 
 ## Troubleshooting
 
@@ -180,8 +248,8 @@ Install Python development headers:
 ### Import Error after build
 
 Make sure the `.so` file is in the correct location:
-- Should be: `app/environment/binding*.so`
-- Or: `app/environment/binding.cpython-*.so`
+- Should be: `app/environment/seller/binding*.so`
+- Or: `app/environment/seller/binding.cpython-*.so`
 
 Check with:
 ```bash

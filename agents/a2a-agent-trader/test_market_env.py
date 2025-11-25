@@ -26,22 +26,24 @@ def test_market_import():
         sys.path.insert(0, str(env_dir))
     
     try:
-        # Import directly from the environment module to avoid app.__init__
+        # Import directly from the environment.seller module
         import importlib.util
+        seller_dir = env_dir / "seller"
         spec = importlib.util.spec_from_file_location(
-            "environment.market",
-            env_dir / "market.py"
+            "environment.seller.market",
+            seller_dir / "market.py"
         )
         market_module = importlib.util.module_from_spec(spec)
+        market_module.__package__ = "environment.seller"
         spec.loader.exec_module(market_module)
         Market = market_module.Market
-        print("✓ Successfully imported Market from environment.market")
+        print("✓ Successfully imported Market from environment.seller.market")
         return Market
     except Exception as e:
         print(f"✗ Failed to import Market: {e}")
         print("\nPossible issues:")
         print("1. The C extension binding may need to be built")
-        print("   - Run: cd app/environment && uv run python build_binding.py")
+        print("   - Run: cd app/environment/seller && uv run python build_binding.py")
         print("2. pufferlib may need to be installed/configured")
         print("3. The binding module may need to be compiled")
         import traceback

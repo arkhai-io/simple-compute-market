@@ -14,7 +14,7 @@ except ImportError:
     except ImportError:
         raise ImportError(
             "Could not import Market binding. Please build the C extension:\n"
-            "  cd app/environment && uv run python build_binding.py\n"
+            "  cd app/environment/seller && uv run python build_binding.py\n"
             "Or ensure pufferlib.ocean.market.binding is available."
         )
 
