@@ -377,8 +377,13 @@ class TraderAgent(BaseAgent):
                 #     self._alkahest_client = alkahest_client
                 #     logger.info("[ALKAHEST]: AlkahestClient initialized.")
                 # else:
-                # self._alkahest_client = AlkahestClient(private_key=AGENT_PRIV_KEY, rpc_url=CHAIN_RPC_URL)
-                self._alkahest_client = None
+                env = EnvTestManager()
+                self._alkahest_client = AlkahestClient(
+                    private_key=AGENT_PRIV_KEY,
+                    rpc_url=CHAIN_RPC_URL,
+                    address_config=env.addresses
+                )
+                # self._alkahest_client = None
                 logger.info(f"[ALKAHEST]: AlkahestClient initialized: {self._alkahest_client}.")
             except Exception as e:
                 logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")

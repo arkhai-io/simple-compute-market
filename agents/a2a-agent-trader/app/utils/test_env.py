@@ -14,8 +14,8 @@ def main() -> None:
     pp = pprint.PrettyPrinter()
 
     mock_erc20 = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
-    mock_erc20.transfer(env.alice, 1000)
-    mock_erc20.transfer(env.bob, 1000)
+    mock_erc20.transfer(env.alice, 90000000000)
+    mock_erc20.transfer(env.bob, 90000000000)
 
     print("rpc_url:", env.rpc_url)
     print("alice:", env.alice)
@@ -36,7 +36,7 @@ def main() -> None:
         rpc_url=env.rpc_url,
         address_config=env.addresses
     )
-    # pp.pprint(f"new_client: {asyncio.run(test_approval(client))}")
+    pp.pprint(f"new_client: {asyncio.run(test_approval(client))}")
 
     print("\nEnvTestManager running. Press Enter to shut down...")
     input()

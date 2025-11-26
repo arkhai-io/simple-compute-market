@@ -370,8 +370,8 @@ async def accept_offer(
     escrow_uid = None
     escrow_receipt = None
 
-    # If escrow_uid not provided, attempt on-chain buy to create it.
-    if not escrow_uid and alkahest_client:
+    # If alkahest_client provided, attempt on-chain buy to escrow tokens.
+    if alkahest_client:
         try:
             logger.info("[ALKAHEST]: Putting tokens in escrow.")
             compute_resource = order_dict.get("offer_resource", {})
@@ -379,7 +379,7 @@ async def accept_offer(
             escrow_receipt = await buy_compute_with_erc20(
                 compute_resource=compute_resource,
                 token_resource=token_resource,
-                oracle_address=TRUSTED_ORACLE_ARBITER,
+                oracle_address=DEMO_ORACLE_ADDRESS,
                 client=alkahest_client,
             )
             escrow_uid = escrow_receipt.get("log", {}).get("uid")
