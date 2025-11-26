@@ -58,7 +58,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=0.3.9" },
-    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest-py?rev=simplify-oracle" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest-py?rev=main" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "eth-abi", specifier = ">=5.2.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
@@ -236,7 +236,7 @@ wheels = [
 [[package]]
 name = "alkahest-py"
 version = "0.1.0"
-source = { git = "https://github.com/arkhai-io/alkahest-py?rev=simplify-oracle#fa858563f4884b39c2f0d937de6c0bf8bcfdbe32" }
+source = { git = "https://github.com/arkhai-io/alkahest-py?rev=main#36161fe83456fc53f02e8cf92e9a597abe33b562" }
 
 [[package]]
 name = "annotated-types"
