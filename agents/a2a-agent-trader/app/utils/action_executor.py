@@ -52,6 +52,34 @@ DEMO_ORACLE_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 logger = logging.getLogger(__name__)
 
 
+def _serialize_decision(decision: Any) -> Any:
+    """Return a minimal JSON-safe dict with decision and tx_hash."""
+    if isinstance(decision, dict):
+        return {
+            "decision": decision.get("decision"),
+            "tx_hash": decision.get("tx_hash") or decision.get("transaction_hash"),
+        }
+
+    decision_bool = getattr(decision, "decision", None)
+    tx_hash = getattr(decision, "transaction_hash", None) or getattr(decision, "tx_hash", None)
+
+    if decision_bool is None and isinstance(decision, bool):
+        decision_bool = decision
+
+    return {
+        "decision": decision_bool,
+        "tx_hash": tx_hash,
+    }
+
+
+def _serialize_decisions(decisions: Any) -> list[Any]:
+    if decisions is None:
+        return []
+    if isinstance(decisions, list):
+        return [_serialize_decision(d) for d in decisions]
+    return [_serialize_decision(decisions)]
+
+
 def _resolve_oracle_address(client: AlkahestClient | None, oracle_address: str | None) -> str:
     """Return the oracle signer address."""
     return oracle_address or DEMO_ORACLE_ADDRESS
@@ -745,6 +773,7 @@ async def arbitrate_compute_fulfillment(
     logger.info("[TOOL] Arbitration decisions: %s", result)
     decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
     logger.info("[TOOL] Arbitration decisions: %s", decisions)
+    serialized_decisions = _serialize_decisions(decisions)
 
     return {
         "status": "trusted",
@@ -752,8 +781,7 @@ async def arbitrate_compute_fulfillment(
         "fulfillment_uid": fulfillment_uid,
         "escrow_uid": escrow_uid,
         "oracle_address": oracle_address,
-        "result": result,
-        "decisions": decisions,
+        "decisions": serialized_decisions,
     }
 
 async def collect_escrow(
@@ -764,8 +792,8 @@ async def collect_escrow(
     # POV: Compute-seller.
     
     if client:
-        await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
-        logger.info("[ALKAHEST]: Escrow collected.")
+        result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+        logger.info(f"[ALKAHEST]: Escrow collected: {result}")
     else:
         logger.info("[ALKAHEST] (Simulated) Escrow collected")
     return
