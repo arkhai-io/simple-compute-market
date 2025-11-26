@@ -47,9 +47,14 @@ AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 TRUSTED_ORACLE_ARBITER = "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0"
-DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+DEMO_ORACLE_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_oracle_address(client: AlkahestClient | None, oracle_address: str | None) -> str:
+    """Return the oracle signer address."""
+    return oracle_address or DEMO_ORACLE_ADDRESS
 
 
 async def execute_action(
@@ -161,7 +166,7 @@ async def execute_action(
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=parameters.get("oracle_address"),
+                oracle_address=parameters.get("oracle_address", DEMO_ORACLE_ADDRESS),
                 escrow_uid=parameters.get("escrow_uid"),
             )
             result["escrow_uid"] = result.get("escrow_uid") or parameters.get("escrow_uid")
@@ -669,6 +674,7 @@ async def fulfill_compute_obligation(
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
     # POV: Compute-seller
+    oracle_address = _resolve_oracle_address(client, oracle_address)
     connection_details = await mock_provision_machine(ssh_public_key)
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
@@ -687,8 +693,9 @@ async def fulfill_compute_obligation(
         connection_details,
         escrow_uid
     )
-    logger.info("[TOOL] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
-    await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+    logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
+    request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+    logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
@@ -705,6 +712,7 @@ async def arbitrate_compute_fulfillment(
     escrow_uid: str | None = None,
 ):
     # POV: Compute-buyer.
+    oracle_address = _resolve_oracle_address(client, oracle_address)
     async def decision_function (attestation):
         return True
 
@@ -712,7 +720,7 @@ async def arbitrate_compute_fulfillment(
         pass
 
     # Demo path: no client/chain
-    if not client or not oracle_address:
+    if not client:
         logger.info("[TOOL] (Simulated) Arbitration trusted fulfillment.")
         decisions = [True]
         logger.info("[TOOL] Arbitration decisions (simulated): %s", decisions)
@@ -734,6 +742,7 @@ async def arbitrate_compute_fulfillment(
         timeout_seconds=2.0
     )
 
+    logger.info("[TOOL] Arbitration decisions: %s", result)
     decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
     logger.info("[TOOL] Arbitration decisions: %s", decisions)
 
