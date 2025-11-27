@@ -159,11 +159,19 @@ async def execute_action(
 
         case ActionType.FULFILL_COMPUTE_OBLIGATION.value:
             logger.info(f"[ACTION] [SIMULATED] Fulfilling compute obligation with params: {parameters}")
+            escrow_uid = parameters.get("escrow_uid")
+            ssh_public_key = parameters.get("ssh_public_key")
+
+            if not escrow_uid:
+                raise ValueError("escrow_uid is required for fulfill_compute_obligation")
+            if not ssh_public_key:
+                raise ValueError("ssh_public_key is required for fulfill_compute_obligation")
+
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
-                escrow_uid=parameters.get("escrow_uid"),
+                escrow_uid=escrow_uid,
                 oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
-                ssh_public_key=parameters.get("ssh_public_key"),
+                ssh_public_key=ssh_public_key,
             )
             # Include event_type for downstream parsing and propagate to remote agent.
             result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
@@ -364,16 +372,13 @@ def reject_offer() -> bool:
     return True
 
 
-async def mock_provision_machine(ssh_public_key: str | None = None) -> str:
+async def mock_provision_machine(ssh_public_key: str) -> str:
     """Mock stand-in for provisioning a machine.
 
     Return:
         String with connection details.
     """
-    if ssh_public_key:
-        logger.info("[TOOL] (Simulated) Machine provisioned with SSH key.")
-    else:
-        logger.info("[TOOL] (Simulated) Machine provisioned without SSH key.")
+    logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
     return "demo-user@node-01.example.net"
 
 
@@ -695,8 +700,8 @@ async def buy_compute_with_erc20(
 async def fulfill_compute_obligation(
     client: AlkahestClient | None,
     escrow_uid: str,
+    ssh_public_key: str,
     oracle_address: str | None = None,
-    ssh_public_key: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
     oracle_address = _resolve_oracle_address(oracle_address)
