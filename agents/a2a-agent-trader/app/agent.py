@@ -547,7 +547,6 @@ class TraderAgent(BaseAgent):
         outcome = await execute_action(
             action=action,
             ctx=ctx,
-            domain_event=domain_event,
             alkahest_client=self._alkahest_client,
         )
         
