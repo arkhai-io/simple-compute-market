@@ -161,6 +161,7 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
             action_type=ActionType.ACCEPT_OFFER,
             parameters={
                 "order_id": order.order_id,
+                "order": order,
                 "offer_resource": offer_resource.model_dump(mode="json"),
                 "demand_resource": demand_resource.model_dump(mode="json"),
             }
