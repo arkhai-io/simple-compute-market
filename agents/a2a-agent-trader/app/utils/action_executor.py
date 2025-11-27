@@ -622,7 +622,7 @@ async def approve_token_escrow(
         price_data,
     )
     escrow_approval = await alkahest_client.erc20.approve(price_data, "escrow")
-    logger.info(f"[ALKAHEST]: Escrow approved: f{escrow_approval}")
+    logger.info(f"[ALKAHEST]: Escrow approved: {escrow_approval}")
     return escrow_approval
 
 
@@ -641,7 +641,6 @@ async def buy_compute_with_erc20(
     Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
     and purchases via buy_with_erc20. Expiration is set to 0 (non-expiring) for now.
     """
-    # POV: Compute-buyer
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
 
@@ -683,6 +682,8 @@ async def buy_compute_with_erc20(
         expiration,
     )
 
+    escrow_receipt = None
+
     try:
         escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
         logger.info(f"[ALKAHEST]: {escrow_receipt}")
@@ -698,7 +699,6 @@ async def fulfill_compute_obligation(
     ssh_public_key: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
-    # POV: Compute-seller
     oracle_address = _resolve_oracle_address(oracle_address)
     connection_details = await mock_provision_machine(ssh_public_key)
     if not client or not oracle_address:
@@ -736,7 +736,6 @@ async def arbitrate_compute_fulfillment(
     oracle_address: str | None,
     escrow_uid: str | None = None,
 ):
-    # POV: Compute-buyer.
     oracle_address = _resolve_oracle_address(oracle_address)
     
     async def decision_function (attestation):
@@ -785,8 +784,6 @@ async def collect_escrow(
     escrow_uid: str,
     fulfillment_uid: str
 ):
-    # POV: Compute-seller.
-    
     if client:
         result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
         logger.info(f"[ALKAHEST]: Escrow collected: {result}")
