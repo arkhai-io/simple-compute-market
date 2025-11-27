@@ -80,7 +80,7 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
     return [_serialize_decision(decisions)]
 
 
-def _resolve_oracle_address(client: AlkahestClient | None, oracle_address: str | None) -> str:
+def _resolve_oracle_address(oracle_address: str | None) -> str:
     """Return the oracle signer address."""
     return oracle_address or DEMO_ORACLE_ADDRESS
 
@@ -661,9 +661,6 @@ async def buy_compute_with_erc20(
 
     demand_bytes = demand_data.encode_self()
 
-    logger.info(f"[ALKAHEST] Demand data: {demand_data}")
-    logger.info(f"[ALKAHEST] Demand bytes: {demand_bytes}")
-
     # 2) Build price data from token resource
     if isinstance(token_resource, TokenResource):
         payment = token_resource
@@ -702,12 +699,12 @@ async def fulfill_compute_obligation(
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
     # POV: Compute-seller
-    oracle_address = _resolve_oracle_address(client, oracle_address)
+    oracle_address = _resolve_oracle_address(oracle_address)
     connection_details = await mock_provision_machine(ssh_public_key)
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        logger.info("[TOOL] (Simulated) Fulfilled compute obligation without on-chain client.")
+        logger.info("[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client.")
         return {
             "status": "fulfilled",
             "message": "Compute obligation fulfilled (simulated)",
@@ -740,7 +737,8 @@ async def arbitrate_compute_fulfillment(
     escrow_uid: str | None = None,
 ):
     # POV: Compute-buyer.
-    oracle_address = _resolve_oracle_address(client, oracle_address)
+    oracle_address = _resolve_oracle_address(oracle_address)
+    
     async def decision_function (attestation):
         return True
 
@@ -749,9 +747,8 @@ async def arbitrate_compute_fulfillment(
 
     # Demo path: no client/chain
     if not client:
-        logger.info("[TOOL] (Simulated) Arbitration trusted fulfillment.")
         decisions = [True]
-        logger.info("[TOOL] Arbitration decisions (simulated): %s", decisions)
+        logger.info("[ALKAHEST] Arbitration decisions (simulated): %s", decisions)
         return {
             "status": "trusted",
             "message": "Arbitration skipped (auto-approve)",
@@ -770,9 +767,8 @@ async def arbitrate_compute_fulfillment(
         timeout_seconds=2.0
     )
 
-    logger.info("[TOOL] Arbitration decisions: %s", result)
     decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
-    logger.info("[TOOL] Arbitration decisions: %s", decisions)
+    logger.info("[ALKAHEST] Arbitration decisions: %s", decisions)
     serialized_decisions = _serialize_decisions(decisions)
 
     return {
