@@ -50,7 +50,6 @@ setup_file_logging(CONFIG.log_file_path, CONFIG.log_level)
 
 logger = logging.getLogger(__name__)
 
-TEST_ALKAHEST_CLIENT = CONFIG.test_alkahest_client
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
@@ -368,15 +367,10 @@ class TraderAgent(BaseAgent):
         has_priv_key = AGENT_PRIV_KEY and isinstance(AGENT_PRIV_KEY, str) and AGENT_PRIV_KEY.strip()
         has_rpc_url = CHAIN_RPC_URL and isinstance(CHAIN_RPC_URL, str) and CHAIN_RPC_URL.strip()
         
-        if TEST_ALKAHEST_CLIENT or (has_priv_key and has_rpc_url):
+        if has_priv_key and has_rpc_url:
             try:
-                # logger.info(f"[ALKAHEST] Client: {TEST_ALKAHEST_CLIENT}")
-                # if TEST_ALKAHEST_CLIENT:
-                #     alkahest_client = getattr(env, f"{TEST_ALKAHEST_CLIENT}_client")
-                #     logger.info(f"[ALKAHEST] Env: {alkahest_client}")
-                #     self._alkahest_client = alkahest_client
-                #     logger.info("[ALKAHEST]: AlkahestClient initialized.")
-                # else:
+                # DEMO ONLY:
+                # We use a short-lived EnvTestManager just for extracting custom addresses.
                 env = EnvTestManager()
                 self._alkahest_client = AlkahestClient(
                     private_key=AGENT_PRIV_KEY,
