@@ -27,11 +27,9 @@ from app.schema.pydantic_models import (
     Action,
     ActionType,
     ComputeResource,
-    DomainEvent,
     EventType,
     GPUModel,
     MarketOrder,
-    MakeOfferEvent,
     Region,
     TokenResource
 )
@@ -89,7 +87,6 @@ async def execute_action(
     action: Action,
     alkahest_client: Any,
     ctx: InvocationContext | None = None,
-    domain_event: DomainEvent | None = None,
 ) -> dict[str, Any]:
     """Execute an action and return outcome. Currently simulated/logged only.
     
@@ -123,7 +120,6 @@ async def execute_action(
             result = await accept_offer(
                 alkahest_client=alkahest_client,
                 ctx=ctx,
-                domain_event=domain_event,
                 parameters=parameters,
             )
             outcome["result"] = result
@@ -386,16 +382,12 @@ async def accept_offer(
     *,
     alkahest_client: Any | None,
     ctx: InvocationContext | None,
-    domain_event: DomainEvent | None,
     parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Accept a received offer and send acceptance to the counterparty via A2A."""
     parameters = parameters or {}
 
-    # Prefer explicit order payload; fallback to the triggering MakeOfferEvent.
     order_payload = parameters.get("order") or parameters.get("offer")
-    if order_payload is None and isinstance(domain_event, MakeOfferEvent):
-        order_payload = domain_event.order
 
     if isinstance(order_payload, MarketOrder):
         order_dict = order_payload.model_dump(mode="json")
