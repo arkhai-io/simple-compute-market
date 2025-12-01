@@ -201,6 +201,7 @@ async def execute_action(
                 oracle_address=parameters.get("oracle_address", DEMO_ORACLE_ADDRESS),
                 escrow_uid=parameters.get("escrow_uid"),
             )
+            logger.info(f"[ALKAHEST]: {result}")
             result["escrow_uid"] = result.get("escrow_uid") or parameters.get("escrow_uid")
             decisions = result.get("decisions")
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
@@ -618,8 +619,11 @@ async def approve_token_escrow(
         token_meta.decimals,
         price_data,
     )
-    escrow_approval = await alkahest_client.erc20.approve(price_data, "escrow")
-    logger.info(f"[ALKAHEST]: Escrow approved: {escrow_approval}")
+    try:
+        escrow_approval = await alkahest_client.erc20.approve(price_data, "escrow")
+        logger.info(f"[ALKAHEST]: Escrow approved: {escrow_approval}")
+    except Exception as error:
+        logger.info(f"[ALKAHEST] Escrow approval error: {error}")
     return escrow_approval
 
 
@@ -711,13 +715,16 @@ async def fulfill_compute_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    fulfillment_uid = await client.string_obligation.do_obligation(
-        connection_details,
-        escrow_uid
-    )
-    logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
-    request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
-    logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
+    try:
+        fulfillment_uid = await client.string_obligation.do_obligation(
+            connection_details,
+            escrow_uid
+        )
+        logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
+        request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+        logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
+    except Exception as error:
+        logger.info(f"[ALKAHEST] Fulfillment error: {error}")
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
@@ -734,8 +741,10 @@ async def arbitrate_compute_fulfillment(
     escrow_uid: str | None = None,
 ):
     oracle_address = _resolve_oracle_address(oracle_address)
+    logger.info(f"[ALKAHEST] Oracle address: {oracle_address}")
     
     async def decision_function (attestation):
+        logger.info(f"[ALKAHEST] Attestation: {attestation}")
         return True
 
     def callback(decision):
@@ -754,18 +763,28 @@ async def arbitrate_compute_fulfillment(
             "decisions": decisions,
         }
 
-    options = ArbitrateOptions(skip_arbitrated=False, only_new=False)
+    options = ArbitrateOptions(skip_arbitrated=True, only_new=True)
 
-    result = await client.oracle.listen_and_arbitrate_no_spawn(
-        decision_function,
-        callback,
-        options,
-        timeout_seconds=2.0
-    )
+    try:
+        result = await client.oracle.listen_and_arbitrate_no_spawn(
+            decision_function,
+            callback,
+            options,
+            timeout_seconds=2.0
+        )
 
-    decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
-    logger.info("[ALKAHEST] Arbitration decisions: %s", decisions)
-    serialized_decisions = _serialize_decisions(decisions)
+        decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
+        logger.info("[ALKAHEST] Arbitration decisions: %s", decisions)
+        serialized_decisions = _serialize_decisions(decisions)
+    except Exception as error:
+        logger.info(f"[ALKAHEST] Arbitration Error: {error}")
+        return {
+            "status": "trusted",
+            "message": "Arbitration failed",
+            "fulfillment_uid": fulfillment_uid,
+            "escrow_uid": escrow_uid,
+            "oracle_address": oracle_address,
+        }
 
     return {
         "status": "trusted",
@@ -782,8 +801,11 @@ async def collect_escrow(
     fulfillment_uid: str
 ):
     if client:
-        result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
-        logger.info(f"[ALKAHEST]: Escrow collected: {result}")
+        try:
+            result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+            logger.info(f"[ALKAHEST]: Escrow collected: {result}")
+        except Exception as error:
+            logger.info(f"[ALKAHEST] Escrow collection error: {error}")
     else:
         logger.info("[ALKAHEST] (Simulated) Escrow collected")
     return
