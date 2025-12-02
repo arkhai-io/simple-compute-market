@@ -250,17 +250,27 @@ async def execute_action(
                 return outcome
 
             try:
-                await collect_escrow(
+                result = await collect_escrow(
                     client=alkahest_client,
                     escrow_uid=escrow_uid,
                     fulfillment_uid=fulfillment_uid,
                 )
-                outcome["result"] = {
-                    "status": "collected",
-                    "message": "Escrow collected successfully",
-                    "escrow_uid": escrow_uid,
-                    "fulfillment_uid": fulfillment_uid,
-                }
+                logger.info(f"[ACTION] Result: {result}")
+                if result:
+                    outcome["result"] = {
+                        "status": "collected",
+                        "message": "Escrow collected successfully",
+                        "escrow_uid": escrow_uid,
+                        "escrow_collection_uid": result,
+                        "fulfillment_uid": fulfillment_uid,
+                    }
+                else:
+                    outcome["result"] = {
+                        "status": "collected",
+                        "message": "Failed to collect escrow",
+                        "escrow_uid": escrow_uid,
+                        "fulfillment_uid": fulfillment_uid,
+                    }
                 outcome["message"] = outcome["result"]["message"]
             except Exception as err:
                 logger.warning("[ACTION] Failed to collect escrow: %s", err)
@@ -800,12 +810,14 @@ async def collect_escrow(
     escrow_uid: str,
     fulfillment_uid: str
 ):
-    if client:
+    result = None
+    if client is None:
+        result = f"escrow_collected_{uuid.uuid4()}"
+        logger.info("[ALKAHEST] (Simulated) Escrow collected {result}")
+    else:
         try:
             result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
             logger.info(f"[ALKAHEST]: Escrow collected: {result}")
         except Exception as error:
             logger.info(f"[ALKAHEST] Escrow collection error: {error}")
-    else:
-        logger.info("[ALKAHEST] (Simulated) Escrow collected")
-    return
+    return result
