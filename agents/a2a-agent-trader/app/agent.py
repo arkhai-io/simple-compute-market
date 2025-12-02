@@ -542,7 +542,7 @@ class TraderAgent(BaseAgent):
         )
         
         # [4] Action execution (simulated)
-        logger.info("[DEMO] DEMO AKLAHEST")
+        # logger.info("[DEMO] DEMO AKLAHEST")
         # await self._demo_alkahest()
         outcome = await execute_action(
             action=action,
