@@ -255,7 +255,7 @@ async def execute_action(
                     escrow_uid=escrow_uid,
                     fulfillment_uid=fulfillment_uid,
                 )
-                logger.info(f"[ACTION] Result: {result}")
+                logger.info(f"[ACTION] Escrow collection result: {result}")
                 if result:
                     outcome["result"] = {
                         "status": "collected",
@@ -784,6 +784,8 @@ async def arbitrate_compute_fulfillment(
         )
 
         decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
+        if not decisions:
+            logger.warning("[ALKAHEST] Warning: No fulfillments were arbitrated.")
         logger.info("[ALKAHEST] Arbitration decisions: %s", decisions)
         serialized_decisions = _serialize_decisions(decisions)
     except Exception as error:
