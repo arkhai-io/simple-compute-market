@@ -763,7 +763,7 @@ async def arbitrate_compute_fulfillment(
             "decisions": decisions,
         }
 
-    options = ArbitrateOptions(skip_arbitrated=True, only_new=True)
+    options = ArbitrateOptions(skip_arbitrated=True, only_new=False)
 
     try:
         result = await client.oracle.listen_and_arbitrate_no_spawn(
