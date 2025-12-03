@@ -1,0 +1,317 @@
+# ERC-8004 Registry (Python)
+
+A Python/FastAPI service that integrates with ERC-8004 smart contracts for agent registration, discovery, and health monitoring. This registry provides a REST API server with off-chain indexing for fast queries while maintaining on-chain data integrity.
+
+## Features
+
+- **Agent Registration**: Register agents on-chain via ERC-8004 IdentityRegistry
+- **Agent Discovery**: Search and list agents with fast off-chain indexing
+- **Health Monitoring**: Automatic health checks via heartbeat and endpoint monitoring
+- **Event Sync**: Real-time synchronization of on-chain events to off-chain database
+- **Multi-Database Support**: Works with SQLite (development) and PostgreSQL (production)
+- **Base Sepolia Integration**: Pre-configured for Base Sepolia testnet
+
+## Architecture
+
+The registry consists of:
+
+1. **Contract Integration Layer**: Interacts with ERC-8004 smart contracts using `web3.py`
+2. **Off-Chain Database**: Fast queries and health status tracking using SQLAlchemy
+3. **Event Sync Service**: Synchronizes on-chain events to the database
+4. **Health Check Service**: Monitors agent endpoints and updates health status
+5. **REST API Server**: FastAPI-based API for agent management
+
+## Prerequisites
+
+- Python 3.10+
+- uv or pip
+- Database: SQLite (dev) or PostgreSQL (prod)
+
+## Installation
+
+1. Clone the repository and navigate to the registry directory:
+
+```bash
+cd erc-8004-registry-py
+```
+
+2. Install dependencies with uv:
+
+```bash
+uv sync
+```
+
+Or with pip:
+
+```bash
+pip install -e .
+```
+
+## Local Development with Anvil
+
+For local development, you can use [Anvil](https://book.getfoundry.sh/anvil/) (a local Ethereum node) instead of connecting to testnet. See [ANVIL_SETUP.md](./ANVIL_SETUP.md) for detailed instructions.
+
+Quick start:
+```bash
+# 1. Start Anvil in a separate terminal
+anvil
+
+# 2. Deploy ERC-8004 contracts to Anvil
+# (See ANVIL_SETUP.md for deployment instructions)
+
+# 3. Copy and configure local environment
+cp .env.local.example .env.local
+# Update contract addresses in .env.local
+
+# 4. Run with local config
+export $(cat .env.local | xargs) && uvicorn src.main:app --reload
+```
+
+3. Set up environment variables:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your configuration:
+
+```env
+# Database (SQLite for dev, PostgreSQL for prod)
+DATABASE_URL=sqlite:///./registry.db
+
+# Blockchain Configuration - Base Sepolia
+CHAIN_ID=84532
+RPC_URL=https://sepolia.base.org
+
+# ERC-8004 Contract Addresses (Base Sepolia)
+IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
+REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF
+VALIDATION_REGISTRY_ADDRESS=0x8004C269D0A5647E51E121FeB226200ECE932d55
+
+# Server Configuration
+PORT=8080
+HOST=0.0.0.0
+
+# Health Check Configuration
+ENABLE_HEALTH_CHECKS=true
+HEALTH_CHECK_INTERVAL=60
+ENDPOINT_CHECK_TIMEOUT=10
+HEARTBEAT_TTL_SECS=60
+
+# Logging
+LOG_LEVEL=info
+```
+
+4. Run database migrations:
+
+```bash
+alembic upgrade head
+```
+
+## Running the Server
+
+### Development
+
+```bash
+uvicorn src.main:app --reload --port 8080
+```
+
+Or with uv:
+
+```bash
+uv run uvicorn src.main:app --reload --port 8080
+```
+
+### Production
+
+```bash
+uvicorn src.main:app --host 0.0.0.0 --port 8080
+```
+
+The server will start on `http://localhost:8080` (or your configured port).
+
+## API Endpoints
+
+### Health Check
+
+```http
+GET /health
+```
+
+Returns service health status.
+
+### Register Agent
+
+```http
+POST /agents/register
+Content-Type: application/json
+
+{
+  "agent_card": {
+    "name": "Weather Agent",
+    "description": "Provides weather information",
+    "url": "https://agent.example.com",
+    "version": "1.0.0",
+    "skills": [...],
+    "capabilities": {"streaming": true}
+  },
+  "owner": "0x...",
+  "labels": {"category": "weather"}
+}
+```
+
+**Note**: Full on-chain registration requires wallet integration. This endpoint currently stores agents off-chain for indexing.
+
+### Get Agent
+
+```http
+GET /agents/{agentId}
+```
+
+Returns agent details including metadata and health status.
+
+### List Agents
+
+```http
+GET /agents?q=weather&limit=25&offset=0
+```
+
+Query parameters:
+- `q`: Search query (optional)
+- `limit`: Maximum results (default: 25, max: 200)
+- `offset`: Pagination offset (default: 0)
+
+### Search Agents
+
+```http
+GET /agents/search?q=weather
+```
+
+Performs text search across agents.
+
+### Heartbeat
+
+```http
+POST /agents/{agentId}/heartbeat
+```
+
+Updates agent's last heartbeat timestamp and sets status to healthy.
+
+## Database Configuration
+
+### SQLite (Development)
+
+```env
+DATABASE_URL=sqlite:///./registry.db
+```
+
+### PostgreSQL (Production)
+
+```env
+DATABASE_URL=postgresql://user:password@localhost:5432/registry
+```
+
+Ensure PostgreSQL is running and the database exists:
+
+```bash
+createdb registry
+```
+
+## Event Synchronization
+
+The registry automatically syncs on-chain events:
+
+- **AgentRegistered**: New agent registrations
+- **MetadataUpdated**: Agent metadata updates
+
+The sync service:
+- Performs initial sync on startup
+- Watches for new events in real-time
+- Handles missed events with periodic backfill
+
+## Health Monitoring
+
+The health check service:
+
+1. Monitors agent heartbeats (configurable TTL)
+2. Checks agent endpoints if heartbeat is stale
+3. Updates health status (healthy/stale/unreachable)
+4. Records health check history
+
+Health check interval and settings are configurable via environment variables.
+
+## Development
+
+### Project Structure
+
+```
+erc-8004-registry-py/
+├── src/
+│   ├── contracts/        # Contract ABIs and interaction logic
+│   ├── db/               # Database models and migrations
+│   ├── api/              # REST API routes
+│   ├── services/         # Health checks, indexing, sync
+│   ├── types/           # Type definitions
+│   └── main.py          # Entry point
+├── alembic/             # Database migrations
+├── pyproject.toml
+└── README.md
+```
+
+### Building
+
+The project uses Python directly, no build step required.
+
+### Running Migrations
+
+```bash
+alembic upgrade head
+```
+
+## Configuration
+
+All configuration is done via environment variables. See `.env.example` for available options.
+
+### Base Sepolia Contract Addresses
+
+- **IdentityRegistry**: `0x8004AA63c570c570eBF15376c0dB199918BFe9Fb`
+- **ReputationRegistry**: `0x8004bd8daB57f14Ed299135749a5CB5c42d341BF`
+- **ValidationRegistry**: `0x8004C269D0A5647E51E121FeB226200ECE932d55`
+
+## Production Deployment
+
+1. **Database**: Use PostgreSQL with connection pooling
+2. **Environment**: Set secure environment variables
+3. **Monitoring**: Enable logging and health checks
+4. **Scaling**: Deploy behind load balancer if needed
+
+## Troubleshooting
+
+### Database Connection Issues
+
+- Verify `DATABASE_URL` format is correct
+- Ensure database exists and is accessible
+- Check database user permissions
+
+### Event Sync Issues
+
+- Verify RPC URL is accessible
+- Check contract addresses are correct for the network
+- Review logs for sync errors
+
+### Health Check Failures
+
+- Verify agent URLs are accessible
+- Check firewall rules allow health check traffic
+- Review health check interval settings
+
+## License
+
+MIT
+
+## Resources
+
+- [ERC-8004 Specification](https://eips.ethereum.org/EIPS/eip-8004)
+- [ERC-8004 Contracts](https://github.com/erc-8004/erc-8004-contracts)
+- [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
+
