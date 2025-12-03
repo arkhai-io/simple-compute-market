@@ -99,3 +99,122 @@ lint:
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
 	uv run python app/utils/test_env.py
+# Market Environment Build Targets
+# ==============================================================================
+
+# Build the Market C extension binding
+build-market-env:
+	@echo "Building Market C extension..."
+	@cd app/environment/seller && uv run python build_binding.py
+
+# Check Market environment build dependencies
+check-market-env:
+	@echo "Checking Market environment build dependencies..."
+	@which uv > /dev/null || (echo "ERROR: uv not found" && exit 1)
+	@uv run python -c "import pufferlib" 2>/dev/null && echo "✓ pufferlib installed" || echo "⚠ pufferlib not found"
+	@uv run python -c "from setuptools import setup" 2>/dev/null && echo "✓ setuptools available" || echo "⚠ setuptools not found"
+	@which gcc > /dev/null && echo "✓ gcc compiler found" || (which clang > /dev/null && echo "✓ clang compiler found" || echo "⚠ C compiler not found")
+
+# Clean Market environment build artifacts
+clean-market-env:
+	@echo "Cleaning Market environment build artifacts..."
+	@cd app/environment/seller && rm -f *.so *.o binding.cpython-*.so
+	@cd app/environment/seller && rm -rf build/ __pycache__/ *.egg-info/
+	@rm -f app/env_binding.h
+
+# Test Market environment
+test-market-env: build-market-env
+	@echo "Testing Market environment..."
+	@uv run test_market_env.py
+
+# Train Market environment model
+# Usage: make train-market-env [CONFIG=app/environment/seller/market.ini] [DEVICE=cpu] [USE_WANDB=true] [WANDB_TAG=tag_name]
+# Note: Uses Python API since puffer_market is a local environment
+# For CLI usage, the environment needs to be registered with pufferlib's ocean package
+train-market-env: build-market-env
+	@echo "Training Market environment model..."
+	@echo "Note: Using Python API for local environment"
+	@echo "For CLI usage, register the environment with pufferlib's ocean package"
+	@CONFIG_FILE=$${CONFIG:-app/environment/seller/market.ini}; \
+	DEVICE=$${DEVICE:-cpu}; \
+	USE_WANDB=$${USE_WANDB:-false}; \
+	WANDB_TAG=$${WANDB_TAG:-}; \
+	echo "Using config: $$CONFIG_FILE"; \
+	echo "Using device: $$DEVICE"; \
+	echo "Using wandb: $$USE_WANDB"; \
+	[ -n "$$WANDB_TAG" ] && echo "Wandb tag: $$WANDB_TAG" || true; \
+	PUFFERLIB_CONFIG=$$CONFIG_FILE \
+	PUFFERLIB_DEVICE=$$DEVICE \
+	USE_WANDB=$$USE_WANDB \
+	WANDB_TAG=$$WANDB_TAG \
+	uv run python app/environment/seller/train.py
+
+# Evaluate Market environment (render with random agent)
+# Usage: make eval-market-env [LOAD_MODEL_PATH=latest]
+eval-market-env: build-market-env
+	@echo "Evaluating Market environment..."
+	@MODEL_PATH=$${LOAD_MODEL_PATH:-latest}; \
+	LOAD_MODEL_PATH=$$MODEL_PATH \
+	uv run python app/environment/seller/eval.py
+
+# Run hyperparameter sweep for Market environment
+# Usage: make sweep-market-env [LOGGER=wandb] [TAG=sweep_name] [CONFIG=app/environment/seller/market.ini]
+# Examples:
+#   make sweep-market-env LOGGER=wandb TAG=my_sweep
+#   make sweep-market-env LOGGER=neptune TAG=my_sweep
+# Note: Sweeps may require the environment to be registered with pufferlib
+sweep-market-env: build-market-env
+	@echo "Running hyperparameter sweep for Market environment..."
+	@CONFIG_FILE=$${CONFIG:-app/environment/seller/market.ini}; \
+	LOGGER=$${LOGGER:-wandb}; \
+	TAG=$${TAG:-market_sweep}; \
+	if [ "$$LOGGER" = "neptune" ]; then \
+		uv run python -m pufferlib.pufferl sweep puffer_market \
+			--config $$CONFIG_FILE \
+			--neptune --tag $$TAG || \
+		echo "Note: Sweep failed. You may need to register the environment with pufferlib."; \
+	else \
+		uv run python -m pufferlib.pufferl sweep puffer_market \
+			--config $$CONFIG_FILE \
+			--wandb --tag $$TAG || \
+		echo "Note: Sweep failed. You may need to register the environment with pufferlib."; \
+	fi
+
+# Export model checkpoint to TorchScript
+# Usage: make export-model [CHECKPOINT=path/to/model.pt] [OUTPUT=output.ts] [DEVICE=cpu] [SCRIPT=false]
+# Examples:
+#   make export-model  # Exports latest checkpoint
+#   make export-model CHECKPOINT=experiments/123/model_000200.pt OUTPUT=model.ts
+#   make export-model CHECKPOINT=experiments/123/model_000200.pt DEVICE=cuda
+#   make export-model CHECKPOINT=experiments/123/model_000200.pt SCRIPT=true  # Use torch.jit.script
+export-model: build-market-env
+	@echo "Exporting model to TorchScript..."
+	@CHECKPOINT=$${CHECKPOINT:-}; \
+	OUTPUT=$${OUTPUT:-}; \
+	DEVICE=$${DEVICE:-cpu}; \
+	SCRIPT=$${SCRIPT:-false}; \
+	if [ -n "$$CHECKPOINT" ]; then \
+		CHECKPOINT_ARG="$$CHECKPOINT"; \
+	else \
+		CHECKPOINT_ARG=""; \
+	fi; \
+	if [ -n "$$OUTPUT" ]; then \
+		OUTPUT_ARG="-o $$OUTPUT"; \
+	else \
+		OUTPUT_ARG=""; \
+	fi; \
+	if [ "$$SCRIPT" = "true" ]; then \
+		SCRIPT_ARG="--script"; \
+	else \
+		SCRIPT_ARG=""; \
+	fi; \
+	uv run python app/environment/seller/export_model.py $$CHECKPOINT_ARG $$OUTPUT_ARG --device $$DEVICE $$SCRIPT_ARG
+
+# Test TorchScript model inference
+# Usage: make test-torchscript MODEL=<path_to_torchscript_model.ts>
+test-torchscript:
+	@if [ -z "$(MODEL)" ]; then \
+		echo "Usage: make test-torchscript MODEL=<path_to_torchscript_model.ts>"; \
+		exit 1; \
+	fi
+	@uv run python app/environment/seller/test_torchscript.py $(MODEL)
