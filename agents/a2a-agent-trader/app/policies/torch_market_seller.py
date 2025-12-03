@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 # Default model path - can be overridden via environment variable
-_DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "environment" / "seller" / "models" / "market_seller.ts"
+_DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "policies" / "models" / "torch_market_seller.ts"
 _loaded_model: Optional[Any] = None
 
 
