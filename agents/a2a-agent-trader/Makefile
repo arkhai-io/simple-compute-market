@@ -91,3 +91,11 @@ lint:
 	uv run ruff check . --diff
 	uv run ruff format . --check --diff
 	uv run mypy .
+
+# ==============================================================================
+# Local test chain helper
+# ==============================================================================
+
+# Spin up EnvTestManager once, print useful details, and hold the process open.
+test-env:
+	uv run python app/utils/test_env.py

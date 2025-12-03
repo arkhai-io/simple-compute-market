@@ -19,7 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
-from alkahest_py.alkahest_py import AlkahestClient
+from alkahest_py import AlkahestClient, EnvTestManager
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
@@ -61,8 +61,11 @@ from .schema.pydantic_models import (
     ActionType,
     EventType,
     DomainEvent,
+    AcceptOfferEvent,
     MarketOrder,
     MakeOfferEvent,
+    ReceiveComputeObligationFulfillmentEvent,
+    ArbitrationCompleteEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
     NegotiationEvent,
@@ -259,6 +262,26 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             order = MarketOrder.model_validate(offer_data)
             return MakeOfferEvent.from_order(order)
             
+        elif event_type == EventType.ACCEPT_OFFER:
+            offer_data = data.get("offer", data)
+            if not isinstance(offer_data, dict):
+                raise ValueError("AcceptOfferEvent requires 'offer' or order data as dictionary")
+
+            order = MarketOrder.model_validate(offer_data)
+            escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
+            ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
+            return AcceptOfferEvent.from_order(
+                order,
+                escrow_uid=escrow_uid,
+                ssh_public_key=ssh_public_key,
+            )
+            
+        elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
+            return ReceiveComputeObligationFulfillmentEvent.from_payload(data)
+
+        elif event_type == EventType.ARBITRATION_COMPLETE:
+            return ArbitrationCompleteEvent.from_payload(data)
+            
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
             required_fields = ["negotiation_id", "message_type", "sender"]
@@ -346,7 +369,16 @@ class TraderAgent(BaseAgent):
         
         if has_priv_key and has_rpc_url:
             try:
-                self._alkahest_client = AlkahestClient(AGENT_PRIV_KEY, CHAIN_RPC_URL)
+                # DEMO ONLY:
+                # We use a short-lived EnvTestManager just for extracting custom addresses.
+                env = EnvTestManager()
+                self._alkahest_client = AlkahestClient(
+                    private_key=AGENT_PRIV_KEY,
+                    rpc_url=CHAIN_RPC_URL,
+                    address_config=env.addresses
+                )
+                # self._alkahest_client = None
+                logger.info(f"[ALKAHEST]: AlkahestClient initialized: {self._alkahest_client}.")
             except Exception as e:
                 logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
                 self._alkahest_client = None
@@ -461,7 +493,7 @@ class TraderAgent(BaseAgent):
         return None
     
     async def _demo_alkahest(self) -> None:
-        token = TOKEN_REGISTRY.require("USDC")
+        token = TOKEN_REGISTRY.require("MOCK")
         logger.info(
             "[ALKAHEST] Using %s (%s) with %s decimals",
             token.symbol,
@@ -510,7 +542,13 @@ class TraderAgent(BaseAgent):
         )
         
         # [4] Action execution (simulated)
-        outcome = await execute_action(action=action, ctx=ctx)
+        # logger.info("[DEMO] DEMO AKLAHEST")
+        # await self._demo_alkahest()
+        outcome = await execute_action(
+            action=action,
+            ctx=ctx,
+            alkahest_client=self._alkahest_client,
+        )
         
         # [5] Experience recording
         try:
@@ -544,6 +582,7 @@ class TraderAgent(BaseAgent):
             "counter_offer": "COUNTER the offer.",
             "make_offer": "MAKE OFFER. Create market order.",
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
+            "collect_escrow": "COLLECT ESCROW. Collect escrow for completed fulfillment.",
             "noop": "NOOP. No action required.",
         }
         outcome_message = outcome.get("message", None)

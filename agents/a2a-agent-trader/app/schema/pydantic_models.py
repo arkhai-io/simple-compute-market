@@ -214,11 +214,11 @@ class MarketOrder(BaseModel):
         description="The resource being demanded, which may be a token or compute resource."
     )
     duration: int = Field(description="The duration of the order in days")
-    maker_attestation: Attestation | None = Field(
+    maker_attestation: str | None = Field(
         default=None,
         description="The attestation for the offer in escrow (None for open orders)",
     )
-    taker_attestation: Attestation | None = Field(
+    taker_attestation: str | None = Field(
         default=None,
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
@@ -269,6 +269,9 @@ class EventType(str, Enum):
     """Events that can be handled by the Agent"""
 
     MAKE_OFFER = "make_offer"
+    ACCEPT_OFFER = "accept_offer"
+    RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
+    ARBITRATION_COMPLETE = "arbitration_complete"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
@@ -314,6 +317,120 @@ class MakeOfferEvent(DomainEvent):
             },
         )
 
+
+class AcceptOfferEvent(DomainEvent):
+    """Event triggered when a taker accepts a market offer."""
+
+    event_type: EventType = Field(default=EventType.ACCEPT_OFFER)
+    order: MarketOrder = Field(description="The accepted market order with taker info")
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Escrow receipt UID supplied by the taker",
+    )
+    ssh_public_key: str | None = Field(
+        default=None,
+        description="Buyer-provided SSH public key for provisioning access",
+    )
+
+    @classmethod
+    def from_order(
+        cls,
+        order: MarketOrder,
+        escrow_uid: str | None = None,
+        ssh_public_key: str | None = None,
+    ) -> "AcceptOfferEvent":
+        """Create an accept-offer event from a market order and optional escrow UID."""
+        return cls(
+            event_id=f"acc_{order.order_id}",
+            source=order.order_taker or order.order_maker,
+            order=order,
+            escrow_uid=escrow_uid,
+            ssh_public_key=ssh_public_key,
+            data={
+                "order_id": order.order_id,
+                "offer_resource": order.offer_resource.model_dump(mode="json"),
+                "demand_resource": order.demand_resource.model_dump(mode="json"),
+                "duration": order.duration,
+                "escrow_uid": escrow_uid,
+                "ssh_public_key": ssh_public_key,
+            },
+        )
+
+
+class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
+    """Event triggered when the buyer receives compute fulfillment details."""
+
+    event_type: EventType = Field(default=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT)
+    escrow_uid: str = Field(description="Escrow UID tied to the fulfillment")
+    fulfillment_uid: str | None = Field(
+        default=None,
+        description="UID of the fulfillment (may be provided by seller/chain)",
+    )
+    connection_details: str | None = Field(
+        default=None,
+        description="Connection string/details for the provisioned compute",
+    )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
+        escrow_uid = payload.get("escrow_uid")
+        if not escrow_uid:
+            raise ValueError("ReceiveComputeObligationFulfillmentEvent requires escrow_uid")
+        return cls(
+            event_id=payload.get("event_id", f"rcf_{uuid.uuid4()}"),
+            source=payload.get("source", "unknown"),
+            escrow_uid=escrow_uid,
+            fulfillment_uid=payload.get("fulfillment_uid"),
+            connection_details=payload.get("connection_details"),
+            data=payload,
+        )
+
+class ArbitrationCompleteEvent(DomainEvent):
+    """Event triggered when arbitration over fulfillment has completed."""
+
+    event_type: EventType = Field(default=EventType.ARBITRATION_COMPLETE)
+    decisions: list[Any] | None = Field(
+        default=None,
+        description="Arbiter decisions returned for the fulfillment",
+    )
+    fulfillment_uid: str | None = Field(
+        default=None,
+        description="UID of the fulfillment that was arbitrated",
+    )
+    escrow_uid: str | None = Field(
+        default=None,
+        description="Escrow UID tied to the fulfillment (may be required to collect)",
+    )
+    oracle_address: str | None = Field(
+        default=None,
+        description="Oracle contract/address used for arbitration",
+    )
+    status: str | None = Field(
+        default=None,
+        description="Status string reported by the arbiter or workflow",
+    )
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "ArbitrationCompleteEvent":
+        """Create an arbitration-complete event from a payload dict."""
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            raise ValueError("ArbitrationCompleteEvent payload must be a dictionary")
+
+        fulfillment_uid = data.get("fulfillment_uid")
+        if not fulfillment_uid:
+            raise ValueError("ArbitrationCompleteEvent requires fulfillment_uid")
+
+        return cls(
+            event_id=data.get("event_id") or payload.get("event_id", f"arb_{uuid.uuid4()}"),
+            source=data.get("source") or payload.get("source", "unknown"),
+            decisions=data.get("decisions"),
+            fulfillment_uid=fulfillment_uid,
+            escrow_uid=data.get("escrow_uid"),
+            oracle_address=data.get("oracle_address"),
+            status=data.get("status"),
+            data=data,
+        )
 
 class ResourceAlertRequest(BaseModel):
     """Request model for resource imbalance alerts from monitoring systems.
@@ -524,6 +641,10 @@ class ActionType(str, Enum):
     # Resource management actions
     RESOLVE_INTERNALLY = "resolve_internally"
     OUTSOURCE = "outsource"
+    FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
+    TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
+    COLLECT_ESCROW = "collect_escrow"
+    VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
 
     # No-op
     NOOP = "noop"

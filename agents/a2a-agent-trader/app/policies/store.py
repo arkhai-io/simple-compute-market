@@ -6,6 +6,9 @@ from app.policies.evaluator import CallableEvaluator
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
+    AcceptOfferEvent,
+    ReceiveComputeObligationFulfillmentEvent,
+    ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
     ComputeResource,
@@ -197,6 +200,69 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
         },
     )
 
+# Accept-offer -> fulfill flow
+@policy_callable("ao.action.fulfill_after_accept")
+def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
+    """When we receive an AcceptOfferEvent, move directly to fulfill compute obligation."""
+    if not isinstance(context.event, AcceptOfferEvent):
+        return None
+
+    escrow_uid = context.event.escrow_uid
+    ssh_key = context.event.ssh_public_key
+
+    return DomainAction(
+        action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
+        parameters={
+            "order": context.event.order.model_dump(mode="json"),
+            "escrow_uid": escrow_uid,
+            "ssh_public_key": ssh_key,
+        },
+    )
+
+# Receive fulfillment -> trust arbitration path
+@policy_callable("rcf.action.trust_fulfillment")
+def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | None:
+    """When we receive compute fulfillment, trust it and move to arbitration."""
+    if not isinstance(context.event, ReceiveComputeObligationFulfillmentEvent):
+        return None
+
+    return DomainAction(
+        action_type=DomainActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT,
+        parameters={
+            "escrow_uid": context.event.escrow_uid,
+            "fulfillment_uid": context.event.fulfillment_uid,
+            "connection_details": context.event.connection_details,
+        },
+    )
+
+# Arbitration complete -> collect escrow
+@policy_callable("arb.action.collect_escrow_after_arbitration")
+def arb_action_collect_escrow_after_arbitration(context: DecisionContext) -> DomainAction | None:
+    """After arbitration completes, collect escrow for the fulfillment."""
+    event = context.event
+    if not (
+        isinstance(event, ArbitrationCompleteEvent)
+    ):
+        return None
+
+    data = getattr(event, "data", {}) or {}
+    escrow_uid = getattr(event, "escrow_uid", None) or data.get("escrow_uid")
+    fulfillment_uid = getattr(event, "fulfillment_uid", None) or data.get("fulfillment_uid")
+
+    if not escrow_uid or not fulfillment_uid:
+        return None
+
+    return DomainAction(
+        action_type=DomainActionType.COLLECT_ESCROW,
+        parameters={
+            "escrow_uid": escrow_uid,
+            "fulfillment_uid": fulfillment_uid,
+            "decisions": getattr(event, "decisions", None) or data.get("decisions"),
+            "oracle_address": getattr(event, "oracle_address", None) or data.get("oracle_address"),
+            "status": getattr(event, "status", None) or data.get("status"),
+        },
+    )
+
 
 @policy_callable("mo.guard.trigger_is_make_offer")
 def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | None:
@@ -259,8 +325,8 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
         action_type=ActionType.ACCEPT_OFFER,
         parameters={
             "order_id": order.order_id,
+            "order": order,
             "offer_resource": offer_resource.model_dump(mode='json'),
             "demand_resource": demand_resource.model_dump(mode='json'),
         }
     )
-

@@ -30,6 +30,7 @@ class Config:
     remote_agent_url_override: str
     chain_rpc_url: str
     agent_priv_key: str
+    agent_wallet_address: str
     use_vertex_ai: bool
     policy_db_path: str
     event_validation_mode: str  # "warn" or "strict"
@@ -41,6 +42,7 @@ class Config:
     log_file_path: str | None  # Path to log file, None for default
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
+    ssh_public_key: str
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -71,6 +73,7 @@ def load_config() -> Config:
         ),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
+        agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         policy_db_path=os.getenv("POLICY_DB_PATH", "/tmp/policies.db"),
         event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),
@@ -83,6 +86,10 @@ def load_config() -> Config:
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
             "TOKEN_REGISTRY_PATH", str(DEFAULT_TOKEN_REGISTRY_PATH)
+        ),
+        ssh_public_key=os.getenv(
+            "SSH_PUBLIC_KEY",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example",
         ),
     )
 
