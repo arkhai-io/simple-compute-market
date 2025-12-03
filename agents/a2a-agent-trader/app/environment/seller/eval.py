@@ -58,7 +58,7 @@ def main():
         sys.exit(1)
     
     try:
-        from app.environment.market import Market
+        from app.environment.seller.market import Market
         
         # Get model path from environment or use default
         model_path = os.environ.get('LOAD_MODEL_PATH', 'latest')

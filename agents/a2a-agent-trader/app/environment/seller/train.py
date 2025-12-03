@@ -41,17 +41,19 @@ def _load_market_class():
     binding_module = importlib.util.module_from_spec(binding_spec)
     binding_spec.loader.exec_module(binding_module)
     
-    # Create a mock module for 'environment' package to satisfy relative imports
+    # Create a mock module for 'environment.seller' package to satisfy relative imports
     environment_module = type(sys)('environment')
-    environment_module.binding = binding_module
+    seller_module = type(sys)('environment.seller')
+    seller_module.binding = binding_module
     sys.modules['environment'] = environment_module
-    sys.modules['environment.binding'] = binding_module
+    sys.modules['environment.seller'] = seller_module
+    sys.modules['environment.seller.binding'] = binding_module
     
     # Now import market.py
     market_path = env_dir / "market.py"
-    spec = importlib.util.spec_from_file_location("environment.market", market_path)
+    spec = importlib.util.spec_from_file_location("environment.seller.market", market_path)
     market_module = importlib.util.module_from_spec(spec)
-    market_module.__package__ = "environment"
+    market_module.__package__ = "environment.seller"
     spec.loader.exec_module(market_module)
     
     _Market = market_module.Market
