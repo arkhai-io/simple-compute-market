@@ -309,9 +309,20 @@ All configuration is done via environment variables. See `.env.example` for avai
 
 MIT
 
+## Agent Integration
+
+For detailed information on how agents integrate with the registry, see [AGENT_INTEGRATION.md](./AGENT_INTEGRATION.md).
+
+Quick overview:
+- **Registration**: Agents register on-chain via ERC-8004 or off-chain via API
+- **Heartbeat**: Agents send periodic heartbeats to maintain health status
+- **Discovery**: Clients query the registry to discover available agents
+- **Health Monitoring**: Registry automatically monitors agent endpoints
+
 ## Resources
 
 - [ERC-8004 Specification](https://eips.ethereum.org/EIPS/eip-8004)
 - [ERC-8004 Contracts](https://github.com/erc-8004/erc-8004-contracts)
 - [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
+- [Agent Integration Guide](./AGENT_INTEGRATION.md)
 
