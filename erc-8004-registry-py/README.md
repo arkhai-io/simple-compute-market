@@ -49,7 +49,7 @@ pip install -e .
 
 ## Local Development with Anvil
 
-For local development, you can use [Anvil](https://book.getfoundry.sh/anvil/) (a local Ethereum node) instead of connecting to testnet. See [ANVIL_SETUP.md](./ANVIL_SETUP.md) for detailed instructions.
+For local development, you can use [Anvil](https://book.getfoundry.sh/anvil/) (a local Ethereum node) instead of connecting to testnet. See [docs/ANVIL_SETUP.md](./docs/ANVIL_SETUP.md) for detailed instructions.
 
 Quick start:
 ```bash
@@ -57,7 +57,7 @@ Quick start:
 anvil
 
 # 2. Deploy ERC-8004 contracts to Anvil
-# (See ANVIL_SETUP.md for deployment instructions)
+# (See docs/ANVIL_SETUP.md for deployment instructions)
 
 # 3. Copy and configure local environment
 cp .env.local.example .env.local
@@ -108,6 +108,26 @@ LOG_LEVEL=info
 alembic upgrade head
 ```
 
+## Startup Order
+
+**Important**: Start the registry **before** starting your agents.
+
+1. **Start Registry First**:
+   ```bash
+   cd erc-8004-registry-py
+   uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
+   ```
+
+2. **Then Start Agents**: Your agents can now register and interact with the registry.
+
+**Why registry first?**
+- Agents can register off-chain via API (requires registry)
+- Agents can send heartbeats (requires registry)  
+- Agents can discover other agents (requires registry)
+- Event sync will catch up on any on-chain registrations that happened before registry started
+
+**Note**: If an agent registers on-chain before the registry starts, the event sync service will automatically index it when the registry starts.
+
 ## Running the Server
 
 ### Development
@@ -142,12 +162,60 @@ Returns service health status.
 
 ### Register Agent
 
+The registry supports three registration formats:
+
+**Option 1: ERC-8004 Registration File (Recommended)**
+
 ```http
 POST /agents/register
 Content-Type: application/json
 
 {
-  "agent_card": {
+  "registrationFile": {
+    "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+    "name": "Weather Agent",
+    "description": "Provides weather information",
+    "image": "https://example.com/agent.png",
+    "endpoints": [
+      {
+        "name": "A2A",
+        "endpoint": "https://agent.example.com",
+        "version": "0.3.0",
+        "a2aSkills": []
+      }
+    ],
+    "registrations": [],
+    "supportedTrust": ["reputation"],
+    "active": true,
+    "x402support": false,
+    "updatedAt": 1704067200
+  },
+  "owner": "0x...",
+  "labels": {"category": "weather"}
+}
+```
+
+**Option 2: Registration File URL**
+
+```http
+POST /agents/register
+Content-Type: application/json
+
+{
+  "registrationFileUrl": "https://yourdomain.com/agents/my-agent.json",
+  "owner": "0x...",
+  "labels": {"category": "weather"}
+}
+```
+
+**Option 3: Legacy Agent Card Format (Backward Compatible)**
+
+```http
+POST /agents/register
+Content-Type: application/json
+
+{
+  "agentCard": {
     "name": "Weather Agent",
     "description": "Provides weather information",
     "url": "https://agent.example.com",
@@ -160,7 +228,7 @@ Content-Type: application/json
 }
 ```
 
-**Note**: Full on-chain registration requires wallet integration. This endpoint currently stores agents off-chain for indexing.
+**Note**: Full on-chain registration requires wallet integration. This endpoint currently stores agents off-chain for indexing. See [docs/WALLET_INTEGRATION.md](./docs/WALLET_INTEGRATION.md) for on-chain registration.
 
 ### Get Agent
 
@@ -173,11 +241,13 @@ Returns agent details including metadata and health status.
 ### List Agents
 
 ```http
-GET /agents?q=weather&limit=25&offset=0
+GET /agents?q=weather&endpoint_type=A2A&trust_model=reputation&limit=25&offset=0
 ```
 
 Query parameters:
 - `q`: Search query (optional)
+- `endpoint_type`: Filter by endpoint type (A2A, MCP, etc.) (optional)
+- `trust_model`: Filter by trust model (reputation, validation, etc.) (optional)
 - `limit`: Maximum results (default: 25, max: 200)
 - `offset`: Pagination offset (default: 0)
 
@@ -253,9 +323,15 @@ erc-8004-registry-py/
 │   ├── services/         # Health checks, indexing, sync
 │   ├── types/           # Type definitions
 │   └── main.py          # Entry point
+├── docs/                 # Documentation (14 markdown files)
+│   ├── INTEGRATION_WITH_YOUR_AGENTS.md
+│   ├── RECOMMENDED_REGISTRATION_WORKFLOW.md
+│   ├── AGENT_REGISTRATION_EXAMPLES.md
+│   ├── DOCUMENTATION_INDEX.md
+│   └── ... (see docs/DOCUMENTATION_INDEX.md for complete list)
 ├── alembic/             # Database migrations
 ├── pyproject.toml
-└── README.md
+└── README.md            # Main entry point
 ```
 
 ### Building
@@ -311,7 +387,7 @@ MIT
 
 ## Agent Integration
 
-For detailed information on how agents integrate with the registry, see [AGENT_INTEGRATION.md](./AGENT_INTEGRATION.md).
+For detailed information on how agents integrate with the registry, see [docs/AGENT_INTEGRATION.md](./docs/AGENT_INTEGRATION.md).
 
 Quick overview:
 - **Registration**: Agents register on-chain via ERC-8004 or off-chain via API
@@ -319,10 +395,78 @@ Quick overview:
 - **Discovery**: Clients query the registry to discover available agents
 - **Health Monitoring**: Registry automatically monitors agent endpoints
 
+## Wallet Integration
+
+For on-chain registration and wallet operations, see [docs/WALLET_INTEGRATION.md](./docs/WALLET_INTEGRATION.md).
+
+Quick overview:
+- **Private Keys**: Use environment variables for secure key management
+- **On-Chain Registration**: Register agents via ERC-8004 IdentityRegistry
+- **Gas Management**: Estimate and manage transaction costs
+- **Error Handling**: Handle blockchain errors gracefully
+
+## Agent Registration Examples
+
+For practical examples of registering your agents from the `agents/` folder, see [docs/AGENT_REGISTRATION_EXAMPLES.md](./docs/AGENT_REGISTRATION_EXAMPLES.md).
+
+Quick example:
+```bash
+# Register trader agent
+curl -X POST "http://localhost:8080/agents/register" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "registrationFile": {
+      "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+      "name": "A2A Trader Agent",
+      "description": "AI agent for trading computational resources",
+      "endpoints": [{
+        "name": "A2A",
+        "endpoint": "http://localhost:8001/",
+        "version": "0.3.0",
+        "a2aSkills": []
+      }],
+      "supportedTrust": ["reputation"],
+      "active": true,
+      "updatedAt": '$(date +%s)'
+    },
+    "owner": "0x...",
+    "labels": {"category": "trading"}
+  }'
+```
+
+## Recommended Registration Workflow
+
+For the **recommended workflow** for registering agents on-chain, see [docs/RECOMMENDED_REGISTRATION_WORKFLOW.md](./docs/RECOMMENDED_REGISTRATION_WORKFLOW.md).
+
+**Quick summary:**
+1. Create ERC-8004 registration file in your agent code
+2. Host registration file on HTTP/IPFS
+3. Register on-chain directly from agent code (not via registry API)
+4. Registry automatically syncs via event sync service
+
+**Why this approach?**
+- ✅ Secure: Private keys stay in agent code
+- ✅ Flexible: Works with or without registry running
+- ✅ Standard: Follows ERC-8004 best practices
+- ✅ Automatic: Registry auto-indexes on-chain registrations
+
+## Documentation
+
+For complete documentation, see [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md).
+
+**Quick Links:**
+- [Integration with Your Agents](./docs/INTEGRATION_WITH_YOUR_AGENTS.md) - **START HERE** for practical integration
+- [Recommended Registration Workflow](./docs/RECOMMENDED_REGISTRATION_WORKFLOW.md) - Best practices
+- [Agent Registration Examples](./docs/AGENT_REGISTRATION_EXAMPLES.md) - Code examples
+- [Wallet Integration](./docs/WALLET_INTEGRATION.md) - Security and wallet operations
+- [ERC-8004 Format](./docs/ERC8004_FORMAT.md) - Format specification
+- [Agent Integration Guide](./docs/AGENT_INTEGRATION.md) - Integration patterns
+- [Anvil Setup](./docs/ANVIL_SETUP.md) - Local development
+
 ## Resources
 
 - [ERC-8004 Specification](https://eips.ethereum.org/EIPS/eip-8004)
 - [ERC-8004 Contracts](https://github.com/erc-8004/erc-8004-contracts)
 - [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
-- [Agent Integration Guide](./AGENT_INTEGRATION.md)
+- [Agent0 SDK](https://sdk.ag0.xyz/)
 

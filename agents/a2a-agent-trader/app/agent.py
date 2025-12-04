@@ -833,10 +833,29 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
+# Background task for delayed registration
+async def _delayed_registration():
+    """Run registration after server is ready."""
+    from .utils.config import CONFIG
+    from .onchain_registration import register_agent_on_startup
+    
+    try:
+        result = await register_agent_on_startup(CONFIG)
+        if result:
+            logger.info(f"[STARTUP] Agent registration complete: {result}")
+    except Exception as e:
+        logger.error(f"[STARTUP] Agent registration failed: {e}")
+
+
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
     from .utils.config import CONFIG
+    
+    # Schedule registration as background task (runs after server starts)
+    if CONFIG.auto_register:
+        asyncio.create_task(_delayed_registration())
+        logger.info("[STARTUP] Auto-registration scheduled")
     
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()

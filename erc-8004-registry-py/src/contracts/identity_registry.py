@@ -80,23 +80,23 @@ class IdentityRegistryClient:
     def get_past_agent_registered_events(self, from_block: int, to_block: Optional[int] = None):
         """Get past AgentRegistered events"""
         event_filter = self.contract.events.AgentRegistered.create_filter(
-            fromBlock=from_block,
-            toBlock=to_block or "latest"
+            from_block=from_block,
+            to_block=to_block or "latest"
         )
         return event_filter.get_all_entries()
 
     def get_past_metadata_updated_events(self, from_block: int, to_block: Optional[int] = None):
         """Get past MetadataUpdated events"""
         event_filter = self.contract.events.MetadataUpdated.create_filter(
-            fromBlock=from_block,
-            toBlock=to_block or "latest"
+            from_block=from_block,
+            to_block=to_block or "latest"
         )
         return event_filter.get_all_entries()
 
     def watch_agent_registered(self, callback, from_block: Optional[int] = None):
         """Watch for AgentRegistered events"""
         event_filter = self.contract.events.AgentRegistered.create_filter(
-            fromBlock=from_block or "latest"
+            from_block=from_block or "latest"
         )
         
         def handle_event(event):
@@ -109,7 +109,7 @@ class IdentityRegistryClient:
     def watch_metadata_updated(self, callback, from_block: Optional[int] = None):
         """Watch for MetadataUpdated events"""
         event_filter = self.contract.events.MetadataUpdated.create_filter(
-            fromBlock=from_block or "latest"
+            from_block=from_block or "latest"
         )
         
         def handle_event(event):

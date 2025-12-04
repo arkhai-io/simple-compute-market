@@ -112,8 +112,26 @@ class EventSyncService:
                     )
 
                     for event in registered_events:
-                        if event.args.agentId:
-                            agent_id = str(event.args.agentId)
+                        try:
+                            # Safely access event arguments
+                            if not hasattr(event, 'args') or not event.args:
+                                logger.warning(f"[EventSync] Event missing args: {event}")
+                                continue
+                            
+                            # Try different ways to access agentId (handles different web3.py versions)
+                            agent_id_value = None
+                            if hasattr(event.args, 'agentId'):
+                                agent_id_value = event.args.agentId
+                            elif hasattr(event.args, 'agent_id'):
+                                agent_id_value = event.args.agent_id
+                            elif isinstance(event.args, (list, tuple)) and len(event.args) > 0:
+                                agent_id_value = event.args[0]
+                            
+                            if not agent_id_value:
+                                logger.warning(f"[EventSync] Could not extract agentId from event: {event}")
+                                continue
+                            
+                            agent_id = str(agent_id_value)
                             chain_id = settings.chain_id
                             registry_address = settings.identity_registry_address
 
@@ -126,7 +144,7 @@ class EventSyncService:
                                 # Get token URI and metadata
                                 token_uri = None
                                 try:
-                                    token_uri = self.identity_registry.get_token_uri(event.args.agentId)
+                                    token_uri = self.identity_registry.get_token_uri(int(agent_id_value))
                                 except Exception as e:
                                     logger.warning(f"[EventSync] Could not fetch token URI for agent {agent_id}: {e}")
 
@@ -136,13 +154,18 @@ class EventSyncService:
                                     chain_id=chain_id,
                                     registry_address=registry_address,
                                     token_uri=token_uri,
-                                    metadata={},
+                                    metadata_json={},
                                     health_status="healthy",
                                 )
                                 db.add(agent)
                                 db.commit()
 
-                                logger.info(f"[EventSync] Registered agent {agent_id} from block {event.blockNumber}")
+                                block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
+                                logger.info(f"[EventSync] Registered agent {agent_id} from block {block_number}")
+                        except Exception as e:
+                            logger.error(f"[EventSync] Error processing AgentRegistered event: {e}")
+                            logger.debug(f"[EventSync] Event data: {event}")
+                            continue
 
                     # Get MetadataUpdated events
                     metadata_events = self.identity_registry.get_past_metadata_updated_events(
@@ -150,13 +173,36 @@ class EventSyncService:
                     )
 
                     for event in metadata_events:
-                        if event.args.agentId and event.args.key:
-                            agent_id = str(event.args.agentId)
-                            key = event.args.key
+                        try:
+                            # Safely access event arguments
+                            if not hasattr(event, 'args') or not event.args:
+                                logger.warning(f"[EventSync] MetadataUpdated event missing args: {event}")
+                                continue
+                            
+                            # Try different ways to access event args (handles different web3.py versions)
+                            agent_id_value = None
+                            key_value = None
+                            
+                            if hasattr(event.args, 'agentId') and hasattr(event.args, 'key'):
+                                agent_id_value = event.args.agentId
+                                key_value = event.args.key
+                            elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'key'):
+                                agent_id_value = event.args.agent_id
+                                key_value = event.args.key
+                            elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
+                                agent_id_value = event.args[0]
+                                key_value = event.args[1]
+                            
+                            if not agent_id_value or not key_value:
+                                logger.warning(f"[EventSync] Could not extract agentId/key from MetadataUpdated event: {event}")
+                                continue
+                            
+                            agent_id = str(agent_id_value)
+                            key = str(key_value)
 
                             try:
                                 # Get the metadata value from contract
-                                value = self.identity_registry.get_metadata(event.args.agentId, key)
+                                value = self.identity_registry.get_metadata(int(agent_id_value), key)
 
                                 # Update or insert metadata
                                 existing_metadata = db.query(AgentMetadataEntry).filter(
@@ -191,6 +237,10 @@ class EventSyncService:
                             except Exception as e:
                                 logger.warning(f"[EventSync] Could not update metadata for agent {agent_id}, key {key}: {e}")
                                 db.rollback()
+                        except Exception as e:
+                            logger.error(f"[EventSync] Error processing MetadataUpdated event: {e}")
+                            logger.debug(f"[EventSync] Event data: {event}")
+                            continue
 
                 except Exception as e:
                     logger.error(f"[EventSync] Error syncing blocks {current_from}-{current_to}: {e}")

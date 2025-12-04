@@ -90,9 +90,8 @@ class HealthCheckService:
 
                 if heartbeat_age > settings.heartbeat_ttl_secs:
                     # Heartbeat is stale, check endpoint
-                    endpoint_status = await self.check_endpoint(
-                        agent.metadata_json.get("url") if agent.metadata_json else None or agent.token_uri
-                    )
+                    agent_url = self._extract_agent_url(agent)
+                    endpoint_status = await self.check_endpoint(agent_url)
 
                     if endpoint_status["reachable"]:
                         status = AgentStatusEnum.stale
@@ -100,9 +99,8 @@ class HealthCheckService:
                         status = AgentStatusEnum.unreachable
             else:
                 # No heartbeat, check endpoint
-                endpoint_status = await self.check_endpoint(
-                    agent.metadata.get("url") if agent.metadata else None or agent.token_uri
-                )
+                agent_url = self._extract_agent_url(agent)
+                endpoint_status = await self.check_endpoint(agent_url)
                 status = AgentStatusEnum.stale if endpoint_status["reachable"] else AgentStatusEnum.unreachable
 
             # Update agent status if changed
@@ -113,9 +111,8 @@ class HealthCheckService:
                 logger.info(f"[HealthCheck] Agent {agent.agent_id} status: {agent.health_status} → {status.value}")
 
             # Record health check
-            endpoint_status = await self.check_endpoint(
-                agent.metadata.get("url") if agent.metadata else None or agent.token_uri
-            )
+            agent_url = self._extract_agent_url(agent)
+            endpoint_status = await self.check_endpoint(agent_url)
             health_check = HealthCheck(
                 agent_id=agent.agent_id,
                 status=status.value,
@@ -127,6 +124,40 @@ class HealthCheckService:
         except Exception as e:
             logger.error(f"[HealthCheck] Error checking agent {agent.agent_id}: {e}")
             db.rollback()
+
+    def _extract_agent_url(self, agent: Agent) -> Optional[str]:
+        """Extract agent URL from metadata (supports both ERC-8004 and legacy formats)"""
+        metadata = agent.metadata_json or {}
+        
+        # Try ERC-8004 format: extract from endpoints
+        endpoints = metadata.get("endpoints", [])
+        if endpoints:
+            # Prefer A2A endpoint, fallback to first endpoint
+            for ep in endpoints:
+                if isinstance(ep, dict):
+                    ep_name = ep.get("name", "")
+                    if ep_name.upper() == "A2A":
+                        return ep.get("endpoint")
+                else:
+                    ep_name = getattr(ep, "name", "")
+                    if ep_name.upper() == "A2A":
+                        return getattr(ep, "endpoint", None)
+            
+            # Fallback to first endpoint
+            if endpoints:
+                first_ep = endpoints[0]
+                if isinstance(first_ep, dict):
+                    return first_ep.get("endpoint")
+                else:
+                    return getattr(first_ep, "endpoint", None)
+        
+        # Fallback to legacy format: direct URL in metadata
+        url = metadata.get("url")
+        if url:
+            return url
+        
+        # Final fallback: token URI (might be registration file URL)
+        return agent.token_uri
 
     async def check_endpoint(self, url: Optional[str]) -> dict:
         """Check if an agent endpoint is reachable"""
@@ -164,9 +195,8 @@ class HealthCheckService:
             if not agent:
                 raise ValueError("Agent not found")
 
-            endpoint_status = await self.check_endpoint(
-                agent.metadata.get("url") if agent.metadata else None or agent.token_uri
-            )
+            agent_url = self._extract_agent_url(agent)
+            endpoint_status = await self.check_endpoint(agent_url)
 
             status = AgentStatusEnum.healthy
             if not agent.last_heartbeat:
