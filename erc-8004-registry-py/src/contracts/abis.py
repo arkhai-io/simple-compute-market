@@ -1,5 +1,5 @@
 # ERC-8004 Contract ABIs
-# Based on https://github.com/erc-8004/erc-8004-contracts
+# Based on https://github.com/ww-jermaine/erc-8004-contracts
 # Official contract interface - matches IdentityRegistry.sol
 
 IDENTITY_REGISTRY_ABI = [
