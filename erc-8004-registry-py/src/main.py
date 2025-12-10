@@ -45,9 +45,8 @@ async def lifespan(app: FastAPI):
     
     # Start event sync service
     event_sync = EventSyncService(network_config)
-    if settings.enable_health_checks:
-        await event_sync.start(60000)  # Sync every minute
-        logger.info("Event sync service started")
+    await event_sync.start(60000)  # Sync every minute
+    logger.info("Event sync service started")
     
     # Start health check service (opt-in)
     health_check = HealthCheckService()

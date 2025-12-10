@@ -870,17 +870,5 @@ async def _startup_tasks():
     return None
 
 
-# Start background tasks when module loads (if asyncio event loop exists)
-try:
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # If loop is already running, schedule task
-        loop.create_task(_startup_tasks())
-    else:
-        # Otherwise start tasks synchronously
-        asyncio.run(_startup_tasks())
-except RuntimeError:
-    # No event loop yet, will be started by uvicorn
-    pass
-except Exception as e:
-    logger.warning(f"Could not start background tasks at module load: {e}")
+# Background tasks are now started via FastAPI startup event in server.py
+# This ensures the event loop is running when tasks are created

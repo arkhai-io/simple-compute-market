@@ -13,11 +13,12 @@
 # limitations under the License.
 
 import os
+import asyncio
 
 from fastapi import FastAPI
 
 # Import the use_vertex_ai flag and a2a_app from agent.py
-from app.agent import a2a_app
+from app.agent import a2a_app, _startup_tasks
 from app.utils.config import CONFIG
 
 # Conditional imports based on use_vertex_ai flag
@@ -65,6 +66,11 @@ if CONFIG.use_vertex_ai:
     app.title = "a2a-agent-trader"
     app.description = "API for interacting with the Agent a2a-agent"
 
+    @app.on_event("startup")
+    async def startup_event():
+        """Start background tasks on server startup."""
+        await _startup_tasks()
+
     @app.post("/feedback")
     def collect_feedback(feedback: Feedback) -> dict[str, str]:
         """Collect and log feedback.
@@ -82,6 +88,11 @@ else:
     # Use the A2A app from agent.py for local development
     app = a2a_app
     print("Running in local mode with A2A app (Vertex AI disabled)")
+    
+    @app.on_event("startup")
+    async def startup_event():
+        """Start background tasks on server startup."""
+        await _startup_tasks()
 
 
 # Main execution
