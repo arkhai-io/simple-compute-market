@@ -21,19 +21,31 @@ class IdentityRegistryClient:
 
     def register(
         self,
-        to: str,
         token_uri: str,
         metadata: List[AgentMetadata]
     ) -> str:
-        """Register a new agent on-chain"""
+        """
+        Register a new agent on-chain.
+        
+        Note: Contract always mints to msg.sender (the account signing the transaction).
+        To register for a different address, use that address's private key.
+        
+        Args:
+            token_uri: URI pointing to agent card (IPFS, HTTPS, etc.)
+            metadata: List of metadata entries (values will be converted to bytes)
+        """
         if not self.account:
             raise ValueError("Private key required for write operations")
         
-        # Prepare metadata tuple
-        metadata_tuples = [(m.key, m.value) for m in metadata]
+        # Convert metadata to tuple array with bytes values
+        # Official contract expects MetadataEntry[] where value is bytes
+        metadata_tuples = [
+            (m.key, m.value.encode('utf-8') if isinstance(m.value, str) else m.value)
+            for m in metadata
+        ]
         
-        # Build transaction
-        tx = self.contract.functions.register(to, token_uri, metadata_tuples).build_transaction({
+        # Build transaction - use register(string, MetadataEntry[]) overload
+        tx = self.contract.functions.register(token_uri, metadata_tuples).build_transaction({
             "from": self.account.address,
             "nonce": self.w3.eth.get_transaction_count(self.account.address),
         })
@@ -44,14 +56,22 @@ class IdentityRegistryClient:
         
         return tx_hash.hex()
 
-    def set_metadata(self, agent_id: int, metadata: List[AgentMetadata]) -> str:
-        """Update metadata for an existing agent"""
+    def set_metadata(self, agent_id: int, key: str, value: str) -> str:
+        """
+        Update a single metadata entry for an existing agent.
+        
+        Args:
+            agent_id: Agent ID
+            key: Metadata key
+            value: Metadata value (will be converted to bytes)
+        """
         if not self.account:
             raise ValueError("Private key required for write operations")
         
-        metadata_tuples = [(m.key, m.value) for m in metadata]
+        # Convert value to bytes
+        value_bytes = value.encode('utf-8') if isinstance(value, str) else value
         
-        tx = self.contract.functions.setMetadata(agent_id, metadata_tuples).build_transaction({
+        tx = self.contract.functions.setMetadata(agent_id, key, value_bytes).build_transaction({
             "from": self.account.address,
             "nonce": self.w3.eth.get_transaction_count(self.account.address),
         })
@@ -69,8 +89,12 @@ class IdentityRegistryClient:
         """Get the owner of an agent NFT"""
         return self.contract.functions.ownerOf(agent_id).call()
 
-    def get_metadata(self, agent_id: int, key: str) -> str:
-        """Get metadata value for a specific key"""
+    def get_metadata(self, agent_id: int, key: str) -> bytes:
+        """
+        Get metadata value for a specific key.
+        
+        Returns bytes - decode with .decode('utf-8') if it's a string value.
+        """
         return self.contract.functions.getMetadata(agent_id, key).call()
 
     def get_total_supply(self) -> int:
@@ -78,24 +102,24 @@ class IdentityRegistryClient:
         return self.contract.functions.totalSupply().call()
 
     def get_past_agent_registered_events(self, from_block: int, to_block: Optional[int] = None):
-        """Get past AgentRegistered events"""
-        event_filter = self.contract.events.AgentRegistered.create_filter(
+        """Get past Registered events"""
+        event_filter = self.contract.events.Registered.create_filter(
             from_block=from_block,
             to_block=to_block or "latest"
         )
         return event_filter.get_all_entries()
 
-    def get_past_metadata_updated_events(self, from_block: int, to_block: Optional[int] = None):
-        """Get past MetadataUpdated events"""
-        event_filter = self.contract.events.MetadataUpdated.create_filter(
+    def get_past_metadata_set_events(self, from_block: int, to_block: Optional[int] = None):
+        """Get past MetadataSet events"""
+        event_filter = self.contract.events.MetadataSet.create_filter(
             from_block=from_block,
             to_block=to_block or "latest"
         )
         return event_filter.get_all_entries()
 
     def watch_agent_registered(self, callback, from_block: Optional[int] = None):
-        """Watch for AgentRegistered events"""
-        event_filter = self.contract.events.AgentRegistered.create_filter(
+        """Watch for Registered events"""
+        event_filter = self.contract.events.Registered.create_filter(
             from_block=from_block or "latest"
         )
         
@@ -106,9 +130,9 @@ class IdentityRegistryClient:
         # In production, use web3.py's event listener or polling
         return event_filter
 
-    def watch_metadata_updated(self, callback, from_block: Optional[int] = None):
-        """Watch for MetadataUpdated events"""
-        event_filter = self.contract.events.MetadataUpdated.create_filter(
+    def watch_metadata_set(self, callback, from_block: Optional[int] = None):
+        """Watch for MetadataSet events"""
+        event_filter = self.contract.events.MetadataSet.create_filter(
             from_block=from_block or "latest"
         )
         

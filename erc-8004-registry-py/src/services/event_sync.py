@@ -106,7 +106,7 @@ class EventSyncService:
                 current_to = min(current_from + chunk_size, to_block)
 
                 try:
-                    # Get AgentRegistered events
+                    # Get Registered events (official ERC-8004 event name)
                     registered_events = self.identity_registry.get_past_agent_registered_events(
                         current_from, current_to
                     )
@@ -163,12 +163,12 @@ class EventSyncService:
                                 block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
                                 logger.info(f"[EventSync] Registered agent {agent_id} from block {block_number}")
                         except Exception as e:
-                            logger.error(f"[EventSync] Error processing AgentRegistered event: {e}")
+                            logger.error(f"[EventSync] Error processing Registered event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
                             continue
 
-                    # Get MetadataUpdated events
-                    metadata_events = self.identity_registry.get_past_metadata_updated_events(
+                    # Get MetadataSet events (official ERC-8004 event name)
+                    metadata_events = self.identity_registry.get_past_metadata_set_events(
                         current_from, current_to
                     )
 
@@ -201,8 +201,15 @@ class EventSyncService:
                             key = str(key_value)
 
                             try:
-                                # Get the metadata value from contract
-                                value = self.identity_registry.get_metadata(int(agent_id_value), key)
+                                # Get the metadata value from contract (returns bytes)
+                                value_bytes = self.identity_registry.get_metadata(int(agent_id_value), key)
+                                
+                                # Decode bytes to string if it's UTF-8 encoded
+                                try:
+                                    value = value_bytes.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    # If not UTF-8, store as hex string
+                                    value = value_bytes.hex()
 
                                 # Update or insert metadata
                                 existing_metadata = db.query(AgentMetadataEntry).filter(
@@ -238,7 +245,7 @@ class EventSyncService:
                                 logger.warning(f"[EventSync] Could not update metadata for agent {agent_id}, key {key}: {e}")
                                 db.rollback()
                         except Exception as e:
-                            logger.error(f"[EventSync] Error processing MetadataUpdated event: {e}")
+                            logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
                             continue
 
