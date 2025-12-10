@@ -56,7 +56,7 @@ class Config:
     ssh_public_key: str
     # Auto-registration settings
     auto_register: bool  # AUTO_REGISTER - enable auto-registration on startup
-    registry_url: str  # REGISTRY_URL - ERC-8004 registry API URL (off-chain)
+    indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
     identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
     onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (NFT token ID) to use for updates
 
@@ -113,7 +113,7 @@ def load_config() -> Config:
         ),
         # Auto-registration settings
         auto_register=_get_bool_env("AUTO_REGISTER", False),
-        registry_url=os.getenv("REGISTRY_URL", "http://localhost:8080"),
+        indexer_url=os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080")),  # Support both for backward compatibility
         identity_registry_address=os.getenv("IDENTITY_REGISTRY_ADDRESS"),
         onchain_agent_id=os.getenv("ONCHAIN_AGENT_ID"),  # Explicit on-chain agent ID (optional)
     )

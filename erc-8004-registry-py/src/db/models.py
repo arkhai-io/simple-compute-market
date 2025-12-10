@@ -21,6 +21,7 @@ class Agent(Base):
     agent_id = Column(String, primary_key=True)
     chain_id = Column(Integer, nullable=False)
     registry_address = Column(String, nullable=False)
+    owner = Column(String, nullable=True)  # Wallet address of agent owner (for signature verification)
     token_uri = Column(Text, nullable=True)
     metadata_json = Column("metadata", JSON, default=dict)  # Database column is "metadata", Python attr is "metadata_json" to avoid SQLAlchemy conflict
     health_status = Column(SQLEnum(AgentStatusEnum), nullable=False, default=AgentStatusEnum.healthy)

@@ -151,6 +151,12 @@ class AgentMetadata(BaseModel):
     value: str
 
 
+class HeartbeatRequest(BaseModel):
+    """Heartbeat request with optional signature"""
+    signature: Optional[str] = None
+    timestamp: Optional[int] = None
+
+
 class NetworkConfig(BaseModel):
     chain_id: int
     rpc_url: str

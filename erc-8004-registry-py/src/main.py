@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     global event_sync, health_check
     
     # Startup
-    logger.info("Starting ERC-8004 Registry service...")
+    logger.info("Starting ERC-8004 Indexer service...")
     
     # Initialize database
     init_db()
@@ -49,13 +49,15 @@ async def lifespan(app: FastAPI):
         await event_sync.start(60000)  # Sync every minute
         logger.info("Event sync service started")
     
-    # Start health check service
+    # Start health check service (opt-in)
     health_check = HealthCheckService()
     if settings.enable_health_checks:
         await health_check.start(settings.health_check_interval)
-        logger.info("Health check service started")
+        logger.info("Health check service started (Indexer-initiated health checks enabled)")
+    else:
+        logger.info("Health check service disabled (Agent-initiated heartbeats are the default)")
     
-    logger.info(f"🚀 ERC-8004 Registry server ready on {settings.host}:{settings.port}")
+    logger.info(f"🚀 ERC-8004 Indexer server ready on {settings.host}:{settings.port}")
     
     yield
     
@@ -70,7 +72,7 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="ERC-8004 Registry",
+    title="ERC-8004 Indexer",
     version="0.1.0",
     lifespan=lifespan,
 )

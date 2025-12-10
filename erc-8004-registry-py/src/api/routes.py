@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc
 from typing import Optional
@@ -7,13 +7,22 @@ import time
 import logging
 import asyncio
 import aiohttp
+from datetime import datetime, timedelta
 from src.db.database import get_db
 from src.db.models import Agent, AgentMetadataEntry
 from src.types import (
     AgentRegistration, AgentCard, ERC8004RegistrationFile,
-    Endpoint, RegistrationRecord, AgentMetadata
+    Endpoint, RegistrationRecord, AgentMetadata, HeartbeatRequest
 )
 from src.config import settings
+
+# Import for signature verification
+try:
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    HAS_ETH_ACCOUNT = True
+except ImportError:
+    HAS_ETH_ACCOUNT = False
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -24,7 +33,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "erc-8004-registry",
+        "service": "erc-8004-indexer",
         "version": "0.1.0",
         "health_checks_enabled": settings.enable_health_checks,
     }
@@ -73,7 +82,7 @@ def convert_agent_card_to_registration_file(
         image=None,
         endpoints=endpoints,
         registrations=[],
-        supported_trust=["reputation"],
+        supported_trust=[],
         active=True,
         x402support=False,
         updated_at=int(time.time())
@@ -153,7 +162,7 @@ async def register_agent(
             for k, v in registration.labels.items():
                 metadata_list.append(AgentMetadata(key=f"label.{k}", value=v))
         
-        # Store in database (off-chain index)
+        # Store in database (Indexer)
         temp_agent_id = f"temp_{int(time.time() * 1000)}"
         
         # Build metadata JSON
@@ -180,6 +189,7 @@ async def register_agent(
             agent_id=temp_agent_id,
             chain_id=settings.chain_id,
             registry_address=settings.identity_registry_address,
+            owner=owner,
             token_uri=token_uri,
             metadata_json=metadata_json,
             health_status="healthy",
@@ -203,7 +213,7 @@ async def register_agent(
             "name": registration_file.name,
             "tokenURI": token_uri,
             "message": (
-                "Agent registered off-chain. "
+                "Agent registered with Indexer. "
                 "To register on-chain, register directly from your agent code. "
                 "See RECOMMENDED_REGISTRATION_WORKFLOW.md for instructions."
             ),
@@ -377,18 +387,75 @@ async def search_agents(
     return {"items": items}
 
 
+def verify_heartbeat_signature(agent_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
+    """Verify heartbeat signature using EIP-191 personal sign format"""
+    if not HAS_ETH_ACCOUNT:
+        logger.warning("[Heartbeat] eth_account not available, signature verification disabled")
+        return False
+    
+    try:
+        # Construct the message that should have been signed
+        message = f"heartbeat:{agent_id}:{timestamp}"
+        
+        # Encode message in EIP-191 format
+        message_hash = encode_defunct(text=message)
+        
+        # Recover the signer address from the signature
+        recovered_address = Account.recover_message(message_hash, signature=signature)
+        
+        # Verify it matches the agent's owner address
+        return recovered_address.lower() == owner_address.lower()
+    except Exception as e:
+        logger.error(f"[Heartbeat] Signature verification error: {e}")
+        return False
+
+
 @router.post("/agents/{agent_id}/heartbeat")
 async def heartbeat(
     agent_id: str = Path(..., description="Agent ID"),
+    request: HeartbeatRequest = Body(default=HeartbeatRequest()),
     db: Session = Depends(get_db),
 ):
-    """Update agent heartbeat"""
+    """
+    Update agent heartbeat.
+    
+    Requires cryptographic signature from the agent's owner address to verify authenticity.
+    Signature format: EIP-191 personal sign of message "heartbeat:{agent_id}:{timestamp}"
+    """
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verify signature if agent has an owner address
+    signature = request.signature
+    timestamp = request.timestamp
+    
+    if agent.owner:
+        if not signature or timestamp is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Signature and timestamp required for authenticated heartbeats"
+            )
+        
+        # Check timestamp is within 5-minute window
+        now = int(time.time())
+        if abs(now - timestamp) > 300:  # 5 minutes
+            raise HTTPException(
+                status_code=401,
+                detail="Timestamp too old or too far in future (max 5 minutes)"
+            )
+        
+        # Verify signature
+        if not verify_heartbeat_signature(agent_id, timestamp, signature, agent.owner):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid signature"
+            )
+    elif signature or timestamp:
+        # Signature provided but agent has no owner - warn but allow
+        logger.warning(f"[Heartbeat] Agent {agent_id} has no owner but signature provided")
 
-    from datetime import datetime
     agent.last_heartbeat = datetime.utcnow()
     agent.health_status = "healthy"
     agent.updated_at = datetime.utcnow()

@@ -1,7 +1,7 @@
 """
 Auto-registration module for a2a-agent-trader.
 
-Supports both off-chain (via registry API) and on-chain (via smart contract) registration.
+Supports both Indexer (via Indexer API) and on-chain (via smart contract) registration.
 Registration happens automatically on agent startup when AUTO_REGISTER=true.
 """
 import asyncio
@@ -31,7 +31,7 @@ AGENT_ID_FILE = Path(__file__).parent.parent / ".agent_id"
 # This allows the server to fully start before registration
 REGISTRATION_DELAY = 5
 
-# Heartbeat interval (seconds) - should be less than registry's heartbeat_ttl_secs
+# Heartbeat interval (seconds) - should be less than Indexer's heartbeat_ttl_secs
 HEARTBEAT_INTERVAL = 30  # Send heartbeat every 30 seconds
 
 # ERC-8004 Identity Registry ABI (minimal - only register function)
@@ -55,25 +55,25 @@ IDENTITY_REGISTRY_ABI = [
 
 async def register_offchain(
     agent_card_url: str,
-    registry_url: str,
+    indexer_url: str,
     owner: str,
     labels: Optional[dict] = None
 ) -> Optional[str]:
     """
-    Register agent off-chain with the ERC-8004 registry API.
+    Register agent with the ERC-8004 Indexer API.
     
     Args:
         agent_card_url: URL to the agent card (e.g., http://localhost:8000/.well-known/agent-card.json)
-        registry_url: URL of the registry API (e.g., http://localhost:8080)
+        indexer_url: URL of the Indexer API (e.g., http://localhost:8080)
         owner: Wallet address of the agent owner
         labels: Optional labels/metadata for the agent
         
     Returns:
         Agent ID if successful, None otherwise
     """
-    logger.info(f"[REGISTRATION] Attempting off-chain registration...")
+    logger.info(f"[REGISTRATION] Attempting Indexer registration...")
     logger.info(f"[REGISTRATION] Agent card URL: {agent_card_url}")
-    logger.info(f"[REGISTRATION] Registry: {registry_url}")
+    logger.info(f"[REGISTRATION] Indexer: {indexer_url}")
     
     # Fetch agent card ourselves to avoid registry timeout (use async if available)
     agent_card_data = None
@@ -104,11 +104,11 @@ async def register_offchain(
     
     # Quick health check first
     try:
-        health_req = urllib.request.Request(f"{registry_url.rstrip('/')}/health", method='GET')
+        health_req = urllib.request.Request(f"{indexer_url.rstrip('/')}/health", method='GET')
         urllib.request.urlopen(health_req, timeout=3)
     except Exception as e:
-        logger.warning(f"[REGISTRATION] Registry health check failed: {e}")
-        logger.warning(f"[REGISTRATION] Registry may not be running at {registry_url}")
+        logger.warning(f"[REGISTRATION] Indexer health check failed: {e}")
+        logger.warning(f"[REGISTRATION] Indexer may not be running at {indexer_url}")
         return None
     
     # Build payload - prefer sending agent card directly to avoid registry fetch timeout
@@ -127,7 +127,7 @@ async def register_offchain(
     
     try:
         req = urllib.request.Request(
-            f"{registry_url.rstrip('/')}/agents/register",
+            f"{indexer_url.rstrip('/')}/agents/register",
             data=json.dumps(payload).encode('utf-8'),
             headers={'Content-Type': 'application/json'},
             method='POST'
@@ -135,19 +135,19 @@ async def register_offchain(
         # Shorter timeout since we're sending data directly
         with urllib.request.urlopen(req, timeout=10) as response:
             result = json.loads(response.read().decode('utf-8'))
-            # Registry returns "id" not "agent_id"
+            # Indexer returns "id" not "agent_id"
             agent_id = result.get('id') or result.get('agent_id')
-            logger.info(f"[REGISTRATION] Off-chain registration successful! Agent ID: {agent_id}")
+            logger.info(f"[REGISTRATION] Indexer registration successful! Agent ID: {agent_id}")
             return agent_id
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8') if e.fp else str(e)
-        logger.warning(f"[REGISTRATION] Off-chain registration failed: {e.code} - {error_body}")
+        logger.warning(f"[REGISTRATION] Indexer registration failed: {e.code} - {error_body}")
         return None
     except urllib.error.URLError as e:
-        logger.warning(f"[REGISTRATION] Cannot connect to registry at {registry_url}: {e.reason}")
+        logger.warning(f"[REGISTRATION] Cannot connect to Indexer at {indexer_url}: {e.reason}")
         return None
     except Exception as e:
-        logger.error(f"[REGISTRATION] Unexpected error during off-chain registration: {e}")
+        logger.error(f"[REGISTRATION] Unexpected error during Indexer registration: {e}")
         return None
 
 
@@ -171,23 +171,23 @@ def _store_agent_id(agent_id: int) -> None:
         logger.warning(f"[REGISTRATION] Could not cache agent ID: {e}")
 
 
-async def _query_registry_for_agent(registry_url: str, agent_id: str) -> Optional[dict]:
-    """Query registry API to check if agent exists"""
+async def _query_indexer_for_agent(indexer_url: str, agent_id: str) -> Optional[dict]:
+    """Query Indexer API to check if agent exists"""
     try:
         if HAS_AIOHTTP:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{registry_url.rstrip('/')}/agents/{agent_id}",
+                    f"{indexer_url.rstrip('/')}/agents/{agent_id}",
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as response:
                     if response.status == 200:
                         return await response.json()
         else:
-            req = urllib.request.Request(f"{registry_url.rstrip('/')}/agents/{agent_id}", method='GET')
+            req = urllib.request.Request(f"{indexer_url.rstrip('/')}/agents/{agent_id}", method='GET')
             with urllib.request.urlopen(req, timeout=5) as response:
                 return json.loads(response.read().decode('utf-8'))
     except Exception as e:
-        logger.debug(f"[REGISTRATION] Could not query registry for agent {agent_id}: {e}")
+        logger.debug(f"[REGISTRATION] Could not query Indexer for agent {agent_id}: {e}")
         return None
 
 
@@ -240,7 +240,7 @@ async def register_onchain(
     contract_address: str,
     owner_address: Optional[str] = None,
     explicit_agent_id: Optional[str] = None,
-    registry_url: Optional[str] = None
+    indexer_url: Optional[str] = None
 ) -> Optional[str]:
     """
     Register or update agent on-chain by calling the ERC-8004 Identity Registry contract.
@@ -248,7 +248,7 @@ async def register_onchain(
     
     Priority order for finding existing agent:
     1. Explicit agent ID from environment variable (ONCHAIN_AGENT_ID)
-    2. Query registry API (if registry_url provided)
+    2. Query Indexer API (if indexer_url provided)
     3. Cached agent ID from file
     4. Search blockchain events (last resort)
     
@@ -259,7 +259,7 @@ async def register_onchain(
         contract_address: ERC-8004 Identity Registry contract address
         owner_address: Optional owner address (defaults to signer address)
         explicit_agent_id: Explicit agent ID from env var (highest priority)
-        registry_url: Registry API URL to query for existing agent
+        indexer_url: Indexer API URL to query for existing agent
         
     Returns:
         Transaction hash if successful, None otherwise
@@ -311,19 +311,19 @@ async def register_onchain(
                 logger.warning(f"[REGISTRATION] Invalid explicit agent ID {explicit_agent_id}: {e}")
                 agent_id = None
         
-        # 2. Query registry API (fast, already indexed)
-        if not agent_id and registry_url:
-            logger.debug(f"[REGISTRATION] Querying registry for existing agent...")
+        # 2. Query Indexer API (fast, already indexed)
+        if not agent_id and indexer_url:
+            logger.debug(f"[REGISTRATION] Querying Indexer for existing agent...")
             cached_id = _get_stored_agent_id()
             if cached_id:
-                registry_data = await _query_registry_for_agent(registry_url, str(cached_id))
-                if registry_data:
+                indexer_data = await _query_indexer_for_agent(indexer_url, str(cached_id))
+                if indexer_data:
                     try:
                         # Verify ownership on-chain
                         owner = contract.functions.ownerOf(cached_id).call()
                         if owner.lower() == to_address.lower():
                             agent_id = cached_id
-                            logger.info(f"[REGISTRATION] Found agent in registry (ID: {agent_id})")
+                            logger.info(f"[REGISTRATION] Found agent in Indexer (ID: {agent_id})")
                     except Exception:
                         pass
         
@@ -473,7 +473,7 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
     """
     Main registration function called on agent startup.
     
-    Attempts both off-chain and on-chain registration based on configuration.
+    Attempts both Indexer and on-chain registration based on configuration.
     Waits for the server to be ready before attempting registration.
     
     Args:
@@ -499,15 +499,15 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
     
     result = None
     
-    # Attempt off-chain registration first
-    if config.registry_url:
+    # Attempt Indexer registration first
+    if config.indexer_url:
         result = await register_offchain(
             agent_card_url=agent_card_url,
-            registry_url=config.registry_url,
+            indexer_url=config.indexer_url,
             owner=owner
         )
         if result:
-            logger.info(f"[REGISTRATION] Off-chain registration complete. Agent ID: {result}")
+            logger.info(f"[REGISTRATION] Indexer registration complete. Agent ID: {result}")
     
     # Attempt on-chain registration if configured
     if (config.agent_priv_key and 
@@ -521,7 +521,7 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
             contract_address=config.identity_registry_address,
             owner_address=config.agent_wallet_address,
             explicit_agent_id=config.onchain_agent_id,
-            registry_url=config.registry_url
+            indexer_url=config.indexer_url
         )
         if tx_hash:
             logger.info(f"[REGISTRATION] On-chain registration complete. TX: {tx_hash}")
@@ -538,42 +538,86 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
         )
     
     if not result:
-        logger.warning("[REGISTRATION] No registration completed. Agent will not be discoverable via registry.")
+        logger.warning("[REGISTRATION] No registration completed. Agent will not be discoverable via Indexer.")
     
-    # Start heartbeat loop if off-chain registration succeeded
-    if result and config.registry_url:
+    # Start heartbeat loop if Indexer registration succeeded
+    if result and config.indexer_url:
         # Extract agent ID from result (could be agent ID string or TX hash)
-        # If it's a temp ID from registry, use it for heartbeats
+        # If it's a temp ID from Indexer, use it for heartbeats
         if isinstance(result, str) and result.startswith("temp_"):
-            asyncio.create_task(heartbeat_loop(result, config.registry_url))
+            asyncio.create_task(heartbeat_loop(result, config.indexer_url, config.agent_priv_key, owner))
             logger.info(f"[REGISTRATION] Started heartbeat loop for agent {result}")
     
     return result
 
 
-async def send_heartbeat(agent_id: str, registry_url: str) -> bool:
+async def send_heartbeat(
+    agent_id: str, 
+    indexer_url: str, 
+    private_key: Optional[str] = None,
+    owner_address: Optional[str] = None
+) -> bool:
     """
-    Send heartbeat to registry to indicate agent is alive.
+    Send heartbeat to Indexer to indicate agent is alive.
+    
+    Signs the heartbeat with the agent's private key to authenticate the request.
     
     Args:
-        agent_id: Agent ID (from off-chain registration)
-        registry_url: Registry API URL
+        agent_id: Agent ID (from Indexer registration)
+        indexer_url: Indexer API URL
+        private_key: Private key for signing heartbeat (optional if agent has no owner)
+        owner_address: Owner wallet address (optional, used for logging)
         
     Returns:
         True if successful, False otherwise
     """
     try:
+        import time
+        timestamp = int(time.time())
+        
+        # Prepare request body with signature if private key is available
+        body = {}
+        if private_key:
+            try:
+                from eth_account import Account
+                from eth_account.messages import encode_defunct
+                
+                # Construct message to sign
+                message = f"heartbeat:{agent_id}:{timestamp}"
+                
+                # Sign message using EIP-191 personal sign format
+                message_hash = encode_defunct(text=message)
+                signed_message = Account.sign_message(message_hash, private_key)
+                signature = signed_message.signature.hex()
+                
+                body = {
+                    "signature": signature,
+                    "timestamp": timestamp
+                }
+            except ImportError:
+                logger.warning("[HEARTBEAT] eth_account not available, sending heartbeat without signature")
+            except Exception as e:
+                logger.warning(f"[HEARTBEAT] Failed to sign heartbeat: {e}")
+        
         if HAS_AIOHTTP:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{registry_url.rstrip('/')}/agents/{agent_id}/heartbeat",
+                    f"{indexer_url.rstrip('/')}/agents/{agent_id}/heartbeat",
+                    json=body,
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as response:
                     if response.status == 200:
                         return True
+                    elif response.status == 401:
+                        logger.warning(f"[HEARTBEAT] Authentication failed - signature may be invalid")
+                        return False
         else:
+            import urllib.request
+            import json as json_module
             req = urllib.request.Request(
-                f"{registry_url.rstrip('/')}/agents/{agent_id}/heartbeat",
+                f"{indexer_url.rstrip('/')}/agents/{agent_id}/heartbeat",
+                data=json_module.dumps(body).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
                 method='POST'
             )
             with urllib.request.urlopen(req, timeout=5) as response:
@@ -584,24 +628,35 @@ async def send_heartbeat(agent_id: str, registry_url: str) -> bool:
     return False
 
 
-async def heartbeat_loop(agent_id: Optional[str], registry_url: str):
+async def heartbeat_loop(
+    agent_id: Optional[str], 
+    indexer_url: str,
+    private_key: Optional[str] = None,
+    owner_address: Optional[str] = None
+):
     """
-    Background task to periodically send heartbeats to registry.
+    Background task to periodically send heartbeats to Indexer.
     
     Args:
         agent_id: Agent ID from registration (None if not registered)
-        registry_url: Registry API URL
+        indexer_url: Indexer API URL
+        private_key: Private key for signing heartbeats (optional)
+        owner_address: Owner wallet address (optional, for logging)
     """
     if not agent_id:
         logger.debug("[HEARTBEAT] No agent ID, skipping heartbeat loop")
         return
     
     logger.info(f"[HEARTBEAT] Starting heartbeat loop for agent {agent_id}")
+    if private_key:
+        logger.debug("[HEARTBEAT] Heartbeats will be signed for authentication")
+    else:
+        logger.warning("[HEARTBEAT] No private key provided - heartbeats will be unsigned (may fail if Indexer requires auth)")
     
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
-            success = await send_heartbeat(agent_id, registry_url)
+            success = await send_heartbeat(agent_id, indexer_url, private_key, owner_address)
             if success:
                 logger.debug(f"[HEARTBEAT] Heartbeat sent successfully")
             else:

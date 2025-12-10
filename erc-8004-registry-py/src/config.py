@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     
     # Health Check Configuration
-    enable_health_checks: bool = True
+    enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)
     health_check_interval: int = 60
     endpoint_check_timeout: int = 10
     heartbeat_ttl_secs: int = 60
