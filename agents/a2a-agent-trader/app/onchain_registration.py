@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Path to store agent ID after registration
-AGENT_ID_FILE = Path(__file__).parent.parent / ".agent_id"
+# Note: We don't cache agent IDs - each agent instance registers independently
+# Multiple agents on different ports will each get their own on-chain agent ID
 
 # Delay before attempting registration (seconds)
 # This allows the server to fully start before registration
@@ -183,24 +183,7 @@ async def register_offchain(
         return None
 
 
-def _get_stored_agent_id() -> Optional[int]:
-    """Get stored agent ID from file (cache only, not source of truth)"""
-    try:
-        if AGENT_ID_FILE.exists():
-            agent_id_str = AGENT_ID_FILE.read_text().strip()
-            return int(agent_id_str) if agent_id_str.isdigit() else None
-    except Exception:
-        pass
-    return None
-
-
-def _store_agent_id(agent_id: int) -> None:
-    """Store agent ID to file (cache only)"""
-    try:
-        AGENT_ID_FILE.write_text(str(agent_id))
-        logger.debug(f"[REGISTRATION] Cached agent ID: {agent_id}")
-    except Exception as e:
-        logger.warning(f"[REGISTRATION] Could not cache agent ID: {e}")
+# Removed agent ID caching - each agent instance registers independently
 
 
 async def _query_indexer_for_agent(indexer_url: str, agent_id: str) -> Optional[dict]:
@@ -299,9 +282,11 @@ async def register_onchain(
     
     Priority order for finding existing agent:
     1. Explicit agent ID from environment variable (ONCHAIN_AGENT_ID)
-    2. Query Indexer API (if indexer_url provided)
-    3. Cached agent ID from file
-    4. Search blockchain events (last resort)
+    2. Search blockchain events (finds most recent registration by owner)
+    
+    Note: Each agent instance registers independently. Multiple agents on different ports
+    will each get their own on-chain agent ID (auto-incremented by contract).
+    No local caching is used - agents always check the blockchain for existing registrations.
     
     Args:
         agent_card_url: URL to the agent card (used as tokenURI)
@@ -364,36 +349,13 @@ async def register_onchain(
                 logger.warning(f"[REGISTRATION] Invalid explicit agent ID {explicit_agent_id}: {e}")
                 agent_id = None
         
-        # 2. Query Indexer API (fast, already indexed)
-        if not agent_id and indexer_url:
-            logger.debug(f"[REGISTRATION] Querying Indexer for existing agent...")
-            cached_id = _get_stored_agent_id()
-            if cached_id:
-                indexer_data = await _query_indexer_for_agent(indexer_url, str(cached_id))
-                if indexer_data:
-                    try:
-                        # Verify ownership on-chain
-                        owner = contract.functions.ownerOf(cached_id).call()
-                        if owner.lower() == signer_address.lower():
-                            agent_id = cached_id
-                            logger.info(f"[REGISTRATION] Found agent in Indexer (ID: {agent_id})")
-                    except Exception:
-                        pass
-        
-        # 3. Use cached agent ID from file (verify it's still valid)
+        # 2. Search blockchain events (finds most recent registration by owner)
         if not agent_id:
-            cached_id = _get_stored_agent_id()
-            if cached_id:
-                # Verify stored agent ID is still valid
-                try:
-                    owner = contract.functions.ownerOf(cached_id).call()
-                    if owner.lower() == signer_address.lower():
-                        agent_id = cached_id
-                        logger.info(f"[REGISTRATION] Using cached agent ID: {agent_id}")
-                    else:
-                        logger.warning(f"[REGISTRATION] Cached agent ID {cached_id} owned by different address")
-                except Exception as e:
-                    logger.debug(f"[REGISTRATION] Cached agent ID {cached_id} invalid: {e}")
+            logger.debug(f"[REGISTRATION] Searching blockchain for existing registration by owner...")
+            agent_id = _find_agent_id_by_owner(w3, contract, signer_address)
+            if agent_id:
+                logger.info(f"[REGISTRATION] Found existing registration (ID: {agent_id}), will update metadata...")
+                # Continue to metadata update below
         
         # If we found an existing agent ID, update metadata instead of registering
         if agent_id:
@@ -430,50 +392,10 @@ async def register_onchain(
                         logger.warning(f"[REGISTRATION] Metadata update failed for key {key}")
                 
                 logger.info(f"[REGISTRATION] Metadata updates submitted! TXs: {', '.join(tx_hashes)}")
-                _store_agent_id(agent_id)  # Update cache
                 return tx_hashes[0] if tx_hashes else None
             except Exception as e:
                 logger.error(f"[REGISTRATION] Error updating metadata: {e}")
                 # Fall through to register new
-        
-        # 4. Search blockchain events (last resort - slow/expensive)
-        if not agent_id:
-            logger.debug(f"[REGISTRATION] Searching blockchain for existing registration...")
-            agent_id = _find_agent_id_by_owner(w3, contract, signer_address)
-            if agent_id:
-                logger.info(f"[REGISTRATION] Found existing registration (ID: {agent_id}), updating metadata...")
-                _store_agent_id(agent_id)
-                
-                # Update metadata - official contract uses setMetadata(agentId, key, value) with bytes
-                metadata_updates = [
-                    ("category", "compute"),
-                    ("type", "a2a-trader"),
-                ]
-                
-                tx_hashes = []
-                for key, value in metadata_updates:
-                    tx = contract.functions.setMetadata(
-                        agent_id,
-                        key,
-                        value.encode('utf-8')  # Convert string to bytes
-                    ).build_transaction({
-                        "from": account.address,
-                        "nonce": w3.eth.get_transaction_count(account.address),
-                        "gas": 100000,
-                        "gasPrice": w3.eth.gas_price,
-                    })
-                    
-                    signed_tx = account.sign_transaction(tx)
-                    tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-                    tx_hashes.append(tx_hash.hex())
-                    
-                    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
-                    if receipt.status == 1:
-                        logger.info(f"[REGISTRATION] Metadata updated for {key}! Block: {receipt.blockNumber}")
-                    else:
-                        logger.warning(f"[REGISTRATION] Metadata update failed for {key}")
-                
-                return tx_hashes[0] if tx_hashes else None
         
         # No existing registration found, register new
         logger.info(f"[REGISTRATION] Registering new agent on-chain...")
@@ -522,8 +444,8 @@ async def register_onchain(
                                 new_agent_id = event.args[0]
                             
                             if new_agent_id:
-                                _store_agent_id(int(new_agent_id))
-                                logger.info(f"[REGISTRATION] Stored new agent ID: {new_agent_id}")
+                                onchain_id = int(new_agent_id)
+                                logger.info(f"[REGISTRATION] Registered new agent ID: {onchain_id}")
                                 
                                 # If owner_address was specified and differs from signer, transfer NFT
                                 if owner_address and owner_address.lower() != signer_address.lower():
