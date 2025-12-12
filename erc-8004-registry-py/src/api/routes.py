@@ -70,7 +70,7 @@ def convert_agent_card_to_registration_file(
         a2a_endpoint = Endpoint(
             name="A2A",
             endpoint=str(agent_card.url),
-            version=agent_card.protocol_version or agent_card.version,
+            version=agent_card.version,
             a2a_skills=[skill.id for skill in agent_card.skills] if agent_card.skills else []
         )
         endpoints.append(a2a_endpoint)
@@ -100,24 +100,22 @@ async def register_agent(
     if not owner or owner == "0x0000000000000000000000000000000000000000":
         raise HTTPException(status_code=400, detail="Owner address is required")
 
-    # TEMPORARILY DISABLE SIGNATURE VERIFICATION FOR DEBUGGING
+    # Verify signature if provided (secure registration)
     signature = registration.signature
     timestamp = registration.timestamp
 
     if signature and timestamp is not None:
         # Create registration data dictionary for verification
         reg_data = registration.model_dump(exclude={'signature', 'timestamp'})
-        # TEMPORARILY DISABLE SIGNATURE VERIFICATION TO UNBLOCK REGISTRATION
-        logger.warning(f"[Registration] SIGNATURE VERIFICATION TEMPORARILY DISABLED")
-        logger.info(f"[Registration] Received signature from owner: {owner}")
-        # TODO: Re-enable after fixing JSON serialization mismatch
-        # if not verify_registration_signature(owner, timestamp, signature, reg_data):
-        #     logger.error(f"[Registration] Invalid registration signature for owner: {owner}")
-        #     raise HTTPException(
-        #         status_code=401,
-        #         detail="Invalid registration signature"
-        #     )
-        # logger.info(f"[Registration] Valid signature verified for owner {owner}")
+
+        logger.info(f"[Registration] Verifying signature for owner: {owner}")
+        if not verify_registration_signature(owner, timestamp, signature, reg_data):
+            logger.error(f"[Registration] Invalid registration signature for owner: {owner}")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid registration signature"
+            )
+        logger.info(f"[Registration] ✓ Valid signature verified for owner {owner}")
     else:
         logger.warning(f"[Registration] No signature provided for owner {owner} - allowing for backward compatibility")
 
@@ -513,14 +511,20 @@ def verify_registration_signature(
 
         serializable_data = serialize_registration_data(data_to_hash)
 
-        # Sort keys for consistent ordering
+        # Sort keys for consistent ordering - keep A2A agent card in camelCase (protocol compliant)
         data_str = json.dumps(serializable_data, sort_keys=True, separators=(',', ':'))
         data_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
 
         # Verify signature
         message = f"register:{owner}:{timestamp}:{data_hash}"
         message_hash = encode_defunct(text=message)
+
+        # Ensure signature has 0x prefix and is proper format
+        if not signature.startswith('0x'):
+            signature = '0x' + signature
+
         recovered_address = Account.recover_message(message_hash, signature=signature)
+        logger.info(f"[Registration] Signature format check: original={len(signature)} chars, with prefix={signature[:10]}...")
 
         logger.info(f"[Registration] Verifying signature for owner {owner}")
         logger.info(f"[Registration] Expected message: {message}")
@@ -528,6 +532,8 @@ def verify_registration_signature(
         logger.info(f"[Registration] Data hash: {data_hash}")
         logger.info(f"[Registration] Received signature: {signature}")
         logger.info(f"[Registration] Recovered address: {recovered_address}")
+        logger.info(f"[Registration] Expected owner: {owner}")
+        logger.info(f"[Registration] Address match: {recovered_address.lower() == owner.lower()}")
 
         return recovered_address.lower() == owner.lower()
     except Exception as e:

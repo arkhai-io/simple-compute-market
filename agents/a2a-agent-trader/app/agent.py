@@ -654,8 +654,8 @@ public_agent_card = AgentCard(
     description="A helpful AI assistant designed to trade compute resources with others.",
     url=BASE_URL_OVERRIDE,
     version="0.1.0",
-    default_input_modes=["text"],
-    default_output_modes=["text"],
+    defaultInputModes=["text"],  # A2A Protocol camelCase
+    defaultOutputModes=["text"],  # A2A Protocol camelCase
     skills=[],
     capabilities=AgentCapabilities(streaming=True),
 )

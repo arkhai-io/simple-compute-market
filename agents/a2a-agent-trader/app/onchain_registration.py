@@ -99,25 +99,30 @@ async def register_offchain(
         logger.warning(f"[REGISTRATION] Indexer may not be running at {indexer_url}")
         return None
     
-    # Build payload - prefer sending agent card directly to avoid registry fetch timeout
+    # Build payload - use snake_case to match indexer expectations
     base_payload = {
         "owner": owner,
-        "labels": labels or {"category": "compute", "type": "trader"}
+        "labels": labels or {"category": "compute", "type": "trader"},
+        "auth": {},  # Add empty auth to match indexer structure
+        "domain": None,  # Add domain to match indexer structure
+        "visibility": "public",  # Add visibility to match indexer structure
+        "registration_file": None,  # Add to match indexer structure
+        "registration_file_url": None,  # Add to match indexer structure
     }
 
     # Include agent_id if provided
     if agent_id:
-        base_payload["agentId"] = agent_id
+        base_payload["agent_id"] = agent_id
 
     if agent_card_data:
         payload = {
             **base_payload,
-            "agentCard": agent_card_data,
+            "agent_card": agent_card_data,  # Use snake_case to match indexer
         }
     else:
         payload = {
             **base_payload,
-            "registrationFileUrl": agent_card_url,
+            "registration_file_url": agent_card_url,  # Use snake_case
         }
 
     # Add signature if private key is available
@@ -128,11 +133,15 @@ async def register_offchain(
             import hashlib
             import time
 
+            account = Account.from_key(private_key)
+
             # Generate timestamp
             timestamp = int(time.time())
 
             # Create deterministic hash of registration data (excluding signature fields)
             data_to_hash = {k: v for k, v in payload.items() if k not in ['signature', 'timestamp']}
+
+            # Keep A2A agent card in camelCase (protocol compliant) - indexer handles camelCase
             data_str = json.dumps(data_to_hash, sort_keys=True, separators=(',', ':'))
             data_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
 
@@ -154,6 +163,7 @@ async def register_offchain(
             logger.info(f"[OFFCHAIN REGISTRATION] Message: {message}")
             logger.info(f"[OFFCHAIN REGISTRATION] Data hash: {data_hash}")
             logger.info(f"[OFFCHAIN REGISTRATION] Signature: {signed_message.signature.hex()}")
+            logger.info(f"[OFFCHAIN REGISTRATION] Sending to indexer (A2A card in camelCase): {json.dumps(payload, sort_keys=True, separators=(',', ':'))}")
         except Exception as e:
             logger.warning(f"[OFFCHAIN REGISTRATION] Could not generate signature: {e}")
             logger.warning(f"[OFFCHAIN REGISTRATION] Proceeding without signature")
@@ -210,108 +220,87 @@ async def _query_indexer_for_agent(indexer_url: str, agent_id: str) -> Optional[
 
 
 def _find_agent_id_by_owner(w3, contract, owner_address: str, max_blocks: int = 10000) -> Optional[int]:
-    """Find agent ID by checking token ownership (primary) and events (fallback)"""
+    """Find agent ID by checking balance - simple and reliable approach"""
     try:
-        logger.debug(f"[REGISTRATION] Searching for owner {owner_address}")
+        logger.info(f"[REGISTRATION] Searching for owner {owner_address}")
 
-        # PRIMARY: Try to find events (reliable with new contract that emits events)
-        current_block = w3.eth.block_number
-        from_block = max(0, current_block - max_blocks)
-
-        # List all available events for debugging
+        # SIMPLE & RELIABLE: Check balance first - if owner has tokens, find the first one
         try:
-            event_names = [attr for attr in dir(contract.events) if not attr.startswith('_')]
-            logger.debug(f"[REGISTRATION] Available events: {event_names}")
+            balance = contract.functions.balanceOf(owner_address).call()
+            logger.info(f"[REGISTRATION] Owner balance: {balance} tokens")
+
+            if balance > 0:
+                # Try to find the first token ID owned by this address
+                # Since ERC-721 uses sequential IDs, we can try from 0 upwards
+                current_block = w3.eth.block_number
+                logger.info(f"[REGISTRATION] Searching for token IDs from 0 to {balance + 10}")
+
+                for token_id in range(balance + 10):  # Check a reasonable range
+                    try:
+                        token_owner = contract.functions.ownerOf(token_id).call()
+                        if token_owner.lower() == owner_address.lower():
+                            logger.info(f"[REGISTRATION] ✓ Found matching agent ID: {token_id}")
+                            return int(token_id)
+                    except Exception:
+                        # Token doesn't exist, continue
+                        continue
+
+                logger.warning(f"[REGISTRATION] Has balance {balance} but couldn't find token")
+            else:
+                logger.info(f"[REGISTRATION] No tokens found for owner {owner_address}")
+
         except Exception as e:
-            logger.debug(f"[REGISTRATION] Could not list events: {e}")
+            logger.warning(f"[REGISTRATION] Balance check failed: {e}")
 
-        # Try multiple possible event names
-        events = []
-        event_names_to_try = ['Registered', 'AgentRegistered', 'Registration', 'CreateAgent', 'AgentCreated']
+        # FALLBACK: Try event filtering if balance check fails
+        logger.info(f"[REGISTRATION] Fallback: trying event filtering...")
+        current_block = w3.eth.block_number
+        from_block = max(0, current_block - 100)  # Search last 100 blocks only
 
-        for event_name in event_names_to_try:
-            try:
-                if hasattr(contract.events, event_name):
-                    logger.debug(f"[REGISTRATION] Trying event {event_name}...")
-                    event_filter = getattr(contract.events, event_name).create_filter(
-                        from_block=from_block,
-                        to_block="latest"
-                    )
-                    events = event_filter.get_all_entries()
-                    logger.info(f"[REGISTRATION] Found {len(events)} {event_name} events")
-                    if events:
-                        break
-            except Exception as e:
-                logger.debug(f"[REGISTRATION] Event {event_name} not available: {e}")
-                continue
+        # Try "Registered" events first (from contract ABI)
+        try:
+            if hasattr(contract.events, 'Registered'):
+                logger.info(f"[REGISTRATION] Trying Registered events...")
+                event_filter = contract.events.Registered.create_filter(
+                    from_block=from_block,
+                    to_block="latest",
+                    argument_filters={'owner': owner_address}
+                )
+                events = event_filter.get_all_entries()
+                logger.info(f"[REGISTRATION] Found {len(events)} Registered events for owner")
 
-        # Find most recent registration by this owner
-        logger.info(f"[REGISTRATION] Processing {len(events)} events for owner {owner_address}")
-        for i, event in enumerate(reversed(events)):  # Check most recent first
-            try:
-                logger.info(f"[REGISTRATION] Processing event {i+1}/{len(events)}")
-                # Extract agent ID and owner from event
-                if hasattr(event, 'args'):
-                    agent_id = None
-                    event_owner = None
-
-                    if hasattr(event.args, 'agentId'):
+                for event in reversed(events):  # Most recent first
+                    if hasattr(event, 'args') and hasattr(event.args, 'agentId'):
                         agent_id = event.args.agentId
-                        # Registered event has owner as indexed parameter
-                        if hasattr(event.args, 'owner'):
-                            event_owner = event.args.owner
-                        logger.info(f"[REGISTRATION] Event has agentId: {agent_id}, owner: {event_owner}")
-                    elif hasattr(event.args, 'agent_id'):
-                        agent_id = event.args.agent_id
-                        if hasattr(event.args, 'owner'):
-                            event_owner = event.args.owner
-                        logger.info(f"[REGISTRATION] Event has agent_id: {agent_id}, owner: {event_owner}")
-                    elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
-                        agent_id = event.args[0]
-                        event_owner = event.args[2] if len(event.args) > 2 else None
-                        logger.info(f"[REGISTRATION] Event tuple: agent_id: {agent_id}, owner: {event_owner}")
-                    else:
-                        logger.warning(f"[REGISTRATION] Event args structure unknown: {event.args}")
+                        logger.info(f"[REGISTRATION] ✓ Found agent ID from Registered event: {agent_id}")
+                        return int(agent_id)
+        except Exception as e:
+            logger.info(f"[REGISTRATION] Registered event filtering failed: {e}")
 
-                    if agent_id:
-                        # Check if this agent is owned by our address
-                        # First check event owner, then verify on-chain
-                        if event_owner and event_owner.lower() == owner_address.lower():
-                            logger.info(f"[REGISTRATION] Event owner matches: {event_owner} == {owner_address}")
-                            try:
-                                # Double-check on-chain
-                                owner = contract.functions.ownerOf(agent_id).call()
-                                logger.info(f"[REGISTRATION] On-chain owner of agent {agent_id}: {owner}")
-                                if owner.lower() == owner_address.lower():
-                                    logger.info(f"[REGISTRATION] ✓ Found matching agent ID: {agent_id}")
-                                    return int(agent_id)
-                                else:
-                                    logger.warning(f"[REGISTRATION] On-chain owner mismatch: {owner} != {owner_address}")
-                            except Exception as e:
-                                logger.warning(f"[REGISTRATION] Error checking on-chain owner for {agent_id}: {e}")
-                                continue
-                        else:
-                            logger.info(f"[REGISTRATION] Event owner mismatch or missing: {event_owner} != {owner_address}, checking on-chain...")
-                            # Fallback: check on-chain
-                            try:
-                                owner = contract.functions.ownerOf(agent_id).call()
-                                logger.info(f"[REGISTRATION] On-chain owner check for agent {agent_id}: {owner}")
-                                if owner.lower() == owner_address.lower():
-                                    logger.info(f"[REGISTRATION] ✓ Found matching agent ID via on-chain check: {agent_id}")
-                                    return int(agent_id)
-                                else:
-                                    logger.info(f"[REGISTRATION] On-chain owner does not match: {owner} != {owner_address}")
-                            except Exception as e:
-                                logger.warning(f"[REGISTRATION] Error checking on-chain owner for {agent_id}: {e}")
-                                continue
-            except Exception:
-                continue
+        # Try "Transfer" events (ERC-721 standard)
+        try:
+            if hasattr(contract.events, 'Transfer'):
+                logger.info(f"[REGISTRATION] Trying Transfer events...")
+                event_filter = contract.events.Transfer.create_filter(
+                    from_block=from_block,
+                    to_block="latest",
+                    argument_filters={'to': owner_address}
+                )
+                events = event_filter.get_all_entries()
+                logger.info(f"[REGISTRATION] Found {len(events)} Transfer events to owner")
 
-        logger.debug(f"[REGISTRATION] No agent found for owner {owner_address} in {len(events)} events")
+                for event in reversed(events):  # Most recent first
+                    if hasattr(event, 'args') and hasattr(event.args, 'tokenId'):
+                        token_id = event.args.tokenId
+                        logger.info(f"[REGISTRATION] ✓ Found agent ID from Transfer event: {token_id}")
+                        return int(token_id)
+        except Exception as e:
+            logger.info(f"[REGISTRATION] Transfer event filtering failed: {e}")
 
+        logger.info(f"[REGISTRATION] No agent found for owner {owner_address}")
         return None
     except Exception as e:
-        logger.warning(f"[REGISTRATION] Could not search past events: {e}")
+        logger.warning(f"[REGISTRATION] Could not search for agent: {e}")
         return None
 
 
@@ -426,12 +415,13 @@ async def register_onchain(
         # No existing registration found, register new
         logger.info(f"[ONCHAIN REGISTRATION] Registering new agent on-chain...")
         # Official contract: register(string tokenUri, MetadataEntry[] metadata)
-        # MetadataEntry is {string key, bytes value}
+        # MetadataEntry is {string key, bytes value} - format matches viem's toHex output
+        from web3 import Web3
         metadata = [
-            ("category", "compute".encode('utf-8')),  # Convert to bytes
-            ("type", "a2a-trader".encode('utf-8')),
+            {"key": "category", "value": Web3.to_hex(text="compute")},  # Convert to hex bytes
+            {"key": "type", "value": Web3.to_hex(text="a2a-trader")},
         ]
-        
+
         # Build transaction - no 'to' parameter, always mints to msg.sender
         tx = contract.functions.register(
             agent_card_url,

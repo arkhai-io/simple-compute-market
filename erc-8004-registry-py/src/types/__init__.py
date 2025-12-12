@@ -23,41 +23,21 @@ class Capability(BaseModel):
 
 
 class AgentCard(BaseModel):
-    """Legacy agent card format (backward compatibility)"""
+    """A2A Protocol agent card format (camelCase compliant)"""
     name: str
     description: str
     url: HttpUrl
     version: str = "0.1.0"
-    default_input_modes: Optional[List[str]] = Field(default=["text/plain"], alias="defaultInputModes")
-    default_output_modes: Optional[List[str]] = Field(default=["text/plain"], alias="defaultOutputModes")
+    defaultInputModes: Optional[List[str]] = Field(default=["text/plain"])
+    defaultOutputModes: Optional[List[str]] = Field(default=["text/plain"])
     skills: List[Capability] = []
     capabilities: Dict[str, Any] = {}
-    preferred_transport: Optional[str] = Field(default=None, alias="preferredTransport")
-    protocol_version: Optional[str] = Field(default=None, alias="protocolVersion")
-    
+    preferredTransport: Optional[str] = Field(default=None)
+    protocolVersion: Optional[str] = Field(default=None)
+
     model_config = ConfigDict(populate_by_name=True)
     
-    @model_validator(mode='before')
-    @classmethod
-    def normalize_fields(cls, data):
-        """Normalize camelCase to snake_case for compatibility"""
-        if isinstance(data, dict):
-            # Handle camelCase fields
-            normalized = {}
-            for key, value in data.items():
-                if key == "defaultInputModes":
-                    normalized["default_input_modes"] = value
-                elif key == "defaultOutputModes":
-                    normalized["default_output_modes"] = value
-                elif key == "preferredTransport":
-                    normalized["preferred_transport"] = value
-                elif key == "protocolVersion":
-                    normalized["protocol_version"] = value
-                else:
-                    normalized[key] = value
-            return normalized
-        return data
-
+    
 
 # ERC-8004 Registration File Format Models
 
