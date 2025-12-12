@@ -5,7 +5,7 @@ from typing import Literal
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///./registry.db"
+    database_url: str = "sqlite:///./indexer.db"
     
     # Blockchain Configuration - Base Sepolia
     chain_id: int = 84532

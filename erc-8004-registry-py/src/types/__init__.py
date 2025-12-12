@@ -125,19 +125,24 @@ class AgentRegistration(BaseModel):
     # ERC-8004 registration file (new format)
     registration_file: Optional[ERC8004RegistrationFile] = Field(default=None, alias="registrationFile")
     registration_file_url: Optional[str] = Field(default=None, alias="registrationFileUrl")
-    
+
     # Legacy agent card format (backward compatibility)
     agent_card: Optional[AgentCard] = Field(default=None, alias="agentCard")
-    
+
     # Common fields
+    agent_id: Optional[str] = Field(default=None, alias="agentId")  # Custom agent ID (optional)
     domain: Optional[str] = None
     owner: Optional[str] = None
     visibility: Optional[str] = "public"  # public|internal|private
     labels: Dict[str, str] = {}
     auth: Dict[str, Any] = {}
-    
+
+    # Signature-based authentication fields
+    signature: Optional[str] = None  # EIP-191 signature of registration message
+    timestamp: Optional[int] = None  # Unix timestamp for replay protection
+
     model_config = ConfigDict(populate_by_name=True)
-    
+
     @model_validator(mode='after')
     def validate_format(self):
         """Ensure at least one format is provided"""

@@ -24,6 +24,7 @@ from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
 
+
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
@@ -838,35 +839,38 @@ async def _delayed_registration():
     """Run registration after server is ready."""
     from .utils.config import CONFIG
     from .onchain_registration import register_agent_on_startup
-    
+
     try:
+        logger.info("[REGISTRATION] Starting agent registration")
         result = await register_agent_on_startup(CONFIG)
         if result:
-            logger.info(f"[STARTUP] Agent registration complete: {result}")
+            logger.info(f"[REGISTRATION] Agent registration complete: {result}")
+        else:
+            logger.warning("[REGISTRATION] Agent registration returned no result")
     except Exception as e:
-        logger.error(f"[STARTUP] Agent registration failed: {e}")
+        logger.error(f"[REGISTRATION] Agent registration failed: {e}")
 
 
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
     from .utils.config import CONFIG
-    
+
     # Schedule registration as background task (runs after server starts)
     if CONFIG.auto_register:
         asyncio.create_task(_delayed_registration())
         logger.info("[STARTUP] Auto-registration scheduled")
-    
+
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
         logger.info("[STARTUP] Redis subscriber started")
-    
+
     if CONFIG.enable_event_queue:
         # Start queue processor in background
         task = asyncio.create_task(process_queued_events())
         logger.info("[STARTUP] Event queue processor started")
         return task
-    
+
     return None
 
 
