@@ -2,6 +2,17 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+# Load .env file if it exists (before loading any config values)
+try:
+    from dotenv import load_dotenv
+    # Load .env from the project root (parent of app directory)
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    # python-dotenv not available, skip
+    pass
+
 
 def _get_bool_env(var_name: str, default: bool = False) -> bool:
     value = os.getenv(var_name)
@@ -43,6 +54,11 @@ class Config:
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
     ssh_public_key: str
+    # Auto-registration settings
+    auto_register: bool  # AUTO_REGISTER - enable auto-registration on startup
+    indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
+    identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
+    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (NFT token ID) to use for updates
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -51,16 +67,20 @@ DEFAULT_TOKEN_REGISTRY_PATH = (
 
 
 def load_config() -> Config:
-    # Get agent_id with fallback
+    # Get agent_id from environment variable
+    # Agent name must be a valid identifier: start with letter/underscore, 
+    # and only contain letters, digits, and underscores
     agent_id = os.getenv("AGENT_ID")
     if not agent_id:
-        try:
-            agent_id = os.uname().nodename
-        except (AttributeError, OSError):
-            # os.uname() not available on all platforms
-            import socket
-            agent_id = socket.gethostname()
-    agent_id = agent_id or "root_agent"
+        # If AGENT_ID is not set, use a safe default instead of hostname
+        # (hostnames often contain invalid characters like hyphens and dots)
+        agent_id = "root_agent"
+        import warnings
+        warnings.warn(
+            "AGENT_ID environment variable not set. Using default 'root_agent'. "
+            "Please set AGENT_ID to a valid identifier (letters, digits, underscores only).",
+            UserWarning
+        )
     
     return Config(
         agent_id=agent_id,
@@ -91,6 +111,11 @@ def load_config() -> Config:
             "SSH_PUBLIC_KEY",
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example",
         ),
+        # Auto-registration settings
+        auto_register=_get_bool_env("AUTO_REGISTER", False),
+        indexer_url=os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080")),  # Support both for backward compatibility
+        identity_registry_address=os.getenv("IDENTITY_REGISTRY_ADDRESS"),
+        onchain_agent_id=os.getenv("ONCHAIN_AGENT_ID"),  # Explicit on-chain agent ID (optional)
     )
 
 

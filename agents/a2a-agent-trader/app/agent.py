@@ -24,6 +24,7 @@ from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
 
+
 import google.auth
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from fastapi import HTTPException
@@ -653,8 +654,8 @@ public_agent_card = AgentCard(
     description="A helpful AI assistant designed to trade compute resources with others.",
     url=BASE_URL_OVERRIDE,
     version="0.1.0",
-    default_input_modes=["text"],
-    default_output_modes=["text"],
+    defaultInputModes=["text"],  # A2A Protocol camelCase
+    defaultOutputModes=["text"],  # A2A Protocol camelCase
     skills=[],
     capabilities=AgentCapabilities(streaming=True),
 )
@@ -833,35 +834,45 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
+# Background task for delayed registration
+async def _delayed_registration():
+    """Run registration after server is ready."""
+    from .utils.config import CONFIG
+    from .onchain_registration import register_agent_on_startup
+
+    try:
+        logger.info("[REGISTRATION] Starting agent registration")
+        result = await register_agent_on_startup(CONFIG)
+        if result:
+            logger.info(f"[REGISTRATION] Agent registration complete: {result}")
+        else:
+            logger.warning("[REGISTRATION] Agent registration returned no result")
+    except Exception as e:
+        logger.error(f"[REGISTRATION] Agent registration failed: {e}")
+
+
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
     from .utils.config import CONFIG
-    
+
+    # Schedule registration as background task (runs after server starts)
+    if CONFIG.auto_register:
+        asyncio.create_task(_delayed_registration())
+        logger.info("[STARTUP] Auto-registration scheduled")
+
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
         logger.info("[STARTUP] Redis subscriber started")
-    
+
     if CONFIG.enable_event_queue:
         # Start queue processor in background
         task = asyncio.create_task(process_queued_events())
         logger.info("[STARTUP] Event queue processor started")
         return task
-    
+
     return None
 
 
-# Start background tasks when module loads (if asyncio event loop exists)
-try:
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # If loop is already running, schedule task
-        loop.create_task(_startup_tasks())
-    else:
-        # Otherwise start tasks synchronously
-        asyncio.run(_startup_tasks())
-except RuntimeError:
-    # No event loop yet, will be started by uvicorn
-    pass
-except Exception as e:
-    logger.warning(f"Could not start background tasks at module load: {e}")
+# Background tasks are now started via FastAPI startup event in server.py
+# This ensures the event loop is running when tasks are created

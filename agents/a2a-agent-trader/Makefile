@@ -40,6 +40,11 @@ serve-a2a:
 	@echo "|                                                                             |"
 	@echo "| 🌐 Server will be available at: http://localhost:$(or $(PORT),8000)         |"
 	@echo "| 📡 A2A protocol enabled for agent-to-agent communication                    |"
+	@if [ -n "$(ENV_ARG)" ]; then \
+		echo "| 📝 Loading environment from: $(ENV_FILE)                                 |"; \
+	else \
+		echo "| ⚠️  No .env file found - using environment variables or defaults          |"; \
+	fi
 	@echo "|                                                                             |"
 	@echo "| 💡 Try asking: How many apples do you have?                                 |"
 	@echo "==============================================================================="
