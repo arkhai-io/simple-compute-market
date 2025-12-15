@@ -106,8 +106,8 @@ class IdentityRegistryClient:
         try:
             # Use get_logs directly instead of create_filter for better RPC compatibility
             return self.contract.events.Registered.get_logs(
-                fromBlock=from_block,
-                toBlock=to_block if to_block is not None else "latest"
+                from_block=from_block,
+                to_block=to_block if to_block is not None else "latest"
             )
         except Exception as e:
             # Fallback: try with create_filter if get_logs fails
@@ -127,8 +127,8 @@ class IdentityRegistryClient:
         try:
             # Use get_logs directly instead of create_filter for better RPC compatibility
             return self.contract.events.MetadataSet.get_logs(
-                fromBlock=from_block,
-                toBlock=to_block if to_block is not None else "latest"
+                from_block=from_block,
+                to_block=to_block if to_block is not None else "latest"
             )
         except Exception as e:
             # Fallback: try with create_filter if get_logs fails
