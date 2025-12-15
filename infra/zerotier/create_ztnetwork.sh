@@ -1,11 +1,29 @@
 #!/bin/bash
 # create_zerotier_network.sh
 
-# Configuration
-NETWORK_NAME="My Private Network"
-IP_RANGE_START="10.10.10.1"
-IP_RANGE_END="10.10.10.254"
-NETWORK_CIDR="10.10.10.0/24"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Env file not found at $ENV_FILE"
+  echo "Copy infra/zerotier/.env.sample to $ENV_FILE and set values."
+  exit 1
+fi
+
+# Load network configuration from .env
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+for var in NETWORK_NAME IP_RANGE_START IP_RANGE_END NETWORK_CIDR; do
+  if [[ -z "${!var:-}" ]]; then
+    echo "Missing required env var: $var in $ENV_FILE" >&2
+    exit 1
+  fi
+done
 
 # Get node ID and auth token
 NODE_ID=$(sudo zerotier-cli info | awk '{print $3}')

@@ -9,3 +9,7 @@ add-node:
 	@if [ -z "$(NODE_ID)" ]; then echo "Usage: make add-node NODE_ID=<member-id>"; exit 1; fi
 	@. ./zerotier/.env; \
 	./zerotier/authorize_zt_member.sh $$ZEROTIER_NETWORK $$NODE_ID
+
+get-peers:
+	@. ./zerotier/.env; \
+	./zerotier/get_peers.sh $$ZEROTIER_NETWORK
