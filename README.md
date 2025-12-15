@@ -26,30 +26,6 @@ make test-env
 
 Note the RPC URL, especially the port.
 
-## Agent Setup
-Install agent deps:
-```bash
-cd agents/a2a-agent-trader
-make install
-```
-
-Start the agent (auto-joins ZeroTier if ZEROTIER_NETWORK is set)
-```bash
-cd agents/a2a-agent-trader
-make serve-a2a # optional ENV_FILE=alice.env
-```
-
-Configure the agent:
-```bash
-cd ../agents/a2a-agent-trader
-cp .env.sample .env
-# Set:
-# IDENTITY_REGISTRY_ADDRESS / REPUTATION_REGISTRY_ADDRESS / VALIDATION_REGISTRY_ADDRESS (from deployment)
-# CHAIN_RPC_URL (same rpc_url as step 2)
-# REGISTRY_URL=http://localhost:8080/
-# AGENT_PRIV_KEY / AGENT_WALLET_ADDRESS (use test keys from step 2)
-# ZEROTIER_NETWORK=<your network ID if using ZeroTier>
-```
 ## Market + ZeroTier Setup
 
 ### Registry and Indexer
@@ -87,6 +63,35 @@ Agents join the market network automatically:
 - Set `ZEROTIER_NETWORK=<network-id>` in `agents/a2a-agent-trader/.env`
 - Run `make serve-a2a`; the agent joins ZeroTier automatically
 - Send the agent’s ZeroTier node ID to the market controller so they can authorize it, in order to participate in the network and obtain an IP.
+
+## Agent Setup
+Install agent deps:
+```bash
+cd agents/a2a-agent-trader
+make install
+```
+
+Start the agent (auto-joins ZeroTier if ZEROTIER_NETWORK is set)
+```bash
+cd agents/a2a-agent-trader
+make serve-a2a # optional ENV_FILE=alice.env
+```
+
+Note that ZeroTier requires `sudo`.
+
+Configure the agent:
+```bash
+cd ../agents/a2a-agent-trader
+cp .env.sample .env
+# Set:
+# IDENTITY_REGISTRY_ADDRESS / REPUTATION_REGISTRY_ADDRESS / VALIDATION_REGISTRY_ADDRESS (from deployment)
+# CHAIN_RPC_URL (same rpc_url as step 2)
+# REGISTRY_URL=http://localhost:8080/
+# AGENT_PRIV_KEY / AGENT_WALLET_ADDRESS (use test keys from step 2)
+# ZEROTIER_NETWORK=<your network ID if using ZeroTier>
+```
+
+On CTRL+C (`SIGINT`), `serve-a2a` will leave the ZeroTier network, also requiring `sudo`.
 
 ## Useful Commands
 Agent playground (no A2A): `make playground` in agents/a2a-agent-trader
