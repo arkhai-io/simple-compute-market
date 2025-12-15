@@ -35,24 +35,25 @@ ifneq (,$(wildcard $(ENV_FILE)))
 endif
 
 serve-a2a:
-	@bash -c 'set -e; \
-	echo "==============================================================================="; \
-	echo "| 🚀 Starting A2A agent server...                                             |"; \
-	echo "|                                                                             |"; \
-	echo "| 🌐 Server will be available at: http://localhost:$(or $(PORT),8000)         |"; \
-	echo "| 📡 A2A protocol enabled for agent-to-agent communication                    |"; \
-	if [ -n "$(ENV_ARG)" ]; then \
-		echo "| 📝 Loading environment from: $(ENV_FILE)                                 |"; \
+	@NODE_ID=$$(sudo zerotier-cli info | cut -d " " -f3); \
+	bash -c "set -e; \
+	echo '==============================================================================='; \
+	echo '| 🚀 Starting A2A agent server...                                             |'; \
+	echo '|                                                                             |'; \
+	echo '| 🌐 Server will be available at: http://localhost:$(or $(PORT),8000)         |'; \
+	echo '| 📡 A2A protocol enabled for agent-to-agent communication                    |'; \
+	if [ -n '$(ENV_ARG)' ]; then \
+		echo '| 📝 Loading environment from: $(ENV_FILE)                                 |'; \
 	else \
-		echo "| ⚠️  No .env file found - using environment variables or defaults          |"; \
-	fi; \
-	echo "|                                                                             |"; \
-	echo "| 💡 Try asking: How many apples do you have?                                 |"; \
-	echo "==============================================================================="; \
-	trap "echo \"Leaving ZeroTier network $(ZEROTIER_NETWORK)\"; sudo zerotier-cli leave \"$(ZEROTIER_NETWORK)\"" INT EXIT; \
-	echo Connecting to ZeroTier network "$(ZEROTIER_NETWORK)"; \
-	sudo zerotier-cli join "$(ZEROTIER_NETWORK)"; \
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload $(ENV_ARG)'
+		echo '| ⚠️  No .env file found - using environment variables or defaults          |'; \
+	fi ; \
+	echo '|                                                                             |'; \
+	echo '==============================================================================='; \
+	trap \"echo 'Leaving ZeroTier network $(ZEROTIER_NETWORK)'; sudo zerotier-cli leave '$(ZEROTIER_NETWORK)'\" INT EXIT; \
+	echo Connecting to ZeroTier network '$(ZEROTIER_NETWORK)'; \
+	echo 'ZeroTier node ID: '\"$$NODE_ID\"; \
+	sudo zerotier-cli join '$(ZEROTIER_NETWORK)'; \
+	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload $(ENV_ARG)"
 
 # ==============================================================================
 # Backend Deployment Targets
