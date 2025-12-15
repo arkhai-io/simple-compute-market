@@ -17,28 +17,30 @@ End-to-end example of an ERC-8004-powered agent market. It includes smart contra
 - ZeroTier CLI (`make install` in `infra/` installs it; requires sudo)
 - Anvil/Foundry (for local chain via `make test-env`)
 
-## Local Setup (single-machine demo)
+## Local Development Setup
+Start local chain (keep this terminal open)
+```bash
+cd agents/a2a-agent-trader
+make test-env
+```
 
-Install agent deps  :
+Note the RPC URL, especially the port.
+
+## Agent Setup
+Install agent deps:
 ```bash
 cd agents/a2a-agent-trader
 make install
 ```
 
-Start local chain (keep this terminal open)
+Start the agent (auto-joins ZeroTier if ZEROTIER_NETWORK is set)
 ```bash
-make test-env
-```
-
-Deploy ERC-8004 contracts to that RPC
-```
-cd ../../erc-8004-contracts
-npm install
-ANVIL_RPC_URL=<rpc_url_from_step_2> npm run deploy:anvil
+cd agents/a2a-agent-trader
+make serve-a2a # optional ENV_FILE=alice.env
 ```
 
 Configure the agent:
-```
+```bash
 cd ../agents/a2a-agent-trader
 cp .env.sample .env
 # Set:
@@ -48,42 +50,43 @@ cp .env.sample .env
 # AGENT_PRIV_KEY / AGENT_WALLET_ADDRESS (use test keys from step 2)
 # ZEROTIER_NETWORK=<your network ID if using ZeroTier>
 ```
+## Market + ZeroTier Setup
 
-Run the Registry/Indexer (separate terminal)
+### Registry and Indexer
+Deploy ERC-8004 contracts to the local chain:
+```bash
+cd ../../erc-8004-contracts
+npm install
+ANVIL_RPC_URL=<rpc_url from local chain> npm run deploy:anvil
 ```
+
+Run the Registry/Indexer (separate terminal):
+```bash
 cd erc-8004-registry-py
 uv sync
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
 ```
 
-Start the agent (auto-joins ZeroTier if ZEROTIER_NETWORK is set)
-```
-cd agents/a2a-agent-trader
-make serve-a2a # optional ENV_FILE=alice.env
-```
-
-## Market / ZeroTier Setup (multi-host)
-Controller: create a ZeroTier network
-```
+## ZeroTier Setup
+As the ZeroTier Controller, create a ZeroTier network:
+```bash
 cd infra
 make install             # installs zerotier (sudo)
 make create-network      # prints the new network ID
 ```
 
-Populate infra/zerotier/.env with ZEROTIER_NETWORK=<network-id> so other make targets can use it.
+Populate `infra/zerotier/.env` with `ZEROTIER_NETWORK=<network-id>` so other make targets can use it.
 
-Approve new nodes
-```
+Authorize new Agents (ZeroTier nodes) joining the network:
+```bash
 cd infra
 make add-node NODE_ID=<member-id-from-zerotier-cli-info>
 ```
 
-- Agents join the market network
-
+Agents join the market network automatically:
 - Set `ZEROTIER_NETWORK=<network-id>` in `agents/a2a-agent-trader/.env`
-
-Run `make serve-a2a`; the agent joins ZeroTier automatically
-Send the agent’s ZeroTier node ID to the market controller so they can authorize it
+- Run `make serve-a2a`; the agent joins ZeroTier automatically
+- Send the agent’s ZeroTier node ID to the market controller so they can authorize it, in order to participate in the network and obtain an IP.
 
 ## Useful Commands
 Agent playground (no A2A): `make playground` in agents/a2a-agent-trader
