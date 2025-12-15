@@ -98,8 +98,9 @@ class EventSyncService:
         """Sync events in a block range"""
         db = SessionLocal()
         try:
-            # Process in chunks to avoid overwhelming the RPC
-            chunk_size = 1000
+            # Process in smaller chunks to avoid RPC limits and filter expiration
+            # Many RPC providers have limits on block range queries
+            chunk_size = 500  # Reduced from 1000 to avoid filter/query limits
             current_from = from_block
 
             while current_from <= to_block:

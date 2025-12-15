@@ -102,20 +102,46 @@ class IdentityRegistryClient:
         return self.contract.functions.totalSupply().call()
 
     def get_past_agent_registered_events(self, from_block: int, to_block: Optional[int] = None):
-        """Get past Registered events"""
-        event_filter = self.contract.events.Registered.create_filter(
-            from_block=from_block,
-            to_block=to_block or "latest"
-        )
-        return event_filter.get_all_entries()
+        """Get past Registered events using get_logs (more reliable than filters)"""
+        try:
+            # Use get_logs directly instead of create_filter for better RPC compatibility
+            return self.contract.events.Registered.get_logs(
+                fromBlock=from_block,
+                toBlock=to_block if to_block is not None else "latest"
+            )
+        except Exception as e:
+            # Fallback: try with create_filter if get_logs fails
+            # This handles cases where RPC doesn't support get_logs with block ranges
+            try:
+                event_filter = self.contract.events.Registered.create_filter(
+                    from_block=from_block,
+                    to_block=to_block or "latest"
+                )
+                return event_filter.get_all_entries()
+            except Exception:
+                # If both fail, re-raise the original error
+                raise e
 
     def get_past_metadata_set_events(self, from_block: int, to_block: Optional[int] = None):
-        """Get past MetadataSet events"""
-        event_filter = self.contract.events.MetadataSet.create_filter(
-            from_block=from_block,
-            to_block=to_block or "latest"
-        )
-        return event_filter.get_all_entries()
+        """Get past MetadataSet events using get_logs (more reliable than filters)"""
+        try:
+            # Use get_logs directly instead of create_filter for better RPC compatibility
+            return self.contract.events.MetadataSet.get_logs(
+                fromBlock=from_block,
+                toBlock=to_block if to_block is not None else "latest"
+            )
+        except Exception as e:
+            # Fallback: try with create_filter if get_logs fails
+            # This handles cases where RPC doesn't support get_logs with block ranges
+            try:
+                event_filter = self.contract.events.MetadataSet.create_filter(
+                    from_block=from_block,
+                    to_block=to_block or "latest"
+                )
+                return event_filter.get_all_entries()
+            except Exception:
+                # If both fail, re-raise the original error
+                raise e
 
     def watch_agent_registered(self, callback, from_block: Optional[int] = None):
         """Watch for Registered events"""
