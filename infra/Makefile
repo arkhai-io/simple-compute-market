@@ -19,8 +19,7 @@ add-node:
 		exit 1; \
 	fi; \
 	bash zerotier/authorize_zt_member.sh $$ZEROTIER_NETWORK $(NODE_ID)
-	
-	```
+
 get-peers:
 	@. ./zerotier/.env; \
 	./zerotier/get_peers.sh $$ZEROTIER_NETWORK
