@@ -26,8 +26,90 @@ for var in NETWORK_NAME IP_RANGE_START IP_RANGE_END NETWORK_CIDR; do
 done
 
 # Get node ID and auth token
-NODE_ID=$(sudo zerotier-cli info | awk '{print $3}')
-AUTH_TOKEN=$(sudo cat /var/lib/zerotier-one/authtoken.secret)
+# Check if ZeroTier is installed
+if ! command -v zerotier-cli &> /dev/null; then
+  echo "Error: ZeroTier CLI not found. Install with: make install" >&2
+  exit 1
+fi
+
+# Check if ZeroTier controller API is accessible
+echo "Checking ZeroTier controller API..."
+if ! curl -s --max-time 2 http://localhost:9993/status &> /dev/null; then
+  echo "Error: ZeroTier controller API is not accessible at http://localhost:9993" >&2
+  echo "" >&2
+  echo "The ZeroTier controller service needs to be running to create networks." >&2
+  echo "" >&2
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "On macOS:" >&2
+    echo "  1. Open ZeroTier from Applications or System Preferences" >&2
+    echo "  2. Make sure ZeroTier is running (check the menu bar icon)" >&2
+    echo "  3. Or start it with: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
+    echo "" >&2
+    echo "Note: On macOS, ZeroTier runs as a regular app, not a system service." >&2
+    echo "The controller API may only be available when ZeroTier is actively running." >&2
+  else
+    echo "On Linux:" >&2
+    echo "  Start it with: sudo systemctl start zerotier-one" >&2
+    echo "  Enable it with: sudo systemctl enable zerotier-one" >&2
+  fi
+  exit 1
+fi
+echo "ZeroTier controller API is accessible"
+
+# Determine auth token file location based on OS
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # macOS
+  AUTH_TOKEN_FILE="/Library/Application Support/ZeroTier/One/authtoken.secret"
+else
+  # Linux
+  AUTH_TOKEN_FILE="/var/lib/zerotier-one/authtoken.secret"
+fi
+
+# Check if auth token file exists
+if [[ ! -f "$AUTH_TOKEN_FILE" ]]; then
+  echo "Error: ZeroTier auth token not found at $AUTH_TOKEN_FILE" >&2
+  echo "Make sure ZeroTier is installed and running." >&2
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "On macOS, start ZeroTier from System Preferences or run: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
+  else
+    echo "On Linux, start with: sudo systemctl start zerotier-one" >&2
+  fi
+  exit 1
+fi
+
+# Get node ID from identity file (requires sudo but avoids zerotier-cli password prompt)
+# The node ID is the first 10 characters of the identity.public file
+IDENTITY_FILE="${AUTH_TOKEN_FILE%/*}/identity.public"
+
+if [[ ! -f "$IDENTITY_FILE" ]]; then
+  echo "Error: ZeroTier identity file not found at $IDENTITY_FILE" >&2
+  echo "Make sure ZeroTier is installed and running." >&2
+  exit 1
+fi
+
+# Read node ID from identity file (first 10 chars)
+NODE_ID=$(sudo cat "$IDENTITY_FILE" 2>/dev/null | head -1 | cut -c 1-10)
+
+# If that failed, try zerotier-cli info as fallback
+if [[ -z "$NODE_ID" ]] || [[ ${#NODE_ID} -ne 10 ]]; then
+  echo "Trying alternative method to get node ID..." >&2
+  NODE_ID=$(sudo zerotier-cli info 2>/dev/null | awk '{print $3}')
+fi
+
+if [[ -z "$NODE_ID" ]] || [[ ${#NODE_ID} -ne 10 ]]; then
+  echo "Error: Failed to get ZeroTier node ID." >&2
+  echo "This script requires sudo access. Please run it interactively." >&2
+  echo "You can get your node ID manually with: sudo zerotier-cli info" >&2
+  exit 1
+fi
+
+AUTH_TOKEN=$(sudo cat "$AUTH_TOKEN_FILE" 2>/dev/null)
+if [[ -z "$AUTH_TOKEN" ]]; then
+  echo "Error: Failed to read auth token from $AUTH_TOKEN_FILE" >&2
+  echo "This script requires sudo access. Please run it interactively." >&2
+  exit 1
+fi
+
 
 # Generate network ID (node ID + random suffix)
 SUFFIX=$(openssl rand -hex 3)
