@@ -183,10 +183,37 @@ sudo zerotier-cli join ${NETWORK_ID}
 # Authorize ourselves
 echo -e "\n3. Authorizing controller node..."
 sleep 2
-curl -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/${NODE_ID} \
+# Use set +e to allow curl to fail without exiting the script
+set +e
+RESPONSE=$(curl -s -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/${NODE_ID} \
   -H "X-ZT1-Auth: $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"authorized": true}'
+  -d '{"authorized": true}' \
+  -w "\n%{http_code}" 2>&1)
+CURL_EXIT=$?
+set -e
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [[ $CURL_EXIT -ne 0 ]] || [[ "$HTTP_CODE" != "200" ]]; then
+  echo "Warning: Failed to authorize controller node" >&2
+  if [[ $CURL_EXIT -ne 0 ]]; then
+    echo "Curl exit code: $CURL_EXIT" >&2
+  fi
+  if [[ -n "$HTTP_CODE" ]] && [[ "$HTTP_CODE" != "200" ]]; then
+    echo "HTTP status: $HTTP_CODE" >&2
+  fi
+  if [[ -n "$BODY" ]]; then
+    echo "Response: $BODY" >&2
+  fi
+  echo "You may need to authorize manually or the node may already be authorized." >&2
+  echo "Try running: make add-node NODE_ID=$NODE_ID" >&2
+  # Don't exit here as network creation succeeded
+else
+  echo "Controller node authorized successfully!"
+fi
+
 
 # Verify
 echo -e "\n\n4. Verifying network..."
