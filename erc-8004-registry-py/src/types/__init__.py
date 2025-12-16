@@ -111,6 +111,7 @@ class AgentRegistration(BaseModel):
 
     # Common fields
     agent_id: Optional[str] = Field(default=None, alias="agentId")  # Custom agent ID (optional)
+    chain_id: Optional[int] = Field(default=None, alias="chainId")  # Chain ID from agent
     domain: Optional[str] = None
     owner: Optional[str] = None
     visibility: Optional[str] = "public"  # public|internal|private

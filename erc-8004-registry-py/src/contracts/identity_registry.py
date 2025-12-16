@@ -150,7 +150,8 @@ class IdentityRegistryClient:
         )
         
         def handle_event(event):
-            if event.args.agentId:
+            # CRITICAL: Use 'is not None' not truthy check because agentId 0 is valid!
+            if hasattr(event.args, 'agentId') and event.args.agentId is not None:
                 callback(event.args.agentId, event.blockNumber)
         
         # In production, use web3.py's event listener or polling
@@ -163,7 +164,9 @@ class IdentityRegistryClient:
         )
         
         def handle_event(event):
-            if event.args.agentId and event.args.key:
+            # CRITICAL: Use 'is not None' not truthy check because agentId 0 is valid!
+            if (hasattr(event.args, 'agentId') and event.args.agentId is not None and
+                hasattr(event.args, 'key') and event.args.key):
                 callback(event.args.agentId, event.args.key, event.blockNumber)
         
         return event_filter

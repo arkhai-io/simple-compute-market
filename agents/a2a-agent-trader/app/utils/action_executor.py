@@ -36,6 +36,7 @@ from app.schema.pydantic_models import (
 
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
+from .registry_client import get_registry_client
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
@@ -133,19 +134,35 @@ async def execute_action(
             
         case ActionType.MAKE_OFFER.value:
             gpu_model = parameters.get("gpu_model", "unknown")
+            imbalance_type = parameters.get("imbalance_type", "surplus")
             logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
             order = create_order(
                 gpu_model_str=parameters.get("gpu_model"),
                 sla=parameters.get("sla"),
-                region_str=parameters.get("region")
+                region_str=parameters.get("region"),
+                imbalance_type=imbalance_type
             )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.
             make_offer_result = await make_offer(ctx=ctx, order=order)
-            for part in getattr(make_offer_result.content, "parts", []):
-                logger.info(f"[ACTION] Received response: {part.text}")
-                outcome["message"] = part.text
+            # make_offer returns a dict, not an Event object
+            if isinstance(make_offer_result, dict):
+                outcome["result"] = make_offer_result
+                outcome["message"] = make_offer_result.get("message", f"Order created for {gpu_model}")
+                logger.info(f"[ACTION] Make offer result: {make_offer_result}")
+            else:
+                # Fallback for Event objects (shouldn't happen but handle gracefully)
+                content = getattr(make_offer_result, "content", None)
+                if content:
+                    # Content object has .parts attribute, not .get() method
+                    parts = getattr(content, "parts", [])
+                    for part in parts:
+                        text = getattr(part, "text", "")
+                        if text:
+                            logger.info(f"[ACTION] Received response: {text}")
+                            outcome["message"] = text
+                            break
             
         case ActionType.RESOLVE_INTERNALLY.value:
             result = rebalance_internal_resources()
@@ -300,10 +317,28 @@ async def execute_action(
     return outcome
 
 
-def connect_to_remote_agent(agent_url=REMOTE_AGENT_URL_OVERRIDE):
-    agent_card_url=f"{agent_url}{AGENT_CARD_WELL_KNOWN_PATH}"
+def connect_to_remote_agent(agent_url: str | None = None):
+    """Connect to a remote agent by URL.
+    
+    Args:
+        agent_url: Agent URL (defaults to REMOTE_AGENT_URL_OVERRIDE for backward compatibility)
+    """
+    if agent_url is None:
+        agent_url = REMOTE_AGENT_URL_OVERRIDE
+    agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
+    
+    # Sanitize URL to create valid identifier (remove protocol, slashes, colons)
+    # e.g., "http://localhost:8000/" -> "localhost_8000"
+    sanitized_name = agent_url.replace("http://", "").replace("https://", "").replace("/", "_").replace(":", "_").replace(".", "_")
+    # Remove trailing underscores and ensure it starts with letter/underscore
+    sanitized_name = sanitized_name.rstrip("_")
+    if sanitized_name and sanitized_name[0].isdigit():
+        sanitized_name = f"agent_{sanitized_name}"
+    if not sanitized_name:
+        sanitized_name = "remote_agent"
+    
     remote_agent = RemoteA2aAgent(
-        name=f"remote_agent_{REMOTE_AGENT_PORT}",
+        name=sanitized_name,
         description="A helpful AI assistant trading compute resources with others.",
         agent_card=agent_card_url,
     )
@@ -312,9 +347,16 @@ def connect_to_remote_agent(agent_url=REMOTE_AGENT_URL_OVERRIDE):
 async def send_to_remote_agent(
     ctx: InvocationContext,
     event: Event,
-    remote_agent: RemoteA2aAgent = None
+    remote_agent: RemoteA2aAgent = None,
+    agent_url: str | None = None
 ):
     """Takes an event and sends it to a specified remote agent via A2A.
+
+    Args:
+        ctx: Invocation context
+        event: Event to send
+        remote_agent: Pre-constructed RemoteA2aAgent (optional)
+        agent_url: Agent URL to connect to (optional, used if remote_agent is None)
 
     Examples of Events:
         Text:
@@ -347,7 +389,7 @@ async def send_to_remote_agent(
             )
     """
     if remote_agent is None:
-        remote_agent = connect_to_remote_agent()
+        remote_agent = connect_to_remote_agent(agent_url)
 
     logger.info(f"[A2A] Sending event to remote agent: {event}")
 
@@ -471,6 +513,28 @@ async def accept_offer(
 
     logger.info("[TOOL] Accepting offer and notifying counterparty: %s", event_payload)
 
+    # Update registry if order exists there
+    # This updates the MAKER's order (the order we're accepting)
+    if CONFIG.enable_registry_discovery:
+        try:
+            registry_client = get_registry_client()
+            order_id = order_dict.get("order_id")
+            if order_id:
+                updates = {
+                    "status": "accepted",
+                    "order_taker": BASE_URL_OVERRIDE,
+                    "taker_attestation": escrow_uid,
+                }
+                result = await registry_client.update_order(order_id, updates)
+                if result:
+                    logger.info(f"[REGISTRY] Updated maker's order {order_id} status to accepted")
+                else:
+                    logger.warning(f"[REGISTRY] Failed to update maker's order {order_id} - order may not exist in registry")
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Failed to update order in registry: {e}")
+            import traceback
+            logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
+
     try:
         result = await send_to_remote_agent(ctx, event)
         return {
@@ -490,7 +554,15 @@ async def accept_offer(
         }
 
 
-def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None:
+def create_order(
+    gpu_model_str: str = None,
+    sla: float = None,
+    region_str: str = None,
+    imbalance_type: str = "surplus",
+    publish_to_registry: bool = True,
+    offer_resource: ComputeResource | TokenResource = None,
+    demand_resource: ComputeResource | TokenResource = None,
+) -> dict | None:
     """Create an order in the market.
 
     This only locally assembles the details of an order, without yet propagating it into the market,
@@ -499,62 +571,271 @@ def create_order(gpu_model_str: str, sla: float, region_str: str) -> dict | None
     Not to be confused with make_offer, which propagates the order to the market.
 
     Args:
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"}
-        sla: SLA required for the order.
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"}
+        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"} (required for surplus)
+        sla: SLA required for the order (required for surplus)
+        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"} (required for surplus)
+        imbalance_type: "surplus" (offer compute, demand tokens) or "deficit" (offer tokens, demand compute)
+        publish_to_registry: Whether to publish order to registry (default: True)
+        offer_resource: Pre-constructed offer resource (optional, overrides gpu_model_str/sla/region_str)
+        demand_resource: Pre-constructed demand resource (optional)
 
     Returns:
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
     settlement_token = TOKEN_REGISTRY.require("MOCK")
-    logger.info("[TOOL] Creating order for resource.")
+    logger.info(f"[TOOL] Creating order for resource (imbalance_type: {imbalance_type}).")
+    
+    # Determine order direction based on imbalance_type
+    if imbalance_type == "deficit":
+        # Deficit: Offer tokens, demand compute
+        if not offer_resource:
+            offer_resource = TokenResource(
+                token=settlement_token,
+                amount=9 * 10**settlement_token.decimals,
+            )
+        if not demand_resource:
+            if not gpu_model_str or sla is None or not region_str:
+                logger.error("[TOOL] gpu_model_str, sla, and region_str required for deficit orders")
+                return None
+            demand_resource = ComputeResource(
+                gpu_model=GPUModel(gpu_model_str),
+                quantity=1,
+                sla=sla,
+                region=Region(region_str),
+            )
+    else:
+        # Surplus: Offer compute, demand tokens (default/current behavior)
+        if not offer_resource:
+            if not gpu_model_str or sla is None or not region_str:
+                logger.error("[TOOL] gpu_model_str, sla, and region_str required for surplus orders")
+                return None
+            offer_resource = ComputeResource(
+                gpu_model=GPUModel(gpu_model_str),
+                quantity=1,
+                sla=sla,
+                region=Region(region_str),
+            )
+        if not demand_resource:
+            demand_resource = TokenResource(
+                token=settlement_token,
+                amount=9 * 10**settlement_token.decimals,
+            )
+    
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
         order_maker=BASE_URL_OVERRIDE,
         order_taker=None,
-        offer_resource=ComputeResource(
-            gpu_model=GPUModel(gpu_model_str),
-            quantity=1,
-            sla=sla,
-            region=Region(region_str),
-        ),
-        demand_resource=TokenResource(
-            token=settlement_token,
-            amount=9 * 10**settlement_token.decimals,
-        ),
+        offer_resource=offer_resource,
+        demand_resource=demand_resource,
         duration=1,
         maker_attestation=None,
         taker_attestation=None
     )
-    return order.model_dump(mode='json')
+    
+    order_dict = order.model_dump(mode='json')
+    
+    # Note: Order publishing to registry happens in make_offer() to ensure
+    # it's done in an async context. This keeps create_order() synchronous
+    # for compatibility with existing callers.
+    
+    return order_dict
 
-async def make_offer(ctx: InvocationContext, order: MarketOrder):
-    """Propegate an offer to the network.
-
-    [PROTOTYPE] This is currently set to send a message to one other remote agent.
+async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
+    """Propagate an offer to the network using registry discovery.
+    
+    Queries the registry for matching orders and sends offers to discovered agents.
+    Falls back to REMOTE_AGENT_URL_OVERRIDE if registry discovery is disabled or fails.
+    
+    Args:
+        ctx: Invocation context
+        order: MarketOrder object or order dictionary
     """
+    # Convert order to dict if needed
+    if isinstance(order, MarketOrder):
+        order_dict = order.model_dump(mode='json')
+        order_id = order.order_id
+    else:
+        order_dict = order
+        order_id = order_dict.get("order_id", "unknown")
+    
+    # Ensure order is published to registry first
+    if CONFIG.enable_registry_discovery:
+        try:
+            registry_client = get_registry_client()
+            
+            # Get canonical agent ID for registry (required format)
+            # Use ONCHAIN_AGENT_ID from .env directly
+            agent_id_for_registry = CONFIG.agent_id  # fallback
+            
+            onchain_agent_id = CONFIG.onchain_agent_id
+            # Debug: Log what we're reading
+            logger.debug(f"[REGISTRY] CONFIG.onchain_agent_id={onchain_agent_id}, CONFIG.agent_id={CONFIG.agent_id}, CONFIG.port={CONFIG.port}")
+            if not onchain_agent_id:
+                logger.warning(f"[REGISTRY] ONCHAIN_AGENT_ID not set in .env, using CONFIG.agent_id={CONFIG.agent_id} (order publish may fail)")
+            else:
+                # Check if onchain_agent_id is already a canonical ID (starts with eip155:)
+                if isinstance(onchain_agent_id, str) and onchain_agent_id.startswith("eip155:"):
+                    # Already a canonical ID, use it directly
+                    agent_id_for_registry = onchain_agent_id
+                    logger.info(f"[REGISTRY] Using canonical ID from ONCHAIN_AGENT_ID: {agent_id_for_registry}")
+                elif CONFIG.identity_registry_address:
+                    # Build canonical ID from numeric agent ID
+                    try:
+                        numeric_agent_id = int(onchain_agent_id) if isinstance(onchain_agent_id, str) else onchain_agent_id
+                        from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                        # Get chain_id - try from RPC or use default
+                        chain_id = 31337  # Default for Anvil/local
+                        if CONFIG.chain_rpc_url:
+                            try:
+                                from web3 import Web3
+                                from web3.providers import HTTPProvider
+                                http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+                                w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
+                                chain_id = w3.eth.chain_id
+                            except Exception:
+                                pass  # Use default
+                        
+                        agent_id_for_registry = build_erc8004_canonical_id(
+                            chain_id=chain_id,
+                            identity_registry=CONFIG.identity_registry_address,
+                            agent_id=numeric_agent_id
+                        )
+                        logger.info(f"[REGISTRY] Built canonical ID from ONCHAIN_AGENT_ID={numeric_agent_id}: {agent_id_for_registry}")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[REGISTRY] Invalid ONCHAIN_AGENT_ID={onchain_agent_id}, must be numeric or canonical ID format. Using CONFIG.agent_id={CONFIG.agent_id}: {e}")
+                    except Exception as e:
+                        logger.warning(f"[REGISTRY] Failed to build canonical ID from ONCHAIN_AGENT_ID={onchain_agent_id}: {e}")
+                else:
+                    logger.warning(f"[REGISTRY] IDENTITY_REGISTRY_ADDRESS not set, cannot build canonical ID. Using CONFIG.agent_id={CONFIG.agent_id}")
+            
+            result = await registry_client.publish_order(agent_id_for_registry, order_dict)
+            if result:
+                logger.info(f"[REGISTRY] Published order {order_id} to registry before making offer")
+            else:
+                logger.warning(f"[REGISTRY] Order publish returned None - agent may not be registered in registry")
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Failed to publish order to registry: {e}")
+    
+    # Create the event
     event = Event(
-          author=AGENT_ID,
-          content=genai_types.Content(
-              role="model",
-              parts=[
-                  genai_types.Part.from_function_response(
-                      name="make_offer",
-                      response={
-                          "event_type": EventType.MAKE_OFFER.value,
-                          "offer": order
-                      })
-                  ],
-          ),
-          invocation_id=ctx.invocation_id,
-          branch=ctx.branch,
-      )
+        author=AGENT_ID,
+        content=genai_types.Content(
+            role="model",
+            parts=[
+                genai_types.Part.from_function_response(
+                    name="make_offer",
+                    response={
+                        "event_type": EventType.MAKE_OFFER.value,
+                        "offer": order_dict
+                    })
+            ],
+        ),
+        invocation_id=ctx.invocation_id,
+        branch=ctx.branch,
+    )
+    
+    # Try registry discovery if enabled
+    if CONFIG.enable_registry_discovery:
+        try:
+            registry_client = get_registry_client()
+            
+            # Determine resource types for filtering
+            offer_res = order_dict.get("offer_resource", {})
+            demand_res = order_dict.get("demand_resource", {})
+            
+            # Determine resource types
+            offer_type = "compute" if "gpu_model" in offer_res else ("token" if "token" in offer_res else "unknown")
+            demand_type = "compute" if "gpu_model" in demand_res else ("token" if "token" in demand_res else "unknown")
+            
+            # Query registry for matching orders (bidirectional)
+            # Note: bidirectional is passed as a separate parameter, not in filters
+            filters = {
+                "status": "open",
+            }
+            
+            # Add resource type filters if we can determine them
+            if offer_type != "unknown":
+                # For bidirectional matching, we want orders where:
+                # - Their offer matches our demand OR their demand matches our offer
+                # So we query for both directions
+                matching_orders = await registry_client.query_orders(
+                    filters=filters,
+                    bidirectional=True,
+                    limit=CONFIG.max_discovery_agents
+                )
+            else:
+                matching_orders = await registry_client.query_orders(
+                    filters=filters,
+                    bidirectional=True,
+                    limit=CONFIG.max_discovery_agents
+                )
+            
+            # Use match_orders helper to filter more precisely
+            matching_orders = registry_client.match_orders(
+                order_dict,
+                matching_orders,
+                bidirectional=True
+            )
+
+            # If bidirectional matching finds no compatible orders, no-op instead of falling back
+            if not matching_orders:
+                logger.info("[REGISTRY] No matching orders found in registry after bidirectional matching; no-op.")
+                return {
+                    "status": "no_match",
+                    "message": "No matching market orders found in registry",
+                    "order": order_dict,
+                }
+
+            logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
+
+            # Extract agent URLs from matching orders
+            agent_urls = []
+            matched_order_ids = []
+            for match_order in matching_orders[:CONFIG.max_discovery_agents]:
+                maker_url = match_order.get("order_maker")
+                matched_order_id = match_order.get("order_id")
+                if maker_url and maker_url not in agent_urls:
+                    agent_urls.append(maker_url)
+                if matched_order_id:
+                    matched_order_ids.append(matched_order_id)
+
+            # Note: Order stays "open" until accepted - we don't update status here
+            # The order will be updated to "accepted" when accept_offer is called
+
+            # Send offer to each matching agent
+            results = []
+            for agent_url in agent_urls:
+                try:
+                    logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
+                    result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
+                    if result:
+                        results.append({"agent_url": agent_url, "result": result})
+                except Exception as e:
+                    logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
+
+            if results:
+                logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
+                return results[0]["result"] if len(results) == 1 else {"results": results}
+            else:
+                logger.warning("[REGISTRY] No successful offers sent despite matches; returning no-op result.")
+                return {
+                    "status": "no_delivery",
+                    "message": "Matching orders found but no offers could be delivered",
+                    "order": order_dict,
+                    "targets": agent_urls,
+                }
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Registry discovery failed: {e}, falling back to default")
+    
+    # Fallback to hard-coded remote agent URL (backward compatibility)
     try:
+        logger.info(f"[A2A] Using fallback: sending to {REMOTE_AGENT_URL_OVERRIDE}")
         result = await send_to_remote_agent(ctx, event)
         return result
     except Exception as e:
-        logger.error(f"[TOOL] Failed to make offer: {e}.")
+        logger.error(f"[TOOL] Failed to make offer: {e}")
+        raise
 
 
 def encode_compute_lease(

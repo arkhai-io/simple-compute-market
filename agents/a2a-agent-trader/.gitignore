@@ -195,3 +195,6 @@ my_env.tfvars
 .saved_chats
 .env
 .requirements.txt
+
+!.env.sample
+!.env.b.sample

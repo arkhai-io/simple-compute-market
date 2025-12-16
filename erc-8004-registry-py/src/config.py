@@ -1,4 +1,6 @@
-from pydantic import field_validator
+import os
+from typing import Literal
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from web3 import Web3
 
@@ -13,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./indexer.db"
     
     # Blockchain Configuration - Base Sepolia
-    chain_id: int = 84532
+    chain_id: int = Field(default=84532, env="CHAIN_ID")
     rpc_url: str = "https://sepolia.base.org"
     
     # ERC-8004 Contract Addresses (Base Sepolia)

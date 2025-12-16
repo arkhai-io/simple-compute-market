@@ -847,11 +847,76 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
+# Background task to clean up expired/fulfilled orders from registry
+async def cleanup_stale_orders():
+    """Background task to remove expired/fulfilled orders from registry."""
+    from .utils.registry_client import get_registry_client
+    from datetime import datetime, timedelta
+    
+    # Wait a bit before first run to allow agent registration to complete
+    await asyncio.sleep(10)
+    
+    while True:
+        try:
+            if CONFIG.enable_registry_discovery:
+                registry_client = get_registry_client()
+                
+                # Query for orders older than 7 days or with closed/expired status
+                cutoff_date = datetime.utcnow() - timedelta(days=7)
+                
+                # Get all orders for this agent
+                agent_orders = await registry_client.get_agent_orders(
+                    CONFIG.agent_id,
+                    limit=100
+                )
+                
+                # If no orders found (including 404), skip cleanup silently
+                if not agent_orders:
+                    logger.debug(f"[CLEANUP] No orders found for agent {CONFIG.agent_id}")
+                else:
+                    cleaned_count = 0
+                    for order in agent_orders:
+                        order_id = order.get("order_id")
+                        status = order.get("status")
+                        created_at_str = order.get("created_at")
+                        
+                        should_cleanup = False
+                        if status in ("closed", "expired"):
+                            should_cleanup = True
+                        elif created_at_str:
+                            try:
+                                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                                if created_at < cutoff_date:
+                                    should_cleanup = True
+                            except Exception:
+                                pass
+                        
+                        if should_cleanup and order_id:
+                            try:
+                                # Delete expired/old orders
+                                success = await registry_client.delete_order(order_id)
+                                if success:
+                                    cleaned_count += 1
+                            except Exception as e:
+                                logger.warning(f"[CLEANUP] Failed to cleanup order {order_id}: {e}")
+                    
+                    if cleaned_count > 0:
+                        logger.info(f"[CLEANUP] Cleaned up {cleaned_count} stale orders")
+            
+            # Run cleanup every hour
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[CLEANUP] Error in order cleanup loop: {e}")
+            await asyncio.sleep(300)  # Back off on error (5 minutes)
+
+
 # Background task for delayed registration
 async def _delayed_registration():
     """Run registration after server is ready."""
     from .utils.config import CONFIG
-    from .onchain_registration import register_agent_on_startup
+    from .agent_registration import register_agent_on_startup
 
     try:
         logger.info("[REGISTRATION] Starting agent registration")
@@ -882,8 +947,12 @@ async def _startup_tasks():
         # Start queue processor in background
         task = asyncio.create_task(process_queued_events())
         logger.info("[STARTUP] Event queue processor started")
-        return task
-
+    
+    if CONFIG.enable_registry_discovery:
+        # Start order cleanup task in background
+        cleanup_task = asyncio.create_task(cleanup_stale_orders())
+        logger.info("[STARTUP] Order cleanup task started")
+    
     return None
 
 

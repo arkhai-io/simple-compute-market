@@ -125,44 +125,112 @@ class EventSyncService:
                                 agent_id_value = event.args.agentId
                             elif hasattr(event.args, 'agent_id'):
                                 agent_id_value = event.args.agent_id
+                            elif isinstance(event.args, dict):
+                                # Sometimes args is a dict
+                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
                             elif isinstance(event.args, (list, tuple)) and len(event.args) > 0:
                                 agent_id_value = event.args[0]
                             
-                            if not agent_id_value:
+                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
+                            if agent_id_value is None:
                                 logger.warning(f"[EventSync] Could not extract agentId from event: {event}")
                                 continue
                             
-                            agent_id = str(agent_id_value)
+                            onchain_agent_id = int(agent_id_value)
                             chain_id = settings.chain_id
-                            registry_address = settings.identity_registry_address
+                            identity_registry = settings.identity_registry_address
+                            
+                            # Build ERC-8004 canonical ID: eip155:{chainId}:{identityRegistry}:{agentId}
+                            # Normalize address to lowercase (Ethereum addresses are case-insensitive)
+                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
 
-                            # Check if agent already exists
-                            existing = db.query(Agent).filter(
-                                Agent.agent_id == agent_id
-                            ).first()
+                            # Fetch on-chain token URI and owner for this agent
+                            token_uri = None
+                            owner_address = None
+                            try:
+                                token_uri = self.identity_registry.get_token_uri(onchain_agent_id)
+                            except Exception as e:
+                                logger.warning(f"[EventSync] Could not fetch token URI for agent {onchain_agent_id}: {e}")
+                            try:
+                                owner_address = self.identity_registry.get_owner(onchain_agent_id)
+                            except Exception as e:
+                                logger.warning(f"[EventSync] Could not fetch owner for agent {onchain_agent_id}: {e}")
 
+                            # Lookup existing agent by canonical ID or by (chain_id, identity_registry, onchain_agent_id) tuple
+                            existing = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                            
+                            # Fallback: lookup by tuple (for compatibility with agent-initiated registration)
                             if not existing:
-                                # Get token URI and metadata
-                                token_uri = None
-                                try:
-                                    token_uri = self.identity_registry.get_token_uri(int(agent_id_value))
-                                except Exception as e:
-                                    logger.warning(f"[EventSync] Could not fetch token URI for agent {agent_id}: {e}")
+                                existing = db.query(Agent).filter(
+                                    and_(
+                                        Agent.chain_id == chain_id,
+                                        Agent.identity_registry == identity_registry,
+                                        Agent.onchain_agent_id == onchain_agent_id
+                                    )
+                                ).first()
 
-                                # Insert new agent
+                            if existing:
+                                # Update existing agent record with on-chain details
+                                # Normalize identity_registry to lowercase (Ethereum addresses are case-insensitive)
+                                normalized_registry = identity_registry.lower()
+                                existing.agent_id = canonical_id  # Ensure canonical ID is set
+                                existing.chain_id = chain_id
+                                existing.identity_registry = normalized_registry
+                                existing.onchain_agent_id = onchain_agent_id
+                                existing.registry_address = normalized_registry  # Keep for backward compatibility
+                                if token_uri:
+                                    existing.token_uri = token_uri
+                                if owner_address:
+                                    existing.owner = owner_address
+                                
+                                # Update metadata with on-chain agent ID and ensure ERC-8004 format
+                                metadata = existing.metadata_json or {}
+                                # Use camelCase for A2A/ERC-8004 JSON (migrate legacy key if present)
+                                if "onchainAgentId" in metadata:
+                                    # Migrate legacy key to camelCase
+                                    metadata["onChainAgentId"] = metadata.pop("onchainAgentId")
+                                else:
+                                    metadata["onChainAgentId"] = onchain_agent_id  # Store as int
+                                
+                                # Ensure metadata has ERC-8004 structure (category, type, etc.)
+                                # If missing, try to infer from existing metadata or use defaults
+                                if "category" not in metadata:
+                                    metadata["category"] = metadata.get("label.category", "compute")
+                                if "type" not in metadata:
+                                    metadata["type"] = metadata.get("label.type", "trader")
+                                
+                                existing.metadata_json = metadata
+
+                                db.commit()
+                                block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
+                                logger.info(
+                                    f"[EventSync] Linked on-chain agent {onchain_agent_id} "
+                                    f"to existing agent {canonical_id} from block {block_number}"
+                                )
+                            else:
+                                # No matching off-chain registration; create a new agent row
+                                # Normalize identity_registry to lowercase (Ethereum addresses are case-insensitive)
+                                normalized_registry = identity_registry.lower()
                                 agent = Agent(
-                                    agent_id=agent_id,
+                                    agent_id=canonical_id,  # Canonical ID is the primary identifier
                                     chain_id=chain_id,
-                                    registry_address=registry_address,
+                                    identity_registry=normalized_registry,
+                                    onchain_agent_id=onchain_agent_id,
+                                    registry_address=normalized_registry,  # Keep for backward compatibility
+                                    owner=owner_address,
                                     token_uri=token_uri,
-                                    metadata_json={},
+                                    metadata_json={
+                                        "onChainAgentId": onchain_agent_id,  # camelCase for A2A/ERC-8004 JSON
+                                        "category": "compute",  # Default
+                                        "type": "trader",  # Default
+                                    },
                                     health_status="healthy",
                                 )
                                 db.add(agent)
                                 db.commit()
-
+                                
                                 block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
-                                logger.info(f"[EventSync] Registered agent {agent_id} from block {block_number}")
+                                logger.info(f"[EventSync] Registered new on-chain-only agent {canonical_id} from block {block_number}")
                         except Exception as e:
                             logger.error(f"[EventSync] Error processing Registered event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
@@ -190,20 +258,31 @@ class EventSyncService:
                             elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'key'):
                                 agent_id_value = event.args.agent_id
                                 key_value = event.args.key
+                            elif isinstance(event.args, dict):
+                                # Sometimes args is a dict
+                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
+                                key_value = event.args.get('key')
                             elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
                                 agent_id_value = event.args[0]
                                 key_value = event.args[1]
                             
-                            if not agent_id_value or not key_value:
-                                logger.warning(f"[EventSync] Could not extract agentId/key from MetadataUpdated event: {event}")
+                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
+                            if agent_id_value is None or key_value is None:
+                                logger.warning(f"[EventSync] Could not extract agentId/key from MetadataSet event: {event}")
                                 continue
                             
-                            agent_id = str(agent_id_value)
+                            onchain_agent_id = int(agent_id_value)
                             key = str(key_value)
+                            
+                            # Build canonical ID to lookup agent
+                            chain_id = settings.chain_id
+                            identity_registry = settings.identity_registry_address
+                            # Normalize address to lowercase (Ethereum addresses are case-insensitive)
+                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
 
                             try:
                                 # Get the metadata value from contract (returns bytes)
-                                value_bytes = self.identity_registry.get_metadata(int(agent_id_value), key)
+                                value_bytes = self.identity_registry.get_metadata(onchain_agent_id, key)
                                 
                                 # Decode bytes to string if it's UTF-8 encoded
                                 try:
@@ -212,10 +291,27 @@ class EventSyncService:
                                     # If not UTF-8, store as hex string
                                     value = value_bytes.hex()
 
-                                # Update or insert metadata
+                                # Find agent by canonical ID or by tuple
+                                agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                                
+                                if not agent:
+                                    # Fallback: lookup by tuple
+                                    agent = db.query(Agent).filter(
+                                        and_(
+                                            Agent.chain_id == chain_id,
+                                            Agent.identity_registry == identity_registry,
+                                            Agent.onchain_agent_id == onchain_agent_id
+                                        )
+                                    ).first()
+                                
+                                if not agent:
+                                    logger.warning(f"[EventSync] Agent {canonical_id} not found for metadata update")
+                                    continue
+
+                                # Update or insert metadata entry (using canonical ID for FK)
                                 existing_metadata = db.query(AgentMetadataEntry).filter(
                                     and_(
-                                        AgentMetadataEntry.agent_id == agent_id,
+                                        AgentMetadataEntry.agent_id == canonical_id,
                                         AgentMetadataEntry.key == key
                                     )
                                 ).first()
@@ -224,24 +320,19 @@ class EventSyncService:
                                     existing_metadata.value = value
                                 else:
                                     metadata_entry = AgentMetadataEntry(
-                                        agent_id=agent_id,
+                                        agent_id=canonical_id,  # Use canonical ID for FK
                                         key=key,
                                         value=value,
                                     )
                                     db.add(metadata_entry)
 
                                 # Update agent's metadata JSON
-                                agent = db.query(Agent).filter(
-                                    Agent.agent_id == agent_id
-                                ).first()
-
-                                if agent:
-                                    current_metadata = agent.metadata_json or {}
-                                    current_metadata[key] = value
-                                    agent.metadata_json = current_metadata
+                                current_metadata = agent.metadata_json or {}
+                                current_metadata[key] = value
+                                agent.metadata_json = current_metadata
 
                                 db.commit()
-                                logger.info(f"[EventSync] Updated metadata for agent {agent_id}, key: {key}")
+                                logger.info(f"[EventSync] Updated metadata for agent {canonical_id}, key: {key}")
                             except Exception as e:
                                 logger.warning(f"[EventSync] Could not update metadata for agent {agent_id}, key {key}: {e}")
                                 db.rollback()

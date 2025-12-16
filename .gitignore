@@ -186,3 +186,4 @@ agents/a2a-agent-trader/app/environment/seller/resources
 # PufferRL Experiments
 experiments/
 wandb/
+.cursor

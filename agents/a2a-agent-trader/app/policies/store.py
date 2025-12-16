@@ -186,17 +186,26 @@ def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("ri.action.make_offer_from_resource")
 def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
-    from app.schema.pydantic_models import ActionType
+    from app.schema.pydantic_models import ActionType, ResourceImbalanceEvent
 
     res = getattr(context.event, "resource", None)
     if not res:
         return None
+    
+    # Extract imbalance_type from ResourceImbalanceEvent
+    imbalance_type = "surplus"  # default
+    if isinstance(context.event, ResourceImbalanceEvent):
+        imbalance_type = getattr(context.event, "imbalance_type", "surplus")
+    elif hasattr(context.event, "data") and isinstance(context.event.data, dict):
+        imbalance_type = context.event.data.get("imbalance_type", "surplus")
+    
     return DomainAction(
         action_type=ActionType.MAKE_OFFER,
         parameters={
             "gpu_model": res.gpu_model,
             "sla": res.sla,
             "region": res.region,
+            "imbalance_type": imbalance_type,
         },
     )
 

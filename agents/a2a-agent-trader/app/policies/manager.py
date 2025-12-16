@@ -95,9 +95,9 @@ class PolicyManager:
                 policy_name="make_offer.default.v1",
                 components=[
                     "mo.guard.trigger_is_make_offer",
-                    # "mo.action.accept_offer", # Uncomment this to use the default accept offer policy
+                    "mo.action.accept_offer", # Use simple accept policy for testing (always accepts compatible offers)
                     # "mo.action.torch_always_accept_offer", # Uncomment this to use the Always Accept offer TorchScript policy
-                    "mo.action.torch_market_seller", # Uncomment this to use the Market Seller TorchScript policy
+                    # "mo.action.torch_market_seller", # Uncomment this to use the Market Seller TorchScript policy (may counter/reject)
                 ],
             )
             logger.debug("[POLICY MANAGER] Ensured make_offer policy")
