@@ -35,20 +35,42 @@ ifneq (,$(wildcard $(ENV_FILE)))
 endif
 
 serve-a2a:
-	@echo "==============================================================================="
-	@echo "| 🚀 Starting A2A agent server...                                             |"
-	@echo "|                                                                             |"
-	@echo "| 🌐 Server will be available at: http://localhost:$(or $(PORT),8000)         |"
-	@echo "| 📡 A2A protocol enabled for agent-to-agent communication                    |"
-	@if [ -n "$(ENV_ARG)" ]; then \
-		echo "| 📝 Loading environment from: $(ENV_FILE)                                 |"; \
+	@bash -c 'set -e; \
+	PORT="$(or $(PORT),8000)"; \
+	ZT_NETWORK="$(ZEROTIER_NETWORK)"; \
+	ENV_ARG="$(ENV_ARG)"; \
+	if [ -n "$$ZT_NETWORK" ]; then \
+		if ! command -v zerotier-cli >/dev/null 2>&1; then \
+			echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2; \
+			exit 1; \
+		fi; \
+		NODE_ID=$$(sudo zerotier-cli info | cut -d " " -f3); \
+	fi; \
+	echo "==============================================================================="; \
+	echo "| 🚀 Starting A2A agent server...                                             |"; \
+	echo "|                                                                             |"; \
+	echo "| 🌐 Server will be available at: http://localhost:$$PORT                       |"; \
+	echo "| 🤝 A2A protocol enabled for agent-to-agent communication                    |"; \
+	if [ -n "$$ENV_ARG" ]; then \
+		echo "| ✅ Loading environment from: $(ENV_FILE)                                           |"; \
 	else \
-		echo "| ⚠️  No .env file found - using environment variables or defaults          |"; \
-	fi
-	@echo "|                                                                             |"
-	@echo "| 💡 Try asking: How many apples do you have?                                 |"
-	@echo "==============================================================================="
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $(or $(PORT),8000) --reload $(ENV_ARG)
+		echo "| ⚠️  No .env file found - using environment variables or defaults            |"; \
+	fi; \
+	echo "|                                                                             |"; \
+	if [ -n "$$ZT_NETWORK" ]; then \
+		echo "| 🌐 ZeroTier network: $$ZT_NETWORK                                       |"; \
+	else \
+		echo "| ⚠️  ZEROTIER_NETWORK not set - skipping ZeroTier join                       |"; \
+	fi; \
+	echo "==============================================================================="; \
+	if [ -n "$$ZT_NETWORK" ]; then \
+		trap "echo Leaving ZeroTier network $$ZT_NETWORK; sudo zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
+		echo Connecting to ZeroTier network $$ZT_NETWORK; \
+		echo ZeroTier node ID: $$NODE_ID; \
+		sudo zerotier-cli join $$ZT_NETWORK; \
+	fi; \
+	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
+
 
 # ==============================================================================
 # Backend Deployment Targets

@@ -91,6 +91,7 @@ from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
+from .utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
 
 
@@ -328,6 +329,18 @@ class TraderAgent(BaseAgent):
             name=name,
             resource_portfolio={}
         )
+
+        # Log ZeroTier IP if available for the configured network
+        zerotier_network = os.getenv("ZEROTIER_NETWORK")
+        if zerotier_network:
+            zerotier_ip = get_zerotier_ip(zerotier_network)
+            if zerotier_ip:
+                logger.info("ZeroTier IP (%s): %s", zerotier_network, zerotier_ip)
+            else:
+                logger.info(
+                    "ZeroTier IP not assigned yet for network %s. Ensure the member is authorized.",
+                    zerotier_network,
+                )
 
         # In-memory stand-in for compute nodes under the Agent's control.
         self.resource_portfolio =  ComputeResourcePortfolio(
