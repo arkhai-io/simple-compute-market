@@ -41,8 +41,14 @@ echo "Member IP assignments:"
 echo "======================"
 
 for id in "${MEMBER_IDS[@]}"; do
-  MEMBER_JSON="$(curl -s -H "X-ZT1-Auth: $TOKEN" \
+  MEMBER_JSON="$(curl -sf -H "X-ZT1-Auth: $TOKEN" \
     "$API/controller/network/$NWID/member/$id")"
+  
+  if [[ -z "$MEMBER_JSON" ]] || [[ "$MEMBER_JSON" == "null" ]]; then
+    echo "Warning: Failed to fetch details for member $id" >&2
+    continue
+  fi
+
 
   # Extract all IPs for this member (if any)
   IPS=($(printf '%s' "$MEMBER_JSON" | jq -r '.ipAssignments[]?'))
