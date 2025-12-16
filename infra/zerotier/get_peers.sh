@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
 # Usage: ./zt-list-ips.sh <NETWORK_ID>
 NWID="${1:-}"
 
