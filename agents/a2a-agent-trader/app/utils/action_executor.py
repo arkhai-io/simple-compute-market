@@ -641,6 +641,157 @@ def create_order(
     
     return order_dict
 
+
+async def _find_and_send_matching_offers(
+    order_dict: dict,
+    ctx: InvocationContext | None = None,
+    event: Event | None = None,
+) -> dict:
+    """Helper function to find matching orders and send offers.
+    
+    This function is used by both make_offer() and the retry mechanism.
+    
+    Args:
+        order_dict: Order dictionary to match against
+        ctx: Invocation context (optional, for retries)
+        event: Event object (optional, will be created if not provided)
+    
+    Returns:
+        Result dictionary with status and details
+    """
+    if not CONFIG.enable_registry_discovery:
+        return {
+            "status": "disabled",
+            "message": "Registry discovery is disabled",
+        }
+    
+    try:
+        registry_client = get_registry_client()
+        
+        # Determine resource types for filtering
+        offer_res = order_dict.get("offer_resource", {})
+        demand_res = order_dict.get("demand_resource", {})
+        
+        # Determine resource types
+        offer_type = "compute" if "gpu_model" in offer_res else ("token" if "token" in offer_res else "unknown")
+        demand_type = "compute" if "gpu_model" in demand_res else ("token" if "token" in demand_res else "unknown")
+        
+        # Query registry for matching orders (bidirectional)
+        filters = {
+            "status": "open",
+        }
+        
+        matching_orders = await registry_client.query_orders(
+            filters=filters,
+            bidirectional=True,
+            limit=CONFIG.max_discovery_agents
+        )
+        
+        # Use match_orders helper to filter more precisely
+        matching_orders = registry_client.match_orders(
+            order_dict,
+            matching_orders,
+            bidirectional=True
+        )
+        
+        # Filter out our own orders (don't match with ourselves)
+        order_id = order_dict.get("order_id")
+        matching_orders = [m for m in matching_orders if m.get("order_id") != order_id]
+        
+        if not matching_orders:
+            return {
+                "status": "no_match",
+                "message": "No matching market orders found in registry",
+                "order": order_dict,
+            }
+        
+        logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
+        
+        # Extract agent URLs from matching orders
+        agent_urls = []
+        matched_order_ids = []
+        for match_order in matching_orders[:CONFIG.max_discovery_agents]:
+            maker_url = match_order.get("order_maker")
+            matched_order_id = match_order.get("order_id")
+            if maker_url and maker_url not in agent_urls:
+                agent_urls.append(maker_url)
+            if matched_order_id:
+                matched_order_ids.append(matched_order_id)
+        
+        # Send offers only if we have a context (for initial make_offer calls)
+        # For retries without context, we just log matches - actual offers will be sent
+        # when other agents query the registry and find our orders
+        results = []
+        if ctx and event:
+            # Create event if not provided
+            if event is None:
+                event = Event(
+                    author=AGENT_ID,
+                    content=genai_types.Content(
+                        role="model",
+                        parts=[
+                            genai_types.Part.from_function_response(
+                                name="make_offer",
+                                response={
+                                    "event_type": EventType.MAKE_OFFER.value,
+                                    "offer": order_dict
+                                })
+                        ],
+                    ),
+                    invocation_id=ctx.invocation_id,
+                    branch=ctx.branch,
+                )
+            
+            # Send offer to each matching agent
+            for agent_url in agent_urls:
+                try:
+                    logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
+                    result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
+                    if result:
+                        results.append({"agent_url": agent_url, "result": result})
+                except Exception as e:
+                    logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
+        elif agent_urls:
+            # For retries without context, just log that matches were found
+            # The bidirectional matching means other agents will discover our order
+            logger.info(f"[REGISTRY] Found {len(agent_urls)} matching agents for order {order_id} (retry mode - matches logged)")
+            return {
+                "status": "matches_found",
+                "message": f"Found {len(agent_urls)} matching orders (retry mode - offers will be sent when other agents query)",
+                "order": order_dict,
+                "targets": agent_urls,
+                "matched_order_ids": matched_order_ids,
+            }
+        
+        if results:
+            logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
+            return {
+                "status": "success",
+                "message": f"Sent offers to {len(results)} agents",
+                "results": results,
+            }
+        elif agent_urls:
+            return {
+                "status": "no_delivery",
+                "message": "Matching orders found but no offers could be delivered",
+                "order": order_dict,
+                "targets": agent_urls,
+            }
+        else:
+            return {
+                "status": "no_match",
+                "message": "No matching market orders found in registry",
+                "order": order_dict,
+            }
+    except Exception as e:
+        logger.error(f"[REGISTRY] Error finding/sending matching offers: {e}")
+        return {
+            "status": "error",
+            "message": f"Error during matching: {e}",
+            "order": order_dict,
+        }
+
+
 async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
     """Propagate an offer to the network using registry discovery.
     
@@ -737,96 +888,21 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
     
     # Try registry discovery if enabled
     if CONFIG.enable_registry_discovery:
-        try:
-            registry_client = get_registry_client()
-            
-            # Determine resource types for filtering
-            offer_res = order_dict.get("offer_resource", {})
-            demand_res = order_dict.get("demand_resource", {})
-            
-            # Determine resource types
-            offer_type = "compute" if "gpu_model" in offer_res else ("token" if "token" in offer_res else "unknown")
-            demand_type = "compute" if "gpu_model" in demand_res else ("token" if "token" in demand_res else "unknown")
-            
-            # Query registry for matching orders (bidirectional)
-            # Note: bidirectional is passed as a separate parameter, not in filters
-            filters = {
-                "status": "open",
-            }
-            
-            # Add resource type filters if we can determine them
-            if offer_type != "unknown":
-                # For bidirectional matching, we want orders where:
-                # - Their offer matches our demand OR their demand matches our offer
-                # So we query for both directions
-                matching_orders = await registry_client.query_orders(
-                    filters=filters,
-                    bidirectional=True,
-                    limit=CONFIG.max_discovery_agents
-                )
-            else:
-                matching_orders = await registry_client.query_orders(
-                    filters=filters,
-                    bidirectional=True,
-                    limit=CONFIG.max_discovery_agents
-                )
-            
-            # Use match_orders helper to filter more precisely
-            matching_orders = registry_client.match_orders(
-                order_dict,
-                matching_orders,
-                bidirectional=True
-            )
-
-            # If bidirectional matching finds no compatible orders, no-op instead of falling back
-            if not matching_orders:
-                logger.info("[REGISTRY] No matching orders found in registry after bidirectional matching; no-op.")
-                return {
-                    "status": "no_match",
-                    "message": "No matching market orders found in registry",
-                    "order": order_dict,
-                }
-
-            logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
-
-            # Extract agent URLs from matching orders
-            agent_urls = []
-            matched_order_ids = []
-            for match_order in matching_orders[:CONFIG.max_discovery_agents]:
-                maker_url = match_order.get("order_maker")
-                matched_order_id = match_order.get("order_id")
-                if maker_url and maker_url not in agent_urls:
-                    agent_urls.append(maker_url)
-                if matched_order_id:
-                    matched_order_ids.append(matched_order_id)
-
-            # Note: Order stays "open" until accepted - we don't update status here
-            # The order will be updated to "accepted" when accept_offer is called
-
-            # Send offer to each matching agent
-            results = []
-            for agent_url in agent_urls:
-                try:
-                    logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
-                    result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
-                    if result:
-                        results.append({"agent_url": agent_url, "result": result})
-                except Exception as e:
-                    logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
-
-            if results:
-                logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
-                return results[0]["result"] if len(results) == 1 else {"results": results}
-            else:
-                logger.warning("[REGISTRY] No successful offers sent despite matches; returning no-op result.")
-                return {
-                    "status": "no_delivery",
-                    "message": "Matching orders found but no offers could be delivered",
-                    "order": order_dict,
-                    "targets": agent_urls,
-                }
-        except Exception as e:
-            logger.warning(f"[REGISTRY] Registry discovery failed: {e}, falling back to default")
+        result = await _find_and_send_matching_offers(order_dict, ctx, event)
+        
+        # Return appropriate result based on status
+        if result.get("status") == "success":
+            results = result.get("results", [])
+            return results[0]["result"] if len(results) == 1 else {"results": results}
+        elif result.get("status") == "no_match":
+            # No matches found - order will remain open for retry
+            return result
+        elif result.get("status") == "no_delivery":
+            return result
+        elif result.get("status") == "error":
+            logger.warning(f"[REGISTRY] Registry discovery failed: {result.get('message')}, falling back to default")
+        else:
+            logger.warning(f"[REGISTRY] Unexpected result status: {result.get('status')}, falling back to default")
     
     # Fallback to hard-coded remote agent URL (backward compatibility)
     try:

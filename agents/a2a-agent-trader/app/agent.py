@@ -847,6 +847,130 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
+# Retry tracking for unmatched orders (in-memory)
+_order_retry_tracker: dict[str, dict] = {}  # order_id -> {retry_count: int (for logging), last_retry: datetime}
+
+
+# Background task to retry unmatched orders
+async def retry_unmatched_orders():
+    """Background task to periodically retry matching for open orders."""
+    from .utils.registry_client import get_registry_client
+    from .utils.action_executor import _find_and_send_matching_offers
+    from datetime import datetime, timedelta
+    
+    # Wait before first run to allow orders to be created
+    await asyncio.sleep(30)
+    
+    while True:
+        try:
+            if CONFIG.enable_registry_discovery and CONFIG.enable_order_retry:
+                registry_client = get_registry_client()
+                
+                # Get all open orders for this agent
+                agent_orders = await registry_client.get_agent_orders(
+                    CONFIG.agent_id,
+                    status="open",
+                    limit=100
+                )
+                
+                if not agent_orders:
+                    logger.debug(f"[RETRY] No open orders found for agent {CONFIG.agent_id}")
+                else:
+                    retried_count = 0
+                    skipped_count = 0
+                    
+                    for order in agent_orders:
+                        order_id = order.get("order_id")
+                        if not order_id:
+                            continue
+                        
+                        # Check retry tracking
+                        retry_info = _order_retry_tracker.get(order_id, {"retry_count": 0, "last_retry": None})
+                        retry_count = retry_info["retry_count"]
+                        last_retry = retry_info["last_retry"]
+                        
+                        # Check if enough time has passed since last retry
+                        now = datetime.utcnow()
+                        if last_retry:
+                            time_since_retry = (now - last_retry).total_seconds()
+                            if time_since_retry < CONFIG.order_retry_interval:
+                                # Not enough time has passed, skip this order
+                                continue
+                        
+                        # Also check order age - don't retry orders that are too old
+                        created_at_str = order.get("created_at")
+                        if created_at_str:
+                            try:
+                                # Parse datetime (handle both with and without timezone)
+                                if created_at_str.endswith('Z'):
+                                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                                else:
+                                    created_at = datetime.fromisoformat(created_at_str)
+                                
+                                # Convert to naive datetime for comparison
+                                if created_at.tzinfo:
+                                    created_at_naive = created_at.replace(tzinfo=None)
+                                else:
+                                    created_at_naive = created_at
+                                
+                                order_age_days = (now - created_at_naive).days
+                                if order_age_days > 7:  # Don't retry orders older than 7 days
+                                    logger.debug(f"[RETRY] Order {order_id} is {order_age_days} days old, skipping retry")
+                                    skipped_count += 1
+                                    continue
+                            except Exception as e:
+                                logger.debug(f"[RETRY] Failed to parse created_at for order {order_id}: {e}")
+                                pass  # Continue if date parsing fails
+                        
+                        # Retry matching for this order
+                        try:
+                            logger.info(f"[RETRY] Retrying order {order_id} (attempt {retry_count + 1})")
+                            
+                            # For retries, we query for matches but don't send offers (no context)
+                            # The bidirectional matching means other agents will discover our order when they query
+                            result = await _find_and_send_matching_offers(order, ctx=None, event=None)
+                            
+                            # Update retry tracker
+                            _order_retry_tracker[order_id] = {
+                                "retry_count": retry_count + 1,
+                                "last_retry": now,
+                            }
+                            
+                            if result.get("status") == "success":
+                                logger.info(f"[RETRY] Order {order_id} matched successfully on retry attempt {retry_count + 1}")
+                                # Don't remove from tracker yet - let it be cleaned up naturally
+                            elif result.get("status") == "matches_found":
+                                logger.info(f"[RETRY] Order {order_id} found {len(result.get('targets', []))} matching orders on retry attempt {retry_count + 1}")
+                                # Matches found - other agents will discover our order via bidirectional matching
+                            elif result.get("status") == "no_match":
+                                logger.debug(f"[RETRY] Order {order_id} still no match after retry attempt {retry_count + 1}")
+                            else:
+                                logger.debug(f"[RETRY] Order {order_id} retry result: {result.get('status')}")
+                            
+                            retried_count += 1
+                            
+                        except Exception as e:
+                            logger.warning(f"[RETRY] Error retrying order {order_id}: {e}")
+                            # Still update retry tracking
+                            _order_retry_tracker[order_id] = {
+                                "retry_count": retry_count + 1,
+                                "last_retry": now,
+                            }
+                    
+                    if retried_count > 0:
+                        logger.info(f"[RETRY] Retried {retried_count} orders, skipped {skipped_count} orders")
+                    elif skipped_count > 0:
+                        logger.debug(f"[RETRY] Skipped {skipped_count} orders (too old or not ready for retry)")
+            
+            # Sleep for retry interval before next check
+            await asyncio.sleep(CONFIG.order_retry_interval)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[RETRY] Error in order retry loop: {e}")
+            await asyncio.sleep(60)  # Back off on error (1 minute)
+
+
 # Background task to clean up expired/fulfilled orders from registry
 async def cleanup_stale_orders():
     """Background task to remove expired/fulfilled orders from registry."""
@@ -952,6 +1076,11 @@ async def _startup_tasks():
         # Start order cleanup task in background
         cleanup_task = asyncio.create_task(cleanup_stale_orders())
         logger.info("[STARTUP] Order cleanup task started")
+        
+        # Start order retry task in background
+        if CONFIG.enable_order_retry:
+            retry_task = asyncio.create_task(retry_unmatched_orders())
+            logger.info(f"[STARTUP] Order retry task started (interval: {CONFIG.order_retry_interval}s)")
     
     return None
 
