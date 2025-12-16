@@ -143,7 +143,38 @@ RESPONSE=$(curl -s --max-time 10 -X POST http://localhost:9993/controller/networ
     \"routes\": [{
       \"target\": \"$NETWORK_CIDR\"
     }]
-  }"
+  }" \
+  -w "\n%{http_code}" 2>&1)
+CURL_EXIT=$?
+set -e
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [[ $CURL_EXIT -ne 0 ]]; then
+  echo "Error: Failed to create network (curl exit code: $CURL_EXIT)" >&2
+  if [[ -n "$BODY" ]]; then
+    echo "Response: $BODY" >&2
+  fi
+  echo "This might mean:" >&2
+  echo "  - ZeroTier controller API is not accessible at http://localhost:9993" >&2
+  echo "  - Network already exists (try a different network ID)" >&2
+  echo "  - ZeroTier service needs to be restarted" >&2
+  exit 1
+fi
+
+if [[ "$HTTP_CODE" != "200" ]]; then
+  echo "Error: Failed to create network (HTTP $HTTP_CODE)" >&2
+  if [[ -n "$BODY" ]]; then
+    echo "Response: $BODY" >&2
+  fi
+  if [[ "$HTTP_CODE" == "409" ]]; then
+    echo "Network already exists. Try deleting it first or use a different network ID." >&2
+  fi
+  exit 1
+fi
+
+echo "   Network created successfully!"
 
 # Join the network
 echo -e "\n\n2. Joining network..."
