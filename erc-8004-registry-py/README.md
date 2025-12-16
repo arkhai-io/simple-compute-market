@@ -137,6 +137,11 @@ alembic upgrade head
 1. **Start Indexer First**:
    ```bash
    cd erc-8004-registry-py
+   make serve
+   ```
+   
+   Or manually:
+   ```bash
    uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
    ```
 
@@ -152,7 +157,34 @@ alembic upgrade head
 
 ## Running the Server
 
-### Development
+### Using Makefile (Recommended)
+
+The Makefile provides a convenient way to start the server with ZeroTier support:
+
+```bash
+# Start server (defaults to port 8080)
+make serve
+
+# Start on custom port
+make serve PORT=9000
+
+# With ZeroTier network (set ZEROTIER_NETWORK in .env or environment)
+# The server will automatically join the ZeroTier network on startup
+make serve
+```
+
+**ZeroTier Integration**: If `ZEROTIER_NETWORK` is set in your `.env` file or environment, the server will automatically:
+- Check for ZeroTier CLI installation
+- Join the specified ZeroTier network
+- Display the ZeroTier node ID for authorization
+- Leave the network gracefully on shutdown
+
+After starting, send your ZeroTier node ID to the network controller to get authorized:
+```bash
+sudo zerotier-cli info | cut -d " " -f3
+```
+
+### Manual Development
 
 ```bash
 uvicorn src.main:app --reload --port 8080

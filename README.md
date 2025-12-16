@@ -40,6 +40,11 @@ Run the Registry/Indexer (separate terminal):
 ```bash
 cd erc-8004-registry-py
 uv sync
+make serve
+```
+
+Or manually:
+```bash
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
 ```
 
@@ -53,16 +58,16 @@ make create-network      # prints the new network ID
 
 Populate `infra/zerotier/.env` with `ZEROTIER_NETWORK=<network-id>` so other make targets can use it.
 
-Authorize new Agents (ZeroTier nodes) joining the network:
+Authorize new nodes (Agents and Registry) joining the network:
 ```bash
 cd infra
 make add-node NODE_ID=<member-id-from-zerotier-cli-info>
 ```
 
-Agents join the market network automatically:
-- Set `ZEROTIER_NETWORK=<network-id>` in `agents/a2a-agent-trader/.env`
-- Run `make serve-a2a`; the agent joins ZeroTier automatically
-- Send the agent’s ZeroTier node ID to the market controller so they can authorize it, in order to participate in the network and obtain an IP.
+Registry and Agents join the market network automatically:
+- **Registry**: Set `ZEROTIER_NETWORK=<network-id>` in `erc-8004-registry-py/.env` and run `make serve`; the registry joins ZeroTier automatically
+- **Agents**: Set `ZEROTIER_NETWORK=<network-id>` in `agents/a2a-agent-trader/.env` and run `make serve-a2a`; the agent joins ZeroTier automatically
+- Send the node's ZeroTier node ID to the market controller so they can authorize it, in order to participate in the network and obtain an IP.
 
 ## Agent Setup
 Install agent deps:
