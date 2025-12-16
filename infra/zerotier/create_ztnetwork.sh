@@ -248,6 +248,10 @@ fi
 
 echo ""
 echo "To authorize new members:"
-echo "curl -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
-echo "  -H \"X-ZT1-Auth: $AUTH_TOKEN\" \\"
-echo "  -d '{\"authorized\": true}'"
+echo "  make add-node NODE_ID=<member-id>"
+echo ""
+echo "Or manually:"
+echo "  curl -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
+echo "    -H \"X-ZT1-Auth: $AUTH_TOKEN\" \\"
+echo "    -d '{\"authorized\": true}'"
+
