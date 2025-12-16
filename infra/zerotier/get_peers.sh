@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-# Usage: ./zt-list-ips.sh <NETWORK_ID>
+# Usage: ./get_peers.sh <NETWORK_ID>
 NWID="${1:-}"
 
 if [[ -z "$NWID" ]]; then
