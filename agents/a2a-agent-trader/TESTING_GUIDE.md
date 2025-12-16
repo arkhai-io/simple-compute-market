@@ -99,41 +99,55 @@ Verify it's running:
 curl http://localhost:8001/health
 ```
 
-### Step 5: Register Agents (Optional but Recommended)
+### Step 5: Verify Agent Auto-Registration
 
-Register both agents with the registry so they can discover each other:
+Agents automatically register with the registry on startup when `AUTO_REGISTER=true` is set in your `.env` files. Wait for a few minutes before the offchain indexer updates the database from onchain event sync. Verify that both agents have successfully registered:
 
-**Register Maker Agent:**
-```bash
-curl -X POST http://localhost:8080/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "owner": "0x0000000000000000000000000000000000000000",
-    "agentCard": {
-      "name": "Maker Agent",
-      "description": "Agent that creates market orders",
-      "url": "http://localhost:8000",
-      "version": "0.1.0"
-    },
-    "agentId": "maker_agent"
-  }'
+**Check Agent Logs for Registration Confirmation:**
+
+Look for registration messages in the agent startup logs (Terminal 3 and Terminal 4):
+
+**Maker Agent logs should show:**
+```
+[REGISTRATION] Starting registration for wallet: <wallet_address>
+[ONCHAIN REGISTRATION] ✓ On-chain registration complete. TX: <tx_hash>, Agent ID: <agent_id>
 ```
 
-**Register Taker Agent:**
-```bash
-curl -X POST http://localhost:8080/agents/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "owner": "0x0000000000000000000000000000000000000000",
-    "agentCard": {
-      "name": "Taker Agent",
-      "description": "Agent that accepts market orders",
-      "url": "http://localhost:8001",
-      "version": "0.1.0"
-    },
-    "agentId": "taker_agent"
-  }'
+**Taker Agent logs should show:**
 ```
+[REGISTRATION] Starting registration for wallet: <wallet_address>
+[ONCHAIN REGISTRATION] ✓ On-chain registration complete. TX: <tx_hash>, Agent ID: <agent_id>
+```
+
+**Verify Registration via Registry API:**
+
+**List all registered agents:**
+```bash
+curl http://localhost:8080/agents
+```
+
+**Query agents by owner address** (if you know the wallet addresses from your `.env` files):
+```bash
+# Replace <maker_wallet_address> with AGENT_WALLET_ADDRESS from .env
+curl "http://localhost:8080/agents?owner=<maker_wallet_address>"
+
+# Replace <taker_wallet_address> with AGENT_WALLET_ADDRESS from .env.b
+curl "http://localhost:8080/agents?owner=<taker_wallet_address>"
+```
+
+**Get specific agent by canonical ID** (from the logs):
+```bash
+# Replace <canonical_agent_id> with the agent ID from registration logs
+# Format: eip155:{chainId}:{identityRegistry}:{agentId}
+curl http://localhost:8080/agents/<canonical_agent_id>
+```
+
+**Expected Response:**
+You should see both agents listed with their metadata, endpoints, and health status. If agents are not registered, check:
+- `AUTO_REGISTER=true` is set in both `.env` and `.env.b`
+- `AGENT_WALLET_ADDRESS` is configured in both files
+- `AGENT_PRIV_KEY` and `CHAIN_RPC_URL` are set (for on-chain registration)
+- Registry is running and accessible at `http://localhost:8080`
 
 ### Step 6: Trigger a Resource Alert (Surplus Scenario)
 
@@ -313,4 +327,3 @@ ENABLE_REGISTRY_DISCOVERY=false
 ```
 
 This should fall back to `REMOTE_AGENT_URL_OVERRIDE` for direct agent-to-agent communication.
-
