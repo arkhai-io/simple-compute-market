@@ -122,7 +122,12 @@ echo "IP Range: $IP_RANGE_START - $IP_RANGE_END"
 
 # Create the network
 echo -e "\n1. Creating network..."
-curl -X POST http://localhost:9993/controller/network/${NETWORK_ID} \
+echo "   Network ID: $NETWORK_ID"
+echo "   This may take a few seconds..."
+
+# Use timeout and better error handling
+set +e
+RESPONSE=$(curl -s --max-time 10 -X POST http://localhost:9993/controller/network/${NETWORK_ID} \
   -H "X-ZT1-Auth: $AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
