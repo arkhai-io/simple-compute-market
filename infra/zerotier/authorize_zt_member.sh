@@ -11,6 +11,12 @@ if [[ -z "$NETWORK_ID" ]] || [[ -z "$MEMBER_ID" ]]; then
   exit 1
 fi
 
+# Check if ZeroTier is installed
+if ! command -v zerotier-cli &> /dev/null; then
+  echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2
+  exit 1
+fi
+
 # Determine auth token file location based on OS
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # macOS
