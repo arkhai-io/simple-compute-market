@@ -166,6 +166,29 @@ echo -e "\n\nNetwork created successfully!"
 echo "Network ID: $NETWORK_ID"
 echo "Share this ID with others to join your network"
 echo ""
+
+# Try to update .env file with the network ID
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  if grep -q "^ZEROTIER_NETWORK=" "$ENV_FILE"; then
+    # Update existing ZEROTIER_NETWORK line
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "s/^ZEROTIER_NETWORK=.*/ZEROTIER_NETWORK=$NETWORK_ID/" "$ENV_FILE"
+    else
+      sed -i "s/^ZEROTIER_NETWORK=.*/ZEROTIER_NETWORK=$NETWORK_ID/" "$ENV_FILE"
+    fi
+    echo "✓ Updated $ENV_FILE with network ID: $NETWORK_ID"
+  else
+    # Append if it doesn't exist
+    echo "ZEROTIER_NETWORK=$NETWORK_ID" >> "$ENV_FILE"
+    echo "✓ Added network ID to $ENV_FILE: $NETWORK_ID"
+  fi
+else
+  echo "Note: .env file not found at $ENV_FILE"
+  echo "Create it and set: ZEROTIER_NETWORK=$NETWORK_ID"
+fi
+
+echo ""
 echo "To authorize new members:"
 echo "curl -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
 echo "  -H \"X-ZT1-Auth: $AUTH_TOKEN\" \\"
