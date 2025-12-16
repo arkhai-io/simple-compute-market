@@ -26,6 +26,173 @@ from ...abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
 logger = logging.getLogger(__name__)
 
 
+async def update_existing_agent(
+    contract,
+    account,
+    agent_id: int,
+    desired_token_uri: str,
+    desired_metadata: list,
+    w3,
+    private_key: str
+) -> Tuple[Optional[str], dict]:
+    """
+    Update existing agent if changes detected.
+    
+    Args:
+        contract: Web3 contract instance
+        account: Web3 account instance
+        agent_id: Existing agent ID
+        desired_token_uri: Desired token URI (agent card URL)
+        desired_metadata: List of desired metadata dicts with 'key' and 'value' (hex-encoded)
+        w3: Web3 instance
+        private_key: Private key for signing transactions
+        
+    Returns:
+        Tuple of (last_tx_hash_if_updated, updates_dict) where updates_dict indicates what was updated:
+        {
+            'token_uri_updated': bool,
+            'metadata_updated': list of updated keys,
+            'no_changes': bool
+        }
+    """
+    updates = {
+        'token_uri_updated': False,
+        'metadata_updated': [],
+        'no_changes': True
+    }
+    last_tx_hash = None
+    
+    try:
+        # Fetch current token URI from contract
+        current_token_uri = contract.functions.tokenURI(agent_id).call()
+        logger.debug(f"[UPDATE] Current token URI: {current_token_uri}")
+        logger.debug(f"[UPDATE] Desired token URI: {desired_token_uri}")
+        
+        # Compare token URI
+        if current_token_uri != desired_token_uri:
+            logger.info(f"[UPDATE] Token URI changed: {current_token_uri} -> {desired_token_uri}")
+            try:
+                # Call setAgentUri
+                tx = contract.functions.setAgentUri(agent_id, desired_token_uri).build_transaction({
+                    "from": account.address,
+                    "nonce": w3.eth.get_transaction_count(account.address),
+                    "gas": 200000,
+                    "gasPrice": w3.eth.gas_price,
+                })
+                
+                signed_tx = account.sign_transaction(tx)
+                tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
+                
+                # Wait for confirmation
+                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                if receipt.status == 1:
+                    logger.info(f"[UPDATE] ✓ Token URI updated! TX: {tx_hash_str}")
+                    updates['token_uri_updated'] = True
+                    updates['no_changes'] = False
+                    last_tx_hash = tx_hash_str
+                else:
+                    logger.error(f"[UPDATE] ✗ Token URI update failed! TX reverted.")
+            except Exception as e:
+                logger.error(f"[UPDATE] Error updating token URI: {e}")
+        else:
+            logger.debug(f"[UPDATE] Token URI unchanged")
+        
+        # Fetch current metadata and compare
+        for desired_meta in desired_metadata:
+            key = desired_meta['key']
+            desired_value_hex = desired_meta['value']
+            
+            try:
+                # Fetch current metadata value (returns bytes)
+                current_value_bytes = contract.functions.getMetadata(agent_id, key).call()
+                
+                # Convert desired hex string to bytes for comparison
+                # Web3.to_hex returns hex string with '0x' prefix, so we need to handle that
+                if isinstance(desired_value_hex, str):
+                    if desired_value_hex.startswith('0x'):
+                        desired_value_bytes = bytes.fromhex(desired_value_hex[2:])
+                    else:
+                        desired_value_bytes = bytes.fromhex(desired_value_hex)
+                else:
+                    desired_value_bytes = desired_value_hex
+                
+                # Compare bytes
+                if current_value_bytes != desired_value_bytes:
+                    logger.info(f"[UPDATE] Metadata key '{key}' changed")
+                    try:
+                        # Call setMetadata - contract expects bytes value
+                        tx = contract.functions.setMetadata(agent_id, key, desired_value_bytes).build_transaction({
+                            "from": account.address,
+                            "nonce": w3.eth.get_transaction_count(account.address),
+                            "gas": 200000,
+                            "gasPrice": w3.eth.gas_price,
+                        })
+                        
+                        signed_tx = account.sign_transaction(tx)
+                        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                        tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
+                        
+                        # Wait for confirmation
+                        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                        if receipt.status == 1:
+                            logger.info(f"[UPDATE] ✓ Metadata key '{key}' updated! TX: {tx_hash_str}")
+                            updates['metadata_updated'].append(key)
+                            updates['no_changes'] = False
+                            last_tx_hash = tx_hash_str
+                        else:
+                            logger.error(f"[UPDATE] ✗ Metadata key '{key}' update failed! TX reverted.")
+                    except Exception as e:
+                        logger.error(f"[UPDATE] Error updating metadata key '{key}': {e}")
+                else:
+                    logger.debug(f"[UPDATE] Metadata key '{key}' unchanged")
+            except Exception as e:
+                # Metadata key might not exist yet, treat as changed
+                logger.debug(f"[UPDATE] Metadata key '{key}' not found on-chain (or error): {e}, will update")
+                try:
+                    # Convert desired hex to bytes
+                    if isinstance(desired_value_hex, str):
+                        if desired_value_hex.startswith('0x'):
+                            desired_value_bytes = bytes.fromhex(desired_value_hex[2:])
+                        else:
+                            desired_value_bytes = bytes.fromhex(desired_value_hex)
+                    else:
+                        desired_value_bytes = desired_value_hex
+                    
+                    # Call setMetadata
+                    tx = contract.functions.setMetadata(agent_id, key, desired_value_bytes).build_transaction({
+                        "from": account.address,
+                        "nonce": w3.eth.get_transaction_count(account.address),
+                        "gas": 200000,
+                        "gasPrice": w3.eth.gas_price,
+                    })
+                    
+                    signed_tx = account.sign_transaction(tx)
+                    tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                    tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
+                    
+                    # Wait for confirmation
+                    receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                    if receipt.status == 1:
+                        logger.info(f"[UPDATE] ✓ Metadata key '{key}' set! TX: {tx_hash_str}")
+                        updates['metadata_updated'].append(key)
+                        updates['no_changes'] = False
+                        last_tx_hash = tx_hash_str
+                    else:
+                        logger.error(f"[UPDATE] ✗ Metadata key '{key}' set failed! TX reverted.")
+                except Exception as e2:
+                    logger.error(f"[UPDATE] Error setting metadata key '{key}': {e2}")
+        
+        if updates['no_changes']:
+            logger.info(f"[UPDATE] ✓ No changes detected for agent {agent_id}")
+        
+        return (last_tx_hash, updates)
+        
+    except Exception as e:
+        logger.error(f"[UPDATE] Error in update_existing_agent: {e}")
+        return (None, updates)
+
+
 async def register_onchain(
     agent_card_url: str,
     private_key: str,
@@ -58,7 +225,9 @@ async def register_onchain(
         
     Returns:
         Tuple of (tx_hash, agent_id) if successful, None otherwise
-        If agent already exists, returns (None, existing_agent_id)
+        - For new registrations: (tx_hash, agent_id)
+        - For existing agents with updates: (tx_hash, agent_id) where tx_hash is the last update transaction hash
+        - For existing agents with no changes: (None, agent_id)
     """
     if not HAS_WEB3:
         logger.error("[ONCHAIN REGISTRATION] web3 package not installed. Cannot perform on-chain registration.")
@@ -122,21 +291,7 @@ async def register_onchain(
                 logger.info(f"[REGISTRATION] Found existing registration (ID: {agent_id}) for owner {search_address}")
                 # Continue to idempotent check below
         
-        # If we found an existing agent ID, skip registration entirely (idempotent)
-        # CRITICAL: Use 'is not None' instead of truthy check because agent_id 0 is valid!
-        if agent_id is not None:
-            logger.info(f"[REGISTRATION] ✓ Agent already registered with ID: {agent_id}")
-            logger.info(f"[REGISTRATION] ✓ Skipping on-chain registration (idempotent)")
-
-            # Successfully found existing registration - no need for additional verification
-            logger.info(f"[REGISTRATION] ✓ Using existing agent ID {agent_id} for wallet {owner_address if owner_address else signer_address}")
-
-            return (None, agent_id)  # Return (None, agent_id) to indicate existing registration
-        
-        # No existing registration found, register new
-        logger.info(f"[ONCHAIN REGISTRATION] Registering new agent on-chain...")
-        
-        # Fetch agent card to build full metadata
+        # Fetch agent card to build full metadata (needed for both new registration and updates)
         agent_card_data = None
         try:
             if HAS_AIOHTTP:
@@ -172,6 +327,37 @@ async def register_onchain(
             {"key": "category", "value": Web3.to_hex(text=metadata_json.get("category", "compute"))},
             {"key": "type", "value": Web3.to_hex(text=metadata_json.get("type", "trader"))},
         ]
+        
+        # If we found an existing agent ID, check for changes and update if needed (idempotent)
+        # CRITICAL: Use 'is not None' instead of truthy check because agent_id 0 is valid!
+        if agent_id is not None:
+            logger.info(f"[REGISTRATION] ✓ Agent already registered with ID: {agent_id}")
+            logger.info(f"[REGISTRATION] Checking for changes and updating if needed...")
+
+            # Update existing agent if changes detected
+            update_tx_hash, updates = await update_existing_agent(
+                contract=contract,
+                account=account,
+                agent_id=agent_id,
+                desired_token_uri=agent_card_url,
+                desired_metadata=metadata,
+                w3=w3,
+                private_key=private_key
+            )
+            
+            if updates['no_changes']:
+                logger.info(f"[REGISTRATION] ✓ No changes detected, using existing agent ID {agent_id}")
+            else:
+                if updates['token_uri_updated']:
+                    logger.info(f"[REGISTRATION] ✓ Token URI updated")
+                if updates['metadata_updated']:
+                    logger.info(f"[REGISTRATION] ✓ Metadata keys updated: {', '.join(updates['metadata_updated'])}")
+            
+            # Return (tx_hash_if_updated, agent_id) - tx_hash is None if no updates were made
+            return (update_tx_hash, agent_id)
+        
+        # No existing registration found, register new
+        logger.info(f"[ONCHAIN REGISTRATION] Registering new agent on-chain...")
         # Note: agentId is already the ERC-721 tokenId, so we don't store it as metadata
         # Description and other details are in the tokenURI registration file, not on-chain
         

@@ -188,9 +188,9 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
                 tx_hash, agent_id_from_reg = result
                 onchain_agent_id = agent_id_from_reg
                 if tx_hash:
-                    logger.info(f"[ONCHAIN REGISTRATION] ✓ On-chain registration complete. TX: {tx_hash}, Agent ID: {onchain_agent_id}")
+                    logger.info(f"[ONCHAIN REGISTRATION] ✓ On-chain registration/update complete. TX: {tx_hash}, Agent ID: {onchain_agent_id}")
                 else:
-                    logger.info(f"[ONCHAIN REGISTRATION] ✓ Using existing agent ID: {onchain_agent_id}")
+                    logger.info(f"[ONCHAIN REGISTRATION] ✓ Using existing agent ID: {onchain_agent_id} (no changes detected)")
         except Exception as e:
             logger.warning(f"[ONCHAIN REGISTRATION] On-chain registration failed: {e}")
     elif config.identity_registry_address:
