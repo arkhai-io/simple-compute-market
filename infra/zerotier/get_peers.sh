@@ -18,8 +18,13 @@ echo "Network ID: $NWID"
 echo
 
 echo "Fetching member list..."
-MEMBERS_JSON="$(curl -s -H "X-ZT1-Auth: $TOKEN" \
+MEMBERS_JSON="$(curl -sf -H "X-ZT1-Auth: $TOKEN" \
   "$API/controller/network/$NWID/member")"
+
+if [[ -z "$MEMBERS_JSON" ]] || [[ "$MEMBERS_JSON" == "null" ]]; then
+  echo "Error: Failed to fetch members or network not found" >&2
+  exit 1
+fi
 
 # Get just the member IDs
 MEMBER_IDS=($(printf '%s' "$MEMBERS_JSON" | jq -r 'keys[]'))
