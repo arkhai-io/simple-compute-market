@@ -3,7 +3,7 @@ install:
 
 create-network:
 	@echo "Creating ZeroTier network..."
-	./zerotier/create_ztnetwork.sh
+	@bash zerotier/create_ztnetwork.sh
 
 add-node:
 	@if [ -z "$(NODE_ID)" ]; then echo "Usage: make add-node NODE_ID=<member-id>"; exit 1; fi
