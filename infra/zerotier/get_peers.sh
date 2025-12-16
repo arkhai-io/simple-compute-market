@@ -52,7 +52,7 @@ if [[ ! -f "$AUTH_TOKEN_FILE" ]]; then
   exit 1
 fi
 # Where your ZeroTier state lives (default for most installs)
-TOKEN=$(sudo cat /var/lib/zerotier-one/authtoken.secret)
+TOKEN=$(sudo cat "$AUTH_TOKEN_FILE")
 
 API="http://127.0.0.1:9993"
 
