@@ -421,15 +421,15 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
             # Extreme case → reject (shouldn't normally happen)
             action_type = ActionType.REJECT_OFFER
     else:
-        # For BUYERS: More selective (they need the compute resource but want good pricing)
-        # - Accept if price_idx <= 5 (more lenient)
-        # - Counter if price_idx <= 7
+        # For BUYERS: Accept more readily (they need the compute resource)
+        # - Accept if price_idx <= 6 (more lenient to complete trades)
+        # - Counter if price_idx == 7
         # - Reject only if price_idx >= 8
-        if price_idx <= 5:
+        if price_idx <= 6:
             # Lower price index → more competitive → accept
             action_type = ActionType.ACCEPT_OFFER
-        elif price_idx <= 7:
-            # Medium price index → counter offer
+        elif price_idx == 7:
+            # Medium-high price index → counter offer
             action_type = ActionType.COUNTER_OFFER
         else:
             # Higher price index → reject

@@ -177,57 +177,52 @@ async def update_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Store original values before updating
     original_order_maker = order.order_maker
-    original_order_taker = order.order_taker
     original_offer_resource = order.offer_resource
     original_demand_resource = order.demand_resource
     
-    # Update fields
+    symmetric_order = None
+    if "order_taker" in updates:
+        temp_taker = updates["order_taker"]
+        original_taker = order.order_taker
+        order.order_taker = temp_taker
+        try:
+            symmetric_order = find_symmetric_order(
+                db, order, original_offer_resource, original_demand_resource
+            )
+        finally:
+            order.order_taker = original_taker
+    
     if "status" in updates:
         order.status = validate_order_status(updates["status"])
-    
     if "order_taker" in updates:
         order.order_taker = updates["order_taker"]
-    
     if "taker_attestation" in updates:
         order.taker_attestation = updates["taker_attestation"]
-    
     if "maker_attestation" in updates:
         order.maker_attestation = updates["maker_attestation"]
-    
     order.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(order)
-    
-    # Find and update the corresponding symmetric order
-    symmetric_order = find_symmetric_order(
-        db, order, original_offer_resource, original_demand_resource
-    )
     
     if symmetric_order:
-        logger.info(f"[REGISTRY] Found symmetric order {symmetric_order.order_id} for order {order_id}")
-        
-        # Update symmetric order with swapped fields
         if "status" in updates:
             symmetric_order.status = validate_order_status(updates["status"])
-        
-        # For symmetric order: taker becomes the original maker
         if "order_taker" in updates:
             symmetric_order.order_taker = original_order_maker
-        
-        # Swap attestations: symmetric order's taker_attestation = original's maker_attestation
         if "maker_attestation" in updates and order.maker_attestation:
             symmetric_order.taker_attestation = order.maker_attestation
-        
-        # Swap attestations: symmetric order's maker_attestation = original's taker_attestation
         if "taker_attestation" in updates and order.taker_attestation:
             symmetric_order.maker_attestation = order.taker_attestation
-        
         symmetric_order.updated_at = datetime.utcnow()
+    
+    try:
         db.commit()
-        db.refresh(symmetric_order)
-        logger.info(f"[REGISTRY] Updated symmetric order {symmetric_order.order_id} status to {symmetric_order.status.value}")
+        db.refresh(order)
+        if symmetric_order:
+            db.refresh(symmetric_order)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[REGISTRY] Failed to update orders: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update orders: {e}")
     
     return {
         "order_id": order.order_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from decimal import Decimal
 import logging
@@ -145,7 +146,7 @@ async def execute_action(
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.
-            make_offer_result = await make_offer(ctx=ctx, order=order)
+            make_offer_result = await make_offer(ctx=ctx, order=order, alkahest_client=alkahest_client)
             # make_offer returns a dict, not an Event object
             if isinstance(make_offer_result, dict):
                 outcome["result"] = make_offer_result
@@ -174,6 +175,7 @@ async def execute_action(
             logger.info(f"[ACTION] [SIMULATED] Fulfilling compute obligation with params: {parameters}")
             escrow_uid = parameters.get("escrow_uid")
             ssh_public_key = parameters.get("ssh_public_key")
+            order_id = parameters.get("order_id")
 
             if not escrow_uid:
                 raise ValueError("escrow_uid is required for fulfill_compute_obligation")
@@ -185,6 +187,7 @@ async def execute_action(
                 escrow_uid=escrow_uid,
                 oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
                 ssh_public_key=ssh_public_key,
+                order_id=order_id,
             )
             # Include event_type for downstream parsing and propagate to remote agent.
             result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
@@ -453,29 +456,71 @@ async def accept_offer(
     escrow_uid = None
     escrow_receipt = None
 
-    # If alkahest_client provided, attempt on-chain buy to escrow tokens.
+    # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
+    # When accepting an offer, the taker is buying compute and paying tokens.
+    # The mapping depends on what the maker is offering:
+    # - If maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
+    # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
+    escrow_uid = None
+    escrow_receipt = None
+    
     if alkahest_client:
-        try:
-            logger.info("[ALKAHEST]: Putting tokens in escrow.")
-            compute_resource = order_dict.get("offer_resource", {})
-            token_resource = order_dict.get("demand_resource", {})
-            escrow_receipt = await buy_compute_with_erc20(
-                compute_resource=compute_resource,
-                token_resource=token_resource,
-                oracle_address=DEMO_ORACLE_ADDRESS,
-                client=alkahest_client,
-            )
-            escrow_uid = escrow_receipt.get("log", {}).get("uid")
-            logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
-        except Exception as e:
-            logger.warning("[ALKAHEST] Failed to create escrow via buy_with_erc20: %s", e)
+        offer_res = order_dict.get("offer_resource", {})
+        demand_res = order_dict.get("demand_resource", {})
+        
+        # Determine resource types
+        offer_is_compute = "gpu_model" in offer_res
+        demand_is_compute = "gpu_model" in demand_res
+        
+        # Map resources based on what maker is offering
+        if offer_is_compute:
+            # Maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
+            compute_resource = offer_res
+            token_resource = demand_res
+        else:
+            # Maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
+            compute_resource = demand_res
+            token_resource = offer_res
+        
+        # Retry logic with exponential backoff
+        max_retries = 3
+        base_delay = 1.0  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[ALKAHEST] Attempting to put tokens in escrow (attempt {attempt + 1}/{max_retries})")
+                escrow_receipt = await buy_compute_with_erc20(
+                    compute_resource=compute_resource,
+                    token_resource=token_resource,
+                    oracle_address=DEMO_ORACLE_ADDRESS,
+                    client=alkahest_client,
+                )
+                escrow_uid = escrow_receipt.get("log", {}).get("uid")
+                if escrow_uid:
+                    logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
+                    break
+                else:
+                    logger.warning(f"[ALKAHEST] Escrow receipt missing uid on attempt {attempt + 1}")
+            except Exception as e:
+                logger.warning(f"[ALKAHEST] Failed to create escrow on attempt {attempt + 1}/{max_retries}: {e}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"[ALKAHEST] Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error("[ALKAHEST] All retry attempts failed. Cannot create escrow.")
+                    raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
+        
+        if not escrow_uid:
+            if isinstance(escrow_receipt, dict):
+                escrow_uid = escrow_receipt.get("log", {}).get("uid")
+                if escrow_uid:
+                    logger.info(f"[ALKAHEST] Got escrow_uid from receipt: {escrow_uid}")
+            
+            if not escrow_uid:
+                raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
     else:
-        logger.info("[ALKAHEST] No AlkahestClient, falling back to simulated escrow_uid.")
-        escrow_uid = f"escrow_{uuid.uuid4()}"
-
-    if not escrow_uid and isinstance(escrow_receipt, dict):
-        escrow_uid = escrow_receipt.get("log", {}).get("uid")
-        logger.info(f"[ALKAHEST] Got escrow_uid: {escrow_uid}")
+        raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
 
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
@@ -515,6 +560,7 @@ async def accept_offer(
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)
+    # The registry will also update the symmetric order (taker's order) automatically
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
@@ -528,6 +574,10 @@ async def accept_offer(
                 result = await registry_client.update_order(order_id, updates)
                 if result:
                     logger.info(f"[REGISTRY] Updated maker's order {order_id} status to accepted")
+                    if result.get("symmetric_order_updated"):
+                        logger.info(f"[REGISTRY] Also updated symmetric order {result.get('symmetric_order_updated')}")
+                    else:
+                        logger.warning(f"[REGISTRY] No symmetric order found/updated for order {order_id}")
                 else:
                     logger.warning(f"[REGISTRY] Failed to update maker's order {order_id} - order may not exist in registry")
         except Exception as e:
@@ -792,7 +842,7 @@ async def _find_and_send_matching_offers(
         }
 
 
-async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
+async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest_client: Any | None = None):
     """Propagate an offer to the network using registry discovery.
     
     Queries the registry for matching orders and sends offers to discovered agents.
@@ -801,6 +851,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
     Args:
         ctx: Invocation context
         order: MarketOrder object or order dictionary
+        alkahest_client: Alkahest client for creating escrows (optional)
     """
     # Convert order to dict if needed
     if isinstance(order, MarketOrder):
@@ -809,6 +860,13 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict):
     else:
         order_dict = order
         order_id = order_dict.get("order_id", "unknown")
+    
+    # Open orders should NOT have maker_attestation set
+    # maker_attestation is only set when the maker fulfills their obligation via Alkahest
+    # Ensure it's None for open orders
+    if order_dict.get("maker_attestation"):
+        logger.warning(f"[REGISTRY] Order {order_id} has maker_attestation set but should be None for open orders")
+        # Don't remove it if it's already set (might be from a previous state)
     
     # Ensure order is published to registry first
     if CONFIG.enable_registry_discovery:
@@ -1065,33 +1123,50 @@ async def fulfill_compute_obligation(
     escrow_uid: str,
     ssh_public_key: str,
     oracle_address: str | None = None,
+    order_id: str | None = None,
 ):
-    """Provision compute and fulfill the obligation. Falls back to simulated flow if no client."""
+    """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
+    
+    When the maker fulfills, this sets maker_attestation in the registry.
+    """
     oracle_address = _resolve_oracle_address(oracle_address)
     connection_details = await mock_provision_machine(ssh_public_key)
+    fulfillment_uid = None
+    maker_attestation = None
+    
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
+        maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
         logger.info("[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client.")
-        return {
-            "status": "fulfilled",
-            "message": "Compute obligation fulfilled (simulated)",
-            "escrow_uid": escrow_uid,
-            "fulfillment_uid": fulfillment_uid,
-            "connection_details": connection_details,
-            "ssh_public_key": ssh_public_key,
-        }
-
-    try:
-        fulfillment_uid = await client.string_obligation.do_obligation(
-            connection_details,
-            escrow_uid
-        )
-        logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
-        request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
-        logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
-    except Exception as error:
-        logger.info(f"[ALKAHEST] Fulfillment error: {error}")
+    else:
+        try:
+            fulfillment_uid = await client.string_obligation.do_obligation(
+                connection_details,
+                escrow_uid
+            )
+            maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
+            logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
+            request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+            logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
+        except Exception as error:
+            logger.info(f"[ALKAHEST] Fulfillment error: {error}")
+    
+    # Update registry with maker_attestation when maker fulfills
+    if order_id and maker_attestation and CONFIG.enable_registry_discovery:
+        try:
+            registry_client = get_registry_client()
+            updates = {
+                "maker_attestation": maker_attestation,
+            }
+            result = await registry_client.update_order(order_id, updates)
+            if result:
+                logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
+            else:
+                logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
+    
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",

@@ -363,17 +363,17 @@ def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resourc
     - demand_resource == original_order.offer_resource
     - order_maker == original_order.order_taker (the agent accepting)
     """
-    if not order.order_taker:  # Only look for symmetric order if we have a taker
+    if not order.order_taker:
         return None
     
     symmetric_orders = db.query(MarketOrder).filter(
         and_(
-            MarketOrder.order_id != order.order_id,  # Not the same order
-            MarketOrder.order_maker == order.order_taker,  # Maker is the taker of original order
+            MarketOrder.order_id != order.order_id,
+            MarketOrder.order_maker == order.order_taker,
+            MarketOrder.status == OrderStatusEnum.open,
         )
     ).all()
     
-    # Find the one where resources are swapped
     for candidate in symmetric_orders:
         if (resources_match(candidate.offer_resource, original_demand_resource) and
             resources_match(candidate.demand_resource, original_offer_resource)):
