@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./indexer.db"
     
     # Blockchain Configuration - Base Sepolia
-    chain_id: int = Field(default=84532, env="CHAIN_ID")
+    chain_id: int = Field(default=1337, env="CHAIN_ID")
     rpc_url: str = "https://sepolia.base.org"
     
     # ERC-8004 Contract Addresses (Base Sepolia)
