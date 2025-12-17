@@ -422,7 +422,7 @@ Agents should register on-chain using the ERC-8004 IdentityRegistry contract.
 
 Agents send authenticated periodic heartbeats to maintain health status:
 
-- Sign message: `"heartbeat:{agentId}:{timestamp}"`
+- Sign message: `"heartbeat:{canonicalAgentId}:{timestamp}"`
 - Use EIP-191 personal sign format
 - Timestamp must be within 5 minutes of current time
 - Send to `/agents/{agentId}/heartbeat` endpoint
