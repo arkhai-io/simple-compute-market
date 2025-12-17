@@ -21,6 +21,7 @@ from src.api.utils import (
     convert_agent_card_to_registration_file,
     verify_registration_signature,
     verify_heartbeat_signature,
+    find_agent_by_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -334,7 +335,7 @@ async def get_agent(
     db: Session = Depends(get_db),
 ):
     """Get agent by ID (supports canonical eip155:... format or integer PK)"""
-    agent = _find_agent_by_id(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -507,7 +508,7 @@ async def heartbeat(
     # FastAPI should automatically URL-decode path parameters, but ensure it's decoded
     agent_id = urllib.parse.unquote(agent_id)
     
-    agent = _find_agent_by_id(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")

@@ -8,8 +8,11 @@ import aiohttp
 import hashlib
 from typing import Optional
 from fastapi import HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
 
 from src.types import AgentCard, ERC8004RegistrationFile, Endpoint
+from src.db.models import Agent, MarketOrder, OrderStatusEnum
 
 # Import for signature verification
 try:
@@ -258,4 +261,131 @@ def resources_match(resource1: dict, resource2: dict) -> bool:
     import json
     # Normalize JSON for comparison
     return json.dumps(resource1, sort_keys=True) == json.dumps(resource2, sort_keys=True)
+
+
+def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
+    """Find agent by ID (supports integer PK or canonical ID format)"""
+    # Try integer PK first
+    try:
+        agent_id_int = int(agent_id)
+        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
+        if agent:
+            return agent
+    except ValueError:
+        pass
+    
+    # Try canonical ID (exact match)
+    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+    if agent:
+        return agent
+    
+    # Fallback: parse canonical ID and lookup by components
+    # This handles case where canonical ID format differs (e.g., address case)
+    try:
+        chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
+        # Normalize identity_registry to lowercase for comparison
+        identity_registry_lower = identity_registry.lower()
+        agent = db.query(Agent).filter(
+            and_(
+                Agent.chain_id == chain_id,
+                Agent.identity_registry == identity_registry_lower,
+                Agent.onchain_agent_id == onchain_agent_id
+            )
+        ).first()
+        return agent
+    except ValueError:
+        return None
+
+
+def order_to_dict(order: MarketOrder) -> dict:
+    """Convert MarketOrder model to API response dict"""
+    return {
+        "order_id": order.order_id,
+        "agent_id": order.agent_id,
+        "order_maker": order.order_maker,
+        "order_taker": order.order_taker,
+        "offer_resource": order.offer_resource or {},
+        "demand_resource": order.demand_resource or {},
+        "duration": order.duration,
+        "maker_attestation": order.maker_attestation,
+        "taker_attestation": order.taker_attestation,
+        "status": order.status.value,
+        "created_at": order.created_at.isoformat(),
+        "updated_at": order.updated_at.isoformat(),
+    }
+
+
+def validate_order_status(status: str) -> OrderStatusEnum:
+    """Validate and convert string status to OrderStatusEnum"""
+    try:
+        return OrderStatusEnum(status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+
+
+def matches_resource_filters(
+    order: MarketOrder,
+    offer_resource_type: Optional[str] = None,
+    demand_resource_type: Optional[str] = None,
+    region: Optional[str] = None,
+    gpu_model: Optional[str] = None,
+    sla: Optional[float] = None,
+    bidirectional: bool = False,
+) -> bool:
+    """Check if order matches resource filters"""
+    offer_res = order.offer_resource or {}
+    demand_res = order.demand_resource or {}
+    
+    # Resource type filtering (skip if bidirectional)
+    if not bidirectional:
+        if offer_resource_type:
+            if get_resource_type(offer_res) != offer_resource_type.lower():
+                return False
+        if demand_resource_type:
+            if get_resource_type(demand_res) != demand_resource_type.lower():
+                return False
+    
+    # Region filtering - applies to both directions
+    if region:
+        if offer_res.get("region") != region and demand_res.get("region") != region:
+            return False
+    
+    # GPU model filtering - applies to both directions
+    if gpu_model:
+        if offer_res.get("gpu_model") != gpu_model and demand_res.get("gpu_model") != gpu_model:
+            return False
+    
+    # SLA filtering - applies to both directions
+    if sla is not None:
+        if offer_res.get("sla") != sla and demand_res.get("sla") != sla:
+            return False
+    
+    return True
+
+
+def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resource: dict, original_demand_resource: dict) -> Optional[MarketOrder]:
+    """Find the symmetric order for a given order.
+    
+    A symmetric order is one where:
+    - offer_resource == original_order.demand_resource
+    - demand_resource == original_order.offer_resource
+    - order_maker == original_order.order_taker (the agent accepting)
+    """
+    if not order.order_taker:  # Only look for symmetric order if we have a taker
+        return None
+    
+    symmetric_orders = db.query(MarketOrder).filter(
+        and_(
+            MarketOrder.order_id != order.order_id,  # Not the same order
+            MarketOrder.order_maker == order.order_taker,  # Maker is the taker of original order
+        )
+    ).all()
+    
+    # Find the one where resources are swapped
+    for candidate in symmetric_orders:
+        if (resources_match(candidate.offer_resource, original_demand_resource) and
+            resources_match(candidate.demand_resource, original_offer_resource)):
+            return candidate
+    
+    return None
 

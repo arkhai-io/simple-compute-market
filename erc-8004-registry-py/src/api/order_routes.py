@@ -10,7 +10,13 @@ from sqlalchemy import desc, and_
 
 from src.db.database import get_db
 from src.db.models import Agent, MarketOrder, OrderStatusEnum
-from src.api.utils import parse_erc8004_canonical_id, get_resource_type, resources_match
+from src.api.utils import (
+    find_agent_by_id,
+    order_to_dict,
+    validate_order_status,
+    matches_resource_filters,
+    find_symmetric_order,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,31 +29,7 @@ async def publish_order(
     db: Session = Depends(get_db),
 ):
     """Publish a market order to the registry (supports both directions: compute supply and compute demand)"""
-    # Try to parse as integer (PK)
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-    except ValueError:
-        agent = None
-    
-    # If not found by PK, try canonical ID
-    if not agent:
-        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    
-    # Fallback: try to parse as canonical ID and lookup by components
-    if not agent:
-        try:
-            chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-            agent = db.query(Agent).filter(
-                and_(
-                    Agent.chain_id == chain_id,
-                    Agent.identity_registry == identity_registry,
-                    Agent.onchain_agent_id == onchain_agent_id
-                )
-            ).first()
-        except ValueError:
-            pass
-    
+    agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
@@ -64,20 +46,29 @@ async def publish_order(
     
     if existing_order:
         # Update existing order
-        existing_order.order_maker = order_data.get("order_maker", existing_order.order_maker)
-        existing_order.offer_resource = order_data.get("offer_resource", existing_order.offer_resource)
-        existing_order.demand_resource = order_data.get("demand_resource", existing_order.demand_resource)
-        existing_order.duration = order_data.get("duration", existing_order.duration)
-        existing_order.maker_attestation = order_data.get("maker_attestation", existing_order.maker_attestation)
-        existing_order.taker_attestation = order_data.get("taker_attestation", existing_order.taker_attestation)
-        existing_order.status = OrderStatusEnum(order_data.get("status", existing_order.status.value))
+        update_fields = {
+            "order_maker": order_data.get("order_maker"),
+            "offer_resource": order_data.get("offer_resource"),
+            "demand_resource": order_data.get("demand_resource"),
+            "duration": order_data.get("duration"),
+            "maker_attestation": order_data.get("maker_attestation"),
+            "taker_attestation": order_data.get("taker_attestation"),
+        }
+        for field, value in update_fields.items():
+            if value is not None:
+                setattr(existing_order, field, value)
+        
+        if "status" in order_data:
+            existing_order.status = validate_order_status(order_data["status"])
+        
         existing_order.updated_at = datetime.utcnow()
         order = existing_order
     else:
         # Create new order
+        status_str = order_data.get("status", "open")
         order = MarketOrder(
             order_id=order_id,
-            agent_id=agent_id_for_order,  # Use agent_id (string) for FK
+            agent_id=agent_id_for_order,
             order_maker=order_data.get("order_maker", ""),
             order_taker=order_data.get("order_taker"),
             offer_resource=order_data.get("offer_resource", {}),
@@ -85,7 +76,7 @@ async def publish_order(
             duration=order_data.get("duration", 1),
             maker_attestation=order_data.get("maker_attestation"),
             taker_attestation=order_data.get("taker_attestation"),
-            status=OrderStatusEnum(order_data.get("status", "open")),
+            status=validate_order_status(status_str),
         )
         db.add(order)
     
@@ -110,31 +101,7 @@ async def get_agent_orders(
     db: Session = Depends(get_db),
 ):
     """List orders for a specific agent"""
-    # Try to parse as integer (PK)
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-    except ValueError:
-        agent = None
-    
-    # If not found by PK, try canonical ID
-    if not agent:
-        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    
-    # Fallback: try to parse as canonical ID and lookup by components
-    if not agent:
-        try:
-            chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-            agent = db.query(Agent).filter(
-                and_(
-                    Agent.chain_id == chain_id,
-                    Agent.identity_registry == identity_registry,
-                    Agent.onchain_agent_id == onchain_agent_id
-                )
-            ).first()
-        except ValueError:
-            pass
-    
+    agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
@@ -142,31 +109,13 @@ async def get_agent_orders(
     query = db.query(MarketOrder).filter(MarketOrder.agent_id == agent.agent_id)
     
     if status:
-        try:
-            status_enum = OrderStatusEnum(status)
-            query = query.filter(MarketOrder.status == status_enum)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        status_enum = validate_order_status(status)
+        query = query.filter(MarketOrder.status == status_enum)
     
     orders = query.order_by(desc(MarketOrder.created_at)).offset(offset).limit(limit).all()
     
     return {
-        "items": [
-            {
-                "order_id": order.order_id,
-                "order_maker": order.order_maker,
-                "order_taker": order.order_taker,
-                "offer_resource": order.offer_resource,
-                "demand_resource": order.demand_resource,
-                "duration": order.duration,
-                "maker_attestation": order.maker_attestation,
-                "taker_attestation": order.taker_attestation,
-                "status": order.status.value,
-                "created_at": order.created_at.isoformat(),
-                "updated_at": order.updated_at.isoformat(),
-            }
-            for order in orders
-        ],
+        "items": [order_to_dict(order) for order in orders],
         "count": len(orders),
     }
 
@@ -189,73 +138,25 @@ async def query_orders(
     
     # Filter by status
     if status:
-        try:
-            status_enum = OrderStatusEnum(status)
-            query = query.filter(MarketOrder.status == status_enum)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        status_enum = validate_order_status(status)
+        query = query.filter(MarketOrder.status == status_enum)
     
     orders = query.order_by(desc(MarketOrder.created_at)).offset(offset).limit(limit).all()
     
     # Filter in Python for complex resource matching
-    filtered_items = []
-    for order in orders:
-        offer_res = order.offer_resource or {}
-        demand_res = order.demand_resource or {}
-        
-        # When bidirectional=True, skip strict resource type filtering
-        # Client-side matching will handle bidirectional matching
-        if not bidirectional:
-            # Filter by offer resource type (only when not bidirectional)
-            if offer_resource_type:
-                res_type = get_resource_type(offer_res)
-                if res_type != offer_resource_type.lower():
-                    continue
-            
-            # Filter by demand resource type (only when not bidirectional)
-            if demand_resource_type:
-                res_type = get_resource_type(demand_res)
-                if res_type != demand_resource_type.lower():
-                    continue
-        
-        # Filter by region (if compute resource) - applies to both directions
-        if region and "region" in offer_res:
-            if offer_res.get("region") != region:
-                continue
-        if region and "region" in demand_res:
-            if demand_res.get("region") != region:
-                continue
-        
-        # Filter by GPU model (if compute resource) - applies to both directions
-        if gpu_model and "gpu_model" in offer_res:
-            if offer_res.get("gpu_model") != gpu_model:
-                continue
-        if gpu_model and "gpu_model" in demand_res:
-            if demand_res.get("gpu_model") != gpu_model:
-                continue
-        
-        # Filter by SLA (if compute resource) - applies to both directions
-        if sla is not None and "sla" in offer_res:
-            if offer_res.get("sla") != sla:
-                continue
-        if sla is not None and "sla" in demand_res:
-            if demand_res.get("sla") != sla:
-                continue
-        
-        filtered_items.append({
-            "order_id": order.order_id,
-            "agent_id": order.agent_id,
-            "order_maker": order.order_maker,
-            "order_taker": order.order_taker,
-            "offer_resource": offer_res,
-            "demand_resource": demand_res,
-            "duration": order.duration,
-            "maker_attestation": order.maker_attestation,
-            "taker_attestation": order.taker_attestation,
-            "status": order.status.value,
-            "created_at": order.created_at.isoformat(),
-            "updated_at": order.updated_at.isoformat(),
-        })
+    filtered_items = [
+        order_to_dict(order)
+        for order in orders
+        if matches_resource_filters(
+            order,
+            offer_resource_type=offer_resource_type,
+            demand_resource_type=demand_resource_type,
+            region=region,
+            gpu_model=gpu_model,
+            sla=sla,
+            bidirectional=bidirectional,
+        )
+    ]
     
     return {
         "items": filtered_items,
@@ -284,10 +185,7 @@ async def update_order(
     
     # Update fields
     if "status" in updates:
-        try:
-            order.status = OrderStatusEnum(updates["status"])
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {updates['status']}")
+        order.status = validate_order_status(updates["status"])
     
     if "order_taker" in updates:
         order.order_taker = updates["order_taker"]
@@ -303,34 +201,16 @@ async def update_order(
     db.refresh(order)
     
     # Find and update the corresponding symmetric order
-    # Symmetric order: offer_resource == original_order.demand_resource AND
-    #                  demand_resource == original_order.offer_resource AND
-    #                  order_maker == original_order.order_taker (the agent accepting)
-    symmetric_order = None
-    if order.order_taker:  # Only look for symmetric order if we have a taker
-        symmetric_orders = db.query(MarketOrder).filter(
-            and_(
-                MarketOrder.order_id != order_id,  # Not the same order
-                MarketOrder.order_maker == order.order_taker,  # Maker is the taker of original order
-            )
-        ).all()
-        
-        # Find the one where resources are swapped
-        for candidate in symmetric_orders:
-            if (resources_match(candidate.offer_resource, original_demand_resource) and
-                resources_match(candidate.demand_resource, original_offer_resource)):
-                symmetric_order = candidate
-                break
+    symmetric_order = find_symmetric_order(
+        db, order, original_offer_resource, original_demand_resource
+    )
     
     if symmetric_order:
         logger.info(f"[REGISTRY] Found symmetric order {symmetric_order.order_id} for order {order_id}")
         
         # Update symmetric order with swapped fields
         if "status" in updates:
-            try:
-                symmetric_order.status = OrderStatusEnum(updates["status"])
-            except ValueError:
-                pass  # Already validated above
+            symmetric_order.status = validate_order_status(updates["status"])
         
         # For symmetric order: taker becomes the original maker
         if "order_taker" in updates:
