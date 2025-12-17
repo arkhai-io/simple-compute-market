@@ -164,9 +164,6 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
     # Build agent card URL using shared helper
     agent_card_url = build_agent_card_url(config.base_url_override)
     
-    # Initialize indexer_agent_id to None
-    indexer_agent_id = None
-    
     # Attempt on-chain registration if configured
     onchain_agent_id = None
     if (config.agent_priv_key and
@@ -204,68 +201,33 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
             f"[ONCHAIN REGISTRATION] On-chain registration skipped. Missing: {', '.join(missing)}"
         )
 
-    # Register with Indexer after on-chain registration (if configured)
-    # NOTE: Offchain registration is commented out - relying on event sync instead
-    indexer_agent_id = None
+    # Build canonical ID for heartbeat (Indexer discovers agents via event sync)
     canonical_id = None
-    
-    # Build canonical ID for heartbeat even if offchain registration is disabled
-    if config.indexer_url and onchain_agent_id is not None:
+    if config.indexer_url and onchain_agent_id is not None and config.identity_registry_address:
         try:
-            # Build ERC-8004 canonical ID: eip155:{chainId}:{identityRegistry}:{agentId}
             # Get chain_id from web3 connection
-            if HAS_WEB3:
+            chain_id = 1337  # Default for Anvil/local
+            if HAS_WEB3 and config.chain_rpc_url:
                 try:
                     http_url = config.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
                     w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 10}))
                     chain_id = w3.eth.chain_id
                 except Exception as e:
-                    logger.warning(f"[REGISTRATION] Could not get chain_id from RPC: {e}, using default")
-                    chain_id = 1337  # Default for Anvil/local
-            else:
-                logger.warning(f"[REGISTRATION] web3 not available, using default chain_id")
-                chain_id = 1337  # Default for Anvil/local
+                    logger.warning(f"[REGISTRATION] Could not get chain_id from RPC: {e}, using default {chain_id}")
             
-            # Build canonical ID
             canonical_id = build_erc8004_canonical_id(
                 chain_id=chain_id,
                 identity_registry=config.identity_registry_address,
                 agent_id=onchain_agent_id
             )
             logger.info(f"[REGISTRATION] Built canonical ID: {canonical_id}")
-            logger.info(f"[REGISTRATION] Offchain registration disabled - Indexer will discover agent via event sync")
-
-            # Offchain registration commented out - testing event sync
-            # indexer_agent_id = await register_offchain(
-            #     agent_card_url=agent_card_url,
-            #     indexer_url=config.indexer_url,
-            #     owner=wallet_address,
-            #     agent_id=canonical_id,  # Pass ERC-8004 canonical ID
-            #     private_key=config.agent_priv_key,
-            #     onchain_agent_id=onchain_agent_id
-            # )
-            # if indexer_agent_id:
-            #     logger.info(f"[OFFCHAIN REGISTRATION] Indexer registration complete. Agent ID: {indexer_agent_id}")
-            # else:
-            #     logger.warning("[OFFCHAIN REGISTRATION] Indexer registration returned no agent ID")
         except Exception as e:
             logger.warning(f"[REGISTRATION] Error building canonical ID: {e}")
 
-    # Start heartbeat loop if we have an agent ID
-    # The heartbeat endpoint accepts canonical IDs, so we can use that even without offchain registration
-    # This allows heartbeats to work when testing event sync (offchain registration disabled)
-    heartbeat_agent_id = None
-    if indexer_agent_id:
-        # Use indexer's agent ID if available (from offchain registration)
-        heartbeat_agent_id = indexer_agent_id
-    elif canonical_id and config.indexer_url:
-        # Use canonical ID for heartbeat when offchain registration is disabled (event sync mode)
-        heartbeat_agent_id = canonical_id
-        logger.info(f"[REGISTRATION] Using canonical ID for heartbeat: {heartbeat_agent_id}")
-    
-    if heartbeat_agent_id and config.indexer_url:
-        asyncio.create_task(heartbeat_loop(heartbeat_agent_id, config.indexer_url, config.agent_priv_key, wallet_address))
-        logger.info(f"[REGISTRATION] Started heartbeat loop for agent {heartbeat_agent_id}")
+    # Start heartbeat loop using canonical ID (Indexer discovers agents via event sync)
+    if canonical_id and config.indexer_url:
+        asyncio.create_task(heartbeat_loop(canonical_id, config.indexer_url, config.agent_priv_key, wallet_address))
+        logger.info(f"[REGISTRATION] Started heartbeat loop for agent {canonical_id}")
 
     logger.info(f"[REGISTRATION] Registration complete using wallet address as identifier: {wallet_address}")
     return wallet_address

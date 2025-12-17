@@ -119,17 +119,8 @@ class EventSyncService:
                                 logger.warning(f"[EventSync] Event missing args: {event}")
                                 continue
                             
-                            # Try different ways to access agentId (handles different web3.py versions)
-                            agent_id_value = None
-                            if hasattr(event.args, 'agentId'):
-                                agent_id_value = event.args.agentId
-                            elif hasattr(event.args, 'agent_id'):
-                                agent_id_value = event.args.agent_id
-                            elif isinstance(event.args, dict):
-                                # Sometimes args is a dict
-                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
-                            elif isinstance(event.args, (list, tuple)) and len(event.args) > 0:
-                                agent_id_value = event.args[0]
+                            # Extract agentId from event args (handles different web3.py versions)
+                            agent_id_value = self._extract_event_arg(event.args, 'agentId', 'agent_id')
                             
                             # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
                             if agent_id_value is None:
@@ -248,25 +239,10 @@ class EventSyncService:
                                 logger.warning(f"[EventSync] MetadataUpdated event missing args: {event}")
                                 continue
                             
-                            # Try different ways to access event args (handles different web3.py versions)
-                            agent_id_value = None
-                            key_value = None
+                            # Extract event args (handles different web3.py versions)
+                            agent_id_value = self._extract_event_arg(event.args, 'agentId', 'agent_id')
+                            key_value = self._extract_event_arg(event.args, 'key')
                             
-                            if hasattr(event.args, 'agentId') and hasattr(event.args, 'key'):
-                                agent_id_value = event.args.agentId
-                                key_value = event.args.key
-                            elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'key'):
-                                agent_id_value = event.args.agent_id
-                                key_value = event.args.key
-                            elif isinstance(event.args, dict):
-                                # Sometimes args is a dict
-                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
-                                key_value = event.args.get('key')
-                            elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
-                                agent_id_value = event.args[0]
-                                key_value = event.args[1]
-                            
-                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
                             if agent_id_value is None or key_value is None:
                                 logger.warning(f"[EventSync] Could not extract agentId/key from MetadataSet event: {event}")
                                 continue
@@ -334,10 +310,10 @@ class EventSyncService:
                                 db.commit()
                                 logger.info(f"[EventSync] Updated metadata for agent {canonical_id}, key: {key}")
                             except Exception as e:
-                                logger.warning(f"[EventSync] Could not update metadata for agent {agent_id}, key {key}: {e}")
+                                logger.error(f"[EventSync] Error updating metadata for agent {canonical_id}, key {key}: {e}")
                                 db.rollback()
-                            except Exception as e:
-                                logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
+                        except Exception as e:
+                            logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
                             continue
 
@@ -353,25 +329,10 @@ class EventSyncService:
                                 logger.warning(f"[EventSync] UriUpdated event missing args: {event}")
                                 continue
                             
-                            # Try different ways to access event args (handles different web3.py versions)
-                            agent_id_value = None
-                            new_uri_value = None
+                            # Extract event args (handles different web3.py versions)
+                            agent_id_value = self._extract_event_arg(event.args, 'agentId', 'agent_id')
+                            new_uri_value = self._extract_event_arg(event.args, 'newUri', 'new_uri')
                             
-                            if hasattr(event.args, 'agentId') and hasattr(event.args, 'newUri'):
-                                agent_id_value = event.args.agentId
-                                new_uri_value = event.args.newUri
-                            elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'new_uri'):
-                                agent_id_value = event.args.agent_id
-                                new_uri_value = event.args.new_uri
-                            elif isinstance(event.args, dict):
-                                # Sometimes args is a dict
-                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
-                                new_uri_value = event.args.get('newUri') or event.args.get('new_uri')
-                            elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
-                                agent_id_value = event.args[0]
-                                new_uri_value = event.args[1]
-                            
-                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
                             if agent_id_value is None or new_uri_value is None:
                                 logger.warning(f"[EventSync] Could not extract agentId/newUri from UriUpdated event: {event}")
                                 continue
@@ -422,6 +383,28 @@ class EventSyncService:
                 current_from = current_to + 1
         finally:
             db.close()
+
+    def _extract_event_arg(self, args, *possible_keys):
+        """Extract event argument by trying multiple key names (handles different web3.py versions)"""
+        if not args:
+            return None
+        
+        # Try attribute access first
+        for key in possible_keys:
+            if hasattr(args, key):
+                return getattr(args, key)
+        
+        # Try dict access
+        if isinstance(args, dict):
+            for key in possible_keys:
+                if key in args:
+                    return args[key]
+        
+        # Try list/tuple access (first element)
+        if isinstance(args, (list, tuple)) and len(args) > 0:
+            return args[0]
+        
+        return None
 
     async def sync(self):
         """Manually trigger a sync"""

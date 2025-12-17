@@ -27,6 +27,36 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
+    """Find agent by ID (supports integer PK or canonical ID format)"""
+    # Try integer PK first
+    try:
+        agent_id_int = int(agent_id)
+        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
+        if agent:
+            return agent
+    except ValueError:
+        pass
+    
+    # Try canonical ID
+    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+    if agent:
+        return agent
+    
+    # Fallback: parse canonical ID and lookup by components
+    try:
+        chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
+        return db.query(Agent).filter(
+            and_(
+                Agent.chain_id == chain_id,
+                Agent.identity_registry == identity_registry,
+                Agent.onchain_agent_id == onchain_agent_id
+            )
+        ).first()
+    except ValueError:
+        return None
+
+
 @router.post("/agents/register", status_code=201)
 async def register_agent(
     registration: AgentRegistration,
@@ -279,30 +309,7 @@ async def get_agent(
     db: Session = Depends(get_db),
 ):
     """Get agent by ID (supports canonical eip155:... format or integer PK)"""
-    # Try to parse as integer (PK)
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-    except ValueError:
-        agent = None
-    
-    # If not found by PK, try canonical ID (agent_id stores canonical format)
-    if not agent:
-        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    
-    # Fallback: try to parse as canonical ID and lookup by components
-    if not agent:
-        try:
-            chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-            agent = db.query(Agent).filter(
-                and_(
-                    Agent.chain_id == chain_id,
-                    Agent.identity_registry == identity_registry,
-                    Agent.onchain_agent_id == onchain_agent_id
-                )
-            ).first()
-        except ValueError:
-            pass
+    agent = _find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -475,16 +482,7 @@ async def heartbeat(
     # FastAPI should automatically URL-decode path parameters, but ensure it's decoded
     agent_id = urllib.parse.unquote(agent_id)
     
-    # Try to parse as integer (PK)
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-    except ValueError:
-        agent = None
-    
-    # If not found by PK, try canonical ID lookup (exact match - addresses are normalized to lowercase)
-    if not agent:
-        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+    agent = _find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
