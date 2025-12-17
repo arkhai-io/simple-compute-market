@@ -380,4 +380,3 @@ def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resourc
             return candidate
     
     return None
-

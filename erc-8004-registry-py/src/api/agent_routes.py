@@ -28,45 +28,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find agent by ID (canonical ID format)"""    
-    # Try canonical ID (exact match)
-    agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
-    if agent:
-        logger.debug(f"[AgentLookup] Found agent by canonical ID: {agent_id}")
-        return agent
-    
-    # Fallback: parse canonical ID and lookup by components
-    # This handles case where canonical ID format differs (e.g., address case)
-    try:
-        chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-        # Normalize identity_registry to lowercase for comparison
-        identity_registry_lower = identity_registry.lower()
-        agent = db.query(Agent).filter(
-            and_(
-                Agent.chain_id == chain_id,
-                Agent.identity_registry == identity_registry_lower,
-                Agent.onchain_agent_id == onchain_agent_id
-            )
-        ).first()
-        if agent:
-            logger.debug(f"[AgentLookup] Found agent by components: chain_id={chain_id}, registry={identity_registry_lower}, onchain_id={onchain_agent_id} -> {agent.agent_id}")
-        else:
-            # Debug: Check what agents exist with similar components
-            similar_agents = db.query(Agent).filter(
-                Agent.onchain_agent_id == onchain_agent_id
-            ).all()
-            if similar_agents:
-                logger.warning(
-                    f"[AgentLookup] Agent {agent_id} not found. Found {len(similar_agents)} agents with same onchain_agent_id: "
-                    f"{[(a.agent_id, a.chain_id, a.identity_registry) for a in similar_agents]}"
-                )
-        return agent
-    except ValueError as e:
-        logger.debug(f"[AgentLookup] Failed to parse canonical ID {agent_id}: {e}")
-        return None
-
-
 @router.post("/agents/register", status_code=201)
 async def register_agent(
     registration: AgentRegistration,
