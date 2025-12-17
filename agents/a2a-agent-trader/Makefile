@@ -13,8 +13,8 @@ install:
 
 # Register agent on-chain (run this before starting the agent)
 # Usage: make register-onchain [ENV_FILE=.env]
-# This breaks the circular dependency by registering on-chain separately
-# from agent startup. The agent ID will be saved to .env as ONCHAIN_AGENT_ID
+# This registers to the on-chain Registry separately from agent startup.
+# The agent ID will be saved to .env as ONCHAIN_AGENT_ID
 register-onchain:
 	@echo "==============================================================================="
 	@echo "| 🔗 Registering agent on-chain...                                            |"
