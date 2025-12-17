@@ -197,6 +197,7 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
             "gpu_model": res.gpu_model,
             "sla": res.sla,
             "region": res.region,
+            "imbalance_type": getattr(context.event, "imbalance_type", "surplus"),
         },
     )
 

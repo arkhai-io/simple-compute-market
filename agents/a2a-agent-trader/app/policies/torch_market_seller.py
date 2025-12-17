@@ -21,6 +21,7 @@ from app.schema.pydantic_models import (
     ComputeResourcePortfolio,
 )
 from app.utils.validation import extract_resources_from_make_offer_event
+from app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +227,28 @@ def _build_action_parameters(
     demand_resource: Any = None,
     price_idx: int | None = None,
     sell_flag: int | None = None,
+    order: Any = None,
 ) -> dict[str, Any]:
-    """Build parameter payload with resource/order info and market actions."""
+    """Build parameter payload with resource/order info and market actions.
+    
+    Args:
+        order_id: Order identifier
+        offer_resource: Resource being offered
+        demand_resource: Resource being demanded
+        price_idx: Price index from model
+        sell_flag: Sell flag from model
+        order: Full MarketOrder object (required for ACCEPT_OFFER action)
+    """
     parameters: dict[str, Any] = {}
+    
+    # Include full order object if provided (required for accept_offer)
+    if order is not None:
+        if hasattr(order, "model_dump"):
+            parameters["order"] = order.model_dump(mode="json")
+        elif isinstance(order, dict):
+            parameters["order"] = order
+        else:
+            parameters["order"] = order
     
     if order_id:
         parameters["order_id"] = order_id
@@ -340,37 +360,89 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
     # Extract actions from model output
     price_idx, sell_flag = _extract_actions_from_logits(output)
     
-    logger.debug(
-        f"[MARKET SELLER POLICY] Model inference: price_idx={price_idx}, sell_flag={sell_flag} "
-        f"(sell_flag controls energy sales, not compute resource sales)"
+    # Determine if current agent is buyer or seller based on order structure
+    # Seller: offering compute resource, demanding tokens
+    # Buyer: demanding compute resource, offering tokens
+    maker_offers_compute = isinstance(offer_resource, ComputeResource) and isinstance(demand_resource, TokenResource)
+    maker_offers_tokens = isinstance(offer_resource, TokenResource) and isinstance(demand_resource, ComputeResource)
+    
+    # Check if we're the maker (who created the order) or receiver
+    current_agent_url = CONFIG.base_url_override
+    # Normalize URLs for comparison (remove trailing slashes, handle port variations)
+    maker_url_normalized = order.order_maker.rstrip('/')
+    current_url_normalized = current_agent_url.rstrip('/')
+    is_maker = (
+        maker_url_normalized == current_url_normalized or 
+        maker_url_normalized.endswith(current_url_normalized) or 
+        current_url_normalized.endswith(maker_url_normalized)
     )
     
-    # Map market actions to domain actions
+    # Determine role:
+    # - If maker offers compute: maker is seller, receiver is buyer
+    # - If maker offers tokens: maker is buyer, receiver is seller
+    if is_maker:
+        # We created this order
+        agent_role = "seller" if maker_offers_compute else "buyer"
+    else:
+        # We received this order - our role is opposite of maker
+        agent_role = "buyer" if maker_offers_compute else "seller"
+    
+    # Fallback: if we can't determine role from order structure, use default seller behavior
+    if not maker_offers_compute and not maker_offers_tokens:
+        logger.warning(
+            f"[MARKET SELLER POLICY] Cannot determine role from order structure, "
+            f"defaulting to seller behavior. offer={type(offer_resource).__name__}, "
+            f"demand={type(demand_resource).__name__}"
+        )
+        agent_role = "seller"
+    
+    logger.info(
+        f"[MARKET SELLER POLICY] Agent role: {agent_role} (maker={is_maker}, "
+        f"offer={type(offer_resource).__name__}, demand={type(demand_resource).__name__}), "
+        f"price_idx={price_idx}, sell_flag={sell_flag}"
+    )
+    
+    # Map market actions to domain actions based on role
     # Note: sell_flag is for energy marketplace, not for compute resource sales
     # price_idx determines the offer price multiplier for job offers
-    # For compute resource offers, we map price_idx to action type:
-    # - Lower price_idx (0-3): More competitive pricing → ACCEPT or COUNTER
-    # - Higher price_idx (4-8): Higher pricing → REJECT or COUNTER
-    # The actual mapping should be refined based on your domain requirements
     
-    # Map price_idx to action type (this is a simplified mapping)
-    # In production, you might want to use price_idx to set actual offer prices
-    if price_idx <= 3:
-        # Lower price index → more competitive → accept or counter
-        action_type = ActionType.ACCEPT_OFFER
-    elif price_idx <= 6:
-        # Medium price index → counter offer
-        action_type = ActionType.COUNTER_OFFER
+    # For SELLERS: Auto-accept first (they want to sell their compute resource)
+    # - Accept by default (price_idx <= 7)
+    # - Only counter if price_idx == 8 (very high pricing)
+    # - Reject only in extreme cases (shouldn't happen with normal price_idx range 0-8)
+    if agent_role == "seller":
+        if price_idx <= 7:
+            # Accept most offers to sell compute resources
+            action_type = ActionType.ACCEPT_OFFER
+        elif price_idx == 8:
+            # Very high price index → counter offer
+            action_type = ActionType.COUNTER_OFFER
+        else:
+            # Extreme case → reject (shouldn't normally happen)
+            action_type = ActionType.REJECT_OFFER
     else:
-        # Higher price index → reject
-        action_type = ActionType.REJECT_OFFER
+        # For BUYERS: More selective (they need the compute resource but want good pricing)
+        # - Accept if price_idx <= 5 (more lenient)
+        # - Counter if price_idx <= 7
+        # - Reject only if price_idx >= 8
+        if price_idx <= 5:
+            # Lower price index → more competitive → accept
+            action_type = ActionType.ACCEPT_OFFER
+        elif price_idx <= 7:
+            # Medium price index → counter offer
+            action_type = ActionType.COUNTER_OFFER
+        else:
+            # Higher price index → reject
+            action_type = ActionType.REJECT_OFFER
     
+    # Build parameters - include full order for ACCEPT_OFFER action
     parameters = _build_action_parameters(
         order_id=order.order_id,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
         price_idx=price_idx,
         sell_flag=sell_flag,  # Energy marketplace sell flag
+        order=order if action_type == ActionType.ACCEPT_OFFER else None,  # Include full order for accept
     )
     
     return DomainAction(action_type=action_type, parameters=parameters)
