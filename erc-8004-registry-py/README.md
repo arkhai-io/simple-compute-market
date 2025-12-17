@@ -136,7 +136,7 @@ uvicorn src.main:app --reload
 
 ## Startup Order
 
-**Important**: Start the Indexer **before** starting your agents.
+**Recommended**: Start the Indexer **before** starting your agents for best experience.
 
 1. **Start Indexer First**:
 
@@ -151,16 +151,27 @@ uvicorn src.main:app --reload
    uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
    ```
 
-2. **Then Start Agents**: Your agents can now register and interact with the Indexer.
+2. **Then Start Agents**: Your agents can now:
+   - Register on-chain (works independently, but Indexer will sync immediately)
+   - Send authenticated heartbeats (requires Indexer)
+   - Discover other agents via Indexer API (requires Indexer)
 
-**Why Indexer first?**
+**Why Start Indexer First?**
 
-- Agents can register via Indexer API (requires Indexer)
-- Agents can send authenticated heartbeats (requires Indexer)  
-- Agents can discover other agents (requires Indexer)
-- Event sync will catch up on any on-chain registrations that happened before Indexer started
+- **Event Sync**: Indexer can immediately sync agent registrations as they happen
+- **Heartbeats**: Agents can send heartbeats right away (requires Indexer)
+- **Discovery**: Agents can discover other agents immediately (requires Indexer)
 
-**Note**: If an agent registers on-chain before the Indexer starts, the event sync service will automatically index it when the Indexer starts.
+**What if Indexer Starts After Agents?**
+
+- ✅ **No problem!** Agents can register on-chain anytime (independent of Indexer)
+- ✅ **Auto-sync**: When Indexer starts, event sync will automatically catch up on all on-chain registrations
+- ✅ **Backfill**: Event sync performs initial sync on startup to index any missed registrations
+
+**Note**: While agents can register on-chain independently, the Indexer must be running for:
+- Agent discovery via `/agents` endpoint
+- Heartbeat processing
+- Real-time event synchronization
 
 ## Running the Server
 
@@ -309,9 +320,11 @@ The recommended workflow is for agents to register directly on-chain using the E
 
 Agents should register on-chain using the ERC-8004 IdentityRegistry contract.
 
-**Registration Flow:**
+**On-Chain Registration Steps:**
 
-1. **Register on-chain** → Call the IdentityRegistry contract's `register()` function
+1. **Call `register()` function** → Interact directly with the ERC-8004 IdentityRegistry contract
+   - Pass your agent's token URI (pointing to your agent card JSON)
+   - Optionally include metadata entries
    - Returns a numeric agent ID (e.g., `22`) - this is the ERC-721 tokenId
    - Use environment variables for secure private key management
    - Estimate and manage transaction costs (gas)
@@ -321,7 +334,12 @@ Agents should register on-chain using the ERC-8004 IdentityRegistry contract.
    - Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
    - Where `22` is the numeric agent ID from step 1
 
-3. **Use canonical ID** → Include it in API calls, heartbeats, and Option 3 registrations
+3. **Indexer auto-syncs** → The Indexer's event sync service automatically detects your registration
+   - No additional API calls needed
+   - Agent becomes available in Indexer database
+   - Can be discovered via `/agents` endpoint
+
+4. **Use canonical ID** → Include it in heartbeats and other Indexer API calls
 
 ### Agent Heartbeat
 
@@ -358,16 +376,33 @@ createdb registry
 
 ## Event Synchronization
 
-The Indexer automatically syncs on-chain events:
+The Indexer automatically syncs on-chain events to keep its database up-to-date:
 
-- **AgentRegistered**: New agent registrations
-- **MetadataUpdated**: Agent metadata updates
+**Synced Events:**
 
-The sync service:
+- **AgentRegistered**: New agent registrations (primary method for agent discovery)
+- **MetadataSet**: Agent metadata updates
+- **UriUpdated**: Agent token URI updates
 
-- Performs initial sync on startup
-- Watches for new events in real-time
-- Handles missed events with periodic backfill
+**How Event Sync Works:**
+
+1. **On Startup**: Performs initial sync to catch up on any registrations that happened while Indexer was offline
+2. **Real-Time Monitoring**: Continuously watches for new events on-chain
+3. **Automatic Indexing**: When an agent registers on-chain, the Indexer automatically:
+   - Detects the `AgentRegistered` event
+   - Fetches agent metadata from the token URI
+   - Stores agent information in the database
+   - Makes the agent discoverable via API
+
+**Benefits:**
+
+- ✅ Agents register on-chain independently (no Indexer dependency)
+- ✅ Indexer automatically discovers all on-chain registrations
+- ✅ No manual API calls needed for registration
+- ✅ Handles missed events with periodic backfill
+- ✅ Works even if Indexer was offline during registration
+
+**Note**: The event sync service runs automatically when the Indexer starts. Ensure the Indexer is running for agents to be discoverable, but agents can register on-chain at any time.
 
 ## Health Monitoring
 
