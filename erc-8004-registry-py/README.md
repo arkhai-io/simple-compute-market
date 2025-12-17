@@ -425,7 +425,7 @@ Agents send authenticated periodic heartbeats to maintain health status:
 - Sign message: `"heartbeat:{canonicalAgentId}:{timestamp}"`
 - Use EIP-191 personal sign format
 - Timestamp must be within 5 minutes of current time
-- Send to `/agents/{agentId}/heartbeat` endpoint
+- Send to `/agents/{canonicalAgentId}/heartbeat` endpoint
 
 ### Discovery
 
