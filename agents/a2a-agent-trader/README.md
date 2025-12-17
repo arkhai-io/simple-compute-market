@@ -44,7 +44,7 @@ make install && make playground
 | Command              | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
 | `make install`       | Install all required dependencies using uv                                                  |
-| `make register-onchain` | Register agent on-chain before starting (breaks circular dependency) |
+| `make register-onchain` | Register agent on-chain before starting |
 | `make serve-a2a`     | Start A2A agent server (requires on-chain registration first) |
 | `make playground`    | Launch local development environment with backend and frontend - leveraging `adk web` command.|
 | `make backend`       | Deploy agent to Cloud Run (use `IAP=true` to enable Identity-Aware Proxy) |
