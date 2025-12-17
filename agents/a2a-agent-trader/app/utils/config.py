@@ -31,6 +31,49 @@ def _get_int_env(var_name: str, default: int) -> int:
         return default
 
 
+# Default agent ID used when AGENT_ID env var is not set
+DEFAULT_AGENT_ID = "root_agent"
+
+
+def get_agent_id(env_value: str | None = None) -> str:
+    """
+    Get and validate agent ID from environment variable or provided value.
+    
+    Agent ID must be a valid Python identifier:
+    - Must start with a letter (a-z, A-Z) or underscore (_)
+    - Can only contain letters, digits, and underscores
+    - Cannot be empty
+    
+    This restriction exists because:
+    - Agent ID is used as BaseAgent.name parameter (may need to be valid identifier)
+    - Used in database queries and as identifiers throughout the codebase
+    - Prevents issues with special characters in URLs, filenames, SQL queries, etc.
+    
+    Args:
+        env_value: Optional value to use (if None, reads from AGENT_ID env var)
+    
+    Returns:
+        Validated agent ID string (defaults to DEFAULT_AGENT_ID if not set)
+    
+    Raises:
+        ValueError: If agent_id contains invalid characters or doesn't start with letter/underscore
+    """
+    agent_id = env_value if env_value is not None else os.getenv("AGENT_ID")
+    
+    if not agent_id:
+        return DEFAULT_AGENT_ID
+    
+    # Validate: must be a valid Python identifier
+    if not agent_id.isidentifier():
+        raise ValueError(
+            f"AGENT_ID '{agent_id}' is not a valid identifier. "
+            f"Must start with a letter or underscore, and only contain letters, digits, and underscores. "
+            f"Examples: 'my_agent', 'agent_123', '_internal_agent'"
+        )
+    
+    return agent_id
+
+
 @dataclass(frozen=True)
 class Config:
     agent_id: str
@@ -54,11 +97,10 @@ class Config:
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
     ssh_public_key: str
-    # Auto-registration settings
-    auto_register: bool  # AUTO_REGISTER - enable auto-registration on startup
+    # Indexer/Registry settings
     indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
     identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
-    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (NFT token ID) to use for updates
+    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (set by make register-onchain)
     # Registry discovery settings
     enable_registry_discovery: bool  # ENABLE_REGISTRY_DISCOVERY - enable registry-based agent discovery
     registry_order_timeout: int  # REGISTRY_ORDER_TIMEOUT - timeout for registry API calls in seconds
@@ -74,18 +116,15 @@ DEFAULT_TOKEN_REGISTRY_PATH = (
 
 
 def load_config() -> Config:
-    # Get agent_id from environment variable
-    # Agent name must be a valid identifier: start with letter/underscore, 
-    # and only contain letters, digits, and underscores
-    agent_id = os.getenv("AGENT_ID")
-    if not agent_id:
-        # If AGENT_ID is not set, use a safe default instead of hostname
-        # (hostnames often contain invalid characters like hyphens and dots)
-        agent_id = "root_agent"
+    # Get agent_id from environment variable with validation
+    agent_id = get_agent_id()
+    
+    if agent_id == DEFAULT_AGENT_ID and not os.getenv("AGENT_ID"):
+        # Only warn if using default (not if user explicitly set it to "root_agent")
         import warnings
         warnings.warn(
-            "AGENT_ID environment variable not set. Using default 'root_agent'. "
-            "Please set AGENT_ID to a valid identifier (letters, digits, underscores only).",
+            f"AGENT_ID environment variable not set. Using default '{DEFAULT_AGENT_ID}'. "
+            f"Please set AGENT_ID to a valid identifier (letters, digits, underscores only).",
             UserWarning
         )
     
@@ -118,8 +157,7 @@ def load_config() -> Config:
             "SSH_PUBLIC_KEY",
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example",
         ),
-        # Auto-registration settings
-        auto_register=_get_bool_env("AUTO_REGISTER", False),
+        # Indexer/Registry settings
         indexer_url=os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080")),  # Support both for backward compatibility
         identity_registry_address=os.getenv("IDENTITY_REGISTRY_ADDRESS"),
         onchain_agent_id=os.getenv("ONCHAIN_AGENT_ID"),  # Explicit on-chain agent ID (optional)

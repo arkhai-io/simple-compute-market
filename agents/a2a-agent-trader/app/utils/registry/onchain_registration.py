@@ -26,6 +26,21 @@ from ...abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
 logger = logging.getLogger(__name__)
 
 
+def build_agent_card_url(base_url: str) -> str:
+    """
+    Build the agent card URL (token_uri) consistently.
+    
+    Args:
+        base_url: Base URL of the agent (e.g., http://localhost:8000)
+    
+    Returns:
+        Agent card URL (e.g., http://localhost:8000/.well-known/agent-card.json)
+    """
+    return f"{base_url.rstrip('/')}/.well-known/agent-card.json"
+
+
+
+
 async def update_existing_agent(
     contract,
     account,
@@ -65,11 +80,22 @@ async def update_existing_agent(
     try:
         # Fetch current token URI from contract
         current_token_uri = contract.functions.tokenURI(agent_id).call()
+        
+        # Normalize URIs for comparison (strip trailing slashes, handle http/https)
+        def normalize_uri(uri: str) -> str:
+            uri = uri.rstrip('/')
+            # Normalize http/https (optional - uncomment if needed)
+            # uri = uri.replace('https://', 'http://')
+            return uri
+        
+        normalized_current = normalize_uri(current_token_uri)
+        normalized_desired = normalize_uri(desired_token_uri)
+        
         logger.debug(f"[UPDATE] Current token URI: {current_token_uri}")
         logger.debug(f"[UPDATE] Desired token URI: {desired_token_uri}")
         
-        # Compare token URI
-        if current_token_uri != desired_token_uri:
+        # Compare normalized token URIs
+        if normalized_current != normalized_desired:
             logger.info(f"[UPDATE] Token URI changed: {current_token_uri} -> {desired_token_uri}")
             try:
                 # Call setAgentUri
@@ -200,8 +226,9 @@ async def register_onchain(
     contract_address: str,
     owner_address: Optional[str] = None,
     explicit_agent_id: Optional[str] = None,
-    indexer_url: Optional[str] = None
-) -> Optional[Tuple[str, int]]:
+    indexer_url: Optional[str] = None,
+    agent_name: Optional[str] = None
+) -> Optional[Tuple[str, int, Optional[dict]]]:
     """
     Register or update agent on-chain by calling the ERC-8004 Identity Registry contract.
     Checks if agent is already registered and updates metadata instead of re-registering.
@@ -222,12 +249,13 @@ async def register_onchain(
         owner_address: Optional owner address (defaults to signer address)
         explicit_agent_id: Explicit agent ID from env var (highest priority)
         indexer_url: Indexer API URL to query for existing agent
+        agent_name: Optional agent name (from AGENT_ID env var). If not provided, uses agent card name or "A2A Agent"
         
     Returns:
-        Tuple of (tx_hash, agent_id) if successful, None otherwise
-        - For new registrations: (tx_hash, agent_id)
-        - For existing agents with updates: (tx_hash, agent_id) where tx_hash is the last update transaction hash
-        - For existing agents with no changes: (None, agent_id)
+        Tuple of (tx_hash, agent_id, updates_dict) if successful, None otherwise
+        - For new registrations: (tx_hash, agent_id, None)
+        - For existing agents with updates: (tx_hash, agent_id, updates_dict) where tx_hash is the last update transaction hash
+        - For existing agents with no changes: (None, agent_id, updates_dict) where updates_dict['no_changes'] is True
     """
     if not HAS_WEB3:
         logger.error("[ONCHAIN REGISTRATION] web3 package not installed. Cannot perform on-chain registration.")
@@ -313,7 +341,8 @@ async def register_onchain(
                 logger.info(f"[REGISTRATION] Found existing registration (ID: {agent_id}) for owner {search_address}")
                 # Continue to idempotent check below
         
-        # Fetch agent card to build full metadata (needed for both new registration and updates)
+        # Build agent card from config (server may not be running yet)
+        # Try to fetch from URL first, fallback to building from config
         agent_card_data = None
         try:
             if HAS_AIOHTTP:
@@ -321,33 +350,52 @@ async def register_onchain(
                     async with session.get(agent_card_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                         if response.status == 200:
                             agent_card_data = await response.json()
+                            logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
             else:
                 card_req = urllib.request.Request(agent_card_url, method='GET')
                 with urllib.request.urlopen(card_req, timeout=5) as response:
                     agent_card_data = json.loads(response.read().decode('utf-8'))
+                    logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
         except Exception as e:
-            logger.warning(f"[ONCHAIN REGISTRATION] Could not fetch agent card: {e}, using minimal metadata")
+            logger.info(f"[REGISTRATION] Could not fetch agent card from URL (server may not be running): {e}")
+            logger.info(f"[REGISTRATION] Building agent card from configuration...")
         
-        # Build minimal metadata JSON for on-chain registration
-        # Full metadata is stored in tokenURI, on-chain metadata is minimal
+        # Build agent card from config if fetch failed
+        if agent_card_data is None:
+            # Import shared function to build agent card from config
+            from ...utils.agent_card import build_agent_card_data
+            from ...utils.config import get_agent_id, DEFAULT_AGENT_ID
+            base_url = agent_card_url.replace("/.well-known/agent-card.json", "")
+            # Prioritize agent_name parameter, then AGENT_ID env var (with validation), then default
+            if agent_name:
+                final_agent_id = agent_name
+            else:
+                try:
+                    final_agent_id = get_agent_id()
+                except ValueError:
+                    # If validation fails, use default
+                    final_agent_id = DEFAULT_AGENT_ID
+            agent_card_data = build_agent_card_data(
+                agent_id=final_agent_id,
+                base_url=base_url
+            )
+        
+        # Build metadata for on-chain storage
+        # Use agent_name parameter if provided, otherwise from agent card, otherwise default
+        from ...utils.config import DEFAULT_AGENT_ID
+        final_agent_name = agent_name or agent_card_data.get("name", DEFAULT_AGENT_ID)
         labels = {"category": "compute", "type": "trader"}  # Default labels
-        agent_card = agent_card_data or {"name": "A2A Agent", "description": "", "url": agent_card_url}
-        metadata_json = {
-            "name": agent_card.get("name", "A2A Agent"),
-            "category": labels.get("category", "compute"),
-            "type": labels.get("type", "trader"),
-        }
         
         # Official contract: register(string tokenUri, MetadataEntry[] metadata)
         # MetadataEntry is {string key, bytes value} - format matches viem's toHex output
-        # According to ERC-8004 spec, on-chain metadata examples are "agentWallet" or "agentName"
-        # We store essential metadata on-chain for composability, but keep detailed data in tokenURI
+        # Store essential metadata on-chain for composability (minimal to save gas)
         metadata = [
             # Store agent name on-chain (as per ERC-8004 spec example)
-            {"key": "agentName", "value": Web3.to_hex(text=metadata_json.get("name", "A2A Agent"))},
-            # Store category and type for filtering/discovery (custom keys, but useful for composability)
-            {"key": "category", "value": Web3.to_hex(text=metadata_json.get("category", "compute"))},
-            {"key": "type", "value": Web3.to_hex(text=metadata_json.get("type", "trader"))},
+            # Uses AGENT_ID env var if provided, otherwise from agent card, otherwise "A2A Agent"
+            {"key": "agentName", "value": Web3.to_hex(text=final_agent_name)},
+            # Store category and type for filtering/discovery
+            {"key": "category", "value": Web3.to_hex(text=labels.get("category", "compute"))},
+            {"key": "type", "value": Web3.to_hex(text=labels.get("type", "trader"))},
         ]
         
         # If we found an existing agent ID, check for changes and update if needed (idempotent)
@@ -375,8 +423,8 @@ async def register_onchain(
                 if updates['metadata_updated']:
                     logger.info(f"[REGISTRATION] ✓ Metadata keys updated: {', '.join(updates['metadata_updated'])}")
             
-            # Return (tx_hash_if_updated, agent_id) - tx_hash is None if no updates were made
-            return (update_tx_hash, agent_id)
+            # Return (tx_hash_if_updated, agent_id, updates_dict) - tx_hash is None if no updates were made
+            return (update_tx_hash, agent_id, updates)
         
         # No existing registration found, register new
         logger.info(f"[ONCHAIN REGISTRATION] Registering new agent on-chain...")
@@ -449,10 +497,10 @@ async def register_onchain(
                     else:
                         logger.error(f"[REGISTRATION] ✗ NFT transfer failed for agent {onchain_id}")
 
-            # Return (tx_hash, agent_id) tuple
+            # Return (tx_hash, agent_id, None) tuple - None indicates new registration
             if onchain_id is not None:
                 tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
-                return (tx_hash_str, onchain_id)
+                return (tx_hash_str, onchain_id, None)
             else:
                 logger.error(f"[REGISTRATION] Registration succeeded but could not extract agent ID")
                 return None

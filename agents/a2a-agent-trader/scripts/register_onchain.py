@@ -21,9 +21,8 @@ from pathlib import Path
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.utils.registry.onchain_registration import register_onchain
+from app.utils.registry.onchain_registration import register_onchain, build_agent_card_url
 from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
-from app.agent_registration import build_agent_card_url
 
 
 async def main():
@@ -32,6 +31,7 @@ async def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--env-file', default='.env', help='Path to .env file')
+    parser.add_argument('--no-update-env', action='store_true', help='Skip automatic .env file update (useful for CI/CD)')
     args, _ = parser.parse_known_args()
     
     try:
@@ -49,6 +49,17 @@ async def main():
     base_url_override = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
     chain_id = int(os.getenv("CHAIN_ID", "1337"))
     onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")  # Optional - for existing agents
+    
+    # Get agent name with validation (for on-chain metadata)
+    try:
+        from app.utils.config import get_agent_id
+        agent_name = get_agent_id()  # Validates and returns default if not set
+    except (ImportError, ValueError) as e:
+        # Fallback if config not available or validation fails
+        agent_name = os.getenv("AGENT_ID")
+        if agent_name:
+            print(f"⚠️  Warning: AGENT_ID validation failed: {e}")
+            print(f"   Using AGENT_ID as-is: {agent_name}")
     
     # Validate required variables
     missing = []
@@ -94,11 +105,12 @@ async def main():
             contract_address=identity_registry_address,
             owner_address=agent_wallet_address,
             explicit_agent_id=onchain_agent_id,
-            indexer_url=None  # Not needed for standalone registration
+            indexer_url=None,  # Not needed for standalone registration
+            agent_name=agent_name  # Pass AGENT_ID env var for agentName metadata
         )
         
         if result:
-            tx_hash, numeric_agent_id = result
+            tx_hash, numeric_agent_id, updates_dict = result
             
             # Build canonical ID
             canonical_id = build_erc8004_canonical_id(
@@ -109,46 +121,75 @@ async def main():
             
             print()
             print("=" * 70)
-            print("✅ Registration Successful!")
+            
+            # Determine status and show appropriate message
+            if updates_dict is None:
+                # New registration
+                print("✅ New Registration Successful!")
+                status_msg = "New agent registered on-chain"
+            elif updates_dict.get('no_changes', False):
+                # No changes detected
+                print("✓ No Changes Detected")
+                status_msg = "Agent already up to date"
+            else:
+                # Updates were made
+                print("✅ Registration Updated!")
+                status_msg = "Existing agent updated"
+                changes = []
+                if updates_dict.get('token_uri_updated'):
+                    changes.append("Token URI")
+                if updates_dict.get('metadata_updated'):
+                    changes.extend(updates_dict['metadata_updated'])
+                if changes:
+                    print(f"  Changes: {', '.join(changes)}")
+            
             print("=" * 70)
+            print(f"Status: {status_msg}")
             print(f"Numeric Agent ID: {numeric_agent_id}")
             print(f"Canonical Agent ID: {canonical_id}")
             if tx_hash:
                 print(f"Transaction Hash: {tx_hash}")
             else:
-                print("(Using existing registration - no new transaction)")
+                print("Transaction: None (no changes made)")
             print("=" * 70)
             print()
             
-            # Optionally update .env file
-            env_file = Path(".env")
-            if env_file.exists():
-                print("💡 Tip: Add this to your .env file:")
+            # Auto-update .env file (unless --no-update-env flag is set)
+            env_file = Path(args.env_file)
+            should_update_env = not args.no_update_env
+            
+            if should_update_env and env_file.exists():
+                # Read current .env
+                content = env_file.read_text()
+                lines = content.split('\n')
+                
+                # Check if ONCHAIN_AGENT_ID exists and if it needs updating
+                current_agent_id = None
+                updated = False
+                for i, line in enumerate(lines):
+                    if line.startswith('ONCHAIN_AGENT_ID='):
+                        current_agent_id = line.split('=', 1)[1].strip()
+                        if current_agent_id != str(numeric_agent_id):
+                            lines[i] = f'ONCHAIN_AGENT_ID={numeric_agent_id}'
+                            updated = True
+                        break
+                
+                # Add if missing
+                if current_agent_id is None:
+                    lines.append(f'ONCHAIN_AGENT_ID={numeric_agent_id}')
+                    updated = True
+                
+                # Write back if changed
+                if updated:
+                    env_file.write_text('\n'.join(lines))
+                    print(f"✅ Auto-updated .env with ONCHAIN_AGENT_ID={numeric_agent_id}")
+                else:
+                    print(f"✓ .env already has ONCHAIN_AGENT_ID={numeric_agent_id}")
+            elif args.no_update_env:
+                print("ℹ️  Skipped .env update (--no-update-env flag set)")
+            elif not env_file.exists():
+                print(f"💡 Tip: Add this to your .env file:")
                 print(f"   ONCHAIN_AGENT_ID={numeric_agent_id}")
-                print()
-                print("Or update it automatically? (y/n): ", end="")
-                try:
-                    response = input().strip().lower()
-                    if response == 'y':
-                        # Read current .env
-                        content = env_file.read_text()
-                        
-                        # Update or add ONCHAIN_AGENT_ID
-                        lines = content.split('\n')
-                        updated = False
-                        for i, line in enumerate(lines):
-                            if line.startswith('ONCHAIN_AGENT_ID='):
-                                lines[i] = f'ONCHAIN_AGENT_ID={numeric_agent_id}'
-                                updated = True
-                                break
-                        
-                        if not updated:
-                            lines.append(f'ONCHAIN_AGENT_ID={numeric_agent_id}')
-                        
-                        env_file.write_text('\n'.join(lines))
-                        print(f"✅ Updated .env with ONCHAIN_AGENT_ID={numeric_agent_id}")
-                except (KeyboardInterrupt, EOFError):
-                    print("\n(Skipped .env update)")
             
             return 0
         else:

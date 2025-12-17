@@ -662,15 +662,21 @@ root_agent = TraderAgent(
 # Define the skill for the root agent
 # In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
 
+# Build agent card from config (shared with registration script)
+from .utils.agent_card import build_agent_card_data
+agent_card_data = build_agent_card_data(
+    agent_id=CONFIG.agent_id,
+    base_url=BASE_URL_OVERRIDE
+)
 public_agent_card = AgentCard(
-    name="A2A Agent",
-    description="A helpful AI assistant designed to trade compute resources with others.",
-    url=BASE_URL_OVERRIDE,
-    version="0.1.0",
-    defaultInputModes=["text"],  # A2A Protocol camelCase
-    defaultOutputModes=["text"],  # A2A Protocol camelCase
-    skills=[],
-    capabilities=AgentCapabilities(streaming=True),
+    name=agent_card_data["name"],
+    description=agent_card_data["description"],
+    url=agent_card_data["url"],
+    version=agent_card_data["version"],
+    defaultInputModes=agent_card_data["defaultInputModes"],
+    defaultOutputModes=agent_card_data["defaultOutputModes"],
+    skills=agent_card_data["skills"],
+    capabilities=AgentCapabilities(**agent_card_data["capabilities"]),
 )
 
 ALERTS_APP_NAME = "alerts"
@@ -851,7 +857,7 @@ async def process_queued_events():
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from .utils.config import CONFIG
-    from .agent_registration import start_agent_heartbeat
+    from .agent_heartbeat import start_agent_heartbeat
     await start_agent_heartbeat(CONFIG)
 
 
@@ -861,8 +867,7 @@ async def _startup_tasks():
     from .utils.config import CONFIG
 
     # Start heartbeat after server is ready
-    if CONFIG.auto_register:
-        asyncio.create_task(_start_heartbeat())
+    asyncio.create_task(_start_heartbeat())
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
