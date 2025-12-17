@@ -59,6 +59,13 @@ class Config:
     indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
     identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
     onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (NFT token ID) to use for updates
+    # Registry discovery settings
+    enable_registry_discovery: bool  # ENABLE_REGISTRY_DISCOVERY - enable registry-based agent discovery
+    registry_order_timeout: int  # REGISTRY_ORDER_TIMEOUT - timeout for registry API calls in seconds
+    max_discovery_agents: int  # MAX_DISCOVERY_AGENTS - maximum number of agents to contact
+    # Order retry settings
+    enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
+    order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -116,6 +123,13 @@ def load_config() -> Config:
         indexer_url=os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080")),  # Support both for backward compatibility
         identity_registry_address=os.getenv("IDENTITY_REGISTRY_ADDRESS"),
         onchain_agent_id=os.getenv("ONCHAIN_AGENT_ID"),  # Explicit on-chain agent ID (optional)
+        # Registry discovery settings
+        enable_registry_discovery=_get_bool_env("ENABLE_REGISTRY_DISCOVERY", True),
+        registry_order_timeout=_get_int_env("REGISTRY_ORDER_TIMEOUT", 30),
+        max_discovery_agents=_get_int_env("MAX_DISCOVERY_AGENTS", 10),
+        # Order retry settings
+        enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
+        order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
     )
 
 
