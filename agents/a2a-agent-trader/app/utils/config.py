@@ -35,6 +35,27 @@ def _get_int_env(var_name: str, default: int) -> int:
 DEFAULT_AGENT_ID = "root_agent"
 
 
+def get_agent_name() -> str:
+    """
+    Get agent display name from AGENT_NAME env var, falling back to AGENT_ID if not set.
+    
+    AGENT_NAME is the user-friendly display name used in:
+    - Agent card name (A2A protocol)
+    - On-chain metadata (agentName field)
+    
+    Unlike AGENT_ID, AGENT_NAME can contain spaces, hyphens, and other characters.
+    
+    Returns:
+        Agent name string (from AGENT_NAME env var, or AGENT_ID if not set, or DEFAULT_AGENT_ID)
+    """
+    agent_name = os.getenv("AGENT_NAME")
+    if agent_name:
+        return agent_name
+    
+    # Fallback to AGENT_ID if AGENT_NAME not set
+    return get_agent_id()
+
+
 def get_agent_id(env_value: str | None = None) -> str:
     """
     Get and validate agent ID from environment variable or provided value.
@@ -76,7 +97,8 @@ def get_agent_id(env_value: str | None = None) -> str:
 
 @dataclass(frozen=True)
 class Config:
-    agent_id: str
+    agent_id: str  # Internal identifier (must be valid Python identifier)
+    agent_name: str  # Display name (can be any string, used in agent card and on-chain metadata)
     mcp_server_url: str
     base_url_override: str
     port: int
@@ -128,8 +150,12 @@ def load_config() -> Config:
             UserWarning
         )
     
+    # Get agent_name (display name) - can be any string, falls back to agent_id
+    agent_name = get_agent_name()
+    
     return Config(
         agent_id=agent_id,
+        agent_name=agent_name,
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
         base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
         port=_get_int_env("PORT", 8000),

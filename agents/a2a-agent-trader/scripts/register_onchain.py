@@ -21,19 +21,55 @@ from pathlib import Path
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.utils.registry.onchain_registration import register_onchain, build_agent_card_url
+from app.utils.registry.onchain_registration import register_onchain_from_env, build_agent_card_url, build_registration_file_url
 from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+
+
+def update_env_file(env_file: Path, agent_id: int) -> bool:
+    """
+    Update .env file with ONCHAIN_AGENT_ID.
+    
+    Returns:
+        True if file was updated, False otherwise
+    """
+    if not env_file.exists():
+        return False
+    
+    content = env_file.read_text()
+    lines = content.split('\n')
+    
+    # Check if ONCHAIN_AGENT_ID exists and if it needs updating
+    current_agent_id = None
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith('ONCHAIN_AGENT_ID='):
+            current_agent_id = line.split('=', 1)[1].strip()
+            if current_agent_id != str(agent_id):
+                lines[i] = f'ONCHAIN_AGENT_ID={agent_id}'
+                updated = True
+            break
+    
+    # Add if missing
+    if current_agent_id is None:
+        lines.append(f'ONCHAIN_AGENT_ID={agent_id}')
+        updated = True
+    
+    # Write back if changed
+    if updated:
+        env_file.write_text('\n'.join(lines))
+    
+    return updated
 
 
 async def main():
     """Register agent on-chain and output the agent ID."""
-    # Load environment variables from .env file if available
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--env-file', default='.env', help='Path to .env file')
     parser.add_argument('--no-update-env', action='store_true', help='Skip automatic .env file update (useful for CI/CD)')
     args, _ = parser.parse_known_args()
     
+    # Load environment variables from .env file if available
     try:
         from dotenv import load_dotenv
         load_dotenv(args.env_file)
@@ -41,51 +77,24 @@ async def main():
         # dotenv not available, rely on environment variables from Makefile or shell
         pass
     
-    # Required environment variables
-    agent_priv_key = os.getenv("AGENT_PRIV_KEY")
-    chain_rpc_url = os.getenv("CHAIN_RPC_URL")
-    identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
-    agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
+    # Read config for display
     base_url_override = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
     chain_id = int(os.getenv("CHAIN_ID", "1337"))
-    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")  # Optional - for existing agents
+    identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
+    agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
+    chain_rpc_url = os.getenv("CHAIN_RPC_URL")
+    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
     
-    # Get agent name with validation (for on-chain metadata)
-    try:
-        from app.utils.config import get_agent_id
-        agent_name = get_agent_id()  # Validates and returns default if not set
-    except (ImportError, ValueError) as e:
-        # Fallback if config not available or validation fails
-        agent_name = os.getenv("AGENT_ID")
-        if agent_name:
-            print(f"⚠️  Warning: AGENT_ID validation failed: {e}")
-            print(f"   Using AGENT_ID as-is: {agent_name}")
-    
-    # Validate required variables
-    missing = []
-    if not agent_priv_key:
-        missing.append("AGENT_PRIV_KEY")
-    if not chain_rpc_url:
-        missing.append("CHAIN_RPC_URL")
-    if not identity_registry_address:
-        missing.append("IDENTITY_REGISTRY_ADDRESS")
-    if not agent_wallet_address:
-        missing.append("AGENT_WALLET_ADDRESS")
-    
-    if missing:
-        print("❌ Error: Missing required environment variables:")
-        for var in missing:
-            print(f"   - {var}")
-        print("\nPlease set these in your .env file or environment.")
-        sys.exit(1)
-    
-    # Build agent card URL
+    # Build URLs for display
     agent_card_url = build_agent_card_url(base_url_override)
+    registration_file_url = build_registration_file_url(base_url_override)
     
+    # Display registration info
     print("=" * 70)
     print("🔗 On-Chain Registration")
     print("=" * 70)
     print(f"Agent Card URL: {agent_card_url}")
+    print(f"Registration File URL (tokenURI): {registration_file_url}")
     print(f"Identity Registry: {identity_registry_address}")
     print(f"Chain RPC: {chain_rpc_url}")
     print(f"Chain ID: {chain_id}")
@@ -98,15 +107,10 @@ async def main():
     # Register on-chain
     print("Registering agent on-chain...")
     try:
-        result = await register_onchain(
-            agent_card_url=agent_card_url,
-            private_key=agent_priv_key,
-            rpc_url=chain_rpc_url,
-            contract_address=identity_registry_address,
-            owner_address=agent_wallet_address,
-            explicit_agent_id=onchain_agent_id,
-            indexer_url=None,  # Not needed for standalone registration
-            agent_name=agent_name  # Pass AGENT_ID env var for agentName metadata
+        result = await register_onchain_from_env(
+            base_url=base_url_override,
+            chain_id=chain_id,
+            explicit_agent_id=onchain_agent_id
         )
         
         if result:
@@ -156,46 +160,28 @@ async def main():
             
             # Auto-update .env file (unless --no-update-env flag is set)
             env_file = Path(args.env_file)
-            should_update_env = not args.no_update_env
-            
-            if should_update_env and env_file.exists():
-                # Read current .env
-                content = env_file.read_text()
-                lines = content.split('\n')
-                
-                # Check if ONCHAIN_AGENT_ID exists and if it needs updating
-                current_agent_id = None
-                updated = False
-                for i, line in enumerate(lines):
-                    if line.startswith('ONCHAIN_AGENT_ID='):
-                        current_agent_id = line.split('=', 1)[1].strip()
-                        if current_agent_id != str(numeric_agent_id):
-                            lines[i] = f'ONCHAIN_AGENT_ID={numeric_agent_id}'
-                            updated = True
-                        break
-                
-                # Add if missing
-                if current_agent_id is None:
-                    lines.append(f'ONCHAIN_AGENT_ID={numeric_agent_id}')
-                    updated = True
-                
-                # Write back if changed
+            if not args.no_update_env:
+                updated = update_env_file(env_file, numeric_agent_id)
                 if updated:
-                    env_file.write_text('\n'.join(lines))
                     print(f"✅ Auto-updated .env with ONCHAIN_AGENT_ID={numeric_agent_id}")
-                else:
+                elif env_file.exists():
                     print(f"✓ .env already has ONCHAIN_AGENT_ID={numeric_agent_id}")
-            elif args.no_update_env:
+                else:
+                    print(f"💡 Tip: Add this to your .env file:")
+                    print(f"   ONCHAIN_AGENT_ID={numeric_agent_id}")
+            else:
                 print("ℹ️  Skipped .env update (--no-update-env flag set)")
-            elif not env_file.exists():
-                print(f"💡 Tip: Add this to your .env file:")
-                print(f"   ONCHAIN_AGENT_ID={numeric_agent_id}")
             
             return 0
         else:
             print("❌ Registration failed - no result returned")
             return 1
             
+    except ValueError as e:
+        # Missing env vars or validation errors
+        print(f"❌ Error: {e}")
+        print("\nPlease set the required environment variables in your .env file or environment.")
+        return 1
     except Exception as e:
         print(f"❌ Registration failed: {e}")
         import traceback
