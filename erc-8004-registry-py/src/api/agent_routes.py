@@ -34,6 +34,7 @@ def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
         agent_id_int = int(agent_id)
         agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
         if agent:
+            logger.debug(f"[AgentLookup] Found agent by integer PK: {agent_id_int} -> {agent.agent_id}")
             return agent
     except ValueError:
         pass
@@ -41,6 +42,7 @@ def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
     # Try canonical ID (exact match)
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
+        logger.debug(f"[AgentLookup] Found agent by canonical ID: {agent_id}")
         return agent
     
     # Fallback: parse canonical ID and lookup by components
@@ -56,8 +58,21 @@ def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
                 Agent.onchain_agent_id == onchain_agent_id
             )
         ).first()
+        if agent:
+            logger.debug(f"[AgentLookup] Found agent by components: chain_id={chain_id}, registry={identity_registry_lower}, onchain_id={onchain_agent_id} -> {agent.agent_id}")
+        else:
+            # Debug: Check what agents exist with similar components
+            similar_agents = db.query(Agent).filter(
+                Agent.onchain_agent_id == onchain_agent_id
+            ).all()
+            if similar_agents:
+                logger.warning(
+                    f"[AgentLookup] Agent {agent_id} not found. Found {len(similar_agents)} agents with same onchain_agent_id: "
+                    f"{[(a.agent_id, a.chain_id, a.identity_registry) for a in similar_agents]}"
+                )
         return agent
-    except ValueError:
+    except ValueError as e:
+        logger.debug(f"[AgentLookup] Failed to parse canonical ID {agent_id}: {e}")
         return None
 
 

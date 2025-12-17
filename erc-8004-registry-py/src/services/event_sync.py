@@ -221,6 +221,8 @@ class EventSyncService:
                                 )
                                 db.add(agent)
                                 db.commit()
+                                # Expire all objects to ensure subsequent queries see the newly committed agent
+                                db.expire_all()
                                 
                                 block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
                                 logger.info(f"[EventSync] Registered new on-chain-only agent {canonical_id} from block {block_number}")
@@ -271,6 +273,7 @@ class EventSyncService:
                                     value = value_bytes.hex()
 
                                 # Find agent by canonical ID or by tuple
+                                # Use db.refresh() or expire_all() to ensure we see newly committed agents
                                 agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
                                 
                                 if not agent:
@@ -284,7 +287,34 @@ class EventSyncService:
                                     ).first()
                                 
                                 if not agent:
-                                    logger.warning(f"[EventSync] Agent {canonical_id} not found for metadata update")
+                                    # Try one more time with a fresh query after expiring session cache
+                                    db.expire_all()
+                                    agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                                    if not agent:
+                                        agent = db.query(Agent).filter(
+                                            and_(
+                                                Agent.chain_id == chain_id,
+                                                Agent.identity_registry == normalized_registry,
+                                                Agent.onchain_agent_id == onchain_agent_id
+                                            )
+                                        ).first()
+                                
+                                if not agent:
+                                    # Debug: Check what agents exist with similar IDs
+                                    similar_agents = db.query(Agent).filter(
+                                        Agent.onchain_agent_id == onchain_agent_id
+                                    ).all()
+                                    if similar_agents:
+                                        logger.warning(
+                                            f"[EventSync] Agent {canonical_id} not found for metadata update. "
+                                            f"Found {len(similar_agents)} agents with same onchain_agent_id: "
+                                            f"{[a.agent_id for a in similar_agents]}"
+                                        )
+                                    else:
+                                        logger.warning(
+                                            f"[EventSync] Agent {canonical_id} not found for metadata update. "
+                                            f"No agents found with onchain_agent_id={onchain_agent_id}"
+                                        )
                                     continue
 
                                 # Update or insert metadata entry (using canonical ID for FK)
@@ -362,6 +392,19 @@ class EventSyncService:
                                         Agent.onchain_agent_id == onchain_agent_id
                                     )
                                 ).first()
+                            
+                            if not agent:
+                                # Try one more time with a fresh query after expiring session cache
+                                db.expire_all()
+                                agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                                if not agent:
+                                    agent = db.query(Agent).filter(
+                                        and_(
+                                            Agent.chain_id == chain_id,
+                                            Agent.identity_registry == normalized_registry,
+                                            Agent.onchain_agent_id == onchain_agent_id
+                                        )
+                                    ).first()
                             
                             if not agent:
                                 logger.warning(f"[EventSync] Agent {canonical_id} not found for URI update")
