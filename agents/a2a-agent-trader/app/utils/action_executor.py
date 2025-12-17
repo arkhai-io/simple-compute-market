@@ -37,6 +37,8 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 
+logger = logging.getLogger(__name__)
+
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
@@ -46,8 +48,6 @@ SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 TRUSTED_ORACLE_ARBITER = "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0"
 DEMO_ORACLE_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-
-logger = logging.getLogger(__name__)
 
 
 def _serialize_decision(decision: Any) -> Any:

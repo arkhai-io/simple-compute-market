@@ -7,6 +7,7 @@ Registration happens automatically on agent startup when AUTO_REGISTER=true.
 import asyncio
 import json
 import logging
+import os
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -36,6 +37,10 @@ HEARTBEAT_INTERVAL = 30  # Send heartbeat every 30 seconds
 
 # Import the complete ERC-8004 Identity Registry ABI for container deployment
 from .abi.identity_registry_abi import IDENTITY_REGISTRY_ABI
+from .utils.zerotier import (
+    await_base_url_resolution,
+    BaseUrlResolutionError,
+)
 
 
 async def register_offchain(
@@ -544,8 +549,21 @@ async def register_agent_on_startup(config: "Config") -> Optional[str]:
 
     logger.info(f"[REGISTRATION] Starting registration for wallet: {wallet_address}")
 
+    # Resolve BASE_URL_OVERRIDE, waiting for ZeroTier IP if needed
+    zerotier_network = os.getenv("ZEROTIER_NETWORK")
+    try:
+        base_url = await await_base_url_resolution(
+            config.base_url_override,
+            zerotier_network,
+            wait_timeout=120.0,
+        )
+    except BaseUrlResolutionError as exc:
+        logger.error("[REGISTRATION] BASE_URL_OVERRIDE could not be resolved: %s", exc)
+        return None
+
+    logger.info(f"[REGISTRATION] Using base URL for agent card: {base_url}")
+
     # Build agent card URL
-    base_url = config.base_url_override.rstrip('/')
     agent_card_url = f"{base_url}/.well-known/agent-card.json"
     
     # Initialize indexer_agent_id to None
@@ -795,4 +813,3 @@ async def check_indexer_registration(wallet_address: str, indexer_url: str) -> O
         logger.debug(f"[REGISTRATION] Failed to check Indexer registration: {e}")
 
     return None
-
