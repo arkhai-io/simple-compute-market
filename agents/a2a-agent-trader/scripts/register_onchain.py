@@ -2,9 +2,6 @@
 """
 Standalone script to register an agent on-chain before starting the agent server.
 
-This breaks the circular dependency by allowing on-chain registration to happen
-separately from agent startup.
-
 Usage:
     python scripts/register_onchain.py
     # Or via make:
