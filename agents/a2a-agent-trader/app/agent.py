@@ -847,21 +847,12 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
-# Background task for delayed registration
-async def _delayed_registration():
-    """Run registration after server is ready."""
+# Background task to start heartbeat after server is ready
+async def _start_heartbeat():
+    """Start heartbeat loop after server is ready."""
     from .utils.config import CONFIG
-    from .agent_registration import register_agent_on_startup
-
-    try:
-        logger.info("[REGISTRATION] Starting agent registration")
-        result = await register_agent_on_startup(CONFIG)
-        if result:
-            logger.info(f"[REGISTRATION] Agent registration complete: {result}")
-        else:
-            logger.warning("[REGISTRATION] Agent registration returned no result")
-    except Exception as e:
-        logger.error(f"[REGISTRATION] Agent registration failed: {e}")
+    from .agent_registration import start_agent_heartbeat
+    await start_agent_heartbeat(CONFIG)
 
 
 # Initialize startup tasks
@@ -869,10 +860,9 @@ async def _startup_tasks():
     """Initialize background tasks."""
     from .utils.config import CONFIG
 
-    # Schedule registration as background task (runs after server starts)
+    # Start heartbeat after server is ready
     if CONFIG.auto_register:
-        asyncio.create_task(_delayed_registration())
-        logger.info("[STARTUP] Auto-registration scheduled")
+        asyncio.create_task(_start_heartbeat())
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
