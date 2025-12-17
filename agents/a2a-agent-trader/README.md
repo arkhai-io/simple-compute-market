@@ -88,7 +88,6 @@ make serve-a2a
 The agent will use the `ONCHAIN_AGENT_ID` from your `.env` file (or find it automatically via blockchain events) to build the canonical ID for heartbeats and API calls.
 
 **Why this approach?**
-- ✅ Breaks circular dependency: registration happens separately from startup
 - ✅ Idempotent: safe to run multiple times (finds existing registration)
 - ✅ Clear workflow: explicit registration step before starting agent
 
