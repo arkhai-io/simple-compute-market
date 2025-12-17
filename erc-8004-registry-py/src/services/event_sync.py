@@ -346,8 +346,8 @@ class EventSyncService:
                             except Exception as e:
                                 logger.error(f"[EventSync] Error updating metadata for agent {canonical_id}, key {key}: {e}")
                                 db.rollback()
-                            except Exception as e:
-                                logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
+                        except Exception as e:
+                            logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
                             continue
 
