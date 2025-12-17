@@ -58,7 +58,7 @@ For full command options and usage, refer to the [Makefile](Makefile).
 
 ## Agent Registration Workflow
 
-To avoid circular dependencies, register your agent on-chain **before** starting the agent server:
+Register your agent on-chain **before** starting the agent server:
 
 ### Step 1: Register On-Chain
 
