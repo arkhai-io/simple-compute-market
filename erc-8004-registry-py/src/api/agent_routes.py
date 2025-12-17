@@ -38,21 +38,25 @@ def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
     except ValueError:
         pass
     
-    # Try canonical ID
+    # Try canonical ID (exact match)
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
         return agent
     
     # Fallback: parse canonical ID and lookup by components
+    # This handles case where canonical ID format differs (e.g., address case)
     try:
         chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-        return db.query(Agent).filter(
+        # Normalize identity_registry to lowercase for comparison
+        identity_registry_lower = identity_registry.lower()
+        agent = db.query(Agent).filter(
             and_(
                 Agent.chain_id == chain_id,
-                Agent.identity_registry == identity_registry,
+                Agent.identity_registry == identity_registry_lower,
                 Agent.onchain_agent_id == onchain_agent_id
             )
         ).first()
+        return agent
     except ValueError:
         return None
 
@@ -167,9 +171,14 @@ async def register_agent(
                 detail="agentId (ERC-8004 canonical ID) is required. Format: eip155:{chainId}:{identityRegistry}:{agentId}"
             )
         
-        # Validate canonical ID format
+        # Validate canonical ID format and normalize
         try:
             chain_id_from_id, identity_registry_from_id, onchain_agent_id_from_id = parse_erc8004_canonical_id(agent_canonical_id)
+            # Rebuild canonical ID with normalized address to ensure consistency
+            from src.api.utils import build_erc8004_canonical_id_from_components
+            agent_canonical_id = build_erc8004_canonical_id_from_components(
+                chain_id_from_id, identity_registry_from_id, onchain_agent_id_from_id
+            )
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -211,7 +220,8 @@ async def register_agent(
 
         # Use components from canonical ID (they are the source of truth)
         chain_id_to_use = chain_id_from_id
-        identity_registry_to_use = identity_registry_from_id
+        # Normalize registry address to lowercase for consistent comparison (Ethereum addresses are case-insensitive)
+        identity_registry_to_use = identity_registry_from_id.lower()
         onchain_agent_id_to_use = onchain_agent_id_from_id
         
         # Validate that chain_id matches if provided in registration
@@ -224,11 +234,11 @@ async def register_agent(
         # Check if agent already exists by canonical ID or by (chain_id, identity_registry, onchain_agent_id) tuple
         existing_agent = db.query(Agent).filter(Agent.agent_id == agent_canonical_id).first()
         
-        # Fallback: lookup by tuple (for event sync compatibility)
+        # Fallback: lookup by tuple (for event sync compatibility) - normalize registry address for comparison
         if not existing_agent:
             existing_agent = db.query(Agent).filter(
                 Agent.chain_id == chain_id_to_use,
-                Agent.identity_registry == identity_registry_to_use,
+                Agent.identity_registry == identity_registry_to_use,  # Already normalized to lowercase
                 Agent.onchain_agent_id == onchain_agent_id_to_use
             ).first()
 

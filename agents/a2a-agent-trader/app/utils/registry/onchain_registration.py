@@ -242,10 +242,20 @@ async def register_onchain(
         # Convert ws:// to http:// for compatibility
         http_url = rpc_url.replace("ws://", "http://").replace("wss://", "https://")
         logger.debug(f"[REGISTRATION] Connecting to RPC: {http_url} (converted from {rpc_url})")
-        w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 10}))
         
-        if not w3.is_connected():
-            logger.error(f"[REGISTRATION] Cannot connect to RPC at {http_url} (original: {rpc_url})")
+        try:
+            w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 10}))
+            if not w3.is_connected():
+                logger.error(f"[REGISTRATION] Cannot connect to RPC at {http_url} (original: {rpc_url})")
+                logger.error(f"[REGISTRATION] Please ensure your blockchain node is running and accessible")
+                return None
+        except Exception as conn_error:
+            logger.error(f"[REGISTRATION] RPC connection error: {conn_error}")
+            logger.error(f"[REGISTRATION] Failed to connect to {http_url} (original: {rpc_url})")
+            logger.error(f"[REGISTRATION] Please check:")
+            logger.error(f"[REGISTRATION]   1. Is your blockchain node running?")
+            logger.error(f"[REGISTRATION]   2. Is the RPC URL correct?")
+            logger.error(f"[REGISTRATION]   3. Is the port accessible?")
             return None
         
         account = w3.eth.account.from_key(private_key)
@@ -264,7 +274,19 @@ async def register_onchain(
         # 1. Explicit agent ID from env var (highest priority - user override)
         if explicit_agent_id:
             try:
-                agent_id = int(explicit_agent_id)
+                # Handle both numeric ID and canonical ID formats
+                if explicit_agent_id.startswith("eip155:"):
+                    # Extract numeric agent ID from canonical ID format: eip155:{chainId}:{registry}:{agentId}
+                    parts = explicit_agent_id.split(":")
+                    if len(parts) == 4:
+                        agent_id = int(parts[3])
+                        logger.info(f"[REGISTRATION] Extracted numeric agent ID {agent_id} from canonical ID {explicit_agent_id}")
+                    else:
+                        raise ValueError(f"Invalid canonical ID format: {explicit_agent_id}")
+                else:
+                    # Assume it's a numeric ID
+                    agent_id = int(explicit_agent_id)
+                
                 logger.info(f"[REGISTRATION] Using explicit agent ID {agent_id} (searching for owner {owner_address or signer_address})")
                 # Verify it's valid
                 owner = contract.functions.ownerOf(agent_id).call()

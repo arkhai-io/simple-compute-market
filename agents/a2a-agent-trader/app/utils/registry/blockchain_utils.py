@@ -69,9 +69,23 @@ def extract_agent_id_from_receipt(contract, receipt) -> Optional[int]:
     for log in receipt.logs:
         try:
             event = contract.events.Registered().process_log(log)
-            if event and hasattr(event.args, 'agentId'):
-                return int(event.args.agentId)
-        except Exception:
+            if event:
+                # Try different ways to access agentId (handles different web3.py versions)
+                agent_id_value = None
+                if hasattr(event.args, 'agentId'):
+                    agent_id_value = event.args.agentId
+                elif hasattr(event.args, 'agent_id'):
+                    agent_id_value = event.args.agent_id
+                elif isinstance(event.args, dict):
+                    agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
+                elif isinstance(event.args, (list, tuple)) and len(event.args) > 0:
+                    agent_id_value = event.args[0]
+                
+                if agent_id_value is not None:
+                    return int(agent_id_value)
+        except Exception as e:
+            # Log the exception for debugging but continue trying other logs
+            logger.debug(f"[BLOCKCHAIN] Error parsing event log: {e}")
             continue
     return None
 

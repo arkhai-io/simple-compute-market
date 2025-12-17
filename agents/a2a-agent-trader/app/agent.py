@@ -851,7 +851,7 @@ async def process_queued_events():
 async def _delayed_registration():
     """Run registration after server is ready."""
     from .utils.config import CONFIG
-    from .onchain_registration import register_agent_on_startup
+    from .agent_registration import register_agent_on_startup
 
     try:
         logger.info("[REGISTRATION] Starting agent registration")

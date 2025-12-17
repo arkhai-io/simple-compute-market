@@ -32,10 +32,14 @@ from app.agent_registration import build_agent_card_url
 async def main():
     """Register agent on-chain and output the agent ID."""
     # Load environment variables from .env file if available
-    # (Makefile handles this, but we support direct execution too)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env-file', default='.env', help='Path to .env file')
+    args, _ = parser.parse_known_args()
+    
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(args.env_file)
     except ImportError:
         # dotenv not available, rely on environment variables from Makefile or shell
         pass

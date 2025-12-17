@@ -22,6 +22,24 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def build_erc8004_canonical_id_from_components(chain_id: int, identity_registry: str, agent_id: int) -> str:
+    """
+    Build ERC-8004 canonical ID from components.
+    
+    Format: eip155:{chainId}:{identityRegistry}:{agentId}
+    
+    Args:
+        chain_id: Chain ID (e.g., 1337 for Anvil, 84532 for Base Sepolia)
+        identity_registry: Registry contract address (will be normalized to lowercase)
+        agent_id: Numeric ERC-721 tokenId
+    
+    Returns:
+        Canonical ID string with lowercase address
+    """
+    normalized_registry = identity_registry.lower()
+    return f"eip155:{chain_id}:{normalized_registry}:{agent_id}"
+
+
 def parse_erc8004_canonical_id(canonical_id: str) -> tuple[int, str, int]:
     """
     Parse ERC-8004 canonical ID into components.
@@ -57,6 +75,9 @@ def parse_erc8004_canonical_id(canonical_id: str) -> tuple[int, str, int]:
     
     if not identity_registry.startswith("0x") or len(identity_registry) != 42:
         raise ValueError(f"Invalid registry address format: {identity_registry}")
+    
+    # Normalize registry address to lowercase for consistent comparison
+    identity_registry = identity_registry.lower()
     
     return (chain_id, identity_registry, onchain_agent_id)
 

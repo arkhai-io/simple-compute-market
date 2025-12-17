@@ -20,10 +20,11 @@ register-onchain:
 	@echo "| 🔗 Registering agent on-chain...                                            |"
 	@echo "==============================================================================="
 	@ENV_FILE="$(or $(ENV_FILE),.env)"; \
+	ENV_FILE_ARG=""; \
 	if [ -f "$$ENV_FILE" ]; then \
-		export $$(grep -v '^#' $$ENV_FILE | xargs); \
+		ENV_FILE_ARG="--env-file $$ENV_FILE"; \
 	fi; \
-	uv run python scripts/register_onchain.py
+	uv run python scripts/register_onchain.py $$ENV_FILE_ARG
 
 # ==============================================================================
 # Playground Targets

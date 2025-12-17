@@ -151,11 +151,13 @@ class EventSyncService:
                             existing = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
                             
                             # Fallback: lookup by tuple (for compatibility with agent-initiated registration)
+                            # Normalize registry address to lowercase for comparison
+                            normalized_registry = identity_registry.lower()
                             if not existing:
                                 existing = db.query(Agent).filter(
                                     and_(
                                         Agent.chain_id == chain_id,
-                                        Agent.identity_registry == identity_registry,
+                                        Agent.identity_registry == normalized_registry,
                                         Agent.onchain_agent_id == onchain_agent_id
                                     )
                                 ).first()
@@ -254,7 +256,8 @@ class EventSyncService:
                             chain_id = settings.chain_id
                             identity_registry = settings.identity_registry_address
                             # Normalize address to lowercase (Ethereum addresses are case-insensitive)
-                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
+                            normalized_registry = identity_registry.lower()
+                            canonical_id = f"eip155:{chain_id}:{normalized_registry}:{onchain_agent_id}"
 
                             try:
                                 # Get the metadata value from contract (returns bytes)
@@ -271,11 +274,11 @@ class EventSyncService:
                                 agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
                                 
                                 if not agent:
-                                    # Fallback: lookup by tuple
+                                    # Fallback: lookup by tuple (normalize registry address)
                                     agent = db.query(Agent).filter(
                                         and_(
                                             Agent.chain_id == chain_id,
-                                            Agent.identity_registry == identity_registry,
+                                            Agent.identity_registry == normalized_registry,
                                             Agent.onchain_agent_id == onchain_agent_id
                                         )
                                     ).first()
@@ -344,17 +347,18 @@ class EventSyncService:
                             chain_id = settings.chain_id
                             identity_registry = settings.identity_registry_address
                             # Normalize address to lowercase (Ethereum addresses are case-insensitive)
-                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
+                            normalized_registry = identity_registry.lower()
+                            canonical_id = f"eip155:{chain_id}:{normalized_registry}:{onchain_agent_id}"
 
                             # Find agent by canonical ID or by tuple
                             agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
                             
                             if not agent:
-                                # Fallback: lookup by tuple
+                                # Fallback: lookup by tuple (normalize registry address)
                                 agent = db.query(Agent).filter(
                                     and_(
                                         Agent.chain_id == chain_id,
-                                        Agent.identity_registry == identity_registry,
+                                        Agent.identity_registry == normalized_registry,
                                         Agent.onchain_agent_id == onchain_agent_id
                                     )
                                 ).first()
