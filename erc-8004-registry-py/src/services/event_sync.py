@@ -362,6 +362,80 @@ class EventSyncService:
                                 logger.warning(f"[EventSync] UriUpdated event missing args: {event}")
                                 continue
                             
+                            # Try different ways to access event args (handles different web3.py versions)
+                            agent_id_value = None
+                            new_uri_value = None
+                            
+                            if hasattr(event.args, 'agentId') and hasattr(event.args, 'newUri'):
+                                agent_id_value = event.args.agentId
+                                new_uri_value = event.args.newUri
+                            elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'new_uri'):
+                                agent_id_value = event.args.agent_id
+                                new_uri_value = event.args.new_uri
+                            elif isinstance(event.args, dict):
+                                # Sometimes args is a dict
+                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
+                                new_uri_value = event.args.get('newUri') or event.args.get('new_uri')
+                            elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
+                                agent_id_value = event.args[0]
+                                new_uri_value = event.args[1]
+                            
+                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
+                            if agent_id_value is None or new_uri_value is None:
+                                logger.warning(f"[EventSync] Could not extract agentId/newUri from UriUpdated event: {event}")
+                                continue
+                            
+                            onchain_agent_id = int(agent_id_value)
+                            new_uri = str(new_uri_value)
+                            
+                            # Build canonical ID to lookup agent
+                            chain_id = settings.chain_id
+                            identity_registry = settings.identity_registry_address
+                            # Normalize address to lowercase (Ethereum addresses are case-insensitive)
+                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
+
+                            # Find agent by canonical ID or by tuple
+                            agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                            
+                            if not agent:
+                                # Fallback: lookup by tuple
+                                agent = db.query(Agent).filter(
+                                    and_(
+                                        Agent.chain_id == chain_id,
+                                        Agent.identity_registry == identity_registry,
+                                        Agent.onchain_agent_id == onchain_agent_id
+                                    )
+                                ).first()
+                            
+                            if not agent:
+                                logger.warning(f"[EventSync] Agent {canonical_id} not found for URI update")
+                                continue
+
+                            # Update agent's token URI
+                            agent.token_uri = new_uri
+                            db.commit()
+                            
+                            block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
+                            logger.info(
+                                f"[EventSync] Updated token URI for agent {canonical_id} to {new_uri} from block {block_number}"
+                            )
+                        except Exception as e:
+                            logger.error(f"[EventSync] Error processing UriUpdated event: {e}")
+                            logger.debug(f"[EventSync] Event data: {event}")
+                            continue
+
+                    # Get UriUpdated events (official ERC-8004 event name)
+                    uri_updated_events = self.identity_registry.get_past_uri_updated_events(
+                        current_from, current_to
+                    )
+
+                    for event in uri_updated_events:
+                        try:
+                            # Safely access event arguments
+                            if not hasattr(event, 'args') or not event.args:
+                                logger.warning(f"[EventSync] UriUpdated event missing args: {event}")
+                                continue
+                            
                             # Extract event args (handles different web3.py versions)
                             agent_id_value = self._extract_event_arg(event.args, 'agentId', 'agent_id')
                             new_uri_value = self._extract_event_arg(event.args, 'newUri', 'new_uri')

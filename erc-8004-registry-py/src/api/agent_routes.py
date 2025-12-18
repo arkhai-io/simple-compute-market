@@ -21,6 +21,7 @@ from src.api.utils import (
     convert_agent_card_to_registration_file,
     verify_registration_signature,
     verify_heartbeat_signature,
+    find_agent_by_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,17 +29,7 @@ router = APIRouter()
 
 
 def _find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find agent by ID (supports integer PK or canonical ID format)"""
-    # Try integer PK first
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-        if agent:
-            logger.debug(f"[AgentLookup] Found agent by integer PK: {agent_id_int} -> {agent.agent_id}")
-            return agent
-    except ValueError:
-        pass
-    
+    """Find agent by ID (canonical ID format)"""    
     # Try canonical ID (exact match)
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
@@ -333,8 +324,8 @@ async def get_agent(
     agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
     db: Session = Depends(get_db),
 ):
-    """Get agent by ID (supports canonical eip155:... format or integer PK)"""
-    agent = _find_agent_by_id(db, agent_id)
+    """Get agent by ID (expects canonical eip155:... format)"""
+    agent = find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -507,7 +498,7 @@ async def heartbeat(
     # FastAPI should automatically URL-decode path parameters, but ensure it's decoded
     agent_id = urllib.parse.unquote(agent_id)
     
-    agent = _find_agent_by_id(db, agent_id)
+    agent = find_agent_by_id(db, agent_id)
     
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
