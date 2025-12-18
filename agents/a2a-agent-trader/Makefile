@@ -12,10 +12,10 @@ install:
 # ==============================================================================
 
 # Register agent on-chain (run this before starting the agent)
-# Usage: make register-onchain [ENV_FILE=.env]
+# Usage: make register [ENV_FILE=.env]
 # This registers to the on-chain Registry separately from agent startup.
 # The agent ID will be saved to .env as ONCHAIN_AGENT_ID
-register-onchain:
+register:
 	@echo "==============================================================================="
 	@echo "| 🔗 Registering agent on-chain...                                            |"
 	@echo "==============================================================================="
