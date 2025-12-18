@@ -304,7 +304,7 @@ class EventSyncService:
                                     similar_agents = db.query(Agent).filter(
                                         Agent.onchain_agent_id == onchain_agent_id
                                     ).all()
-                                    if similar_agents:
+                                    if (similar_agents and similar_agents != [None]):
                                         logger.warning(
                                             f"[EventSync] Agent {canonical_id} not found for metadata update. "
                                             f"Found {len(similar_agents)} agents with same onchain_agent_id: "
