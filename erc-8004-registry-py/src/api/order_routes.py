@@ -24,7 +24,7 @@ router = APIRouter()
 
 @router.post("/agents/{agent_id}/orders", status_code=201)
 async def publish_order(
-    agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
+    agent_id: str = Path(..., description="Agent ID (canonical eip155:... format)"),
     order_data: dict = Body(..., description="Market order data"),
     db: Session = Depends(get_db),
 ):
