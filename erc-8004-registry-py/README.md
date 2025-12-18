@@ -489,6 +489,3 @@ All configuration is done via environment variables. See `.env.example` for avai
 - [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
 - [Agent0 SDK](https://sdk.ag0.xyz/)
 
-## License
-
-MIT
