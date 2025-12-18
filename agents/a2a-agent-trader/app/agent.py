@@ -94,6 +94,11 @@ from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
 
+# Limits to keep stored JSON blobs from exploding the SQLite size
+MAX_CONTEXT_JSON_CHARS = 100_000
+MAX_OUTCOME_JSON_CHARS = 100_000
+MAX_PAST_EXPERIENCES = 5
+
 
 INCOMING_A2A_PATTERN = re.compile(
     r"""\[(?P<agent>[^\]]+)\] `(?P<tool>[^`]+)` tool returned result: (?P<payload>\{.*\})*$""",
@@ -303,6 +308,57 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     except (ValueError, KeyError, TypeError) as e:
         logger.error(f"[PARSE DOMAIN EVENT] Error parsing {event_type}: {e}")
         raise ValueError(f"Failed to parse {event_type} event: {e}") from e
+
+
+def _serialize_context_for_storage(decision_context: DecisionContext) -> str:
+    """Serialize decision context while trimming heavy fields to avoid huge blobs."""
+    ctx_dict = decision_context.model_dump(mode="json")
+
+    past_exps = ctx_dict.get("past_experiences") or []
+    trimmed_exps = []
+    for exp in past_exps[:MAX_PAST_EXPERIENCES]:
+        trimmed_exps.append(
+            {
+                "decision_id": exp.get("decision_id"),
+                "event_id": exp.get("event_id"),
+                "event_type": exp.get("event_type"),
+                "action_type": exp.get("action_type"),
+                "policy_used": exp.get("policy_used"),
+                "timestamp": exp.get("timestamp"),
+            }
+        )
+    ctx_dict["past_experiences"] = trimmed_exps
+
+    context_json = json.dumps(ctx_dict, default=json_serializer)
+    if len(context_json) > MAX_CONTEXT_JSON_CHARS:
+        logger.warning(
+            f"[PIPELINE] Context JSON too large ({len(context_json)} chars). Storing truncated metadata."
+        )
+        context_json = json.dumps(
+            {
+                "truncated": True,
+                "original_length": len(context_json),
+                "message": "Context JSON exceeded max size and was trimmed for storage.",
+            }
+        )
+    return context_json
+
+
+def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
+    """Serialize outcome with a size guard to prevent oversized blobs."""
+    outcome_json = json.dumps(outcome, default=json_serializer)
+    if len(outcome_json) > MAX_OUTCOME_JSON_CHARS:
+        logger.warning(
+            f"[PIPELINE] Outcome JSON too large ({len(outcome_json)} chars). Storing truncated metadata."
+        )
+        outcome_json = json.dumps(
+            {
+                "truncated": True,
+                "original_length": len(outcome_json),
+                "message": "Outcome JSON exceeded max size and was trimmed for storage.",
+            }
+        )
+    return outcome_json
 
 class TraderAgent(BaseAgent):
     """
@@ -566,8 +622,8 @@ class TraderAgent(BaseAgent):
         
         # [5] Experience recording
         try:
-            import json as json_lib
             action_type_str = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
+            context_json = _serialize_context_for_storage(decision.context)
             await self._sqlite_client.save_decision(
                 decision_id=decision.decision_id,
                 event_id=domain_event.event_id,
@@ -576,12 +632,12 @@ class TraderAgent(BaseAgent):
                 policy_used=decision.policy_used,
                 action_type=action_type_str,
                 timestamp=decision.timestamp.isoformat(),
-                context_json=decision.context.model_dump_json(),
+                context_json=context_json,
             )
             
             await self._sqlite_client.save_decision_outcome(
                 decision_id=decision.decision_id,
-                outcome_json=json_lib.dumps(outcome, default=json_serializer),
+                outcome_json=_serialize_outcome_for_storage(outcome),
                 timestamp=datetime.now().isoformat(),
             )
             logger.info(f"[PIPELINE] Recorded decision {decision.decision_id} with outcome")

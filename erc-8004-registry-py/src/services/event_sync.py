@@ -247,6 +247,7 @@ class EventSyncService:
                             agent_id_value = self._extract_event_arg(event.args, 'agentId', 'agent_id')
                             key_value = self._extract_event_arg(event.args, 'key')
                             
+                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
                             if agent_id_value is None or key_value is None:
                                 logger.warning(f"[EventSync] Could not extract agentId/key from MetadataSet event: {event}")
                                 continue
@@ -261,8 +262,8 @@ class EventSyncService:
                             normalized_registry = identity_registry.lower()
                             canonical_id = f"eip155:{chain_id}:{normalized_registry}:{onchain_agent_id}"
 
+                            # Get the metadata value from contract (returns bytes)
                             try:
-                                # Get the metadata value from contract (returns bytes)
                                 value_bytes = self.identity_registry.get_metadata(onchain_agent_id, key)
                                 
                                 # Decode bytes to string if it's UTF-8 encoded
@@ -271,13 +272,29 @@ class EventSyncService:
                                 except UnicodeDecodeError:
                                     # If not UTF-8, store as hex string
                                     value = value_bytes.hex()
+                            except Exception as e:
+                                logger.error(f"[EventSync] Error getting metadata for agent {canonical_id}, key {key}: {e}")
+                                continue
 
-                                # Find agent by canonical ID or by tuple
-                                # Use db.refresh() or expire_all() to ensure we see newly committed agents
+                            # Find agent by canonical ID or by tuple
+                            # Use db.refresh() or expire_all() to ensure we see newly committed agents
+                            agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
+                            
+                            if not agent:
+                                # Fallback: lookup by tuple (normalize registry address)
+                                agent = db.query(Agent).filter(
+                                    and_(
+                                        Agent.chain_id == chain_id,
+                                        Agent.identity_registry == normalized_registry,
+                                        Agent.onchain_agent_id == onchain_agent_id
+                                    )
+                                ).first()
+                            
+                            if not agent:
+                                # Try one more time with a fresh query after expiring session cache
+                                db.expire_all()
                                 agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
-                                
                                 if not agent:
-                                    # Fallback: lookup by tuple (normalize registry address)
                                     agent = db.query(Agent).filter(
                                         and_(
                                             Agent.chain_id == chain_id,
@@ -285,143 +302,54 @@ class EventSyncService:
                                             Agent.onchain_agent_id == onchain_agent_id
                                         )
                                     ).first()
-                                
-                                if not agent:
-                                    # Try one more time with a fresh query after expiring session cache
-                                    db.expire_all()
-                                    agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
-                                    if not agent:
-                                        agent = db.query(Agent).filter(
-                                            and_(
-                                                Agent.chain_id == chain_id,
-                                                Agent.identity_registry == normalized_registry,
-                                                Agent.onchain_agent_id == onchain_agent_id
-                                            )
-                                        ).first()
-                                
-                                if not agent:
-                                    # Debug: Check what agents exist with similar IDs
-                                    similar_agents = db.query(Agent).filter(
-                                        Agent.onchain_agent_id == onchain_agent_id
-                                    ).all()
-                                    if (similar_agents and similar_agents != [None]):
-                                        logger.warning(
-                                            f"[EventSync] Agent {canonical_id} not found for metadata update. "
-                                            f"Found {len(similar_agents)} agents with same onchain_agent_id: "
-                                            f"{[a.agent_id for a in similar_agents]}"
-                                        )
-                                    else:
-                                        logger.warning(
-                                            f"[EventSync] Agent {canonical_id} not found for metadata update. "
-                                            f"No agents found with onchain_agent_id={onchain_agent_id}"
-                                        )
-                                    continue
-
-                                # Update or insert metadata entry (using canonical ID for FK)
-                                existing_metadata = db.query(AgentMetadataEntry).filter(
-                                    and_(
-                                        AgentMetadataEntry.agent_id == canonical_id,
-                                        AgentMetadataEntry.key == key
+                            
+                            if not agent:
+                                # Debug: Check what agents exist with similar IDs
+                                similar_agents = db.query(Agent).filter(
+                                    Agent.onchain_agent_id == onchain_agent_id
+                                ).all()
+                                if similar_agents:
+                                    logger.warning(
+                                        f"[EventSync] Agent {canonical_id} not found for metadata update. "
+                                        f"Found {len(similar_agents)} agents with same onchain_agent_id: "
+                                        f"{[a.agent_id for a in similar_agents]}"
                                     )
-                                ).first()
-
-                                if existing_metadata:
-                                    existing_metadata.value = value
                                 else:
-                                    metadata_entry = AgentMetadataEntry(
-                                        agent_id=canonical_id,  # Use canonical ID for FK
-                                        key=key,
-                                        value=value,
+                                    logger.warning(
+                                        f"[EventSync] Agent {canonical_id} not found for metadata update. "
+                                        f"No agents found with onchain_agent_id={onchain_agent_id}"
                                     )
-                                    db.add(metadata_entry)
+                                continue
 
-                                # Update agent's metadata JSON
-                                current_metadata = agent.metadata_json or {}
-                                current_metadata[key] = value
-                                agent.metadata_json = current_metadata
+                            # Update or insert metadata entry (using canonical ID for FK)
+                            existing_metadata = db.query(AgentMetadataEntry).filter(
+                                and_(
+                                    AgentMetadataEntry.agent_id == canonical_id,
+                                    AgentMetadataEntry.key == key
+                                )
+                            ).first()
 
-                                db.commit()
-                                logger.info(f"[EventSync] Updated metadata for agent {canonical_id}, key: {key}")
-                            except Exception as e:
-                                logger.error(f"[EventSync] Error updating metadata for agent {canonical_id}, key {key}: {e}")
-                                db.rollback()
+                            if existing_metadata:
+                                existing_metadata.value = value
+                            else:
+                                metadata_entry = AgentMetadataEntry(
+                                    agent_id=canonical_id,  # Use canonical ID for FK
+                                    key=key,
+                                    value=value,
+                                )
+                                db.add(metadata_entry)
+
+                            # Update agent's metadata JSON
+                            current_metadata = agent.metadata_json or {}
+                            current_metadata[key] = value
+                            agent.metadata_json = current_metadata
+
+                            db.commit()
+                            logger.info(f"[EventSync] Updated metadata for agent {canonical_id}, key: {key}")
                         except Exception as e:
                             logger.error(f"[EventSync] Error processing MetadataSet event: {e}")
                             logger.debug(f"[EventSync] Event data: {event}")
-                            continue
-
-                    # Get UriUpdated events (official ERC-8004 event name)
-                    uri_updated_events = self.identity_registry.get_past_uri_updated_events(
-                        current_from, current_to
-                    )
-
-                    for event in uri_updated_events:
-                        try:
-                            # Safely access event arguments
-                            if not hasattr(event, 'args') or not event.args:
-                                logger.warning(f"[EventSync] UriUpdated event missing args: {event}")
-                                continue
-                            
-                            # Try different ways to access event args (handles different web3.py versions)
-                            agent_id_value = None
-                            new_uri_value = None
-                            
-                            if hasattr(event.args, 'agentId') and hasattr(event.args, 'newUri'):
-                                agent_id_value = event.args.agentId
-                                new_uri_value = event.args.newUri
-                            elif hasattr(event.args, 'agent_id') and hasattr(event.args, 'new_uri'):
-                                agent_id_value = event.args.agent_id
-                                new_uri_value = event.args.new_uri
-                            elif isinstance(event.args, dict):
-                                # Sometimes args is a dict
-                                agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
-                                new_uri_value = event.args.get('newUri') or event.args.get('new_uri')
-                            elif isinstance(event.args, (list, tuple)) and len(event.args) >= 2:
-                                agent_id_value = event.args[0]
-                                new_uri_value = event.args[1]
-                            
-                            # CRITICAL: Use 'is None' not truthy check because agentId 0 is valid!
-                            if agent_id_value is None or new_uri_value is None:
-                                logger.warning(f"[EventSync] Could not extract agentId/newUri from UriUpdated event: {event}")
-                                continue
-                            
-                            onchain_agent_id = int(agent_id_value)
-                            new_uri = str(new_uri_value)
-                            
-                            # Build canonical ID to lookup agent
-                            chain_id = settings.chain_id
-                            identity_registry = settings.identity_registry_address
-                            # Normalize address to lowercase (Ethereum addresses are case-insensitive)
-                            canonical_id = f"eip155:{chain_id}:{identity_registry.lower()}:{onchain_agent_id}"
-
-                            # Find agent by canonical ID or by tuple
-                            agent = db.query(Agent).filter(Agent.agent_id == canonical_id).first()
-                            
-                            if not agent:
-                                # Fallback: lookup by tuple
-                                agent = db.query(Agent).filter(
-                                    and_(
-                                        Agent.chain_id == chain_id,
-                                        Agent.identity_registry == identity_registry,
-                                        Agent.onchain_agent_id == onchain_agent_id
-                                    )
-                                ).first()
-                            
-                            if not agent:
-                                logger.warning(f"[EventSync] Agent {canonical_id} not found for URI update")
-                                continue
-
-                            # Update agent's token URI
-                            agent.token_uri = new_uri
-                            db.commit()
-                            
-                            block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
-                            logger.info(
-                                f"[EventSync] Updated token URI for agent {canonical_id} to {new_uri} from block {block_number}"
-                            )
-                        except Exception as e:
-                            logger.error(f"[EventSync] Error processing UriUpdated event: {e}")
-                            logger.debug(f"[EventSync] Event data: {event}")
+                            db.rollback()
                             continue
 
                     # Get UriUpdated events (official ERC-8004 event name)

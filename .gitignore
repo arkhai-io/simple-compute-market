@@ -187,3 +187,4 @@ agents/a2a-agent-trader/app/environment/seller/resources
 experiments/
 wandb/
 !.env.sample
+.cursor/

@@ -242,7 +242,7 @@ class SQLiteClient:
         limit: int = 10,
         event_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Load recent decisions for context building."""
+        """Load recent decisions for context building (without heavy context_json payloads)."""
         def _load() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -250,7 +250,7 @@ class SQLiteClient:
                 if event_type:
                     cur.execute(
                         """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp, context_json
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
                         FROM decisions
                         WHERE agent_id = ? AND event_type = ?
                         ORDER BY timestamp DESC
@@ -261,7 +261,7 @@ class SQLiteClient:
                 else:
                     cur.execute(
                         """
-                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp, context_json
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
                         FROM decisions
                         WHERE agent_id = ?
                         ORDER BY timestamp DESC
@@ -279,12 +279,9 @@ class SQLiteClient:
                         "policy_used": row[3],
                         "action_type": row[4],
                         "timestamp": row[5],
-                        "context_json": row[6],
                     })
                 return result
             finally:
                 conn.close()
         
         return await asyncio.to_thread(_load)
-
-

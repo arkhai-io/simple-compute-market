@@ -184,22 +184,7 @@ class ComputeResourcePortfolio(BaseModel):
 
 
 class MarketOrder(BaseModel):
-    """Describes an open order on the market, which contains information about
-    the resources being offered or sought, and parameters are used for matching
-    agents before the negotiation begins.
-    An open order is one with a filled maker_attestation and a blank taker_attestation
-    (taker_attestation is None until an offer is accepted).
-    A closed order is one with filled out maker_attestation and taker_attestation.
-    
-    Resource Parsing:
-        The `parse_resources` model_validator automatically converts offer_resource and
-        demand_resource from dictionaries to proper Resource types (ComputeResource or
-        TokenResource) during validation using Resource.parse_from_dict() helper.
-        Resources are identified by:
-        - TokenResource: presence of 'token' key in dict (takes precedence)
-        - ComputeResource: presence of 'gpu_model' key in dict
-        If a resource dict doesn't match either pattern, ValidationError is raised.
-    """
+    """Market order for trading compute resources and tokens."""
 
     order_id: str = Field(description="The id of the order")
     order_maker: str = Field(description="The card URL of the agent who made the order")
@@ -226,18 +211,7 @@ class MarketOrder(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def parse_resources(cls, data: Any) -> Any:
-        """Parse offer_resource and demand_resource from dicts to proper Resource types.
-        
-        Uses Resource.parse_from_dict() helper to convert dictionaries to appropriate
-        Resource subclasses (TokenResource or ComputeResource). The helper handles:
-        - TokenResource: presence of 'token' key in dict (takes precedence)
-        - ComputeResource: presence of 'gpu_model' key in dict
-        - Existing Resource instances: passes through unchanged
-        - Invalid dicts: raises ValueError
-        
-        Note: When both 'token' and 'gpu_model' are present, TokenResource is created
-        and 'gpu_model' is ignored. This ensures deterministic parsing behavior.
-        """
+        """Parse resources from dicts to Resource types."""
         if not isinstance(data, dict):
             return data
         
