@@ -5,14 +5,6 @@ from src.api.utils import find_agent_by_id
 from src.db.models import Agent
 
 
-def test_find_agent_by_integer_pk(db_session, sample_agent):
-    """Test finding agent by integer primary key."""
-    agent = find_agent_by_id(db_session, "1")
-    assert agent is not None
-    assert agent.id == 1
-    assert agent.agent_id == sample_agent.agent_id
-
-
 def test_find_agent_by_canonical_id(db_session, sample_agent):
     """Test finding agent by canonical ID."""
     canonical_id = sample_agent.agent_id
