@@ -133,24 +133,11 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
     assert order_a_id not in order_ids
 
 
-def test_agent_id_resolution_all_formats(client, agent_a, db_session):
-    """Test agent ID resolution with all formats."""
+def test_agent_id_resolution_canonical_only(client, agent_a, db_session):
+    """Test agent ID resolution using only canonical agent ID (no PK support)."""
     # 1. Register agent (already done via fixture)
     
-    # 2. Create order using integer PK
-    response_pk = client.post(
-        f"/agents/{agent_a.id}/orders",
-        json={
-            "order_id": "test-pk-order",
-            "order_maker": agent_a.token_uri,
-            "offer_resource": {"gpu_model": "A100"},
-            "demand_resource": {"token": "USDC"},
-            "duration": 3600,
-        },
-    )
-    assert response_pk.status_code == 201
-    
-    # 3. Create order using canonical ID
+    # 2. Create order using canonical ID
     response_canonical = client.post(
         f"/agents/{agent_a.agent_id}/orders",
         json={
@@ -163,10 +150,9 @@ def test_agent_id_resolution_all_formats(client, agent_a, db_session):
     )
     assert response_canonical.status_code == 201
     
-    # 4. Verify both resolve to same agent
+    # 3. Verify order is associated with agent
     response = client.get(f"/agents/{agent_a.agent_id}/orders")
     assert response.status_code == 200
     order_ids = [item["order_id"] for item in response.json()["items"]]
-    assert "test-pk-order" in order_ids
     assert "test-canonical-order" in order_ids
 

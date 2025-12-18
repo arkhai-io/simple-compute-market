@@ -264,15 +264,7 @@ def resources_match(resource1: dict, resource2: dict) -> bool:
 
 
 def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find agent by ID (supports integer PK or canonical ID format)"""
-    # Try integer PK first
-    try:
-        agent_id_int = int(agent_id)
-        agent = db.query(Agent).filter(Agent.id == agent_id_int).first()
-        if agent:
-            return agent
-    except ValueError:
-        pass
+    """Find agent by ID (supports canonical ID format)""
     
     # Try canonical ID (exact match)
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
