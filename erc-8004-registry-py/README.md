@@ -21,6 +21,30 @@ The Indexer consists of:
 4. **Health Check Service**: Optional service that monitors agent endpoints (disabled by default)
 5. **REST API Server**: FastAPI-based API for agent management
 
+## Agent ID Format (ERC-8004 Canonical)
+
+Agents are identified using **ERC-8004 canonical IDs** following the format:
+
+```text
+eip155:{chainId}:{identityRegistry}:{numericAgentId}
+```
+
+Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
+
+Where:
+
+- `eip155`: Namespace (Ethereum Improvement Proposal 155)
+- `chainId`: Blockchain network identifier (e.g., 1337 for Anvil, 84532 for Base Sepolia)
+- `identityRegistry`: ERC-8004 Identity Registry contract address
+- `numericAgentId`: Numeric ERC-721 tokenId assigned by the registry (e.g., `22`)
+
+**Two Types of Agent IDs:**
+
+1. **Numeric Agent ID**: The ERC-721 tokenId returned from on-chain registration (e.g., `22`)
+2. **Canonical Agent ID**: The full formatted identifier combining chain, registry, and numeric ID (e.g., `eip155:1337:0x...:22`)
+
+**Important**: The canonical ID is built **after** on-chain registration. You register on-chain to receive the numeric agent ID, then construct the canonical ID from it. The canonical ID is used consistently across all Indexer APIs.
+
 ## Prerequisites
 
 - Python 3.10+
@@ -45,26 +69,6 @@ Or with pip:
 
 ```bash
 pip install -e .
-```
-
-## Local Development with Anvil
-
-For local development, you can use [Anvil](https://book.getfoundry.sh/anvil/) (a local Ethereum node) instead of connecting to testnet. See [docs/ANVIL_SETUP.md](./docs/ANVIL_SETUP.md) for detailed instructions.
-
-Quick start:
-```bash
-# 1. Start Anvil in a separate terminal
-anvil
-
-# 2. Deploy ERC-8004 contracts to Anvil
-# (See docs/ANVIL_SETUP.md for deployment instructions)
-
-# 3. Copy and configure local environment
-cp .env.local.example .env.local
-# Update contract addresses in .env.local
-
-# 4. Run with local config
-export $(cat .env.local | xargs) && uvicorn src.main:app --reload
 ```
 
 3. Set up environment variables:
@@ -108,29 +112,99 @@ LOG_LEVEL=info
 alembic upgrade head
 ```
 
+## Local Development with Anvil
+
+For local development, you can use [Anvil](https://getfoundry.sh/anvil/overview/) (a local Ethereum node) instead of connecting to testnet.
+
+Quick start:
+
+```bash
+# 1. Start Anvil in a separate terminal
+anvil
+
+# 2. Deploy ERC-8004 contracts to Anvil
+# Navigate to erc-8004-contracts/ and run deployment scripts
+
+# 3. Update .env with Anvil configuration:
+# CHAIN_ID=1337
+# RPC_URL=http://localhost:8545
+# Update contract addresses to your deployed addresses
+
+# 4. Run with local config
+uvicorn src.main:app --reload
+```
+
 ## Startup Order
 
-**Important**: Start the Indexer **before** starting your agents.
+**Recommended**: Start the Indexer **before** starting your agents for best experience.
 
 1. **Start Indexer First**:
+
    ```bash
    cd erc-8004-registry-py
+   make serve
+   ```
+
+   Or manually:
+
+   ```bash
    uv run uvicorn src.main:app --host 0.0.0.0 --port 8080
    ```
 
-2. **Then Start Agents**: Your agents can now register and interact with the Indexer.
+2. **Then Start Agents**: Your agents can now:
+   - Register on-chain (works independently, but Indexer will sync immediately)
+   - Send authenticated heartbeats (requires Indexer)
+   - Discover other agents via Indexer API (requires Indexer)
 
-**Why Indexer first?**
-- Agents can register via Indexer API (requires Indexer)
-- Agents can send authenticated heartbeats (requires Indexer)  
-- Agents can discover other agents (requires Indexer)
-- Event sync will catch up on any on-chain registrations that happened before Indexer started
+**Why Start Indexer First?**
 
-**Note**: If an agent registers on-chain before the Indexer starts, the event sync service will automatically index it when the Indexer starts.
+- **Event Sync**: Indexer can immediately sync agent registrations as they happen
+- **Heartbeats**: Agents can send heartbeats right away (requires Indexer)
+- **Discovery**: Agents can discover other agents immediately (requires Indexer)
+
+**What if Indexer Starts After Agents?**
+
+- ✅ **No problem!** Agents can register on-chain anytime (independent of Indexer)
+- ✅ **Auto-sync**: When Indexer starts, event sync will automatically catch up on all on-chain registrations
+- ✅ **Backfill**: Event sync performs initial sync on startup to index any missed registrations
+
+**Note**: While agents can register on-chain independently, the Indexer must be running for:
+- Agent discovery via `/agents` endpoint
+- Heartbeat processing
+- Real-time event synchronization
 
 ## Running the Server
 
-### Development
+### Using Makefile (Recommended)
+
+The Makefile provides a convenient way to start the server with ZeroTier support:
+
+```bash
+# Start server (defaults to port 8080)
+make serve
+
+# Start on custom port
+make serve PORT=9000
+
+# With ZeroTier network (set ZEROTIER_NETWORK in .env or environment)
+# The server will automatically join the ZeroTier network on startup
+make serve
+```
+
+**ZeroTier Integration**: If `ZEROTIER_NETWORK` is set in your `.env` file or environment, the server will automatically:
+
+- Check for ZeroTier CLI installation
+- Join the specified ZeroTier network
+- Display the ZeroTier node ID for authorization
+- Leave the network gracefully on shutdown
+
+After starting, send your ZeroTier node ID to the network controller to get authorized:
+
+```bash
+sudo zerotier-cli info | cut -d " " -f3
+```
+
+### Manual Development
 
 ```bash
 uvicorn src.main:app --reload --port 8080
@@ -158,78 +232,6 @@ The server will start on `http://localhost:8080` (or your configured port).
 GET /health
 ```
 
-Returns service health status.
-
-### Register Agent
-
-The Indexer supports three registration formats:
-
-**Option 1: ERC-8004 Registration File (Recommended)**
-
-```http
-POST /agents/register
-Content-Type: application/json
-
-{
-  "registrationFile": {
-    "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-    "name": "Weather Agent",
-    "description": "Provides weather information",
-    "image": "https://example.com/agent.png",
-    "endpoints": [
-      {
-        "name": "A2A",
-        "endpoint": "https://agent.example.com",
-        "version": "0.3.0",
-        "a2aSkills": []
-      }
-    ],
-    "registrations": [],
-    "supportedTrust": ["reputation"],
-    "active": true,
-    "x402support": false,
-    "updatedAt": 1704067200
-  },
-  "owner": "0x...",
-  "labels": {"category": "weather"}
-}
-```
-
-**Option 2: Registration File URL**
-
-```http
-POST /agents/register
-Content-Type: application/json
-
-{
-  "registrationFileUrl": "https://yourdomain.com/agents/my-agent.json",
-  "owner": "0x...",
-  "labels": {"category": "weather"}
-}
-```
-
-**Option 3: Legacy Agent Card Format (Backward Compatible)**
-
-```http
-POST /agents/register
-Content-Type: application/json
-
-{
-  "agentCard": {
-    "name": "Weather Agent",
-    "description": "Provides weather information",
-    "url": "https://agent.example.com",
-    "version": "1.0.0",
-    "skills": [...],
-    "capabilities": {"streaming": true}
-  },
-  "owner": "0x...",
-  "labels": {"category": "weather"}
-}
-```
-
-**Note**: Full on-chain registration requires wallet integration. This endpoint stores agents in the Indexer for fast discovery. See [docs/WALLET_INTEGRATION.md](./docs/WALLET_INTEGRATION.md) for on-chain registration.
-
 ### Get Agent
 
 ```http
@@ -245,6 +247,7 @@ GET /agents?q=weather&endpoint_type=A2A&trust_model=reputation&limit=25&offset=0
 ```
 
 Query parameters:
+
 - `q`: Search query (optional)
 - `endpoint_type`: Filter by endpoint type (A2A, MCP, etc.) (optional)
 - `trust_model`: Filter by trust model (reputation, validation, etc.) (optional)
@@ -275,6 +278,82 @@ Updates agent's last heartbeat timestamp and sets status to healthy.
 
 **Authentication**: If the agent has an owner address registered, heartbeats must include a cryptographic signature. The signature is generated by signing the message `"heartbeat:{agentId}:{timestamp}"` using EIP-191 personal sign format with the agent's private key. The timestamp must be within 5 minutes of the current time.
 
+## Agent Integration
+
+### Registration Workflow
+
+**Recommended Approach: Register On-Chain, Indexer Auto-Syncs**
+
+The recommended workflow is for agents to register directly on-chain using the ERC-8004 IdentityRegistry contract. The Indexer will automatically discover and index these registrations via its event sync service.
+
+**Registration Flow:**
+
+1. **Agent registers on-chain** → Your agent code calls the ERC-8004 IdentityRegistry contract's `register()` function directly
+   - This happens entirely on-chain, independent of the Indexer
+   - Returns a numeric agent ID (ERC-721 tokenId)
+   - Private keys stay secure in your agent code
+
+2. **Indexer automatically syncs** → The Indexer's event sync service detects the on-chain registration event
+   - No API calls needed from your agent
+   - Indexer automatically indexes the agent into its database
+   - Agent becomes discoverable via Indexer API
+
+3. **Agent uses canonical ID** → Build and use the canonical ID format for all interactions
+   - Format: `eip155:{chainId}:{identityRegistry}:{numericAgentId}`
+   - Use this ID for heartbeats, discovery, and other Indexer API calls
+
+**Why this approach?**
+
+- ✅ **Secure**: Private keys never leave your agent code
+- ✅ **Decentralized**: Registration happens on-chain, not dependent on Indexer availability
+- ✅ **Automatic**: Indexer automatically discovers and indexes agents via event sync
+- ✅ **Standard**: Follows ERC-8004 best practices
+- ✅ **Flexible**: Works even if Indexer is temporarily offline (will sync when back online)
+
+**Important Notes:**
+
+- The Indexer must be running for event sync to work (but agents can register on-chain anytime)
+- If an agent registers on-chain before the Indexer starts, the event sync will catch up on startup
+- Event sync monitors both new registrations and metadata updates automatically
+
+### On-Chain Registration
+
+Agents should register on-chain using the ERC-8004 IdentityRegistry contract.
+
+**On-Chain Registration Steps:**
+
+1. **Call `register()` function** → Interact directly with the ERC-8004 IdentityRegistry contract
+   - Pass your agent's token URI (pointing to your agent card JSON)
+   - Optionally include metadata entries
+   - Returns a numeric agent ID (e.g., `22`) - this is the ERC-721 tokenId
+   - Use environment variables for secure private key management
+   - Estimate and manage transaction costs (gas)
+   - Handle blockchain errors gracefully
+
+2. **Build canonical ID** → Format: `eip155:{chainId}:{identityRegistry}:{numericAgentId}`
+   - Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
+   - Where `22` is the numeric agent ID from step 1
+
+3. **Indexer auto-syncs** → The Indexer's event sync service automatically detects your registration
+   - No additional API calls needed
+   - Agent becomes available in Indexer database
+   - Can be discovered via `/agents` endpoint
+
+4. **Use canonical ID** → Include it in heartbeats and other Indexer API calls
+
+### Agent Heartbeat
+
+Agents send authenticated periodic heartbeats to maintain health status:
+
+- Sign message: `"heartbeat:{canonicalAgentId}:{timestamp}"`
+- Use EIP-191 personal sign format
+- Timestamp must be within 5 minutes of current time
+- Send to `/agents/{canonicalAgentId}/heartbeat` endpoint
+
+### Discovery
+
+Clients query the Indexer to discover available agents using the `/agents` endpoint with filters.
+
 ## Database Configuration
 
 ### SQLite (Development)
@@ -297,15 +376,33 @@ createdb registry
 
 ## Event Synchronization
 
-The Indexer automatically syncs on-chain events:
+The Indexer automatically syncs on-chain events to keep its database up-to-date:
 
-- **AgentRegistered**: New agent registrations
-- **MetadataUpdated**: Agent metadata updates
+**Synced Events:**
 
-The sync service:
-- Performs initial sync on startup
-- Watches for new events in real-time
-- Handles missed events with periodic backfill
+- **AgentRegistered**: New agent registrations (primary method for agent discovery)
+- **MetadataSet**: Agent metadata updates
+- **UriUpdated**: Agent token URI updates
+
+**How Event Sync Works:**
+
+1. **On Startup**: Performs initial sync to catch up on any registrations that happened while Indexer was offline
+2. **Real-Time Monitoring**: Continuously watches for new events on-chain
+3. **Automatic Indexing**: When an agent registers on-chain, the Indexer automatically:
+   - Detects the `AgentRegistered` event
+   - Fetches agent metadata from the token URI
+   - Stores agent information in the database
+   - Makes the agent discoverable via API
+
+**Benefits:**
+
+- ✅ Agents register on-chain independently (no Indexer dependency)
+- ✅ Indexer automatically discovers all on-chain registrations
+- ✅ No manual API calls needed for registration
+- ✅ Handles missed events with periodic backfill
+- ✅ Works even if Indexer was offline during registration
+
+**Note**: The event sync service runs automatically when the Indexer starts. Ensure the Indexer is running for agents to be discoverable, but agents can register on-chain at any time.
 
 ## Health Monitoring
 
@@ -324,7 +421,7 @@ Health checks are **disabled by default**. To enable, set `ENABLE_HEALTH_CHECKS=
 
 ### Project Structure
 
-```
+```text
 erc-8004-registry-py/
 ├── src/
 │   ├── contracts/        # Contract ABIs and interaction logic
@@ -333,15 +430,9 @@ erc-8004-registry-py/
 │   ├── services/         # Health checks, indexing, sync
 │   ├── types/           # Type definitions
 │   └── main.py          # Entry point
-├── docs/                 # Documentation (14 markdown files)
-│   ├── INTEGRATION_WITH_YOUR_AGENTS.md
-│   ├── RECOMMENDED_REGISTRATION_WORKFLOW.md
-│   ├── AGENT_REGISTRATION_EXAMPLES.md
-│   ├── DOCUMENTATION_INDEX.md
-│   └── ... (see docs/DOCUMENTATION_INDEX.md for complete list)
 ├── alembic/             # Database migrations
 ├── pyproject.toml
-└── README.md            # Main entry point
+└── README.md
 ```
 
 ### Building
@@ -390,88 +481,6 @@ All configuration is done via environment variables. See `.env.example` for avai
 - Verify agent URLs are accessible
 - Check firewall rules allow health check traffic
 - Review health check interval settings
-
-## License
-
-MIT
-
-## Agent Integration
-
-For detailed information on how agents integrate with the Indexer, see [docs/AGENT_INTEGRATION.md](./docs/AGENT_INTEGRATION.md).
-
-Quick overview:
-- **Registration**: Agents register on-chain via ERC-8004 or via Indexer API
-- **Heartbeat**: Agents send authenticated periodic heartbeats to maintain health status (default)
-- **Discovery**: Clients query the Indexer to discover available agents
-- **Health Monitoring**: Indexer can optionally monitor agent endpoints (opt-in, disabled by default)
-
-## Wallet Integration
-
-For on-chain registration and wallet operations, see [docs/WALLET_INTEGRATION.md](./docs/WALLET_INTEGRATION.md).
-
-Quick overview:
-- **Private Keys**: Use environment variables for secure key management
-- **On-Chain Registration**: Register agents via ERC-8004 IdentityRegistry
-- **Gas Management**: Estimate and manage transaction costs
-- **Error Handling**: Handle blockchain errors gracefully
-
-## Agent Registration Examples
-
-For practical examples of registering your agents from the `agents/` folder, see [docs/AGENT_REGISTRATION_EXAMPLES.md](./docs/AGENT_REGISTRATION_EXAMPLES.md).
-
-Quick example:
-```bash
-# Register trader agent
-curl -X POST "http://localhost:8080/agents/register" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "registrationFile": {
-      "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-      "name": "A2A Trader Agent",
-      "description": "AI agent for trading computational resources",
-      "endpoints": [{
-        "name": "A2A",
-        "endpoint": "http://localhost:8001/",
-        "version": "0.3.0",
-        "a2aSkills": []
-      }],
-      "supportedTrust": ["reputation"],
-      "active": true,
-      "updatedAt": '$(date +%s)'
-    },
-    "owner": "0x...",
-    "labels": {"category": "trading"}
-  }'
-```
-
-## Recommended Registration Workflow
-
-For the **recommended workflow** for registering agents on-chain, see [docs/RECOMMENDED_REGISTRATION_WORKFLOW.md](./docs/RECOMMENDED_REGISTRATION_WORKFLOW.md).
-
-**Quick summary:**
-1. Create ERC-8004 registration file in your agent code
-2. Host registration file on HTTP/IPFS
-3. Register on-chain directly from agent code (not via Indexer API)
-4. Indexer automatically syncs via event sync service
-
-**Why this approach?**
-- ✅ Secure: Private keys stay in agent code
-- ✅ Flexible: Works with or without Indexer running
-- ✅ Standard: Follows ERC-8004 best practices
-- ✅ Automatic: Indexer auto-indexes on-chain registrations
-
-## Documentation
-
-For complete documentation, see [docs/DOCUMENTATION_INDEX.md](./docs/DOCUMENTATION_INDEX.md).
-
-**Quick Links:**
-- [Integration with Your Agents](./docs/INTEGRATION_WITH_YOUR_AGENTS.md) - **START HERE** for practical integration
-- [Recommended Registration Workflow](./docs/RECOMMENDED_REGISTRATION_WORKFLOW.md) - Best practices
-- [Agent Registration Examples](./docs/AGENT_REGISTRATION_EXAMPLES.md) - Code examples
-- [Wallet Integration](./docs/WALLET_INTEGRATION.md) - Security and wallet operations
-- [ERC-8004 Format](./docs/ERC8004_FORMAT.md) - Format specification
-- [Agent Integration Guide](./docs/AGENT_INTEGRATION.md) - Integration patterns
-- [Anvil Setup](./docs/ANVIL_SETUP.md) - Local development
 
 ## Resources
 

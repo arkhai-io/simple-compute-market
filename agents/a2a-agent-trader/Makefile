@@ -8,6 +8,25 @@ install:
 	uv sync --dev
 
 # ==============================================================================
+# Agent Registration
+# ==============================================================================
+
+# Register agent on-chain (run this before starting the agent)
+# Usage: make register-onchain [ENV_FILE=.env]
+# This registers to the on-chain Registry separately from agent startup.
+# The agent ID will be saved to .env as ONCHAIN_AGENT_ID
+register-onchain:
+	@echo "==============================================================================="
+	@echo "| 🔗 Registering agent on-chain...                                            |"
+	@echo "==============================================================================="
+	@ENV_FILE="$(or $(ENV_FILE),.env)"; \
+	ENV_FILE_ARG=""; \
+	if [ -f "$$ENV_FILE" ]; then \
+		ENV_FILE_ARG="--env-file $$ENV_FILE"; \
+	fi; \
+	uv run python scripts/register_onchain.py $$ENV_FILE_ARG
+
+# ==============================================================================
 # Playground Targets
 # ==============================================================================
 

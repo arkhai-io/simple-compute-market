@@ -57,10 +57,15 @@ def setup_file_logging(log_file_path: str | None = None, log_level: str = "INFO"
         # Local development: Use file-based logging
         # Default log file location
         if log_file_path is None:
-            # Use agent_id from config if available, otherwise default
-            agent_id = os.getenv("AGENT_ID", "agent")
-            # Sanitize agent_id for filename (remove invalid chars)
-            safe_agent_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in agent_id)
+            # Use agent_id from config helper for consistency
+            try:
+                from .config import get_agent_id
+                agent_id = get_agent_id()
+            except (ImportError, ValueError):
+                # Fallback if config not available or validation fails
+                agent_id = os.getenv("AGENT_ID", "root_agent")
+            # Sanitize agent_id for filename (remove invalid chars, but should already be valid)
+            safe_agent_id = "".join(c if c.isalnum() or c == '_' else '_' for c in agent_id)
             log_file_path = f"{safe_agent_id}.log"
         
         # Ensure log directory exists

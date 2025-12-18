@@ -44,6 +44,8 @@ make install && make playground
 | Command              | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
 | `make install`       | Install all required dependencies using uv                                                  |
+| `make register-onchain` | Register agent on-chain before starting |
+| `make serve-a2a`     | Start A2A agent server (requires on-chain registration first) |
 | `make playground`    | Launch local development environment with backend and frontend - leveraging `adk web` command.|
 | `make backend`       | Deploy agent to Cloud Run (use `IAP=true` to enable Identity-Aware Proxy) |
 | `make local-backend` | Launch local development server |
@@ -53,6 +55,41 @@ make install && make playground
 | `uv run jupyter lab` | Launch Jupyter notebook                                                                     |
 
 For full command options and usage, refer to the [Makefile](Makefile).
+
+## Agent Registration Workflow
+
+Register your agent on-chain **before** starting the agent server:
+
+### Step 1: Register On-Chain
+
+```bash
+# Configure your .env file with:
+# - AGENT_PRIV_KEY
+# - CHAIN_RPC_URL
+# - IDENTITY_REGISTRY_ADDRESS
+# - AGENT_WALLET_ADDRESS
+# - CHAIN_ID (optional, defaults to 1337)
+
+make register-onchain
+```
+
+This will:
+- Register your agent on the ERC-8004 IdentityRegistry contract
+- Output the numeric agent ID (e.g., `22`)
+- Output the canonical agent ID (e.g., `eip155:1337:0x...:22`)
+- Optionally update your `.env` file with `ONCHAIN_AGENT_ID`
+
+### Step 2: Start Agent
+
+```bash
+make serve-a2a
+```
+
+The agent will use the `ONCHAIN_AGENT_ID` from your `.env` file (or find it automatically via blockchain events) to build the canonical ID for heartbeats and API calls.
+
+**Why this approach?**
+- ✅ Idempotent: safe to run multiple times (finds existing registration)
+- ✅ Clear workflow: explicit registration step before starting agent
 
 
 ## Usage

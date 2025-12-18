@@ -1,6 +1,6 @@
 """add_owner_field
 
-Revision ID: 6d2549d33af3
+Revision ID: 002_add_owner_field
 Revises: 001_initial
 Create Date: 2025-12-10 19:01:29.338497
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '6d2549d33af3'
+revision = '002_add_owner_field'
 down_revision = '001_initial'
 branch_labels = None
 depends_on = None

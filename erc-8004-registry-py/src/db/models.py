@@ -18,9 +18,21 @@ Base = declarative_base()
 class Agent(Base):
     __tablename__ = "agents"
     
-    agent_id = Column(String, primary_key=True)
+    # Integer primary key for internal DB use
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # ERC-8004 canonical identifier: eip155:{chainId}:{identityRegistry}:{agentId}
+    # This is the single source of truth for agent identity
+    agent_id = Column(String, nullable=True, unique=True)
+    
+    # Components of canonical ID for querying
     chain_id = Column(Integer, nullable=False)
+    identity_registry = Column(String, nullable=True)  # Registry contract address
+    onchain_agent_id = Column(Integer, nullable=True)  # Numeric ERC-721 tokenId
+    
+    # Legacy field name for backward compatibility (maps to identity_registry)
     registry_address = Column(String, nullable=False)
+    
     owner = Column(String, nullable=True)  # Wallet address of agent owner (for signature verification)
     token_uri = Column(Text, nullable=True)
     metadata_json = Column("metadata", JSON, default=dict)  # Database column is "metadata", Python attr is "metadata_json" to avoid SQLAlchemy conflict
@@ -36,6 +48,11 @@ class Agent(Base):
     __table_args__ = (
         Index("idx_agents_chain_id", "chain_id"),
         Index("idx_agents_health_status", "health_status"),
+        Index("idx_agents_owner", "owner"),
+        Index("idx_agents_token_uri", "token_uri"),
+        Index("idx_agents_identity_registry", "identity_registry"),
+        Index("idx_agents_onchain_agent_id", "onchain_agent_id"),
+        Index("ux_agents_chain_registry_onchain", "chain_id", "identity_registry", "onchain_agent_id", unique=True),
     )
 
 
@@ -72,5 +89,38 @@ class HealthCheck(Base):
     __table_args__ = (
         Index("idx_health_checks_agent_id", "agent_id"),
         Index("idx_health_checks_checked_at", "checked_at"),
+    )
+
+
+class OrderStatusEnum(str, enum.Enum):
+    open = "open"
+    closed = "closed"
+    accepted = "accepted"
+    expired = "expired"
+
+
+class MarketOrder(Base):
+    __tablename__ = "market_orders"
+    
+    order_id = Column(String, primary_key=True)
+    agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
+    order_maker = Column(Text, nullable=False)  # Agent card URL
+    order_taker = Column(Text, nullable=True)  # Agent card URL of taker
+    offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
+    demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
+    duration = Column(Integer, nullable=False)
+    maker_attestation = Column(Text, nullable=True)
+    taker_attestation = Column(Text, nullable=True)
+    status = Column(SQLEnum(OrderStatusEnum), nullable=False, default=OrderStatusEnum.open)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    agent = relationship("Agent")
+    
+    __table_args__ = (
+        Index("idx_market_orders_agent_id", "agent_id"),
+        Index("idx_market_orders_status", "status"),
+        Index("idx_market_orders_created_at", "created_at"),
     )
 

@@ -143,6 +143,27 @@ class IdentityRegistryClient:
                 # If both fail, re-raise the original error
                 raise e
 
+    def get_past_uri_updated_events(self, from_block: int, to_block: Optional[int] = None):
+        """Get past UriUpdated events using get_logs (more reliable than filters)"""
+        try:
+            # Use get_logs directly instead of create_filter for better RPC compatibility
+            return self.contract.events.UriUpdated.get_logs(
+                from_block=from_block,
+                to_block=to_block if to_block is not None else "latest"
+            )
+        except Exception as e:
+            # Fallback: try with create_filter if get_logs fails
+            # This handles cases where RPC doesn't support get_logs with block ranges
+            try:
+                event_filter = self.contract.events.UriUpdated.create_filter(
+                    from_block=from_block,
+                    to_block=to_block or "latest"
+                )
+                return event_filter.get_all_entries()
+            except Exception:
+                # If both fail, re-raise the original error
+                raise e
+
     def watch_agent_registered(self, callback, from_block: Optional[int] = None):
         """Watch for Registered events"""
         event_filter = self.contract.events.Registered.create_filter(
@@ -150,7 +171,8 @@ class IdentityRegistryClient:
         )
         
         def handle_event(event):
-            if event.args.agentId:
+            # CRITICAL: Use 'is not None' not truthy check because agentId 0 is valid!
+            if hasattr(event.args, 'agentId') and event.args.agentId is not None:
                 callback(event.args.agentId, event.blockNumber)
         
         # In production, use web3.py's event listener or polling
@@ -163,7 +185,9 @@ class IdentityRegistryClient:
         )
         
         def handle_event(event):
-            if event.args.agentId and event.args.key:
+            # CRITICAL: Use 'is not None' not truthy check because agentId 0 is valid!
+            if (hasattr(event.args, 'agentId') and event.args.agentId is not None and
+                hasattr(event.args, 'key') and event.args.key):
                 callback(event.args.agentId, event.args.key, event.blockNumber)
         
         return event_filter

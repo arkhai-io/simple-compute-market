@@ -662,15 +662,21 @@ root_agent = TraderAgent(
 # Define the skill for the root agent
 # In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
 
+# Build agent card from config (shared with registration script)
+from .utils.agent_card import build_agent_card_data
+agent_card_data = build_agent_card_data(
+    agent_name=CONFIG.agent_name,
+    base_url=BASE_URL_OVERRIDE
+)
 public_agent_card = AgentCard(
-    name="A2A Agent",
-    description="A helpful AI assistant designed to trade compute resources with others.",
-    url=BASE_URL_OVERRIDE,
-    version="0.1.0",
-    defaultInputModes=["text"],  # A2A Protocol camelCase
-    defaultOutputModes=["text"],  # A2A Protocol camelCase
-    skills=[],
-    capabilities=AgentCapabilities(streaming=True),
+    name=agent_card_data["name"],
+    description=agent_card_data["description"],
+    url=agent_card_data["url"],
+    version=agent_card_data["version"],
+    defaultInputModes=agent_card_data["defaultInputModes"],
+    defaultOutputModes=agent_card_data["defaultOutputModes"],
+    skills=agent_card_data["skills"],
+    capabilities=AgentCapabilities(**agent_card_data["capabilities"]),
 )
 
 ALERTS_APP_NAME = "alerts"
@@ -823,6 +829,56 @@ a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 # Add the alert route to the A2A app
 a2a_app.routes.append(alert_route)
 
+# Add ERC-8004 registration file endpoint
+# Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
+from .utils.agent_card import build_erc8004_registration_file
+from .utils.registry.blockchain_utils import build_erc8004_canonical_id
+
+async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
+    """
+    Serve ERC-8004 registration file at /.well-known/erc-8004-registration.json
+    
+    Per ERC-8004 spec, this file contains:
+    - type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1"
+    - name, description, endpoints (with A2A endpoint pointing to agent card)
+    - registrations: array with agentId and agentRegistry (if registered on-chain)
+    - supportedTrust: array (optional)
+    """
+    # Get chain_id
+    chain_id = 1337  # Default
+    if CONFIG.chain_rpc_url:
+        try:
+            from web3 import Web3
+            from web3.providers import HTTPProvider
+            http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+            w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
+            chain_id = w3.eth.chain_id
+        except Exception:
+            pass  # Use default
+    
+    # Get on-chain agent ID if available
+    agent_id = None
+    if CONFIG.onchain_agent_id:
+        try:
+            agent_id = int(CONFIG.onchain_agent_id)
+        except ValueError:
+            pass
+    
+    # Build registration file
+    registration_file = build_erc8004_registration_file(
+        agent_card_data=agent_card_data,
+        agent_id=agent_id,
+        chain_id=chain_id,
+        identity_registry=CONFIG.identity_registry_address,
+        supported_trust=[]
+    )
+    
+    return JSONResponse(registration_file)
+
+# Add registration file route
+registration_file_route = Route("/.well-known/erc-8004-registration.json", serve_erc8004_registration_file, methods=["GET"])
+a2a_app.routes.append(registration_file_route)
+
 
 # Background task to process queued events
 # TODO Refactor this to run through _run_async_impl for it to have access to ctx
@@ -847,21 +903,12 @@ async def process_queued_events():
             await asyncio.sleep(5)  # Back off on error
 
 
-# Background task for delayed registration
-async def _delayed_registration():
-    """Run registration after server is ready."""
+# Background task to start heartbeat after server is ready
+async def _start_heartbeat():
+    """Start heartbeat loop after server is ready."""
     from .utils.config import CONFIG
-    from .onchain_registration import register_agent_on_startup
-
-    try:
-        logger.info("[REGISTRATION] Starting agent registration")
-        result = await register_agent_on_startup(CONFIG)
-        if result:
-            logger.info(f"[REGISTRATION] Agent registration complete: {result}")
-        else:
-            logger.warning("[REGISTRATION] Agent registration returned no result")
-    except Exception as e:
-        logger.error(f"[REGISTRATION] Agent registration failed: {e}")
+    from .agent_heartbeat import start_agent_heartbeat
+    await start_agent_heartbeat(CONFIG)
 
 
 # Initialize startup tasks
@@ -869,10 +916,8 @@ async def _startup_tasks():
     """Initialize background tasks."""
     from .utils.config import CONFIG
 
-    # Schedule registration as background task (runs after server starts)
-    if CONFIG.auto_register:
-        asyncio.create_task(_delayed_registration())
-        logger.info("[STARTUP] Auto-registration scheduled")
+    # Start heartbeat after server is ready
+    asyncio.create_task(_start_heartbeat())
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
