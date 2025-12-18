@@ -94,7 +94,7 @@ async def publish_order(
 
 @router.get("/agents/{agent_id}/orders")
 async def get_agent_orders(
-    agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
+    agent_id: str = Path(..., description="Agent ID (canonical eip155:... format)"),
     status: Optional[str] = Query(None, description="Filter by order status"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
