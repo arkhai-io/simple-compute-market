@@ -324,7 +324,7 @@ async def get_agent(
     agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
     db: Session = Depends(get_db),
 ):
-    """Get agent by ID (supports canonical eip155:... format or integer PK)"""
+    """Get agent by ID (expects canonical eip155:... format)"""
     agent = find_agent_by_id(db, agent_id)
     
     if not agent:
