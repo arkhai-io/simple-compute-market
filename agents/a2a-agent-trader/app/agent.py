@@ -92,6 +92,7 @@ from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
+from .utils.provisioning import run_vm_provisioning_playbook
 from pydantic import PrivateAttr
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
@@ -359,7 +360,6 @@ def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
             }
         )
     return outcome_json
-
 class TraderAgent(BaseAgent):
     """
     Custom agent for trading computational resources.
@@ -862,6 +862,11 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
             {"error": "Failed to validate alert", "detail": str(e)},
             status_code=400
         )
+
+    logger.info("Provisioning...")
+    run_vm_provisioning_playbook("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGhWsCyFhP7XsBcnjft0H9463ShWBuv6ck+bhIEfWVyJ albert@whitewidget.com")
+    logger.info("Provisioning complete.")
+    return JSONResponse({"message": "Provisioning successful."})
 
     try:
         response_text = await _run_alert_conversation(alert_request)
