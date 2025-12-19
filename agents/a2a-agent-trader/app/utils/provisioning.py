@@ -75,12 +75,12 @@ def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:
     return None
 
 
-def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> str:
+def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> Optional[str]:
     """
     Run the Ansible playbook that provisions a VM using the shared inventory and vars file.
 
     Returns:
-        Stdout from the playbook run.
+        SSH command string if all connection details were found, otherwise None.
 
     Raises:
         subprocess.CalledProcessError if the playbook exits with a non-zero status.
@@ -125,8 +125,9 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> str:
         )
     except subprocess.CalledProcessError as exc:
         logger.error(
-            "VM provisioning playbook failed (code %s): %s",
+            "VM provisioning playbook failed (code %s). stdout:\n%s\nstderr:\n%s",
             exc.returncode,
+            exc.stdout,
             exc.stderr,
         )
         raise
@@ -153,12 +154,9 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> str:
     else:
         logger.warning("Tenant SSH user not found in playbook output.")
 
+    ssh_command = None
     if external_port and vm_host_ip and tenant_user:
-        logger.info(
-            "SSH command: ssh -i <your_private_key> -p %s %s@%s",
-            external_port,
-            tenant_user,
-            vm_host_ip,
-        )
+        ssh_command = f"ssh -i <your_private_key> -p {external_port} {tenant_user}@{vm_host_ip}"
+        logger.info("SSH command: %s", ssh_command)
 
-    return result.stdout
+    return ssh_command

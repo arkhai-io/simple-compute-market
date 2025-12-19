@@ -1,4 +1,4 @@
-"""Action execution simulation (logging only for now)."""
+"""Action execution."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
+from .provisioning import run_vm_provisioning_playbook
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
@@ -172,7 +173,7 @@ async def execute_action(
             outcome["message"] = "Resources rebalanced internally (simulated)"
 
         case ActionType.FULFILL_COMPUTE_OBLIGATION.value:
-            logger.info(f"[ACTION] [SIMULATED] Fulfilling compute obligation with params: {parameters}")
+            logger.info(f"[ACTION] Fulfilling compute obligation with params: {parameters}")
             escrow_uid = parameters.get("escrow_uid")
             ssh_public_key = parameters.get("ssh_public_key")
             order_id = parameters.get("order_id")
@@ -211,7 +212,7 @@ async def execute_action(
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             outcome["result"] = result
-            outcome["message"] = result.get("message", "Compute obligation fulfilled (simulated)")
+            outcome["message"] = result.get("message", "Compute obligation fulfilled")
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
@@ -310,7 +311,7 @@ async def execute_action(
         case ActionType.NOOP.value:
             logger.info(f"[ACTION] [SIMULATED] No operation required")
             outcome["result"] = None
-            outcome["message"] = "No operation (simulated)"
+            outcome["message"] = "No operation"
             
         case _:
             logger.warning(f"[ACTION] [SIMULATED] Unknown action type: {action_type_str}")
@@ -432,6 +433,28 @@ async def mock_provision_machine(ssh_public_key: str) -> str:
     """
     logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
     return "demo-user@node-01.example.net"
+
+
+async def provision_machine(ssh_public_key: str) -> str:
+    """Provision a machine using the provided SSH public key.
+
+    Args:
+        ssh_public_key: SSH public key to install on the provisioned machine.
+
+    Returns:
+        String with connection details.
+    """
+    logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
+    try:
+        connection_info = run_vm_provisioning_playbook(ssh_public_key)
+        if connection_info:
+            logger.info(f"[TOOL] Machine provisioned: {connection_info}")
+            return connection_info
+        logger.warning("[TOOL] Provisioning completed but connection info was not available.")
+        return "Provisioning completed, but SSH connection info unavailable."
+    except Exception as exc:
+        logger.error("[TOOL] Provisioning failed: %s", exc)
+        return f"Provisioning failed: {exc}"
 
 
 async def accept_offer(
@@ -1130,7 +1153,7 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
-    connection_details = await mock_provision_machine(ssh_public_key)
+    connection_details = await provision_machine(ssh_public_key)
     fulfillment_uid = None
     maker_attestation = None
     
@@ -1146,7 +1169,7 @@ async def fulfill_compute_obligation(
                 escrow_uid
             )
             maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
-            logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; simulated machine provisioned.")
+            logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; machine provisioned.")
             request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
