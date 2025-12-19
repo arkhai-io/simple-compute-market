@@ -359,7 +359,6 @@ def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
             }
         )
     return outcome_json
-
 class TraderAgent(BaseAgent):
     """
     Custom agent for trading computational resources.
