@@ -91,7 +91,7 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> Optio
 
     vm_vars_payload = (
         f"vm_host: {vm_host}\n"
-        "vm_target: albert-vm\n"
+        "vm_target: tenant-vm\n"
         "vm_action: create\n"
         "vm_ram: 2048\n"
         "vm_vcpus: 2\n"
