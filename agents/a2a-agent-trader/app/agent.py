@@ -516,8 +516,13 @@ class TraderAgent(BaseAgent):
             event_type=domain_event.event_type.value,
         )
         
-        # Negotiation history (empty for now, can be populated from negotiation events)
+        # Load negotiation history if this is a negotiation event
         negotiation_history = []
+        if isinstance(domain_event, NegotiationEvent):
+            from app.policies.negotiation_thread import get_thread_store
+            thread_store = get_thread_store()
+            negotiation_history = thread_store.get_thread(domain_event.negotiation_id)
+            logger.debug(f"[BUILD CONTEXT] Loaded {len(negotiation_history)} messages for negotiation {domain_event.negotiation_id}")
         
         return (domain_event, {
             "resource_portfolio": resource_portfolio,
@@ -585,6 +590,7 @@ class TraderAgent(BaseAgent):
         # [2] Context building
         domain_context = await self._build_domain_context(domain_event)
         domain_event, context_data = domain_context
+        negotiation_history = context_data.get("negotiation_history", [])
         
         # [3] Policy evaluation
         action = await self._consult_policy(domain_context)
@@ -641,6 +647,51 @@ class TraderAgent(BaseAgent):
                 timestamp=datetime.now().isoformat(),
             )
             logger.info(f"[PIPELINE] Recorded decision {decision.decision_id} with outcome")
+            
+            # [5a] Update negotiation thread if this is a negotiation event
+            if isinstance(domain_event, NegotiationEvent):
+                from app.policies.negotiation_thread import get_thread_store
+                thread_store = get_thread_store()
+                
+                # Extract price data from event
+                event_data = domain_event.data or {}
+                our_price = event_data.get("our_price")
+                their_price = event_data.get("their_price")
+                proposed_price = action.parameters.get("proposed_price") if action.action_type == ActionType.COUNTER_OFFER else None
+                
+                # Determine message type
+                message_type = "initial_proposal" if len(negotiation_history) == 0 else "counter_proposal"
+                
+                # Add message to thread
+                round_num = thread_store.add_message(
+                    negotiation_id=domain_event.negotiation_id,
+                    sender=self.name,
+                    our_price=our_price,
+                    their_price=their_price,
+                    proposed_price=proposed_price,
+                    action_taken=action_type_str.upper(),
+                    message_type=message_type,
+                )
+                
+                # Check for terminal condition
+                is_terminal, terminal_state = thread_store.check_terminal(domain_event.negotiation_id)
+                if is_terminal:
+                    logger.info(f"[NEGOTIATION] Thread {domain_event.negotiation_id} reached terminal state: {terminal_state}")
+                    # If terminal, update order status accordingly
+                    if terminal_state == "success":
+                        # Both accepted - orders should already be in accepted state
+                        pass
+                    elif terminal_state in ("failure", "timeout"):
+                        # Negotiation failed - revert orders to open
+                        from app.utils.registry_client import get_registry_client
+                        registry_client = get_registry_client()
+                        our_order_id = event_data.get("our_order_id")
+                        their_order_id = event_data.get("their_order_id")
+                        if our_order_id:
+                            await registry_client.update_order(our_order_id, {"status": "open"})
+                        if their_order_id:
+                            await registry_client.update_order(their_order_id, {"status": "open"})
+                        logger.info(f"[NEGOTIATION] Reverted orders {our_order_id}, {their_order_id} to open status")
         except Exception as e:
             logger.error(f"[PIPELINE] Failed to record decision: {e}")
         
@@ -650,6 +701,7 @@ class TraderAgent(BaseAgent):
             "accept_offer": "ACCEPT the offer.",
             "reject_offer": "REJECT the offer.",
             "counter_offer": "COUNTER the offer.",
+            "exit_negotiation": "EXIT NEGOTIATION. Terminate negotiation and revert orders to open.",
             "make_offer": "MAKE OFFER. Create market order.",
             "resolve_internally": "RESOLVE INTERNALLY. Run rebalance_internal_resources utility.",
             "collect_escrow": "COLLECT ESCROW. Collect escrow for completed fulfillment.",

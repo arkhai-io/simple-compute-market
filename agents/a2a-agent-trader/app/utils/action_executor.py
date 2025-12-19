@@ -303,9 +303,76 @@ async def execute_action(
                 outcome["message"] = outcome["result"]["message"]
             
         case ActionType.COUNTER_OFFER.value:
-            logger.info(f"[ACTION] [SIMULATED] Countering offer with params: {parameters}")
-            outcome["result"] = {"counter_offer_id": f"sim_{action.timestamp.isoformat()}"}
-            outcome["message"] = "Counter offer created (simulated)"
+            logger.info(f"[ACTION] Countering offer with params: {parameters}")
+            negotiation_id = parameters.get("negotiation_id")
+            order_id = parameters.get("order_id")
+            proposed_price = parameters.get("proposed_price")
+            
+            # Send counter-offer back to counterparty via A2A
+            if ctx:
+                try:
+                    # Extract their order from context if available
+                    from app.schema.pydantic_models import NegotiationEvent
+                    # The negotiation event should be in the context
+                    # For now, we'll create a new negotiation event with the counter proposal
+                    counter_event_data = {
+                        "event_type": EventType.NEGOTIATION.value,
+                        "negotiation_id": negotiation_id,
+                        "message_type": "counter_proposal",
+                        "sender": AGENT_ID,
+                        "data": {
+                            "proposed_price": proposed_price,
+                            "order_id": order_id,
+                        }
+                    }
+                    
+                    counter_event = Event(
+                        author=AGENT_ID,
+                        content=genai_types.Content(
+                            role="model",
+                            parts=[
+                                genai_types.Part.from_function_response(
+                                    name=EventType.NEGOTIATION.value,
+                                    response=counter_event_data
+                                )
+                            ],
+                        ),
+                        invocation_id=ctx.invocation_id,
+                        branch=ctx.branch,
+                    )
+                    
+                    # Find the counterparty agent URL from the original negotiation
+                    # For now, we'll need to extract it from the negotiation context
+                    # This is a simplified version - in production, we'd track counterparty URLs
+                    logger.info(f"[ACTION] Counter-offer created: {proposed_price} for negotiation {negotiation_id}")
+                    outcome["result"] = {
+                        "counter_offer_id": f"counter_{action.timestamp.isoformat()}",
+                        "negotiation_id": negotiation_id,
+                        "proposed_price": proposed_price,
+                    }
+                    outcome["message"] = f"Counter offer: {proposed_price}"
+                except Exception as e:
+                    logger.warning(f"[ACTION] Failed to send counter-offer: {e}")
+                    outcome["result"] = {"counter_offer_id": f"sim_{action.timestamp.isoformat()}"}
+                    outcome["message"] = "Counter offer created (simulated, failed to send)"
+            else:
+                outcome["result"] = {"counter_offer_id": f"sim_{action.timestamp.isoformat()}"}
+                outcome["message"] = "Counter offer created (simulated, no context)"
+            
+        case ActionType.EXIT_NEGOTIATION.value:
+            logger.info(f"[ACTION] [SIMULATED] Exiting negotiation with params: {parameters}")
+            negotiation_id = parameters.get("negotiation_id")
+            order_id = parameters.get("order_id")
+            # Update order status back to open
+            if CONFIG.enable_registry_discovery and order_id:
+                try:
+                    registry_client = get_registry_client()
+                    await registry_client.update_order(order_id, {"status": "open"})
+                    logger.info(f"[ACTION] Reverted order {order_id} to open status after negotiation exit")
+                except Exception as e:
+                    logger.warning(f"[ACTION] Failed to revert order status: {e}")
+            outcome["result"] = {"negotiation_id": negotiation_id, "order_id": order_id}
+            outcome["message"] = f"Exited negotiation {negotiation_id}"
             
         case ActionType.NOOP.value:
             logger.info(f"[ACTION] [SIMULATED] No operation required")
@@ -727,6 +794,7 @@ async def _find_and_send_matching_offers(
         demand_type = "compute" if "gpu_model" in demand_res else ("token" if "token" in demand_res else "unknown")
         
         # Query registry for matching orders (bidirectional)
+        # Only query 'open' orders - 'under_negotiation' orders are already in negotiation
         filters = {
             "status": "open",
         }
@@ -737,11 +805,13 @@ async def _find_and_send_matching_offers(
             limit=CONFIG.max_discovery_agents
         )
         
-        # Use match_orders helper to filter more precisely
+        # Use price-aware matching to get structured results with price metadata
         matching_orders = registry_client.match_orders(
             order_dict,
             matching_orders,
-            bidirectional=True
+            bidirectional=True,
+            include_price_analysis=True,
+            price_epsilon=0.0  # Exact match only for "equal" classification
         )
         
         # Filter out our own orders (don't match with ourselves)
@@ -755,23 +825,27 @@ async def _find_and_send_matching_offers(
                 "order": order_dict,
             }
         
-        logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
+        logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders")
         
-        # Extract agent URLs from matching orders
-        agent_urls = []
-        matched_order_ids = []
+        # Separate matches by price relation
+        price_equal_matches = []
+        price_different_matches = []
+        
         for match_order in matching_orders[:CONFIG.max_discovery_agents]:
-            maker_url = match_order.get("order_maker")
-            matched_order_id = match_order.get("order_id")
-            if maker_url and maker_url not in agent_urls:
-                agent_urls.append(maker_url)
-            if matched_order_id:
-                matched_order_ids.append(matched_order_id)
+            price_relation = match_order.get("price_relation", "unknown")
+            if price_relation == "equal":
+                price_equal_matches.append(match_order)
+            elif price_relation in ("we_pay_more", "we_pay_less", "unknown"):
+                price_different_matches.append(match_order)
+            else:
+                # Unknown price relation - treat as different to be safe
+                price_different_matches.append(match_order)
         
-        # Send offers only if we have a context (for initial make_offer calls)
-        # For retries without context, we just log matches - actual offers will be sent
-        # when other agents query the registry and find our orders
+        logger.info(f"[REGISTRY] Price analysis: {len(price_equal_matches)} equal-price, {len(price_different_matches)} price-different matches")
+        
         results = []
+        negotiation_results = []
+        
         if ctx and event:
             # Create event if not provided
             if event is None:
@@ -792,15 +866,93 @@ async def _find_and_send_matching_offers(
                     branch=ctx.branch,
                 )
             
-            # Send offer to each matching agent
-            for agent_url in agent_urls:
+            # Handle price-equal matches: send direct offers (existing behavior)
+            for match_order in price_equal_matches:
+                agent_url = match_order.get("order_maker")
+                if not agent_url:
+                    continue
                 try:
-                    logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
+                    logger.info(f"[REGISTRY] Sending direct offer (price-equal) to agent at {agent_url}")
                     result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
                     if result:
-                        results.append({"agent_url": agent_url, "result": result})
+                        results.append({"agent_url": agent_url, "result": result, "price_relation": "equal"})
                 except Exception as e:
                     logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
+            
+            # Handle price-different matches: route to negotiation
+            for match_order in price_different_matches:
+                matched_order_id = match_order.get("order_id")
+                agent_url = match_order.get("order_maker")
+                our_price = match_order.get("our_price")
+                their_price = match_order.get("their_price")
+                price_relation = match_order.get("price_relation", "unknown")
+                
+                if not agent_url or not matched_order_id:
+                    continue
+                
+                try:
+                    # Create negotiation_id from order pair
+                    negotiation_id = f"neg_{order_id}_{matched_order_id}"
+                    
+                    # Update both orders to under_negotiation status
+                    registry_client = get_registry_client()
+                    await registry_client.update_order(order_id, {"status": "under_negotiation"})
+                    await registry_client.update_order(matched_order_id, {"status": "under_negotiation"})
+                    logger.info(f"[NEGOTIATION] Updated orders {order_id} and {matched_order_id} to under_negotiation")
+                    
+                    # Create NegotiationEvent
+                    from app.schema.pydantic_models import NegotiationEvent
+                    negotiation_event_data = {
+                        "event_type": EventType.NEGOTIATION.value,
+                        "negotiation_id": negotiation_id,
+                        "message_type": "initial_proposal",
+                        "sender": BASE_URL_OVERRIDE,
+                        "data": {
+                            "our_order_id": order_id,
+                            "their_order_id": matched_order_id,
+                            "our_price": our_price,
+                            "their_price": their_price,
+                            "price_relation": price_relation,
+                            "our_order": order_dict,
+                            "their_order": match_order,
+                        }
+                    }
+                    
+                    negotiation_event = NegotiationEvent.model_validate(negotiation_event_data)
+                    
+                    # Send negotiation event via A2A
+                    neg_event = Event(
+                        author=AGENT_ID,
+                        content=genai_types.Content(
+                            role="model",
+                            parts=[
+                                genai_types.Part.from_function_response(
+                                    name=EventType.NEGOTIATION.value,
+                                    response=negotiation_event_data
+                                )
+                            ],
+                        ),
+                        invocation_id=ctx.invocation_id,
+                        branch=ctx.branch,
+                    )
+                    
+                    logger.info(f"[NEGOTIATION] Sending negotiation event to agent at {agent_url} (negotiation_id: {negotiation_id})")
+                    result = await send_to_remote_agent(ctx, neg_event, agent_url=agent_url)
+                    if result:
+                        negotiation_results.append({
+                            "agent_url": agent_url,
+                            "negotiation_id": negotiation_id,
+                            "result": result,
+                            "price_relation": price_relation
+                        })
+                except Exception as e:
+                    logger.error(f"[NEGOTIATION] Failed to start negotiation with {agent_url}: {e}")
+                    # Rollback order status on error
+                    try:
+                        await registry_client.update_order(order_id, {"status": "open"})
+                        await registry_client.update_order(matched_order_id, {"status": "open"})
+                    except Exception as rollback_err:
+                        logger.warning(f"[NEGOTIATION] Failed to rollback order status: {rollback_err}")
         elif agent_urls:
             # For retries without context, just log that matches were found
             # The bidirectional matching means other agents will discover our order
@@ -813,17 +965,26 @@ async def _find_and_send_matching_offers(
                 "matched_order_ids": matched_order_ids,
             }
         
-        if results:
-            logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
+        # Combine results from direct offers and negotiations
+        if results or negotiation_results:
+            total_sent = len(results) + len(negotiation_results)
+            logger.info(f"[REGISTRY] Successfully sent {len(results)} direct offers and started {len(negotiation_results)} negotiations")
             return {
                 "status": "success",
-                "message": f"Sent offers to {len(results)} agents",
-                "results": results,
+                "message": f"Sent {len(results)} direct offers and started {len(negotiation_results)} negotiations",
+                "direct_offers": results,
+                "negotiations": negotiation_results,
             }
-        elif agent_urls:
+        elif price_equal_matches or price_different_matches:
+            # Extract agent URLs for logging
+            agent_urls = []
+            for match in price_equal_matches + price_different_matches:
+                url = match.get("order_maker")
+                if url and url not in agent_urls:
+                    agent_urls.append(url)
             return {
                 "status": "no_delivery",
-                "message": "Matching orders found but no offers could be delivered",
+                "message": "Matching orders found but no offers could be delivered (no context)",
                 "order": order_dict,
                 "targets": agent_urls,
             }

@@ -143,16 +143,33 @@ class PolicyManager:
     async def ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store.
         
+        Registers the composite negotiation.default.v1 policy that chains:
+        - negotiation.guard.always_negotiate_on_price_diff
+        - negotiation.action.price_interval_concession
+        - negotiation.guard.bounded_rounds_and_timeout
+        - negotiation.action.safe_default_reject
+        
         Lazy initialization: policy is created on first use.
         """
         try:
             await self._policy_store.save_policy(
                 agent_id=self._agent_id,
-                policy_name="simple_negotiation_random",
+                policy_name="negotiation_default_v1",
                 trigger_type=EventType.NEGOTIATION.value,
-                callable_ref="simple_negotiation_random",
+                callable_ref="negotiation.default.v1",
             )
-            logger.debug("[POLICY MANAGER] Ensured negotiation policy")
+            # Persist composite components for negotiation.default.v1
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name="negotiation.default.v1",
+                components=[
+                    "negotiation.guard.always_negotiate_on_price_diff",
+                    "negotiation.action.price_interval_concession",
+                    "negotiation.guard.bounded_rounds_and_timeout",
+                    "negotiation.action.safe_default_reject",
+                ],
+            )
+            logger.debug("[POLICY MANAGER] Ensured negotiation.default.v1 composite policy")
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save negotiation policy: {e}")
 

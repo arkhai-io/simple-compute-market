@@ -366,11 +366,12 @@ def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resourc
     if not order.order_taker:
         return None
     
+    # Find symmetric orders that are open or under_negotiation (both are active states)
     symmetric_orders = db.query(MarketOrder).filter(
         and_(
             MarketOrder.order_id != order.order_id,
             MarketOrder.order_maker == order.order_taker,
-            MarketOrder.status == OrderStatusEnum.open,
+            MarketOrder.status.in_([OrderStatusEnum.open, OrderStatusEnum.under_negotiation]),
         )
     ).all()
     

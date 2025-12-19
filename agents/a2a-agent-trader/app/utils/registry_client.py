@@ -238,30 +238,110 @@ class RegistryClient:
             return "compute"
         return "unknown"
     
+    def _extract_price_from_order(self, order: Dict[str, Any], is_our_order: bool = False) -> tuple[int | None, str | None]:
+        """Extract price from an order's TokenResource.
+        
+        Args:
+            order: Order dictionary
+            is_our_order: True if this is our order (for determining which resource is the price)
+            
+        Returns:
+            Tuple of (price_amount_in_base_units, token_symbol) or (None, None) if no token resource found
+        """
+        offer_res = order.get("offer_resource", {})
+        demand_res = order.get("demand_resource", {})
+        
+        # Find the TokenResource (price is always in tokens)
+        token_resource = None
+        if "token" in offer_res:
+            token_resource = offer_res
+        elif "token" in demand_res:
+            token_resource = demand_res
+        
+        if not token_resource or "token" not in token_resource:
+            return None, None
+        
+        token_data = token_resource.get("token", {})
+        amount = token_resource.get("amount")
+        
+        if amount is None:
+            return None, None
+        
+        # amount is already in base units (amount * 10**decimals)
+        symbol = token_data.get("symbol") if isinstance(token_data, dict) else None
+        return int(amount), symbol
+    
+    def _compare_prices(
+        self,
+        our_price: int,
+        their_price: int,
+        epsilon: float = 0.0
+    ) -> str:
+        """Compare two prices and classify the relationship.
+        
+        Args:
+            our_price: Our price in base units
+            their_price: Their price in base units
+            epsilon: Tolerance for "equal" classification (as fraction, e.g., 0.01 = 1%)
+            
+        Returns:
+            "equal" | "we_pay_more" | "we_pay_less"
+        """
+        if epsilon > 0:
+            diff_ratio = abs(our_price - their_price) / max(our_price, their_price, 1)
+            if diff_ratio <= epsilon:
+                return "equal"
+        
+        if our_price == their_price:
+            return "equal"
+        elif our_price > their_price:
+            return "we_pay_more"
+        else:
+            return "we_pay_less"
+    
     def match_orders(
         self,
         our_order: Dict[str, Any],
         candidate_orders: List[Dict[str, Any]],
-        bidirectional: bool = True
+        bidirectional: bool = True,
+        include_price_analysis: bool = False,
+        price_epsilon: float = 0.0
     ) -> List[Dict[str, Any]]:
-        """Find matching orders bidirectionally.
+        """Find matching orders bidirectionally with optional price analysis.
+        
+        CURRENT BEHAVIOR (Phase 2 - Price-Aware):
+        - First pass: Matches orders based on resource type compatibility (compute ↔ token) and direction.
+        - Second pass (if include_price_analysis=True): Compares prices and adds price_relation metadata.
+        - Price is extracted from TokenResource.amount (base units) in either offer_resource or demand_resource.
         
         Args:
             our_order: Our order dictionary
             candidate_orders: List of candidate orders to match against
             bidirectional: Enable bidirectional matching
+            include_price_analysis: If True, add price comparison metadata to results
+            price_epsilon: Tolerance for "equal" price classification (fraction, e.g., 0.01 = 1%)
             
         Returns:
-            List of matching orders
+            List of matching orders with optional price metadata:
+            - If include_price_analysis=False: Returns type-compatible matches only (backward compatible)
+            - If include_price_analysis=True: Each match includes:
+              - All original order fields
+              - "our_price": Our price in base units (int)
+              - "their_price": Their price in base units (int)
+              - "price_relation": "equal" | "we_pay_more" | "we_pay_less"
         """
         matches = []
         our_offer_type = self._get_resource_type(our_order.get("offer_resource", {}))
         our_demand_type = self._get_resource_type(our_order.get("demand_resource", {}))
         
+        # Extract our price once (for price-aware matching)
+        our_price, our_token_symbol = self._extract_price_from_order(our_order, is_our_order=True)
+        
         for candidate in candidate_orders:
             their_offer_type = self._get_resource_type(candidate.get("offer_resource", {}))
             their_demand_type = self._get_resource_type(candidate.get("demand_resource", {}))
             
+            is_type_compatible = False
             if bidirectional:
                 # Case A: Our compute offer matches their compute demand AND our token demand matches their token offer
                 case_a = (
@@ -273,12 +353,40 @@ class RegistryClient:
                     our_offer_type == "token" and their_demand_type == "token" and
                     our_demand_type == "compute" and their_offer_type == "compute"
                 )
-                if case_a or case_b:
-                    matches.append(candidate)
+                is_type_compatible = case_a or case_b
             else:
                 # Direct match: our offer matches their demand and our demand matches their offer
-                if our_offer_type == their_demand_type and our_demand_type == their_offer_type:
-                    matches.append(candidate)
+                is_type_compatible = (our_offer_type == their_demand_type and our_demand_type == their_offer_type)
+            
+            if not is_type_compatible:
+                continue
+            
+            # Type-compatible match found - add price analysis if requested
+            match_result = candidate.copy()  # Don't mutate original
+            
+            if include_price_analysis:
+                their_price, their_token_symbol = self._extract_price_from_order(candidate, is_our_order=False)
+                
+                if our_price is not None and their_price is not None:
+                    # Both orders have token prices - compare them
+                    price_relation = self._compare_prices(our_price, their_price, epsilon=price_epsilon)
+                    match_result["our_price"] = our_price
+                    match_result["their_price"] = their_price
+                    match_result["price_relation"] = price_relation
+                    match_result["our_token_symbol"] = our_token_symbol
+                    match_result["their_token_symbol"] = their_token_symbol
+                else:
+                    # One or both orders missing price - mark as unknown
+                    match_result["our_price"] = our_price
+                    match_result["their_price"] = their_price
+                    match_result["price_relation"] = "unknown"
+                    match_result["our_token_symbol"] = our_token_symbol
+                    match_result["their_token_symbol"] = their_token_symbol
+            else:
+                # Backward compatible: no price metadata
+                pass
+            
+            matches.append(match_result)
         
         return matches
 
