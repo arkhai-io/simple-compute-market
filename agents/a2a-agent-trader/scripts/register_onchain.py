@@ -169,6 +169,7 @@ async def main():
     # Read config for display
     base_url_override_env = os.getenv("BASE_URL_OVERRIDE")
     zerotier_network = os.getenv("ZEROTIER_NETWORK")
+    port = int(os.getenv("PORT", "8000"))  # Get port from env or default to 8000
     chain_id = int(os.getenv("CHAIN_ID", "1337"))
     identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
     agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
@@ -184,8 +185,15 @@ async def main():
         if base_url_override_env and "{ZEROTIER_IP}" in base_url_override_env:
             base_url_template = base_url_override_env
         else:
-            # Default template if none provided
-            base_url_template = "http://{ZEROTIER_IP}:8000/"
+            # Extract port from BASE_URL_OVERRIDE if provided, otherwise use PORT env var or default
+            template_port = port
+            if base_url_override_env:
+                # Try to extract port from existing BASE_URL_OVERRIDE
+                parsed_existing = urlparse(base_url_override_env)
+                if parsed_existing.port is not None:
+                    template_port = parsed_existing.port
+            # Default template with the determined port
+            base_url_template = f"http://{{ZEROTIER_IP}}:{template_port}/"
 
         print("ZeroTier network detected. Ensuring network is joined before registration...")
         joined = join_zerotier_network(zerotier_network)
@@ -230,13 +238,17 @@ async def main():
         else:
             print(f"✓ .env already has BASE_URL_OVERRIDE={resolved_base_url}")
     else:
-        # No ZeroTier configured; fall back to existing env or localhost default
-        resolved_base_url = base_url_override_env or "http://localhost:8000"
-        if base_url_override_env and "{ZEROTIER_IP}" in base_url_override_env:
-            print(
-                "⚠️  BASE_URL_OVERRIDE contains {ZEROTIER_IP} but ZEROTIER_NETWORK is not set. "
-                "Proceeding without ZeroTier resolution."
-            )
+        # No ZeroTier configured; fall back to existing env or localhost default with PORT
+        if base_url_override_env:
+            resolved_base_url = base_url_override_env
+            if "{ZEROTIER_IP}" in base_url_override_env:
+                print(
+                    "⚠️  BASE_URL_OVERRIDE contains {ZEROTIER_IP} but ZEROTIER_NETWORK is not set. "
+                    "Proceeding without ZeroTier resolution."
+                )
+        else:
+            # Use PORT env var or default to 8000
+            resolved_base_url = f"http://localhost:{port}"
 
     # Build URLs for display using resolved base URL
     agent_card_url = build_agent_card_url(resolved_base_url)
