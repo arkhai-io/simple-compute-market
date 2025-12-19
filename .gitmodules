@@ -1,3 +1,6 @@
 [submodule "erc-8004-contracts"]
 	path = erc-8004-contracts
 	url = https://github.com/ww-jermaine/erc-8004-contracts.git
+[submodule "compute-provisioning-iac"]
+	path = compute-provisioning-iac
+	url = git@github.com:arkhai-io/compute-provisioning-iac.git
