@@ -1,6 +1,9 @@
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.utils.zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
 # Load .env file if it exists (before loading any config values)
 try:
@@ -12,6 +15,9 @@ try:
 except ImportError:
     # python-dotenv not available, skip
     pass
+
+
+logger = logging.getLogger(__name__)
 
 
 def _get_bool_env(var_name: str, default: bool = False) -> bool:
@@ -100,6 +106,7 @@ class Config:
     agent_id: str  # Internal identifier (must be valid Python identifier)
     agent_name: str  # Display name (can be any string, used in agent card and on-chain metadata)
     mcp_server_url: str
+    base_url_override_raw: str
     base_url_override: str
     port: int
     remote_agent_port: int
@@ -152,12 +159,35 @@ def load_config() -> Config:
     
     # Get agent_name (display name) - can be any string, falls back to agent_id
     agent_name = get_agent_name()
-    
+
+    # BASE_URL_OVERRIDE handling with optional ZeroTier placeholder
+    base_url_override_raw = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
+    zerotier_network = os.getenv("ZEROTIER_NETWORK")
+
+    try:
+        base_url_override_resolved = resolve_base_url_best_effort(
+            base_url_override_raw,
+            zerotier_network,
+        )
+        if base_url_override_resolved != base_url_override_raw:
+            logger.info(
+                "[CONFIG] BASE_URL_OVERRIDE resolved to %s (network=%s)",
+                base_url_override_resolved,
+                zerotier_network,
+            )
+    except BaseUrlResolutionError as exc:
+        logger.warning(
+            "[CONFIG] BASE_URL_OVERRIDE is invalid (%s); using raw value from env",
+            exc,
+        )
+        base_url_override_resolved = base_url_override_raw
+
     return Config(
         agent_id=agent_id,
         agent_name=agent_name,
         mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
-        base_url_override=os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000"),
+        base_url_override_raw=base_url_override_raw,
+        base_url_override=base_url_override_resolved,
         port=_get_int_env("PORT", 8000),
         remote_agent_port=_get_int_env("REMOTE_AGENT_PORT", 8000),
         remote_agent_url_override=os.getenv(

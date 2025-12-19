@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Server Configuration
     port: int = 8080
     host: str = "0.0.0.0"
+
+    # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
+    zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
     
     # Health Check Configuration
     enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)

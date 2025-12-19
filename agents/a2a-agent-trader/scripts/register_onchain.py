@@ -17,12 +17,23 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.utils.registry.onchain_registration import register_onchain_from_env, build_agent_card_url, build_registration_file_url
+from app.utils.registry.onchain_registration import (
+    register_onchain_from_env,
+    build_agent_card_url,
+    build_registration_file_url,
+)
 from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+from app.utils.zerotier import (
+    await_base_url_resolution,
+    join_zerotier_network,
+    get_zerotier_node_id,
+    BaseUrlResolutionError,
+)
 
 
 def update_env_file(env_file: Path, agent_id: int) -> bool:
@@ -61,6 +72,81 @@ def update_env_file(env_file: Path, agent_id: int) -> bool:
     return updated
 
 
+def update_env_file_zerotier_ip(env_file: Path, zerotier_ip: str) -> bool:
+    """
+    Update .env file with ZEROTIER_IP.
+
+    Returns:
+        True if file was updated, False otherwise
+    """
+    if not zerotier_ip:
+        return False
+
+    if not env_file.exists():
+        # Create a new file with just ZEROTIER_IP
+        env_file.write_text(f"ZEROTIER_IP={zerotier_ip}\n")
+        return True
+
+    content = env_file.read_text()
+    lines = content.split("\n")
+
+    current_ip = None
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("ZEROTIER_IP="):
+            current_ip = line.split("=", 1)[1].strip()
+            if current_ip != zerotier_ip:
+                lines[i] = f"ZEROTIER_IP={zerotier_ip}"
+                updated = True
+            break
+
+    if current_ip is None:
+        lines.append(f"ZEROTIER_IP={zerotier_ip}")
+        updated = True
+
+    if updated:
+        env_file.write_text("\n".join(lines))
+
+    return updated
+
+
+def update_env_file_base_url_override(env_file: Path, base_url: str) -> bool:
+    """
+    Update .env file with BASE_URL_OVERRIDE.
+
+    Returns:
+        True if file was updated, False otherwise
+    """
+    if not base_url:
+        return False
+
+    if not env_file.exists():
+        env_file.write_text(f"BASE_URL_OVERRIDE={base_url}\n")
+        return True
+
+    content = env_file.read_text()
+    lines = content.split("\n")
+
+    current_value = None
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("BASE_URL_OVERRIDE="):
+            current_value = line.split("=", 1)[1].strip()
+            if current_value != base_url:
+                lines[i] = f"BASE_URL_OVERRIDE={base_url}"
+                updated = True
+            break
+
+    if current_value is None:
+        lines.append(f"BASE_URL_OVERRIDE={base_url}")
+        updated = True
+
+    if updated:
+        env_file.write_text("\n".join(lines))
+
+    return updated
+
+
 async def main():
     """Register agent on-chain and output the agent ID."""
     import argparse
@@ -76,18 +162,85 @@ async def main():
     except ImportError:
         # dotenv not available, rely on environment variables from Makefile or shell
         pass
-    
+
+    # Path to the env file we will read/update
+    env_file = Path(args.env_file)
+
     # Read config for display
-    base_url_override = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
+    base_url_override_env = os.getenv("BASE_URL_OVERRIDE")
+    zerotier_network = os.getenv("ZEROTIER_NETWORK")
     chain_id = int(os.getenv("CHAIN_ID", "1337"))
     identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
     agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
     chain_rpc_url = os.getenv("CHAIN_RPC_URL")
     onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
-    
-    # Build URLs for display
-    agent_card_url = build_agent_card_url(base_url_override)
-    registration_file_url = build_registration_file_url(base_url_override)
+
+    # Determine final base URL, possibly using ZeroTier
+    use_zerotier = bool(zerotier_network)
+    resolved_base_url: str
+
+    if use_zerotier:
+        # Choose a template that always includes {ZEROTIER_IP}
+        if base_url_override_env and "{ZEROTIER_IP}" in base_url_override_env:
+            base_url_template = base_url_override_env
+        else:
+            # Default template if none provided
+            base_url_template = "http://{ZEROTIER_IP}:8000/"
+
+        print("ZeroTier network detected. Ensuring network is joined before registration...")
+        joined = join_zerotier_network(zerotier_network)
+        if not joined:
+            print(f"❌ Failed to join ZeroTier network {zerotier_network}.")
+            return 1
+
+        node_id = get_zerotier_node_id()
+        if node_id:
+            print(f"ZeroTier node ID: {node_id}")
+            print("Share this node ID with the Market Controller for authorization.")
+        else:
+            print("⚠️  Unable to determine ZeroTier node ID (zerotier-cli info failed).")
+
+        print("Waiting for ZeroTier IP assignment...")
+        try:
+            resolved_base_url = await await_base_url_resolution(
+                base_url_template,
+                zerotier_network,
+                wait_timeout=120.0,
+            )
+        except BaseUrlResolutionError as exc:
+            print(f"❌ Failed to resolve BASE_URL_OVERRIDE with ZeroTier IP: {exc}")
+            return 1
+
+        # Extract IP from resolved URL and store as ZEROTIER_IP in .env
+        parsed = urlparse(resolved_base_url)
+        zerotier_ip = parsed.hostname
+        if zerotier_ip:
+            ip_updated = update_env_file_zerotier_ip(env_file, zerotier_ip)
+            if ip_updated:
+                print(f"✅ Saved ZeroTier IP to {env_file}: ZEROTIER_IP={zerotier_ip}")
+            else:
+                print(f"✓ .env already has ZEROTIER_IP={zerotier_ip}")
+        else:
+            print("⚠️  Could not extract ZeroTier IP from resolved URL; skipping ZEROTIER_IP env update.")
+
+        # Persist the resolved BASE_URL_OVERRIDE (no placeholder) back into .env
+        base_url_updated = update_env_file_base_url_override(env_file, resolved_base_url)
+        if base_url_updated:
+            print(f"✅ Saved BASE_URL_OVERRIDE to {env_file}: {resolved_base_url}")
+        else:
+            print(f"✓ .env already has BASE_URL_OVERRIDE={resolved_base_url}")
+    else:
+        # No ZeroTier configured; fall back to existing env or localhost default
+        resolved_base_url = base_url_override_env or "http://localhost:8000"
+        if base_url_override_env and "{ZEROTIER_IP}" in base_url_override_env:
+            print(
+                "⚠️  BASE_URL_OVERRIDE contains {ZEROTIER_IP} but ZEROTIER_NETWORK is not set. "
+                "Proceeding without ZeroTier resolution."
+            )
+
+    # Build URLs for display using resolved base URL
+    agent_card_url = build_agent_card_url(resolved_base_url)
+    registration_file_url = build_registration_file_url(resolved_base_url)
     
     # Display registration info
     print("=" * 70)
@@ -108,9 +261,9 @@ async def main():
     print("Registering agent on-chain...")
     try:
         result = await register_onchain_from_env(
-            base_url=base_url_override,
+            base_url=resolved_base_url,
             chain_id=chain_id,
-            explicit_agent_id=onchain_agent_id
+            explicit_agent_id=onchain_agent_id,
         )
         
         if result:
@@ -159,7 +312,6 @@ async def main():
             print()
             
             # Auto-update .env file (unless --no-update-env flag is set)
-            env_file = Path(args.env_file)
             if not args.no_update_env:
                 updated = update_env_file(env_file, numeric_agent_id)
                 if updated:
