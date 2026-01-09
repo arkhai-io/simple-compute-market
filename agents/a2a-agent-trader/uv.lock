@@ -61,7 +61,7 @@ dev = [
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=0.3.9" },
     { name = "aiohttp", specifier = ">=3.12.15" },
-    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest-py?rev=main" },
+    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=main" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "google-adk", extras = ["a2a"], git = "https://github.com/google/adk-python?rev=5eca72f9bfd05c7c28a3d738391138a59a31167d" },
@@ -240,7 +240,7 @@ wheels = [
 [[package]]
 name = "alkahest-py"
 version = "0.1.0"
-source = { git = "https://github.com/arkhai-io/alkahest-py?rev=main#36161fe83456fc53f02e8cf92e9a597abe33b562" }
+source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=main#96cc1662a7347dab6339d1d78169d1d647d44749" }
 
 [[package]]
 name = "annotated-types"
