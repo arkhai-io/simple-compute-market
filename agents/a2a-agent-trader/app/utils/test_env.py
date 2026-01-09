@@ -3,7 +3,7 @@ import pprint
 import asyncio
 
 async def test_approval(client):
-    hash = await client.erc20.approve(
+    hash = await client.erc20.util.approve(
         {"address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", "value": 100},
         "escrow",
     )
@@ -34,7 +34,6 @@ def main() -> None:
     client = AlkahestClient(
         private_key="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
         rpc_url=env.rpc_url,
-        address_config=env.addresses
     )
     pp.pprint(f"new_client: {asyncio.run(test_approval(client))}")
 
