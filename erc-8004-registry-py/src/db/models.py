@@ -94,6 +94,7 @@ class HealthCheck(Base):
 
 class OrderStatusEnum(str, enum.Enum):
     open = "open"
+    under_negotiation = "under_negotiation"  # Orders in negotiation (price-different but resource-compatible)
     closed = "closed"
     accepted = "accepted"
     expired = "expired"
