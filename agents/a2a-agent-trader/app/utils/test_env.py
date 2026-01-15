@@ -37,7 +37,7 @@ def main() -> None:
     print("rpc_url:", env.rpc_url)
     print(f"rpc_port: {port}")
     print("For local development, deploy contracts with:")
-    print(f"  ANVIL_RPC_URL=https://localhost:{port} npm run deploy:anvil")
+    print(f"  ANVIL_RPC_URL=http://localhost:{port} npm run deploy:anvil")
 
     print("alice:", env.alice)
     print("bob:", env.bob)
