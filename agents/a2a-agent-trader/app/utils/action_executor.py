@@ -48,7 +48,7 @@ AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 TRUSTED_ORACLE_ARBITER = "0x77154e8F4204e484e12fAA68d50964e793224d02"
-DEMO_ORACLE_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 logger = logging.getLogger(__name__)
 
@@ -456,6 +456,24 @@ async def provision_machine(ssh_public_key: str) -> str:
         logger.error("[TOOL] Provisioning failed: %s", exc)
         return f"Provisioning failed: {exc}"
 
+def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
+    """Given an order, take the demand and offer and extract which is compute and which is tokens."""
+    offer_resource = order.get("offer_resource", {})
+    demand_resource = order.get("demand_resource", {})
+
+    offer_is_compute = "gpu_model" in offer_resource
+    demand_is_compute = "gpu_model" in demand_resource
+
+    if offer_is_compute:
+        compute_resource = offer_resource
+        token_resource = demand_resource
+    elif demand_is_compute:
+        compute_resource = demand_resource
+        token_resource = offer_resource
+    else:
+        raise ValueError("Neither offer nor demand resource is compute in the provided order.")
+
+    return compute_resource, token_resource
 
 async def accept_offer(
     *,
@@ -488,22 +506,7 @@ async def accept_offer(
     escrow_receipt = None
     
     if alkahest_client:
-        offer_res = order_dict.get("offer_resource", {})
-        demand_res = order_dict.get("demand_resource", {})
-        
-        # Determine resource types
-        offer_is_compute = "gpu_model" in offer_res
-        demand_is_compute = "gpu_model" in demand_res
-        
-        # Map resources based on what maker is offering
-        if offer_is_compute:
-            # Maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
-            compute_resource = offer_res
-            token_resource = demand_res
-        else:
-            # Maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
-            compute_resource = demand_res
-            token_resource = offer_res
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         
         # Retry logic with exponential backoff
         max_retries = 3
@@ -1160,8 +1163,8 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
-    # connection_details = await mock_provision_machine(ssh_public_key)
-    connection_details = await provision_machine(ssh_public_key)
+    connection_details = await mock_provision_machine(ssh_public_key)
+    # connection_details = await provision_machine(ssh_public_key)
     fulfillment_uid = None
     maker_attestation = None
 
@@ -1179,10 +1182,15 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
-            order_bytes = json.dumps(order_dict, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+            order_bytes = encode_compute_lease(
+                compute_resource=compute_resource,
+                token_resource=token_resource,
+                duration_days=1,
+            )
         if order_dict:
             order_id = order_dict.get("order_id")
-    
+
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
