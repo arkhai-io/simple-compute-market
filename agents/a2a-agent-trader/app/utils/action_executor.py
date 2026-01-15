@@ -39,6 +39,7 @@ from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .provisioning import run_vm_provisioning_playbook
+from ..policies.negotiation_thread import get_thread_store
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
@@ -304,9 +305,14 @@ async def execute_action(
                 outcome["message"] = outcome["result"]["message"]
             
         case ActionType.COUNTER_OFFER.value:
-            logger.info(f"[ACTION] [SIMULATED] Countering offer with params: {parameters}")
-            outcome["result"] = {"counter_offer_id": f"sim_{action.timestamp.isoformat()}"}
-            outcome["message"] = "Counter offer created (simulated)"
+            logger.info(f"[ACTION] Countering offer with params: {parameters}")
+            # Execute counter offer: create negotiation thread and send negotiation event
+            result = await counter_offer(
+                ctx=ctx,
+                parameters=parameters,
+            )
+            outcome["result"] = result
+            outcome["message"] = result.get("message", "Counter offer sent")
             
         case ActionType.NOOP.value:
             logger.info(f"[ACTION] [SIMULATED] No operation required")
@@ -475,6 +481,120 @@ def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
 
     return compute_resource, token_resource
 
+async def counter_offer(
+    *,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Send a counter offer in a negotiation."""
+    parameters = parameters or {}
+    
+    negotiation_id = parameters.get("negotiation_id")
+    order_id = parameters.get("order_id")  # Their order ID
+    proposed_price = parameters.get("proposed_price")
+    our_price = parameters.get("our_price")
+    their_price = parameters.get("their_price")
+    
+    if not negotiation_id or not order_id:
+        return {
+            "status": "error",
+            "message": "Missing negotiation_id or order_id for counter_offer",
+        }
+    
+    if ctx is None:
+        return {
+            "status": "error",
+            "message": "No invocation context available for counter_offer",
+        }
+    
+    # Get order details to find the counterparty
+    try:
+        registry_client = get_registry_client()
+        order = await registry_client.get_order(order_id)
+        if not order:
+            return {
+                "status": "error",
+                "message": f"Order {order_id} not found in registry",
+            }
+        
+        their_agent_id = order.get("order_maker")
+        our_order_id = parameters.get("our_order_id")  # Our order ID if we have one
+        
+        # Get thread store and create/update negotiation thread
+        thread_store = get_thread_store()
+        
+        # Check if thread exists, if not create it
+        existing_thread = await thread_store.get_thread(negotiation_id)
+        if not existing_thread:
+            # Create new thread with order and agent tracking
+            if our_order_id and their_agent_id:
+                await thread_store.create_thread(
+                    negotiation_id=negotiation_id,
+                    our_order_id=our_order_id or "",
+                    their_order_id=order_id,
+                    our_agent_id=AGENT_ID,
+                    their_agent_id=their_agent_id,
+                )
+        
+        # Add counter offer message to thread
+        await thread_store.add_message(
+            negotiation_id=negotiation_id,
+            sender=AGENT_ID,
+            our_price=our_price,
+            their_price=their_price,
+            proposed_price=proposed_price,
+            action_taken=ActionType.COUNTER_OFFER.value,
+            message_type="counter_proposal",
+        )
+        
+        # Create negotiation event
+        event_payload = {
+            "event_type": EventType.NEGOTIATION.value,
+            "negotiation_id": negotiation_id,
+            "message_type": "counter_proposal",
+            "sender": AGENT_ID,
+            "data": {
+                "our_price": our_price,
+                "their_price": their_price,
+                "proposed_price": proposed_price,
+                "their_order_id": order_id,
+                "our_order_id": our_order_id,
+            },
+        }
+        
+        event = Event(
+            author=AGENT_ID,
+            content=genai_types.Content(
+                role="model",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="counter_offer",
+                        response=event_payload,
+                    )
+                ],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
+        
+        # Send to counterparty
+        result = await send_to_remote_agent(ctx, event, agent_url=their_agent_id)
+        
+        return {
+            "status": "sent",
+            "message": "Counter offer sent",
+            "negotiation_id": negotiation_id,
+            "proposed_price": proposed_price,
+            "remote_response": getattr(result, "content", None),
+        }
+    except Exception as e:
+        logger.error(f"[ACTION] Failed to send counter offer: {e}")
+        return {
+            "status": "error",
+            "message": f"Failed to send counter offer: {e}",
+        }
+
+
 async def accept_offer(
     *,
     alkahest_client: Any | None,
@@ -583,6 +703,33 @@ async def accept_offer(
     )
 
     logger.info("[TOOL] Accepting offer and notifying counterparty: %s", event_payload)
+
+    # Cancel competing negotiations for both orders
+    try:
+        thread_store = get_thread_store()
+        order_id = order_dict.get("order_id")
+        their_order_id = parameters.get("their_order_id")  # May be in parameters
+        
+        # Get negotiation_id from parameters if this is part of a negotiation
+        negotiation_id = parameters.get("negotiation_id")
+        
+        if order_id:
+            canceled_ours = await thread_store._sqlite.cancel_negotiations_for_order(
+                order_id=order_id,
+                except_negotiation_id=negotiation_id
+            )
+            if canceled_ours:
+                logger.info(f"[NEGOTIATION] Canceled {len(canceled_ours)} competing negotiations for our order {order_id}")
+        
+        if their_order_id:
+            canceled_theirs = await thread_store._sqlite.cancel_negotiations_for_order(
+                order_id=their_order_id,
+                except_negotiation_id=negotiation_id
+            )
+            if canceled_theirs:
+                logger.info(f"[NEGOTIATION] Canceled {len(canceled_theirs)} competing negotiations for their order {their_order_id}")
+    except Exception as e:
+        logger.warning(f"[NEGOTIATION] Failed to cancel competing negotiations: {e}")
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)
@@ -774,6 +921,31 @@ async def _find_and_send_matching_offers(
         order_id = order_dict.get("order_id")
         matching_orders = [m for m in matching_orders if m.get("order_id") != order_id]
         
+        # Filter out orders that are already in active negotiations with us
+        try:
+            thread_store = get_thread_store()
+            our_order_id = order_id
+            active_negotiations = await thread_store._sqlite.get_active_negotiations_for_order(
+                order_id=our_order_id
+            )
+            # Get list of order IDs we're already negotiating with
+            active_order_ids = set()
+            for neg in active_negotiations:
+                if neg["our_order_id"] == our_order_id:
+                    active_order_ids.add(neg["their_order_id"])
+                elif neg["their_order_id"] == our_order_id:
+                    active_order_ids.add(neg["our_order_id"])
+            
+            # Filter out orders we're already negotiating with
+            matching_orders = [
+                m for m in matching_orders 
+                if m.get("order_id") not in active_order_ids
+            ]
+            if active_order_ids:
+                logger.info(f"[REGISTRY] Filtered out {len(active_order_ids)} orders already in active negotiations")
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Failed to filter active negotiations: {e}")
+        
         if not matching_orders:
             return {
                 "status": "no_match",
@@ -819,8 +991,30 @@ async def _find_and_send_matching_offers(
                 )
             
             # Send offer to each matching agent
-            for agent_url in agent_urls:
+            for idx, agent_url in enumerate(agent_urls):
                 try:
+                    matched_order = matching_orders[idx] if idx < len(matching_orders) else None
+                    matched_order_id = matched_order.get("order_id") if matched_order else None
+                    
+                    # Check for duplicate negotiation before sending
+                    if matched_order_id:
+                        try:
+                            thread_store = get_thread_store()
+                            existing = await thread_store._sqlite.check_existing_negotiation(
+                                our_order_id=order_id,
+                                their_order_id=matched_order_id,
+                                our_agent_id=AGENT_ID,
+                                their_agent_id=agent_url,
+                            )
+                            if existing:
+                                logger.info(
+                                    f"[REGISTRY] Skipping duplicate negotiation with order {matched_order_id} "
+                                    f"(existing: {existing['negotiation_id']})"
+                                )
+                                continue
+                        except Exception as e:
+                            logger.warning(f"[REGISTRY] Failed to check for duplicate negotiation: {e}")
+                    
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
                     result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
                     if result:

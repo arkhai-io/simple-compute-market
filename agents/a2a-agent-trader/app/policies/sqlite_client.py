@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from datetime import datetime
 from typing import Any
 
 
@@ -66,6 +67,62 @@ class SQLiteClient:
                 )
                 """
             )
+            # Negotiation threads table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  our_order_id TEXT,
+                  their_order_id TEXT,
+                  our_agent_id TEXT,
+                  their_agent_id TEXT,
+                  status TEXT DEFAULT 'active',
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  terminal_state TEXT
+                )
+                """
+            )
+            # Add columns if they don't exist (for existing databases)
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_order_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_order_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_agent_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_agent_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass
+            # Negotiation messages table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_messages (
+                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  negotiation_id TEXT NOT NULL,
+                  round INTEGER NOT NULL,
+                  sender TEXT NOT NULL,
+                  our_price INTEGER,
+                  their_price INTEGER,
+                  proposed_price INTEGER,
+                  action_taken TEXT NOT NULL,
+                  message_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
+                  UNIQUE(negotiation_id, round)
+                )
+                """
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -78,6 +135,28 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_agent_id ON decisions(agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_round ON negotiation_messages(negotiation_id, round)"
+            )
+            # Indexes for negotiation tracking
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_order_id ON negotiation_threads(our_order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_order_id ON negotiation_threads(their_order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_agent_id ON negotiation_threads(our_agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_agent_id ON negotiation_threads(their_agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
             )
             conn.commit()
         finally:
@@ -285,3 +364,366 @@ class SQLiteClient:
                 conn.close()
         
         return await asyncio.to_thread(_load)
+    
+    async def save_negotiation_message(
+        self,
+        *,
+        negotiation_id: str,
+        round: int,
+        sender: str,
+        our_price: int | None,
+        their_price: int | None,
+        proposed_price: int | None,
+        action_taken: str,
+        message_type: str,
+        timestamp: str,
+    ) -> None:
+        """Save a negotiation message to the database."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Ensure thread exists
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_threads(negotiation_id, created_at, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (negotiation_id, timestamp, timestamp),
+                )
+                # Update thread updated_at
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads SET updated_at = ? WHERE negotiation_id = ?
+                    """,
+                    (timestamp, negotiation_id),
+                )
+                # Insert message
+                cur.execute(
+                    """
+                    INSERT INTO negotiation_messages(
+                        negotiation_id, round, sender, our_price, their_price,
+                        proposed_price, action_taken, message_type, timestamp
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id, round, sender, our_price, their_price,
+                        proposed_price, action_taken, message_type, timestamp
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_save)
+
+    async def load_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Load all messages for a negotiation thread, ordered by round."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT round, sender, our_price, their_price, proposed_price,
+                           action_taken, message_type, timestamp
+                    FROM negotiation_messages
+                    WHERE negotiation_id = ?
+                    ORDER BY round ASC
+                    """,
+                    (negotiation_id,),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "round": row[0],
+                        "sender": row[1],
+                        "our_price": row[2],
+                        "their_price": row[3],
+                        "proposed_price": row[4],
+                        "action_taken": row[5],
+                        "message_type": row[6],
+                        "timestamp": row[7],
+                    })
+                return result
+            finally:
+                conn.close()
+        
+        return await asyncio.to_thread(_load)
+
+    async def update_negotiation_thread_terminal(
+        self,
+        *,
+        negotiation_id: str,
+        terminal_state: str | None,
+    ) -> None:
+        """Update the terminal state of a negotiation thread."""
+        def _update() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET terminal_state = ?, updated_at = ?
+                    WHERE negotiation_id = ?
+                    """,
+                    (terminal_state, datetime.now().isoformat(), negotiation_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_update)
+
+    async def delete_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> None:
+        """Delete a negotiation thread and all its messages."""
+        def _delete() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Delete messages first (foreign key constraint)
+                cur.execute(
+                    "DELETE FROM negotiation_messages WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                # Delete thread
+                cur.execute(
+                    "DELETE FROM negotiation_threads WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_delete)
+
+    async def create_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+        our_order_id: str,
+        their_order_id: str,
+        our_agent_id: str,
+        their_agent_id: str,
+        status: str = "active",
+    ) -> None:
+        """Create a new negotiation thread with order and agent tracking."""
+        def _create() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                timestamp = datetime.now().isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO negotiation_threads(
+                        negotiation_id, our_order_id, their_order_id,
+                        our_agent_id, their_agent_id, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id, our_order_id, their_order_id,
+                        our_agent_id, their_agent_id, status, timestamp, timestamp
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_create)
+
+    async def check_existing_negotiation(
+        self,
+        *,
+        our_order_id: str | None = None,
+        their_order_id: str | None = None,
+        our_agent_id: str | None = None,
+        their_agent_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Check if an active negotiation already exists between two orders or agents (bidirectional).
+        
+        Returns:
+            Dictionary with negotiation details if found, None otherwise
+        """
+        def _check() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                query = """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE status = 'active' AND (
+                        (our_order_id = ? AND their_order_id = ?) OR
+                        (our_order_id = ? AND their_order_id = ?) OR
+                        (our_agent_id = ? AND their_agent_id = ?) OR
+                        (our_agent_id = ? AND their_agent_id = ?)
+                    )
+                """
+                params = (
+                    our_order_id, their_order_id,
+                    their_order_id, our_order_id,
+                    our_agent_id, their_agent_id,
+                    their_agent_id, our_agent_id,
+                )
+                cur.execute(query, params)
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    }
+                return None
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_check)
+
+    async def get_active_negotiations_for_order(
+        self, *, order_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all active negotiations involving an order (as our_order_id or their_order_id)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE (our_order_id = ? OR their_order_id = ?) AND status = 'active'
+                    """,
+                    (order_id, order_id),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    })
+                return result
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def get_active_negotiations_for_agent(
+        self, *, agent_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all active negotiations involving an agent (as our_agent_id or their_agent_id)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE (our_agent_id = ? OR their_agent_id = ?) AND status = 'active'
+                    """,
+                    (agent_id, agent_id),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    })
+                return result
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def cancel_negotiations_for_order(
+        self, *, order_id: str, except_negotiation_id: str | None = None
+    ) -> list[str]:
+        """Cancel all active negotiations for an order, except the specified one.
+        
+        Returns:
+            List of canceled negotiation IDs
+        """
+        def _cancel() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                
+                # Find all active negotiations involving this order
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, 
+                           our_agent_id, their_agent_id
+                    FROM negotiation_threads
+                    WHERE (our_order_id = ? OR their_order_id = ?)
+                      AND (status = 'active')
+                      AND negotiation_id != COALESCE(?, '')
+                    """,
+                    (order_id, order_id, except_negotiation_id or '')
+                )
+                
+                canceled_ids = []
+                for row in cur.fetchall():
+                    neg_id = row[0]
+                    cur.execute(
+                        """
+                        UPDATE negotiation_threads
+                        SET status = 'superseded',
+                            terminal_state = 'superseded',
+                            updated_at = ?
+                        WHERE negotiation_id = ?
+                        """,
+                        (datetime.now().isoformat(), neg_id)
+                    )
+                    canceled_ids.append(neg_id)
+                
+                conn.commit()
+                return canceled_ids
+            finally:
+                conn.close()
+        
+        return await asyncio.to_thread(_cancel)
+
+    async def cancel_negotiations_for_agent(
+        self, *, agent_id: str, except_negotiation_id: str | None = None
+    ) -> None:
+        """Cancel all active negotiations for an agent, except the specified one."""
+        def _cancel() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET status = 'superseded',
+                        terminal_state = 'superseded',
+                        updated_at = ?
+                    WHERE (our_agent_id = ? OR their_agent_id = ?)
+                      AND (status = 'active')
+                      AND negotiation_id != COALESCE(?, '')
+                    """,
+                    (datetime.now().isoformat(), agent_id, agent_id, except_negotiation_id or '')
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_cancel)

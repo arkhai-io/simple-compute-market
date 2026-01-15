@@ -79,6 +79,7 @@ from .schema.pydantic_models import (
 from .policies.store import PolicyStore
 from .policies.manager import PolicyManager
 from .policies.sqlite_client import SQLiteClient
+from .policies.negotiation_thread import get_thread_store
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
     queue_event,
@@ -418,6 +419,9 @@ class TraderAgent(BaseAgent):
         # Initialize SQLite client (shared for policies and decisions)
         self._sqlite_client = SQLiteClient(db_path=POLICY_DB_PATH)
         
+        # Initialize negotiation thread store
+        get_thread_store(sqlite_client=self._sqlite_client)
+        
         # Initialize PolicyStore (private attribute to avoid Pydantic field requirements)
         self._policy_store = PolicyStore(self._sqlite_client)
         
@@ -515,8 +519,13 @@ class TraderAgent(BaseAgent):
             event_type=domain_event.event_type.value,
         )
         
-        # Negotiation history (empty for now, can be populated from negotiation events)
+        # Load negotiation history from thread store if this is a NegotiationEvent
         negotiation_history = []
+        if isinstance(domain_event, NegotiationEvent):
+            thread_store = get_thread_store()
+            negotiation_id = domain_event.negotiation_id
+            if negotiation_id:
+                negotiation_history = await thread_store.get_thread(negotiation_id)
         
         return (domain_event, {
             "resource_portfolio": resource_portfolio,
