@@ -47,7 +47,7 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
-TRUSTED_ORACLE_ARBITER = "0x77154e8F4204e484e12fAA68d50964e793224d02"
+TRUSTED_ORACLE_ARBITER = "0x8a791620dd6260079bf849dc5567adc3f2fdc318"
 DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 logger = logging.getLogger(__name__)
@@ -1156,7 +1156,7 @@ async def fulfill_compute_obligation(
     escrow_uid: str,
     ssh_public_key: str,
     oracle_address: str | None = None,
-    order: str | None = None,
+    order: str | dict | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
     
@@ -1275,7 +1275,7 @@ async def arbitrate_compute_fulfillment(
             "decisions": decisions,
         }
 
-    mode = ArbitrationMode.AllUnarbitrated
+    mode = ArbitrationMode.PastUnarbitrated
 
     try:
         decisions = await client.oracle.arbitrate_many(
@@ -1320,6 +1320,7 @@ async def collect_escrow(
         logger.info("[ALKAHEST] (Simulated) Escrow collected {result}")
     else:
         try:
+            logger.info(f"[ALKAHEST] Collecting escrow: escrow_uid={escrow_uid}, fulfillment_uid={fulfillment_uid}")
             result = await client.erc20.escrow.non_tierable.collect(
                 escrow_uid,
                 fulfillment_uid,
