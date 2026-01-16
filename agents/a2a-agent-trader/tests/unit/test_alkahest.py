@@ -5,7 +5,7 @@ from alkahest_py import (
     TrustedOracleArbiterDemandData,
     ArbitrationMode,
 )
-import pprint
+
 import uuid
 import asyncio
 
@@ -72,33 +72,28 @@ async def full_arbitration_flow(
 
     return escrow_collection_uid
 
-# def test_rust():
-#     env = EnvTestManager()
-
-#     mock_erc20 = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
-#     mock_erc20.transfer(env.alice, 90000000000)
-#     mock_erc20.transfer(env.bob, 90000000000)
-
-# def test_python():
-#     env = EnvTestManager()
-
-#     mock_erc20 = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
-#     mock_erc20.transfer(env.alice, 90000000000)
-#     mock_erc20.transfer(env.bob, 90000000000)
-
-def test_escrow_approval_and_creation():
+def test_rust():
     env = EnvTestManager()
 
     mock_erc20 = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
     mock_erc20.transfer(env.alice, 90000000000)
     mock_erc20.transfer(env.bob, 90000000000)
 
-    alice_rs_client = env.alice_client
-    bob_rs_client = env.bob_client
+    arbitration_flow = asyncio.run(full_arbitration_flow(
+        arbiter_address = env.addresses.arbiters_addresses.trusted_oracle_arbiter,
+        seller_client = env.alice_client,
+        buyer_client = env.bob_client,
+        oracle_address = env.bob
+    ))
 
-    rs_escrow_approve = asyncio.run(approve_escrow(alice_rs_client))
+    assert arbitration_flow is not None
 
-    assert rs_escrow_approve
+def test_python():
+    env = EnvTestManager()
+
+    mock_erc20 = MockERC20(env.mock_addresses.erc20_a, env.god_wallet_provider)
+    mock_erc20.transfer(env.alice, 90000000000)
+    mock_erc20.transfer(env.bob, 90000000000)
 
     alice_py_client = AlkahestClient(
         private_key="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
