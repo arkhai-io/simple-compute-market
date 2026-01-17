@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
-from app.policies.decorators import requires_trigger, requires_event_type
-from app.policies.action_builders import NegotiationActionBuilder, ResourceActionBuilder
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
@@ -22,10 +19,6 @@ from app.schema.pydantic_models import (
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
 from app.utils.validation import extract_resources_from_make_offer_event
-
-import logging
-
-logger = logging.getLogger(__name__)
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
@@ -283,175 +276,258 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | N
 
 
 # ===== Negotiation Policies (Strategic Interaction Pattern) =====
-# Consolidated from 4 policies → 2 policies for better maintainability
 
-# Negotiation configuration
-NEGOTIATION_CONFIG = {
-    "min_factor": 0.8,           # Reservation band min (80% of our price)
-    "max_factor": 1.2,           # Reservation band max (120% of our price)
-    "reasonable_min": 0.5,       # Reasonable range min (50% of our price)
-    "reasonable_max": 2.0,       # Reasonable range max (200% of our price)
-    "max_rounds": 5,             # Maximum negotiation rounds
-    "timeout_seconds": 300,      # Timeout in seconds (5 minutes)
-}
-
-
-# Helper functions for negotiation logic
-def _is_valid_price_data(our_price: Any, their_price: Any) -> bool:
-    """Validate price data for negotiation."""
-    return (
-        our_price is not None
-        and their_price is not None
-        and isinstance(our_price, (int, float))
-        and isinstance(their_price, (int, float))
-        and our_price > 0
-        and their_price > 0
-    )
-
-
-def _check_exit_conditions(history: list[dict[str, Any]], config: dict[str, Any]) -> str | None:
-    """Check all exit conditions, return reason if any met."""
-    # Max rounds
-    if len(history) >= config["max_rounds"]:
-        return "max_rounds"
-
-    # Staleness (no price movement)
-    if len(history) >= 2:
-        last_two_prices = [
-            msg.get("proposed_price") or msg.get("their_price")
-            for msg in history[-2:]
-        ]
-        if last_two_prices[0] == last_two_prices[1]:
-            return "stale_negotiation"
-
-    # Timeout
-    if history:
-        first_ts = history[0].get("timestamp")
-        if first_ts:
-            try:
-                first_time = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-                elapsed = (datetime.now(first_time.tzinfo) - first_time).total_seconds()
-                if elapsed > config["timeout_seconds"]:
-                    return "timeout"
-            except Exception:
-                pass
-
+@policy_callable("negotiation.guard.always_negotiate_on_price_diff")
+def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -> DomainAction | None:
+    """Admission policy: Always negotiate when prices differ, accept when equal.
+    
+    CGT role: Implements the "Entry Decision → Negotiation Game" handoff from
+    Reactive Decision Pattern to Strategic Interaction Pattern.
+    
+    Returns:
+        None to pass to next policy (continue negotiation), or
+        ACCEPT_OFFER if prices are equal (skip negotiation)
+    """
+    from app.schema.pydantic_models import ActionType
+    
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+    
+    # Check if this is a negotiation event with price data
+    if not isinstance(context.event, NegotiationEvent):
+        return None
+    
+    data = context.event.data or {}
+    our_price = data.get("our_price")
+    their_price = data.get("their_price")
+    
+    # If prices are equal, short-circuit to accept (skip negotiation)
+    if our_price is not None and their_price is not None and our_price == their_price:
+        logger.info(f"[NEGOTIATION] Prices equal ({our_price}), accepting directly")
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "reason": "price_equal",
+        })
+    
+    # Prices differ - continue to negotiation policies
     return None
 
 
-def _calculate_midpoint(our_price: int, their_price: int, history: list[dict[str, Any]], agent_id: str) -> int:
-    """Calculate counter-offer price as midpoint between last proposal and their price."""
-    last_our_proposal = our_price
-    if history:
-        for msg in reversed(history):
-            if msg.get("sender") == agent_id and msg.get("proposed_price"):
-                last_our_proposal = msg.get("proposed_price")
-                break
-    return (last_our_proposal + their_price) // 2
-
-
-@policy_callable("negotiation.action.price_aware_decision")
-@requires_trigger("negotiation")
-@requires_event_type(NegotiationEvent)
-def price_aware_decision(context: DecisionContext) -> DomainAction | None:
-    """Single policy for price-based negotiation decisions.
-
-    Combines entry guard (price equality check) with core decision logic.
-
-    CGT role: Implements "Entry Decision → Negotiation Game" handoff and
-    per-round strategic decisions using reservation bands and price history.
-
+@policy_callable("negotiation.action.price_interval_concession")
+def negotiation_action_price_interval_concession(context: DecisionContext) -> DomainAction | None:
+    """Price-based counter-offer policy using reservation band.
+    
+    CGT role: Implements the per-round "Strategic Decision" in the bilateral
+    negotiation game, using thread state and resource-aware thresholds.
+    
     Returns:
-        ACCEPT_OFFER if price equal or within band,
+        ACCEPT_OFFER if their price is within our reservation band,
         COUNTER_OFFER with proposed price if outside but reasonable,
-        EXIT_NEGOTIATION if far outside our band,
-        None if data invalid (passes to safety policy)
+        EXIT_NEGOTIATION if far outside our band
     """
-    data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
-
-    # Safety check - let termination_conditions handle invalid data
-    if not _is_valid_price_data(our_price, their_price):
+    from app.schema.pydantic_models import ActionType
+    
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
         return None
-
-    actions = NegotiationActionBuilder(data)
-    config = NEGOTIATION_CONFIG
-    negotiation_history = context.negotiation_history or []
-
-    # Entry guard: Accept immediately if prices equal
-    if our_price == their_price:
-        logger.info(f"[NEGOTIATION] Prices equal ({our_price}), accepting directly")
-        return actions.accept("price_equal")
-
-    # Core decision: Evaluate price bands
-    min_price = our_price * config["min_factor"]
-    max_price = our_price * config["max_factor"]
-
-    # Determine if we're buying or selling based on resources
-    order = data.get("our_order") or {}
-    offer_resource = order.get("offer_resource", {})
-    is_selling = "gpu_model" in offer_resource  # We're offering compute
-
-    # Within reservation band → accept
-    if is_selling:
-        if their_price >= min_price:  # Selling: they pay at least our minimum
-            logger.info(f"[NEGOTIATION] Their price {their_price} >= min {min_price}, accepting")
-            return actions.accept("within_band")
-    else:
-        if their_price <= max_price:  # Buying: we pay at most our maximum
-            logger.info(f"[NEGOTIATION] Their price {their_price} <= max {max_price}, accepting")
-            return actions.accept("within_band")
-
-    # Outside band but reasonable → counter-offer
-    reasonable_min = our_price * config["reasonable_min"]
-    reasonable_max = our_price * config["reasonable_max"]
-
-    if reasonable_min <= their_price <= reasonable_max:
-        proposed = _calculate_midpoint(our_price, their_price, negotiation_history, context.agent_id)
-        logger.info(f"[NEGOTIATION] Counter-offering {proposed} (between last proposal and {their_price})")
-        return actions.counter(proposed)
-
-    # Far outside reasonable range → exit
-    logger.info(f"[NEGOTIATION] Their price {their_price} outside reasonable range [{reasonable_min}, {reasonable_max}], exiting")
-    return actions.exit("price_unreasonable")
-
-
-@policy_callable("negotiation.guard.termination_conditions")
-@requires_trigger("negotiation")
-@requires_event_type(NegotiationEvent)
-def termination_conditions(context: DecisionContext) -> DomainAction | None:
-    """Single policy for all termination conditions.
-
-    Combines round/timeout limits with safety checks for invalid data.
-
-    CGT role: Encodes terminal checks and TIMEOUT/FAILURE outcomes, plus
-    safety fallback for error conditions.
-
-    Returns:
-        EXIT_NEGOTIATION if limits exceeded,
-        REJECT_OFFER if data invalid,
-        None to continue negotiation
-    """
+    
+    if not isinstance(context.event, NegotiationEvent):
+        return None
+    
     data = context.event.data or {}
     our_price = data.get("our_price")
     their_price = data.get("their_price")
-    actions = NegotiationActionBuilder(data)
     negotiation_history = context.negotiation_history or []
-    config = NEGOTIATION_CONFIG
+    
+    if our_price is None or their_price is None:
+        return None  # Pass to next policy if price data missing
+    
+    # Determine reservation thresholds from context
+    # Use the band to determine either minimum (selling) or maximum (buying)
+    # This allows for arbitrage opportunities where prices are very favorable
+    # For now, use a simple heuristic: ±20% of our price
+    # In production, derive from market_state, available_resources, etc.
+    min_price = int(our_price * 0.8)  # Minimum we're willing to accept (selling) - at least 80% of our price
+    max_price = int(our_price * 1.2)  # Maximum we're willing to pay (buying) - up to 20% more than our price
+    
+    # Accept if their price is favorable:
+    # - Always accept if their_price < our_price (favorable deal - arbitrage opportunity)
+    #   Example: Alice values at 5 BTC, Bob offers 1 BTC -> Alice accepts
+    # - Also accept if their_price is within our acceptable range:
+    #   * If buying: accept if their_price <= max_price (we're willing to pay up to this)
+    #   * If selling: accept if their_price >= min_price (we want at least this)
+    # Since we don't know if we're buying or selling, we accept if EITHER condition is met
+    # This allows arbitrage while still using reservation bands for less favorable deals
+    is_favorable = their_price < our_price  # Their price is better than ours (always accept)
+    is_within_buying_max = their_price <= max_price  # We're buying and their price is within our max
+    is_within_selling_min = their_price >= min_price  # We're selling and their price is at least our min
+    
+    # Accept if favorable OR within acceptable range (buying or selling)
+    if is_favorable or is_within_buying_max or is_within_selling_min:
+        logger.info(f"[NEGOTIATION] Their price {their_price} is favorable (our: {our_price}, min: {min_price}, max: {max_price}), accepting")
+        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "reason": "within_reservation_band",
+            "our_price": our_price,
+            "their_price": their_price,
+        })
+    
+    # Their price is outside our band - check if reasonable
+    # Reasonable = within 2x or 0.5x (not completely unreasonable)
+    reasonable_min = int(our_price * 0.5)
+    reasonable_max = int(our_price * 2.0)
+    
+    if reasonable_min <= their_price <= reasonable_max:
+        # Calculate counter-offer: midpoint between our last proposal and their current
+        # For first round, use midpoint between our_price and their_price
+        last_our_proposal = our_price
+        if negotiation_history:
+            # Find our last proposal from history
+            for msg in reversed(negotiation_history):
+                if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
+                    last_our_proposal = msg.get("proposed_price")
+                    break
+        
+        # Propose midpoint (concession strategy)
+        proposed_price = (last_our_proposal + their_price) // 2
+        
+        logger.info(f"[NEGOTIATION] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+        return DomainAction(action_type=ActionType.COUNTER_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "negotiation_id": context.event.negotiation_id,
+            "proposed_price": proposed_price,
+            "our_price": our_price,
+            "their_price": their_price,
+        })
+    else:
+        # Far outside reasonable range - exit negotiation
+        logger.info(f"[NEGOTIATION] Their price {their_price} far outside reasonable range [{reasonable_min}, {reasonable_max}], exiting")
+        return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+            "order_id": data.get("their_order_id"),
+            "negotiation_id": context.event.negotiation_id,
+            "reason": "price_far_outside_range",
+        })
 
-    # Safety check: Reject if data invalid
-    if not _is_valid_price_data(our_price, their_price):
-        logger.warning(f"[NEGOTIATION] Invalid price data, rejecting for safety")
-        return actions.reject("invalid_price_data")
 
-    # Check all exit conditions
-    exit_reason = _check_exit_conditions(negotiation_history, config)
-    if exit_reason:
-        logger.info(f"[NEGOTIATION] Exiting due to: {exit_reason}")
-        return actions.exit(exit_reason)
+@policy_callable("negotiation.guard.bounded_rounds_and_timeout")
+def negotiation_guard_bounded_rounds_and_timeout(context: DecisionContext) -> DomainAction | None:
+    """Thread/termination policy: Enforce round limits and timeout.
+    
+    CGT role: Encodes the terminal checks and TIMEOUT/FAILURE outcomes
+    from the Bilateral Negotiation Actions diagram.
+    
+    Returns:
+        EXIT_NEGOTIATION if limits exceeded, None otherwise
+    """
+    from app.schema.pydantic_models import ActionType
+    from datetime import datetime, timedelta
+    
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+    
+    if not isinstance(context.event, NegotiationEvent):
+        return None
+    
+    negotiation_history = context.negotiation_history or []
+    max_rounds = 5  # Configurable default
+    timeout_seconds = 300  # 5 minutes default
+    
+    # Check round limit
+    if len(negotiation_history) >= max_rounds:
+        logger.info(f"[NEGOTIATION] Max rounds ({max_rounds}) exceeded, exiting")
+        return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+            "negotiation_id": context.event.negotiation_id,
+            "reason": "max_rounds_exceeded",
+        })
+    
+    # Check for stale negotiation (no price movement in last 2 rounds)
+    if len(negotiation_history) >= 2:
+        last_two = negotiation_history[-2:]
+        prices = [msg.get("proposed_price") or msg.get("their_price") for msg in last_two if msg.get("proposed_price") or msg.get("their_price")]
+        if len(prices) >= 2 and prices[-1] == prices[-2]:
+            logger.info(f"[NEGOTIATION] No price movement in last 2 rounds, exiting")
+            return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+                "negotiation_id": context.event.negotiation_id,
+                "reason": "stale_negotiation",
+            })
+    
+    # Check timeout (if first message has timestamp)
+    if negotiation_history:
+        first_msg = negotiation_history[0]
+        first_timestamp_str = first_msg.get("timestamp")
+        if first_timestamp_str:
+            try:
+                first_timestamp = datetime.fromisoformat(first_timestamp_str.replace('Z', '+00:00'))
+                elapsed = (datetime.now(first_timestamp.tzinfo) - first_timestamp).total_seconds()
+                if elapsed > timeout_seconds:
+                    logger.info(f"[NEGOTIATION] Timeout ({timeout_seconds}s) exceeded, exiting")
+                    return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+                        "negotiation_id": context.event.negotiation_id,
+                        "reason": "timeout",
+                    })
+            except Exception as e:
+                logger.warning(f"[NEGOTIATION] Failed to parse timestamp: {e}")
+    
+    # No limits exceeded - continue negotiation
+    return None
 
-    return None  # No termination, continue
+
+@policy_callable("negotiation.action.safe_default_reject")
+def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAction | None:
+    """Fallback/safety policy: Reject if price data is malformed.
+    
+    CGT role: Ensures all negotiation games terminate cleanly even under error conditions.
+    
+    Returns:
+        REJECT_OFFER if price data is invalid, None otherwise
+    """
+    from app.schema.pydantic_models import ActionType
+    
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+    
+    if not isinstance(context.event, NegotiationEvent):
+        return None
+    
+    data = context.event.data or {}
+    our_price = data.get("our_price")
+    their_price = data.get("their_price")
+    
+    # If price data is missing or invalid, reject for safety
+    if our_price is None or their_price is None:
+        logger.warning(f"[NEGOTIATION] Missing price data, rejecting for safety")
+        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "negotiation_id": context.event.negotiation_id,
+            "reason": "missing_price_data",
+        })
+    
+    # Check for invalid price values
+    if not isinstance(our_price, (int, float)) or not isinstance(their_price, (int, float)):
+        logger.warning(f"[NEGOTIATION] Invalid price types, rejecting for safety")
+        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "negotiation_id": context.event.negotiation_id,
+            "reason": "invalid_price_types",
+        })
+    
+    if our_price <= 0 or their_price <= 0:
+        logger.warning(f"[NEGOTIATION] Non-positive prices, rejecting for safety")
+        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
+            "order_id": data.get("their_order_id"),
+            "negotiation_id": context.event.negotiation_id,
+            "reason": "non_positive_prices",
+        })
+    
+    # Price data looks valid - pass to next policy (shouldn't reach here in normal flow)
+    return None
 
 
 @policy_callable("mo.action.accept_offer")

@@ -673,30 +673,6 @@ class DecisionContext(BaseModel):
         """Get the type of triggering event."""
         return self.event.event_type
 
-    def matches_trigger(self, trigger: str) -> bool:
-        """Check if event type matches the given trigger.
-
-        This method provides a clean, declarative way to check event types in policies.
-        Instead of:
-            et = context.event.event_type
-            trigger_str = et.value if hasattr(et, "value") else str(et)
-            if trigger_str != "negotiation":
-                return None
-
-        You can write:
-            if not context.matches_trigger("negotiation"):
-                return None
-
-        Args:
-            trigger: The trigger type to match (e.g., "negotiation", "resource_imbalance")
-
-        Returns:
-            True if the event type matches the trigger, False otherwise
-        """
-        et = self.event.event_type
-        trigger_str = et.value if hasattr(et, "value") else str(et)
-        return trigger_str == trigger
-
     def has_negotiation_context(self) -> bool:
         """Check if this context includes negotiation history."""
         return len(self.negotiation_history) > 0
