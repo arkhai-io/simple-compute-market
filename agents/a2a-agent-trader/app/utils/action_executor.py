@@ -1212,7 +1212,7 @@ async def fulfill_compute_obligation(
             )
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
-            logger.info(f"[ALKAHEST] Fulfillment error: {error}")
+            logger.error(f"[ALKAHEST] Fulfillment error: {error}")
     
     # Update registry with maker_attestation when maker fulfills
     if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
