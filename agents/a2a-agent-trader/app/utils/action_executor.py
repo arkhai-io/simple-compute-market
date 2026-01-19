@@ -1327,5 +1327,5 @@ async def collect_escrow(
             )
             logger.info(f"[ALKAHEST]: Escrow collected: {result}")
         except Exception as error:
-            logger.info(f"[ALKAHEST] Escrow collection error: {error}")
+            logger.error(f"[ALKAHEST] Escrow collection error: {error}")
     return result
