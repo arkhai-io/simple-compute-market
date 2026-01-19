@@ -17,8 +17,8 @@ from google.adk.agents.remote_a2a_agent import (
 
 from alkahest_py import (
     AlkahestClient,
-    ArbitrateOptions,
-    TrustedOracleArbiterDemandData
+    ArbitrationMode,
+    TrustedOracleArbiterDemandData,
 )
 import json
 
@@ -47,8 +47,8 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
-TRUSTED_ORACLE_ARBITER = "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0"
-DEMO_ORACLE_ADDRESS = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+TRUSTED_ORACLE_ARBITER = "0x8a791620dd6260079bf849dc5567adc3f2fdc318"
+DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ async def execute_action(
             logger.info(f"[ACTION] Fulfilling compute obligation with params: {parameters}")
             escrow_uid = parameters.get("escrow_uid")
             ssh_public_key = parameters.get("ssh_public_key")
-            order_id = parameters.get("order_id")
+            order = parameters.get("order")
 
             if not escrow_uid:
                 raise ValueError("escrow_uid is required for fulfill_compute_obligation")
@@ -188,7 +188,7 @@ async def execute_action(
                 escrow_uid=escrow_uid,
                 oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
                 ssh_public_key=ssh_public_key,
-                order_id=order_id,
+                order=order,
             )
             # Include event_type for downstream parsing and propagate to remote agent.
             result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
@@ -456,6 +456,24 @@ async def provision_machine(ssh_public_key: str) -> str:
         logger.error("[TOOL] Provisioning failed: %s", exc)
         return f"Provisioning failed: {exc}"
 
+def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
+    """Given an order, take the demand and offer and extract which is compute and which is tokens."""
+    offer_resource = order.get("offer_resource", {})
+    demand_resource = order.get("demand_resource", {})
+
+    offer_is_compute = "gpu_model" in offer_resource
+    demand_is_compute = "gpu_model" in demand_resource
+
+    if offer_is_compute:
+        compute_resource = offer_resource
+        token_resource = demand_resource
+    elif demand_is_compute:
+        compute_resource = demand_resource
+        token_resource = offer_resource
+    else:
+        raise ValueError("Neither offer nor demand resource is compute in the provided order.")
+
+    return compute_resource, token_resource
 
 async def accept_offer(
     *,
@@ -488,22 +506,7 @@ async def accept_offer(
     escrow_receipt = None
     
     if alkahest_client:
-        offer_res = order_dict.get("offer_resource", {})
-        demand_res = order_dict.get("demand_resource", {})
-        
-        # Determine resource types
-        offer_is_compute = "gpu_model" in offer_res
-        demand_is_compute = "gpu_model" in demand_res
-        
-        # Map resources based on what maker is offering
-        if offer_is_compute:
-            # Maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
-            compute_resource = offer_res
-            token_resource = demand_res
-        else:
-            # Maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
-            compute_resource = demand_res
-            token_resource = offer_res
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         
         # Retry logic with exponential backoff
         max_retries = 3
@@ -1068,10 +1071,11 @@ async def approve_token_escrow(
         price_data,
     )
     try:
-        escrow_approval = await alkahest_client.erc20.approve(price_data, "escrow")
+        escrow_approval = await alkahest_client.erc20.util.approve(price_data, "escrow")
         logger.info(f"[ALKAHEST]: Escrow approved: {escrow_approval}")
     except Exception as error:
         logger.info(f"[ALKAHEST] Escrow approval error: {error}")
+        raise RuntimeError("Escrow approval failed") from error
     return escrow_approval
 
 
@@ -1088,7 +1092,8 @@ async def buy_compute_with_erc20(
     wishes to trade it for a ComputeResource.
 
     Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
-    and purchases via buy_with_erc20. Expiration is set to 0 (non-expiring) for now.
+    and creates escrow via the non-tierable escrow client. Expiration is set to 0
+    (non-expiring) for now.
     """
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
@@ -1125,7 +1130,7 @@ async def buy_compute_with_erc20(
     expiration = 0  # non-expiring escrow for now; may become time-limited later
 
     logger.info(
-        "[ALKAHEST] buy_with_erc20 price_data=%s arbiter=%s expiration=%s",
+        "[ALKAHEST] escrow.create price_data=%s arbiter=%s expiration=%s",
         price_data,
         arbiter_address,
         expiration,
@@ -1134,10 +1139,15 @@ async def buy_compute_with_erc20(
     escrow_receipt = None
 
     try:
-        escrow_receipt =  await client.erc20.buy_with_erc20(price_data, arbiter_data, expiration)
+        escrow_receipt = await client.erc20.escrow.non_tierable.create(
+            price_data,
+            arbiter_data,
+            expiration,
+        )
         logger.info(f"[ALKAHEST]: {escrow_receipt}")
     except Exception as buy_with_erc20_err:
-        logger.warning("[ALKAHEST] Failed to buy_with_erc20: %s", buy_with_erc20_err)
+        logger.error("[ALKAHEST] Failed to create escrow: %s", buy_with_erc20_err)
+        raise RuntimeError("Escrow creation failed") from buy_with_erc20_err
 
     return escrow_receipt
 
@@ -1146,17 +1156,41 @@ async def fulfill_compute_obligation(
     escrow_uid: str,
     ssh_public_key: str,
     oracle_address: str | None = None,
-    order_id: str | None = None,
+    order: str | dict | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
     
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
+    # connection_details = await mock_provision_machine(ssh_public_key)
     connection_details = await provision_machine(ssh_public_key)
     fulfillment_uid = None
     maker_attestation = None
-    
+
+    logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
+    order_dict = None
+    order_id = None
+    order_bytes = b""
+
+    if order:
+        if isinstance(order, str):
+            try:
+                order_dict = json.loads(order)
+            except json.JSONDecodeError:
+                order_dict = None
+            order_bytes = order.encode("utf-8")
+        elif isinstance(order, dict):
+            order_dict = order
+            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+            order_bytes = encode_compute_lease(
+                compute_resource=compute_resource,
+                token_resource=token_resource,
+                duration_days=1,
+            )
+        if order_dict:
+            order_id = order_dict.get("order_id")
+
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
@@ -1170,13 +1204,18 @@ async def fulfill_compute_obligation(
             )
             maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
             logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; machine provisioned.")
-            request_arbitration_result = await client.oracle.request_arbitration(fulfillment_uid, oracle_address)
+            demand_bytes = order_bytes
+            request_arbitration_result = await client.oracle.request_arbitration(
+                fulfillment_uid,
+                oracle_address,
+                demand_bytes,
+            )
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
-            logger.info(f"[ALKAHEST] Fulfillment error: {error}")
+            logger.error(f"[ALKAHEST] Fulfillment error: {error}")
     
     # Update registry with maker_attestation when maker fulfills
-    if order_id and maker_attestation and CONFIG.enable_registry_discovery:
+    if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
         try:
             registry_client = get_registry_client()
             updates = {
@@ -1208,8 +1247,16 @@ async def arbitrate_compute_fulfillment(
     oracle_address = _resolve_oracle_address(oracle_address)
     logger.info(f"[ALKAHEST] Oracle address: {oracle_address}")
     
-    async def decision_function (attestation):
+    async def decision_function(attestation, demand):
         logger.info(f"[ALKAHEST] Attestation: {attestation}")
+
+        # Parse the demand directly from callback argument (no need to fetch from escrow!)
+        try:
+            demand_json = json.loads(bytes(demand).decode('utf-8'))
+            logger.info(f"[ALKAHEST] Parsed demand data: {demand_json}")
+        except Exception as e:
+            logger.error(f"Failed to parse demand: {e}")
+
         return True
 
     def callback(decision):
@@ -1228,17 +1275,17 @@ async def arbitrate_compute_fulfillment(
             "decisions": decisions,
         }
 
-    options = ArbitrateOptions(skip_arbitrated=True, only_new=False)
+    mode = ArbitrationMode.PastUnarbitrated
 
     try:
-        result = await client.oracle.listen_and_arbitrate_no_spawn(
+        decisions = await client.oracle.arbitrate_many(
             decision_function,
             callback,
-            options,
+            mode,
             timeout_seconds=2.0
         )
 
-        decisions = getattr(result, "decisions", None) or getattr(result, "decision", None) or []
+        logger.info(f"[ALKAHEST] Arbitration result: {decisions}")
         if not decisions:
             logger.warning("[ALKAHEST] Warning: No fulfillments were arbitrated.")
         logger.info("[ALKAHEST] Arbitration decisions: %s", decisions)
@@ -1273,8 +1320,12 @@ async def collect_escrow(
         logger.info("[ALKAHEST] (Simulated) Escrow collected {result}")
     else:
         try:
-            result = await client.erc20.collect_escrow(escrow_uid, fulfillment_uid)
+            logger.info(f"[ALKAHEST] Collecting escrow: escrow_uid={escrow_uid}, fulfillment_uid={fulfillment_uid}")
+            result = await client.erc20.escrow.non_tierable.collect(
+                escrow_uid,
+                fulfillment_uid,
+            )
             logger.info(f"[ALKAHEST]: Escrow collected: {result}")
         except Exception as error:
-            logger.info(f"[ALKAHEST] Escrow collection error: {error}")
+            logger.error(f"[ALKAHEST] Escrow collection error: {error}")
     return result
