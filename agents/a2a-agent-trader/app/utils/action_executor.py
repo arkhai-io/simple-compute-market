@@ -1163,8 +1163,8 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
-    connection_details = await mock_provision_machine(ssh_public_key)
-    # connection_details = await provision_machine(ssh_public_key)
+    # connection_details = await mock_provision_machine(ssh_public_key)
+    connection_details = await provision_machine(ssh_public_key)
     fulfillment_uid = None
     maker_attestation = None
 
