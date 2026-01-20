@@ -103,6 +103,8 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> Optio
 
     project_root = _find_project_root()
 
+    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management_vars.yml"
+
     cmd = [
         "ansible-playbook",
         "-i",
@@ -110,6 +112,8 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1") -> Optio
         str(project_root / "compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"),
         "--extra-vars",
         f"@{vm_vars_path}",
+        "--extra-vars",
+        f"@{management_vars_path}",
         "--limit",
         vm_host,
     ]
