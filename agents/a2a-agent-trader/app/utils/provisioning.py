@@ -169,6 +169,7 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
 
     return ssh_command
 
+
 def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: str = "tenant-vm") -> None:
     """
     Schedule a VM shutdown by setting its lease end time.
@@ -178,6 +179,16 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
         vm_host: The host where the VM is located.
         vm_target: The name of the VM to schedule for shutdown.
     """
+    nonce = uuid.uuid4().hex
+    vm_vars_path = Path(f"/tmp/vm_lease_vars_{nonce}.yml")
+    vm_vars_payload = (
+        f"vm_host: {vm_host}\n"
+        f"vm_target: {vm_target}\n"
+        "vm_action: lease_end\n"
+        f"vm_lease_end: {lease_end_utc}\n"
+    )
+    vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
+
     project_root = _find_project_root()
 
     management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management_vars.yml"
@@ -188,15 +199,9 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
         str(project_root / "compute-provisioning-iac/ansible/inventory/hosts"),
         str(project_root / "compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"),
         "--extra-vars",
-        f"vm_host={vm_host}",
+        f"@{vm_vars_path}",
         "--extra-vars",
         f"@{management_vars_path}",
-        "--extra-vars",
-        f"vm_target={vm_target}",
-        "--extra-vars",
-        "vm_action=lease_end",
-        "--extra-vars",
-        f"vm_lease_end='{lease_end_utc}'",
         "--limit kvm_hosts",
     ]
     cwd = project_root
