@@ -198,7 +198,7 @@ class MarketOrder(BaseModel):
     demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
-    duration: int = Field(description="The duration of the order in days")
+    duration: int = Field(description="The duration of the order in hours")
     maker_attestation: str | None = Field(
         default=None,
         description="The attestation for the offer in escrow (None for open orders)",

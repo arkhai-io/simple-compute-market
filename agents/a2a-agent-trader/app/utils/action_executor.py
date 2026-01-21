@@ -1212,14 +1212,14 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
 def encode_compute_lease(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    duration_days: int = 1,
+    duration_hours: int = 1,
 ) -> bytes:
     """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
 
     Args:
         compute_resource: ComputeResource (or dict payload) describing the offered compute.
-        token_resource: TokenResource (or dict) describing the payment token and amount (base units).
-        duration_days: Lease duration in days (defaults to 1, must be >=1).
+        token_resource: TokenResource (or dict) describing the payment token and amount (base units) for the hourly rate.
+        duration_hours: Lease duration in hours (defaults to 1, must be >=1).
     """
     compute = compute_resource
     if isinstance(compute_resource, dict):
@@ -1227,29 +1227,34 @@ def encode_compute_lease(
     if not isinstance(compute, ComputeResource):
         raise ValueError("encode_compute_lease expects a ComputeResource")
 
-    payment = token_resource
+    hourly_rate = token_resource
     if isinstance(token_resource, dict):
         payment = TokenResource.model_validate(token_resource)
-    if not isinstance(payment, TokenResource):
+    if not isinstance(hourly_rate, TokenResource):
         raise ValueError("encode_compute_lease expects a TokenResource")
 
-    if duration_days < 1:
-        raise ValueError("duration_days must be >= 1")
+    if duration_hours < 1:
+        raise ValueError("duration_hours must be >= 1")
 
-    token_meta = payment.token
-    human_total_price = Decimal(payment.amount) / Decimal(10**token_meta.decimals)
-    human_price_per_day = human_total_price / Decimal(duration_days)
+    token_meta = hourly_rate.token
+    total_price = hourly_rate.amount * duration_hours
+    total_payment_resource = TokenResource(token=token_meta, amount=total_price)
+    
+    # Human-readable prices
+    human_total_payment = Decimal(payment.amount) / Decimal(10**token_meta.decimals)
+    human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
 
     lease_terms = {
         "gpu_model": compute.gpu_model.value if hasattr(compute.gpu_model, "value") else str(compute.gpu_model),
         "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
         "quantity": compute.quantity,
         "sla": compute.sla,
-        "duration_days": duration_days,
+        "duration_hours": duration_hours,
         "token_symbol": token_meta.symbol,
         "token_address": token_meta.contract_address,
-        "price_per_day": float(human_price_per_day),
-        "total_price": float(human_total_price),
+        "price_per_hour_decimal": float(human_price_per_hour),
+        "total_price_decimal": float(human_total_payment),
+        "total_price_int": total_payment_resource.amount,
     }
 
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
@@ -1319,7 +1324,7 @@ async def buy_compute_with_erc20(
         encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
-            duration_days=1,
+            duration_hours=1,
         )
     )
 
@@ -1376,10 +1381,9 @@ async def fulfill_compute_obligation(
     oracle_address = _resolve_oracle_address(oracle_address)
     # connection_details = await mock_provision_machine(ssh_public_key)
     connection_details = await provision_machine(ssh_public_key)
-    lease_end_utc = (datetime.now(timezone.utc) + timedelta(days=duration_days)).strftime("%Y-%m-%d %H:%M")
-    schedule_vm_shutdown(lease_end_utc)
     fulfillment_uid = None
     maker_attestation = None
+    duration_hours = 1
 
     logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
     order_dict = None
@@ -1395,15 +1399,18 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
-            duration_days = order_dict.get("duration", 1)
+            duration_hours = order_dict.get("duration", 1)
             compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
             order_bytes = encode_compute_lease(
                 compute_resource=compute_resource,
                 token_resource=token_resource,
-                duration_days=duration_days,
+                duration_hours=duration_hours,
             )
         if order_dict:
             order_id = order_dict.get("order_id")
+
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
+    schedule_vm_shutdown(lease_end_utc)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
