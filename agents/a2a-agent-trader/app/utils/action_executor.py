@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 from typing import Any
@@ -38,7 +39,7 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
-from .provisioning import run_vm_provisioning_playbook
+from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
@@ -1375,6 +1376,8 @@ async def fulfill_compute_obligation(
     oracle_address = _resolve_oracle_address(oracle_address)
     # connection_details = await mock_provision_machine(ssh_public_key)
     connection_details = await provision_machine(ssh_public_key)
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(days=duration_days)).strftime("%Y-%m-%d %H:%M")
+    schedule_vm_shutdown(lease_end_utc)
     fulfillment_uid = None
     maker_attestation = None
 
@@ -1392,11 +1395,12 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
+            duration_days = order_dict.get("duration", 1)
             compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
             order_bytes = encode_compute_lease(
                 compute_resource=compute_resource,
                 token_resource=token_resource,
-                duration_days=1,
+                duration_days=duration_days,
             )
         if order_dict:
             order_id = order_dict.get("order_id")
