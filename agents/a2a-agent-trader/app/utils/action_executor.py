@@ -872,7 +872,7 @@ def create_order(
         order_taker=None,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
-        duration=1,
+        duration_hours=1,
         maker_attestation=None,
         taker_attestation=None
     )
@@ -1399,7 +1399,7 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
-            duration_hours = order_dict.get("duration", 1)
+            duration_hours = order_dict.get("duration_hours", 1)
             compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
             order_bytes = encode_compute_lease(
                 compute_resource=compute_resource,

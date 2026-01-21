@@ -298,7 +298,7 @@ def order_to_dict(order: MarketOrder) -> dict:
         "order_taker": order.order_taker,
         "offer_resource": order.offer_resource or {},
         "demand_resource": order.demand_resource or {},
-        "duration": order.duration,
+        "duration_hours": order.duration_hours,
         "maker_attestation": order.maker_attestation,
         "taker_attestation": order.taker_attestation,
         "status": order.status.value,

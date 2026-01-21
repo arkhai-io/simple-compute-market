@@ -26,7 +26,7 @@ OBSERVATION_FEATURES = [
     "[9] request.nodes[0] / max_nodes",
     "[10] request.nodes[1] / max_nodes",
     "[11] request.space_tb / max_space_tb",
-    "[12] request.duration / max_job_duration",
+    "[12] request.duration_hours / max_job_duration",
     "[13] prev_reward",
 ]
 
@@ -152,4 +152,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

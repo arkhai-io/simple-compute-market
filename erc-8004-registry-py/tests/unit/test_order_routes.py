@@ -31,7 +31,7 @@ def test_create_order(client, sample_agent):
             "order_maker": "http://localhost:8001/.well-known/agent-card.json",
             "offer_resource": {"gpu_model": "A100", "region": "us-west"},
             "demand_resource": {"token": "USDC"},
-            "duration": 3600,
+            "duration_hours": 3600,
             "status": "open",
         },
     )
@@ -50,7 +50,7 @@ def test_create_order_duplicate(client, sample_agent, sample_order):
             "order_maker": "http://localhost:8001/.well-known/agent-card.json",
             "offer_resource": {"gpu_model": "H100", "region": "us-east"},
             "demand_resource": {"token": "USDC"},
-            "duration": 7200,
+            "duration_hours": 7200,
             "status": "closed",
         },
     )
@@ -97,7 +97,7 @@ def test_get_agent_orders(client, sample_agent, db_session):
             order_maker="http://localhost:8001/.well-known/agent-card.json",
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
-            duration=3600,
+            duration_hours=3600,
             status=OrderStatusEnum.open,
         )
         db_session.add(order)
@@ -119,7 +119,7 @@ def test_get_agent_orders_filtered_by_status(client, sample_agent, db_session):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     order_closed = MarketOrder(
@@ -128,7 +128,7 @@ def test_get_agent_orders_filtered_by_status(client, sample_agent, db_session):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.closed,
     )
     db_session.add(order_open)
@@ -150,7 +150,7 @@ def test_query_orders_with_filters(client, db_session, sample_agent):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)
@@ -172,7 +172,7 @@ def test_query_orders_bidirectional(client, db_session, sample_agent):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     # Create order B: offer token, demand GPU
@@ -182,7 +182,7 @@ def test_query_orders_bidirectional(client, db_session, sample_agent):
         order_maker="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"token": "USDC"},
         demand_resource={"gpu_model": "A100"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order_a)
@@ -217,7 +217,7 @@ def test_update_order_symmetric(client, db_session, sample_agent):
         order_taker="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     # Create order B: offer token, demand GPU (symmetric)
@@ -227,7 +227,7 @@ def test_update_order_symmetric(client, db_session, sample_agent):
         order_maker="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"token": "USDC"},
         demand_resource={"gpu_model": "A100"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order_a)

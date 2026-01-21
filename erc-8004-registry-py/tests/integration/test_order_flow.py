@@ -70,7 +70,7 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
             "order_maker": agent_a.token_uri,
             "offer_resource": {"gpu_model": "A100", "region": "us-west"},
             "demand_resource": {"token": "USDC"},
-            "duration": 3600,
+            "duration_hours": 3600,
             "status": "open",
         },
     )
@@ -85,7 +85,7 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
             "order_maker": agent_b.token_uri,
             "offer_resource": {"token": "USDC"},
             "demand_resource": {"gpu_model": "A100", "region": "us-west"},
-            "duration": 3600,
+            "duration_hours": 3600,
             "status": "open",
         },
     )
@@ -145,7 +145,7 @@ def test_agent_id_resolution_canonical_only(client, agent_a, db_session):
             "order_maker": agent_a.token_uri,
             "offer_resource": {"gpu_model": "A100"},
             "demand_resource": {"token": "USDC"},
-            "duration": 3600,
+            "duration_hours": 3600,
         },
     )
     assert response_canonical.status_code == 201

@@ -241,7 +241,7 @@ class TestMarketOrderResourceDeserialization:
                 "token": "USDT",
                 "amount": 9000000000000000000,
             },
-            "duration": 1,
+            "duration_hours": 1,
         }
         order = MarketOrder.model_validate(order_data)
         
@@ -265,7 +265,7 @@ class TestMarketOrderResourceDeserialization:
                 "sla": 99.9,
                 "region": "New York, US",
             },
-            "duration": 1,
+            "duration_hours": 1,
         }
         order = MarketOrder.model_validate(order_data)
         
@@ -287,7 +287,7 @@ class TestMarketOrderResourceDeserialization:
                 "token": "USDT",
                 "amount": 9000000000000000000,
             },
-            "duration": 1,
+            "duration_hours": 1,
         }
         with pytest.raises(ValidationError):
             MarketOrder.model_validate(order_data)
@@ -312,7 +312,7 @@ class TestMarketOrderResourceDeserialization:
                 "token": "USDT",
                 "amount": 9000000000000000000,
             },
-            "duration": 1,
+            "duration_hours": 1,
         }
         order = MarketOrder.model_validate(order_data)
         assert isinstance(order.offer_resource, TokenResource)
@@ -336,7 +336,7 @@ class TestMarketOrderResourceDeserialization:
             order_maker="agent1",
             offer_resource=compute_res,
             demand_resource=token_res,
-            duration=1,
+            duration_hours=1,
         )
         
         # Resources should be unchanged
@@ -391,7 +391,7 @@ class TestParseDomainEvent:
                         "token": "USDT",
                         "amount": 9000000000000000000,
                     },
-                    "duration": 1,
+                    "duration_hours": 1,
                 },
             },
         }
@@ -452,7 +452,7 @@ class TestValidationUtilities:
                 "token": "USDT",
                 "amount": 9000000000000000000,
             },
-            "duration": 1,
+            "duration_hours": 1,
         }
         order = validate_market_order(order_data)
         assert isinstance(order, MarketOrder)
@@ -495,7 +495,7 @@ class TestValidationUtilities:
                 region=Region.CALIFORNIA_US,
             ),
             demand_resource=TokenResource(token=USDT_METADATA, amount=1000000000000000000),
-            duration=1,
+            duration_hours=1,
         )
         make_offer_event = MakeOfferEvent.from_order(order)
         
@@ -528,7 +528,7 @@ class TestValidationUtilities:
                 sla=99.9,
                 region=Region.NEW_YORK_US,
             ),
-            duration=1,
+            duration_hours=1,
         )
         make_offer_event = MakeOfferEvent.from_order(order)
         

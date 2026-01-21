@@ -108,7 +108,7 @@ class MarketOrder(Base):
     order_taker = Column(Text, nullable=True)  # Agent card URL of taker
     offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
     demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
-    duration = Column(Integer, nullable=False)
+    duration_hours = Column(Integer, nullable=False)
     maker_attestation = Column(Text, nullable=True)
     taker_attestation = Column(Text, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum), nullable=False, default=OrderStatusEnum.open)

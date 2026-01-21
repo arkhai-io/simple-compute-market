@@ -92,7 +92,7 @@ def _build_market_observation(
     [9] request.nodes[0] / max_nodes
     [10] request.nodes[1] / max_nodes
     [11] request.space_tb / max_space_tb
-    [12] request.duration / max_job_duration
+    [12] request.duration_hours / max_job_duration
     [13] prev_reward
     
     Args:
@@ -288,7 +288,7 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
       * Energy sale proceeds are added to reward
     
     The Market environment models a seller-side controller for:
-    - Cloud compute marketplace (nodes per type, storage TB, duration)
+    - Cloud compute marketplace (nodes per type, storage TB, duration_hours)
     - Energy marketplace (buy/sell energy based on time-varying prices)
     
     Args:
@@ -338,7 +338,7 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
     # [0-3]: Node capacity (total/free for types 0 and 1)
     # [4-5]: Storage capacity (total/free)
     # [6-8]: Energy state (charge, gen, storage)
-    # [9-12]: Request details (nodes, storage, duration)
+    # [9-12]: Request details (nodes, storage, duration_hours)
     # [13]: Previous reward
     observation = _build_market_observation(context, offer_resource, demand_resource)
     if observation is None:
@@ -446,4 +446,3 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
     )
     
     return DomainAction(action_type=action_type, parameters=parameters)
-
