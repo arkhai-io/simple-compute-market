@@ -371,7 +371,7 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
         return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
             "order_id": data.get("their_order_id"),
             "reason": "within_reservation_band",
-            "our_price": our_price,
+            "our_price": their_price,
             "their_price": their_price,
         })
     
