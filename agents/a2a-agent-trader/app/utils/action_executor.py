@@ -146,7 +146,8 @@ async def execute_action(
                 gpu_model_str=parameters.get("gpu_model"),
                 sla=parameters.get("sla"),
                 region_str=parameters.get("region"),
-                imbalance_type=imbalance_type
+                imbalance_type=imbalance_type,
+                duration_hours=parameters.get("duration_hours", 1),
             )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
@@ -807,6 +808,7 @@ def create_order(
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
     demand_resource: ComputeResource | TokenResource = None,
+    duration_hours: int = 1,
 ) -> dict | None:
     """Create an order in the market.
 
@@ -823,6 +825,7 @@ def create_order(
         publish_to_registry: Whether to publish order to registry (default: True)
         offer_resource: Pre-constructed offer resource (optional, overrides gpu_model_str/sla/region_str)
         demand_resource: Pre-constructed demand resource (optional)
+        duration_hours: Duration of the order in hours (default: 1); 1 if seller (rate), else total if buyer
 
     Returns:
         The created order as a dictionary if the order was successfully created, or None otherwise.
@@ -873,11 +876,11 @@ def create_order(
         order_taker=None,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
-        duration_hours=1,
+        duration_hours=duration_hours,
         maker_attestation=None,
         taker_attestation=None
     )
-    
+
     order_dict = order.model_dump(mode='json')
     
     # Note: Order publishing to registry happens in make_offer() to ensure
