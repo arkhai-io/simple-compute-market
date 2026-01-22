@@ -108,7 +108,7 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
 
     project_root = _find_project_root()
 
-    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management_vars.yml"
+    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management-vars.yml"
 
     cmd = [
         "ansible-playbook",
@@ -192,7 +192,7 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
 
     project_root = _find_project_root()
 
-    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management_vars.yml"
+    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management-vars.yml"
 
     cmd = [
         "ansible-playbook",
