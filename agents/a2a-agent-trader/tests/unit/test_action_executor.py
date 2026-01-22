@@ -1,12 +1,16 @@
 """Unit tests for action executor helpers."""
 
 import json
+from datetime import datetime
 
 import pytest
 
 from app.schema.pydantic_models import (
+    Action,
+    ActionType,
     ComputeResource,
     ERC20TokenMetadata,
+    EventType,
     GPUModel,
     Region,
     TokenResource,
@@ -111,6 +115,12 @@ class _FakeClient:
         self.erc20 = _ERC20(records)
 
 
+class _FakeCtx:
+    def __init__(self) -> None:
+        self.invocation_id = "invocation-1"
+        self.branch = "main"
+
+
 @pytest.mark.asyncio
 async def test_buy_compute_with_erc20_approves_total_and_creates_total(monkeypatch):
     """Test buying compute with ERC20 approves total payment and creates escrow with total price."""
@@ -174,3 +184,67 @@ async def test_accept_offer_passes_duration_and_hourly_rate(monkeypatch):
     if isinstance(token_payload, dict):
         token_payload = TokenResource.model_validate(token_payload)
     assert token_payload.amount == rate
+
+
+@pytest.mark.asyncio
+async def test_execute_action_fulfill_skips_event_on_error(monkeypatch):
+    """Ensure fulfillment errors do not send events to the counterparty."""
+    async def fake_fulfill_compute_obligation(**_kwargs):
+        return {"status": "error", "message": "Provisioning failed"}
+
+    called = {"count": 0}
+
+    async def fake_send_to_remote_agent(_ctx, _event):
+        called["count"] += 1
+
+    monkeypatch.setattr(action_executor, "fulfill_compute_obligation", fake_fulfill_compute_obligation)
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+
+    action = Action(
+        action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
+        parameters={"escrow_uid": "escrow-1", "ssh_public_key": "ssh-rsa AAA"},
+        timestamp=datetime.now(),
+    )
+
+    await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
+
+    assert called["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
+    """Ensure fulfillment success sends event with event type set."""
+    async def fake_fulfill_compute_obligation(**_kwargs):
+        return {"status": "fulfilled", "message": "ok"}
+
+    captured: dict = {}
+
+    async def fake_send_to_remote_agent(_ctx, event):
+        captured["event"] = event
+
+    monkeypatch.setattr(action_executor, "fulfill_compute_obligation", fake_fulfill_compute_obligation)
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+
+    action = Action(
+        action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
+        parameters={"escrow_uid": "escrow-2", "ssh_public_key": "ssh-rsa AAA"},
+        timestamp=datetime.now(),
+    )
+
+    await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
+
+    assert "event" in captured
+    response = captured["event"].content.parts[0].function_response.response
+    assert response["event_type"] == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+
+
+@pytest.mark.asyncio
+async def test_provision_machine_raises_on_missing_connection_info(monkeypatch):
+    """Ensure missing connection info raises a RuntimeError."""
+    def fake_run_vm_provisioning_playbook(_ssh_public_key):
+        return None
+
+    monkeypatch.setattr(action_executor, "run_vm_provisioning_playbook", fake_run_vm_provisioning_playbook)
+
+    with pytest.raises(RuntimeError, match="SSH connection info unavailable"):
+        await action_executor.provision_machine("ssh-rsa AAA")
