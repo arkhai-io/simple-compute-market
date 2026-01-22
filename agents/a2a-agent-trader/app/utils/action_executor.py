@@ -1233,7 +1233,7 @@ def encode_compute_lease(
 
     hourly_rate = token_resource
     if isinstance(token_resource, dict):
-        payment = TokenResource.model_validate(token_resource)
+        hourly_rate = TokenResource.model_validate(token_resource)
     if not isinstance(hourly_rate, TokenResource):
         raise ValueError("encode_compute_lease expects a TokenResource")
 
@@ -1245,7 +1245,7 @@ def encode_compute_lease(
     total_payment_resource = TokenResource(token=token_meta, amount=total_price)
     
     # Human-readable prices
-    human_total_payment = Decimal(payment.amount) / Decimal(10**token_meta.decimals)
+    human_total_payment = Decimal(total_payment_resource.amount) / Decimal(10**token_meta.decimals)
     human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
 
     lease_terms = {
