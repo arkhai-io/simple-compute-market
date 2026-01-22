@@ -119,7 +119,8 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
         f"@{vm_vars_path}",
         "--extra-vars",
         f"@{management_vars_path}",
-        "--limit kvm_hosts",
+        "--limit",
+        "kvm_hosts"
     ]
     cwd = project_root
 
@@ -202,7 +203,8 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
         f"@{vm_vars_path}",
         "--extra-vars",
         f"@{management_vars_path}",
-        "--limit kvm_hosts",
+        "--limit",
+        "kvm_hosts",
     ]
     cwd = project_root
 
