@@ -469,10 +469,10 @@ async def provision_machine(ssh_public_key: str) -> str:
             logger.info(f"[TOOL] Machine provisioned: {connection_info}")
             return connection_info
         logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        return "Provisioning completed, but SSH connection info unavailable."
+        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
     except Exception as exc:
         logger.error("[TOOL] Provisioning failed: %s", exc)
-        return f"Provisioning failed: {exc}"
+        raise RuntimeError(f"Provisioning failed: {exc}") from exc
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""
@@ -1389,7 +1389,17 @@ async def fulfill_compute_obligation(
     """
     oracle_address = _resolve_oracle_address(oracle_address)
     # connection_details = await mock_provision_machine(ssh_public_key)
-    connection_details = await provision_machine(ssh_public_key)
+    try:
+        connection_details = await provision_machine(ssh_public_key)
+    except Exception as error:
+        logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
+        return {
+            "status": "error",
+            "message": f"Provisioning failed: {error}",
+            "escrow_uid": escrow_uid,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
     fulfillment_uid = None
     maker_attestation = None
     duration_hours = 1
