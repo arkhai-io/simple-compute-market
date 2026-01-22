@@ -676,6 +676,7 @@ async def accept_offer(
                 escrow_receipt = await buy_compute_with_erc20(
                     compute_resource=compute_resource,
                     token_resource=token_resource,
+                    duration_hours=order_dict.get("duration_hours", 1),
                     oracle_address=DEMO_ORACLE_ADDRESS,
                     client=alkahest_client,
                 )
@@ -1212,7 +1213,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
 def encode_compute_lease(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    duration_hours: int = 1,
+    duration_hours: int,
 ) -> bytes:
     """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
 
@@ -1298,7 +1299,7 @@ async def approve_token_escrow(
 async def buy_compute_with_erc20(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    *,
+    duration_hours: int,
     oracle_address: str,
     client: AlkahestClient,
 ) -> Any:
@@ -1324,7 +1325,7 @@ async def buy_compute_with_erc20(
         encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
-            duration_hours=1,
+            duration_hours=duration_hours,
         )
     )
 
@@ -1399,15 +1400,16 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
-            duration_hours = order_dict.get("duration_hours", 1)
-            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-            order_bytes = encode_compute_lease(
-                compute_resource=compute_resource,
-                token_resource=token_resource,
-                duration_hours=duration_hours,
-            )
-        if order_dict:
-            order_id = order_dict.get("order_id")
+
+    if order_dict:
+        order_id = order_dict.get("order_id")
+        duration_hours = order_dict.get("duration_hours", 1)
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        order_bytes = encode_compute_lease(
+            compute_resource=compute_resource,
+            token_resource=token_resource,
+            duration_hours=duration_hours,
+        )
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     schedule_vm_shutdown(lease_end_utc)
