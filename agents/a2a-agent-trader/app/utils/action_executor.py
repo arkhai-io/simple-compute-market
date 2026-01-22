@@ -1331,16 +1331,21 @@ async def buy_compute_with_erc20(
 
     demand_bytes = demand_data.encode_self()
 
-    # 2) Build price data from token resource
+    # 2) Build price data from token resource, computing duration * rate
     if isinstance(token_resource, TokenResource):
-        payment = token_resource
+        hourly_rate = token_resource
     else:
-        payment = TokenResource.model_validate(token_resource)
+        hourly_rate = TokenResource.model_validate(token_resource)
 
-    price_data = {"address": payment.token.contract_address, "value": payment.amount}
+    total_payment = TokenResource(
+        token=hourly_rate.token,
+        amount=hourly_rate.amount * duration_hours,
+    )
+
+    price_data = {"address": total_payment.token.contract_address, "value": total_payment.amount}
 
     # 3) Approve escrow spend
-    await approve_token_escrow(payment, alkahest_client=client)
+    await approve_token_escrow(total_payment, alkahest_client=client)
 
     # 4) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
