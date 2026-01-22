@@ -195,29 +195,35 @@ async def execute_action(
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
-            # Include event_type for downstream parsing and propagate to remote agent.
-            result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
-            if ctx:
-                try:
-                    event = Event(
-                        author=AGENT_ID,
-                        content=genai_types.Content(
-                            role="model",
-                            parts=[
-                                genai_types.Part.from_function_response(
-                                    name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-                                    response=result,
-                                )
-                            ],
-                        ),
-                        invocation_id=ctx.invocation_id,
-                        branch=ctx.branch,
-                    )
-                    await send_to_remote_agent(ctx, event)
-                except Exception as send_err:
-                    logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
+            if result.get("status") == "fulfilled":
+                # Include event_type for downstream parsing and propagate to remote agent.
+                result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+                if ctx:
+                    try:
+                        event = Event(
+                            author=AGENT_ID,
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part.from_function_response(
+                                        name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                                        response=result,
+                                    )
+                                ],
+                            ),
+                            invocation_id=ctx.invocation_id,
+                            branch=ctx.branch,
+                        )
+                        await send_to_remote_agent(ctx, event)
+                    except Exception as send_err:
+                        logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
+            else:
+                logger.warning(
+                    "[ACTION] Skipping fulfillment event; status=%s",
+                    result.get("status"),
+                )
             outcome["result"] = result
-            outcome["message"] = result.get("message", "Compute obligation fulfilled")
+            outcome["message"] = result.get("message")
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
