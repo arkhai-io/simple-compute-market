@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from app.policies.sqlite_client import SQLiteClient
 from app.utils.config import CONFIG
@@ -156,6 +156,93 @@ class NegotiationThreadTransaction:
             their_order_id=their_order_id,
         )
         return existing is not None
+
+    async def mark_terminal(self, negotiation_id: str, state: str) -> None:
+        """Mark negotiation as terminal (success/failure/timeout).
+
+        Args:
+            negotiation_id: The negotiation to mark as terminal
+            state: Terminal state - one of "success", "failure", "timeout"
+        """
+        if not self.thread_store:
+            logger.warning(f"[{self.component}] No thread store available")
+            return
+
+        try:
+            await self.thread_store._sqlite.update_negotiation_thread_terminal(
+                negotiation_id=negotiation_id,
+                terminal_state=state,
+            )
+            logger.info(f"[{self.component}] Marked negotiation {negotiation_id} as {state}")
+        except Exception as e:
+            logger.error(f"[{self.component}] Failed to mark terminal: {e}")
+
+    async def ensure_thread(
+        self,
+        negotiation_id: str,
+        our_order_id: str,
+        their_order_id: str,
+        our_agent_id: str,
+        their_agent_id: str,
+    ) -> None:
+        """Get or create negotiation thread.
+
+        Args:
+            negotiation_id: Unique ID for this negotiation
+            our_order_id: Our order ID
+            their_order_id: Their order ID
+            our_agent_id: Our agent ID
+            their_agent_id: Their agent ID
+        """
+        if not self.thread_store:
+            logger.warning(f"[{self.component}] No thread store available")
+            return
+
+        existing = await self.thread_store.get_thread(negotiation_id)
+        if not existing:
+            await self.thread_store.create_thread(
+                negotiation_id=negotiation_id,
+                our_order_id=our_order_id,
+                their_order_id=their_order_id,
+                our_agent_id=our_agent_id,
+                their_agent_id=their_agent_id,
+            )
+            logger.debug(f"[{self.component}] Created thread {negotiation_id}")
+
+    async def add_message(
+        self,
+        negotiation_id: str,
+        sender: str,
+        our_price: int | None = None,
+        their_price: int | None = None,
+        proposed_price: int | None = None,
+        action_taken: str = "",
+        message_type: str = "",
+    ) -> None:
+        """Add message to negotiation thread.
+
+        Args:
+            negotiation_id: The negotiation thread ID
+            sender: Agent ID of sender
+            our_price: Our price in this message
+            their_price: Their price in this message
+            proposed_price: Proposed counter price
+            action_taken: Action taken (ACCEPT_OFFER, COUNTER_OFFER, etc.)
+            message_type: Type of message (initial_proposal, counter_proposal, etc.)
+        """
+        if not self.thread_store:
+            logger.warning(f"[{self.component}] No thread store available")
+            return
+
+        await self.thread_store.add_message(
+            negotiation_id=negotiation_id,
+            sender=sender,
+            our_price=our_price,
+            their_price=their_price,
+            proposed_price=proposed_price,
+            action_taken=action_taken,
+            message_type=message_type,
+        )
 
 
 class NegotiationThreadStore:
