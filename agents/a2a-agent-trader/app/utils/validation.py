@@ -99,22 +99,22 @@ def extract_resources_from_make_offer_event(
     return order, offer_resource, demand_resource
 
 
-def determine_role_from_resources(
+def determine_strategy_from_resources(
     offer_resource: Resource | None,
     demand_resource: Resource | None,
 ) -> str | None:
-    """Determine market role (buyer/seller) from resource types.
+    """Determine negotiation strategy from resource types.
 
     In a compute-for-token market:
-    - Seller: offers ComputeResource, demands TokenResource
-    - Buyer: offers TokenResource, demands ComputeResource
+    - Maximizer (offering compute): offers ComputeResource, demands TokenResource
+    - Minimizer (demanding compute): offers TokenResource, demands ComputeResource
 
     Args:
         offer_resource: Resource being offered
         demand_resource: Resource being demanded
 
     Returns:
-        "buyer" if demanding compute, "seller" if offering compute, None if unclear
+        "minimize" if demanding compute (wants lowest rate), "maximize" if offering compute (wants highest rate), None if unclear
     """
     if not offer_resource or not demand_resource:
         return None
@@ -123,24 +123,24 @@ def determine_role_from_resources(
     is_demanding_compute = isinstance(demand_resource, ComputeResource)
 
     if is_demanding_compute:
-        return "buyer"
+        return "minimize"
     elif is_offering_compute:
-        return "seller"
+        return "maximize"
     else:
         return None
 
 
-def determine_role_from_order(order: MarketOrder | None) -> str | None:
-    """Determine market role from a MarketOrder.
+def determine_strategy_from_order(order: MarketOrder | None) -> str | None:
+    """Determine negotiation strategy from a MarketOrder.
 
     Args:
         order: MarketOrder instance
 
     Returns:
-        "buyer" if demanding compute, "seller" if offering compute, None if unclear
+        "minimize" if demanding compute (wants lowest rate), "maximize" if offering compute (wants highest rate), None if unclear
     """
     if not order:
         return None
 
-    return determine_role_from_resources(order.offer_resource, order.demand_resource)
+    return determine_strategy_from_resources(order.offer_resource, order.demand_resource)
 

@@ -41,7 +41,7 @@ from .registry_client import get_registry_client
 from .provisioning import run_vm_provisioning_playbook
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
-from .validation import determine_role_from_order
+from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
@@ -538,17 +538,17 @@ async def counter_offer(
                 f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
             )
 
-        # Determine our role by looking up our order
-        role = None
+        # Determine our strategy by looking up our order (for internal policy use)
+        strategy = None
         if params.our_order_id:
             try:
                 our_order = await registry_client.get_order(params.our_order_id)
                 if our_order:
                     market_order = MarketOrder.model_validate(our_order)
-                    role = determine_role_from_order(market_order)
-                    logger.info(f"[ACTION] Determined role '{role}' from our order {params.our_order_id}")
+                    strategy = determine_strategy_from_order(market_order)
+                    logger.info(f"[ACTION] Determined strategy '{strategy}' from our order {params.our_order_id}")
             except Exception as e:
-                logger.warning(f"[ACTION] Failed to determine role from order {params.our_order_id}: {e}")
+                logger.warning(f"[ACTION] Failed to determine strategy from order {params.our_order_id}: {e}")
 
         # Use transaction context manager for thread operations
         async with NegotiationThreadTransaction("COUNTER_OFFER") as txn:
@@ -581,7 +581,7 @@ async def counter_offer(
                 "proposed_price": params.proposed_price,
                 "their_order_id": params.order_id,
                 "our_order_id": params.our_order_id,
-                "role": role,
+                "strategy": strategy,  # Strategy for counterparty's policy use
             },
         }
 

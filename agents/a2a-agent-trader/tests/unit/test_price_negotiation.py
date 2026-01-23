@@ -1,20 +1,20 @@
-"""Parametrized price negotiation tests for role-aware smart policies.
+"""Parametrized price negotiation tests for strategy-aware smart policies.
 
 Tests the price_aware_decision (negotiation_action_price_interval_concession) policy.
 
-ROLE-AWARE POLICY BEHAVIOR:
+STRATEGY-AWARE POLICY BEHAVIOR:
 
-Buyer (demanding compute, our_price = max willing to pay):
-- Accepts if 50% <= their_price <= 120% of our_price (reasonable range)
-- Counters if 120% < their_price <= 200% of our_price (high but reasonable)
-- Exits if their_price < 50% or > 200% of our_price
+Minimizer (demanding compute, our_price = ceiling/max willing to pay):
+- Accepts if their_price <= our_price (favorable - at or below ceiling)
+- Counters if our_price < their_price <= 1.5x our_price (above ceiling but reasonable)
+- Exits if their_price > 1.5x our_price (unreasonable)
 
-Seller (offering compute, our_price = min willing to accept):
-- Accepts if 80% <= their_price <= 200% of our_price (reasonable range)
-- Counters if 50% <= their_price < 80% of our_price (low but reasonable)
-- Exits if their_price < 50% or > 200% of our_price
+Maximizer (offering compute, our_price = floor/min willing to accept):
+- Accepts if their_price >= our_price (favorable - at or above floor)
+- Counters if 0.67x our_price <= their_price < our_price (below floor but reasonable)
+- Exits if their_price < 0.67x our_price (unreasonable)
 
-NOTE: Policy requires role to be specified. If no role, passes to next policy.
+NOTE: Policy requires strategy to be specified. If no strategy, passes to next policy.
 """
 
 import pytest
@@ -66,36 +66,26 @@ def policy_store(temp_db):
     CALLABLE_REGISTRY.clear()
 
 
-class TestBuyerNegotiation:
-    """Test buyer role negotiation (demanding compute, offering tokens)."""
+class TestMinimizerStrategy:
+    """Test minimizer strategy (demanding compute, offering tokens)."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("our_price,their_price,expected_action,reason", [
-        # Buyer accepts up to 120% of max (within band)
-        (100, 70, "accept_offer", "within buyer band"),
-        (100, 80, "accept_offer", "within buyer band"),
-        (100, 90, "accept_offer", "within buyer band"),
-        (100, 100, "accept_offer", "equal to max"),
-        (100, 110, "accept_offer", "within buyer band"),
-        (100, 120, "accept_offer", "at buyer max (120%)"),
-
-        # Buyer counters if reasonable but above 120%
-        (100, 125, "counter_offer", "above band but reasonable"),
-        (100, 130, "counter_offer", "above band but reasonable"),
-        (100, 150, "counter_offer", "above band but reasonable"),
-        (100, 180, "counter_offer", "above band but reasonable"),
-        (100, 200, "counter_offer", "at reasonable upper bound"),
-
-        # Buyer exits far outside reasonable
-        (100, 40, "exit_negotiation", "far below 50%"),
-        (100, 49, "exit_negotiation", "below reasonable"),
-        (100, 250, "exit_negotiation", "far above 200%"),
+        # Minimizer accepts if their_price <= our_price (favorable - at or below ceiling)
+        (100, 50, "accept_offer", "well below ceiling"),
+        (100, 80, "accept_offer", "below ceiling"),
+        (100, 90, "accept_offer", "below ceiling"),
+        (100, 100, "accept_offer", "at ceiling"),
+        (100, 110, "counter_offer", "above ceiling - should counter"),
+        (100, 150, "counter_offer", "at 1.5x boundary - counter"),
+        (100, 151, "exit_negotiation", "beyond 1.5x - exit"),
+        (100, 200, "exit_negotiation", "way beyond - exit"),
     ])
-    async def test_buyer_price_aware_decision(self, policy_store, our_price, their_price, expected_action, reason):
-        """Test buyer negotiation policy at various price points."""
+    async def test_minimizer_decisions(self, policy_store, our_price, their_price, expected_action, reason):
+        """Test minimizer strategy at various price points."""
         event = NegotiationEvent.create(
-            event_id=f"evt_test_buyer_{our_price}_{their_price}",
-            negotiation_id=f"test_buyer_{our_price}_{their_price}",
+            event_id=f"evt_test_minimizer_{our_price}_{their_price}",
+            negotiation_id=f"test_minimizer_{our_price}_{their_price}",
             message_type="counter_proposal",
             sender="other_agent",
             data={
@@ -103,7 +93,7 @@ class TestBuyerNegotiation:
                 "their_price": their_price,
                 "our_order_id": "order_our",
                 "their_order_id": "order_their",
-                "role": "buyer",
+                "strategy": "minimize",
             }
         )
 
@@ -125,19 +115,65 @@ class TestBuyerNegotiation:
             f"Expected {expected_action}, got {result.action_type.value} for: our={our_price}, their={their_price}, reason={reason}"
 
     @pytest.mark.asyncio
-    async def test_buyer_counter_calculation(self, policy_store):
-        """Test buyer counter-offer price calculation."""
+    @pytest.mark.parametrize("our_price,their_price,expected_action", [
+        # Minimizer: accept if <= our_price
+        (100, 100, "accept_offer"),   # At ceiling - accept
+        (100, 80, "accept_offer"),    # Below ceiling - accept
+        (100, 50, "accept_offer"),    # Well below - accept
+        (100, 0, "accept_offer"),     # Zero - accept (edge case)
+        # Minimizer: counter if our_price < their_price <= 1.5x
+        (100, 110, "counter_offer"),  # Above ceiling, reasonable
+        (100, 140, "counter_offer"),  # Above ceiling, still reasonable
+        (100, 150, "counter_offer"),  # At 1.5x boundary - counter
+        # Minimizer: exit if > 1.5x
+        (100, 151, "exit_negotiation"),  # Beyond 1.5x - exit
+        (100, 200, "exit_negotiation"),  # Way beyond - exit
+        (100, 1000, "exit_negotiation"), # Extreme - exit
+    ])
+    async def test_minimizer_complete_coverage(self, policy_store, our_price, their_price, expected_action):
+        """Test minimizer strategy with complete coverage of all cases."""
         event = NegotiationEvent.create(
-            event_id="evt_test_buyer_counter",
-            negotiation_id="test_buyer_counter",
+            event_id=f"evt_test_min_{our_price}_{their_price}",
+            negotiation_id=f"test_min_{our_price}_{their_price}",
+            message_type="counter_proposal",
+            sender="other_agent",
+            data={
+                "our_price": our_price,
+                "their_price": their_price,
+                "our_order_id": "order_our",
+                "their_order_id": "order_their",
+                "strategy": "minimize",
+            }
+        )
+
+        context = DecisionContext(
+            event=event,
+            agent_id="test_agent",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        func = policy_store._registry.get("negotiation.action.price_interval_concession")
+        ce = CallableEvaluator(func)
+        result = await ce.evaluate(context)
+
+        assert result is not None
+        assert result.action_type.value == expected_action
+
+    @pytest.mark.asyncio
+    async def test_minimizer_counter_calculation(self, policy_store):
+        """Test minimizer counter-offer price calculation (midpoint)."""
+        event = NegotiationEvent.create(
+            event_id="evt_test_minimizer_counter",
+            negotiation_id="test_minimizer_counter",
             message_type="counter_proposal",
             sender="other_agent",
             data={
                 "our_price": 100,
-                "their_price": 150,
+                "their_price": 140,
                 "our_order_id": "order_our",
                 "their_order_id": "order_their",
-                "role": "buyer",
+                "strategy": "minimize",
             }
         )
 
@@ -152,44 +188,36 @@ class TestBuyerNegotiation:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should counter with midpoint: (100 + 150) // 2 = 125
+        # Should counter with midpoint: (100 + 140) // 2 = 120
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        assert result.parameters.get("proposed_price") == 125
+        assert result.parameters.get("proposed_price") == 120
 
 
-class TestSellerNegotiation:
-    """Test seller role negotiation (offering compute, demanding tokens)."""
+class TestMaximizerStrategy:
+    """Test maximizer strategy (offering compute, demanding tokens)."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("our_price,their_price,expected_action,reason", [
-        # Seller accepts at least 80% of min (within band)
-        (100, 80, "accept_offer", "at seller min (80%)"),
-        (100, 85, "accept_offer", "within seller band"),
-        (100, 90, "accept_offer", "within seller band"),
-        (100, 100, "accept_offer", "equal to min"),
-        (100, 110, "accept_offer", "within seller band"),
-        (100, 120, "accept_offer", "within seller band"),
-        (100, 150, "accept_offer", "within seller band"),
-        (100, 180, "accept_offer", "within seller band"),
-        (100, 200, "accept_offer", "at seller upper bound"),
-
-        # Seller counters if reasonable but below 80%
-        (100, 75, "counter_offer", "below band but reasonable"),
-        (100, 70, "counter_offer", "below band but reasonable"),
-        (100, 60, "counter_offer", "below band but reasonable"),
-        (100, 50, "counter_offer", "at reasonable lower bound"),
-
-        # Seller exits far outside reasonable
-        (100, 40, "exit_negotiation", "far below 50%"),
-        (100, 49, "exit_negotiation", "below reasonable"),
-        (100, 250, "exit_negotiation", "far above 200%"),
+    @pytest.mark.parametrize("our_price,their_price,expected_action", [
+        # Maximizer: accept if their_price >= our_price
+        (100, 100, "accept_offer"),   # At floor - accept
+        (100, 120, "accept_offer"),   # Above floor - accept
+        (100, 200, "accept_offer"),   # Well above - accept
+        (100, 1000, "accept_offer"),  # Extreme - accept
+        # Maximizer: counter if 0.67x <= their_price < our_price (where 0.67 ≈ 1/1.5)
+        (100, 90, "counter_offer"),   # Below floor, reasonable
+        (100, 70, "counter_offer"),   # Below floor, still reasonable
+        (100, 67, "counter_offer"),   # At 1/1.5 boundary - counter
+        # Maximizer: exit if < 0.67x
+        (100, 66, "exit_negotiation"),  # Beyond boundary - exit
+        (100, 50, "exit_negotiation"),  # Way below - exit
+        (100, 0, "exit_negotiation"),   # Zero - exit
     ])
-    async def test_seller_price_aware_decision(self, policy_store, our_price, their_price, expected_action, reason):
-        """Test seller negotiation policy at various price points."""
+    async def test_maximizer_decisions(self, policy_store, our_price, their_price, expected_action):
+        """Test maximizer strategy at various price points."""
         event = NegotiationEvent.create(
-            event_id=f"evt_test_seller_{our_price}_{their_price}",
-            negotiation_id=f"test_seller_{our_price}_{their_price}",
+            event_id=f"evt_test_maximizer_{our_price}_{their_price}",
+            negotiation_id=f"test_maximizer_{our_price}_{their_price}",
             message_type="counter_proposal",
             sender="other_agent",
             data={
@@ -197,7 +225,7 @@ class TestSellerNegotiation:
                 "their_price": their_price,
                 "our_order_id": "order_our",
                 "their_order_id": "order_their",
-                "role": "seller",
+                "strategy": "maximize",
             }
         )
 
@@ -209,21 +237,19 @@ class TestSellerNegotiation:
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
-        assert func is not None, "Policy not registered"
-
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        assert result is not None, f"Policy returned None for: our={our_price}, their={their_price}, reason={reason}"
+        assert result is not None, f"Policy returned None for: our={our_price}, their={their_price}"
         assert result.action_type.value == expected_action, \
-            f"Expected {expected_action}, got {result.action_type.value} for: our={our_price}, their={their_price}, reason={reason}"
+            f"Expected {expected_action}, got {result.action_type.value} for: our={our_price}, their={their_price}"
 
     @pytest.mark.asyncio
-    async def test_seller_counter_calculation(self, policy_store):
-        """Test seller counter-offer price calculation."""
+    async def test_maximizer_counter_calculation(self, policy_store):
+        """Test maximizer counter-offer price calculation (midpoint)."""
         event = NegotiationEvent.create(
-            event_id="evt_test_seller_counter",
-            negotiation_id="test_seller_counter",
+            event_id="evt_test_maximizer_counter",
+            negotiation_id="test_maximizer_counter",
             message_type="counter_proposal",
             sender="other_agent",
             data={
@@ -231,7 +257,7 @@ class TestSellerNegotiation:
                 "their_price": 70,
                 "our_order_id": "order_our",
                 "their_order_id": "order_their",
-                "role": "seller",
+                "strategy": "maximize",
             }
         )
 
@@ -256,11 +282,11 @@ class TestNegotiationScenarios:
     """Test realistic negotiation scenarios."""
 
     @pytest.mark.asyncio
-    async def test_no_role_passes_to_next_policy(self, policy_store):
-        """Test that policy passes to next policy when no role is specified."""
+    async def test_no_strategy_passes_to_next_policy(self, policy_store):
+        """Test that policy passes to next policy when no strategy is specified."""
         event = NegotiationEvent.create(
-            event_id="evt_test_no_role",
-            negotiation_id="test_no_role",
+            event_id="evt_test_no_strategy",
+            negotiation_id="test_no_strategy",
             message_type="counter_proposal",
             sender="other_agent",
             data={
@@ -268,7 +294,7 @@ class TestNegotiationScenarios:
                 "their_price": 110,
                 "our_order_id": "order_our",
                 "their_order_id": "order_their",
-                # No role specified
+                # No strategy specified
             }
         )
 
@@ -283,115 +309,115 @@ class TestNegotiationScenarios:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should return None (pass to next policy) when no role specified
-        assert result is None, "Policy should pass to next policy when no role is specified"
+        # Should return None (pass to next policy) when no strategy specified
+        assert result is None, "Policy should pass to next policy when no strategy is specified"
 
     @pytest.mark.asyncio
-    async def test_buyer_seller_equilibrium(self, policy_store):
-        """Test that buyer and seller reach equilibrium at same price.
+    async def test_minimizer_maximizer_equilibrium(self, policy_store):
+        """Test that minimizer and maximizer reach equilibrium at same price.
 
-        Buyer at 100 (max) receives offer at 110 → accepts
-        Seller at 100 (min) receives offer at 110 → accepts
-        Equilibrium reached!
+        Minimizer at 100 (ceiling) receives offer at 110 → counters (110 > 100)
+        Maximizer at 100 (floor) receives offer at 110 → accepts (110 >= 100)
         """
-        # Buyer perspective
-        buyer_event = NegotiationEvent.create(
-            event_id="evt_test_buyer_eq",
+        # Minimizer perspective (ceiling=100, sees 110)
+        minimizer_event = NegotiationEvent.create(
+            event_id="evt_test_min_eq",
             negotiation_id="test_eq",
             message_type="counter_proposal",
-            sender="seller_agent",
-            data={"our_price": 100, "their_price": 110, "role": "buyer",
-                   "our_order_id": "order_buyer", "their_order_id": "order_seller"}
+            sender="maximizer_agent",
+            data={"our_price": 100, "their_price": 110, "strategy": "minimize",
+                   "our_order_id": "order_min", "their_order_id": "order_max"}
         )
 
-        buyer_context = DecisionContext(
-            event=buyer_event,
-            agent_id="buyer_agent",
+        minimizer_context = DecisionContext(
+            event=minimizer_event,
+            agent_id="minimizer_agent",
             available_resources={},
             negotiation_history=[]
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
-        buyer_result = await ce.evaluate(buyer_context)
+        minimizer_result = await ce.evaluate(minimizer_context)
 
-        # Seller perspective
-        seller_event = NegotiationEvent.create(
-            event_id="evt_test_seller_eq",
+        # Maximizer perspective (floor=100, sees 110)
+        maximizer_event = NegotiationEvent.create(
+            event_id="evt_test_max_eq",
             negotiation_id="test_eq",
             message_type="counter_proposal",
-            sender="buyer_agent",
-            data={"our_price": 100, "their_price": 110, "role": "seller",
-                   "our_order_id": "order_seller", "their_order_id": "order_buyer"}
+            sender="minimizer_agent",
+            data={"our_price": 100, "their_price": 110, "strategy": "maximize",
+                   "our_order_id": "order_max", "their_order_id": "order_min"}
         )
 
-        seller_context = DecisionContext(
-            event=seller_event,
-            agent_id="seller_agent",
+        maximizer_context = DecisionContext(
+            event=maximizer_event,
+            agent_id="maximizer_agent",
             available_resources={},
             negotiation_history=[]
         )
 
-        seller_result = await ce.evaluate(seller_context)
+        maximizer_result = await ce.evaluate(maximizer_context)
 
-        # Both should accept at 110
-        assert buyer_result.action_type.value == "accept_offer"
-        assert seller_result.action_type.value == "accept_offer"
+        # Maximizer should accept at 110 (>= floor)
+        assert maximizer_result.action_type.value == "accept_offer"
+        # Minimizer should counter at 110 (above ceiling but <= 1.5x)
+        assert minimizer_result.action_type.value == "counter_offer"
 
     @pytest.mark.asyncio
-    async def test_buyer_seller_counter_convergence(self, policy_store):
-        """Test that buyer and seller counter-offers converge toward equilibrium.
+    async def test_minimizer_maximizer_counter_convergence(self, policy_store):
+        """Test that minimizer and maximizer counter-offers converge toward equilibrium.
 
-        Initial: Buyer at 100, Seller at 100
-        Offer: 150 (too high for buyer, good for seller)
-        Expected: Buyer counters to 125
+        Initial: Minimizer at 100, Maximizer at 100
+        Offer: 140 (above minimizer's ceiling)
+        Expected: Minimizer counters to 120, Maximizer accepts (120 >= 100)
         """
-        # Buyer sees 150 → counters to 125
-        buyer_event = NegotiationEvent.create(
-            event_id="evt_test_buyer_conv",
+        # Minimizer sees 140 → counters to 120
+        minimizer_event = NegotiationEvent.create(
+            event_id="evt_test_min_conv",
             negotiation_id="test_conv",
             message_type="counter_proposal",
-            sender="seller_agent",
-            data={"our_price": 100, "their_price": 150, "role": "buyer",
-                   "our_order_id": "order_buyer", "their_order_id": "order_seller"}
+            sender="maximizer_agent",
+            data={"our_price": 100, "their_price": 140, "strategy": "minimize",
+                   "our_order_id": "order_min", "their_order_id": "order_max"}
         )
 
-        buyer_context = DecisionContext(
-            event=buyer_event,
-            agent_id="buyer_agent",
+        minimizer_context = DecisionContext(
+            event=minimizer_event,
+            agent_id="minimizer_agent",
             available_resources={},
             negotiation_history=[]
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
-        buyer_result = await ce.evaluate(buyer_context)
+        minimizer_result = await ce.evaluate(minimizer_context)
 
-        # Buyer should counter
-        assert buyer_result.action_type.value == "counter_offer"
-        assert buyer_result.parameters.get("proposed_price") == 125
+        # Minimizer should counter to 120
+        assert minimizer_result.action_type.value == "counter_offer"
+        assert minimizer_result.parameters.get("proposed_price") == 120
 
-        # Seller sees 125 (from buyer counter) → should accept (>= 80% of min)
-        seller_event = NegotiationEvent.create(
-            event_id="evt_test_seller_conv",
+        # Maximizer sees 120 (from minimizer counter) → should accept (>= floor)
+        maximizer_event = NegotiationEvent.create(
+            event_id="evt_test_max_conv",
             negotiation_id="test_conv",
             message_type="counter_proposal",
-            sender="buyer_agent",
-            data={"our_price": 100, "their_price": 125, "role": "seller",
-                   "our_order_id": "order_seller", "their_order_id": "order_buyer"}
+            sender="minimizer_agent",
+            data={"our_price": 100, "their_price": 120, "strategy": "maximize",
+                   "our_order_id": "order_max", "their_order_id": "order_min"}
         )
 
-        seller_context = DecisionContext(
-            event=seller_event,
-            agent_id="seller_agent",
+        maximizer_context = DecisionContext(
+            event=maximizer_event,
+            agent_id="maximizer_agent",
             available_resources={},
             negotiation_history=[]
         )
 
-        seller_result = await ce.evaluate(seller_context)
+        maximizer_result = await ce.evaluate(maximizer_context)
 
-        # Seller should accept at 125
-        assert seller_result.action_type.value == "accept_offer"
+        # Maximizer should accept at 120 (>= floor of 100)
+        assert maximizer_result.action_type.value == "accept_offer"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("our_price,their_price,expected_reason", [
@@ -483,13 +509,13 @@ class TestMultipleBilateralNegotiations:
         return NegotiationThreadStore(sqlite_client=sqlite_client)
 
     @pytest.mark.asyncio
-    async def test_buyer_negotiates_with_multiple_sellers(self, policy_store, thread_store):
-        """Agent A (buyer) negotiates with Agents B and C (sellers) independently.
+    async def test_minimizer_negotiates_with_multiple_maximizers(self, policy_store, thread_store):
+        """Agent A (minimizer) negotiates with Agents B and C (maximizers) independently.
 
         Scenario:
-        - Agent A is a buyer with order_A (max price 100)
-        - Agent B is a seller with order_B (asking 150)
-        - Agent C is a seller with order_C (asking 130)
+        - Agent A is a minimizer with order_A (ceiling=100)
+        - Agent B is a maximizer with order_B (asking 150)
+        - Agent C is a maximizer with order_C (asking 130)
         - A should counter both B and C independently
         """
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -522,7 +548,7 @@ class TestMultipleBilateralNegotiations:
                 "their_price": 150,
                 "our_order_id": "order_A",
                 "their_order_id": "order_B",
-                "role": "buyer",
+                "strategy": "minimize",
             }
         )
         context_B = DecisionContext(
@@ -543,7 +569,7 @@ class TestMultipleBilateralNegotiations:
                 "their_price": 130,
                 "our_order_id": "order_A",
                 "their_order_id": "order_C",
-                "role": "buyer",
+                "strategy": "minimize",
             }
         )
         context_C = DecisionContext(
@@ -600,7 +626,7 @@ class TestMultipleBilateralNegotiations:
 
         Scenario:
         - Agent A has active negotiations with B and C for order_A
-        - B counters with price 110 (acceptable for buyer A)
+        - B counters with price 100 (acceptable for minimizer A - at ceiling)
         - A accepts B's offer
         - Negotiation A↔C should be canceled
         """
@@ -643,7 +669,7 @@ class TestMultipleBilateralNegotiations:
             message_type="initial_proposal",
         )
 
-        # Agent B counters with 110 (within buyer's band)
+        # Agent B counters with 100 (acceptable for minimizer A - at ceiling)
         event_accept = NegotiationEvent.create(
             event_id="evt_A_accept_B",
             negotiation_id="order_A_order_B",
@@ -651,10 +677,10 @@ class TestMultipleBilateralNegotiations:
             sender="agent_B",
             data={
                 "our_price": 100,
-                "their_price": 110,
+                "their_price": 100,
                 "our_order_id": "order_A",
                 "their_order_id": "order_B",
-                "role": "buyer",
+                "strategy": "minimize",
             }
         )
         context = DecisionContext(
@@ -801,13 +827,13 @@ class TestMultipleBilateralNegotiations:
         assert non_existing is None
 
     @pytest.mark.asyncio
-    async def test_multi_round_convergence_with_multiple_sellers(self, policy_store, thread_store):
-        """Test multi-round negotiation where buyer converges with one seller.
+    async def test_multi_round_convergence_with_multiple_maximizers(self, policy_store, thread_store):
+        """Test multi-round negotiation where minimizer converges with one maximizer.
 
         Scenario:
-        - Round 1: A counters B (150→125) and C (130→115)
-        - Round 2: B counters 120, C counters 125
-        - A accepts B's 120 (within band), cancels C
+        - Round 1: Minimizer A counters Maximizers B (150→125) and C (130→115)
+        - Round 2: Both B and C accept (125 >= 100 and 115 >= 100, both acceptable for maximizers)
+        - A accepts whichever completes first, cancels the other
         """
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
@@ -828,7 +854,7 @@ class TestMultipleBilateralNegotiations:
             their_agent_id="agent_C",
         )
 
-        # Round 1: Both sellers offer high prices
+        # Round 1: Both maximizers offer high prices
         # A counters both
         for neg_id, their_price, expected_counter in [
             ("A_B", 150, 125),
@@ -844,64 +870,58 @@ class TestMultipleBilateralNegotiations:
                 message_type="counter_proposal",
             )
 
-        # Round 2: B counters with 120 (acceptable), C counters with 125 (also needs counter)
-        # First check B's counter of 120
+        # Round 2: B accepts A's counter of 125 (>= floor of 100), C accepts A's counter of 115 (>= floor)
+        # Check B's acceptance of 125
         event_B_round2 = NegotiationEvent.create(
             event_id="evt_B_r2",
             negotiation_id="A_B",
             message_type="counter_proposal",
             sender="agent_B",
             data={
-                "our_price": 100,
-                "their_price": 120,
-                "our_order_id": "order_A",
-                "their_order_id": "order_B",
-                "role": "buyer",
+                "our_price": 100,  # B's floor (maximizer offering compute)
+                "their_price": 125,  # A's counter
+                "our_order_id": "order_B",
+                "their_order_id": "order_A",
+                "strategy": "maximize",
             }
         )
 
-        # Use negotiation history to simulate prior round
         context_B_r2 = DecisionContext(
             event=event_B_round2,
-            agent_id="agent_A",
+            agent_id="agent_B",
             available_resources={},
-            negotiation_history=[
-                {"sender": "agent_A", "proposed_price": 125, "action_taken": "COUNTER_OFFER"}
-            ]
+            negotiation_history=[]
         )
 
         result_B = await ce.evaluate(context_B_r2)
-        # 120 is at boundary (120% of 100), should accept
+        # 125 >= 100 (floor), maximizer should accept
         assert result_B.action_type.value == "accept_offer"
 
-        # Check C's counter of 125 (above 120%, needs counter)
+        # Check C's acceptance of 115
         event_C_round2 = NegotiationEvent.create(
             event_id="evt_C_r2",
             negotiation_id="A_C",
             message_type="counter_proposal",
             sender="agent_C",
             data={
-                "our_price": 100,
-                "their_price": 125,
-                "our_order_id": "order_A",
-                "their_order_id": "order_C",
-                "role": "buyer",
+                "our_price": 100,  # C's floor (maximizer offering compute)
+                "their_price": 115,  # A's counter
+                "our_order_id": "order_C",
+                "their_order_id": "order_A",
+                "strategy": "maximize",
             }
         )
 
         context_C_r2 = DecisionContext(
             event=event_C_round2,
-            agent_id="agent_A",
+            agent_id="agent_C",
             available_resources={},
-            negotiation_history=[
-                {"sender": "agent_A", "proposed_price": 115, "action_taken": "COUNTER_OFFER"}
-            ]
+            negotiation_history=[]
         )
 
         result_C = await ce.evaluate(context_C_r2)
-        # 125 is above 120%, should counter with midpoint of (115 + 125) // 2 = 120
-        assert result_C.action_type.value == "counter_offer"
-        assert result_C.parameters.get("proposed_price") == 120
+        # 115 >= 100 (floor), maximizer should accept
+        assert result_C.action_type.value == "accept_offer"
 
         # Now A accepts B, which should cancel C
         canceled = await thread_store._sqlite.cancel_negotiations_for_order(
@@ -912,21 +932,21 @@ class TestMultipleBilateralNegotiations:
         assert "A_C" in canceled
 
     @pytest.mark.asyncio
-    async def test_seller_negotiates_with_multiple_buyers(self, policy_store, thread_store):
-        """Agent A (seller) negotiates with Agents B and C (buyers) independently.
+    async def test_maximizer_negotiates_with_multiple_minimizers(self, policy_store, thread_store):
+        """Agent A (maximizer) negotiates with Agents B and C (minimizers) independently.
 
         Scenario:
-        - Agent A is a seller with order_A (min price 100)
-        - Agent B is a buyer with order_B (offering 70)
-        - Agent C is a buyer with order_C (offering 90)
-        - A should counter B (below 80%) and accept C (at 90% >= 80%)
+        - Agent A is a maximizer with order_A (floor=100)
+        - Agent B is a minimizer with order_B (offering 70)
+        - Agent C is a minimizer with order_C (offering 90)
+        - A should counter both B and C (both offers below floor but >= 0.67x)
         """
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
 
-        # Agent A (seller) receives offer from Agent B (price 70)
+        # Agent A (maximizer) receives offer from Agent B (price 70)
         event_from_B = NegotiationEvent.create(
-            event_id="evt_A_from_B_seller",
+            event_id="evt_A_from_B_max",
             negotiation_id="order_A_order_B",
             message_type="initial_proposal",
             sender="agent_B",
@@ -935,7 +955,7 @@ class TestMultipleBilateralNegotiations:
                 "their_price": 70,
                 "our_order_id": "order_A",
                 "their_order_id": "order_B",
-                "role": "seller",
+                "strategy": "maximize",
             }
         )
         context_B = DecisionContext(
@@ -945,9 +965,9 @@ class TestMultipleBilateralNegotiations:
             negotiation_history=[]
         )
 
-        # Agent A (seller) receives offer from Agent C (price 90)
+        # Agent A (maximizer) receives offer from Agent C (price 90)
         event_from_C = NegotiationEvent.create(
-            event_id="evt_A_from_C_seller",
+            event_id="evt_A_from_C_max",
             negotiation_id="order_A_order_C",
             message_type="initial_proposal",
             sender="agent_C",
@@ -956,7 +976,7 @@ class TestMultipleBilateralNegotiations:
                 "their_price": 90,
                 "our_order_id": "order_A",
                 "their_order_id": "order_C",
-                "role": "seller",
+                "strategy": "maximize",
             }
         )
         context_C = DecisionContext(
@@ -969,9 +989,10 @@ class TestMultipleBilateralNegotiations:
         result_B = await ce.evaluate(context_B)
         result_C = await ce.evaluate(context_C)
 
-        # B's offer of 70 is below 80% (80), so seller should counter
+        # B's offer of 70 is below floor (100), but >= 0.67x (67), so maximizer should counter
         assert result_B.action_type.value == "counter_offer"
         assert result_B.parameters.get("proposed_price") == 85  # (100 + 70) // 2
 
-        # C's offer of 90 is >= 80% (80), so seller should accept
-        assert result_C.action_type.value == "accept_offer"
+        # C's offer of 90 is below floor (100), but >= 0.67x (67), so maximizer should counter
+        # Wait, 90 < 100, so maximizer should counter (not accept)
+        assert result_C.action_type.value == "counter_offer"

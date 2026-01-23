@@ -317,23 +317,23 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
 
 @policy_callable("negotiation.action.price_interval_concession")
 def negotiation_action_price_interval_concession(context: DecisionContext) -> DomainAction | None:
-    """Role-aware price-based counter-offer policy using reservation bands.
+    """Strategy-aware price-based counter-offer policy using minimizer/maximizer model.
 
-    Role determination:
-    - Buyer: demanding ComputeResource (offering tokens, wants compute)
-    - Seller: offering ComputeResource (has compute, wants tokens)
+    Strategy types (inferred from order resource types):
+    - Minimizer: demanding ComputeResource (wants lowest rate, our_price = ceiling)
+    - Maximizer: offering ComputeResource (wants highest rate, our_price = floor)
 
-    Strategy by role:
-    - Buyer (our_price = max willing to pay): accept if their_price <= our_price * 1.2
-    - Seller (our_price = min willing to accept): accept if their_price >= our_price * 0.8
+    Strategy logic:
+    - Minimizer: accept if their_price <= our_price, counter if <= 1.5x, else exit
+    - Maximizer: accept if their_price >= our_price, counter if >= 0.67x, else exit
 
     CGT role: Implements the per-round "Strategic Decision" in the bilateral
     negotiation game, using thread state and resource-aware thresholds.
 
     Returns:
-        ACCEPT_OFFER if their price is within our role-specific reservation band,
-        COUNTER_OFFER with proposed price if outside but reasonable,
-        EXIT_NEGOTIATION if far outside our band
+        ACCEPT_OFFER if their price is favorable,
+        COUNTER_OFFER with proposed price if reasonable but not favorable,
+        EXIT_NEGOTIATION if unreasonable
     """
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
@@ -346,7 +346,7 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
     data = context.event.data or {}
     our_price = data.get("our_price")
     their_price = data.get("their_price")
-    role = data.get("role")  # "buyer" or "seller"
+    strategy = data.get("strategy")  # "minimize" or "maximize"
     negotiation_history = context.negotiation_history or []
 
     if our_price is None or their_price is None:
@@ -359,24 +359,19 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
     # Create action builder for clean action construction
     actions = NegotiationActionBuilder(data)
 
-    # Role-aware price acceptance logic
-    if role == "buyer":
-        # Buyer: our_price is the MAX we're willing to pay
-        # Strategy: Accept 50-120% (reasonable range), Counter 120-200% (high but reasonable), Exit otherwise
+    REASONABLE_MULTIPLIER = 1.5  # Exit threshold
 
-        # Accept if within acceptable range (50%-120% of our max)
-        min_acceptable = int(our_price * 0.5)
-        max_acceptable = int(our_price * 1.2)
-        if min_acceptable <= their_price <= max_acceptable:
-            logger.info(f"[NEGOTIATION][BUYER] Their price {their_price} in range [{min_acceptable}, {max_acceptable}], accepting")
-            return actions.accept("within_buyer_band")
+    # Strategy-aware price acceptance logic
+    if strategy == "minimize":
+        # Minimizer: our_price is the MAX we're willing to pay (ceiling)
+        # Accept if favorable (at or below ceiling), counter if reasonable, exit if unreasonable
 
-        # Check if reasonable for counter-offer (50%-200% of our price)
-        reasonable_min = int(our_price * 0.5)
-        reasonable_max = int(our_price * 2.0)
-
-        if reasonable_min <= their_price <= reasonable_max:
-            # Calculate counter-offer: midpoint between our last proposal and their current
+        if their_price <= our_price:
+            # Favorable - at or below our ceiling
+            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} <= our_price {our_price}, accepting")
+            return actions.accept("favorable_price")
+        elif their_price <= our_price * REASONABLE_MULTIPLIER:
+            # Above ceiling but reasonable - counter with midpoint
             last_our_proposal = our_price
             if negotiation_history:
                 for msg in reversed(negotiation_history):
@@ -385,30 +380,23 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
                         break
 
             proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][BUYER] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
             return actions.counter(proposed_price)
         else:
-            # Far outside reasonable range
-            logger.info(f"[NEGOTIATION][BUYER] Their price {their_price} far outside reasonable [{reasonable_min}, {reasonable_max}], exiting")
-            return actions.exit("price_far_outside_range")
+            # Unreasonable - far above ceiling
+            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} > {REASONABLE_MULTIPLIER}x our_price {our_price}, exiting")
+            return actions.exit("price_unreasonable")
 
-    elif role == "seller":
-        # Seller: our_price is the MIN we're willing to accept
-        # Strategy: Accept 80-200% (reasonable range), Counter 50-80% (low but reasonable), Exit otherwise
+    elif strategy == "maximize":
+        # Maximizer: our_price is the MIN we're willing to accept (floor)
+        # Accept if favorable (at or above floor), counter if reasonable, exit if unreasonable
 
-        # Accept if within acceptable range (80%-200% of our min)
-        min_acceptable = int(our_price * 0.8)
-        max_acceptable = int(our_price * 2.0)
-        if min_acceptable <= their_price <= max_acceptable:
-            logger.info(f"[NEGOTIATION][SELLER] Their price {their_price} in range [{min_acceptable}, {max_acceptable}], accepting")
-            return actions.accept("within_seller_band")
-
-        # Check if reasonable for counter-offer (50%-200% of our price)
-        reasonable_min = int(our_price * 0.5)
-        reasonable_max = int(our_price * 2.0)
-
-        if reasonable_min <= their_price <= reasonable_max:
-            # Calculate counter-offer: midpoint between our last proposal and their current
+        if their_price >= our_price:
+            # Favorable - at or above our floor
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} >= our_price {our_price}, accepting")
+            return actions.accept("favorable_price")
+        elif their_price >= our_price / REASONABLE_MULTIPLIER:
+            # Below floor but reasonable - counter with midpoint
             last_our_proposal = our_price
             if negotiation_history:
                 for msg in reversed(negotiation_history):
@@ -417,16 +405,16 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
                         break
 
             proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][SELLER] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
             return actions.counter(proposed_price)
         else:
-            # Far outside reasonable range
-            logger.info(f"[NEGOTIATION][SELLER] Their price {their_price} far outside reasonable [{reasonable_min}, {reasonable_max}], exiting")
-            return actions.exit("price_far_outside_range")
+            # Unreasonable - far below floor
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} < our_price/{REASONABLE_MULTIPLIER} {our_price / REASONABLE_MULTIPLIER}, exiting")
+            return actions.exit("price_unreasonable")
 
     else:
-        # No role specified - pass to next policy
-        logger.info(f"[NEGOTIATION] No role specified, passing to next policy")
+        # No strategy specified - pass to next policy
+        logger.info(f"[NEGOTIATION] No strategy specified, passing to next policy")
         return None
 
 
