@@ -652,7 +652,6 @@ class TraderAgent(BaseAgent):
         except Exception as e:
             logger.error(f"[PIPELINE] Failed to record decision: {e}")
         
-        # Return response string for backward compatibility
         action_type_str = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
         action_mappings = {
             "accept_offer": "ACCEPT the offer.",

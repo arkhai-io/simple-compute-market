@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
@@ -21,6 +22,8 @@ from app.policies.sqlite_client import SQLiteClient
 from app.utils.validation import extract_resources_from_make_offer_event
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyStore:
@@ -317,99 +320,142 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
 
 @policy_callable("negotiation.action.price_interval_concession")
 def negotiation_action_price_interval_concession(context: DecisionContext) -> DomainAction | None:
-    """Price-based counter-offer policy using reservation band.
-    
+    """Role-aware price-based counter-offer policy using reservation bands.
+
+    Role determination:
+    - Buyer: demanding ComputeResource (offering tokens, wants compute)
+    - Seller: offering ComputeResource (has compute, wants tokens)
+
+    Strategy by role:
+    - Buyer (our_price = max willing to pay): accept if their_price <= our_price * 1.2
+    - Seller (our_price = min willing to accept): accept if their_price >= our_price * 0.8
+
     CGT role: Implements the per-round "Strategic Decision" in the bilateral
     negotiation game, using thread state and resource-aware thresholds.
-    
+
     Returns:
-        ACCEPT_OFFER if their price is within our reservation band,
+        ACCEPT_OFFER if their price is within our role-specific reservation band,
         COUNTER_OFFER with proposed price if outside but reasonable,
         EXIT_NEGOTIATION if far outside our band
     """
     from app.schema.pydantic_models import ActionType
-    
+
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "negotiation":
         return None
-    
+
     if not isinstance(context.event, NegotiationEvent):
         return None
-    
+
     data = context.event.data or {}
     our_price = data.get("our_price")
     their_price = data.get("their_price")
+    role = data.get("role")  # "buyer" or "seller"
     negotiation_history = context.negotiation_history or []
-    
+
     if our_price is None or their_price is None:
         return None  # Pass to next policy if price data missing
-    
-    # Determine reservation thresholds from context
-    # Use the band to determine either minimum (selling) or maximum (buying)
-    # This allows for arbitrage opportunities where prices are very favorable
-    # For now, use a simple heuristic: ±20% of our price
-    # In production, derive from market_state, available_resources, etc.
-    min_price = int(our_price * 0.8)  # Minimum we're willing to accept (selling) - at least 80% of our price
-    max_price = int(our_price * 1.2)  # Maximum we're willing to pay (buying) - up to 20% more than our price
-    
-    # Accept if their price is favorable:
-    # - Always accept if their_price < our_price (favorable deal - arbitrage opportunity)
-    #   Example: Alice values at 5 BTC, Bob offers 1 BTC -> Alice accepts
-    # - Also accept if their_price is within our acceptable range:
-    #   * If buying: accept if their_price <= max_price (we're willing to pay up to this)
-    #   * If selling: accept if their_price >= min_price (we want at least this)
-    # Since we don't know if we're buying or selling, we accept if EITHER condition is met
-    # This allows arbitrage while still using reservation bands for less favorable deals
-    is_favorable = their_price < our_price  # Their price is better than ours (always accept)
-    is_within_buying_max = their_price <= max_price  # We're buying and their price is within our max
-    is_within_selling_min = their_price >= min_price  # We're selling and their price is at least our min
-    
-    # Accept if favorable OR within acceptable range (buying or selling)
-    if is_favorable or is_within_buying_max or is_within_selling_min:
-        logger.info(f"[NEGOTIATION] Their price {their_price} is favorable (our: {our_price}, min: {min_price}, max: {max_price}), accepting")
-        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "reason": "within_reservation_band",
-            "our_price": their_price,
-            "their_price": their_price,
-        })
-    
-    # Their price is outside our band - check if reasonable
-    # Reasonable = within 2x or 0.5x (not completely unreasonable)
-    reasonable_min = int(our_price * 0.5)
-    reasonable_max = int(our_price * 2.0)
-    
-    if reasonable_min <= their_price <= reasonable_max:
-        # Calculate counter-offer: midpoint between our last proposal and their current
-        # For first round, use midpoint between our_price and their_price
-        last_our_proposal = our_price
-        if negotiation_history:
-            # Find our last proposal from history
-            for msg in reversed(negotiation_history):
-                if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
-                    last_our_proposal = msg.get("proposed_price")
-                    break
-        
-        # Propose midpoint (concession strategy)
-        proposed_price = (last_our_proposal + their_price) // 2
-        
-        logger.info(f"[NEGOTIATION] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
-        return DomainAction(action_type=ActionType.COUNTER_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "proposed_price": proposed_price,
-            "our_price": our_price,
-            "their_price": their_price,
-        })
+
+    # Role-aware price acceptance logic
+    if role == "buyer":
+        # Buyer: our_price is the MAX we're willing to pay
+        # Strategy: Accept 50-120% (reasonable range), Counter 120-200% (high but reasonable), Exit otherwise
+
+        # Accept if within acceptable range (50%-120% of our max)
+        min_acceptable = int(our_price * 0.5)
+        max_acceptable = int(our_price * 1.2)
+        if min_acceptable <= their_price <= max_acceptable:
+            logger.info(f"[NEGOTIATION][BUYER] Their price {their_price} in range [{min_acceptable}, {max_acceptable}], accepting")
+            return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
+                "order_id": data.get("their_order_id"),
+                "reason": "within_buyer_band",
+                "our_price": their_price,
+                "their_price": their_price,
+            })
+
+        # Check if reasonable for counter-offer (50%-200% of our price)
+        reasonable_min = int(our_price * 0.5)
+        reasonable_max = int(our_price * 2.0)
+
+        if reasonable_min <= their_price <= reasonable_max:
+            # Calculate counter-offer: midpoint between our last proposal and their current
+            last_our_proposal = our_price
+            if negotiation_history:
+                for msg in reversed(negotiation_history):
+                    if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
+                        last_our_proposal = msg.get("proposed_price")
+                        break
+
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][BUYER] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            return DomainAction(action_type=ActionType.COUNTER_OFFER, parameters={
+                "order_id": data.get("their_order_id"),
+                "negotiation_id": context.event.negotiation_id,
+                "proposed_price": proposed_price,
+                "our_price": our_price,
+                "their_price": their_price,
+            })
+        else:
+            # Far outside reasonable range
+            logger.info(f"[NEGOTIATION][BUYER] Their price {their_price} far outside reasonable [{reasonable_min}, {reasonable_max}], exiting")
+            return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+                "order_id": data.get("their_order_id"),
+                "negotiation_id": context.event.negotiation_id,
+                "reason": "price_far_outside_range",
+            })
+
+    elif role == "seller":
+        # Seller: our_price is the MIN we're willing to accept
+        # Strategy: Accept 80-200% (reasonable range), Counter 50-80% (low but reasonable), Exit otherwise
+
+        # Accept if within acceptable range (80%-200% of our min)
+        min_acceptable = int(our_price * 0.8)
+        max_acceptable = int(our_price * 2.0)
+        if min_acceptable <= their_price <= max_acceptable:
+            logger.info(f"[NEGOTIATION][SELLER] Their price {their_price} in range [{min_acceptable}, {max_acceptable}], accepting")
+            return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
+                "order_id": data.get("their_order_id"),
+                "reason": "within_seller_band",
+                "our_price": their_price,
+                "their_price": their_price,
+            })
+
+        # Check if reasonable for counter-offer (50%-200% of our price)
+        reasonable_min = int(our_price * 0.5)
+        reasonable_max = int(our_price * 2.0)
+
+        if reasonable_min <= their_price <= reasonable_max:
+            # Calculate counter-offer: midpoint between our last proposal and their current
+            last_our_proposal = our_price
+            if negotiation_history:
+                for msg in reversed(negotiation_history):
+                    if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
+                        last_our_proposal = msg.get("proposed_price")
+                        break
+
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][SELLER] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            return DomainAction(action_type=ActionType.COUNTER_OFFER, parameters={
+                "order_id": data.get("their_order_id"),
+                "negotiation_id": context.event.negotiation_id,
+                "proposed_price": proposed_price,
+                "our_price": our_price,
+                "their_price": their_price,
+            })
+        else:
+            # Far outside reasonable range
+            logger.info(f"[NEGOTIATION][SELLER] Their price {their_price} far outside reasonable [{reasonable_min}, {reasonable_max}], exiting")
+            return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
+                "order_id": data.get("their_order_id"),
+                "negotiation_id": context.event.negotiation_id,
+                "reason": "price_far_outside_range",
+            })
+
     else:
-        # Far outside reasonable range - exit negotiation
-        logger.info(f"[NEGOTIATION] Their price {their_price} far outside reasonable range [{reasonable_min}, {reasonable_max}], exiting")
-        return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "price_far_outside_range",
-        })
+        # No role specified - pass to next policy
+        logger.info(f"[NEGOTIATION] No role specified, passing to next policy")
+        return None
 
 
 @policy_callable("negotiation.guard.bounded_rounds_and_timeout")

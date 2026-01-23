@@ -76,13 +76,13 @@ def extract_resources_from_make_offer_event(
     context: DecisionContext,
 ) -> tuple[MarketOrder | None, Resource | None, Resource | None]:
     """Safely extract offer_resource and demand_resource from MakeOfferEvent.
-    
+
     Extracts resources from a MakeOfferEvent, returning the order and both resources.
     Callers can use isinstance() to check resource types as needed.
-    
+
     Args:
         context: DecisionContext containing the event
-        
+
     Returns:
         Tuple of (order, offer_resource, demand_resource)
         - order: MarketOrder instance if event is MakeOfferEvent, None otherwise
@@ -91,10 +91,56 @@ def extract_resources_from_make_offer_event(
     """
     if not isinstance(context.event, MakeOfferEvent):
         return None, None, None
-    
+
     order = context.event.order
     offer_resource = order.offer_resource
     demand_resource = order.demand_resource
-    
+
     return order, offer_resource, demand_resource
+
+
+def determine_role_from_resources(
+    offer_resource: Resource | None,
+    demand_resource: Resource | None,
+) -> str | None:
+    """Determine market role (buyer/seller) from resource types.
+
+    In a compute-for-token market:
+    - Seller: offers ComputeResource, demands TokenResource
+    - Buyer: offers TokenResource, demands ComputeResource
+
+    Args:
+        offer_resource: Resource being offered
+        demand_resource: Resource being demanded
+
+    Returns:
+        "buyer" if demanding compute, "seller" if offering compute, None if unclear
+    """
+    if not offer_resource or not demand_resource:
+        return None
+
+    is_offering_compute = isinstance(offer_resource, ComputeResource)
+    is_demanding_compute = isinstance(demand_resource, ComputeResource)
+
+    if is_demanding_compute:
+        return "buyer"
+    elif is_offering_compute:
+        return "seller"
+    else:
+        return None
+
+
+def determine_role_from_order(order: MarketOrder | None) -> str | None:
+    """Determine market role from a MarketOrder.
+
+    Args:
+        order: MarketOrder instance
+
+    Returns:
+        "buyer" if demanding compute, "seller" if offering compute, None if unclear
+    """
+    if not order:
+        return None
+
+    return determine_role_from_resources(order.offer_resource, order.demand_resource)
 

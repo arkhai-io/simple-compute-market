@@ -369,7 +369,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        round: int,
+        round: int | None = None,
         sender: str,
         our_price: int | None,
         their_price: int | None,
@@ -377,9 +377,24 @@ class SQLiteClient:
         action_taken: str,
         message_type: str,
         timestamp: str,
-    ) -> None:
-        """Save a negotiation message to the database."""
-        def _save() -> None:
+    ) -> int:
+        """Save a negotiation message to the database.
+
+        Args:
+            negotiation_id: Unique negotiation identifier
+            round: Round number (if None, computed atomically as max(round) + 1)
+            sender: Agent ID or card URL of the sender
+            our_price: Our price in base units
+            their_price: Their price in base units
+            proposed_price: Proposed counter price
+            action_taken: Action taken (ACCEPT_OFFER, REJECT_OFFER, COUNTER_OFFER, EXIT_NEGOTIATION)
+            message_type: Type of message (initial_proposal, counter_proposal, etc.)
+            timestamp: ISO format timestamp
+
+        Returns:
+            The actual round number that was assigned
+        """
+        def _save() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
@@ -391,6 +406,21 @@ class SQLiteClient:
                     """,
                     (negotiation_id, timestamp, timestamp),
                 )
+
+                if round is None:
+                    # Compute next round atomically to avoid race conditions
+                    cur.execute(
+                        """
+                        SELECT COALESCE(MAX(round), -1) + 1
+                        FROM negotiation_messages
+                        WHERE negotiation_id = ?
+                        """,
+                        (negotiation_id,),
+                    )
+                    actual_round = cur.fetchone()[0]
+                else:
+                    actual_round = round
+
                 # Update thread updated_at
                 cur.execute(
                     """
@@ -398,7 +428,7 @@ class SQLiteClient:
                     """,
                     (timestamp, negotiation_id),
                 )
-                # Insert message
+                # Insert message with ON CONFLICT handling to gracefully handle races
                 cur.execute(
                     """
                     INSERT INTO negotiation_messages(
@@ -406,17 +436,26 @@ class SQLiteClient:
                         proposed_price, action_taken, message_type, timestamp
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(negotiation_id, round) DO UPDATE SET
+                        sender = excluded.sender,
+                        our_price = excluded.our_price,
+                        their_price = excluded.their_price,
+                        proposed_price = excluded.proposed_price,
+                        action_taken = excluded.action_taken,
+                        message_type = excluded.message_type,
+                        timestamp = excluded.timestamp
                     """,
                     (
-                        negotiation_id, round, sender, our_price, their_price,
+                        negotiation_id, actual_round, sender, our_price, their_price,
                         proposed_price, action_taken, message_type, timestamp
                     ),
                 )
                 conn.commit()
+                return actual_round
             finally:
                 conn.close()
-        
-        await asyncio.to_thread(_save)
+
+        return await asyncio.to_thread(_save)
 
     async def load_negotiation_thread(
         self,
