@@ -463,3 +463,515 @@ class TestNegotiationScenarios:
 
         # Should return None (pass to next policy) when price data missing
         assert result is None, "Policy should pass to next policy when price data missing"
+
+
+class TestMultipleBilateralNegotiations:
+    """Test scenarios with one agent negotiating with multiple counterparties.
+
+    These tests verify that:
+    1. An agent can maintain separate negotiations with different counterparties
+    2. Each negotiation has isolated state (thread, round counter)
+    3. Accepting one negotiation cancels competing negotiations
+    4. Duplicate negotiations are prevented
+    """
+
+    @pytest.fixture
+    def thread_store(self, temp_db):
+        """Create a NegotiationThreadStore for multi-party tests."""
+        from app.policies.negotiation_thread import NegotiationThreadStore
+        sqlite_client = SQLiteClient(db_path=temp_db)
+        return NegotiationThreadStore(sqlite_client=sqlite_client)
+
+    @pytest.mark.asyncio
+    async def test_buyer_negotiates_with_multiple_sellers(self, policy_store, thread_store):
+        """Agent A (buyer) negotiates with Agents B and C (sellers) independently.
+
+        Scenario:
+        - Agent A is a buyer with order_A (max price 100)
+        - Agent B is a seller with order_B (asking 150)
+        - Agent C is a seller with order_C (asking 130)
+        - A should counter both B and C independently
+        """
+        func = policy_store._registry.get("negotiation.action.price_interval_concession")
+        ce = CallableEvaluator(func)
+
+        # Create negotiation threads for A↔B and A↔C
+        await thread_store.create_thread(
+            negotiation_id="order_A_order_B",
+            our_order_id="order_A",
+            their_order_id="order_B",
+            our_agent_id="agent_A",
+            their_agent_id="agent_B",
+        )
+        await thread_store.create_thread(
+            negotiation_id="order_A_order_C",
+            our_order_id="order_A",
+            their_order_id="order_C",
+            our_agent_id="agent_A",
+            their_agent_id="agent_C",
+        )
+
+        # Agent A receives offer from Agent B (price 150)
+        event_from_B = NegotiationEvent.create(
+            event_id="evt_A_from_B",
+            negotiation_id="order_A_order_B",
+            message_type="initial_proposal",
+            sender="agent_B",
+            data={
+                "our_price": 100,
+                "their_price": 150,
+                "our_order_id": "order_A",
+                "their_order_id": "order_B",
+                "role": "buyer",
+            }
+        )
+        context_B = DecisionContext(
+            event=event_from_B,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        # Agent A receives offer from Agent C (price 130)
+        event_from_C = NegotiationEvent.create(
+            event_id="evt_A_from_C",
+            negotiation_id="order_A_order_C",
+            message_type="initial_proposal",
+            sender="agent_C",
+            data={
+                "our_price": 100,
+                "their_price": 130,
+                "our_order_id": "order_A",
+                "their_order_id": "order_C",
+                "role": "buyer",
+            }
+        )
+        context_C = DecisionContext(
+            event=event_from_C,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        # Evaluate both negotiations
+        result_B = await ce.evaluate(context_B)
+        result_C = await ce.evaluate(context_C)
+
+        # Both should counter (150 and 130 are above 120% of 100)
+        assert result_B.action_type.value == "counter_offer"
+        assert result_C.action_type.value == "counter_offer"
+
+        # Counter prices should be different (midpoints)
+        assert result_B.parameters.get("proposed_price") == 125  # (100 + 150) // 2
+        assert result_C.parameters.get("proposed_price") == 115  # (100 + 130) // 2
+
+        # Record messages to threads
+        await thread_store.add_message(
+            negotiation_id="order_A_order_B",
+            sender="agent_A",
+            our_price=100,
+            their_price=150,
+            proposed_price=125,
+            action_taken="COUNTER_OFFER",
+            message_type="counter_proposal",
+        )
+        await thread_store.add_message(
+            negotiation_id="order_A_order_C",
+            sender="agent_A",
+            our_price=100,
+            their_price=130,
+            proposed_price=115,
+            action_taken="COUNTER_OFFER",
+            message_type="counter_proposal",
+        )
+
+        # Verify threads are independent
+        thread_B = await thread_store.get_thread("order_A_order_B")
+        thread_C = await thread_store.get_thread("order_A_order_C")
+
+        assert len(thread_B) == 1
+        assert len(thread_C) == 1
+        assert thread_B[0]["proposed_price"] == 125
+        assert thread_C[0]["proposed_price"] == 115
+
+    @pytest.mark.asyncio
+    async def test_accept_cancels_competing_negotiations(self, policy_store, thread_store):
+        """When A accepts B's offer, A's negotiation with C should be canceled.
+
+        Scenario:
+        - Agent A has active negotiations with B and C for order_A
+        - B counters with price 110 (acceptable for buyer A)
+        - A accepts B's offer
+        - Negotiation A↔C should be canceled
+        """
+        func = policy_store._registry.get("negotiation.action.price_interval_concession")
+        ce = CallableEvaluator(func)
+
+        # Create both negotiation threads
+        await thread_store.create_thread(
+            negotiation_id="order_A_order_B",
+            our_order_id="order_A",
+            their_order_id="order_B",
+            our_agent_id="agent_A",
+            their_agent_id="agent_B",
+        )
+        await thread_store.create_thread(
+            negotiation_id="order_A_order_C",
+            our_order_id="order_A",
+            their_order_id="order_C",
+            our_agent_id="agent_A",
+            their_agent_id="agent_C",
+        )
+
+        # Add some history to both threads
+        await thread_store.add_message(
+            negotiation_id="order_A_order_B",
+            sender="agent_B",
+            our_price=100,
+            their_price=150,
+            proposed_price=150,
+            action_taken="COUNTER_OFFER",
+            message_type="initial_proposal",
+        )
+        await thread_store.add_message(
+            negotiation_id="order_A_order_C",
+            sender="agent_C",
+            our_price=100,
+            their_price=140,
+            proposed_price=140,
+            action_taken="COUNTER_OFFER",
+            message_type="initial_proposal",
+        )
+
+        # Agent B counters with 110 (within buyer's band)
+        event_accept = NegotiationEvent.create(
+            event_id="evt_A_accept_B",
+            negotiation_id="order_A_order_B",
+            message_type="counter_proposal",
+            sender="agent_B",
+            data={
+                "our_price": 100,
+                "their_price": 110,
+                "our_order_id": "order_A",
+                "their_order_id": "order_B",
+                "role": "buyer",
+            }
+        )
+        context = DecisionContext(
+            event=event_accept,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        result = await ce.evaluate(context)
+        assert result.action_type.value == "accept_offer"
+
+        # Simulate accept_offer action: cancel competing negotiations
+        canceled = await thread_store._sqlite.cancel_negotiations_for_order(
+            order_id="order_A",
+            except_negotiation_id="order_A_order_B",
+        )
+
+        # Verify A↔C was canceled
+        assert "order_A_order_C" in canceled
+
+        # Verify A↔B is still active (not canceled)
+        thread_B = await thread_store.get_thread("order_A_order_B")
+        assert len(thread_B) == 1  # Still has messages
+
+        # Verify canceled thread is marked
+        active_negs = await thread_store._sqlite.get_active_negotiations_for_order(
+            order_id="order_A"
+        )
+        active_neg_ids = [n["negotiation_id"] for n in active_negs]
+
+        # Only A↔B should be active (if not yet marked terminal)
+        # A↔C should be canceled
+        assert "order_A_order_C" not in active_neg_ids
+
+    @pytest.mark.asyncio
+    async def test_independent_thread_tracking(self, thread_store):
+        """Each negotiation has its own thread with isolated round counters.
+
+        Verifies that round numbers increment independently per negotiation.
+        """
+        # Create two threads
+        await thread_store.create_thread(
+            negotiation_id="neg_1",
+            our_order_id="order_A",
+            their_order_id="order_B",
+            our_agent_id="agent_A",
+            their_agent_id="agent_B",
+        )
+        await thread_store.create_thread(
+            negotiation_id="neg_2",
+            our_order_id="order_A",
+            their_order_id="order_C",
+            our_agent_id="agent_A",
+            their_agent_id="agent_C",
+        )
+
+        # Add 3 messages to neg_1
+        for i in range(3):
+            round_num = await thread_store.add_message(
+                negotiation_id="neg_1",
+                sender=f"agent_{'A' if i % 2 == 0 else 'B'}",
+                our_price=100,
+                their_price=120,
+                proposed_price=110,
+                action_taken="COUNTER_OFFER",
+                message_type="counter_proposal",
+            )
+            assert round_num == i, f"neg_1 round should be {i}, got {round_num}"
+
+        # Add 1 message to neg_2
+        round_num = await thread_store.add_message(
+            negotiation_id="neg_2",
+            sender="agent_C",
+            our_price=100,
+            their_price=130,
+            proposed_price=130,
+            action_taken="COUNTER_OFFER",
+            message_type="initial_proposal",
+        )
+        assert round_num == 0, "neg_2 should start at round 0"
+
+        # Add another message to neg_2
+        round_num = await thread_store.add_message(
+            negotiation_id="neg_2",
+            sender="agent_A",
+            our_price=100,
+            their_price=130,
+            proposed_price=115,
+            action_taken="COUNTER_OFFER",
+            message_type="counter_proposal",
+        )
+        assert round_num == 1, "neg_2 should be at round 1"
+
+        # Verify thread lengths are independent
+        thread_1 = await thread_store.get_thread("neg_1")
+        thread_2 = await thread_store.get_thread("neg_2")
+
+        assert len(thread_1) == 3
+        assert len(thread_2) == 2
+
+        # Verify round numbers
+        assert [m["round"] for m in thread_1] == [0, 1, 2]
+        assert [m["round"] for m in thread_2] == [0, 1]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_negotiation_prevention(self, thread_store):
+        """Duplicate negotiations between same order pair should be detected.
+
+        Verifies check_existing_negotiation() prevents creating duplicates.
+        """
+        # Create first negotiation
+        await thread_store.create_thread(
+            negotiation_id="order_A_order_B",
+            our_order_id="order_A",
+            their_order_id="order_B",
+            our_agent_id="agent_A",
+            their_agent_id="agent_B",
+        )
+
+        # Check for existing negotiation (same order pair)
+        existing = await thread_store._sqlite.check_existing_negotiation(
+            our_order_id="order_A",
+            their_order_id="order_B",
+        )
+
+        assert existing is not None
+        assert existing["negotiation_id"] == "order_A_order_B"
+
+        # Check reverse direction (should also find it)
+        existing_reverse = await thread_store._sqlite.check_existing_negotiation(
+            our_order_id="order_B",
+            their_order_id="order_A",
+        )
+
+        # Should find the same negotiation (bidirectional check)
+        assert existing_reverse is not None
+
+        # Check non-existing pair
+        non_existing = await thread_store._sqlite.check_existing_negotiation(
+            our_order_id="order_A",
+            their_order_id="order_D",
+        )
+        assert non_existing is None
+
+    @pytest.mark.asyncio
+    async def test_multi_round_convergence_with_multiple_sellers(self, policy_store, thread_store):
+        """Test multi-round negotiation where buyer converges with one seller.
+
+        Scenario:
+        - Round 1: A counters B (150→125) and C (130→115)
+        - Round 2: B counters 120, C counters 125
+        - A accepts B's 120 (within band), cancels C
+        """
+        func = policy_store._registry.get("negotiation.action.price_interval_concession")
+        ce = CallableEvaluator(func)
+
+        # Setup threads
+        await thread_store.create_thread(
+            negotiation_id="A_B",
+            our_order_id="order_A",
+            their_order_id="order_B",
+            our_agent_id="agent_A",
+            their_agent_id="agent_B",
+        )
+        await thread_store.create_thread(
+            negotiation_id="A_C",
+            our_order_id="order_A",
+            their_order_id="order_C",
+            our_agent_id="agent_A",
+            their_agent_id="agent_C",
+        )
+
+        # Round 1: Both sellers offer high prices
+        # A counters both
+        for neg_id, their_price, expected_counter in [
+            ("A_B", 150, 125),
+            ("A_C", 130, 115),
+        ]:
+            await thread_store.add_message(
+                negotiation_id=neg_id,
+                sender="agent_A",
+                our_price=100,
+                their_price=their_price,
+                proposed_price=expected_counter,
+                action_taken="COUNTER_OFFER",
+                message_type="counter_proposal",
+            )
+
+        # Round 2: B counters with 120 (acceptable), C counters with 125 (also needs counter)
+        # First check B's counter of 120
+        event_B_round2 = NegotiationEvent.create(
+            event_id="evt_B_r2",
+            negotiation_id="A_B",
+            message_type="counter_proposal",
+            sender="agent_B",
+            data={
+                "our_price": 100,
+                "their_price": 120,
+                "our_order_id": "order_A",
+                "their_order_id": "order_B",
+                "role": "buyer",
+            }
+        )
+
+        # Use negotiation history to simulate prior round
+        context_B_r2 = DecisionContext(
+            event=event_B_round2,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[
+                {"sender": "agent_A", "proposed_price": 125, "action_taken": "COUNTER_OFFER"}
+            ]
+        )
+
+        result_B = await ce.evaluate(context_B_r2)
+        # 120 is at boundary (120% of 100), should accept
+        assert result_B.action_type.value == "accept_offer"
+
+        # Check C's counter of 125 (above 120%, needs counter)
+        event_C_round2 = NegotiationEvent.create(
+            event_id="evt_C_r2",
+            negotiation_id="A_C",
+            message_type="counter_proposal",
+            sender="agent_C",
+            data={
+                "our_price": 100,
+                "their_price": 125,
+                "our_order_id": "order_A",
+                "their_order_id": "order_C",
+                "role": "buyer",
+            }
+        )
+
+        context_C_r2 = DecisionContext(
+            event=event_C_round2,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[
+                {"sender": "agent_A", "proposed_price": 115, "action_taken": "COUNTER_OFFER"}
+            ]
+        )
+
+        result_C = await ce.evaluate(context_C_r2)
+        # 125 is above 120%, should counter with midpoint of (115 + 125) // 2 = 120
+        assert result_C.action_type.value == "counter_offer"
+        assert result_C.parameters.get("proposed_price") == 120
+
+        # Now A accepts B, which should cancel C
+        canceled = await thread_store._sqlite.cancel_negotiations_for_order(
+            order_id="order_A",
+            except_negotiation_id="A_B",
+        )
+
+        assert "A_C" in canceled
+
+    @pytest.mark.asyncio
+    async def test_seller_negotiates_with_multiple_buyers(self, policy_store, thread_store):
+        """Agent A (seller) negotiates with Agents B and C (buyers) independently.
+
+        Scenario:
+        - Agent A is a seller with order_A (min price 100)
+        - Agent B is a buyer with order_B (offering 70)
+        - Agent C is a buyer with order_C (offering 90)
+        - A should counter B (below 80%) and accept C (at 90% >= 80%)
+        """
+        func = policy_store._registry.get("negotiation.action.price_interval_concession")
+        ce = CallableEvaluator(func)
+
+        # Agent A (seller) receives offer from Agent B (price 70)
+        event_from_B = NegotiationEvent.create(
+            event_id="evt_A_from_B_seller",
+            negotiation_id="order_A_order_B",
+            message_type="initial_proposal",
+            sender="agent_B",
+            data={
+                "our_price": 100,
+                "their_price": 70,
+                "our_order_id": "order_A",
+                "their_order_id": "order_B",
+                "role": "seller",
+            }
+        )
+        context_B = DecisionContext(
+            event=event_from_B,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        # Agent A (seller) receives offer from Agent C (price 90)
+        event_from_C = NegotiationEvent.create(
+            event_id="evt_A_from_C_seller",
+            negotiation_id="order_A_order_C",
+            message_type="initial_proposal",
+            sender="agent_C",
+            data={
+                "our_price": 100,
+                "their_price": 90,
+                "our_order_id": "order_A",
+                "their_order_id": "order_C",
+                "role": "seller",
+            }
+        )
+        context_C = DecisionContext(
+            event=event_from_C,
+            agent_id="agent_A",
+            available_resources={},
+            negotiation_history=[]
+        )
+
+        result_B = await ce.evaluate(context_B)
+        result_C = await ce.evaluate(context_C)
+
+        # B's offer of 70 is below 80% (80), so seller should counter
+        assert result_B.action_type.value == "counter_offer"
+        assert result_B.parameters.get("proposed_price") == 85  # (100 + 70) // 2
+
+        # C's offer of 90 is >= 80% (80), so seller should accept
+        assert result_C.action_type.value == "accept_offer"
