@@ -104,6 +104,26 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
             except sqlite3.OperationalError:
                 pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_initial_price INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_strategy TEXT")
+            except sqlite3.OperationalError:
+                pass
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_local_state (
+                  negotiation_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  our_initial_price INTEGER,
+                  our_strategy TEXT,
+                  PRIMARY KEY(negotiation_id, owner_id),
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
+                )
+                """
+            )
             # Negotiation messages table
             cur.execute(
                 """
@@ -536,6 +556,11 @@ class SQLiteClient:
                     "DELETE FROM negotiation_messages WHERE negotiation_id = ?",
                     (negotiation_id,),
                 )
+                # Delete local state
+                cur.execute(
+                    "DELETE FROM negotiation_local_state WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
                 # Delete thread
                 cur.execute(
                     "DELETE FROM negotiation_threads WHERE negotiation_id = ?",
@@ -555,17 +580,34 @@ class SQLiteClient:
         their_order_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        owner_id: str,  # The agent creating this record
         status: str = "active",
+        our_initial_price: int | None = None,
+        our_strategy: str | None = None,
     ) -> None:
-        """Create a new negotiation thread with order and agent tracking."""
+        """Create a new negotiation thread with private local state.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            our_order_id: Our order ID
+            their_order_id: Their order ID
+            our_agent_id: Our agent ID (participant A)
+            their_agent_id: Their agent ID (participant B)
+            owner_id: ID of the agent owning this private state
+            status: Initial status (default: 'active')
+            our_initial_price: Private initial price
+            our_strategy: Private strategy
+        """
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 timestamp = datetime.now().isoformat()
+                
+                # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
                     """
-                    INSERT INTO negotiation_threads(
+                    INSERT OR IGNORE INTO negotiation_threads(
                         negotiation_id, our_order_id, their_order_id,
                         our_agent_id, their_agent_id, status, created_at, updated_at
                     )
@@ -576,10 +618,74 @@ class SQLiteClient:
                         our_agent_id, their_agent_id, status, timestamp, timestamp
                     ),
                 )
+                
+                # Insert private local state (upsert if needed)
+                cur.execute(
+                    """
+                    INSERT INTO negotiation_local_state(
+                        negotiation_id, owner_id, our_initial_price, our_strategy
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(negotiation_id, owner_id) DO UPDATE SET
+                        our_initial_price = excluded.our_initial_price,
+                        our_strategy = excluded.our_strategy
+                    """,
+                    (negotiation_id, owner_id, our_initial_price, our_strategy),
+                )
+                
                 conn.commit()
             finally:
                 conn.close()
         await asyncio.to_thread(_create)
+
+    async def get_thread_info(
+        self,
+        *,
+        negotiation_id: str,
+        owner_id: str,
+    ) -> dict[str, Any] | None:
+        """Get negotiation thread metadata joining public thread with private local state.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            owner_id: ID of the agent requesting the info
+        
+        Returns:
+            Merged dictionary with public + private info, or None if thread doesn't exist.
+        """
+        def _get() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
+                           t.our_agent_id, t.their_agent_id, t.status,
+                           l.our_initial_price, l.our_strategy
+                    FROM negotiation_threads t
+                    LEFT JOIN negotiation_local_state l 
+                           ON t.negotiation_id = l.negotiation_id AND l.owner_id = ?
+                    WHERE t.negotiation_id = ?
+                    """,
+                    (owner_id, negotiation_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                        # Default to None if no local state found for this owner
+                        "our_initial_price": row[6],
+                        "our_strategy": row[7],
+                    }
+                return None
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_get)
 
     async def check_existing_negotiation(
         self,

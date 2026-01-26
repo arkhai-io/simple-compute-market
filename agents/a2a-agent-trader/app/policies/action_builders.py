@@ -91,8 +91,6 @@ class NegotiationActionBuilder:
                 "order_id": self.data.get("their_order_id"),
                 "negotiation_id": self._get_negotiation_id(),
                 "reason": reason,
-                "our_price": self.data.get("our_price"),
-                "their_price": self.data.get("their_price"),
                 "our_order_id": self.data.get("our_order_id"),
                 "their_order_id": self.data.get("their_order_id"),
             },

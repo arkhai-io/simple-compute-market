@@ -302,16 +302,17 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
         return None
 
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
+    
+    their_price = data.get("proposed_price")
+    
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
 
-    # If prices are equal, short-circuit to accept (skip negotiation)
     if our_price is not None and their_price is not None and our_price == their_price:
         logger.info(f"[NEGOTIATION] Prices equal ({our_price}), accepting directly")
         actions = NegotiationActionBuilder(data)
         return actions.accept("price_equal")
 
-    # Prices differ - continue to negotiation policies
     return None
 
 
@@ -319,7 +320,11 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
 def negotiation_action_price_interval_concession(context: DecisionContext) -> DomainAction | None:
     """Strategy-aware price-based counter-offer policy using minimizer/maximizer model.
 
-    Strategy types (inferred from order resource types):
+    - their_price: Derived from event's proposed_price (what they're offering)
+    - our_price: Retrieved from local thread state (our_initial_price)
+    - strategy: Retrieved from local thread state (our_strategy)
+
+    Strategy types (inferred from our own order resource types):
     - Minimizer: demanding ComputeResource (wants lowest rate, our_price = ceiling)
     - Maximizer: offering ComputeResource (wants highest rate, our_price = floor)
 
@@ -344,17 +349,23 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
         return None
 
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
-    strategy = data.get("strategy")  # "minimize" or "maximize"
     negotiation_history = context.negotiation_history or []
+    their_price = data.get("proposed_price")
+
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
+    strategy = thread_info.get("our_strategy")
 
     if our_price is None or their_price is None:
+        logger.info(f"[NEGOTIATION] Missing price data: our_price={our_price}, their_price={their_price}")
         return None  # Pass to next policy if price data missing
 
     # Ensure negotiation_id is in data for the builder
     if context.event.negotiation_id and "negotiation_id" not in data:
         data = {**data, "negotiation_id": context.event.negotiation_id}
+    
+    # Add our_price and their_price to data for action builder
+    data = {**data, "our_price": our_price, "their_price": their_price}
 
     # Create action builder for clean action construction
     actions = NegotiationActionBuilder(data)
@@ -497,8 +508,11 @@ def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAc
         return None
 
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
+    
+    their_price = data.get("proposed_price")
+    
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
 
     # Build data dict for action builder
     if context.event.negotiation_id and "negotiation_id" not in data:

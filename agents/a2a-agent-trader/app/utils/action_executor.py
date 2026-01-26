@@ -558,6 +558,8 @@ async def counter_offer(
                 their_order_id=params.order_id,
                 our_agent_id=AGENT_ID,
                 their_agent_id=their_agent_id or "",
+                our_initial_price=params.our_price,  # Store locally for future rounds
+                our_strategy=strategy,  # Store locally, never transmitted
             )
             await txn.add_message(
                 negotiation_id=params.negotiation_id,
@@ -569,19 +571,15 @@ async def counter_offer(
                 message_type="counter_proposal",
             )
 
-        # Create negotiation event
         event_payload = {
             "event_type": EventType.NEGOTIATION.value,
             "negotiation_id": params.negotiation_id,
             "message_type": "counter_proposal",
             "sender": AGENT_ID,
             "data": {
-                "our_price": params.our_price,
-                "their_price": params.their_price,
                 "proposed_price": params.proposed_price,
-                "their_order_id": params.order_id,
-                "our_order_id": params.our_order_id,
-                "strategy": strategy,  # Strategy for counterparty's policy use
+                "sender_order_id": params.our_order_id,
+                "target_order_id": params.order_id,
             },
         }
 

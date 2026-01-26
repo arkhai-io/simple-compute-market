@@ -184,8 +184,10 @@ class NegotiationThreadTransaction:
         their_order_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        our_initial_price: int | None = None,
+        our_strategy: str | None = None,
     ) -> None:
-        """Get or create negotiation thread.
+        """Get or create negotiation thread
 
         Args:
             negotiation_id: Unique ID for this negotiation
@@ -193,12 +195,18 @@ class NegotiationThreadTransaction:
             their_order_id: Their order ID
             our_agent_id: Our agent ID
             their_agent_id: Their agent ID
+            our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
+            our_strategy: Our strategy ('minimize' or 'maximize')
         """
         if not self.thread_store:
             logger.warning(f"[{self.component}] No thread store available")
             return
 
-        existing = await self.thread_store.get_thread(negotiation_id)
+        # Pass owner_id=AGENT_ID to identify which agent's private state to access
+        existing = await self.thread_store.get_thread_info(
+            negotiation_id=negotiation_id,
+            owner_id=AGENT_ID
+        )
         if not existing:
             await self.thread_store.create_thread(
                 negotiation_id=negotiation_id,
@@ -206,6 +214,9 @@ class NegotiationThreadTransaction:
                 their_order_id=their_order_id,
                 our_agent_id=our_agent_id,
                 their_agent_id=their_agent_id,
+                owner_id=AGENT_ID,  # We are the owner of this private state
+                our_initial_price=our_initial_price,
+                our_strategy=our_strategy,
             )
             logger.debug(f"[{self.component}] Created thread {negotiation_id}")
 
@@ -270,19 +281,56 @@ class NegotiationThreadStore:
         their_order_id: str,
         our_agent_id: str,
         their_agent_id: str,
+        owner_id: str,
+        our_initial_price: int | None = None,
+        our_strategy: str | None = None,
     ) -> None:
-        """Create a new negotiation thread with order and agent tracking."""
+        """Create a new negotiation thread with private local state.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            our_order_id: Our order ID
+            their_order_id: Their order ID
+            our_agent_id: Our agent ID
+            their_agent_id: Their agent ID
+            owner_id: ID of the agent owning this private state
+            our_initial_price: Private initial price
+            our_strategy: Private strategy
+        """
         await self._sqlite.create_negotiation_thread(
             negotiation_id=negotiation_id,
             our_order_id=our_order_id,
             their_order_id=their_order_id,
             our_agent_id=our_agent_id,
             their_agent_id=their_agent_id,
+            owner_id=owner_id,
+            our_initial_price=our_initial_price,
+            our_strategy=our_strategy,
         )
         logger.debug(
             f"[NEGOTIATION THREAD] Created thread {negotiation_id} "
             f"for orders {our_order_id} <-> {their_order_id} "
             f"agents {our_agent_id} <-> {their_agent_id}"
+        )
+    
+    async def get_thread_info(
+        self,
+        negotiation_id: str,
+        owner_id: str,
+    ) -> Dict[str, Any] | None:
+        """Get negotiation thread metadata.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            owner_id: ID of the agent requesting the info
+            
+        Returns:
+            Dictionary with thread info including our_initial_price and our_strategy,
+            or None if thread doesn't exist.
+        """
+        return await self._sqlite.get_thread_info(
+            negotiation_id=negotiation_id,
+            owner_id=owner_id
         )
     
     async def get_thread(self, negotiation_id: str) -> List[Dict[str, Any]]:

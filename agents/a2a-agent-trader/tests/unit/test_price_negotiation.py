@@ -66,6 +66,53 @@ def policy_store(temp_db):
     CALLABLE_REGISTRY.clear()
 
 
+def create_test_context(
+    *,
+    our_price: int | None,
+    their_price: int | None,  # This is what they propose (transmitted as proposed_price)
+    strategy: str | None,
+    negotiation_id: str = "test_negotiation",
+    event_id: str = "evt_test",
+    agent_id: str = "test_agent",
+    our_order_id: str = "order_our",
+    their_order_id: str = "order_their",
+    negotiation_history: list | None = None,
+) -> DecisionContext:
+    """Create a test context with POV-neutral structure.
+    
+    This helper properly separates:
+    - transmitted data: proposed_price (what they're offering)
+    - local POV data: our_initial_price, our_strategy (stored locally, never transmitted)
+    
+    The policy looks up our_initial_price and our_strategy from market_state.thread_info,
+    and interprets proposed_price as their_price.
+    """
+    event = NegotiationEvent.create(
+        event_id=event_id,
+        negotiation_id=negotiation_id,
+        message_type="counter_proposal",
+        sender="other_agent",
+        data={
+            "proposed_price": their_price,  # What they're proposing
+            "sender_order_id": their_order_id,
+            "target_order_id": our_order_id,
+        }
+    )
+    
+    return DecisionContext(
+        event=event,
+        agent_id=agent_id,
+        available_resources={},
+        market_state={
+            "thread_info": {
+                "our_initial_price": our_price,
+                "our_strategy": strategy,
+            }
+        },
+        negotiation_history=negotiation_history or []
+    )
+
+
 class TestMinimizerStrategy:
     """Test minimizer strategy (demanding compute, offering tokens)."""
 
@@ -83,25 +130,12 @@ class TestMinimizerStrategy:
     ])
     async def test_minimizer_decisions(self, policy_store, our_price, their_price, expected_action, reason):
         """Test minimizer strategy at various price points."""
-        event = NegotiationEvent.create(
-            event_id=f"evt_test_minimizer_{our_price}_{their_price}",
+        context = create_test_context(
+            our_price=our_price,
+            their_price=their_price,
+            strategy="minimize",
             negotiation_id=f"test_minimizer_{our_price}_{their_price}",
-            message_type="counter_proposal",
-            sender="other_agent",
-            data={
-                "our_price": our_price,
-                "their_price": their_price,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
-                "strategy": "minimize",
-            }
-        )
-
-        context = DecisionContext(
-            event=event,
-            agent_id="test_agent",
-            available_resources={},
-            negotiation_history=[]
+            event_id=f"evt_test_minimizer_{our_price}_{their_price}",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -132,25 +166,12 @@ class TestMinimizerStrategy:
     ])
     async def test_minimizer_complete_coverage(self, policy_store, our_price, their_price, expected_action):
         """Test minimizer strategy with complete coverage of all cases."""
-        event = NegotiationEvent.create(
-            event_id=f"evt_test_min_{our_price}_{their_price}",
+        context = create_test_context(
+            our_price=our_price,
+            their_price=their_price,
+            strategy="minimize",
             negotiation_id=f"test_min_{our_price}_{their_price}",
-            message_type="counter_proposal",
-            sender="other_agent",
-            data={
-                "our_price": our_price,
-                "their_price": their_price,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
-                "strategy": "minimize",
-            }
-        )
-
-        context = DecisionContext(
-            event=event,
-            agent_id="test_agent",
-            available_resources={},
-            negotiation_history=[]
+            event_id=f"evt_test_min_{our_price}_{their_price}",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -163,25 +184,12 @@ class TestMinimizerStrategy:
     @pytest.mark.asyncio
     async def test_minimizer_counter_calculation(self, policy_store):
         """Test minimizer counter-offer price calculation (midpoint)."""
-        event = NegotiationEvent.create(
-            event_id="evt_test_minimizer_counter",
+        context = create_test_context(
+            our_price=100,
+            their_price=140,
+            strategy="minimize",
             negotiation_id="test_minimizer_counter",
-            message_type="counter_proposal",
-            sender="other_agent",
-            data={
-                "our_price": 100,
-                "their_price": 140,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
-                "strategy": "minimize",
-            }
-        )
-
-        context = DecisionContext(
-            event=event,
-            agent_id="test_agent",
-            available_resources={},
-            negotiation_history=[]
+            event_id="evt_test_minimizer_counter",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -215,25 +223,12 @@ class TestMaximizerStrategy:
     ])
     async def test_maximizer_decisions(self, policy_store, our_price, their_price, expected_action):
         """Test maximizer strategy at various price points."""
-        event = NegotiationEvent.create(
-            event_id=f"evt_test_maximizer_{our_price}_{their_price}",
+        context = create_test_context(
+            our_price=our_price,
+            their_price=their_price,
+            strategy="maximize",
             negotiation_id=f"test_maximizer_{our_price}_{their_price}",
-            message_type="counter_proposal",
-            sender="other_agent",
-            data={
-                "our_price": our_price,
-                "their_price": their_price,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
-                "strategy": "maximize",
-            }
-        )
-
-        context = DecisionContext(
-            event=event,
-            agent_id="test_agent",
-            available_resources={},
-            negotiation_history=[]
+            event_id=f"evt_test_maximizer_{our_price}_{their_price}",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -247,25 +242,12 @@ class TestMaximizerStrategy:
     @pytest.mark.asyncio
     async def test_maximizer_counter_calculation(self, policy_store):
         """Test maximizer counter-offer price calculation (midpoint)."""
-        event = NegotiationEvent.create(
-            event_id="evt_test_maximizer_counter",
+        context = create_test_context(
+            our_price=100,
+            their_price=70,
+            strategy="maximize",
             negotiation_id="test_maximizer_counter",
-            message_type="counter_proposal",
-            sender="other_agent",
-            data={
-                "our_price": 100,
-                "their_price": 70,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
-                "strategy": "maximize",
-            }
-        )
-
-        context = DecisionContext(
-            event=event,
-            agent_id="test_agent",
-            available_resources={},
-            negotiation_history=[]
+            event_id="evt_test_maximizer_counter",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -320,20 +302,13 @@ class TestNegotiationScenarios:
         Maximizer at 100 (floor) receives offer at 110 → accepts (110 >= 100)
         """
         # Minimizer perspective (ceiling=100, sees 110)
-        minimizer_event = NegotiationEvent.create(
-            event_id="evt_test_min_eq",
-            negotiation_id="test_eq",
-            message_type="counter_proposal",
-            sender="maximizer_agent",
-            data={"our_price": 100, "their_price": 110, "strategy": "minimize",
-                   "our_order_id": "order_min", "their_order_id": "order_max"}
-        )
-
-        minimizer_context = DecisionContext(
-            event=minimizer_event,
+        minimizer_context = create_test_context(
+            our_price=100,
+            their_price=110,
+            strategy="minimize",
             agent_id="minimizer_agent",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="test_eq",
+            event_id="evt_test_min_eq",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -341,20 +316,13 @@ class TestNegotiationScenarios:
         minimizer_result = await ce.evaluate(minimizer_context)
 
         # Maximizer perspective (floor=100, sees 110)
-        maximizer_event = NegotiationEvent.create(
-            event_id="evt_test_max_eq",
-            negotiation_id="test_eq",
-            message_type="counter_proposal",
-            sender="minimizer_agent",
-            data={"our_price": 100, "their_price": 110, "strategy": "maximize",
-                   "our_order_id": "order_max", "their_order_id": "order_min"}
-        )
-
-        maximizer_context = DecisionContext(
-            event=maximizer_event,
+        maximizer_context = create_test_context(
+            our_price=100,
+            their_price=110,
+            strategy="maximize",
             agent_id="maximizer_agent",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="test_eq",
+            event_id="evt_test_max_eq",
         )
 
         maximizer_result = await ce.evaluate(maximizer_context)
@@ -373,20 +341,13 @@ class TestNegotiationScenarios:
         Expected: Minimizer counters to 120, Maximizer accepts (120 >= 100)
         """
         # Minimizer sees 140 → counters to 120
-        minimizer_event = NegotiationEvent.create(
-            event_id="evt_test_min_conv",
-            negotiation_id="test_conv",
-            message_type="counter_proposal",
-            sender="maximizer_agent",
-            data={"our_price": 100, "their_price": 140, "strategy": "minimize",
-                   "our_order_id": "order_min", "their_order_id": "order_max"}
-        )
-
-        minimizer_context = DecisionContext(
-            event=minimizer_event,
+        minimizer_context = create_test_context(
+            our_price=100,
+            their_price=140,
+            strategy="minimize",
             agent_id="minimizer_agent",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="test_conv",
+            event_id="evt_test_min_conv",
         )
 
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
@@ -398,20 +359,13 @@ class TestNegotiationScenarios:
         assert minimizer_result.parameters.get("proposed_price") == 120
 
         # Maximizer sees 120 (from minimizer counter) → should accept (>= floor)
-        maximizer_event = NegotiationEvent.create(
-            event_id="evt_test_max_conv",
-            negotiation_id="test_conv",
-            message_type="counter_proposal",
-            sender="minimizer_agent",
-            data={"our_price": 100, "their_price": 120, "strategy": "maximize",
-                   "our_order_id": "order_max", "their_order_id": "order_min"}
-        )
-
-        maximizer_context = DecisionContext(
-            event=maximizer_event,
+        maximizer_context = create_test_context(
+            our_price=100,
+            their_price=120,
+            strategy="maximize",
             agent_id="maximizer_agent",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="test_conv",
+            event_id="evt_test_max_conv",
         )
 
         maximizer_result = await ce.evaluate(maximizer_context)
@@ -438,10 +392,9 @@ class TestNegotiationScenarios:
             message_type="counter_proposal",
             sender="other_agent",
             data={
-                "our_price": our_price,
-                "their_price": their_price,
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
+                "proposed_price": their_price,
+                "sender_order_id": "order_their",
+                "target_order_id": "order_our",
             }
         )
 
@@ -449,6 +402,12 @@ class TestNegotiationScenarios:
             event=event,
             agent_id="test_agent",
             available_resources={},
+            market_state={
+                "thread_info": {
+                    "our_initial_price": our_price,
+                    "our_strategy": "minimize"
+                }
+            },
             negotiation_history=[]
         )
 
@@ -456,7 +415,6 @@ class TestNegotiationScenarios:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should reject for safety
         assert result is not None, "Safe default should always return an action"
         assert result.action_type.value == "reject_offer"
         assert result.parameters.get("reason") == expected_reason
@@ -470,9 +428,8 @@ class TestNegotiationScenarios:
             message_type="counter_proposal",
             sender="other_agent",
             data={
-                # Missing our_price and their_price
-                "our_order_id": "order_our",
-                "their_order_id": "order_their",
+                "sender_order_id": "order_their",
+                "target_order_id": "order_our",
             }
         )
 
@@ -480,6 +437,10 @@ class TestNegotiationScenarios:
             event=event,
             agent_id="test_agent",
             available_resources={},
+            market_state={
+                 # Missing thread_info
+                 "thread_info": {}
+            },
             negotiation_history=[]
         )
 
@@ -521,13 +482,16 @@ class TestMultipleBilateralNegotiations:
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
 
-        # Create negotiation threads for A↔B and A↔C
+        # Create negotiation threads for A↔B and A↔C with our_initial_price and our_strategy
         await thread_store.create_thread(
             negotiation_id="order_A_order_B",
             our_order_id="order_A",
             their_order_id="order_B",
             our_agent_id="agent_A",
             their_agent_id="agent_B",
+            owner_id="agent_A",
+            our_initial_price=100,
+            our_strategy="minimize",
         )
         await thread_store.create_thread(
             negotiation_id="order_A_order_C",
@@ -535,48 +499,29 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_C",
             our_agent_id="agent_A",
             their_agent_id="agent_C",
+            owner_id="agent_A",
+            our_initial_price=100,
+            our_strategy="minimize",
         )
 
         # Agent A receives offer from Agent B (price 150)
-        event_from_B = NegotiationEvent.create(
-            event_id="evt_A_from_B",
-            negotiation_id="order_A_order_B",
-            message_type="initial_proposal",
-            sender="agent_B",
-            data={
-                "our_price": 100,
-                "their_price": 150,
-                "our_order_id": "order_A",
-                "their_order_id": "order_B",
-                "strategy": "minimize",
-            }
-        )
-        context_B = DecisionContext(
-            event=event_from_B,
+        context_B = create_test_context(
+            our_price=100,
+            their_price=150,
+            strategy="minimize",
             agent_id="agent_A",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="order_A_order_B",
+            event_id="evt_A_from_B",
         )
 
         # Agent A receives offer from Agent C (price 130)
-        event_from_C = NegotiationEvent.create(
-            event_id="evt_A_from_C",
-            negotiation_id="order_A_order_C",
-            message_type="initial_proposal",
-            sender="agent_C",
-            data={
-                "our_price": 100,
-                "their_price": 130,
-                "our_order_id": "order_A",
-                "their_order_id": "order_C",
-                "strategy": "minimize",
-            }
-        )
-        context_C = DecisionContext(
-            event=event_from_C,
+        context_C = create_test_context(
+            our_price=100,
+            their_price=130,
+            strategy="minimize",
             agent_id="agent_A",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="order_A_order_C",
+            event_id="evt_A_from_C",
         )
 
         # Evaluate both negotiations
@@ -633,13 +578,16 @@ class TestMultipleBilateralNegotiations:
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
 
-        # Create both negotiation threads
+        # Create both negotiation threads with our_initial_price and our_strategy
         await thread_store.create_thread(
             negotiation_id="order_A_order_B",
             our_order_id="order_A",
             their_order_id="order_B",
             our_agent_id="agent_A",
             their_agent_id="agent_B",
+            our_initial_price=100,
+            our_strategy="minimize",
+            owner_id="agent_A",
         )
         await thread_store.create_thread(
             negotiation_id="order_A_order_C",
@@ -647,6 +595,9 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_C",
             our_agent_id="agent_A",
             their_agent_id="agent_C",
+            our_initial_price=100,
+            our_strategy="minimize",
+            owner_id="agent_A",
         )
 
         # Add some history to both threads
@@ -670,24 +621,13 @@ class TestMultipleBilateralNegotiations:
         )
 
         # Agent B counters with 100 (acceptable for minimizer A - at ceiling)
-        event_accept = NegotiationEvent.create(
-            event_id="evt_A_accept_B",
-            negotiation_id="order_A_order_B",
-            message_type="counter_proposal",
-            sender="agent_B",
-            data={
-                "our_price": 100,
-                "their_price": 100,
-                "our_order_id": "order_A",
-                "their_order_id": "order_B",
-                "strategy": "minimize",
-            }
-        )
-        context = DecisionContext(
-            event=event_accept,
+        context = create_test_context(
+            our_price=100,
+            their_price=100,
+            strategy="minimize",
             agent_id="agent_A",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="order_A_order_B",
+            event_id="evt_A_accept_B",
         )
 
         result = await ce.evaluate(context)
@@ -729,6 +669,7 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_B",
             our_agent_id="agent_A",
             their_agent_id="agent_B",
+            owner_id="agent_A",
         )
         await thread_store.create_thread(
             negotiation_id="neg_2",
@@ -736,6 +677,7 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_C",
             our_agent_id="agent_A",
             their_agent_id="agent_C",
+            owner_id="agent_A",
         )
 
         # Add 3 messages to neg_1
@@ -799,6 +741,7 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_B",
             our_agent_id="agent_A",
             their_agent_id="agent_B",
+            owner_id="agent_A",
         )
 
         # Check for existing negotiation (same order pair)
@@ -845,6 +788,9 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_B",
             our_agent_id="agent_A",
             their_agent_id="agent_B",
+            owner_id="agent_A",
+            our_initial_price=100,
+            our_strategy="minimize",
         )
         await thread_store.create_thread(
             negotiation_id="A_C",
@@ -852,6 +798,9 @@ class TestMultipleBilateralNegotiations:
             their_order_id="order_C",
             our_agent_id="agent_A",
             their_agent_id="agent_C",
+            owner_id="agent_A",
+            our_initial_price=100,
+            our_strategy="minimize",
         )
 
         # Round 1: Both maximizers offer high prices
@@ -872,25 +821,13 @@ class TestMultipleBilateralNegotiations:
 
         # Round 2: B accepts A's counter of 125 (>= floor of 100), C accepts A's counter of 115 (>= floor)
         # Check B's acceptance of 125
-        event_B_round2 = NegotiationEvent.create(
-            event_id="evt_B_r2",
-            negotiation_id="A_B",
-            message_type="counter_proposal",
-            sender="agent_B",
-            data={
-                "our_price": 100,  # B's floor (maximizer offering compute)
-                "their_price": 125,  # A's counter
-                "our_order_id": "order_B",
-                "their_order_id": "order_A",
-                "strategy": "maximize",
-            }
-        )
-
-        context_B_r2 = DecisionContext(
-            event=event_B_round2,
+        context_B_r2 = create_test_context(
+            our_price=100,  # B's floor (maximizer offering compute)
+            their_price=125,  # A's counter
+            strategy="maximize",
             agent_id="agent_B",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="A_B",
+            event_id="evt_B_r2",
         )
 
         result_B = await ce.evaluate(context_B_r2)
@@ -898,25 +835,13 @@ class TestMultipleBilateralNegotiations:
         assert result_B.action_type.value == "accept_offer"
 
         # Check C's acceptance of 115
-        event_C_round2 = NegotiationEvent.create(
-            event_id="evt_C_r2",
-            negotiation_id="A_C",
-            message_type="counter_proposal",
-            sender="agent_C",
-            data={
-                "our_price": 100,  # C's floor (maximizer offering compute)
-                "their_price": 115,  # A's counter
-                "our_order_id": "order_C",
-                "their_order_id": "order_A",
-                "strategy": "maximize",
-            }
-        )
-
-        context_C_r2 = DecisionContext(
-            event=event_C_round2,
+        context_C_r2 = create_test_context(
+            our_price=100,  # C's floor (maximizer offering compute)
+            their_price=115,  # A's counter
+            strategy="maximize",
             agent_id="agent_C",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="A_C",
+            event_id="evt_C_r2",
         )
 
         result_C = await ce.evaluate(context_C_r2)
@@ -945,45 +870,23 @@ class TestMultipleBilateralNegotiations:
         ce = CallableEvaluator(func)
 
         # Agent A (maximizer) receives offer from Agent B (price 70)
-        event_from_B = NegotiationEvent.create(
-            event_id="evt_A_from_B_max",
-            negotiation_id="order_A_order_B",
-            message_type="initial_proposal",
-            sender="agent_B",
-            data={
-                "our_price": 100,
-                "their_price": 70,
-                "our_order_id": "order_A",
-                "their_order_id": "order_B",
-                "strategy": "maximize",
-            }
-        )
-        context_B = DecisionContext(
-            event=event_from_B,
+        context_B = create_test_context(
+            our_price=100,
+            their_price=70,
+            strategy="maximize",
             agent_id="agent_A",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="order_A_order_B",
+            event_id="evt_A_from_B_max",
         )
 
         # Agent A (maximizer) receives offer from Agent C (price 90)
-        event_from_C = NegotiationEvent.create(
-            event_id="evt_A_from_C_max",
-            negotiation_id="order_A_order_C",
-            message_type="initial_proposal",
-            sender="agent_C",
-            data={
-                "our_price": 100,
-                "their_price": 90,
-                "our_order_id": "order_A",
-                "their_order_id": "order_C",
-                "strategy": "maximize",
-            }
-        )
-        context_C = DecisionContext(
-            event=event_from_C,
+        context_C = create_test_context(
+            our_price=100,
+            their_price=90,
+            strategy="maximize",
             agent_id="agent_A",
-            available_resources={},
-            negotiation_history=[]
+            negotiation_id="order_A_order_C",
+            event_id="evt_A_from_C_max",
         )
 
         result_B = await ce.evaluate(context_B)
