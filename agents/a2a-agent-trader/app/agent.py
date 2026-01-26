@@ -521,15 +521,22 @@ class TraderAgent(BaseAgent):
         
         # Load negotiation history from thread store if this is a NegotiationEvent
         negotiation_history = []
+        thread_info = {}
         if isinstance(domain_event, NegotiationEvent):
             thread_store = get_thread_store()
             negotiation_id = domain_event.negotiation_id
             if negotiation_id:
                 negotiation_history = await thread_store.get_thread(negotiation_id)
+                thread_info = await thread_store.get_thread_info(
+                    negotiation_id=negotiation_id,
+                    owner_id=self.name
+                ) or {}
+        
+        market_state_with_thread = {**market_state, "thread_info": thread_info}
         
         return (domain_event, {
             "resource_portfolio": resource_portfolio,
-            "market_state": market_state,
+            "market_state": market_state_with_thread,
             "past_experiences": past_experiences,
             "negotiation_history": negotiation_history,
         })
@@ -543,10 +550,8 @@ class TraderAgent(BaseAgent):
         domain_event, context_data = context
         event_type = domain_event.event_type
         
-        # Ensure policy exists for this event type (lazy policy setup)
         await self._policy_manager.ensure_policy_for_event_type(event_type)
         
-        # Build DecisionContext for PolicyStore
         decision_context = DecisionContext(
             event=domain_event,
             agent_id=self.name,
@@ -556,7 +561,6 @@ class TraderAgent(BaseAgent):
             past_experiences=context_data.get("past_experiences", []),
         )
         
-        # Evaluate policy using PolicyStore
         try:
             action = await self._policy_store.evaluate_policy(
                 agent_id=self.name,
@@ -652,7 +656,6 @@ class TraderAgent(BaseAgent):
         except Exception as e:
             logger.error(f"[PIPELINE] Failed to record decision: {e}")
         
-        # Return response string for backward compatibility
         action_type_str = action.action_type.value if hasattr(action.action_type, "value") else str(action.action_type)
         action_mappings = {
             "accept_offer": "ACCEPT the offer.",

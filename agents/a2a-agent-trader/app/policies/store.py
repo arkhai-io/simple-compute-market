@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.policies.evaluator import CallableEvaluator
@@ -11,6 +12,7 @@ from app.schema.pydantic_models import (
     ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
+    MarketOrder,
     NegotiationEvent,
     ComputeResource,
     TokenResource,
@@ -18,9 +20,18 @@ from app.schema.pydantic_models import (
 )
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
-from app.utils.validation import extract_resources_from_make_offer_event
+from app.policies.action_builders import NegotiationActionBuilder
+from app.utils.validation import (
+    extract_resources_from_make_offer_event,
+    determine_strategy_from_order,
+)
+from app.utils.registry_client import get_registry_client
+from app.utils.action_executor import _extract_initial_price_from_order
+from app.utils.config import CONFIG
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
+
+logger = logging.getLogger(__name__)
 
 
 class PolicyStore:
@@ -280,182 +291,194 @@ def mo_guard_trigger_is_make_offer(context: DecisionContext) -> DomainAction | N
 @policy_callable("negotiation.guard.always_negotiate_on_price_diff")
 def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -> DomainAction | None:
     """Admission policy: Always negotiate when prices differ, accept when equal.
-    
+
     CGT role: Implements the "Entry Decision → Negotiation Game" handoff from
     Reactive Decision Pattern to Strategic Interaction Pattern.
-    
+
     Returns:
         None to pass to next policy (continue negotiation), or
         ACCEPT_OFFER if prices are equal (skip negotiation)
     """
-    from app.schema.pydantic_models import ActionType
-    
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "negotiation":
         return None
-    
+
     # Check if this is a negotiation event with price data
     if not isinstance(context.event, NegotiationEvent):
         return None
-    
+
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
     
-    # If prices are equal, short-circuit to accept (skip negotiation)
+    their_price = data.get("proposed_price")
+    
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
+
     if our_price is not None and their_price is not None and our_price == their_price:
         logger.info(f"[NEGOTIATION] Prices equal ({our_price}), accepting directly")
-        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "reason": "price_equal",
-        })
-    
-    # Prices differ - continue to negotiation policies
+        actions = NegotiationActionBuilder(data)
+        return actions.accept("price_equal")
+
     return None
 
 
 @policy_callable("negotiation.action.price_interval_concession")
 def negotiation_action_price_interval_concession(context: DecisionContext) -> DomainAction | None:
-    """Price-based counter-offer policy using reservation band.
-    
+    """Strategy-aware price-based counter-offer policy using minimizer/maximizer model.
+
+    - their_price: Derived from event's proposed_price (what they're offering)
+    - our_price: Retrieved from local thread state (our_initial_price)
+    - strategy: Retrieved from local thread state (our_strategy)
+
+    Strategy types (inferred from our own order resource types):
+    - Minimizer: demanding ComputeResource (wants lowest rate, our_price = ceiling)
+    - Maximizer: offering ComputeResource (wants highest rate, our_price = floor)
+
+    Strategy logic:
+    - Minimizer: accept if their_price <= our_price, counter if <= 1.5x, else exit
+    - Maximizer: accept if their_price >= our_price, counter if >= 0.67x, else exit
+
     CGT role: Implements the per-round "Strategic Decision" in the bilateral
     negotiation game, using thread state and resource-aware thresholds.
-    
+
     Returns:
-        ACCEPT_OFFER if their price is within our reservation band,
-        COUNTER_OFFER with proposed price if outside but reasonable,
-        EXIT_NEGOTIATION if far outside our band
+        ACCEPT_OFFER if their price is favorable,
+        COUNTER_OFFER with proposed price if reasonable but not favorable,
+        EXIT_NEGOTIATION if unreasonable
     """
-    from app.schema.pydantic_models import ActionType
-    
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "negotiation":
         return None
-    
+
     if not isinstance(context.event, NegotiationEvent):
         return None
-    
+
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
     negotiation_history = context.negotiation_history or []
-    
+    their_price = data.get("proposed_price")
+
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
+    strategy = thread_info.get("our_strategy")
+
     if our_price is None or their_price is None:
+        logger.info(f"[NEGOTIATION] Missing price data: our_price={our_price}, their_price={their_price}")
         return None  # Pass to next policy if price data missing
+
+    # Ensure negotiation_id is in data for the builder
+    if context.event.negotiation_id and "negotiation_id" not in data:
+        data = {**data, "negotiation_id": context.event.negotiation_id}
     
-    # Determine reservation thresholds from context
-    # Use the band to determine either minimum (selling) or maximum (buying)
-    # This allows for arbitrage opportunities where prices are very favorable
-    # For now, use a simple heuristic: ±20% of our price
-    # In production, derive from market_state, available_resources, etc.
-    min_price = int(our_price * 0.8)  # Minimum we're willing to accept (selling) - at least 80% of our price
-    max_price = int(our_price * 1.2)  # Maximum we're willing to pay (buying) - up to 20% more than our price
-    
-    # Accept if their price is favorable:
-    # - Always accept if their_price < our_price (favorable deal - arbitrage opportunity)
-    #   Example: Alice values at 5 BTC, Bob offers 1 BTC -> Alice accepts
-    # - Also accept if their_price is within our acceptable range:
-    #   * If buying: accept if their_price <= max_price (we're willing to pay up to this)
-    #   * If selling: accept if their_price >= min_price (we want at least this)
-    # Since we don't know if we're buying or selling, we accept if EITHER condition is met
-    # This allows arbitrage while still using reservation bands for less favorable deals
-    is_favorable = their_price < our_price  # Their price is better than ours (always accept)
-    is_within_buying_max = their_price <= max_price  # We're buying and their price is within our max
-    is_within_selling_min = their_price >= min_price  # We're selling and their price is at least our min
-    
-    # Accept if favorable OR within acceptable range (buying or selling)
-    if is_favorable or is_within_buying_max or is_within_selling_min:
-        logger.info(f"[NEGOTIATION] Their price {their_price} is favorable (our: {our_price}, min: {min_price}, max: {max_price}), accepting")
-        return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "reason": "within_reservation_band",
-            "our_price": their_price,
-            "their_price": their_price,
-        })
-    
-    # Their price is outside our band - check if reasonable
-    # Reasonable = within 2x or 0.5x (not completely unreasonable)
-    reasonable_min = int(our_price * 0.5)
-    reasonable_max = int(our_price * 2.0)
-    
-    if reasonable_min <= their_price <= reasonable_max:
-        # Calculate counter-offer: midpoint between our last proposal and their current
-        # For first round, use midpoint between our_price and their_price
-        last_our_proposal = our_price
-        if negotiation_history:
-            # Find our last proposal from history
-            for msg in reversed(negotiation_history):
-                if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
-                    last_our_proposal = msg.get("proposed_price")
-                    break
-        
-        # Propose midpoint (concession strategy)
-        proposed_price = (last_our_proposal + their_price) // 2
-        
-        logger.info(f"[NEGOTIATION] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
-        return DomainAction(action_type=ActionType.COUNTER_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "proposed_price": proposed_price,
-            "our_price": our_price,
-            "their_price": their_price,
-        })
+    # Add our_price and their_price to data for action builder
+    data = {**data, "our_price": our_price, "their_price": their_price}
+
+    # Create action builder for clean action construction
+    actions = NegotiationActionBuilder(data)
+
+    REASONABLE_MULTIPLIER = 1.5  # Exit threshold
+
+    # Strategy-aware price acceptance logic
+    if strategy == "minimize":
+        # Minimizer: our_price is the MAX we're willing to pay (ceiling)
+        # Accept if favorable (at or below ceiling), counter if reasonable, exit if unreasonable
+
+        if their_price <= our_price:
+            # Favorable - at or below our ceiling
+            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} <= our_price {our_price}, accepting")
+            return actions.accept("favorable_price")
+        elif their_price <= our_price * REASONABLE_MULTIPLIER:
+            # Above ceiling but reasonable - counter with midpoint
+            last_our_proposal = our_price
+            if negotiation_history:
+                for msg in reversed(negotiation_history):
+                    if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
+                        last_our_proposal = msg.get("proposed_price")
+                        break
+
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            return actions.counter(proposed_price)
+        else:
+            # Unreasonable - far above ceiling
+            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} > {REASONABLE_MULTIPLIER}x our_price {our_price}, exiting")
+            return actions.exit("price_unreasonable")
+
+    elif strategy == "maximize":
+        # Maximizer: our_price is the MIN we're willing to accept (floor)
+        # Accept if favorable (at or above floor), counter if reasonable, exit if unreasonable
+
+        if their_price >= our_price:
+            # Favorable - at or above our floor
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} >= our_price {our_price}, accepting")
+            return actions.accept("favorable_price")
+        elif their_price >= our_price / REASONABLE_MULTIPLIER:
+            # Below floor but reasonable - counter with midpoint
+            last_our_proposal = our_price
+            if negotiation_history:
+                for msg in reversed(negotiation_history):
+                    if msg.get("sender") == context.agent_id and msg.get("proposed_price"):
+                        last_our_proposal = msg.get("proposed_price")
+                        break
+
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            return actions.counter(proposed_price)
+        else:
+            # Unreasonable - far below floor
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} < our_price/{REASONABLE_MULTIPLIER} {our_price / REASONABLE_MULTIPLIER}, exiting")
+            return actions.exit("price_unreasonable")
+
     else:
-        # Far outside reasonable range - exit negotiation
-        logger.info(f"[NEGOTIATION] Their price {their_price} far outside reasonable range [{reasonable_min}, {reasonable_max}], exiting")
-        return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "price_far_outside_range",
-        })
+        # No strategy specified - pass to next policy
+        logger.info(f"[NEGOTIATION] No strategy specified, passing to next policy")
+        return None
 
 
 @policy_callable("negotiation.guard.bounded_rounds_and_timeout")
 def negotiation_guard_bounded_rounds_and_timeout(context: DecisionContext) -> DomainAction | None:
     """Thread/termination policy: Enforce round limits and timeout.
-    
+
     CGT role: Encodes the terminal checks and TIMEOUT/FAILURE outcomes
     from the Bilateral Negotiation Actions diagram.
-    
+
     Returns:
         EXIT_NEGOTIATION if limits exceeded, None otherwise
     """
-    from app.schema.pydantic_models import ActionType
-    from datetime import datetime, timedelta
-    
+    from datetime import datetime
+
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "negotiation":
         return None
-    
+
     if not isinstance(context.event, NegotiationEvent):
         return None
-    
+
     negotiation_history = context.negotiation_history or []
     max_rounds = 5  # Configurable default
     timeout_seconds = 300  # 5 minutes default
-    
+
+    # Build data dict for action builder
+    data = context.event.data or {}
+    if context.event.negotiation_id and "negotiation_id" not in data:
+        data = {**data, "negotiation_id": context.event.negotiation_id}
+    actions = NegotiationActionBuilder(data)
+
     # Check round limit
     if len(negotiation_history) >= max_rounds:
         logger.info(f"[NEGOTIATION] Max rounds ({max_rounds}) exceeded, exiting")
-        return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "max_rounds_exceeded",
-        })
-    
+        return actions.exit("max_rounds_exceeded")
+
     # Check for stale negotiation (no price movement in last 2 rounds)
     if len(negotiation_history) >= 2:
         last_two = negotiation_history[-2:]
         prices = [msg.get("proposed_price") or msg.get("their_price") for msg in last_two if msg.get("proposed_price") or msg.get("their_price")]
         if len(prices) >= 2 and prices[-1] == prices[-2]:
             logger.info(f"[NEGOTIATION] No price movement in last 2 rounds, exiting")
-            return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
-                "negotiation_id": context.event.negotiation_id,
-                "reason": "stale_negotiation",
-            })
-    
+            return actions.exit("stale_negotiation")
+
     # Check timeout (if first message has timestamp)
     if negotiation_history:
         first_msg = negotiation_history[0]
@@ -466,13 +489,10 @@ def negotiation_guard_bounded_rounds_and_timeout(context: DecisionContext) -> Do
                 elapsed = (datetime.now(first_timestamp.tzinfo) - first_timestamp).total_seconds()
                 if elapsed > timeout_seconds:
                     logger.info(f"[NEGOTIATION] Timeout ({timeout_seconds}s) exceeded, exiting")
-                    return DomainAction(action_type=ActionType.EXIT_NEGOTIATION, parameters={
-                        "negotiation_id": context.event.negotiation_id,
-                        "reason": "timeout",
-                    })
+                    return actions.exit("timeout")
             except Exception as e:
                 logger.warning(f"[NEGOTIATION] Failed to parse timestamp: {e}")
-    
+
     # No limits exceeded - continue negotiation
     return None
 
@@ -480,52 +500,46 @@ def negotiation_guard_bounded_rounds_and_timeout(context: DecisionContext) -> Do
 @policy_callable("negotiation.action.safe_default_reject")
 def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAction | None:
     """Fallback/safety policy: Reject if price data is malformed.
-    
+
     CGT role: Ensures all negotiation games terminate cleanly even under error conditions.
-    
+
     Returns:
         REJECT_OFFER if price data is invalid, None otherwise
     """
-    from app.schema.pydantic_models import ActionType
-    
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
     if trigger != "negotiation":
         return None
-    
+
     if not isinstance(context.event, NegotiationEvent):
         return None
-    
+
     data = context.event.data or {}
-    our_price = data.get("our_price")
-    their_price = data.get("their_price")
     
+    their_price = data.get("proposed_price")
+    
+    thread_info = context.market_state.get("thread_info", {})
+    our_price = thread_info.get("our_initial_price")
+
+    # Build data dict for action builder
+    if context.event.negotiation_id and "negotiation_id" not in data:
+        data = {**data, "negotiation_id": context.event.negotiation_id}
+    actions = NegotiationActionBuilder(data)
+
     # If price data is missing or invalid, reject for safety
     if our_price is None or their_price is None:
         logger.warning(f"[NEGOTIATION] Missing price data, rejecting for safety")
-        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "missing_price_data",
-        })
-    
+        return actions.reject("missing_price_data")
+
     # Check for invalid price values
     if not isinstance(our_price, (int, float)) or not isinstance(their_price, (int, float)):
         logger.warning(f"[NEGOTIATION] Invalid price types, rejecting for safety")
-        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "invalid_price_types",
-        })
-    
+        return actions.reject("invalid_price_types")
+
     if our_price <= 0 or their_price <= 0:
         logger.warning(f"[NEGOTIATION] Non-positive prices, rejecting for safety")
-        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={
-            "order_id": data.get("their_order_id"),
-            "negotiation_id": context.event.negotiation_id,
-            "reason": "non_positive_prices",
-        })
-    
+        return actions.reject("non_positive_prices")
+
     # Price data looks valid - pass to next policy (shouldn't reach here in normal flow)
     return None
 
@@ -587,3 +601,75 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "demand_resource": demand_resource.model_dump(mode='json'),
         }
     )
+
+
+@policy_callable("negotiation.respond_to_make_offer")
+async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainAction | None:
+    et = context.event.event_type
+    if et.value != "make_offer":
+        return None
+    if not isinstance(context.event, MakeOfferEvent):
+        return None
+
+    order_obj = context.event.order
+    if not order_obj:
+        return None
+
+    # Convert to dict if it's a MarketOrder model
+    if isinstance(order_obj, MarketOrder):
+        incoming_order = order_obj.model_dump(mode="json")
+    else:
+        incoming_order = order_obj
+
+    their_proposed_price = _extract_initial_price_from_order(incoming_order)
+    registry_client = get_registry_client()
+    our_orders = await registry_client.query_orders({"status": "open"})
+    our_order = None
+
+    for order_dict in our_orders:
+        if order_dict.get("order_id") == incoming_order.get("order_id"):
+            continue
+        order = MarketOrder.model_validate(order_dict)
+        if determine_strategy_from_order(order):
+            our_order = order_dict
+            break
+
+    if not our_order:
+        actions = NegotiationActionBuilder({})
+        return actions.reject("no_matching_order")
+
+    market_order = MarketOrder.model_validate(our_order)
+    strategy = determine_strategy_from_order(market_order)
+    our_price = _extract_initial_price_from_order(our_order)
+
+    their_order_id = incoming_order.get("order_id", "")
+    our_order_id = our_order.get("order_id", "")
+    negotiation_id = f"{min(our_order_id, their_order_id)}_{max(our_order_id, their_order_id)}"
+
+    actions = NegotiationActionBuilder({
+        "negotiation_id": negotiation_id,
+        "order_id": their_order_id,
+        "our_order_id": our_order_id,
+        "our_price": our_price,
+        "their_price": their_proposed_price,
+        "proposed_price": their_proposed_price,
+        "our_strategy": strategy,
+    })
+
+    if strategy == "minimize":
+        if their_proposed_price <= our_price:
+            return actions.accept("favorable_price")
+        if their_proposed_price <= our_price * 1.5:
+            proposed_price = (our_price + their_proposed_price) // 2
+            return actions.counter(proposed_price)
+        return actions.exit("price_unreasonable")
+
+    if strategy == "maximize":
+        if their_proposed_price >= our_price:
+            return actions.accept("favorable_price")
+        if their_proposed_price >= our_price / 1.5:
+            proposed_price = (our_price + their_proposed_price) // 2
+            return actions.counter(proposed_price)
+        return actions.exit("price_unreasonable")
+
+    return actions.reject("unknown_strategy")
