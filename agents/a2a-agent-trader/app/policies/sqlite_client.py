@@ -104,14 +104,6 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
             except sqlite3.OperationalError:
                 pass
-            try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_initial_price INTEGER")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_strategy TEXT")
-            except sqlite3.OperationalError:
-                pass
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_local_state (
