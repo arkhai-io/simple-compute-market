@@ -106,7 +106,7 @@ def determine_strategy_from_resources(
     """Determine negotiation strategy from resource types.
 
     In a compute-for-token market:
-    - Maximizer (offering compute): offers ComputeResource, demands TokenResource
+    - Maximizer (offering compute): offers ComputeResource, demands TokenResource, maximizing TokenResource amount
     - Minimizer (demanding compute): offers TokenResource, demands ComputeResource
 
     Args:
