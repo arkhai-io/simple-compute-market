@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Callable
 
 from app.schema.pydantic_models import Action, DecisionContext
@@ -10,5 +11,9 @@ class CallableEvaluator:
         self.func = func
 
     async def evaluate(self, context: DecisionContext) -> Action | None:
-        return self.func(context)
+        result = self.func(context)
+        # Handle async policy callables (e.g., negotiation_respond_to_make_offer)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 

@@ -492,6 +492,24 @@ def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     return compute_resource, token_resource
 
 
+def _extract_initial_price_from_order(order: MarketOrder | dict) -> int:
+    """Extract the initial price from an order's token resource.
+
+    The token amount represents:
+    - For surplus (offering compute): The floor price (minimum willing to accept)
+    - For deficit (demanding compute): The ceiling price (maximum willing to pay)
+    """
+    if isinstance(order, dict):
+        order = MarketOrder.model_validate(order)
+
+    if isinstance(order.offer_resource, TokenResource):
+        return order.offer_resource.amount
+    if isinstance(order.demand_resource, TokenResource):
+        return order.demand_resource.amount
+
+    raise ValueError(f"Order has no token resource: {order.order_id}")
+
+
 async def counter_offer(
     *,
     ctx: InvocationContext | None,
@@ -578,8 +596,6 @@ async def counter_offer(
             "sender": AGENT_ID,
             "data": {
                 "proposed_price": params.proposed_price,
-                "sender_order_id": params.our_order_id,
-                "target_order_id": params.order_id,
             },
         }
 
@@ -997,12 +1013,21 @@ async def _find_and_send_matching_offers(
 
                             # Create thread BEFORE sending offer to track in-flight negotiations
                             negotiation_id = f"{order_id}_{matched_order_id}_{AGENT_ID[:8]}"
+
+                            # Get our order to determine strategy and initial price
+                            our_order_dict = await registry_client.get_order(order_id)
+                            our_order = MarketOrder.model_validate(our_order_dict)
+                            strategy = determine_strategy_from_order(our_order)
+                            our_initial_price = _extract_initial_price_from_order(our_order)
+
                             await txn.ensure_thread(
                                 negotiation_id=negotiation_id,
                                 our_order_id=order_id,
                                 their_order_id=matched_order_id,
                                 our_agent_id=AGENT_ID,
                                 their_agent_id=agent_url,
+                                our_initial_price=our_initial_price,
+                                our_strategy=strategy,
                             )
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 

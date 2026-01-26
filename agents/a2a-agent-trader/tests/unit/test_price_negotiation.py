@@ -94,8 +94,6 @@ def create_test_context(
         sender="other_agent",
         data={
             "proposed_price": their_price,  # What they're proposing
-            "sender_order_id": their_order_id,
-            "target_order_id": our_order_id,
         }
     )
     
@@ -393,8 +391,6 @@ class TestNegotiationScenarios:
             sender="other_agent",
             data={
                 "proposed_price": their_price,
-                "sender_order_id": "order_their",
-                "target_order_id": "order_our",
             }
         )
 
@@ -427,10 +423,7 @@ class TestNegotiationScenarios:
             negotiation_id="test_missing_data",
             message_type="counter_proposal",
             sender="other_agent",
-            data={
-                "sender_order_id": "order_their",
-                "target_order_id": "order_our",
-            }
+            data={}
         )
 
         context = DecisionContext(

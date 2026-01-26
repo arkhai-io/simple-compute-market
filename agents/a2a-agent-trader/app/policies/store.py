@@ -12,6 +12,7 @@ from app.schema.pydantic_models import (
     ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
+    MarketOrder,
     NegotiationEvent,
     ComputeResource,
     TokenResource,
@@ -20,7 +21,13 @@ from app.schema.pydantic_models import (
 from app.policies.registry import policy_callable
 from app.policies.sqlite_client import SQLiteClient
 from app.policies.action_builders import NegotiationActionBuilder
-from app.utils.validation import extract_resources_from_make_offer_event
+from app.utils.validation import (
+    extract_resources_from_make_offer_event,
+    determine_strategy_from_order,
+)
+from app.utils.registry_client import get_registry_client
+from app.utils.action_executor import _extract_initial_price_from_order
+from app.utils.config import CONFIG
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
@@ -594,3 +601,75 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "demand_resource": demand_resource.model_dump(mode='json'),
         }
     )
+
+
+@policy_callable("negotiation.respond_to_make_offer")
+async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainAction | None:
+    et = context.event.event_type
+    if et.value != "make_offer":
+        return None
+    if not isinstance(context.event, MakeOfferEvent):
+        return None
+
+    order_obj = context.event.order
+    if not order_obj:
+        return None
+
+    # Convert to dict if it's a MarketOrder model
+    if isinstance(order_obj, MarketOrder):
+        incoming_order = order_obj.model_dump(mode="json")
+    else:
+        incoming_order = order_obj
+
+    their_proposed_price = _extract_initial_price_from_order(incoming_order)
+    registry_client = get_registry_client()
+    our_orders = await registry_client.query_orders({"status": "open"})
+    our_order = None
+
+    for order_dict in our_orders:
+        if order_dict.get("order_id") == incoming_order.get("order_id"):
+            continue
+        order = MarketOrder.model_validate(order_dict)
+        if determine_strategy_from_order(order):
+            our_order = order_dict
+            break
+
+    if not our_order:
+        actions = NegotiationActionBuilder({})
+        return actions.reject("no_matching_order")
+
+    market_order = MarketOrder.model_validate(our_order)
+    strategy = determine_strategy_from_order(market_order)
+    our_price = _extract_initial_price_from_order(our_order)
+
+    their_order_id = incoming_order.get("order_id", "")
+    our_order_id = our_order.get("order_id", "")
+    negotiation_id = f"{min(our_order_id, their_order_id)}_{max(our_order_id, their_order_id)}"
+
+    actions = NegotiationActionBuilder({
+        "negotiation_id": negotiation_id,
+        "order_id": their_order_id,
+        "our_order_id": our_order_id,
+        "our_price": our_price,
+        "their_price": their_proposed_price,
+        "proposed_price": their_proposed_price,
+        "our_strategy": strategy,
+    })
+
+    if strategy == "minimize":
+        if their_proposed_price <= our_price:
+            return actions.accept("favorable_price")
+        if their_proposed_price <= our_price * 1.5:
+            proposed_price = (our_price + their_proposed_price) // 2
+            return actions.counter(proposed_price)
+        return actions.exit("price_unreasonable")
+
+    if strategy == "maximize":
+        if their_proposed_price >= our_price:
+            return actions.accept("favorable_price")
+        if their_proposed_price >= our_price / 1.5:
+            proposed_price = (our_price + their_proposed_price) // 2
+            return actions.counter(proposed_price)
+        return actions.exit("price_unreasonable")
+
+    return actions.reject("unknown_strategy")
