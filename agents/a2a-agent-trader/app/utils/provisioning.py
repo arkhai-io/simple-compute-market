@@ -8,6 +8,15 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _cleanup_temp_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        logger.warning("Failed to remove temp file %s: %s", path, exc)
+
+
 def _find_project_root() -> Path:
     """Walk up the tree to locate the repo root (uses compute-provisioning-iac or .git as sentinels)."""
     current = Path(__file__).resolve()
@@ -140,6 +149,8 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
             exc.stderr,
         )
         raise
+    finally:
+        _cleanup_temp_file(vm_vars_path)
 
     logger.info("VM provisioning playbook output:\n%s", result.stdout)
     if result.stderr:
@@ -225,5 +236,7 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
             exc.stderr,
         )
         raise
+    finally:
+        _cleanup_temp_file(vm_vars_path)
 
     logger.info("VM shutdown scheduling playbook output:\n%s", result.stdout)
