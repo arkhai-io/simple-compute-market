@@ -10,11 +10,17 @@ app = typer.Typer(no_args_is_help=True)
 order_app = typer.Typer(no_args_is_help=True)
 network_app = typer.Typer(no_args_is_help=True)
 registry_app = typer.Typer(no_args_is_help=True)
+dev_app = typer.Typer(no_args_is_help=True)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def run_step(label: str, cmd: list[str], cwd: Path) -> None:
+def run_step(
+    label: str,
+    cmd: list[str],
+    cwd: Path,
+    extra_env: dict[str, str] | None = None,
+) -> None:
     typer.echo(f"==> {label} at {cwd}")
     env = os.environ.copy()
     venv_path = cwd / ".venv"
@@ -22,6 +28,8 @@ def run_step(label: str, cmd: list[str], cwd: Path) -> None:
     if venv_bin.exists():
         env["VIRTUAL_ENV"] = str(venv_path)
         env["PATH"] = f"{venv_bin}{os.pathsep}{env.get('PATH', '')}"
+    if extra_env:
+        env.update(extra_env)
     subprocess.run(cmd, cwd=cwd, check=True, env=env)
 
 
@@ -188,6 +196,36 @@ def registry_start() -> None:
 
 
 app.add_typer(registry_app, name="registry", help="As Market Admin, manage the registry server.")
+
+@dev_app.command("test-env")
+def dev_test_env() -> None:
+    """As a Developer, run the Anvil test env."""
+    run_step(
+        "Start Anvil test env (make test-env)",
+        ["make", "test-env"],
+        REPO_ROOT / "agent",
+    )
+
+
+@dev_app.command("deploy-registry")
+def dev_deploy_registry(
+    rpc_url: str = typer.Option(
+        ...,
+        "--rpc-url",
+        "-r",
+        help="RPC URL to deploy against (sets ANVIL_RPC_URL).",
+    ),
+) -> None:
+    """As a Developer, deploy the ERC-8004 to the given RPC_URL."""
+    run_step(
+        f"Deploy ERC-8004 contracts to {rpc_url}",
+        ["npm", "run", "deploy:anvil"],
+        REPO_ROOT / "erc-8004-contracts",
+        {"ANVIL_RPC_URL": rpc_url},
+    )
+
+
+app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
 
 
 if __name__ == "__main__":
