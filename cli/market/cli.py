@@ -7,8 +7,12 @@ import subprocess
 import typer
 
 app = typer.Typer(no_args_is_help=True)
-order_app = typer.Typer(no_args_is_help=True)
-network_app = typer.Typer(no_args_is_help=True)
+order_app = typer.Typer(no_args_is_help=True, help="Manage orders.")
+network_app = typer.Typer(no_args_is_help=True, help="Manage ZeroTier network.")
+registry_app = typer.Typer(
+    no_args_is_help=True,
+    help="As Market Admin, start the registry server.",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -175,6 +179,18 @@ def network_get_peers() -> None:
 
 
 app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
+
+@registry_app.command("start")
+def registry_start() -> None:
+    """As Market Admin, start the registry server."""
+    run_step(
+        "Start registry (make serve)",
+        ["make", "serve"],
+        REPO_ROOT / "erc-8004-registry-py",
+    )
+
+
+app.add_typer(registry_app, name="registry", help="As Market Admin, start the registry server.")
 
 
 if __name__ == "__main__":
