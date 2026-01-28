@@ -109,9 +109,23 @@ def register() -> None:
 
 
 @app.command()
-def start() -> None:
-    """Start services (stub)."""
-    typer.echo("Not implemented: start")
+def start(
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file passed as ENV_FILE to make serve-a2a.",
+    ),
+) -> None:
+    """Start Agent service."""
+    cmd = ["make", "serve-a2a"]
+    if env:
+        cmd.append(f"ENV_FILE={env}")
+    run_step(
+        "Start agent (make serve-a2a)",
+        cmd,
+        REPO_ROOT / "agent",
+    )
 
 
 @app.command()
