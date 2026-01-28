@@ -8,6 +8,7 @@ import typer
 
 app = typer.Typer(no_args_is_help=True)
 order_app = typer.Typer(no_args_is_help=True)
+network_app = typer.Typer(no_args_is_help=True)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -87,8 +88,63 @@ def order_history() -> None:
     """Show order history (stub)."""
     typer.echo("Not implemented: order history")
 
+@order_app.command("list")
+def order_list() -> None:
+    """List orders (stub)."""
+    typer.echo("Not implemented: order list")
+
+
+@order_app.command("show")
+def order_show(order_id: str = typer.Argument(..., help="Order ID")) -> None:
+    """Show an order (stub)."""
+    typer.echo(f"Not implemented: order show {order_id}")
+
 
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+
+@app.command()
+def register() -> None:
+    """Register (stub)."""
+    typer.echo("Not implemented: register")
+
+
+@app.command()
+def start() -> None:
+    """Start services (stub)."""
+    typer.echo("Not implemented: start")
+
+
+@app.command()
+def config() -> None:
+    """Manage config (stub)."""
+    typer.echo("Not implemented: config")
+
+
+@network_app.command("init")
+def network_init() -> None:
+    """Initialize network (stub)."""
+    typer.echo("Not implemented: network init")
+
+
+@network_app.command("create")
+def network_create() -> None:
+    """Create network (stub)."""
+    typer.echo("Not implemented: network create")
+
+
+@network_app.command("add")
+def network_add(member_id: str = typer.Argument(..., help="Member ID")) -> None:
+    """Authorize a member (stub)."""
+    typer.echo(f"Not implemented: network add {member_id}")
+
+
+@network_app.command("get-peers")
+def network_get_peers() -> None:
+    """Get network peers (stub)."""
+    typer.echo("Not implemented: network get-peers")
+
+
+app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
 
 
 if __name__ == "__main__":
