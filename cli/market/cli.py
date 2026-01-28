@@ -134,28 +134,44 @@ def config() -> None:
     typer.echo("Not implemented: config")
 
 
-@network_app.command("init")
-def network_init() -> None:
-    """Initialize network (stub)."""
-    typer.echo("Not implemented: network init")
+@network_app.command("install")
+def network_install() -> None:
+    """Install ZeroTier, if it isn't already installed."""
+    run_step(
+        "ZeroTier install (make install)",
+        ["make", "install"],
+        REPO_ROOT / "infra",
+    )
 
 
 @network_app.command("create")
 def network_create() -> None:
-    """Create network (stub)."""
-    typer.echo("Not implemented: network create")
+    """Create network."""
+    run_step(
+        "Create ZeroTier network (make create-network)",
+        ["make", "create-network"],
+        REPO_ROOT / "infra",
+    )
 
 
 @network_app.command("add")
 def network_add(member_id: str = typer.Argument(..., help="Member ID")) -> None:
-    """Authorize a member (stub)."""
-    typer.echo(f"Not implemented: network add {member_id}")
+    """Authorize a member."""
+    run_step(
+        f"Authorize ZeroTier member {member_id}",
+        ["make", "add-node", f"NODE_ID={member_id}"],
+        REPO_ROOT / "infra",
+    )
 
 
 @network_app.command("get-peers")
 def network_get_peers() -> None:
-    """Get network peers (stub)."""
-    typer.echo("Not implemented: network get-peers")
+    """Get network peers."""
+    run_step(
+        "Get ZeroTier peers (make get-peers)",
+        ["make", "get-peers"],
+        REPO_ROOT / "infra",
+    )
 
 
 app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
