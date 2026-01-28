@@ -17,6 +17,24 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
 
+## CLI
+
+Install the CLI and add `market` to your PATH:
+
+```bash
+cd cli
+uv venv
+uv pip install -e .
+```
+
+If `market` isn't found, ensure your user bin is on PATH (common default is `~/.local/bin`).
+
+Install all component dependencies and venvs:
+
+```bash
+market install
+```
+
 ## Quick Start
 
 ### 1. Start Local Chain
