@@ -4,7 +4,7 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 
 ## Repository Layout
 
-- `agents/a2a-agent-trader/` — A2A agent server and local test-chain helper
+- `agent/` — A2A agent server and local test-chain helper
 - `erc-8004-contracts/` — ERC-8004 Identity/Reputation/Validation registries (Hardhat)
 - `erc-8004-registry-py/` — Registry/indexer API (FastAPI) for on-chain/off-chain sync
 - `infra/zerotier/` — ZeroTier controller scripts
@@ -22,7 +22,7 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 ### 1. Start Local Chain
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 make test-env
 ```
 
@@ -57,7 +57,7 @@ The registry runs on `http://localhost:8080` by default.
 In a new terminal:
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 make install
 cp .env.sample .env
 ```
@@ -93,7 +93,7 @@ For ZeroTier overlay network:
    Add `ZEROTIER_NETWORK=<network-id>` to `erc-8004-registry-py/.env`
 
 3. **Configure Agent**:
-   Add `ZEROTIER_NETWORK=<network-id>` to `agents/a2a-agent-trader/.env`
+   Add `ZEROTIER_NETWORK=<network-id>` to `agent/.env`
 
 4. **Authorize Nodes**:
 
@@ -108,5 +108,5 @@ Both registry and agent will auto-join ZeroTier when started if `ZEROTIER_NETWOR
 
 ## Useful Commands
 
-- Agent playground: `make playground` in `agents/a2a-agent-trader`
+- Agent playground: `make playground` in `agent`
 - ZeroTier network info: `sudo zerotier-cli listnetworks`

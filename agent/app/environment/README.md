@@ -30,14 +30,14 @@ The Market environment requires a C extension to be built. The binding uses puff
 ### Option 1: Build with Make (Recommended)
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 make build-market-env
 ```
 
 ### Option 2: Build with uv directly
 
 ```bash
-cd agents/a2a-agent-trader/app/environment/seller
+cd agent/app/environment/seller
 uv run python build_binding.py
 ```
 
@@ -46,7 +46,7 @@ uv run python build_binding.py
 If pufferlib is installed from source:
 
 ```bash
-cd agents/a2a-agent-trader/app/environment/seller
+cd agent/app/environment/seller
 
 # Find and copy env_binding.h from pufferlib
 python3 -c "import pufferlib; import os; print(os.path.dirname(pufferlib.__file__))"
@@ -74,14 +74,14 @@ This will make `env_binding.h` available in the pufferlib installation.
 After building, test the environment:
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 make test-market-env
 ```
 
 Or manually:
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 uv run test_market_env.py
 ```
 
@@ -94,7 +94,7 @@ Train a model on the Market environment using pufferlib. **Note:** Since this is
 ### Basic Training
 
 ```bash
-cd agents/a2a-agent-trader
+cd agent
 make train-market-env
 ```
 
@@ -255,4 +255,3 @@ Check with:
 ```bash
 find . -name "binding*.so" -o -name "binding*.pyd"
 ```
-
