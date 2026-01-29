@@ -14,6 +14,7 @@ import urllib.error
 
 from rich.console import Console
 from rich.table import Table
+from rich.panel import Panel
 from rich import box
 
 app = typer.Typer(no_args_is_help=True)
@@ -196,6 +197,20 @@ def _short_ts(value: str | None) -> str:
     return value.replace("T", " ")[:19]
 
 
+def _fetch_json(url: str) -> dict:
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
+        typer.secho(f"Registry error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+
 @order_app.command("list")
 def order_list(
     registry_url: str = typer.Option(
@@ -203,6 +218,11 @@ def order_list(
         "--registry-url",
         "-r",
         help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+    ),
+    order_id: str | None = typer.Option(
+        None,
+        "--order-id",
+        help="Filter by order ID.",
     ),
     limit: int = typer.Option(
         50,
@@ -225,20 +245,13 @@ def order_list(
     if offset < 0:
         raise typer.BadParameter("offset must be >= 0")
 
-    params = urllib.parse.urlencode({"status": "open", "limit": limit, "offset": offset})
+    query_params: dict[str, str | int] = {"status": "open", "limit": limit, "offset": offset}
+    if order_id:
+        query_params["order_id"] = order_id
+    params = urllib.parse.urlencode(query_params)
     url = f"{base_url}/orders?{params}"
 
-    try:
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
-        typer.secho(f"Registry error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+    payload = _fetch_json(url)
 
     items = payload.get("items", [])
     console = Console()
@@ -272,9 +285,43 @@ def order_list(
 
 
 @order_app.command("show")
-def order_show(order_id: str = typer.Argument(..., help="Order ID")) -> None:
-    """Show an order (stub)."""
-    typer.echo(f"Not implemented: order show {order_id}")
+def order_show(
+    order_id: str = typer.Argument(..., help="Order ID"),
+    registry_url: str = typer.Option(
+        None,
+        "--registry-url",
+        "-r",
+        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+    ),
+) -> None:
+    """Show a single order by ID."""
+    base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_url = _normalize_registry_url(base_url)
+    params = urllib.parse.urlencode({"order_id": order_id, "limit": 1, "offset": 0})
+    url = f"{base_url}/orders?{params}"
+    payload = _fetch_json(url)
+    items = payload.get("items", [])
+    if not items:
+        typer.secho("Order not found.", err=True, fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    found = items[0]
+
+    console = Console()
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Order ID", str(found.get("order_id", "-")))
+    table.add_row("Agent ID", str(found.get("agent_id", "-")))
+    table.add_row("Status", str(found.get("status", "-")))
+    table.add_row("Maker", str(found.get("order_maker", "-")))
+    table.add_row("Taker", str(found.get("order_taker", "-")))
+    table.add_row("Duration (h)", str(found.get("duration_hours", "-")))
+    table.add_row("Created", _short_ts(found.get("created_at")))
+    table.add_row("Updated", _short_ts(found.get("updated_at")))
+    table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
+    table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
+
+    console.print(Panel(table, title="Market Order", border_style="blue"))
 
 
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
