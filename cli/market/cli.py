@@ -112,9 +112,23 @@ def order_show(order_id: str = typer.Argument(..., help="Order ID")) -> None:
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 
 @app.command()
-def register() -> None:
-    """Register (stub)."""
-    typer.echo("Not implemented: register")
+def register(
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file passed as ENV_FILE to make register.",
+    ),
+) -> None:
+    """Register agent on-chain (make register)."""
+    cmd = ["make", "register"]
+    if env:
+        cmd.append(f"ENV_FILE={env}")
+    run_step(
+        "Register agent (make register)",
+        cmd,
+        REPO_ROOT / "agent",
+    )
 
 
 @app.command()
