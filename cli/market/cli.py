@@ -201,15 +201,15 @@ app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly
 
 @registry_app.command("start")
 def registry_start() -> None:
-    """Start the registry server."""
+    """Start the Registry Indexer server."""
     run_step(
-        "Start registry (make serve)",
+        "Start Registry Indexer (make serve)",
         ["make", "serve"],
         REPO_ROOT / "erc-8004-registry-py",
     )
 
 
-app.add_typer(registry_app, name="registry", help="As Market Admin, manage the registry server.")
+app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
 
 @dev_app.command("test-env")
 def dev_test_env() -> None:
@@ -230,7 +230,7 @@ def dev_deploy_registry(
         help="RPC URL to deploy against (sets ANVIL_RPC_URL).",
     ),
 ) -> None:
-    """As a Developer, deploy the ERC-8004 to the given RPC_URL."""
+    """As a Developer, deploy the ERC-8004 contracts to the given RPC_URL."""
     run_step(
         f"Deploy ERC-8004 contracts to {rpc_url}",
         ["npm", "run", "deploy:anvil"],
