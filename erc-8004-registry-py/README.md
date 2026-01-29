@@ -445,7 +445,7 @@ curl -X POST "http://localhost:8080/agents/{agent_id}/orders" \
     "order_maker": "http://localhost:8001/.well-known/agent-card.json",
     "offer_resource": {"type": "compute", "region": "us-west"},
     "demand_resource": {"type": "token", "symbol": "USDC"},
-    "duration": 1,
+    "duration_hours": 1,
     "status": "open"
   }'
 ```
