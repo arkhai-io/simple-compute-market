@@ -5,6 +5,7 @@ description = "CLI for the market components"
 requires-python = ">=3.10"
 dependencies = [
   "typer>=0.12.0",
+  "rich>=13.7.0",
 ]
 
 [project.scripts]

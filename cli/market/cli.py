@@ -6,6 +6,15 @@ import subprocess
 from importlib.metadata import version, PackageNotFoundError
 
 import typer
+import json
+import textwrap
+import urllib.parse
+import urllib.request
+import urllib.error
+
+from rich.console import Console
+from rich.table import Table
+from rich import box
 
 app = typer.Typer(no_args_is_help=True)
 order_app = typer.Typer(no_args_is_help=True)
@@ -121,10 +130,145 @@ def order_history() -> None:
     """Show order history (stub)."""
     typer.echo("Not implemented: order history")
 
+
+def _normalize_registry_url(raw_url: str) -> str:
+    return raw_url.rstrip("/")
+
+
+def _short_contract_address(value: str) -> str:
+    if not value:
+        return "-"
+    if len(value) <= 12:
+        return value
+    return f"{value[:6]}…{value[-4:]}"
+
+
+def _format_resource(resource: dict) -> str:
+    if not resource:
+        return "-"
+    if not isinstance(resource, dict):
+        return str(resource)
+    is_compute = resource.get("type") == "compute" or "gpu_model" in resource
+    if is_compute:
+        ordered_keys = ("type", "gpu_model", "quantity", "sla", "region")
+        lines = [f"{key}={resource[key]}" for key in ordered_keys if key in resource]
+        extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
+        lines.extend(f"{key}={resource[key]}" for key in extra_keys)
+        return "\n".join(lines) if lines else json.dumps(resource, separators=(",", ":"), sort_keys=True)
+
+    token_payload = resource.get("token")
+    is_token = resource.get("type") == "token" or isinstance(token_payload, dict) or "symbol" in resource
+    if is_token:
+        token_data = token_payload if isinstance(token_payload, dict) else resource
+        symbol = token_data.get("symbol")
+        decimals = token_data.get("decimals")
+        amount = resource.get("amount", token_data.get("amount"))
+        contract = token_data.get("contract_address")
+        lines = []
+        if symbol is not None:
+            lines.append(f"symbol={symbol}")
+        if decimals is not None:
+            lines.append(f"decimals={decimals}")
+        if amount is not None:
+            lines.append(f"amount={amount}")
+        if contract is not None:
+            lines.append(f"contract_address={_short_contract_address(str(contract))}")
+        return "\n".join(lines) if lines else json.dumps(resource, separators=(",", ":"), sort_keys=True)
+
+    parts: list[str] = []
+    for key in ("type", "region", "gpu_model", "sla", "symbol"):
+        if key in resource:
+            parts.append(f"{key}={resource[key]}")
+    if parts:
+        return ", ".join(parts)
+    return json.dumps(resource, separators=(",", ":"), sort_keys=True)
+
+
+def _shorten(text: str, width: int = 36) -> str:
+    if not text:
+        return "-"
+    return textwrap.shorten(text, width=width, placeholder="…")
+
+
+def _short_ts(value: str | None) -> str:
+    if not value:
+        return "-"
+    return value.replace("T", " ")[:19]
+
+
 @order_app.command("list")
-def order_list() -> None:
-    """List orders (stub)."""
-    typer.echo("Not implemented: order list")
+def order_list(
+    registry_url: str = typer.Option(
+        None,
+        "--registry-url",
+        "-r",
+        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        "-l",
+        help="Maximum orders to fetch (1-200).",
+    ),
+    offset: int = typer.Option(
+        0,
+        "--offset",
+        "-o",
+        help="Pagination offset.",
+    ),
+) -> None:
+    """List open orders from the Registry Indexer."""
+    base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_url = _normalize_registry_url(base_url)
+    if limit < 1 or limit > 200:
+        raise typer.BadParameter("limit must be between 1 and 200")
+    if offset < 0:
+        raise typer.BadParameter("offset must be >= 0")
+
+    params = urllib.parse.urlencode({"status": "open", "limit": limit, "offset": offset})
+    url = f"{base_url}/orders?{params}"
+
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
+        typer.secho(f"Registry error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    items = payload.get("items", [])
+    console = Console()
+    table = Table(title="Open Orders", box=box.SIMPLE_HEAVY)
+    table.add_column("Order ID", style="bold")
+    table.add_column("Agent ID")
+    table.add_column("Maker")
+    table.add_column("Taker")
+    table.add_column("Offer")
+    table.add_column("Demand")
+    table.add_column("Created", justify="right")
+
+    for order in items:
+        offer_display = _format_resource(order.get("offer_resource", {}))
+        demand_display = _format_resource(order.get("demand_resource", {}))
+        table.add_row(
+            _shorten(str(order.get("order_id", "-")), 32),
+            _shorten(str(order.get("agent_id", "-")), 32),
+            _shorten(str(order.get("order_maker", "-")), 40),
+            _shorten(str(order.get("order_taker", "-")), 40),
+            offer_display if "\n" in offer_display else _shorten(offer_display, 120),
+            demand_display if "\n" in demand_display else _shorten(demand_display, 120),
+            _short_ts(order.get("created_at")),
+        )
+
+    if not items:
+        console.print("No open orders found.")
+        return
+
+    console.print(table)
 
 
 @order_app.command("show")
