@@ -55,7 +55,7 @@ def sample_order(db_session, sample_agent):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration=3600,
+        duration_hours=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)

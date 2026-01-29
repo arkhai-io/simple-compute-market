@@ -198,7 +198,7 @@ class MarketOrder(BaseModel):
     demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
-    duration: int = Field(description="The duration of the order in days")
+    duration_hours: int = Field(description="The duration of the order in hours")
     maker_attestation: str | None = Field(
         default=None,
         description="The attestation for the offer in escrow (None for open orders)",
@@ -287,7 +287,7 @@ class MakeOfferEvent(DomainEvent):
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
-                "duration": order.duration,
+                "duration_hours": order.duration_hours,
             },
         )
 
@@ -324,7 +324,7 @@ class AcceptOfferEvent(DomainEvent):
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
-                "duration": order.duration,
+                "duration_hours": order.duration_hours,
                 "escrow_uid": escrow_uid,
                 "ssh_public_key": ssh_public_key,
             },

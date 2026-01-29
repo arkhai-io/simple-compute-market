@@ -50,7 +50,7 @@ async def publish_order(
             "order_maker": order_data.get("order_maker"),
             "offer_resource": order_data.get("offer_resource"),
             "demand_resource": order_data.get("demand_resource"),
-            "duration": order_data.get("duration"),
+            "duration_hours": order_data.get("duration_hours"),
             "maker_attestation": order_data.get("maker_attestation"),
             "taker_attestation": order_data.get("taker_attestation"),
         }
@@ -73,7 +73,7 @@ async def publish_order(
             order_taker=order_data.get("order_taker"),
             offer_resource=order_data.get("offer_resource", {}),
             demand_resource=order_data.get("demand_resource", {}),
-            duration=order_data.get("duration", 1),
+            duration_hours=order_data.get("duration_hours", 1),
             maker_attestation=order_data.get("maker_attestation"),
             taker_attestation=order_data.get("taker_attestation"),
             status=validate_order_status(status_str),

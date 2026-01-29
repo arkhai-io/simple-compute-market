@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 from typing import Any
@@ -38,7 +39,7 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
-from .provisioning import run_vm_provisioning_playbook
+from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
@@ -145,7 +146,8 @@ async def execute_action(
                 gpu_model_str=parameters.get("gpu_model"),
                 sla=parameters.get("sla"),
                 region_str=parameters.get("region"),
-                imbalance_type=imbalance_type
+                imbalance_type=imbalance_type,
+                duration_hours=parameters.get("duration_hours", 1),
             )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
@@ -193,29 +195,35 @@ async def execute_action(
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
-            # Include event_type for downstream parsing and propagate to remote agent.
-            result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
-            if ctx:
-                try:
-                    event = Event(
-                        author=AGENT_ID,
-                        content=genai_types.Content(
-                            role="model",
-                            parts=[
-                                genai_types.Part.from_function_response(
-                                    name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-                                    response=result,
-                                )
-                            ],
-                        ),
-                        invocation_id=ctx.invocation_id,
-                        branch=ctx.branch,
-                    )
-                    await send_to_remote_agent(ctx, event)
-                except Exception as send_err:
-                    logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
+            if result.get("status") == "fulfilled":
+                # Include event_type for downstream parsing and propagate to remote agent.
+                result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+                if ctx:
+                    try:
+                        event = Event(
+                            author=AGENT_ID,
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part.from_function_response(
+                                        name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                                        response=result,
+                                    )
+                                ],
+                            ),
+                            invocation_id=ctx.invocation_id,
+                            branch=ctx.branch,
+                        )
+                        await send_to_remote_agent(ctx, event)
+                    except Exception as send_err:
+                        logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
+            else:
+                logger.warning(
+                    "[ACTION] Skipping fulfillment event; status=%s",
+                    result.get("status"),
+                )
             outcome["result"] = result
-            outcome["message"] = result.get("message", "Compute obligation fulfilled")
+            outcome["message"] = result.get("message")
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
@@ -467,10 +475,10 @@ async def provision_machine(ssh_public_key: str) -> str:
             logger.info(f"[TOOL] Machine provisioned: {connection_info}")
             return connection_info
         logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        return "Provisioning completed, but SSH connection info unavailable."
+        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
     except Exception as exc:
         logger.error("[TOOL] Provisioning failed: %s", exc)
-        return f"Provisioning failed: {exc}"
+        raise RuntimeError(f"Provisioning failed: {exc}") from exc
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""
@@ -675,6 +683,7 @@ async def accept_offer(
                 escrow_receipt = await buy_compute_with_erc20(
                     compute_resource=compute_resource,
                     token_resource=token_resource,
+                    duration_hours=order_dict.get("duration_hours", 1),
                     oracle_address=DEMO_ORACLE_ADDRESS,
                     client=alkahest_client,
                 )
@@ -805,6 +814,7 @@ def create_order(
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
     demand_resource: ComputeResource | TokenResource = None,
+    duration_hours: int = 1,
 ) -> dict | None:
     """Create an order in the market.
 
@@ -821,6 +831,7 @@ def create_order(
         publish_to_registry: Whether to publish order to registry (default: True)
         offer_resource: Pre-constructed offer resource (optional, overrides gpu_model_str/sla/region_str)
         demand_resource: Pre-constructed demand resource (optional)
+        duration_hours: Duration of the order in hours (default: 1); 1 if seller (rate), else total if buyer
 
     Returns:
         The created order as a dictionary if the order was successfully created, or None otherwise.
@@ -871,11 +882,11 @@ def create_order(
         order_taker=None,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
-        duration=1,
+        duration_hours=duration_hours,
         maker_attestation=None,
         taker_attestation=None
     )
-    
+
     order_dict = order.model_dump(mode='json')
     
     # Note: Order publishing to registry happens in make_offer() to ensure
@@ -1211,14 +1222,14 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
 def encode_compute_lease(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    duration_days: int = 1,
+    duration_hours: int,
 ) -> bytes:
     """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
 
     Args:
         compute_resource: ComputeResource (or dict payload) describing the offered compute.
-        token_resource: TokenResource (or dict) describing the payment token and amount (base units).
-        duration_days: Lease duration in days (defaults to 1, must be >=1).
+        token_resource: TokenResource (or dict) describing the payment token and amount (base units) for the hourly rate.
+        duration_hours: Lease duration in hours (defaults to 1, must be >=1).
     """
     compute = compute_resource
     if isinstance(compute_resource, dict):
@@ -1226,29 +1237,34 @@ def encode_compute_lease(
     if not isinstance(compute, ComputeResource):
         raise ValueError("encode_compute_lease expects a ComputeResource")
 
-    payment = token_resource
+    hourly_rate = token_resource
     if isinstance(token_resource, dict):
-        payment = TokenResource.model_validate(token_resource)
-    if not isinstance(payment, TokenResource):
+        hourly_rate = TokenResource.model_validate(token_resource)
+    if not isinstance(hourly_rate, TokenResource):
         raise ValueError("encode_compute_lease expects a TokenResource")
 
-    if duration_days < 1:
-        raise ValueError("duration_days must be >= 1")
+    if duration_hours < 1:
+        raise ValueError("duration_hours must be >= 1")
 
-    token_meta = payment.token
-    human_total_price = Decimal(payment.amount) / Decimal(10**token_meta.decimals)
-    human_price_per_day = human_total_price / Decimal(duration_days)
+    token_meta = hourly_rate.token
+    total_price = hourly_rate.amount * duration_hours
+    total_payment_resource = TokenResource(token=token_meta, amount=total_price)
+    
+    # Human-readable prices
+    human_total_payment = Decimal(total_payment_resource.amount) / Decimal(10**token_meta.decimals)
+    human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
 
     lease_terms = {
         "gpu_model": compute.gpu_model.value if hasattr(compute.gpu_model, "value") else str(compute.gpu_model),
         "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
         "quantity": compute.quantity,
         "sla": compute.sla,
-        "duration_days": duration_days,
+        "duration_hours": duration_hours,
         "token_symbol": token_meta.symbol,
         "token_address": token_meta.contract_address,
-        "price_per_day": float(human_price_per_day),
-        "total_price": float(human_total_price),
+        "price_per_hour_decimal": float(human_price_per_hour),
+        "total_price_decimal": float(human_total_payment),
+        "total_price_int": total_payment_resource.amount,
     }
 
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
@@ -1292,7 +1308,7 @@ async def approve_token_escrow(
 async def buy_compute_with_erc20(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    *,
+    duration_hours: int,
     oracle_address: str,
     client: AlkahestClient,
 ) -> Any:
@@ -1318,22 +1334,27 @@ async def buy_compute_with_erc20(
         encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
-            duration_days=1,
+            duration_hours=duration_hours,
         )
     )
 
     demand_bytes = demand_data.encode_self()
 
-    # 2) Build price data from token resource
+    # 2) Build price data from token resource, computing duration * rate
     if isinstance(token_resource, TokenResource):
-        payment = token_resource
+        hourly_rate = token_resource
     else:
-        payment = TokenResource.model_validate(token_resource)
+        hourly_rate = TokenResource.model_validate(token_resource)
 
-    price_data = {"address": payment.token.contract_address, "value": payment.amount}
+    total_payment = TokenResource(
+        token=hourly_rate.token,
+        amount=hourly_rate.amount * duration_hours,
+    )
+
+    price_data = {"address": total_payment.token.contract_address, "value": total_payment.amount}
 
     # 3) Approve escrow spend
-    await approve_token_escrow(payment, alkahest_client=client)
+    await approve_token_escrow(total_payment, alkahest_client=client)
 
     # 4) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
@@ -1374,9 +1395,20 @@ async def fulfill_compute_obligation(
     """
     oracle_address = _resolve_oracle_address(oracle_address)
     # connection_details = await mock_provision_machine(ssh_public_key)
-    connection_details = await provision_machine(ssh_public_key)
+    try:
+        connection_details = await provision_machine(ssh_public_key)
+    except Exception as error:
+        logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
+        return {
+            "status": "error",
+            "message": f"Provisioning failed: {error}",
+            "escrow_uid": escrow_uid,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
     fulfillment_uid = None
     maker_attestation = None
+    duration_hours = 1
 
     logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
     order_dict = None
@@ -1392,14 +1424,19 @@ async def fulfill_compute_obligation(
             order_bytes = order.encode("utf-8")
         elif isinstance(order, dict):
             order_dict = order
-            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-            order_bytes = encode_compute_lease(
-                compute_resource=compute_resource,
-                token_resource=token_resource,
-                duration_days=1,
-            )
-        if order_dict:
-            order_id = order_dict.get("order_id")
+
+    if order_dict:
+        order_id = order_dict.get("order_id")
+        duration_hours = order_dict.get("duration_hours", 1)
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        order_bytes = encode_compute_lease(
+            compute_resource=compute_resource,
+            token_resource=token_resource,
+            duration_hours=duration_hours,
+        )
+
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
+    schedule_vm_shutdown(lease_end_utc)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
