@@ -42,13 +42,14 @@ Create a market order via the agent endpoint:
 ```bash
 market order create \
   -o '{"gpu_model":"H200","quantity":1,"sla":99.9,"region":"California, US"}' \
-  -d '{"token":{"symbol":"MOCK","contract_address":"0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0","decimals":2},"amount":900}'
+  -d '{"token":"MOCK","amount":9.0}'
 ```
 
 Optional flags:
 
 - `--agent-url` (or `AGENT_URL`/`BASE_URL_OVERRIDE`) to target a specific agent
 - `--duration-hours` to set duration (defaults to `1`)
+- `token` may be a known symbol or contract address; amount is a float and converted using token decimals
 
 ## Quick Start
 

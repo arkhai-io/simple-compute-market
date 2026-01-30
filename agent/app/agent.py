@@ -931,12 +931,8 @@ async def _run_create_order_flow(request: Request) -> dict:
 
     Example demand (token):
     {
-      "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-        "decimals": 2
-      },
-      "amount": 900
+      "token": "MOCK",
+      "amount": 9.0
     }
     """
     # Validate that request JSON is valid:
@@ -954,9 +950,56 @@ async def _run_create_order_flow(request: Request) -> dict:
     if offer_data is None or demand_data is None:
         raise ValueError("Request must include both 'offer' and 'demand'")
 
+    def normalize_token_resource(resource_payload: dict) -> dict:
+        if "token" not in resource_payload:
+            return resource_payload
+
+        token_value = resource_payload.get("token")
+        if token_value is None:
+            raise ValueError("Token must be a symbol or contract address")
+
+        try:
+            if isinstance(token_value, str):
+                token_meta = TOKEN_REGISTRY.require(token_value)
+            elif isinstance(token_value, dict):
+                if all(key in token_value for key in ("symbol", "contract_address", "decimals")):
+                    token_meta = token_value
+                elif "symbol" in token_value:
+                    token_meta = TOKEN_REGISTRY.require(token_value["symbol"])
+                elif "contract_address" in token_value:
+                    token_meta = TOKEN_REGISTRY.require(token_value["contract_address"])
+                else:
+                    raise ValueError("Token metadata must include symbol/contract_address/decimals")
+            else:
+                raise ValueError("Token must be a symbol or contract address")
+        except Exception as exc:
+            raise ValueError(f"Unknown token: {token_value}") from exc
+
+        amount_value = resource_payload.get("amount")
+        if amount_value is None:
+            raise ValueError("Token resource must include amount")
+
+        from decimal import Decimal
+        if isinstance(token_meta, dict):
+            decimals = int(token_meta["decimals"])
+            token_dump = token_meta
+        else:
+            decimals = token_meta.decimals
+            token_dump = token_meta.model_dump()
+
+        raw = Decimal(str(amount_value)) * (Decimal(10) ** decimals)
+        if raw != raw.to_integral_value():
+            raise ValueError("Amount has too many decimal places for token")
+        amount_int = int(raw)
+
+        normalized = dict(resource_payload)
+        normalized["token"] = token_dump
+        normalized["amount"] = amount_int
+        return normalized
+
     try:
-        offer_resource = Resource.parse_from_dict(offer_data)
-        demand_resource = Resource.parse_from_dict(demand_data)
+        offer_resource = Resource.parse_from_dict(normalize_token_resource(offer_data))
+        demand_resource = Resource.parse_from_dict(normalize_token_resource(demand_data))
     except Exception as e:
         raise ValueError(f"Invalid offer/demand resource: {e}") from e
 
