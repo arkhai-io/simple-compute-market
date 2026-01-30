@@ -63,7 +63,7 @@ if CONFIG.use_vertex_ai:
         allow_origins=allow_origins,
         session_service_uri=session_service_uri,
     )
-    app.title = "a2a-agent-trader"
+    app.title = "a2a-agent"
     app.description = "API for interacting with the Agent a2a-agent"
 
     @app.on_event("startup")

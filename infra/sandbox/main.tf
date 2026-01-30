@@ -84,7 +84,7 @@ module "cicd_setup" {
 locals {
   agents = [
     "a2a-agent-farmer",
-    "a2a-agent-trader",
+    "a2a-agent",
   ]
 }
 
