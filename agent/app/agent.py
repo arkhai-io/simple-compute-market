@@ -74,6 +74,9 @@ from .schema.pydantic_models import (
     Region,
     ComputeResource,
     ComputeResourcePortfolio,
+    TokenResource,
+    Resource,
+    OrderCreateEvent,
 )
 
 from .policies.store import PolicyStore
@@ -260,6 +263,24 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             # Use model_validate - model_validator will handle resource dict conversion
             return ResourceImbalanceEvent.model_validate(payload)
             
+        elif event_type == EventType.ORDER_CREATE:
+            offer_data = data.get("offer", data.get("offer_resource"))
+            demand_data = data.get("demand", data.get("demand_resource"))
+            if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
+                raise ValueError("OrderCreateEvent requires 'offer' and 'demand' dictionaries")
+
+            duration_hours = data.get("duration_hours", payload.get("duration_hours", 1))
+            order_create_payload = {
+                "event_id": payload.get("event_id") or f"order_create_{uuid.uuid4()}",
+                "event_type": EventType.ORDER_CREATE.value,
+                "source": payload.get("source") or BASE_URL_OVERRIDE,
+                "offer": offer_data,
+                "demand": demand_data,
+                "duration_hours": duration_hours,
+                "data": data,
+            }
+            return OrderCreateEvent.model_validate(order_create_payload)
+
         elif event_type == EventType.MAKE_OFFER:
             # Extract offer data - could be in 'offer' key or directly in 'data'
             offer_data = data.get("offer", data)
@@ -893,11 +914,169 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
 # Create Starlette route for the alert endpoint
 alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 
+AGENT_REST_API_APP_NAME = "agent-rest-api"
+AGENT_REST_API_USER_ID = "agent-rest-api"
+
+async def _run_create_order_flow(request: Request) -> dict:
+    """
+    Internal helper to run the create order flow.
+
+    Example offer (compute):
+    {
+      "gpu_model": "H200",
+      "quantity": 1,
+      "sla": 99.9,
+      "region": "California, US"
+    }
+
+    Example demand (token):
+    {
+      "token": {
+        "symbol": "MOCK",
+        "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "decimals": 2
+      },
+      "amount": 900
+    }
+    """
+    # Validate that request JSON is valid:
+    # - Must have both offer and demand specified
+    # - One must be a ComputeResource and the other a TokenResource
+    try:
+        order_data = await request.json()
+    except Exception as e:
+        raise ValueError(f"Invalid JSON in request body: {e}") from e
+
+    offer_data = order_data.get("offer")
+    demand_data = order_data.get("demand")
+    duration_hours = order_data.get("duration_hours", 1)
+
+    if offer_data is None or demand_data is None:
+        raise ValueError("Request must include both 'offer' and 'demand'")
+
+    try:
+        offer_resource = Resource.parse_from_dict(offer_data)
+        demand_resource = Resource.parse_from_dict(demand_data)
+    except Exception as e:
+        raise ValueError(f"Invalid offer/demand resource: {e}") from e
+
+    offer_is_compute = isinstance(offer_resource, ComputeResource)
+    offer_is_token = isinstance(offer_resource, TokenResource)
+    demand_is_compute = isinstance(demand_resource, ComputeResource)
+    demand_is_token = isinstance(demand_resource, TokenResource)
+
+    if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
+        raise ValueError("Offer and demand must be one compute and one token resource")
+
+    event_id = f"order_create_{uuid.uuid4()}"
+    order_create_event = OrderCreateEvent(
+        event_id=event_id,
+        source=BASE_URL_OVERRIDE,
+        offer=offer_resource,
+        demand=demand_resource,
+        duration_hours=duration_hours,
+        data={
+            "offer": offer_resource.model_dump(mode="json"),
+            "demand": demand_resource.model_dump(mode="json"),
+            "duration_hours": duration_hours,
+        },
+    )
+
+    if CONFIG.enable_event_queue:
+        queue_event(order_create_event.model_dump(mode="json"))
+        return {
+            "status": "queued",
+            "event_id": event_id,
+            "order_request": order_create_event.model_dump(mode="json"),
+        }
+
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=AGENT_REST_API_APP_NAME,
+        user_id=AGENT_REST_API_USER_ID,
+    )
+    runner = Runner(
+        agent=root_agent,
+        app_name=AGENT_REST_API_APP_NAME,
+        session_service=session_service,
+    )
+
+    event_payload = order_create_event.model_dump(mode="json")
+
+    message = genai_types.Content(
+        role="user",
+        parts=[
+            genai_types.Part.from_function_response(
+                name="create_order",
+                response=event_payload
+            )
+        ],
+    )
+
+    final_response: str | None = None
+    async for event in runner.run_async(
+        user_id=AGENT_REST_API_USER_ID,
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            text_parts = [
+                part.text
+                for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            ]
+            if text_parts:
+                final_response = "".join(text_parts)
+                break
+
+    if not final_response:
+        raise HTTPException(
+            status_code=500,
+            detail="root_agent did not provide a response to the order creation request.",
+        )
+
+    return {
+        "status": "created",
+        "event_id": event_id,
+        "order_request": order_create_event.model_dump(mode="json"),
+        "root_agent_response": final_response,
+    }
+
+async def create_market_order_endpoint(request: Request) -> JSONResponse:
+    """
+    Expose an endpoint to create market orders via the root agent.
+    """
+
+    try:
+        response = await _run_create_order_flow(request)
+        return JSONResponse(response)
+    except ValueError as e:
+        logger.error(f"[ORDER CREATION] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except ValidationError as e:
+        logger.error(f"[ORDER CREATION] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"[ORDER CREATION] Error creating market order: {e}")
+        return JSONResponse(
+            {"error": "Failed to create market order", "detail": str(e)},
+            status_code=500
+        )
+
+agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
 # Add the alert route to the A2A app
 a2a_app.routes.append(alert_route)
+# Add the order creation route to the A2A app
+a2a_app.routes.append(agent_order_creation_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file

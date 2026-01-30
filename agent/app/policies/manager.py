@@ -81,6 +81,25 @@ class PolicyManager:
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save resource_imbalance policy: {e}")
 
+        # Order-create policy (local order entry point)
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="order_create_default_v1",
+                trigger_type=EventType.ORDER_CREATE.value,
+                callable_ref="order_create.default.v1",
+            )
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name="order_create.default.v1",
+                components=[
+                    "oc.action.make_offer_from_order_create",
+                ],
+            )
+            logger.debug("[POLICY MANAGER] Ensured order_create policy")
+        except Exception as e:
+            logger.warning(f"[POLICY MANAGER] Failed to save order_create policy: {e}")
+
         # Make-offer policy (composite saved in DB)
         try:
             await self._policy_store.save_policy(

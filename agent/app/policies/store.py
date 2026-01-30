@@ -196,6 +196,29 @@ def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
     return None
 
 
+@policy_callable("oc.action.make_offer_from_order_create")
+def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAction | None:
+    from app.schema.pydantic_models import ActionType, OrderCreateEvent
+
+    if not isinstance(context.event, OrderCreateEvent):
+        return None
+
+    offer = context.event.offer
+    demand = context.event.demand
+    duration_hours = context.event.duration_hours
+
+    offer_payload = offer.model_dump(mode="json") if hasattr(offer, "model_dump") else offer
+    demand_payload = demand.model_dump(mode="json") if hasattr(demand, "model_dump") else demand
+
+    return DomainAction(
+        action_type=ActionType.MAKE_OFFER,
+        parameters={
+            "offer": offer_payload,
+            "demand": demand_payload,
+            "duration_hours": duration_hours,
+        },
+    )
+
 @policy_callable("ri.action.make_offer_from_resource")
 def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
     from app.schema.pydantic_models import ActionType

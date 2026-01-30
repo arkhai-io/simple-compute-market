@@ -35,6 +35,21 @@ Install all component dependencies and venvs:
 market install
 ```
 
+## Order Creation (CLI)
+
+Create a market order via the agent endpoint:
+
+```bash
+market order create \
+  -o '{"gpu_model":"H200","quantity":1,"sla":99.9,"region":"California, US"}' \
+  -d '{"token":{"symbol":"MOCK","contract_address":"0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0","decimals":2},"amount":900}'
+```
+
+Optional flags:
+
+- `--agent-url` (or `AGENT_URL`/`BASE_URL_OVERRIDE`) to target a specific agent
+- `--duration-hours` to set duration (defaults to `1`)
+
 ## Quick Start
 
 ### 1. Start Local Chain

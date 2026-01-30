@@ -242,6 +242,7 @@ class MarketOrder(BaseModel):
 class EventType(str, Enum):
     """Events that can be handled by the Agent"""
 
+    ORDER_CREATE = "order_create"
     MAKE_OFFER = "make_offer"
     ACCEPT_OFFER = "accept_offer"
     RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
@@ -268,6 +269,26 @@ class DomainEvent(BaseModel):
         default_factory=dict,
         description="Event-specific data payload",
     )
+
+
+class OrderCreateEvent(DomainEvent):
+    """Event triggered when a local client requests order creation."""
+
+    event_type: EventType = Field(default=EventType.ORDER_CREATE)
+    offer: Resource = Field(description="Offered resource (compute or token)")
+    demand: Resource = Field(description="Demanded resource (compute or token)")
+    duration_hours: int = Field(default=1, description="Duration of the order in hours")
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_resources(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "offer" in data:
+            data["offer"] = Resource.parse_from_dict(data["offer"])
+        if "demand" in data:
+            data["demand"] = Resource.parse_from_dict(data["demand"])
+        return data
 
 
 class MakeOfferEvent(DomainEvent):

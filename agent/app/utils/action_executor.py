@@ -34,7 +34,8 @@ from app.schema.pydantic_models import (
     GPUModel,
     MarketOrder,
     Region,
-    TokenResource
+    TokenResource,
+    Resource,
 )
 
 from .config import CONFIG
@@ -140,16 +141,41 @@ async def execute_action(
             outcome["message"] = "Offer rejected (simulated)"
             
         case ActionType.MAKE_OFFER.value:
-            gpu_model = parameters.get("gpu_model", "unknown")
-            imbalance_type = parameters.get("imbalance_type", "surplus")
-            logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
-            order = create_order(
-                gpu_model_str=parameters.get("gpu_model"),
-                sla=parameters.get("sla"),
-                region_str=parameters.get("region"),
-                imbalance_type=imbalance_type,
-                duration_hours=parameters.get("duration_hours", 1),
-            )
+            offer_param = parameters.get("offer")
+            demand_param = parameters.get("demand")
+            if offer_param is not None and demand_param is not None:
+                try:
+                    offer_resource = Resource.parse_from_dict(offer_param)
+                    demand_resource = Resource.parse_from_dict(demand_param)
+                except Exception as exc:
+                    raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+
+                offer_is_compute = isinstance(offer_resource, ComputeResource)
+                offer_is_token = isinstance(offer_resource, TokenResource)
+                demand_is_compute = isinstance(demand_resource, ComputeResource)
+                demand_is_token = isinstance(demand_resource, TokenResource)
+
+                if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
+                    raise ValueError("Offer and demand must be one compute and one token resource")
+
+                logger.info("[ACTION] Creating order from explicit offer/demand payload")
+                order = create_order(
+                    offer_resource=offer_resource,
+                    demand_resource=demand_resource,
+                    duration_hours=parameters.get("duration_hours", 1),
+                )
+                gpu_model = getattr(offer_resource, "gpu_model", None) or getattr(demand_resource, "gpu_model", "unknown")
+            else:
+                gpu_model = parameters.get("gpu_model", "unknown")
+                imbalance_type = parameters.get("imbalance_type", "surplus")
+                logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
+                order = create_order(
+                    gpu_model_str=parameters.get("gpu_model"),
+                    sla=parameters.get("sla"),
+                    region_str=parameters.get("region"),
+                    imbalance_type=imbalance_type,
+                    duration_hours=parameters.get("duration_hours", 1),
+                )
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.

@@ -109,9 +109,77 @@ def install(
     typer.echo("Done.")
 
 @order_app.command("create")
-def order_create() -> None:
-    """Create a new order (stub)."""
-    typer.echo("Not implemented: order create")
+def order_create(
+    offer: str = typer.Option(
+        ...,
+        "--offer",
+        "-o",
+        help="Offer resource JSON.",
+    ),
+    demand: str = typer.Option(
+        ...,
+        "--d",
+        "-d",
+        help="Demand resource JSON.",
+    ),
+    agent_url: str | None = typer.Option(
+        None,
+        "--agent-url",
+        "-a",
+        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+    duration_hours: int | None = typer.Option(
+        None,
+        "--duration-hours",
+        "-t",
+        help="Order duration in hours (default: 1).",
+    ),
+) -> None:
+    """Create a new order via the Agent endpoint."""
+    base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = _normalize_registry_url(base_url)
+    duration = duration_hours if duration_hours is not None else 1
+    if duration < 1:
+        raise typer.BadParameter("duration-hours must be >= 1")
+
+    try:
+        offer_data = json.loads(offer)
+        demand_data = json.loads(demand)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"Invalid JSON: {exc}") from exc
+
+    if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
+        raise typer.BadParameter("Offer and demand must be JSON objects")
+
+    payload = {
+        "offer": offer_data,
+        "demand": demand_data,
+        "duration_hours": duration,
+    }
+    url = f"{base_url}/orders/create"
+    response = _post_json(url, payload)
+
+    console = Console()
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Status", str(response.get("status", "-")))
+    if "event_id" in response:
+        table.add_row("Event ID", str(response.get("event_id")))
+    if "root_agent_response" in response:
+        table.add_row("Agent", str(response.get("root_agent_response")))
+    order_request = response.get("order_request")
+    if isinstance(order_request, dict):
+        offer_req = order_request.get("offer")
+        demand_req = order_request.get("demand")
+        if offer_req is not None:
+            table.add_row("Offer", _format_resource(offer_req))
+        if demand_req is not None:
+            table.add_row("Demand", _format_resource(demand_req))
+        if "duration_hours" in order_request:
+            table.add_row("Duration (h)", str(order_request.get("duration_hours")))
+
+    console.print(Panel(table, title="Order Create", border_style="green"))
 
 
 @order_app.command("update")
@@ -208,6 +276,26 @@ def _fetch_json(url: str) -> dict:
         raise typer.Exit(code=1)
     except Exception as exc:
         typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+
+def _post_json(url: str, payload: dict) -> dict:
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
+        typer.secho(f"Agent error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    except Exception as exc:
+        typer.secho(f"Failed to create order: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
 
