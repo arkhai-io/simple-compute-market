@@ -19,7 +19,7 @@ def _find_project_root() -> Path:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=[".env", ".env.local"], extra="ignore")
 
     host: str = "0.0.0.0"
     port: int = 8081
