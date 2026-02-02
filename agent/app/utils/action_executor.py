@@ -1027,6 +1027,8 @@ async def _find_and_send_matching_offers(
 
                             # Get our order to determine strategy and initial price
                             our_order_dict = await registry_client.get_order(order_id)
+                            if not our_order_dict:
+                                raise ValueError(f"Order {order_id} not found in registry")
                             our_order = MarketOrder.model_validate(our_order_dict)
                             strategy = determine_strategy_from_order(our_order)
                             our_initial_price = _extract_initial_price_from_order(our_order)
