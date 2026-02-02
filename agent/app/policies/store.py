@@ -245,6 +245,7 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
             "escrow_uid": context.event.escrow_uid,
             "fulfillment_uid": context.event.fulfillment_uid,
             "connection_details": context.event.connection_details,
+            "counterparty_url": getattr(context.event, "source", None),
         },
     )
 

@@ -285,10 +285,13 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             )
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
-            return ReceiveComputeObligationFulfillmentEvent.from_payload(data)
+            # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
+            fulfillment_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
+            return ReceiveComputeObligationFulfillmentEvent.from_payload(fulfillment_payload)
 
         elif event_type == EventType.ARBITRATION_COMPLETE:
-            return ArbitrationCompleteEvent.from_payload(data)
+            arb_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
+            return ArbitrationCompleteEvent.from_payload(arb_payload)
             
         elif event_type == EventType.NEGOTIATION:
             # Validate NegotiationEvent with required fields
