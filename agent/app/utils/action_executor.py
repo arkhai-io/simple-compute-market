@@ -459,6 +459,11 @@ async def mock_provision_machine(ssh_public_key: str) -> str:
     return "demo-user@node-01.example.net"
 
 
+def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
+    """Mock stand-in for scheduling VM shutdown."""
+    logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
+
+
 async def provision_machine(ssh_public_key: str) -> str:
     """Provision a machine using the provided SSH public key.
 
@@ -1396,9 +1401,11 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
-    # connection_details = await mock_provision_machine(ssh_public_key)
     try:
-        connection_details = await provision_machine(ssh_public_key)
+        if CONFIG.use_mock_provisioning:
+            connection_details = await mock_provision_machine(ssh_public_key)
+        else:
+            connection_details = await provision_machine(ssh_public_key)
     except Exception as error:
         logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
         return {
@@ -1438,7 +1445,10 @@ async def fulfill_compute_obligation(
         )
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
-    schedule_vm_shutdown(lease_end_utc)
+    if CONFIG.use_mock_provisioning:
+        mock_schedule_vm_shutdown(lease_end_utc)
+    else:
+        schedule_vm_shutdown(lease_end_utc)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
