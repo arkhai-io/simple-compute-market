@@ -180,9 +180,9 @@ infra/*/*.tfstate.backup
 infra/*/.terraform*
 infra/*/*.plan
 policies.db
-agents/a2a-agent-trader/resources
-agents/a2a-agent-trader/app/environment/resources
-agents/a2a-agent-trader/app/environment/seller/resources
+agent/resources
+agent/app/environment/resources
+agent/app/environment/seller/resources
 # PufferRL Experiments
 experiments/
 wandb/

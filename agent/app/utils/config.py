@@ -137,6 +137,8 @@ class Config:
     # Order retry settings
     enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
+    # Provisioning settings
+    use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -224,6 +226,8 @@ def load_config() -> Config:
         # Order retry settings
         enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
+        # Provisioning settings
+        use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
     )
 
 

@@ -232,6 +232,22 @@ async def update_order(
     }
 
 
+@router.get("/orders/{order_id}")
+async def get_order(
+    order_id: str = Path(..., description="Order ID"),
+    db: Session = Depends(get_db),
+):
+    """Get a single order by ID."""
+    order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return {
+        "order": order_to_dict(order),
+    }
+
+
 @router.delete("/orders/{order_id}", status_code=204)
 async def delete_order(
     order_id: str = Path(..., description="Order ID"),
@@ -247,4 +263,3 @@ async def delete_order(
     db.commit()
     
     return None
-

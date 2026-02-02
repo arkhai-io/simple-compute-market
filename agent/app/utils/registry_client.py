@@ -108,6 +108,32 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error getting agent orders: {e}")
             return []
+
+    async def get_order(self, order_id: str) -> Dict[str, Any] | None:
+        """Get a single order by ID.
+
+        Args:
+            order_id: Order ID
+
+        Returns:
+            Order dictionary or None if not found or on error
+        """
+        try:
+            session = await self._get_session()
+            async with session.get(f"{self.base_url}/orders/{order_id}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if isinstance(data, dict) and "order" in data and isinstance(data["order"], dict):
+                        return data["order"]
+                    return data
+                if response.status == 404:
+                    logger.debug(f"[REGISTRY] Order {order_id} not found in registry (404)")
+                    return None
+                logger.warning(f"[REGISTRY] Failed to get order {order_id}: {response.status}")
+                return None
+        except Exception as e:
+            logger.error(f"[REGISTRY] Error getting order {order_id}: {e}")
+            return None
     
     async def query_orders(
         self,
@@ -294,4 +320,3 @@ def get_registry_client() -> RegistryClient:
         timeout = getattr(CONFIG, 'registry_order_timeout', 30)
         _registry_client = RegistryClient(timeout=timeout)
     return _registry_client
-

@@ -8,7 +8,7 @@ Agent generated with [`googleCloudPlatform/agent-starter-pack`](https://github.c
 This project is organized as follows:
 
 ```
-a2a-agent/
+agent/
 ├── app/                 # Core application code
 │   ├── agent.py         # Main agent logic
 │   ├── server.py        # FastAPI Backend server
