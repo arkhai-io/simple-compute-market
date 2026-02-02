@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -199,6 +200,20 @@ async def execute_action(
                 # Include event_type for downstream parsing and propagate to remote agent.
                 result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
                 if ctx:
+                    # Counterparty to notify is the order taker (we are the maker fulfilling for them).
+                    order_obj = parameters.get("order")
+                    if isinstance(order_obj, dict):
+                        order_dict = order_obj
+                    elif hasattr(order_obj, "model_dump"):
+                        order_dict = order_obj.model_dump(mode="json") if order_obj else {}
+                    else:
+                        order_dict = {}
+                    counterparty_url = order_dict.get("order_taker") if order_dict else None
+                    if not counterparty_url or not str(counterparty_url).strip():
+                        logger.warning(
+                            "[A2A] fulfill_compute_obligation: no counterparty URL in order (order_taker); parameters keys=%s",
+                            list(parameters.keys()),
+                        )
                     try:
                         event = Event(
                             author=AGENT_ID,
@@ -214,7 +229,7 @@ async def execute_action(
                             invocation_id=ctx.invocation_id,
                             branch=ctx.branch,
                         )
-                        await send_to_remote_agent(ctx, event)
+                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
                     except Exception as send_err:
                         logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             else:
@@ -238,6 +253,13 @@ async def execute_action(
             decisions = result.get("decisions")
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
             if ctx:
+                # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
+                counterparty_url = parameters.get("counterparty_url") or parameters.get("agent_url")
+                if not counterparty_url or not str(counterparty_url).strip():
+                    logger.warning(
+                        "[A2A] trust_compute_obligation_fulfillment: no counterparty URL in parameters; keys=%s",
+                        list(parameters.keys()),
+                    )
                 try:
                     event = Event(
                         author=AGENT_ID,
@@ -260,7 +282,7 @@ async def execute_action(
                         invocation_id=ctx.invocation_id,
                         branch=ctx.branch,
                     )
-                    await send_to_remote_agent(ctx, event)
+                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
@@ -352,6 +374,8 @@ def connect_to_remote_agent(agent_url: str | None = None):
             "[A2A] No agent_url provided, falling back to REMOTE_AGENT_URL_OVERRIDE. "
             "This may misroute messages in staging environments."
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("[A2A] Fallback call stack:\n%s", "".join(traceback.format_stack(limit=8)[:-1]))
         agent_url = REMOTE_AGENT_URL_OVERRIDE
     agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
     
@@ -792,8 +816,16 @@ async def accept_offer(
             import traceback
             logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
 
+    # Counterparty to notify is the order maker (we are the taker accepting their offer).
+    counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")
+    if not counterparty_url or not counterparty_url.strip():
+        logger.warning(
+            "[A2A] accept_offer: no counterparty URL in order (order_maker) or parameters (their_agent_id); "
+            "order_dict keys=%s",
+            list(order_dict.keys()),
+        )
     try:
-        result = await send_to_remote_agent(ctx, event)
+        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
         return {
             "status": "sent",
             "message": "Offer accepted and forwarded to counterparty",
