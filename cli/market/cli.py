@@ -385,14 +385,9 @@ def order_show(
     """Show a single order by ID."""
     base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
     base_url = _normalize_registry_url(base_url)
-    params = urllib.parse.urlencode({"order_id": order_id, "limit": 1, "offset": 0})
-    url = f"{base_url}/orders?{params}"
+    url = f"{base_url}/orders/{order_id}"
     payload = _fetch_json(url)
-    items = payload.get("items", [])
-    if not items:
-        typer.secho("Order not found.", err=True, fg=typer.colors.YELLOW)
-        raise typer.Exit(code=1)
-    found = items[0]
+    found = payload.get("order", payload)
 
     console = Console()
     table = Table.grid(padding=(0, 2))

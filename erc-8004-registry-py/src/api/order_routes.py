@@ -122,7 +122,6 @@ async def get_agent_orders(
 
 @router.get("/orders")
 async def query_orders(
-    order_id: Optional[str] = Query(None, description="Filter by order ID"),
     offer_resource_type: Optional[str] = Query(None, description="Filter by offer resource type (compute/token)"),
     demand_resource_type: Optional[str] = Query(None, description="Filter by demand resource type (compute/token)"),
     region: Optional[str] = Query(None, description="Filter by region"),
@@ -136,9 +135,6 @@ async def query_orders(
 ):
     """Query orders with filters (supports bidirectional matching)"""
     query = db.query(MarketOrder)
-
-    if order_id:
-        query = query.filter(MarketOrder.order_id == order_id)
     
     # Filter by status
     if status:
