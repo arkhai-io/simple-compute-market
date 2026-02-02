@@ -42,7 +42,8 @@ from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
-from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
+from .provisioning import schedule_vm_shutdown
+from .provisioning_client import provision_machine_async, format_connection_info, ProvisioningError
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
@@ -617,16 +618,23 @@ async def provision_machine(ssh_public_key: str) -> str:
     Returns:
         String with connection details.
     """
-    logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
+    logger.info("[TOOL] Provisioning machine via async provisioning service")
     try:
-        connection_info = run_vm_provisioning_playbook(ssh_public_key)
-        if connection_info:
-            logger.info(f"[TOOL] Machine provisioned: {connection_info}")
-            return connection_info
-        logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
-    except Exception as exc:
+        result = await provision_machine_async(
+            provisioning_service_url=CONFIG.provisioning_service_url,
+            ssh_public_key=ssh_public_key,
+            timeout=CONFIG.provisioning_timeout,
+            poll_interval=CONFIG.provisioning_poll_interval,
+            agent_id=CONFIG.agent_id,
+        )
+        connection_info = format_connection_info(result)
+        logger.info("[TOOL] Machine provisioned: %s", connection_info)
+        return connection_info
+    except ProvisioningError as exc:
         logger.error("[TOOL] Provisioning failed: %s", exc)
+        raise RuntimeError(f"Provisioning failed: {exc}") from exc
+    except Exception as exc:
+        logger.error("[TOOL] Unexpected provisioning error: %s", exc)
         raise RuntimeError(f"Provisioning failed: {exc}") from exc
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:

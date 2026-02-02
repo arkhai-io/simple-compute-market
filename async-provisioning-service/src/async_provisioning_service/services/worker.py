@@ -20,11 +20,14 @@ def _update_job(
     result: dict | None = None,
     error: str | None = None,
     logs: str | None = None,
+    process_id: str | None = None,
 ) -> None:
     job.status = status
     job.result = result
     job.error = error
     job.logs = logs
+    if process_id is not None:
+        job.process_id = process_id
     db.add(job)
     db.commit()
 
@@ -62,6 +65,11 @@ async def worker_loop() -> None:
             params = _build_params(job.params)
             try:
                 result = await asyncio.to_thread(run_playbook, params)
+
+                # Store process ID for potential cancellation
+                if result.process_id:
+                    _update_job(db, job, status=JobStatus.running.value, process_id=str(result.process_id))
+
             except PlaybookError as exc:
                 logs = exc.stdout + ("\n\nSTDERR:\n" + exc.stderr if exc.stderr else "")
                 _update_job(

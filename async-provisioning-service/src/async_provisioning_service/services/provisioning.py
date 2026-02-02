@@ -31,6 +31,7 @@ class ProvisioningResult:
     tenant_user: Optional[str]
     vm_host_ip: Optional[str]
     ssh_command: Optional[str]
+    process_id: Optional[int] = None
 
 
 class PlaybookError(RuntimeError):
@@ -117,25 +118,45 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
         params.vm_host,
     ]
 
+    process = None
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
-            check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             cwd=settings.repo_root,
-            timeout=settings.ansible_timeout_seconds,
         )
-    except subprocess.CalledProcessError as exc:
-        raise PlaybookError("Playbook failed", exc.stdout or "", exc.stderr or "") from exc
+
+        # Store process ID for potential cancellation
+        process_id = process.pid
+        logger.debug("Started ansible-playbook process: PID=%d", process_id)
+
+        # Wait for completion with timeout
+        stdout, stderr = process.communicate(timeout=settings.ansible_timeout_seconds)
+
+        if process.returncode != 0:
+            raise PlaybookError("Playbook failed", stdout or "", stderr or "")
+
+    except subprocess.TimeoutExpired:
+        if process:
+            process.kill()
+            stdout, stderr = process.communicate()
+        raise PlaybookError("Playbook timeout", stdout or "", stderr or "")
+    except PlaybookError:
+        raise
+    except Exception as exc:
+        if process:
+            process.kill()
+        raise PlaybookError(f"Playbook error: {exc}", "", str(exc)) from exc
     finally:
         try:
             vm_vars_path.unlink(missing_ok=True)
         except Exception:
             logger.warning("Failed to delete temp vars file: %s", vm_vars_path)
 
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
+    stdout = stdout or ""
+    stderr = stderr or ""
     external_port = _extract_external_port(stdout, params.vm_host)
     tenant_user = _extract_tenant_user(stdout, params.vm_host)
     vm_host_ip = _lookup_vm_host_ip(params.vm_host)
@@ -151,4 +172,5 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
         tenant_user=tenant_user,
         vm_host_ip=vm_host_ip,
         ssh_command=ssh_command,
+        process_id=process_id if process else None,
     )

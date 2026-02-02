@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     playbook_path: str | None = None
     inventory_path: str | None = None
 
+    # Authentication settings
+    enable_auth: bool = False  # Set to True to enable agent authentication
+    registry_url: str | None = None  # URL of agent registry API for verification
+
     @property
     def repo_root(self) -> Path:
         return _find_project_root()

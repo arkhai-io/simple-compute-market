@@ -1,3 +1,6 @@
+import logging
+import os
+import signal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +15,9 @@ from async_provisioning_service.api.schemas import (
 from async_provisioning_service.db.database import get_db
 from async_provisioning_service.db.models import JobStatus, ProvisioningJob
 from async_provisioning_service.services.queue import enqueue_job
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -58,3 +64,55 @@ async def get_logs(job_id: str, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return ProvisionLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
+
+
+@router.post("/provision/{job_id}/cancel")
+async def cancel_job(job_id: str, db: Session = Depends(get_db)):
+    """
+    Cancel a running provisioning job.
+
+    This endpoint attempts to cancel a job by:
+    1. Checking if the job exists and is in a cancellable state (queued or running)
+    2. If running, attempting to terminate the ansible-playbook process
+    3. Updating the job status to "cancelled"
+
+    Note: Cancellation is best-effort. If the job has already completed or failed,
+    this endpoint returns the current status without modification.
+    """
+    job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check if job is in a cancellable state
+    if job.status not in (JobStatus.queued.value, JobStatus.running.value):
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "message": f"Job cannot be cancelled (current status: {job.status})",
+        }
+
+    # If job is running and we have a process ID, try to kill it
+    if job.status == JobStatus.running.value and job.process_id:
+        try:
+            pid = int(job.process_id)
+            # Send SIGTERM first (graceful shutdown)
+            os.kill(pid, signal.SIGTERM)
+            logger.info("Sent SIGTERM to process %d for job %s", pid, job_id)
+        except ProcessLookupError:
+            logger.warning("Process %d for job %s not found (already terminated)", pid, job_id)
+        except ValueError:
+            logger.error("Invalid process_id '%s' for job %s", job.process_id, job_id)
+        except Exception as exc:
+            logger.error("Failed to terminate process %d for job %s: %s", pid, job_id, exc)
+
+    # Update job status to cancelled
+    job.status = JobStatus.cancelled.value
+    job.error = "Job cancelled by user"
+    db.add(job)
+    db.commit()
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "message": "Job cancelled successfully",
+    }

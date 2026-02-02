@@ -13,6 +13,7 @@ class JobStatus(str, enum.Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class ProvisioningJob(Base):
@@ -24,6 +25,7 @@ class ProvisioningJob(Base):
     result = Column(JSON, nullable=True)
     logs = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
+    process_id = Column(String, nullable=True)  # PID of running ansible process for cancellation
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
