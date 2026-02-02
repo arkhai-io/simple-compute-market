@@ -173,7 +173,8 @@ def format_connection_info(result: dict[str, Any]) -> str:
         return ssh_command
 
     # Fallback: construct from individual fields
-    ssh_port = result.get("ssh_port")
+    # Handle both "ssh_port" and "external_port" for backward compatibility
+    ssh_port = result.get("ssh_port") or result.get("external_port")
     tenant_user = result.get("tenant_user")
     vm_host_ip = result.get("vm_host_ip")
 

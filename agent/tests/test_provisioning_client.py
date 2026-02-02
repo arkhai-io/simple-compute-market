@@ -23,7 +23,8 @@ def mock_httpx_client():
     with patch("app.utils.provisioning_client.httpx.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
         mock_client_class.return_value.__aenter__.return_value = mock_client
-        mock_client_class.return_value.__aexit__.return_value = AsyncMock()
+        # __aexit__ must return None (falsy) to not suppress exceptions
+        mock_client_class.return_value.__aexit__ = AsyncMock(return_value=None)
         yield mock_client
 
 
@@ -69,7 +70,7 @@ async def test_provision_machine_success(mock_httpx_client):
         "status": "succeeded",
         "params": {},
         "result": {
-            "external_port": "2222",
+            "ssh_port": "2222",
             "tenant_user": "tenant1",
             "vm_host_ip": "192.168.1.100",
             "ssh_command": "ssh -i <your_private_key> -p 2222 tenant1@192.168.1.100",
@@ -97,7 +98,7 @@ async def test_provision_machine_success(mock_httpx_client):
     )
 
     # Verify result
-    assert result["external_port"] == "2222"
+    assert result["ssh_port"] == "2222"
     assert result["tenant_user"] == "tenant1"
     assert result["vm_host_ip"] == "192.168.1.100"
     assert result["ssh_command"] == "ssh -i <your_private_key> -p 2222 tenant1@192.168.1.100"
@@ -198,7 +199,7 @@ async def test_provision_machine_timeout(mock_httpx_client):
 def test_format_connection_info_with_ssh_command():
     """Test formatting connection info from result with ssh_command."""
     result = {
-        "external_port": "2222",
+        "ssh_port": "2222",
         "tenant_user": "tenant1",
         "vm_host_ip": "192.168.1.100",
         "ssh_command": "ssh -i <your_private_key> -p 2222 tenant1@192.168.1.100",
@@ -211,7 +212,7 @@ def test_format_connection_info_with_ssh_command():
 def test_format_connection_info_without_ssh_command():
     """Test formatting connection info from result without ssh_command."""
     result = {
-        "external_port": "2222",
+        "ssh_port": "2222",
         "tenant_user": "tenant1",
         "vm_host_ip": "192.168.1.100",
     }
@@ -223,7 +224,7 @@ def test_format_connection_info_without_ssh_command():
 def test_format_connection_info_incomplete():
     """Test formatting connection info with incomplete result."""
     result = {
-        "external_port": "2222",
+        "ssh_port": "2222",
     }
 
     connection_info = format_connection_info(result)
