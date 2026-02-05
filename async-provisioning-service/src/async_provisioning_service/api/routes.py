@@ -12,6 +12,7 @@ from async_provisioning_service.api.schemas import (
     ProvisionResponse,
     ProvisionStatusResponse,
 )
+from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import get_db
 from async_provisioning_service.db.models import JobStatus, ProvisioningJob
 from async_provisioning_service.services.queue import enqueue_job
@@ -31,10 +32,17 @@ async def health() -> dict:
 @router.post("/provision", response_model=ProvisionResponse, status_code=status.HTTP_202_ACCEPTED)
 async def submit_provisioning(request: ProvisionRequest, db: Session = Depends(get_db)):
     job_id = str(uuid.uuid4())
+
+    # Use request max_retries or fall back to config default
+    max_retries = request.max_retries if request.max_retries is not None else settings.default_max_retries
+
     job = ProvisioningJob(
         id=job_id,
         status=JobStatus.queued.value,
         params=request.model_dump(),
+        retry_count=0,
+        max_retries=max_retries,
+        next_retry_at=None,
     )
     db.add(job)
     db.commit()
@@ -55,6 +63,9 @@ async def get_status(job_id: str, db: Session = Depends(get_db)):
         params=job.params,
         result=job.result,
         error=job.error,
+        retry_count=job.retry_count,
+        max_retries=job.max_retries,
+        next_retry_at=job.next_retry_at,
     )
 
 

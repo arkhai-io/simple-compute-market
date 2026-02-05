@@ -2,7 +2,7 @@ import asyncio
 import logging
 
 from async_provisioning_service.config import settings
-from async_provisioning_service.services.worker import worker_loop
+from async_provisioning_service.services.job_processor import process_jobs
 
 
 logging.basicConfig(
@@ -12,7 +12,7 @@ logging.basicConfig(
 
 
 def main() -> None:
-    asyncio.run(worker_loop())
+    asyncio.run(process_jobs())
 
 
 if __name__ == "__main__":

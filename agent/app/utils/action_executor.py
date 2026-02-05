@@ -43,7 +43,12 @@ from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
 from .provisioning import schedule_vm_shutdown
-from .provisioning_client import provision_machine_async, format_connection_info, ProvisioningError
+from .provisioning_client import (
+    provision_machine_async,
+    schedule_vm_shutdown_async,
+    format_connection_info,
+    ProvisioningError,
+)
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
@@ -1647,7 +1652,19 @@ async def fulfill_compute_obligation(
     if CONFIG.use_mock_provisioning:
         mock_schedule_vm_shutdown(lease_end_utc)
     else:
-        schedule_vm_shutdown(lease_end_utc)
+        try:
+            await schedule_vm_shutdown_async(
+                provisioning_service_url=CONFIG.provisioning_service_url,
+                lease_end_utc=lease_end_utc,
+                vm_host="vm1",
+                vm_target="tenant-vm",
+                timeout=300,
+                poll_interval=5,
+            )
+            logger.info("[TOOL] VM shutdown scheduled via async provisioning service for %s UTC", lease_end_utc)
+        except ProvisioningError as exc:
+            logger.error("[TOOL] Failed to schedule VM shutdown: %s", exc)
+            # Non-fatal: continue with fulfillment even if shutdown scheduling fails
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid

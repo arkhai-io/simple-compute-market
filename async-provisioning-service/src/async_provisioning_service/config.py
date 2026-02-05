@@ -35,6 +35,29 @@ class Settings(BaseSettings):
     playbook_path: str | None = None
     inventory_path: str | None = None
 
+    # Worker concurrency settings
+    max_concurrent_jobs: int = 5  # Max jobs running simultaneously per worker
+
+    # Retry configuration
+    default_max_retries: int = 3  # Default retry attempts for failed jobs
+    retry_backoff_initial_seconds: int = 60  # Initial retry delay (1 minute)
+    retry_backoff_multiplier: float = 2.0  # Exponential backoff multiplier
+    retry_backoff_max_seconds: int = 3600  # Max retry delay (1 hour)
+
+    # Errors that should NOT be retried (circuit breaker)
+    non_retryable_errors: list[str] = [
+        "Invalid SSH key",
+        "VM target not found",
+        "Permission denied",
+        "Authentication failed",
+        "Host unreachable",
+        "Operation timed out",  # SSH connection timeout
+        "Connection refused",    # SSH connection refused
+        "UNREACHABLE",          # Ansible unreachable status
+        "Failed to get \"resize\" lock",  # Disk image already in use
+        "Is another process using the image",  # Disk image lock conflict
+    ]
+
     # Authentication settings
     enable_auth: bool = False  # Set to True to enable agent authentication
     registry_url: str | None = None  # URL of agent registry API for verification
