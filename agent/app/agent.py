@@ -77,6 +77,7 @@ from .schema.pydantic_models import (
     TokenResource,
     Resource,
     OrderCreateEvent,
+    OrderCloseEvent,
 )
 
 from .policies.store import PolicyStore
@@ -280,6 +281,19 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 "data": data,
             }
             return OrderCreateEvent.model_validate(order_create_payload)
+
+        elif event_type == EventType.ORDER_CLOSE:
+            order_id = data.get("order_id", payload.get("order_id"))
+            if not isinstance(order_id, str) or not order_id.strip():
+                raise ValueError("OrderCloseEvent requires 'order_id'")
+            order_close_payload = {
+                "event_id": payload.get("event_id") or f"order_close_{uuid.uuid4()}",
+                "event_type": EventType.ORDER_CLOSE.value,
+                "source": payload.get("source") or BASE_URL_OVERRIDE,
+                "order_id": order_id,
+                "data": data,
+            }
+            return OrderCloseEvent.model_validate(order_close_payload)
 
         elif event_type == EventType.MAKE_OFFER:
             # Extract offer data - could be in 'offer' key or directly in 'data'

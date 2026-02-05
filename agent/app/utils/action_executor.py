@@ -139,7 +139,13 @@ async def execute_action(
             logger.info(f"[ACTION] [SIMULATED] Rejecting offer with params: {parameters}")
             outcome["result"] = result
             outcome["message"] = "Offer rejected (simulated)"
-            
+
+        case ActionType.CLOSE_ORDER.value:
+            logger.info(f"[ACTION] Closing order with params: {parameters}")
+            result = await close_order(parameters)
+            outcome["result"] = result
+            outcome["message"] = result.get("message", "Order closed")
+
         case ActionType.MAKE_OFFER.value:
             offer_param = parameters.get("offer")
             demand_param = parameters.get("demand")
@@ -497,6 +503,44 @@ def reject_offer() -> bool:
     """
     logger.info("[TOOL] Rejecting received offer.")
     return True
+
+
+async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Close an order locally and in the registry (if enabled)."""
+    parameters = parameters or {}
+    order_id = parameters.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        return {"status": "error", "message": "Missing order_id for close_order"}
+
+    if not CONFIG.enable_registry_discovery:
+        return {
+            "status": "skipped",
+            "message": "Registry discovery is disabled; order not updated in registry",
+            "order_id": order_id,
+        }
+
+    try:
+        registry_client = get_registry_client()
+        result = await registry_client.update_order(order_id, {"status": "closed"})
+        if result:
+            return {
+                "status": "closed",
+                "message": f"Order {order_id} marked closed in registry",
+                "order_id": order_id,
+                "registry_result": result,
+            }
+        return {
+            "status": "error",
+            "message": f"Failed to update order {order_id} in registry",
+            "order_id": order_id,
+        }
+    except Exception as exc:
+        logger.warning("[REGISTRY] Failed to close order %s in registry: %s", order_id, exc)
+        return {
+            "status": "error",
+            "message": f"Registry update failed for order {order_id}: {exc}",
+            "order_id": order_id,
+        }
 
 
 async def mock_provision_machine(ssh_public_key: str) -> str:

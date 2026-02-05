@@ -100,6 +100,25 @@ class PolicyManager:
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save order_create policy: {e}")
 
+        # Order-close policy (local close entry point)
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="order_close_default_v1",
+                trigger_type=EventType.ORDER_CLOSE.value,
+                callable_ref="order_close.default.v1",
+            )
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name="order_close.default.v1",
+                components=[
+                    "oc.action.close_order",
+                ],
+            )
+            logger.debug("[POLICY MANAGER] Ensured order_close policy")
+        except Exception as e:
+            logger.warning(f"[POLICY MANAGER] Failed to save order_close policy: {e}")
+
         # Make-offer policy (composite saved in DB)
         try:
             await self._policy_store.save_policy(
@@ -192,6 +211,7 @@ class PolicyManager:
             EventType.ACCEPT_OFFER,
             EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT,
             EventType.ARBITRATION_COMPLETE,
+            EventType.ORDER_CLOSE,
         ):
             await self.ensure_default_policies()
         # Other event types may not have default policies yet

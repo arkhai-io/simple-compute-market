@@ -219,6 +219,20 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
         },
     )
 
+@policy_callable("oc.action.close_order")
+def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
+    from app.schema.pydantic_models import ActionType, OrderCloseEvent
+
+    if not isinstance(context.event, OrderCloseEvent):
+        return None
+
+    return DomainAction(
+        action_type=ActionType.CLOSE_ORDER,
+        parameters={
+            "order_id": context.event.order_id,
+        },
+    )
+
 @policy_callable("ri.action.make_offer_from_resource")
 def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
     from app.schema.pydantic_models import ActionType
