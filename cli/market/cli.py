@@ -188,10 +188,10 @@ def order_update() -> None:
     typer.echo("Not implemented: order update")
 
 
-@order_app.command("cancel")
-def order_cancel() -> None:
+@order_app.command("close")
+def order_close() -> None:
     """Cancel an order (stub)."""
-    typer.echo("Not implemented: order cancel")
+    typer.echo("Not implemented: order close")
 
 
 @order_app.command("history")
