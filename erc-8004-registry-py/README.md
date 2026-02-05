@@ -417,6 +417,109 @@ The Indexer automatically syncs on-chain events to keep its database up-to-date:
 
 Health checks are **disabled by default**. To enable, set `ENABLE_HEALTH_CHECKS=true` in your environment. Health check interval and settings are configurable via environment variables.
 
+## Orders API
+
+The Orders API is served by the Indexer (FastAPI). When running locally on the default port, API docs are available at:
+
+- Swagger UI: `http://localhost:8080/docs`
+- OpenAPI JSON: `http://localhost:8080/openapi.json`
+- ReDoc: `http://localhost:8080/redoc`
+
+### Publish or Update an Order
+
+```http
+POST /agents/{agent_id}/orders
+```
+
+- `agent_id` must be the canonical ERC-8004 agent ID (`eip155:...`).
+- `order_id` is required and unique; reusing an `order_id` updates the existing order.
+- `status` defaults to `open` if not provided.
+
+Example:
+
+```bash
+curl -X POST "http://localhost:8080/agents/{agent_id}/orders" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_id": "order-123",
+    "order_maker": "http://localhost:8001/.well-known/agent-card.json",
+    "offer_resource": {"type": "compute", "region": "us-west"},
+    "demand_resource": {"type": "token", "symbol": "USDC"},
+    "duration_hours": 1,
+    "status": "open"
+  }'
+```
+
+### List Orders for an Agent
+
+```http
+GET /agents/{agent_id}/orders
+```
+
+Query params:
+
+- `status` (optional): `open`, `closed`, `accepted`, `expired`
+- `limit` (default 50, max 200)
+- `offset` (default 0)
+
+Example:
+
+```bash
+curl "http://localhost:8080/agents/{agent_id}/orders?status=open"
+```
+
+### Query Orders (Global)
+
+```http
+GET /orders
+```
+
+Query params:
+
+- `offer_resource_type` (e.g., `compute` or `token`)
+- `demand_resource_type` (e.g., `compute` or `token`)
+- `region`
+- `gpu_model`
+- `sla`
+- `status` (default `open`)
+- `bidirectional` (default `false`)
+- `limit` (default 50, max 200)
+- `offset` (default 0)
+
+Example:
+
+```bash
+curl "http://localhost:8080/orders?status=open&offer_resource_type=compute&region=us-west"
+```
+
+### Update an Order
+
+```http
+PUT /orders/{order_id}
+```
+
+Use this to mark an order as accepted/closed/expired or to set `order_taker` and attestations. Updating one order can also update its symmetric counterpart.
+
+Example:
+
+```bash
+curl -X PUT "http://localhost:8080/orders/{order_id}" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"accepted","order_taker":"http://localhost:8002/.well-known/agent-card.json"}'
+```
+
+### Delete an Order
+
+```http
+DELETE /orders/{order_id}
+```
+
+Example:
+
+```bash
+curl -X DELETE "http://localhost:8080/orders/{order_id}"
+```
+
 ## Development
 
 ### Project Structure
@@ -488,4 +591,3 @@ All configuration is done via environment variables. See `.env.example` for avai
 - [ERC-8004 Contracts](https://github.com/erc-8004/erc-8004-contracts)
 - [Base Sepolia](https://docs.base.org/docs/networks/base-sepolia/)
 - [Agent0 SDK](https://sdk.ag0.xyz/)
-

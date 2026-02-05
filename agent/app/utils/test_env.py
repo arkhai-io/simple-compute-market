@@ -16,6 +16,8 @@ def main() -> None:
     print(f"rpc_port: {port}")
     print("For local development, deploy contracts with:")
     print(f"  ANVIL_RPC_URL=http://localhost:{port} npm run deploy:anvil")
+    print("Or using the CLI:")
+    print(f"  market dev deploy-registry -r http://localhost:{port}")
 
     print("\nEnvTestManager running. Press Enter to shut down...")
     input()

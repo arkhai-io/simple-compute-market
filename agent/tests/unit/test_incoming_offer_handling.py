@@ -64,7 +64,7 @@ def minimizer_order(token_resource, compute_resource):
         order_maker="agent_minimizer",
         offer_resource=token_resource,
         demand_resource=compute_resource,
-        duration=3600,
+        duration_hours=3600,
     )
 
 
@@ -76,7 +76,7 @@ def maximizer_order(token_resource, compute_resource):
         order_maker="agent_maximizer",
         offer_resource=compute_resource,
         demand_resource=token_resource,
-        duration=3600,
+        duration_hours=3600,
     )
 
 
@@ -116,7 +116,7 @@ class TestExtractInitialPrice:
                 sla=99.9,
                 region=Region.NEW_YORK_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         with pytest.raises(ValueError, match="Order has no token resource"):
@@ -164,7 +164,7 @@ class TestRespondToMakeOffer:
                 sla=99.9,
                 region=Region.CALIFORNIA_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
@@ -215,7 +215,7 @@ class TestRespondToMakeOffer:
                 sla=99.9,
                 region=Region.CALIFORNIA_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         # Incoming maximizer order: they demand 120 tokens (higher than our 100)
@@ -236,7 +236,7 @@ class TestRespondToMakeOffer:
                 ),
                 amount=120,  # Higher than our 100, but within 1.5x
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
@@ -287,7 +287,7 @@ class TestRespondToMakeOffer:
                 ),
                 amount=200,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         minimizer_our_order = MarketOrder(
@@ -307,7 +307,7 @@ class TestRespondToMakeOffer:
                 sla=99.9,
                 region=Region.CALIFORNIA_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
@@ -356,7 +356,7 @@ class TestRespondToMakeOffer:
                 ),
                 amount=100,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
@@ -398,7 +398,7 @@ class TestRespondToMakeOffer:
             demand_resource=ComputeResource(
                 gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         maximizer_our_order = MarketOrder(
@@ -411,7 +411,7 @@ class TestRespondToMakeOffer:
                 token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
                 amount=100,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
@@ -507,7 +507,7 @@ class TestRespondToMakeOffer:
             demand_resource=ComputeResource(
                 gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         incoming_order = MarketOrder(
@@ -520,7 +520,7 @@ class TestRespondToMakeOffer:
                 token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
                 amount=100,
             ),
-            duration=3600,
+            duration_hours=3600,
         )
 
         event = MakeOfferEvent(
