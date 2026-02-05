@@ -120,17 +120,14 @@ test: ## Run tests
 	@echo "==============================================================================="
 	@echo "| Running tests...                                                            |"
 	@echo "==============================================================================="
-	uv run pytest tests/ -v
-
-test-watch: ## Run tests in watch mode
-	uv run pytest-watch tests/ -v
+	PYTHONPATH=src uv run pytest tests/ -v
 
 test-cov: ## Run tests with coverage
-	uv run pytest tests/ --cov=async_provisioning_service --cov-report=html --cov-report=term
+	PYTHONPATH=src uv run pytest tests/ --cov=async_provisioning_service --cov-report=html --cov-report=term
 	@echo "📊 Coverage report: htmlcov/index.html"
 
 test-integration: check-redis ## Run integration tests (requires Redis)
-	uv run pytest tests/integration/ -v
+	PYTHONPATH=src uv run pytest tests/integration/ -v
 
 # ==============================================================================
 # Service Management

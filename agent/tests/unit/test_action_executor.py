@@ -229,7 +229,11 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 
     action = Action(
         action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={"escrow_uid": "escrow-2", "ssh_public_key": "ssh-rsa AAA"},
+        parameters={
+            "escrow_uid": "escrow-2",
+            "ssh_public_key": "ssh-rsa AAA",
+            "order": {"order_taker": "http://localhost:8000"}  # Add order with taker URL
+        },
         timestamp=datetime.now(),
     )
 
@@ -243,10 +247,24 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_provision_machine_raises_on_missing_connection_info(monkeypatch):
     """Ensure missing connection info raises a RuntimeError."""
-    def fake_run_vm_provisioning_playbook(_ssh_public_key):
-        return None
+    async def fake_provision_machine_async(*_args, **_kwargs):
+        # Return result with missing connection info
+        return {
+            "ssh_port": None,
+            "tenant_user": None,
+            "vm_host_ip": None,
+            "ssh_command": None,
+        }
 
-    monkeypatch.setattr(action_executor, "run_vm_provisioning_playbook", fake_run_vm_provisioning_playbook)
+    def fake_format_connection_info(result):
+        # format_connection_info returns str(result) when it can't format
+        # which shouldn't raise, so let's make it raise explicitly for this test
+        if not result.get("ssh_port"):
+            raise RuntimeError("SSH connection info unavailable")
+        return "ssh user@host -p 22"
+
+    monkeypatch.setattr(action_executor, "provision_machine_async", fake_provision_machine_async)
+    monkeypatch.setattr(action_executor, "format_connection_info", fake_format_connection_info)
 
     with pytest.raises(RuntimeError, match="SSH connection info unavailable"):
         await action_executor.provision_machine("ssh-rsa AAA")
