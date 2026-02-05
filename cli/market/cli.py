@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import subprocess
+from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
@@ -32,6 +33,29 @@ def run_step(
         env.update(extra_env)
     subprocess.run(cmd, cwd=cwd, check=True, env=env)
 
+def version_callback(value: bool) -> None:
+    """Show version and exit."""
+    if value:
+        try:
+            __version__ = version("market-cli")
+        except PackageNotFoundError:
+            __version__ = "unknown (not installed)"
+        typer.echo(f"Market CLI version {__version__}")
+        raise typer.Exit()
+
+@app.callback()
+def main(
+    version_flag: bool = typer.Option(
+        None,
+        "--version",
+        "-v",
+        callback=version_callback,
+        is_eager=True,
+        help="Show version and exit.",
+    ),
+) -> None:
+    """Market CLI - Unified interface for Arkhai market operations."""
+    pass
 
 @app.command()
 def install(
