@@ -378,8 +378,8 @@ def order_list(
 
     items = payload.get("items", [])
     console = Console()
-    table = Table(title="Open Orders", box=box.SIMPLE_HEAVY)
-    table.add_column("Order ID", style="bold")
+    table = Table(title="Open Orders", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Order ID", style="bold", overflow="fold")
     table.add_column("Agent ID")
     table.add_column("Maker")
     table.add_column("Taker")
@@ -391,7 +391,7 @@ def order_list(
         offer_display = _format_resource(order.get("offer_resource", {}))
         demand_display = _format_resource(order.get("demand_resource", {}))
         table.add_row(
-            _shorten(str(order.get("order_id", "-")), 32),
+            str(order.get("order_id", "-")),
             _shorten(str(order.get("agent_id", "-")), 32),
             _shorten(str(order.get("order_maker", "-")), 40),
             _shorten(str(order.get("order_taker", "-")), 40),
