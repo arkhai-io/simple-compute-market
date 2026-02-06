@@ -4,7 +4,7 @@ import logging
 
 from app.policies.discovery import discover_and_register
 from app.policies.registry import CALLABLE_REGISTRY
-from app.policies.sqlite_client import SQLiteClient
+from app.utils.sqlite_client import SQLiteClient
 from app.policies.store import PolicyStore
 from app.schema.pydantic_models import EventType
 

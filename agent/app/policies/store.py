@@ -19,7 +19,7 @@ from app.schema.pydantic_models import (
     ComputeResourcePortfolio,
 )
 from app.policies.registry import policy_callable
-from app.policies.sqlite_client import SQLiteClient
+from app.utils.sqlite_client import SQLiteClient
 from app.policies.action_builders import NegotiationActionBuilder
 from app.utils.validation import (
     extract_resources_from_make_offer_event,

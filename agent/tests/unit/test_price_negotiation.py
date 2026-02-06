@@ -20,7 +20,7 @@ NOTE: Policy requires strategy to be specified. If no strategy, passes to next p
 import pytest
 from app.schema.pydantic_models import DecisionContext, NegotiationEvent
 from app.policies.store import PolicyStore
-from app.policies.sqlite_client import SQLiteClient
+from app.utils.sqlite_client import SQLiteClient
 from app.policies.evaluator import CallableEvaluator
 import tempfile
 import os

@@ -82,7 +82,7 @@ from .schema.pydantic_models import (
 
 from .policies.store import PolicyStore
 from .policies.manager import PolicyManager
-from .policies.sqlite_client import SQLiteClient
+from .utils.sqlite_client import SQLiteClient
 from .policies.negotiation_thread import get_thread_store
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
