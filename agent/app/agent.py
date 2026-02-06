@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
-POLICY_DB_PATH = CONFIG.policy_db_path
+AGENT_DB_PATH = CONFIG.agent_db_path
 AGENT_PRIV_KEY = CONFIG.agent_priv_key
 CHAIN_RPC_URL = CONFIG.chain_rpc_url
 
@@ -468,7 +468,7 @@ class TraderAgent(BaseAgent):
         )
         
         # Initialize SQLite client (shared for policies and decisions)
-        self._sqlite_client = SQLiteClient(db_path=POLICY_DB_PATH)
+        self._sqlite_client = SQLiteClient(db_path=AGENT_DB_PATH)
         
         # Initialize negotiation thread store
         get_thread_store(sqlite_client=self._sqlite_client)
