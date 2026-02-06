@@ -166,6 +166,8 @@ def order_create(
     table.add_row("Status", str(response.get("status", "-")))
     if "event_id" in response:
         table.add_row("Event ID", str(response.get("event_id")))
+    if "order_id" in response:
+        table.add_row("Order ID", str(response.get("order_id")))
     if "root_agent_response" in response:
         table.add_row("Agent", str(response.get("root_agent_response")))
     order_request = response.get("order_request")
@@ -189,9 +191,42 @@ def order_update() -> None:
 
 
 @order_app.command("close")
-def order_close() -> None:
-    """Cancel an order (stub)."""
-    typer.echo("Not implemented: order close")
+def order_close(
+    order_id: str = typer.Option(
+        ...,
+        "--order-id",
+        "-i",
+        help="Order ID to close.",
+    ),
+    agent_url: str | None = typer.Option(
+        None,
+        "--agent-url",
+        "-a",
+        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+) -> None:
+    """Close an order via the Agent endpoint."""
+    base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = _normalize_registry_url(base_url)
+    if not order_id.strip():
+        raise typer.BadParameter("order-id must be a non-empty string")
+
+    payload = {"order_id": order_id}
+    url = f"{base_url}/orders/close"
+    response = _post_json(url, payload)
+
+    console = Console()
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Status", str(response.get("status", "-")))
+    table.add_row("Order ID", order_id)
+    if "event_id" in response:
+        table.add_row("Event ID", str(response.get("event_id")))
+    if "root_agent_response" in response:
+        table.add_row("Agent", str(response.get("root_agent_response")))
+
+    console.print(Panel(table, title="Order Close", border_style="green"))
 
 
 @order_app.command("history")
@@ -295,7 +330,7 @@ def _post_json(url: str, payload: dict) -> dict:
         typer.secho(f"Agent error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
     except Exception as exc:
-        typer.secho(f"Failed to create order: {exc}", err=True, fg=typer.colors.RED)
+        typer.secho(f"Failed to call agent endpoint: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
 

@@ -149,6 +149,7 @@ async def execute_action(
         case ActionType.MAKE_OFFER.value:
             offer_param = parameters.get("offer")
             demand_param = parameters.get("demand")
+            created_order_id: str | None = None
             if offer_param is not None and demand_param is not None:
                 try:
                     offer_resource = Resource.parse_from_dict(offer_param)
@@ -170,6 +171,8 @@ async def execute_action(
                     demand_resource=demand_resource,
                     duration_hours=parameters.get("duration_hours", 1),
                 )
+                if isinstance(order, dict):
+                    created_order_id = order.get("order_id")
                 gpu_model = getattr(offer_resource, "gpu_model", None) or getattr(demand_resource, "gpu_model", "unknown")
             else:
                 gpu_model = parameters.get("gpu_model", "unknown")
@@ -182,6 +185,10 @@ async def execute_action(
                     imbalance_type=imbalance_type,
                     duration_hours=parameters.get("duration_hours", 1),
                 )
+                if isinstance(order, dict):
+                    created_order_id = order.get("order_id")
+            if created_order_id:
+                outcome["order_id"] = created_order_id
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.

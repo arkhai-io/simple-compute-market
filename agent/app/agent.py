@@ -148,6 +148,17 @@ def safe_literal_eval(payload_text: str, *, max_len: int = 50_000) -> Any:
         raise ValueError(f"failed to parse payload: {exc}") from exc
 
 
+def _extract_order_id(outcome: dict | None) -> str | None:
+    if not isinstance(outcome, dict):
+        return None
+    if outcome.get("order_id"):
+        return outcome["order_id"]
+    result = outcome.get("result")
+    if isinstance(result, dict):
+        return result.get("order_id") or (result.get("order") or {}).get("order_id")
+    return None
+
+
 def _extract_content_payload(
     content: Optional[genai_types.Content],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -408,6 +419,7 @@ class TraderAgent(BaseAgent):
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
     _alkahest_client: Any = PrivateAttr()
+    _last_action_outcomes: dict[str, dict] = PrivateAttr()
 
     def __init__(
         self,
@@ -423,6 +435,7 @@ class TraderAgent(BaseAgent):
             name=name,
             resource_portfolio={}
         )
+        self._last_action_outcomes = {}
 
         # Log ZeroTier IP if available for the configured network
         zerotier_network = os.getenv("ZEROTIER_NETWORK")
@@ -669,6 +682,8 @@ class TraderAgent(BaseAgent):
             ctx=ctx,
             alkahest_client=self._alkahest_client,
         )
+        # Capture outcomes for synchronous endpoints that need structured results.
+        self._last_action_outcomes[domain_event.event_id] = outcome
         
         # [5] Experience recording
         try:
@@ -1092,10 +1107,102 @@ async def _run_create_order_flow(request: Request) -> dict:
             detail="root_agent did not provide a response to the order creation request.",
         )
 
-    return {
+    outcome = root_agent._last_action_outcomes.pop(event_id, None)
+    order_id = _extract_order_id(outcome)
+
+    response_payload = {
         "status": "created",
         "event_id": event_id,
         "order_request": order_create_event.model_dump(mode="json"),
+        "root_agent_response": final_response,
+    }
+    if order_id:
+        response_payload["order_id"] = order_id
+    return response_payload
+
+async def _run_close_order_flow(request: Request) -> dict:
+    """
+    Internal helper to run the close order flow.
+
+    Expected payload:
+    {
+      "order_id": "..."
+    }
+    """
+    try:
+        close_data = await request.json()
+    except Exception as e:
+        raise ValueError(f"Invalid JSON in request body: {e}") from e
+
+    order_id = close_data.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        raise ValueError("Request must include non-empty 'order_id'")
+
+    event_id = f"order_close_{uuid.uuid4()}"
+    order_close_event = OrderCloseEvent(
+        event_id=event_id,
+        source=BASE_URL_OVERRIDE,
+        order_id=order_id,
+        data={"order_id": order_id},
+    )
+
+    if CONFIG.enable_event_queue:
+        queue_event(order_close_event.model_dump(mode="json"))
+        return {
+            "status": "queued",
+            "event_id": event_id,
+            "order_request": order_close_event.model_dump(mode="json"),
+        }
+
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=AGENT_REST_API_APP_NAME,
+        user_id=AGENT_REST_API_USER_ID,
+    )
+    runner = Runner(
+        agent=root_agent,
+        app_name=AGENT_REST_API_APP_NAME,
+        session_service=session_service,
+    )
+
+    event_payload = order_close_event.model_dump(mode="json")
+
+    message = genai_types.Content(
+        role="user",
+        parts=[
+            genai_types.Part.from_function_response(
+                name="close_order",
+                response=event_payload
+            )
+        ],
+    )
+
+    final_response: str | None = None
+    async for event in runner.run_async(
+        user_id=AGENT_REST_API_USER_ID,
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            text_parts = [
+                part.text
+                for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            ]
+            if text_parts:
+                final_response = "".join(text_parts)
+                break
+
+    if not final_response:
+        raise HTTPException(
+            status_code=500,
+            detail="root_agent did not provide a response to the order close request.",
+        )
+
+    return {
+        "status": "closed",
+        "event_id": event_id,
+        "order_request": order_close_event.model_dump(mode="json"),
         "root_agent_response": final_response,
     }
 
@@ -1126,7 +1233,34 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
             status_code=500
         )
 
+async def close_market_order_endpoint(request: Request) -> JSONResponse:
+    """
+    Expose an endpoint to close market orders via the root agent.
+    """
+    try:
+        response = await _run_close_order_flow(request)
+        return JSONResponse(response)
+    except ValueError as e:
+        logger.error(f"[ORDER CLOSE] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order close validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except ValidationError as e:
+        logger.error(f"[ORDER CLOSE] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order close validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"[ORDER CLOSE] Error closing market order: {e}")
+        return JSONResponse(
+            {"error": "Failed to close market order", "detail": str(e)},
+            status_code=500
+        )
+
 agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
+agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
@@ -1134,6 +1268,8 @@ a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 a2a_app.routes.append(alert_route)
 # Add the order creation route to the A2A app
 a2a_app.routes.append(agent_order_creation_route)
+# Add the order close route to the A2A app
+a2a_app.routes.append(agent_order_close_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
