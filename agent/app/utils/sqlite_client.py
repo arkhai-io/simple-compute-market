@@ -135,6 +135,27 @@ class SQLiteClient:
                 )
                 """
             )
+            # Orders table (local source of truth)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders (
+                  order_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  offer_resource TEXT NOT NULL,
+                  demand_resource TEXT NOT NULL,
+                  fulfillment_resource TEXT,
+                  duration_hours INTEGER NOT NULL,
+                  order_maker TEXT NOT NULL,
+                  order_taker TEXT,
+                  matched_offer_id TEXT,
+                  maker_attestation TEXT,
+                  taker_attestation TEXT,
+                  escrow_uid TEXT
+                )
+                """
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -169,6 +190,15 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
             )
             conn.commit()
         finally:
