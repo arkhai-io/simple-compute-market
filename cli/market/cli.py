@@ -235,6 +235,85 @@ def order_history() -> None:
     typer.echo("Not implemented: order history")
 
 
+@order_app.command("match")
+def order_match(
+    order_id: str = typer.Option(
+        ...,
+        "--order-id",
+        "-i",
+        help="Order ID to match (flip offer/demand).",
+    ),
+    registry_url: str = typer.Option(
+        None,
+        "--registry-url",
+        "-r",
+        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+    ),
+    agent_url: str | None = typer.Option(
+        None,
+        "--agent-url",
+        "-a",
+        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+    duration_hours: int | None = typer.Option(
+        None,
+        "--duration-hours",
+        "-t",
+        help="Order duration in hours (default: from target order or 1).",
+    ),
+) -> None:
+    """Match an existing order by flipping offer/demand and creating a new order."""
+    if not order_id.strip():
+        raise typer.BadParameter("order-id must be a non-empty string")
+
+    base_registry_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_registry_url = _normalize_registry_url(base_registry_url)
+    target_url = f"{base_registry_url}/orders/{order_id}"
+    target_payload = _fetch_json(target_url)
+    target_order = target_payload.get("order") if isinstance(target_payload, dict) and "order" in target_payload else target_payload
+    if not isinstance(target_order, dict):
+        raise typer.BadParameter("Registry response did not include an order object")
+
+    offer_resource = _normalize_registry_resource(target_order.get("demand_resource"))
+    demand_resource = _normalize_registry_resource(target_order.get("offer_resource"))
+    if not isinstance(offer_resource, dict) or not isinstance(demand_resource, dict):
+        raise typer.BadParameter("Target order is missing offer/demand resources")
+
+    duration = duration_hours if duration_hours is not None else target_order.get("duration_hours", 1)
+    if not isinstance(duration, int):
+        try:
+            duration = int(str(duration))
+        except (TypeError, ValueError):
+            raise typer.BadParameter("duration-hours must be an integer")
+    if duration < 1:
+        raise typer.BadParameter("duration-hours must be >= 1")
+
+    payload = {
+        "offer": offer_resource,
+        "demand": demand_resource,
+        "duration_hours": duration,
+    }
+
+    base_agent_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_agent_url = _normalize_registry_url(base_agent_url)
+    create_url = f"{base_agent_url}/orders/create"
+    response = _post_json(create_url, payload)
+
+    console = Console()
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Status", str(response.get("status", "-")))
+    if "event_id" in response:
+        table.add_row("Event ID", str(response.get("event_id")))
+    if "order_id" in response:
+        table.add_row("Order ID", str(response.get("order_id")))
+    if "root_agent_response" in response:
+        table.add_row("Agent", str(response.get("root_agent_response")))
+
+    console.print(Panel(table, title="Order Match", border_style="green"))
+
+
 def _normalize_registry_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
 
@@ -292,6 +371,29 @@ def _shorten(text: str, width: int = 36) -> str:
     if not text:
         return "-"
     return textwrap.shorten(text, width=width, placeholder="…")
+
+
+def _normalize_registry_resource(resource: dict) -> dict:
+    """Convert registry token resource amounts to friendly units for create endpoint."""
+    if not isinstance(resource, dict):
+        return resource
+    token = resource.get("token")
+    amount = resource.get("amount")
+    if isinstance(token, dict) and "decimals" in token and amount is not None:
+        try:
+            decimals = int(token["decimals"])
+        except (TypeError, ValueError):
+            return resource
+        from decimal import Decimal, InvalidOperation
+        try:
+            amount_value = Decimal(str(amount))
+        except (InvalidOperation, ValueError, TypeError):
+            return resource
+        human_amount = amount_value / (Decimal(10) ** decimals)
+        normalized = dict(resource)
+        normalized["amount"] = str(human_amount.normalize())
+        return normalized
+    return resource
 
 
 def _short_ts(value: str | None) -> str:
