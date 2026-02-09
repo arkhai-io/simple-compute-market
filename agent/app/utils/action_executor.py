@@ -901,6 +901,7 @@ async def accept_offer(
 
     # Cancel competing negotiations and mark as terminal using transaction
     order_id = order_dict.get("order_id")
+    our_order_id = parameters.get("our_order_id")
     their_order_id = parameters.get("their_order_id")
     negotiation_id = parameters.get("negotiation_id")
 
@@ -909,11 +910,25 @@ async def accept_offer(
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
 
+    if not our_order_id:
+        try:
+            sqlite_client = get_sqlite_client()
+            inferred = await sqlite_client.find_symmetric_open_order(
+                offer_resource=order_dict.get("offer_resource"),
+                demand_resource=order_dict.get("demand_resource"),
+                order_maker=BASE_URL_OVERRIDE,
+            )
+            if inferred:
+                our_order_id = inferred.get("order_id")
+        except Exception as exc:
+            logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
+        
+
     try:
         sqlite_client = get_sqlite_client()
-        if order_id:
+        if our_order_id:
             await sqlite_client.update_order(
-                order_id=order_id,
+                order_id=our_order_id,
                 status="accepted",
                 order_taker=BASE_URL_OVERRIDE,
                 taker_attestation=escrow_uid,
@@ -921,7 +936,7 @@ async def accept_offer(
                 matched_offer_id=their_order_id,
             )
     except Exception as exc:
-        logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", order_id, exc)
+        logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)

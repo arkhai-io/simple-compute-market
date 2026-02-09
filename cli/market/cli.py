@@ -230,9 +230,88 @@ def order_close(
 
 
 @order_app.command("history")
-def order_history() -> None:
-    """Show order history (stub)."""
-    typer.echo("Not implemented: order history")
+def order_history(
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file (default: agent/.env).",
+    ),
+) -> None:
+    """Show order history from local SQLite."""
+    env_path = Path(env) if env else REPO_ROOT / "agent" / ".env"
+    db_path = _read_env_value(env_path, "AGENT_DB_PATH")
+    if not db_path:
+        typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if not Path(db_path).exists():
+        typer.secho(f"No local order database found at {db_path}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT order_id, status, created_at, updated_at,
+                       offer_resource, demand_resource, fulfillment_resource
+                FROM orders
+                ORDER BY created_at DESC
+                """
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        typer.secho(f"Failed to read local orders: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    if not rows:
+        typer.echo("No local orders found.")
+        return
+
+    console = Console()
+    table = Table(title="Order History", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Order ID", style="bold", overflow="fold")
+    table.add_column("Status")
+    table.add_column("Offer")
+    table.add_column("Demand")
+    table.add_column("Fulfillment")
+    table.add_column("Created", justify="right")
+    table.add_column("Updated", justify="right")
+
+    for row in rows:
+        (
+            order_id,
+            status,
+            created_at,
+            updated_at,
+            offer_resource,
+            demand_resource,
+            fulfillment_resource,
+        ) = row
+        offer_parsed = _parse_db_resource(offer_resource)
+        demand_parsed = _parse_db_resource(demand_resource)
+        fulfillment_parsed = _parse_db_resource(fulfillment_resource)
+
+        offer_display = _format_resource(offer_parsed) if offer_parsed is not None else "-"
+        demand_display = _format_resource(demand_parsed) if demand_parsed is not None else "-"
+        fulfillment_display = _format_resource_full(fulfillment_parsed)
+
+        table.add_row(
+            str(order_id or "-"),
+            str(status or "-"),
+            offer_display if "\n" in offer_display else _shorten(offer_display, 120),
+            demand_display if "\n" in demand_display else _shorten(demand_display, 120),
+            fulfillment_display,
+            _short_ts(created_at),
+            _short_ts(updated_at),
+        )
+
+    console.print(table)
 
 
 @order_app.command("match")
@@ -400,6 +479,52 @@ def _short_ts(value: str | None) -> str:
     if not value:
         return "-"
     return value.replace("T", " ")[:19]
+
+
+def _read_env_value(path: Path, key: str) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export ") :].strip()
+            if "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            if name.strip() != key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
+                value = value[1:-1]
+            return value
+    except Exception:
+        return None
+    return None
+
+
+def _parse_db_resource(value: str | None) -> dict | str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
+
+def _format_resource_full(resource: dict | str | None) -> str:
+    if resource is None or resource == "":
+        return "-"
+    if isinstance(resource, str):
+        return resource
+    try:
+        return json.dumps(resource, separators=(",", ":"), sort_keys=True)
+    except Exception:
+        return str(resource)
 
 
 def _fetch_json(url: str) -> dict:

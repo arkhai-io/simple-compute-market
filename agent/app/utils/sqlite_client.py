@@ -216,6 +216,75 @@ class SQLiteClient:
         except Exception:
             return str(value)
 
+    def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                return None
+        return None
+
+    def _resources_equal(self, a: Any, b: Any) -> bool:
+        a_dict = self._normalize_resource(a)
+        b_dict = self._normalize_resource(b)
+        if a_dict is None or b_dict is None:
+            return False
+        try:
+            return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
+        except Exception:
+            return False
+
+    async def find_symmetric_open_order(
+        self,
+        *,
+        offer_resource: Any,
+        demand_resource: Any,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find an open local order whose resources are symmetric to the given pair.
+
+        Symmetric means:
+        - local.offer_resource == demand_resource
+        - local.demand_resource == offer_resource
+        """
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, offer_resource, demand_resource, order_maker, status, order_taker, created_at
+                    FROM orders
+                    WHERE status = 'open'
+                      AND (order_taker IS NULL OR order_taker = '')
+                    """
+                )
+                rows = cur.fetchall()
+                matches: list[dict[str, Any]] = []
+                for row in rows:
+                    row_order_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
+                    if order_maker and row_maker != order_maker:
+                        continue
+                    if self._resources_equal(row_offer, demand_resource) and self._resources_equal(row_demand, offer_resource):
+                        matches.append({
+                            "order_id": row_order_id,
+                            "order_maker": row_maker,
+                            "created_at": row_created,
+                        })
+                if not matches:
+                    return None
+                matches.sort(key=lambda m: m.get("created_at") or "", reverse=True)
+                return matches[0]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_find)
+
     async def upsert_order(
         self,
         *,
