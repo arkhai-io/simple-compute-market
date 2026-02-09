@@ -211,6 +211,7 @@ class PolicyManager:
             EventType.ACCEPT_OFFER,
             EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT,
             EventType.ARBITRATION_COMPLETE,
+            EventType.ORDER_CREATE,
             EventType.ORDER_CLOSE,
         ):
             await self.ensure_default_policies()
