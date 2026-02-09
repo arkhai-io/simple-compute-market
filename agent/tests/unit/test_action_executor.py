@@ -1,6 +1,7 @@
 """Unit tests for action executor helpers."""
 
 import json
+import sqlite3
 from datetime import datetime
 
 import pytest
@@ -16,6 +17,7 @@ from app.schema.pydantic_models import (
     TokenResource,
 )
 from app.utils import action_executor
+from app.utils.sqlite_client import SQLiteClient
 
 
 USDT_METADATA = ERC20TokenMetadata(
@@ -219,7 +221,7 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 
     captured: dict = {}
 
-    async def fake_send_to_remote_agent(_ctx, event):
+    async def fake_send_to_remote_agent(_ctx, event, agent_url=None):
         captured["event"] = event
 
     monkeypatch.setattr(action_executor, "fulfill_compute_obligation", fake_fulfill_compute_obligation)
@@ -248,3 +250,166 @@ async def test_provision_machine_raises_on_missing_connection_info(monkeypatch):
 
     with pytest.raises(RuntimeError, match="SSH connection info unavailable"):
         await action_executor.provision_machine("ssh-rsa AAA")
+
+
+def _fetch_order_row(db_path: str, order_id: str) -> dict:
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT status, escrow_uid, taker_attestation, matched_offer_id, maker_attestation, fulfillment_resource
+            FROM orders
+            WHERE order_id=?
+            """,
+            (order_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        return {
+            "status": row[0],
+            "escrow_uid": row[1],
+            "taker_attestation": row[2],
+            "matched_offer_id": row[3],
+            "maker_attestation": row[4],
+            "fulfillment_resource": row[5],
+        }
+    finally:
+        conn.close()
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
+    """Accepting an offer updates the buyer's local order to accepted."""
+    db_path = str(tmp_path / "agent.db")
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    async def fake_buy_compute_with_erc20(*_args, **_kwargs):
+        return {"log": {"uid": "escrow-uid-123"}}
+
+    class _DummyTxn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def cancel_competing(self, *_args, **_kwargs):
+            return None
+
+        async def mark_terminal(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
+    monkeypatch.setattr(action_executor, "NegotiationThreadTransaction", lambda *_args, **_kwargs: _DummyTxn())
+    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
+    async def fake_send_to_remote_agent(_ctx, _event, agent_url=None):
+        return None
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+    class _RegistryClient:
+        async def update_order(self, *_args, **_kwargs):
+            return {"ok": True}
+
+    monkeypatch.setattr(action_executor, "get_registry_client", lambda: _RegistryClient())
+
+    order_id = "buy-order-1"
+    await sqlite_client.upsert_order(
+        order_id=order_id,
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=_token_rate(1_000_000).model_dump(mode="json"),
+        demand_resource=_compute_resource().model_dump(mode="json"),
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker="buyer",
+        order_taker=None,
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=None,
+    )
+
+    order_dict = {
+        "order_id": order_id,
+        "order_maker": "buyer",
+        "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
+        "demand_resource": _compute_resource().model_dump(mode="json"),
+        "duration_hours": 1,
+    }
+
+    await action_executor.accept_offer(
+        alkahest_client=_FakeClient({}),
+        ctx=_FakeCtx(),
+        parameters={"order": order_dict, "their_order_id": "sell-order-2"},
+    )
+
+    row = _fetch_order_row(db_path, order_id)
+    assert row["status"] == "accepted"
+    assert row["escrow_uid"] == "escrow-uid-123"
+    assert row["taker_attestation"] == "escrow-uid-123"
+    assert row["matched_offer_id"] == "sell-order-2"
+
+
+@pytest.mark.asyncio
+async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_path):
+    """Seller fulfillment marks order accepted and stores fulfillment resource."""
+    db_path = str(tmp_path / "agent.db")
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    async def fake_provision_machine(_ssh_public_key: str) -> str:
+        return "user@host.example.net"
+
+    def fake_schedule_vm_shutdown(_lease_end_utc: str) -> None:
+        return None
+
+    monkeypatch.setattr(action_executor, "provision_machine", fake_provision_machine)
+    monkeypatch.setattr(action_executor, "mock_provision_machine", fake_provision_machine)
+    monkeypatch.setattr(action_executor, "schedule_vm_shutdown", fake_schedule_vm_shutdown)
+    monkeypatch.setattr(action_executor, "mock_schedule_vm_shutdown", fake_schedule_vm_shutdown)
+    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
+    class _RegistryClient:
+        async def update_order(self, *_args, **_kwargs):
+            return {"ok": True}
+
+    monkeypatch.setattr(action_executor, "get_registry_client", lambda: _RegistryClient())
+
+    order_id = "sell-order-2"
+    order_dict = {
+        "order_id": order_id,
+        "order_maker": "seller",
+        "offer_resource": _compute_resource().model_dump(mode="json"),
+        "demand_resource": _token_rate(1_000_000).model_dump(mode="json"),
+        "duration_hours": 1,
+    }
+
+    await sqlite_client.upsert_order(
+        order_id=order_id,
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=order_dict["offer_resource"],
+        demand_resource=order_dict["demand_resource"],
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker="seller",
+        order_taker=None,
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=None,
+    )
+
+    await action_executor.fulfill_compute_obligation(
+        client=None,
+        escrow_uid="escrow-uid-456",
+        ssh_public_key="ssh-rsa AAA",
+        order=order_dict,
+    )
+
+    row = _fetch_order_row(db_path, order_id)
+    assert row["status"] == "accepted"
+    assert row["escrow_uid"] == "escrow-uid-456"
+    assert row["maker_attestation"] is not None
+    assert row["fulfillment_resource"] == "user@host.example.net"
