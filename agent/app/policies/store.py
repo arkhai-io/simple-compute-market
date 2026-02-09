@@ -275,7 +275,6 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
     """When we receive compute fulfillment, trust it and move to arbitration."""
     if not isinstance(context.event, ReceiveComputeObligationFulfillmentEvent):
         return None
-
     return DomainAction(
         action_type=DomainActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT,
         parameters={

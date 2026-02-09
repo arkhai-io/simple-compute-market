@@ -41,6 +41,7 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
+from .sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
@@ -189,6 +190,28 @@ async def execute_action(
                     created_order_id = order.get("order_id")
             if created_order_id:
                 outcome["order_id"] = created_order_id
+            if isinstance(order, dict) and order.get("order_id"):
+                try:
+                    now_iso = datetime.now().isoformat()
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.upsert_order(
+                        order_id=order.get("order_id", created_order_id or ""),
+                        status="open",
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                        offer_resource=order.get("offer_resource"),
+                        demand_resource=order.get("demand_resource"),
+                        fulfillment_resource=None,
+                        duration_hours=int(order.get("duration_hours", 1)),
+                        order_maker=order.get("order_maker", BASE_URL_OVERRIDE),
+                        order_taker=order.get("order_taker"),
+                        matched_offer_id=parameters.get("matched_offer_id"),
+                        maker_attestation=order.get("maker_attestation"),
+                        taker_attestation=order.get("taker_attestation"),
+                        escrow_uid=None,
+                    )
+                except Exception as exc:
+                    logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_order_id, exc)
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.
@@ -291,6 +314,17 @@ async def execute_action(
             result["escrow_uid"] = result.get("escrow_uid") or parameters.get("escrow_uid")
             decisions = result.get("decisions")
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
+            try:
+                escrow_uid = parameters.get("escrow_uid")
+                connection_details = parameters.get("connection_details")
+                if escrow_uid and connection_details:
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.update_order_by_escrow_uid(
+                        escrow_uid=escrow_uid,
+                        fulfillment_resource=connection_details,
+                    )
+            except Exception as exc:
+                logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_url = parameters.get("counterparty_url") or parameters.get("agent_url")
@@ -518,6 +552,15 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     order_id = parameters.get("order_id")
     if not isinstance(order_id, str) or not order_id.strip():
         return {"status": "error", "message": "Missing order_id for close_order"}
+
+    try:
+        sqlite_client = get_sqlite_client()
+        await sqlite_client.update_order(
+            order_id=order_id,
+            status="closed",
+        )
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
 
     if not CONFIG.enable_registry_discovery:
         return {
@@ -865,6 +908,20 @@ async def accept_offer(
         await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
+
+    try:
+        sqlite_client = get_sqlite_client()
+        if order_id:
+            await sqlite_client.update_order(
+                order_id=order_id,
+                status="accepted",
+                order_taker=BASE_URL_OVERRIDE,
+                taker_attestation=escrow_uid,
+                escrow_uid=escrow_uid,
+                matched_offer_id=their_order_id,
+            )
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", order_id, exc)
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)
@@ -1552,6 +1609,16 @@ async def fulfill_compute_obligation(
             token_resource=token_resource,
             duration_hours=duration_hours,
         )
+        if order_id:
+            try:
+                sqlite_client = get_sqlite_client()
+                await sqlite_client.update_order(
+                    order_id=order_id,
+                    status="accepted",
+                    escrow_uid=escrow_uid,
+                )
+            except Exception as exc:
+                logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     if CONFIG.use_mock_provisioning:
@@ -1596,7 +1663,19 @@ async def fulfill_compute_obligation(
                 logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
         except Exception as e:
             logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
-    
+
+    if order_id:
+        try:
+            sqlite_client = get_sqlite_client()
+            await sqlite_client.update_order(
+                order_id=order_id,
+                maker_attestation=maker_attestation,
+                fulfillment_resource=connection_details,
+                escrow_uid=escrow_uid,
+            )
+        except Exception as exc:
+            logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
