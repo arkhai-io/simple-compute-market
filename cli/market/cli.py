@@ -184,12 +184,6 @@ def order_create(
     console.print(Panel(table, title="Order Create", border_style="green"))
 
 
-@order_app.command("update")
-def order_update() -> None:
-    """Update an existing order (stub)."""
-    typer.echo("Not implemented: order update")
-
-
 @order_app.command("close")
 def order_close(
     order_id: str = typer.Option(
