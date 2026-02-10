@@ -565,6 +565,21 @@ All configuration is done via environment variables. See `.env.example` for avai
 3. **Monitoring**: Enable logging and health checks
 4. **Scaling**: Deploy behind load balancer if needed
 
+### Container
+
+**Build the image:**
+
+```bash
+cd erc-8004-registry-py/
+docker build -t erc-8004-registry .
+```
+
+**Run locally with an env file:**
+
+```bash
+docker run --env-file .env.development -p 8080:8080 erc-8004-registry
+```
+
 ## Troubleshooting
 
 ### Database Connection Issues
