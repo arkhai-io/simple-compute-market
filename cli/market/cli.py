@@ -186,10 +186,8 @@ def order_create(
 
 @order_app.command("close")
 def order_close(
-    order_id: str = typer.Option(
+    order_id: str = typer.Argument(
         ...,
-        "--order-id",
-        "-i",
         help="Order ID to close.",
     ),
     agent_url: str | None = typer.Option(
@@ -310,10 +308,8 @@ def order_history(
 
 @order_app.command("match")
 def order_match(
-    order_id: str = typer.Option(
+    order_id: str = typer.Argument(
         ...,
-        "--order-id",
-        "-i",
         help="Order ID to match (flip offer/demand).",
     ),
     registry_url: str = typer.Option(
