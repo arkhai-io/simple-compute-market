@@ -121,7 +121,7 @@ def order_create(
         ...,
         "--demand",
         "-d",
-        help="Demand resource JSON.",
+        help="Demand resource JSON. Example: '{\"token\":\"MOCK\",\"amount\":9.0}'",
     ),
     agent_url: str | None = typer.Option(
         None,
