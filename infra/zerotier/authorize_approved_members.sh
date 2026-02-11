@@ -17,7 +17,7 @@ source "$ENV_FILE"
 set +a
 
 # Check required environment variables
-for var in AIR_TABLE_API_KEY ZEROTIER_NETWORK; do
+for var in AIRTABLE_API_KEY ZEROTIER_NETWORK; do
   if [[ -z "${!var:-}" ]]; then
     echo "Missing required env var: $var in $ENV_FILE" >&2
     exit 1
@@ -71,7 +71,7 @@ fi
 
 # Fetch records from Airtable with error handling
 RESPONSE=$(curl -sf "$AIRTABLE_URL" \
-  -H "Authorization: Bearer $AIR_TABLE_API_KEY" 2>&1) || {
+  -H "Authorization: Bearer $AIRTABLE_API_KEY" 2>&1) || {
   echo "Error: Failed to fetch data from Airtable" >&2
   echo "$RESPONSE" >&2
   exit 1
@@ -119,7 +119,7 @@ while IFS= read -r record; do
     echo "Updating Airtable status to 'authorized'..."
     UPDATE_RESPONSE=$(curl -sf -X PATCH \
       "https://api.airtable.com/v0/appY1WZgCrnD5QW1q/Waitlist%20Responses/$RECORD_ID" \
-      -H "Authorization: Bearer $AIR_TABLE_API_KEY" \
+      -H "Authorization: Bearer $AIRTABLE_API_KEY" \
       -H "Content-Type: application/json" \
       -d "{\"fields\": {\"Status\": \"authorized\", \"Error Message\": \"\"}}" 2>&1) || {
       echo "✗ Failed to update Airtable record $RECORD_ID to authorized" >&2
@@ -141,7 +141,7 @@ while IFS= read -r record; do
     echo "Updating Airtable status to 'error'..."
     UPDATE_RESPONSE=$(curl -sf -X PATCH \
       "https://api.airtable.com/v0/appY1WZgCrnD5QW1q/Waitlist%20Responses/$RECORD_ID" \
-      -H "Authorization: Bearer $AIR_TABLE_API_KEY" \
+      -H "Authorization: Bearer $AIRTABLE_API_KEY" \
       -H "Content-Type: application/json" \
       -d "{\"fields\": {\"Status\": \"error\", \"Error Message\": $ERROR_MSG}}" 2>&1) || {
       echo "✗ Failed to update Airtable record $RECORD_ID to error status" >&2
