@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+*.db
+*.bak.db
+.git
+.gitignore
+.env
+.env.*
+tests
+Makefile
+README.md
