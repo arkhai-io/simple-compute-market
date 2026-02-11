@@ -114,7 +114,8 @@ def order_create(
         ...,
         "--offer",
         "-o",
-        help="Offer resource JSON.",
+        help="Offer resource JSON. Example: '{\"gpu_model\":\"H200\",\"quantity\":1,\"sla\":99.9,\"region\":\"California, US\"}'",
+
     ),
     demand: str = typer.Option(
         ...,
