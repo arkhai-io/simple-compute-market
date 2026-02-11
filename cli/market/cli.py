@@ -118,7 +118,7 @@ def order_create(
     ),
     demand: str = typer.Option(
         ...,
-        "--d",
+        "--demand",
         "-d",
         help="Demand resource JSON.",
     ),
