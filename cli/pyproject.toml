@@ -8,6 +8,11 @@ dependencies = [
   "rich>=13.7.0",
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+]
+
 [project.scripts]
 market = "market.cli:app"
 

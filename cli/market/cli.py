@@ -706,10 +706,79 @@ def start(
     )
 
 
+def _init_env_file(
+    component: str,
+    env_dir: Path,
+    overwrite: bool,
+) -> None:
+    """Create or overwrite a component .env file with safety checks.
+
+    Rules:
+    - If `.env` exists and `overwrite` is False, raise an error.
+    - If `.env.local` or any other file containing `.env` exists, warn but still write `.env`.
+    - Always write a `.env` file in `env_dir` when allowed.
+    """
+    env_path = env_dir / ".env"
+    env_local_path = env_dir / ".env.local"
+
+    if env_path.exists() and not overwrite:
+        raise typer.BadParameter(
+            f"{component}: {env_path} already exists. Use --overwrite to replace it."
+        )
+
+    has_env_local = env_local_path.exists()
+    other_envs = []
+    for candidate in env_dir.iterdir():
+        name = candidate.name
+        if ".env" not in name:
+            continue
+        if name in {".env", ".env.local", ".env.sample"}:
+            continue
+        other_envs.append(name)
+
+    env_dir.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("", encoding="utf-8")
+
+    if has_env_local or other_envs:
+        suffix = ""
+        if other_envs:
+            suffix = f" (also found: {', '.join(sorted(other_envs))})"
+        typer.secho(
+            f"Warning: {component} has other env files present. Wrote {env_path}.{suffix}",
+            fg=typer.colors.YELLOW,
+        )
+    else:
+        typer.echo(f"Wrote {env_path}")
+
+
 @config_app.command("init")
-def config_init() -> None:
-    """Initialize market config (stub)."""
-    typer.echo("Not implemented: market config init")
+def config_init(
+    component: str = typer.Argument(
+        ...,
+        help="Component env to initialize: agent, provisioning, registry, zerotier.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Overwrite existing .env.",
+    ),
+) -> None:
+    """Initialize a component .env file (stub)."""
+    component_key = component.strip().lower()
+    if component_key == "agent":
+        target_dir = REPO_ROOT / "agent"
+    elif component_key == "provisioning":
+        target_dir = REPO_ROOT / "async-provisioning-service"
+    elif component_key == "registry":
+        target_dir = REPO_ROOT / "erc-8004-registry-py"
+    elif component_key == "zerotier":
+        target_dir = REPO_ROOT / "infra" / "zerotier"
+    else:
+        raise typer.BadParameter(
+            "component must be one of: agent, provisioning, registry, zerotier"
+        )
+
+    _init_env_file(component_key, target_dir, overwrite)
 
 
 @config_app.command("set")
