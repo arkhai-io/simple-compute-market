@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 BASE_URL_OVERRIDE = CONFIG.base_url_override
 MCP_SERVER_URL = CONFIG.mcp_server_url
 PORT = CONFIG.port
-POLICY_DB_PATH = CONFIG.policy_db_path
+AGENT_DB_PATH = CONFIG.agent_db_path
 AGENT_PRIV_KEY = CONFIG.agent_priv_key
 CHAIN_RPC_URL = CONFIG.chain_rpc_url
 
@@ -74,11 +74,15 @@ from .schema.pydantic_models import (
     Region,
     ComputeResource,
     ComputeResourcePortfolio,
+    TokenResource,
+    Resource,
+    OrderCreateEvent,
+    OrderCloseEvent,
 )
 
 from .policies.store import PolicyStore
 from .policies.manager import PolicyManager
-from .policies.sqlite_client import SQLiteClient
+from .utils.sqlite_client import SQLiteClient
 from .policies.negotiation_thread import get_thread_store
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
@@ -142,6 +146,17 @@ def safe_literal_eval(payload_text: str, *, max_len: int = 50_000) -> Any:
         return ast.literal_eval(payload_text)
     except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
         raise ValueError(f"failed to parse payload: {exc}") from exc
+
+
+def _extract_order_id(outcome: dict | None) -> str | None:
+    if not isinstance(outcome, dict):
+        return None
+    if outcome.get("order_id"):
+        return outcome["order_id"]
+    result = outcome.get("result")
+    if isinstance(result, dict):
+        return result.get("order_id") or (result.get("order") or {}).get("order_id")
+    return None
 
 
 def _extract_content_payload(
@@ -260,6 +275,37 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             # Use model_validate - model_validator will handle resource dict conversion
             return ResourceImbalanceEvent.model_validate(payload)
             
+        elif event_type == EventType.ORDER_CREATE:
+            offer_data = data.get("offer", data.get("offer_resource"))
+            demand_data = data.get("demand", data.get("demand_resource"))
+            if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
+                raise ValueError("OrderCreateEvent requires 'offer' and 'demand' dictionaries")
+
+            duration_hours = data.get("duration_hours", payload.get("duration_hours", 1))
+            order_create_payload = {
+                "event_id": payload.get("event_id") or f"order_create_{uuid.uuid4()}",
+                "event_type": EventType.ORDER_CREATE.value,
+                "source": payload.get("source") or BASE_URL_OVERRIDE,
+                "offer": offer_data,
+                "demand": demand_data,
+                "duration_hours": duration_hours,
+                "data": data,
+            }
+            return OrderCreateEvent.model_validate(order_create_payload)
+
+        elif event_type == EventType.ORDER_CLOSE:
+            order_id = data.get("order_id", payload.get("order_id"))
+            if not isinstance(order_id, str) or not order_id.strip():
+                raise ValueError("OrderCloseEvent requires 'order_id'")
+            order_close_payload = {
+                "event_id": payload.get("event_id") or f"order_close_{uuid.uuid4()}",
+                "event_type": EventType.ORDER_CLOSE.value,
+                "source": payload.get("source") or BASE_URL_OVERRIDE,
+                "order_id": order_id,
+                "data": data,
+            }
+            return OrderCloseEvent.model_validate(order_close_payload)
+
         elif event_type == EventType.MAKE_OFFER:
             # Extract offer data - could be in 'offer' key or directly in 'data'
             offer_data = data.get("offer", data)
@@ -373,6 +419,7 @@ class TraderAgent(BaseAgent):
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
     _alkahest_client: Any = PrivateAttr()
+    _last_action_outcomes: dict[str, dict] = PrivateAttr()
 
     def __init__(
         self,
@@ -388,6 +435,7 @@ class TraderAgent(BaseAgent):
             name=name,
             resource_portfolio={}
         )
+        self._last_action_outcomes = {}
 
         # Log ZeroTier IP if available for the configured network
         zerotier_network = os.getenv("ZEROTIER_NETWORK")
@@ -420,7 +468,7 @@ class TraderAgent(BaseAgent):
         )
         
         # Initialize SQLite client (shared for policies and decisions)
-        self._sqlite_client = SQLiteClient(db_path=POLICY_DB_PATH)
+        self._sqlite_client = SQLiteClient(db_path=AGENT_DB_PATH)
         
         # Initialize negotiation thread store
         get_thread_store(sqlite_client=self._sqlite_client)
@@ -634,6 +682,8 @@ class TraderAgent(BaseAgent):
             ctx=ctx,
             alkahest_client=self._alkahest_client,
         )
+        # Capture outcomes for synchronous endpoints that need structured results.
+        self._last_action_outcomes[domain_event.event_id] = outcome
         
         # [5] Experience recording
         try:
@@ -893,11 +943,333 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
 # Create Starlette route for the alert endpoint
 alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 
+AGENT_REST_API_APP_NAME = "agent-rest-api"
+AGENT_REST_API_USER_ID = "agent-rest-api"
+
+async def _run_create_order_flow(request: Request) -> dict:
+    """
+    Internal helper to run the create order flow.
+
+    Example offer (compute):
+    {
+      "gpu_model": "H200",
+      "quantity": 1,
+      "sla": 99.9,
+      "region": "California, US"
+    }
+
+    Example demand (token):
+    {
+      "token": "MOCK",
+      "amount": 9.0
+    }
+    """
+    # Validate that request JSON is valid:
+    # - Must have both offer and demand specified
+    # - One must be a ComputeResource and the other a TokenResource
+    try:
+        order_data = await request.json()
+    except Exception as e:
+        raise ValueError(f"Invalid JSON in request body: {e}") from e
+
+    offer_data = order_data.get("offer")
+    demand_data = order_data.get("demand")
+    duration_hours = order_data.get("duration_hours", 1)
+
+    if offer_data is None or demand_data is None:
+        raise ValueError("Request must include both 'offer' and 'demand'")
+
+    def normalize_token_resource(resource_payload: dict) -> dict:
+        if "token" not in resource_payload:
+            return resource_payload
+
+        token_value = resource_payload.get("token")
+        if token_value is None:
+            raise ValueError("Token must be a symbol or contract address")
+
+        try:
+            if isinstance(token_value, str):
+                token_meta = TOKEN_REGISTRY.require(token_value)
+            elif isinstance(token_value, dict):
+                if all(key in token_value for key in ("symbol", "contract_address", "decimals")):
+                    token_meta = token_value
+                elif "symbol" in token_value:
+                    token_meta = TOKEN_REGISTRY.require(token_value["symbol"])
+                elif "contract_address" in token_value:
+                    token_meta = TOKEN_REGISTRY.require(token_value["contract_address"])
+                else:
+                    raise ValueError("Token metadata must include symbol/contract_address/decimals")
+            else:
+                raise ValueError("Token must be a symbol or contract address")
+        except Exception as exc:
+            raise ValueError(f"Unknown token: {token_value}") from exc
+
+        amount_value = resource_payload.get("amount")
+        if amount_value is None:
+            raise ValueError("Token resource must include amount")
+
+        from decimal import Decimal
+        if isinstance(token_meta, dict):
+            decimals = int(token_meta["decimals"])
+            token_dump = token_meta
+        else:
+            decimals = token_meta.decimals
+            token_dump = token_meta.model_dump()
+
+        raw = Decimal(str(amount_value)) * (Decimal(10) ** decimals)
+        if raw != raw.to_integral_value():
+            raise ValueError("Amount has too many decimal places for token")
+        amount_int = int(raw)
+
+        normalized = dict(resource_payload)
+        normalized["token"] = token_dump
+        normalized["amount"] = amount_int
+        return normalized
+
+    try:
+        offer_resource = Resource.parse_from_dict(normalize_token_resource(offer_data))
+        demand_resource = Resource.parse_from_dict(normalize_token_resource(demand_data))
+    except Exception as e:
+        raise ValueError(f"Invalid offer/demand resource: {e}") from e
+
+    offer_is_compute = isinstance(offer_resource, ComputeResource)
+    offer_is_token = isinstance(offer_resource, TokenResource)
+    demand_is_compute = isinstance(demand_resource, ComputeResource)
+    demand_is_token = isinstance(demand_resource, TokenResource)
+
+    if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
+        raise ValueError("Offer and demand must be one compute and one token resource")
+
+    event_id = f"order_create_{uuid.uuid4()}"
+    order_create_event = OrderCreateEvent(
+        event_id=event_id,
+        source=BASE_URL_OVERRIDE,
+        offer=offer_resource,
+        demand=demand_resource,
+        duration_hours=duration_hours,
+        data={
+            "offer": offer_resource.model_dump(mode="json"),
+            "demand": demand_resource.model_dump(mode="json"),
+            "duration_hours": duration_hours,
+        },
+    )
+
+    if CONFIG.enable_event_queue:
+        queue_event(order_create_event.model_dump(mode="json"))
+        return {
+            "status": "queued",
+            "event_id": event_id,
+            "order_request": order_create_event.model_dump(mode="json"),
+        }
+
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=AGENT_REST_API_APP_NAME,
+        user_id=AGENT_REST_API_USER_ID,
+    )
+    runner = Runner(
+        agent=root_agent,
+        app_name=AGENT_REST_API_APP_NAME,
+        session_service=session_service,
+    )
+
+    event_payload = order_create_event.model_dump(mode="json")
+
+    message = genai_types.Content(
+        role="user",
+        parts=[
+            genai_types.Part.from_function_response(
+                name="create_order",
+                response=event_payload
+            )
+        ],
+    )
+
+    final_response: str | None = None
+    async for event in runner.run_async(
+        user_id=AGENT_REST_API_USER_ID,
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            text_parts = [
+                part.text
+                for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            ]
+            if text_parts:
+                final_response = "".join(text_parts)
+                break
+
+    if not final_response:
+        raise HTTPException(
+            status_code=500,
+            detail="root_agent did not provide a response to the order creation request.",
+        )
+
+    outcome = root_agent._last_action_outcomes.pop(event_id, None)
+    order_id = _extract_order_id(outcome)
+
+    response_payload = {
+        "status": "created",
+        "event_id": event_id,
+        "order_request": order_create_event.model_dump(mode="json"),
+        "root_agent_response": final_response,
+    }
+    if order_id:
+        response_payload["order_id"] = order_id
+    return response_payload
+
+async def _run_close_order_flow(request: Request) -> dict:
+    """
+    Internal helper to run the close order flow.
+
+    Expected payload:
+    {
+      "order_id": "..."
+    }
+    """
+    try:
+        close_data = await request.json()
+    except Exception as e:
+        raise ValueError(f"Invalid JSON in request body: {e}") from e
+
+    order_id = close_data.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        raise ValueError("Request must include non-empty 'order_id'")
+
+    event_id = f"order_close_{uuid.uuid4()}"
+    order_close_event = OrderCloseEvent(
+        event_id=event_id,
+        source=BASE_URL_OVERRIDE,
+        order_id=order_id,
+        data={"order_id": order_id},
+    )
+
+    if CONFIG.enable_event_queue:
+        queue_event(order_close_event.model_dump(mode="json"))
+        return {
+            "status": "queued",
+            "event_id": event_id,
+            "order_request": order_close_event.model_dump(mode="json"),
+        }
+
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=AGENT_REST_API_APP_NAME,
+        user_id=AGENT_REST_API_USER_ID,
+    )
+    runner = Runner(
+        agent=root_agent,
+        app_name=AGENT_REST_API_APP_NAME,
+        session_service=session_service,
+    )
+
+    event_payload = order_close_event.model_dump(mode="json")
+
+    message = genai_types.Content(
+        role="user",
+        parts=[
+            genai_types.Part.from_function_response(
+                name="close_order",
+                response=event_payload
+            )
+        ],
+    )
+
+    final_response: str | None = None
+    async for event in runner.run_async(
+        user_id=AGENT_REST_API_USER_ID,
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response() and event.content and event.content.parts:
+            text_parts = [
+                part.text
+                for part in event.content.parts
+                if hasattr(part, "text") and part.text
+            ]
+            if text_parts:
+                final_response = "".join(text_parts)
+                break
+
+    if not final_response:
+        raise HTTPException(
+            status_code=500,
+            detail="root_agent did not provide a response to the order close request.",
+        )
+
+    return {
+        "status": "closed",
+        "event_id": event_id,
+        "order_request": order_close_event.model_dump(mode="json"),
+        "root_agent_response": final_response,
+    }
+
+async def create_market_order_endpoint(request: Request) -> JSONResponse:
+    """
+    Expose an endpoint to create market orders via the root agent.
+    """
+
+    try:
+        response = await _run_create_order_flow(request)
+        return JSONResponse(response)
+    except ValueError as e:
+        logger.error(f"[ORDER CREATION] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except ValidationError as e:
+        logger.error(f"[ORDER CREATION] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"[ORDER CREATION] Error creating market order: {e}")
+        return JSONResponse(
+            {"error": "Failed to create market order", "detail": str(e)},
+            status_code=500
+        )
+
+async def close_market_order_endpoint(request: Request) -> JSONResponse:
+    """
+    Expose an endpoint to close market orders via the root agent.
+    """
+    try:
+        response = await _run_close_order_flow(request)
+        return JSONResponse(response)
+    except ValueError as e:
+        logger.error(f"[ORDER CLOSE] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order close validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except ValidationError as e:
+        logger.error(f"[ORDER CLOSE] Validation error: {e}")
+        return JSONResponse(
+            {"error": "Order close validation failed", "detail": str(e)},
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"[ORDER CLOSE] Error closing market order: {e}")
+        return JSONResponse(
+            {"error": "Failed to close market order", "detail": str(e)},
+            status_code=500
+        )
+
+agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
+agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
 # Add the alert route to the A2A app
 a2a_app.routes.append(alert_route)
+# Add the order creation route to the A2A app
+a2a_app.routes.append(agent_order_creation_route)
+# Add the order close route to the A2A app
+a2a_app.routes.append(agent_order_close_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file

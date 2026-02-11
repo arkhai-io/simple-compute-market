@@ -34,12 +34,14 @@ from app.schema.pydantic_models import (
     GPUModel,
     MarketOrder,
     Region,
-    TokenResource
+    TokenResource,
+    Resource,
 )
 
 from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
+from .sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
@@ -138,18 +140,78 @@ async def execute_action(
             logger.info(f"[ACTION] [SIMULATED] Rejecting offer with params: {parameters}")
             outcome["result"] = result
             outcome["message"] = "Offer rejected (simulated)"
-            
+
+        case ActionType.CLOSE_ORDER.value:
+            logger.info(f"[ACTION] Closing order with params: {parameters}")
+            result = await close_order(parameters)
+            outcome["result"] = result
+            outcome["message"] = result.get("message", "Order closed")
+
         case ActionType.MAKE_OFFER.value:
-            gpu_model = parameters.get("gpu_model", "unknown")
-            imbalance_type = parameters.get("imbalance_type", "surplus")
-            logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
-            order = create_order(
-                gpu_model_str=parameters.get("gpu_model"),
-                sla=parameters.get("sla"),
-                region_str=parameters.get("region"),
-                imbalance_type=imbalance_type,
-                duration_hours=parameters.get("duration_hours", 1),
-            )
+            offer_param = parameters.get("offer")
+            demand_param = parameters.get("demand")
+            created_order_id: str | None = None
+            if offer_param is not None and demand_param is not None:
+                try:
+                    offer_resource = Resource.parse_from_dict(offer_param)
+                    demand_resource = Resource.parse_from_dict(demand_param)
+                except Exception as exc:
+                    raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+
+                offer_is_compute = isinstance(offer_resource, ComputeResource)
+                offer_is_token = isinstance(offer_resource, TokenResource)
+                demand_is_compute = isinstance(demand_resource, ComputeResource)
+                demand_is_token = isinstance(demand_resource, TokenResource)
+
+                if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
+                    raise ValueError("Offer and demand must be one compute and one token resource")
+
+                logger.info("[ACTION] Creating order from explicit offer/demand payload")
+                order = create_order(
+                    offer_resource=offer_resource,
+                    demand_resource=demand_resource,
+                    duration_hours=parameters.get("duration_hours", 1),
+                )
+                if isinstance(order, dict):
+                    created_order_id = order.get("order_id")
+                gpu_model = getattr(offer_resource, "gpu_model", None) or getattr(demand_resource, "gpu_model", "unknown")
+            else:
+                gpu_model = parameters.get("gpu_model", "unknown")
+                imbalance_type = parameters.get("imbalance_type", "surplus")
+                logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
+                order = create_order(
+                    gpu_model_str=parameters.get("gpu_model"),
+                    sla=parameters.get("sla"),
+                    region_str=parameters.get("region"),
+                    imbalance_type=imbalance_type,
+                    duration_hours=parameters.get("duration_hours", 1),
+                )
+                if isinstance(order, dict):
+                    created_order_id = order.get("order_id")
+            if created_order_id:
+                outcome["order_id"] = created_order_id
+            if isinstance(order, dict) and order.get("order_id"):
+                try:
+                    now_iso = datetime.now().isoformat()
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.upsert_order(
+                        order_id=order.get("order_id", created_order_id or ""),
+                        status="open",
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                        offer_resource=order.get("offer_resource"),
+                        demand_resource=order.get("demand_resource"),
+                        fulfillment_resource=None,
+                        duration_hours=int(order.get("duration_hours", 1)),
+                        order_maker=order.get("order_maker", BASE_URL_OVERRIDE),
+                        order_taker=order.get("order_taker"),
+                        matched_offer_id=parameters.get("matched_offer_id"),
+                        maker_attestation=order.get("maker_attestation"),
+                        taker_attestation=order.get("taker_attestation"),
+                        escrow_uid=None,
+                    )
+                except Exception as exc:
+                    logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_order_id, exc)
             outcome["result"] = {"order_id": f"sim_{action.timestamp.isoformat()}"}
             outcome["message"] = f"Order created for {gpu_model}"
             # Then, call make_offer to propagate to the network.
@@ -252,6 +314,17 @@ async def execute_action(
             result["escrow_uid"] = result.get("escrow_uid") or parameters.get("escrow_uid")
             decisions = result.get("decisions")
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
+            try:
+                escrow_uid = parameters.get("escrow_uid")
+                connection_details = parameters.get("connection_details")
+                if escrow_uid and connection_details:
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.update_order_by_escrow_uid(
+                        escrow_uid=escrow_uid,
+                        fulfillment_resource=connection_details,
+                    )
+            except Exception as exc:
+                logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_url = parameters.get("counterparty_url") or parameters.get("agent_url")
@@ -471,6 +544,53 @@ def reject_offer() -> bool:
     """
     logger.info("[TOOL] Rejecting received offer.")
     return True
+
+
+async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Close an order locally and in the registry (if enabled)."""
+    parameters = parameters or {}
+    order_id = parameters.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        return {"status": "error", "message": "Missing order_id for close_order"}
+
+    try:
+        sqlite_client = get_sqlite_client()
+        await sqlite_client.update_order(
+            order_id=order_id,
+            status="closed",
+        )
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
+
+    if not CONFIG.enable_registry_discovery:
+        return {
+            "status": "skipped",
+            "message": "Registry discovery is disabled; order not updated in registry",
+            "order_id": order_id,
+        }
+
+    try:
+        registry_client = get_registry_client()
+        result = await registry_client.update_order(order_id, {"status": "closed"})
+        if result:
+            return {
+                "status": "closed",
+                "message": f"Order {order_id} marked closed in registry",
+                "order_id": order_id,
+                "registry_result": result,
+            }
+        return {
+            "status": "error",
+            "message": f"Failed to update order {order_id} in registry",
+            "order_id": order_id,
+        }
+    except Exception as exc:
+        logger.warning("[REGISTRY] Failed to close order %s in registry: %s", order_id, exc)
+        return {
+            "status": "error",
+            "message": f"Registry update failed for order {order_id}: {exc}",
+            "order_id": order_id,
+        }
 
 
 async def mock_provision_machine(ssh_public_key: str) -> str:
@@ -781,6 +901,7 @@ async def accept_offer(
 
     # Cancel competing negotiations and mark as terminal using transaction
     order_id = order_dict.get("order_id")
+    our_order_id = parameters.get("our_order_id")
     their_order_id = parameters.get("their_order_id")
     negotiation_id = parameters.get("negotiation_id")
 
@@ -788,6 +909,34 @@ async def accept_offer(
         await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
+
+    if not our_order_id:
+        try:
+            sqlite_client = get_sqlite_client()
+            inferred = await sqlite_client.find_symmetric_open_order(
+                offer_resource=order_dict.get("offer_resource"),
+                demand_resource=order_dict.get("demand_resource"),
+                order_maker=BASE_URL_OVERRIDE,
+            )
+            if inferred:
+                our_order_id = inferred.get("order_id")
+        except Exception as exc:
+            logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
+        
+
+    try:
+        sqlite_client = get_sqlite_client()
+        if our_order_id:
+            await sqlite_client.update_order(
+                order_id=our_order_id,
+                status="accepted",
+                order_taker=BASE_URL_OVERRIDE,
+                taker_attestation=escrow_uid,
+                escrow_uid=escrow_uid,
+                matched_offer_id=their_order_id,
+            )
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)
@@ -1475,6 +1624,16 @@ async def fulfill_compute_obligation(
             token_resource=token_resource,
             duration_hours=duration_hours,
         )
+        if order_id:
+            try:
+                sqlite_client = get_sqlite_client()
+                await sqlite_client.update_order(
+                    order_id=order_id,
+                    status="accepted",
+                    escrow_uid=escrow_uid,
+                )
+            except Exception as exc:
+                logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     if CONFIG.use_mock_provisioning:
@@ -1519,7 +1678,19 @@ async def fulfill_compute_obligation(
                 logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
         except Exception as e:
             logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
-    
+
+    if order_id:
+        try:
+            sqlite_client = get_sqlite_client()
+            await sqlite_client.update_order(
+                order_id=order_id,
+                maker_attestation=maker_attestation,
+                fulfillment_resource=connection_details,
+                escrow_uid=escrow_uid,
+            )
+        except Exception as exc:
+            logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",

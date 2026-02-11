@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from .config import CONFIG
+
 
 class SQLiteClient:
     def __init__(self, db_path: str):
@@ -135,6 +137,27 @@ class SQLiteClient:
                 )
                 """
             )
+            # Orders table (local source of truth)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders (
+                  order_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  offer_resource TEXT NOT NULL,
+                  demand_resource TEXT NOT NULL,
+                  fulfillment_resource TEXT,
+                  duration_hours INTEGER NOT NULL,
+                  order_maker TEXT NOT NULL,
+                  order_taker TEXT,
+                  matched_offer_id TEXT,
+                  maker_attestation TEXT,
+                  taker_attestation TEXT,
+                  escrow_uid TEXT
+                )
+                """
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -170,9 +193,276 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
+            )
             conn.commit()
         finally:
             conn.close()
+
+    def _serialize_resource(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value)
+        except Exception:
+            return str(value)
+
+    def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                return None
+        return None
+
+    def _resources_equal(self, a: Any, b: Any) -> bool:
+        a_dict = self._normalize_resource(a)
+        b_dict = self._normalize_resource(b)
+        if a_dict is None or b_dict is None:
+            return False
+        try:
+            return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
+        except Exception:
+            return False
+
+    async def find_symmetric_open_order(
+        self,
+        *,
+        offer_resource: Any,
+        demand_resource: Any,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find an open local order whose resources are symmetric to the given pair.
+
+        Symmetric means:
+        - local.offer_resource == demand_resource
+        - local.demand_resource == offer_resource
+        """
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, offer_resource, demand_resource, order_maker, status, order_taker, created_at
+                    FROM orders
+                    WHERE status = 'open'
+                      AND (order_taker IS NULL OR order_taker = '')
+                    """
+                )
+                rows = cur.fetchall()
+                matches: list[dict[str, Any]] = []
+                for row in rows:
+                    row_order_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
+                    if order_maker and row_maker != order_maker:
+                        continue
+                    if self._resources_equal(row_offer, demand_resource) and self._resources_equal(row_demand, offer_resource):
+                        matches.append({
+                            "order_id": row_order_id,
+                            "order_maker": row_maker,
+                            "created_at": row_created,
+                        })
+                if not matches:
+                    return None
+                matches.sort(key=lambda m: m.get("created_at") or "", reverse=True)
+                return matches[0]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_find)
+
+    async def upsert_order(
+        self,
+        *,
+        order_id: str,
+        status: str,
+        created_at: str,
+        updated_at: str,
+        offer_resource: Any,
+        demand_resource: Any,
+        fulfillment_resource: Any | None,
+        duration_hours: int,
+        order_maker: str,
+        order_taker: str | None = None,
+        matched_offer_id: str | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> None:
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO orders(
+                      order_id,
+                      status,
+                      created_at,
+                      updated_at,
+                      offer_resource,
+                      demand_resource,
+                      fulfillment_resource,
+                      duration_hours,
+                      order_maker,
+                      order_taker,
+                      matched_offer_id,
+                      maker_attestation,
+                      taker_attestation,
+                      escrow_uid
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(order_id) DO UPDATE SET
+                      status=excluded.status,
+                      updated_at=excluded.updated_at,
+                      offer_resource=excluded.offer_resource,
+                      demand_resource=excluded.demand_resource,
+                      fulfillment_resource=excluded.fulfillment_resource,
+                      duration_hours=excluded.duration_hours,
+                      order_maker=excluded.order_maker,
+                      order_taker=excluded.order_taker,
+                      matched_offer_id=excluded.matched_offer_id,
+                      maker_attestation=excluded.maker_attestation,
+                      taker_attestation=excluded.taker_attestation,
+                      escrow_uid=excluded.escrow_uid
+                    """,
+                    (
+                        order_id,
+                        status,
+                        created_at,
+                        updated_at,
+                        self._serialize_resource(offer_resource),
+                        self._serialize_resource(demand_resource),
+                        self._serialize_resource(fulfillment_resource),
+                        duration_hours,
+                        order_maker,
+                        order_taker,
+                        matched_offer_id,
+                        maker_attestation,
+                        taker_attestation,
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def update_order(
+        self,
+        *,
+        order_id: str,
+        status: str | None = None,
+        updated_at: str | None = None,
+        offer_resource: Any | None = None,
+        demand_resource: Any | None = None,
+        fulfillment_resource: Any | None = None,
+        duration_hours: int | None = None,
+        order_maker: str | None = None,
+        order_taker: str | None = None,
+        matched_offer_id: str | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> None:
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(field: str, value: Any, *, serialize: bool = False) -> None:
+                if value is None:
+                    return
+                updates.append(f"{field}=?")
+                values.append(self._serialize_resource(value) if serialize else value)
+
+            add("status", status)
+            add("updated_at", updated_at or datetime.now().isoformat())
+            add("offer_resource", offer_resource, serialize=True)
+            add("demand_resource", demand_resource, serialize=True)
+            add("fulfillment_resource", fulfillment_resource, serialize=True)
+            add("duration_hours", duration_hours)
+            add("order_maker", order_maker)
+            add("order_taker", order_taker)
+            add("matched_offer_id", matched_offer_id)
+            add("maker_attestation", maker_attestation)
+            add("taker_attestation", taker_attestation)
+            add("escrow_uid", escrow_uid)
+
+            if not updates:
+                return
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE orders SET {', '.join(updates)} WHERE order_id=?",
+                    (*values, order_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def update_order_by_escrow_uid(
+        self,
+        *,
+        escrow_uid: str,
+        status: str | None = None,
+        updated_at: str | None = None,
+        fulfillment_resource: Any | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+    ) -> None:
+        """
+        Update order fields based on escrow_uid, when order_id is not available.
+        """
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(field: str, value: Any, *, serialize: bool = False) -> None:
+                if value is None:
+                    return
+                updates.append(f"{field}=?")
+                values.append(self._serialize_resource(value) if serialize else value)
+
+            add("status", status)
+            add("updated_at", updated_at or datetime.now().isoformat())
+            add("fulfillment_resource", fulfillment_resource, serialize=True)
+            add("maker_attestation", maker_attestation)
+            add("taker_attestation", taker_attestation)
+
+            if not updates:
+                return
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE orders SET {', '.join(updates)} WHERE escrow_uid=?",
+                    (*values, escrow_uid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
 
     async def save_policy(
         self,
@@ -864,3 +1154,13 @@ class SQLiteClient:
             finally:
                 conn.close()
         await asyncio.to_thread(_cancel)
+
+
+_sqlite_client: SQLiteClient | None = None
+
+
+def get_sqlite_client() -> SQLiteClient:
+    global _sqlite_client
+    if _sqlite_client is None:
+        _sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
+    return _sqlite_client

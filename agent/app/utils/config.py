@@ -115,7 +115,7 @@ class Config:
     agent_priv_key: str
     agent_wallet_address: str
     use_vertex_ai: bool
-    policy_db_path: str
+    agent_db_path: str
     event_validation_mode: str  # "warn" or "strict"
     enable_redis_ingest: bool
     redis_url: str
@@ -199,7 +199,7 @@ def load_config() -> Config:
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
-        policy_db_path=os.getenv("POLICY_DB_PATH", "/tmp/policies.db"),
+        agent_db_path=os.getenv("AGENT_DB_PATH", "/tmp/agent.db"),
         event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),
         enable_redis_ingest=_get_bool_env("ENABLE_REDIS_INGEST", False),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
