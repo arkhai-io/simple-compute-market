@@ -22,6 +22,7 @@ order_app = typer.Typer(no_args_is_help=True)
 network_app = typer.Typer(no_args_is_help=True)
 registry_app = typer.Typer(no_args_is_help=True)
 dev_app = typer.Typer(no_args_is_help=True)
+config_app = typer.Typer(no_args_is_help=True)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,6 +43,8 @@ def run_step(
     if extra_env:
         env.update(extra_env)
     subprocess.run(cmd, cwd=cwd, check=True, env=env)
+
+
 
 def version_callback(value: bool) -> None:
     """Show version and exit."""
@@ -661,6 +664,7 @@ def order_show(
 
 
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+app.add_typer(config_app, name="config", help="Manage market config (init/set/get).")
 
 @app.command()
 def register(
@@ -702,10 +706,27 @@ def start(
     )
 
 
-@app.command()
-def config() -> None:
-    """Manage config (stub)."""
-    typer.echo("Not implemented: config")
+@config_app.command("init")
+def config_init() -> None:
+    """Initialize market config (stub)."""
+    typer.echo("Not implemented: market config init")
+
+
+@config_app.command("set")
+def config_set(
+    attr: str = typer.Argument(..., help="Config attribute to set."),
+    value: str = typer.Argument(..., help="Value to assign."),
+) -> None:
+    """Set a market config value (stub)."""
+    typer.echo(f"Not implemented: market config set {attr} {value}")
+
+
+@config_app.command("get")
+def config_get(
+    attr: str = typer.Argument(..., help="Config attribute to read."),
+) -> None:
+    """Get a market config value (stub)."""
+    typer.echo(f"Not implemented: market config get {attr}")
 
 
 @network_app.command("install")
