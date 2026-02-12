@@ -1,0 +1,11 @@
+component: provisioning
+schema_version: 1
+fields:
+  PORT:
+    required: true
+    default: 9000
+    description: "Provisioning service HTTP port."
+  DATABASE_URL:
+    required: false
+    default: null
+    description: "Database connection string for provisioning state."
