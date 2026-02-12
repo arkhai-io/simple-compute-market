@@ -64,7 +64,7 @@ else
 fi
 
 # Build Airtable API URL
-AIRTABLE_URL="https://api.airtable.com/v0/appY1WZgCrnD5QW1q/Waitlist%20Responses?filterByFormula=%7BStatus%7D+%3D+%27${FILTER_STATUS}%27&sort%5B0%5D%5Bfield%5D=Created&sort%5B0%5D%5Bdirection%5D=asc"
+AIRTABLE_URL="https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}?filterByFormula=%7BStatus%7D+%3D+%27${FILTER_STATUS}%27&sort%5B0%5D%5Bfield%5D=Created&sort%5B0%5D%5Bdirection%5D=asc"
 if [[ -n "$MAX_ENTRIES" ]]; then
   AIRTABLE_URL="${AIRTABLE_URL}&maxRecords=${MAX_ENTRIES}"
 fi
