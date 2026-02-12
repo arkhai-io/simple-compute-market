@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import select
@@ -7,7 +8,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -19,17 +20,33 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ProvisioningParams:
-    ssh_pubkey: str
     vm_host: str
-    vm_target: str
+    vm_target: Optional[str]
     vm_action: str
-    vm_ram: int
-    vm_vcpus: int
-    vm_disk_size: str
-    vm_lease_end: Optional[str] = None
     image_setup_type: str = "scratch"
-    root_ssh_filename: Optional[str] = None
-    root_ssh_password: Optional[str] = None
+    # Sizing
+    vm_ram: Optional[int] = None
+    vm_vcpus: Optional[int] = None
+    vm_disk_size: Optional[str] = None
+    vm_os_variant: Optional[str] = None
+    # SSH
+    ssh_pubkey: Optional[str] = None
+    # GPU
+    gpu_provisioned: Optional[bool] = None
+    vm_gpu_count: Optional[int] = None
+    vm_gpu_device: Optional[str] = None
+    vm_gpu_devices: Optional[list[str]] = field(default=None)
+    vm_gpu_partition_size: Optional[str] = None
+    # FRP
+    frp_server_addr: Optional[str] = None
+    frp_domain: Optional[str] = None
+    frp_dashboard_password: Optional[str] = None
+    # Golden image
+    golden_image_name: Optional[str] = None
+    gcs_bucket_url: Optional[str] = None
+    gcs_image_path: Optional[str] = None
+    # Lease
+    vm_lease_end: Optional[str] = None
 
 
 @dataclass
@@ -41,6 +58,7 @@ class ProvisioningResult:
     tenant_user: Optional[str]
     vm_host_ip: Optional[str]
     ssh_command: Optional[str]
+    ansible_result: Optional[dict] = None
     process_id: Optional[int] = None
 
 
@@ -93,6 +111,75 @@ def _extract_tenant_user(playbook_output: str, vm_host: str | None = None) -> Op
     return None
 
 
+def _extract_ansible_json(stdout: str, action: str) -> Optional[dict]:
+    """Extract the structured JSON output block from Ansible stdout.
+
+    Ansible outputs via `debug: var: vm_*_data` which produces:
+      ok: [ww1] => {
+          "vm_creation_data": { ... }
+      }
+
+    Uses brace-depth counting to handle arbitrarily nested JSON.
+    """
+    # Map action to the fact variable name
+    fact_names = {
+        "create": "vm_creation_data",
+        "list": "vm_list_data",
+        "start": "vm_start_data",
+        "shutdown": "vm_shutdown_data",
+        "destroy": "vm_destroy_data",
+        "reboot": "vm_reboot_data",
+        "undefine": "vm_undefine_data",
+        "monitor": "vm_monitoring_data",
+        "reset_password": "vm_password_reset_data",
+        "lease_end": "vm_lease_end_data",
+        "lease_remove": "vm_lease_remove_data",
+        "check": "check_data",
+    }
+    fact_name = fact_names.get(action)
+    if not fact_name:
+        return None
+    # Find the start of the JSON object after the fact name key
+    marker = f'"{fact_name}":'
+    idx = stdout.find(marker)
+    if idx == -1:
+        return None
+    # Skip past the marker and any whitespace to find the opening brace
+    search_start = idx + len(marker)
+    brace_start = stdout.find("{", search_start)
+    if brace_start == -1:
+        return None
+    # Count braces to find the matching closing brace
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(brace_start, len(stdout)):
+        ch = stdout[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                json_str = stdout[brace_start:i + 1]
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
 def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:
     inventory_path = settings.resolved_inventory_path
     try:
@@ -112,39 +199,79 @@ def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:
     return None
 
 
+def _inject_golden_credentials(lines: list[str]) -> None:
+    """Inject golden image credentials from management-vars (server-side)."""
+    from async_provisioning_service.services.management_vars import get_golden_image_credentials
+
+    creds = get_golden_image_credentials()
+    if creds:
+        lines.append(f"root_ssh_filename: {creds.root_ssh_filename}")
+        lines.append(f"root_ssh_password: {creds.root_ssh_password}")
+        if creds.golden_image_name:
+            lines.append(f"golden_image_name: {creds.golden_image_name}")
+    else:
+        logger.warning("Golden mode requested but credentials not found in management-vars")
+        lines.append("root_ssh_filename: not_provided")
+        lines.append("root_ssh_password: not_provided")
+
+
 def _build_vm_vars(params: ProvisioningParams) -> str:
-    escaped_pubkey = params.ssh_pubkey.replace('"', '\\"')
-    vm_vars = (
-        f"vm_host: {params.vm_host}\n"
-        f"vm_target: {params.vm_target}\n"
-        f"vm_action: {params.vm_action}\n"
-        f"vm_ram: {params.vm_ram}\n"
-        f"vm_vcpus: {params.vm_vcpus}\n"
-        f"vm_disk_size: {params.vm_disk_size}\n"
-        f'vm_tenant_pubkey: "{escaped_pubkey}"\n'
-    )
-
-    # Add vm_lease_end if present (for lease_end action)
+    lines = [
+        f"vm_host: {params.vm_host}",
+        f"vm_action: {params.vm_action}",
+    ]
+    if params.vm_target:
+        lines.append(f"vm_target: {params.vm_target}")
+    if params.vm_action == "create":
+        lines.append(f"image_setup_type: {params.image_setup_type}")
+    # Sizing — only include if explicitly set
+    if params.vm_ram is not None:
+        lines.append(f"vm_ram: {params.vm_ram}")
+    if params.vm_vcpus is not None:
+        lines.append(f"vm_vcpus: {params.vm_vcpus}")
+    if params.vm_disk_size is not None:
+        lines.append(f"vm_disk_size: {params.vm_disk_size}")
+    if params.vm_os_variant is not None:
+        lines.append(f"vm_os_variant: {params.vm_os_variant}")
+    # SSH
+    if params.ssh_pubkey:
+        escaped = params.ssh_pubkey.replace('"', '\\"')
+        lines.append(f'vm_tenant_pubkey: "{escaped}"')
+    # GPU
+    if params.gpu_provisioned is not None:
+        lines.append(f"gpu_provisioned: {'true' if params.gpu_provisioned else 'false'}")
+    if params.vm_gpu_count is not None:
+        lines.append(f"vm_gpu_count: {params.vm_gpu_count}")
+    if params.vm_gpu_device:
+        lines.append(f'vm_gpu_device: "{params.vm_gpu_device}"')
+    if params.vm_gpu_devices:
+        lines.append(f"vm_gpu_devices: {json.dumps(params.vm_gpu_devices)}")
+    if params.vm_gpu_partition_size:
+        lines.append(f'vm_gpu_partition_size: "{params.vm_gpu_partition_size}"')
+    # FRP
+    if params.frp_server_addr:
+        lines.append(f'frp_server_addr: "{params.frp_server_addr}"')
+    if params.frp_domain:
+        lines.append(f'frp_domain: "{params.frp_domain}"')
+    if params.frp_dashboard_password:
+        lines.append(f'frp_dashboard_password: "{params.frp_dashboard_password}"')
+    # Golden image overrides
+    if params.golden_image_name:
+        lines.append(f"golden_image_name: {params.golden_image_name}")
+    if params.gcs_bucket_url:
+        lines.append(f"gcs_bucket_url: {params.gcs_bucket_url}")
+    if params.gcs_image_path:
+        lines.append(f"gcs_image_path: {params.gcs_image_path}")
+    # Lease
     if params.vm_lease_end:
-        vm_vars += f"vm_lease_end: {params.vm_lease_end}\n"
-
-    # Add image setup type (scratch or golden)
-    vm_vars += f"image_setup_type: {params.image_setup_type}\n"
-
-    # Add golden image credentials if provided (required for golden mode)
-    if params.root_ssh_filename:
-        vm_vars += f"root_ssh_filename: {params.root_ssh_filename}\n"
+        lines.append(f'vm_lease_end: "{params.vm_lease_end}"')
+    # Golden mode credentials (server-side injection)
+    if params.image_setup_type == "golden":
+        _inject_golden_credentials(lines)
     else:
-        # Provide placeholder to prevent undefined variable errors in playbook
-        vm_vars += "root_ssh_filename: not_provided\n"
-
-    if params.root_ssh_password:
-        vm_vars += f"root_ssh_password: {params.root_ssh_password}\n"
-    else:
-        # Provide placeholder to prevent undefined variable errors in playbook
-        vm_vars += "root_ssh_password: not_provided\n"
-
-    return vm_vars
+        lines.append("root_ssh_filename: not_provided")
+        lines.append("root_ssh_password: not_provided")
+    return "\n".join(lines) + "\n"
 
 
 async def start_playbook(params: ProvisioningParams) -> RunningPlaybook:
@@ -339,6 +466,8 @@ async def wait_for_playbook(
     if ssh_port and tenant_user and vm_host_ip:
         ssh_command = f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{vm_host_ip}"
 
+    ansible_result = _extract_ansible_json(stdout, running.params.vm_action)
+
     return ProvisioningResult(
         stdout=stdout,
         stderr=stderr,
@@ -346,7 +475,8 @@ async def wait_for_playbook(
         tenant_user=tenant_user,
         vm_host_ip=vm_host_ip,
         ssh_command=ssh_command,
-        process_id=running.process_id,  # Already captured earlier
+        ansible_result=ansible_result,
+        process_id=running.process_id,
     )
 
 
@@ -413,6 +543,8 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
     if ssh_port and tenant_user and vm_host_ip:
         ssh_command = f"ssh -i <your_private_key> -p {ssh_port} {tenant_user}@{vm_host_ip}"
 
+    ansible_result = _extract_ansible_json(stdout, params.vm_action)
+
     return ProvisioningResult(
         stdout=stdout,
         stderr=stderr,
@@ -420,5 +552,6 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
         tenant_user=tenant_user,
         vm_host_ip=vm_host_ip,
         ssh_command=ssh_command,
+        ansible_result=ansible_result,
         process_id=process_id if process else None,
     )

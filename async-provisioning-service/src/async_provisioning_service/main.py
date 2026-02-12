@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from async_provisioning_service.api.auth import AgentAuthMiddleware
+from async_provisioning_service.api.rate_limit import AgentRateLimitMiddleware
 from async_provisioning_service.api.routes import router
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import init_db
@@ -30,6 +31,13 @@ app = FastAPI(
     title="Async Provisioning Service",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Add rate limiting middleware (runs after auth, so agent_id is available)
+app.add_middleware(
+    AgentRateLimitMiddleware,
+    enabled=settings.enable_rate_limiting,
+    max_requests=settings.rate_limit_requests_per_minute,
 )
 
 # Add authentication middleware

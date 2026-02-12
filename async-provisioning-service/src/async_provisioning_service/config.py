@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     redis_queue_name: str = "provisioning_jobs"
 
     ansible_timeout_seconds: int = 1800
-    default_vm_host: str = "vm1"
+    default_vm_host: str = "ww1"
 
     playbook_path: str | None = None
     inventory_path: str | None = None
@@ -56,11 +56,25 @@ class Settings(BaseSettings):
         "UNREACHABLE",          # Ansible unreachable status
         "Failed to get \"resize\" lock",  # Disk image already in use
         "Is another process using the image",  # Disk image lock conflict
+        "Cannot determine IP address for VM",  # VM already undefined/cleaned up
+        "failed to get domain",  # libvirt domain not found
+        "Domain not found",  # virsh domain doesn't exist
     ]
+
+    # FRP tunneling defaults (applied when request doesn't specify FRP params)
+    frp_server_addr: str | None = None
+    frp_domain: str | None = None
+    frp_dashboard_password: str | None = None
 
     # Authentication settings
     enable_auth: bool = False  # Set to True to enable agent authentication
     registry_url: str | None = None  # URL of agent registry API for verification
+    registry_cache_ttl_seconds: int = 300  # TTL for registry lookup cache (5 min)
+    registry_cache_max_size: int = 256  # Max entries in registry cache
+
+    # Rate limiting
+    enable_rate_limiting: bool = False
+    rate_limit_requests_per_minute: int = 30
 
     @property
     def repo_root(self) -> Path:
@@ -84,6 +98,13 @@ class Settings(BaseSettings):
         if self.inventory_path:
             return Path(self.inventory_path).expanduser().resolve()
         return (self.repo_root / "compute-provisioning-iac/ansible/inventory/hosts").resolve()
+
+    @property
+    def management_vars_path(self) -> Path:
+        return (
+            self.repo_root
+            / "compute-provisioning-iac/ansible/inventory/management-vars.yaml"
+        ).resolve()
 
 
 settings = Settings()

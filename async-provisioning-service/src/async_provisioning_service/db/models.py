@@ -25,6 +25,7 @@ class ProvisioningJob(Base):
     result = Column(JSON, nullable=True)
     logs = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
+    agent_id = Column(String, nullable=True, index=True)  # ERC-8004 agent ID that submitted this job
     process_id = Column(String, nullable=True)  # PID of running ansible process for cancellation
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retry attempts made
     max_retries = Column(Integer, default=3, nullable=False)  # Maximum retry attempts allowed

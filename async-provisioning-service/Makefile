@@ -2,7 +2,7 @@
 # Async Provisioning Service Makefile
 # ==============================================================================
 
-.PHONY: help install dev serve worker test migrate migrate-down clean db-init db-reset check-redis
+.PHONY: help install dev serve worker test clean db-init db-reset check-redis
 
 # Default target
 .DEFAULT_GOAL := help
@@ -44,19 +44,6 @@ db-init: ## Initialize database (create tables)
 	@echo "==============================================================================="
 	PYTHONPATH=src uv run python -c "from async_provisioning_service.db.database import init_db; init_db()"
 	@echo "✅ Database initialized"
-
-migrate: ## Run database migrations
-	@echo "==============================================================================="
-	@echo "| Running database migrations...                                              |"
-	@echo "==============================================================================="
-	@for migration in migrations/*.py; do \
-		echo "Running $$migration..."; \
-		PYTHONPATH=src uv run python $$migration; \
-	done
-	@echo "✅ Migrations complete"
-
-migrate-down: ## Rollback last migration (manual, edit migration file)
-	@echo "⚠️  Manual rollback required - edit migration file and run manually"
 
 db-reset: ## Reset database (WARNING: Deletes all data)
 	@echo "⚠️  WARNING: This will delete all data!"

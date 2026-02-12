@@ -3,10 +3,11 @@ import os
 import signal
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from async_provisioning_service.api.schemas import (
+    JobListResponse,
     ProvisionLogsResponse,
     ProvisionRequest,
     ProvisionResponse,
@@ -21,7 +22,22 @@ from async_provisioning_service.services.queue import enqueue_job
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter()
+def agent_id_header(
+    x_agent_id: str | None = Header(
+        default=None,
+        alias="X-Agent-ID",
+        description="ERC-8004 agent identifier: eip155:<chain_id>:0x<address>:<token_id>",
+    )
+) -> str | None:
+    return x_agent_id
+
+
+router = APIRouter(dependencies=[Depends(agent_id_header)])
+
+
+def _get_agent_id(request: Request) -> str | None:
+    """Extract agent_id from request state (set by auth middleware)."""
+    return getattr(request.state, "agent_id", None)
 
 
 @router.get("/health")
@@ -30,16 +46,26 @@ async def health() -> dict:
 
 
 @router.post("/provision", response_model=ProvisionResponse, status_code=status.HTTP_202_ACCEPTED)
-async def submit_provisioning(request: ProvisionRequest, db: Session = Depends(get_db)):
+async def submit_provisioning(
+    provision_request: ProvisionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     job_id = str(uuid.uuid4())
+    agent_id = _get_agent_id(request)
 
     # Use request max_retries or fall back to config default
-    max_retries = request.max_retries if request.max_retries is not None else settings.default_max_retries
+    max_retries = (
+        provision_request.max_retries
+        if provision_request.max_retries is not None
+        else settings.default_max_retries
+    )
 
     job = ProvisioningJob(
         id=job_id,
         status=JobStatus.queued.value,
-        params=request.model_dump(),
+        params=provision_request.model_dump(),
+        agent_id=agent_id,
         retry_count=0,
         max_retries=max_retries,
         next_retry_at=None,
@@ -52,8 +78,57 @@ async def submit_provisioning(request: ProvisionRequest, db: Session = Depends(g
     return ProvisionResponse(job_id=job_id, status=job.status)
 
 
+@router.get("/provision", response_model=JobListResponse)
+async def list_jobs(
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    status_filter: str | None = Query(default=None, alias="status"),
+    db: Session = Depends(get_db),
+):
+    """List provisioning jobs with pagination.
+
+    When authenticated, returns only the requesting agent's jobs.
+    When unauthenticated, returns all jobs.
+    """
+    agent_id = _get_agent_id(request)
+
+    query = db.query(ProvisioningJob)
+
+    # Scope to agent's own jobs when authenticated
+    if agent_id:
+        query = query.filter(ProvisioningJob.agent_id == agent_id)
+
+    # Optional status filter
+    if status_filter:
+        query = query.filter(ProvisioningJob.status == status_filter)
+
+    total = query.count()
+    jobs = query.order_by(ProvisioningJob.created_at.desc()).offset(offset).limit(limit).all()
+
+    return JobListResponse(
+        jobs=[
+            ProvisionStatusResponse(
+                job_id=job.id,
+                status=job.status,
+                params=job.params,
+                result=job.result,
+                error=job.error,
+                retry_count=job.retry_count,
+                max_retries=job.max_retries,
+                next_retry_at=job.next_retry_at,
+                agent_id=job.agent_id,
+            )
+            for job in jobs
+        ],
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
+
+
 @router.get("/provision/{job_id}", response_model=ProvisionStatusResponse)
-async def get_status(job_id: str, db: Session = Depends(get_db)):
+async def get_status(job_id: str, request: Request, db: Session = Depends(get_db)):
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -66,6 +141,7 @@ async def get_status(job_id: str, db: Session = Depends(get_db)):
         retry_count=job.retry_count,
         max_retries=job.max_retries,
         next_retry_at=job.next_retry_at,
+        agent_id=job.agent_id,
     )
 
 
@@ -78,21 +154,23 @@ async def get_logs(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/provision/{job_id}/cancel")
-async def cancel_job(job_id: str, db: Session = Depends(get_db)):
-    """
-    Cancel a running provisioning job.
+async def cancel_job(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Cancel a running provisioning job.
 
-    This endpoint attempts to cancel a job by:
-    1. Checking if the job exists and is in a cancellable state (queued or running)
-    2. If running, attempting to terminate the ansible-playbook process
-    3. Updating the job status to "cancelled"
-
-    Note: Cancellation is best-effort. If the job has already completed or failed,
-    this endpoint returns the current status without modification.
+    Agents can only cancel their own jobs. Returns 403 if the job
+    belongs to a different agent.
     """
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Enforce ownership - agents can only cancel their own jobs
+    agent_id = _get_agent_id(request)
+    if agent_id and job.agent_id and job.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot cancel another agent's job",
+        )
 
     # Check if job is in a cancellable state
     if job.status not in (JobStatus.queued.value, JobStatus.running.value):
@@ -106,7 +184,6 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     if job.status == JobStatus.running.value and job.process_id:
         try:
             pid = int(job.process_id)
-            # Send SIGTERM first (graceful shutdown)
             os.kill(pid, signal.SIGTERM)
             logger.info("Sent SIGTERM to process %d for job %s", pid, job_id)
         except ProcessLookupError:
