@@ -82,6 +82,9 @@ def install(
 
     typer.echo("Done.")
 
+from market.groups.agent import agent_app  # noqa: E402
+
+app.add_typer(agent_app, name="agent", help="Query a running agent's local API (orders, decisions).")
 
 @app.command()
 def register(
