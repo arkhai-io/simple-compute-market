@@ -17,7 +17,7 @@ source "$ENV_FILE"
 set +a
 
 # Check required environment variables
-for var in AIRTABLE_API_KEY ZEROTIER_NETWORK; do
+for var in AIRTABLE_API_KEY AIRTABLE_BASE_ID AIRTABLE_TABLE_NAME ZEROTIER_NETWORK; do
   if [[ -z "${!var:-}" ]]; then
     echo "Missing required env var: $var in $ENV_FILE" >&2
     exit 1
