@@ -140,6 +140,21 @@ Both registry and agent will auto-join ZeroTier when started if `ZEROTIER_NETWOR
 
 **Note**: ZeroTier operations require `sudo`.
 
+5. **Authorize Approved Waitlist Members**:
+
+   Copy `infra/zerotier/.env.sample` to `infra/zerotier/.env` and set `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE_NAME`, and `ZEROTIER_NETWORK`. Requires `jq`.
+
+   ```bash
+   # Authorize all approved waitlist entries
+   ./infra/zerotier/authorize_approved_members.sh
+
+   # Retry entries that previously failed
+   ./infra/zerotier/authorize_approved_members.sh --retry-errors
+
+   # Limit records processed
+   ./infra/zerotier/authorize_approved_members.sh --max-entries 10
+   ```
+
 ## Useful Commands
 
 - Agent playground: `make playground` in `agent`

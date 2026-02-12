@@ -20,6 +20,12 @@ add-node:
 	fi; \
 	bash zerotier/authorize_zt_member.sh $$ZEROTIER_NETWORK $(NODE_ID)
 
+authorize-approved:
+	@bash zerotier/authorize_approved_members.sh
+
+authorize-approved-retry:
+	@bash zerotier/authorize_approved_members.sh --retry-errors
+
 get-peers:
 	@. ./zerotier/.env; \
 	./zerotier/get_peers.sh $$ZEROTIER_NETWORK
