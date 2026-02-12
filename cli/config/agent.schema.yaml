@@ -3,7 +3,7 @@ schema_version: 1
 fields:
   # Core server
   BASE_URL_OVERRIDE:
-    required: false
+    required: true
     default: "http://localhost:8000/"
     secret: false
     description: "Public base URL the agent advertises for callbacks and orders. Can be ZeroTier or public."
@@ -25,18 +25,18 @@ fields:
 
   # Agent identity and local state
   AGENT_ID:
-    required: false
+    required: true
     default: "agent_xxx"
     secret: false
     description: "Local agent identifier (pre-onchain)."
   ONCHAIN_AGENT_ID:
-    required: false
+    required: true
     default: null
     secret: false
     generated: true
     description: "On-chain agent ID after registration."
   AGENT_DB_PATH:
-    required: false
+    required: true
     default: "./agent.db"
     secret: false
     description: "Path to the agent database, which contains policy and order history."
@@ -77,22 +77,22 @@ fields:
   AGENT_PRIV_KEY:
     required: true
     secret: true
-    default: "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356"
+    default: null
     description: "Private key for the agent wallet."
   AGENT_WALLET_ADDRESS:
     required: true
-    default: "0x14dC79964da2C08b23698B3D3cc7Ca32193d9955"
+    default: null
     secret: false
     description: "Agent wallet address."
 
   # Token catalog and SSH access
   TOKEN_REGISTRY_PATH:
-    required: false
+    required: true
     default: "./app/data/token_registry.json"
     secret: false
     description: "Path to token registry JSON. This is the catalog of all known and supported tokens for trade."
   SSH_PUBLIC_KEY:
-    required: false
+    required: true
     default: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
     secret: false
     description: "SSH public key for compute access."
