@@ -31,7 +31,7 @@ class ProvisioningTimeoutError(ProvisioningError):
 
 async def provision_machine_async(
     provisioning_service_url: str,
-    ssh_public_key: str,
+    params: dict[str, Any],
     timeout: int = 3600,
     poll_interval: int = 15,
     agent_id: str | None = None,
@@ -40,26 +40,21 @@ async def provision_machine_async(
     Submit a provisioning job to the async provisioning service and wait for completion.
 
     This function:
-    1. Submits a POST /provision request with the SSH public key
+    1. Submits a POST /provision request with the provisioning parameters
     2. Receives a job_id
     3. Polls GET /provision/{job_id} until status is 'succeeded' or 'failed'
     4. Returns the result on success, raises exception on failure
 
     Args:
         provisioning_service_url: Base URL of the provisioning service (e.g., "http://localhost:8081")
-        ssh_public_key: SSH public key to authorize on the VM
+        params: Provisioning parameters dict (vm_target, vm_action, vm_host, ssh_pubkey, etc.)
         timeout: Maximum time to wait for job completion in seconds (default: 3600 = 1 hour)
         poll_interval: Interval between status checks in seconds (default: 15)
         agent_id: Optional agent ID to include in X-Agent-ID header for authentication
 
     Returns:
-        Job result dictionary containing SSH connection details:
-        {
-            "ssh_port": int,
-            "tenant_user": str,
-            "vm_host_ip": str,
-            "ssh_command": str
-        }
+        Job result dictionary containing SSH connection details, authentication,
+        GPU, FRP, and full ansible_result.
 
     Raises:
         ProvisioningJobError: If the provisioning job fails
@@ -80,7 +75,7 @@ async def provision_machine_async(
         try:
             response = await client.post(
                 f"{base_url}/provision",
-                json={"ssh_pubkey": ssh_public_key},
+                json=params,
                 headers=headers,
             )
             response.raise_for_status()
@@ -161,7 +156,7 @@ async def provision_machine_async(
 async def schedule_vm_shutdown_async(
     provisioning_service_url: str,
     lease_end_utc: str,
-    vm_host: str = "vm1",
+    vm_host: str = "ww1",
     vm_target: str = "tenant-vm",
     timeout: int = 300,
     poll_interval: int = 5,
@@ -208,7 +203,6 @@ async def schedule_vm_shutdown_async(
             response = await client.post(
                 f"{base_url}/provision",
                 json={
-                    "ssh_pubkey": "dummy",  # Not used for lease_end action, but required by schema
                     "vm_host": vm_host,
                     "vm_target": vm_target,
                     "vm_action": "lease_end",
@@ -289,6 +283,43 @@ async def schedule_vm_shutdown_async(
                 raise ProvisioningError(f"Failed to poll job status: {exc}") from exc
 
 
+async def get_vm_available_resources(
+    provisioning_service_url: str,
+    vm_host: str = "ww1",
+    timeout: int = 120,
+    poll_interval: int = 5,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Query available resources on a KVM host.
+
+    Submits a 'check' action via the provisioning service and returns
+    host capacity data (total/allocated/available CPU, RAM, GPU).
+
+    Returns:
+        Dict with keys: vm_host, status, total, allocated,
+        available, gpu_details, utilization, and full ansible_result.
+    """
+    result = await provision_machine_async(
+        provisioning_service_url=provisioning_service_url,
+        params={"vm_host": vm_host, "vm_action": "check"},
+        timeout=timeout,
+        poll_interval=poll_interval,
+        agent_id=agent_id,
+    )
+    # The check action returns capacity data in ansible_result
+    ansible_result = result.get("ansible_result", {})
+    return {
+        "vm_host": vm_host,
+        "status": ansible_result.get("status", "unknown"),
+        "total": ansible_result.get("total", {}),
+        "allocated": ansible_result.get("allocated", {}),
+        "available": ansible_result.get("available", {}),
+        "gpu_details": ansible_result.get("gpu_details", []),
+        "utilization": ansible_result.get("utilization", {}),
+        "ansible_result": ansible_result,
+    }
+
+
 def format_connection_info(result: dict[str, Any]) -> str:
     """
     Format provisioning result into a connection info string.
@@ -304,14 +335,14 @@ def format_connection_info(result: dict[str, Any]) -> str:
         return ssh_command
 
     # Fallback: construct from individual fields
-    # Handle both "ssh_port" and "external_port" for backward compatibility
-    ssh_port = result.get("ssh_port") or result.get("external_port")
+    ssh_port = result.get("ssh_port")
     tenant_user = result.get("tenant_user")
     vm_host_ip = result.get("vm_host_ip")
 
-    if ssh_port and tenant_user and vm_host_ip:
+    if ssh_port and ssh_port.isdigit() and tenant_user and vm_host_ip:
         return f"ssh {tenant_user}@{vm_host_ip} -p {ssh_port}"
 
-    # Last resort: return raw result as string
-    logger.warning("[PROVISIONING] Could not format connection info, returning raw result")
-    return str(result)
+    # No valid connection info found
+    raise ProvisioningError(
+        f"Could not format connection info: missing ssh_command and ssh_port/tenant_user/vm_host_ip in result"
+    )
