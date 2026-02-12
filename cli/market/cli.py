@@ -865,7 +865,7 @@ def config_init(
         help="Overwrite existing .env.",
     ),
 ) -> None:
-    """Initialize a component .env file (stub)."""
+    """Initialize a component .env file."""
     if component is None:
         typer.secho(
             "Missing COMPONENT. Valid targets: agent, provisioning, registry, zerotier.\n"
