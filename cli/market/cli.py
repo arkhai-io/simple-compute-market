@@ -664,7 +664,11 @@ def order_show(
 
 
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
-app.add_typer(config_app, name="config", help="Manage market config (init/set/get).")
+app.add_typer(
+    config_app,
+    name="config",
+    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
+)
 
 @app.command()
 def register(
@@ -753,9 +757,9 @@ def _init_env_file(
 
 @config_app.command("init")
 def config_init(
-    component: str = typer.Argument(
-        ...,
-        help="Component env to initialize: agent, provisioning, registry, zerotier.",
+    component: str | None = typer.Argument(
+        None,
+        help="Component env to initialize (agent, provisioning, registry, zerotier).",
     ),
     overwrite: bool = typer.Option(
         False,
@@ -764,6 +768,15 @@ def config_init(
     ),
 ) -> None:
     """Initialize a component .env file (stub)."""
+    if component is None:
+        typer.secho(
+            "Missing COMPONENT. Valid targets: agent, provisioning, registry, zerotier.\n"
+            "Usage example: 'market config init agent' to create agent/.env"
+            ,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
     component_key = component.strip().lower()
     if component_key == "agent":
         target_dir = REPO_ROOT / "agent"
