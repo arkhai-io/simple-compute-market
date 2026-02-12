@@ -125,6 +125,14 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    agent_id = _get_agent_id(request)
+    if job.agent_id and job.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: job belongs to another agent",
+        )
+
     return ProvisionStatusResponse(
         job_id=job.id,
         status=job.status,
@@ -139,10 +147,18 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
 
 
 @router.get("/provision/{job_id}/logs", response_model=ProvisionLogsResponse)
-async def get_logs(job_id: str, db: Session = Depends(get_db)):
+async def get_logs(job_id: str, request: Request, db: Session = Depends(get_db)):
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    agent_id = _get_agent_id(request)
+    if job.agent_id and job.agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: job belongs to another agent",
+        )
+
     return ProvisionLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
 
