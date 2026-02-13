@@ -33,33 +33,12 @@ if [[ -z "$NETWORK_ID" ]] || [[ -z "$MEMBER_ID" ]]; then
   echo "  NETWORK_ID defaults to ZEROTIER_NETWORK from .env ($ZEROTIER_NETWORK)" >&2
   exit 1
 fi
-
-# Check if ZeroTier is installed
-if ! command -v zerotier-cli &> /dev/null; then
-  echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2
-  exit 1
-fi
-
 # Check if ZeroTier controller API is accessible
 echo "Checking ZeroTier controller API..."
 if ! curl -s --max-time 2 $CONTROLLER_URL:$CONTROLLER_PORT/status &> /dev/null; then
   echo "Error: ZeroTier controller API is not accessible at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
   echo "" >&2
   echo "The ZeroTier controller service needs to be running to authorize members." >&2
-  echo "" >&2
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "On macOS:" >&2
-    echo "  1. Open ZeroTier from Applications or System Preferences" >&2
-    echo "  2. Make sure ZeroTier is running (check the menu bar icon)" >&2
-    echo "  3. Or start it with: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
-    echo "" >&2
-    echo "Note: On macOS, ZeroTier runs as a regular app, not a system service." >&2
-    echo "The controller API may only be available when ZeroTier is actively running." >&2
-  else
-    echo "On Linux:" >&2
-    echo "  Start it with: sudo systemctl start zerotier-one" >&2
-    echo "  Enable it with: sudo systemctl enable zerotier-one" >&2
-  fi
   exit 1
 fi
 echo "ZeroTier controller API is accessible"
@@ -132,8 +111,3 @@ if [[ "$HTTP_CODE" != "200" ]]; then
 fi
 
 echo "Member $MEMBER_ID authorized successfully!"
-
-# Verify by listing peers
-echo -e "\nVerifying network peers..."
-sudo zerotier-cli -D${CONTROLLER_URL} -p${CONTROLLER_PORT} -T${CONTROLLER_AUTH_TOKEN} listpeers
-echo -e "\nDone!"

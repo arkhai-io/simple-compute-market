@@ -108,6 +108,7 @@ while IFS= read -r record; do
   echo "Processing: Email=$EMAIL, Node ID=$NODE_ID, Record ID=$RECORD_ID"
   
   # Authorize the member and capture output
+  AUTH_ERROR=0
   AUTH_OUTPUT=$("${SCRIPT_DIR}/authorize_zt_member.sh" "$ZEROTIER_NETWORK" "$NODE_ID" 2>&1) || AUTH_ERROR=$?
 
 

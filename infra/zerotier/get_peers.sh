@@ -16,45 +16,30 @@ if ! command -v jq &> /dev/null; then
   exit 1
 fi
 
-# Check if ZeroTier is installed
-if ! command -v zerotier-cli &> /dev/null; then
-  echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "Env file not found at $ENV_FILE"
+  echo "Copy infra/zerotier/.env.sample to $ENV_FILE and set values."
   exit 1
 fi
 
-# Check if ZeroTier service is running (skip on macOS as it requires password prompt)
-if [[ "$OSTYPE" != "darwin"* ]]; then
-  if ! sudo zerotier-cli info &> /dev/null; then
-    echo "Error: ZeroTier service is not running." >&2
-    echo "Start it with: sudo systemctl start zerotier-one" >&2
-    exit 1
-  fi
-fi
+# Load configuration from .env
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
 
-# Determine auth token file location based on OS
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS
-  AUTH_TOKEN_FILE="/Library/Application Support/ZeroTier/One/authtoken.secret"
-else
-  # Linux
-  AUTH_TOKEN_FILE="/var/lib/zerotier-one/authtoken.secret"
-fi
-
-# Check if auth token file exists
-if [[ ! -f "$AUTH_TOKEN_FILE" ]]; then
-  echo "Error: ZeroTier auth token not found at $AUTH_TOKEN_FILE" >&2
-  echo "Make sure ZeroTier is installed and running." >&2
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "On macOS, start ZeroTier from System Preferences or run: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
-  else
-    echo "On Linux, start with: sudo systemctl start zerotier-one" >&2
-  fi
+# Require CONTROLLER_AUTH_TOKEN from environment
+if [[ -z "${CONTROLLER_AUTH_TOKEN:-}" ]]; then
+  echo "Error: CONTROLLER_AUTH_TOKEN is not set." >&2
+  echo "Please set CONTROLLER_AUTH_TOKEN in your .env file." >&2
   exit 1
 fi
-# Where your ZeroTier state lives (default for most installs)
-TOKEN=$(sudo cat "$AUTH_TOKEN_FILE")
+TOKEN="$CONTROLLER_AUTH_TOKEN"
 
-API="http://127.0.0.1:9993"
+API="$CONTROLLER_URL:$CONTROLLER_PORT"
 
 echo "Using ZeroTier controller at: $API"
 echo "Network ID: $NWID"

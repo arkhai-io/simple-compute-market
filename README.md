@@ -161,10 +161,11 @@ The `make` targets above wrap the following scripts in `infra/zerotier/`. You ca
 
 #### `create_ztnetwork.sh`
 
-Creates a new private ZeroTier network, joins the controller node, and writes the generated network ID back to `infra/zerotier/.env`.
+Creates a new private ZeroTier network and writes the generated network ID back to `infra/zerotier/.env`. Pass `--join` to also join the network and authorize the local node.
 
 ```bash
-./infra/zerotier/create_ztnetwork.sh
+./infra/zerotier/create_ztnetwork.sh          # create only
+./infra/zerotier/create_ztnetwork.sh --join    # create network then join and authorize local node
 ```
 
 Required env vars in `infra/zerotier/.env`: `NETWORK_NAME`, `IP_RANGE_START`, `IP_RANGE_END`, `NETWORK_CIDR`, `CONTROLLER_URL`, `CONTROLLER_PORT`. Optionally set `CONTROLLER_AUTH_TOKEN` (falls back to reading the local auth token file). Requires `sudo`.
