@@ -31,6 +31,34 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Async Provisioning Service",
     version="0.1.0",
+    description=(
+        "Asynchronous VM provisioning for a multi-agent compute marketplace.\n\n"
+        "## Authentication\n\n"
+        "POST requests require an **ERC-8004 agent identity** header:\n\n"
+        "```\nX-Agent-ID: eip155:<chain_id>:0x<address>:<token_id>\n```\n\n"
+        "GET requests accept the header optionally for agent-scoped filtering.\n"
+        "`/health`, `/docs`, and `/redoc` bypass authentication entirely.\n\n"
+        "When auth is **disabled** (`ENABLE_AUTH=false`), all requests are allowed "
+        "but the agent ID is still extracted if provided.\n\n"
+        "## Job Lifecycle\n\n"
+        "```\n"
+        "queued ──► running ──► succeeded\n"
+        "              ├──► failed  (non-retryable or max retries exceeded)\n"
+        "              └──► queued  (retryable — re-enqueued with backoff)\n"
+        "queued ──► cancelled  (user-initiated)\n"
+        "running ──► cancelled (user-initiated, SIGTERM sent)\n"
+        "```\n"
+    ),
+    openapi_tags=[
+        {
+            "name": "provisioning",
+            "description": "Submit, query, and cancel VM provisioning jobs.",
+        },
+        {
+            "name": "health",
+            "description": "Liveness probe for the API server.",
+        },
+    ],
     lifespan=lifespan,
 )
 
