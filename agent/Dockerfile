@@ -24,9 +24,7 @@ COPY ./app ./app
 
 RUN uv sync --frozen
 
-ARG COMMIT_SHA=""
-ENV COMMIT_SHA=${COMMIT_SHA}
-
 EXPOSE 8080
 
-CMD ["uv", "run", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8080"]
+# Allow port override via PORT env, default to 8080.
+CMD ["uv", "run", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "${PORT:-8080}"]
