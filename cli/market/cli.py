@@ -928,6 +928,7 @@ def config_init(
     for key, spec in fields.items():
         if not isinstance(spec, dict):
             raise typer.BadParameter(f"Invalid field spec for {key} in {schema_path}")
+        is_secret = bool(spec.get("secret", False))
         try:
             if spec.get("generated", False):
                 value = None
