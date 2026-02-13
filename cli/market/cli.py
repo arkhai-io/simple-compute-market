@@ -949,7 +949,13 @@ def config_init(
             display_value = "[hidden]" if is_secret else value
             typer.secho(f"{key}: {display_value}", fg=typer.colors.CYAN)
         elif status == "default":
-            typer.secho(f"{key}: used default value {value}", fg=typer.colors.GREEN)
+            if is_secret:
+                typer.secho(
+                    f"{key}: used default value [hidden]",
+                    fg=typer.colors.GREEN,
+                )
+            else:
+                typer.secho(f"{key}: used default value {value}", fg=typer.colors.GREEN)
         elif status == "skipped":
             typer.secho(f"{key}: skipped", fg=typer.colors.YELLOW)
         elif status == "skipped-empty-required":
