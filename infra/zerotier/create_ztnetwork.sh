@@ -34,8 +34,8 @@ fi
 
 # Check if ZeroTier controller API is accessible
 echo "Checking ZeroTier controller API..."
-if ! curl -s --max-time 2 http://localhost:9993/status &> /dev/null; then
-  echo "Error: ZeroTier controller API is not accessible at http://localhost:9993" >&2
+if ! curl -s --max-time 2 $CONTROLLER_URL:$CONTROLLER_PORT/status &> /dev/null; then
+  echo "Error: ZeroTier controller API is not accessible at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
   echo "" >&2
   echo "The ZeroTier controller service needs to be running to create networks." >&2
   echo "" >&2
@@ -56,60 +56,65 @@ if ! curl -s --max-time 2 http://localhost:9993/status &> /dev/null; then
 fi
 echo "ZeroTier controller API is accessible"
 
-# Determine auth token file location based on OS
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS
-  AUTH_TOKEN_FILE="/Library/Application Support/ZeroTier/One/authtoken.secret"
+# Resolve auth token: prefer CONTROLLER_AUTH_TOKEN from env, fall back to auth token file
+if [[ -n "${CONTROLLER_AUTH_TOKEN:-}" ]]; then
+  echo "Using CONTROLLER_AUTH_TOKEN from environment" >&2
+  AUTH_TOKEN="$CONTROLLER_AUTH_TOKEN"
 else
-  # Linux
-  AUTH_TOKEN_FILE="/var/lib/zerotier-one/authtoken.secret"
-fi
+  echo "CONTROLLER_AUTH_TOKEN not set, reading from auth token file..." >&2
 
-# Check if auth token file exists
-if [[ ! -f "$AUTH_TOKEN_FILE" ]]; then
-  echo "Error: ZeroTier auth token not found at $AUTH_TOKEN_FILE" >&2
-  echo "Make sure ZeroTier is installed and running." >&2
+  # Determine auth token file location based on OS
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "On macOS, start ZeroTier from System Preferences or run: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
+    AUTH_TOKEN_FILE="/Library/Application Support/ZeroTier/One/authtoken.secret"
   else
-    echo "On Linux, start with: sudo systemctl start zerotier-one" >&2
+    AUTH_TOKEN_FILE="/var/lib/zerotier-one/authtoken.secret"
   fi
+
+  # Check if auth token file exists
+  if [[ ! -f "$AUTH_TOKEN_FILE" ]]; then
+    echo "Error: ZeroTier auth token not found at $AUTH_TOKEN_FILE" >&2
+    echo "Make sure ZeroTier is installed and running, or set CONTROLLER_AUTH_TOKEN in your .env file." >&2
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      echo "On macOS, start ZeroTier from System Preferences or run: sudo launchctl load /Library/LaunchDaemons/com.zerotier.one.plist" >&2
+    else
+      echo "On Linux, start with: sudo systemctl start zerotier-one" >&2
+    fi
+    exit 1
+  fi
+
+  AUTH_TOKEN=$(sudo cat "$AUTH_TOKEN_FILE" 2>/dev/null)
+  if [[ -z "$AUTH_TOKEN" ]]; then
+    echo "Error: Failed to read auth token from $AUTH_TOKEN_FILE" >&2
+    echo "This script requires sudo access. Please run it interactively." >&2
+    exit 1
+  fi
+
+  CONTROLLER_AUTH_TOKEN="$AUTH_TOKEN"
+fi
+
+echo "Retrieving node ID..." >&2
+set +e
+ZT_INFO_OUTPUT=$(sudo zerotier-cli -D${CONTROLLER_URL} -p${CONTROLLER_PORT} -T${CONTROLLER_AUTH_TOKEN} info 2>&1)
+ZT_INFO_EXIT=$?
+set -e
+
+if [[ $ZT_INFO_EXIT -ne 0 ]]; then
+  echo "Error: zerotier-cli info command failed (exit code: $ZT_INFO_EXIT)" >&2
+  echo "Command output: $ZT_INFO_OUTPUT" >&2
+  echo "Check that ZeroTier is running and the controller is reachable at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
   exit 1
 fi
 
-# Get node ID from identity file (requires sudo but avoids zerotier-cli password prompt)
-# The node ID is the first 10 characters of the identity.public file
-IDENTITY_FILE="${AUTH_TOKEN_FILE%/*}/identity.public"
-
-if [[ ! -f "$IDENTITY_FILE" ]]; then
-  echo "Error: ZeroTier identity file not found at $IDENTITY_FILE" >&2
-  echo "Make sure ZeroTier is installed and running." >&2
-  exit 1
-fi
-
-# Read node ID from identity file (first 10 chars)
-NODE_ID=$(sudo cat "$IDENTITY_FILE" 2>/dev/null | head -1 | cut -c 1-10)
-
-# If that failed, try zerotier-cli info as fallback
-if [[ -z "$NODE_ID" ]] || [[ ${#NODE_ID} -ne 10 ]]; then
-  echo "Trying alternative method to get node ID..." >&2
-  NODE_ID=$(sudo zerotier-cli info 2>/dev/null | awk '{print $3}')
-fi
+NODE_ID=$(echo "$ZT_INFO_OUTPUT" | awk '{print $3}')
 
 if [[ -z "$NODE_ID" ]] || [[ ${#NODE_ID} -ne 10 ]]; then
-  echo "Error: Failed to get ZeroTier node ID." >&2
+  echo "Error: Failed to parse ZeroTier node ID from output." >&2
+  echo "Expected a 10-character node ID, got: '${NODE_ID:-<empty>}'" >&2
+  echo "Full zerotier-cli info output: $ZT_INFO_OUTPUT" >&2
   echo "This script requires sudo access. Please run it interactively." >&2
   echo "You can get your node ID manually with: sudo zerotier-cli info" >&2
   exit 1
 fi
-
-AUTH_TOKEN=$(sudo cat "$AUTH_TOKEN_FILE" 2>/dev/null)
-if [[ -z "$AUTH_TOKEN" ]]; then
-  echo "Error: Failed to read auth token from $AUTH_TOKEN_FILE" >&2
-  echo "This script requires sudo access. Please run it interactively." >&2
-  exit 1
-fi
-
 
 # Generate network ID (node ID + random suffix)
 SUFFIX=$(openssl rand -hex 3)
@@ -127,8 +132,8 @@ echo "   This may take a few seconds..."
 
 # Use timeout and better error handling
 set +e
-RESPONSE=$(curl -s --max-time 10 -X POST http://localhost:9993/controller/network/${NETWORK_ID} \
-  -H "X-ZT1-Auth: $AUTH_TOKEN" \
+RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID} \
+  -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"$NETWORK_NAME\",
@@ -157,7 +162,7 @@ if [[ $CURL_EXIT -ne 0 ]]; then
     echo "Response: $BODY" >&2
   fi
   echo "This might mean:" >&2
-  echo "  - ZeroTier controller API is not accessible at http://localhost:9993" >&2
+  echo "  - ZeroTier controller API is not accessible at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
   echo "  - Network already exists (try a different network ID)" >&2
   echo "  - ZeroTier service needs to be restarted" >&2
   exit 1
@@ -178,15 +183,15 @@ echo "   Network created successfully!"
 
 # Join the network
 echo -e "\n\n2. Joining network..."
-sudo zerotier-cli join ${NETWORK_ID}
+sudo zerotier-cli -D${CONTROLLER_URL} -p${CONTROLLER_PORT} -T${CONTROLLER_AUTH_TOKEN} join ${NETWORK_ID}
 
 # Authorize ourselves
 echo -e "\n3. Authorizing controller node..."
 sleep 2
 # Use set +e to allow curl to fail without exiting the script
 set +e
-RESPONSE=$(curl -s -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/${NODE_ID} \
-  -H "X-ZT1-Auth: $AUTH_TOKEN" \
+RESPONSE=$(curl -s -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID}/member/${NODE_ID} \
+  -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"authorized": true}' \
   -w "\n%{http_code}" 2>&1)
@@ -218,7 +223,7 @@ fi
 # Verify
 echo -e "\n\n4. Verifying network..."
 sleep 3
-sudo zerotier-cli listnetworks
+sudo zerotier-cli -D${CONTROLLER_URL} -p${CONTROLLER_PORT} -T${CONTROLLER_AUTH_TOKEN} listnetworks
 
 echo -e "\n\nNetwork created successfully!"
 echo "Network ID: $NETWORK_ID"
@@ -251,7 +256,6 @@ echo "To authorize new members:"
 echo "  make add-node NODE_ID=<member-id>"
 echo ""
 echo "Or manually:"
-echo "  curl -X POST http://localhost:9993/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
-echo "    -H \"X-ZT1-Auth: $AUTH_TOKEN\" \\"
+echo "  curl -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
+echo "    -H \"X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN\" \\"
 echo "    -d '{\"authorized\": true}'"
-
