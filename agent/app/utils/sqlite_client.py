@@ -1156,6 +1156,169 @@ class SQLiteClient:
         await asyncio.to_thread(_cancel)
 
 
+    async def list_negotiations(
+        self,
+        *,
+        status: str | None = None,
+        order_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                filters: list[str] = []
+                params: list[Any] = []
+                if status:
+                    filters.append("t.status = ?")
+                    params.append(status)
+                if order_id:
+                    filters.append("(t.our_order_id = ? OR t.their_order_id = ?)")
+                    params.extend([order_id, order_id])
+                where = " WHERE " + " AND ".join(filters) if filters else ""
+                params.append(limit)
+                cur.execute(
+                    f"""
+                    SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
+                           t.status, t.terminal_state, t.updated_at,
+                           COUNT(m.message_id) AS round_count
+                    FROM negotiation_threads t
+                    LEFT JOIN negotiation_messages m ON m.negotiation_id = t.negotiation_id
+                    {where}
+                    GROUP BY t.negotiation_id
+                    ORDER BY t.updated_at DESC LIMIT ?
+                    """,
+                    params,
+                )
+                cols = ["negotiation_id", "our_order_id", "their_order_id",
+                        "status", "terminal_state", "updated_at", "round_count"]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def get_negotiation_detail(
+        self,
+        *,
+        negotiation_id: str,
+        owner_id: str,
+    ) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
+                           t.our_agent_id, t.their_agent_id, t.status, t.terminal_state,
+                           t.created_at, t.updated_at,
+                           l.our_strategy, l.our_initial_price
+                    FROM negotiation_threads t
+                    LEFT JOIN negotiation_local_state l
+                           ON t.negotiation_id = l.negotiation_id AND l.owner_id = ?
+                    WHERE t.negotiation_id = ?
+                    """,
+                    (owner_id, negotiation_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                result = {
+                    "negotiation_id": row[0], "our_order_id": row[1],
+                    "their_order_id": row[2], "our_agent_id": row[3],
+                    "their_agent_id": row[4], "status": row[5],
+                    "terminal_state": row[6], "created_at": row[7],
+                    "updated_at": row[8], "our_strategy": row[9],
+                    "our_initial_price": row[10],
+                }
+                cur.execute(
+                    """
+                    SELECT round, sender, action_taken, our_price, their_price,
+                           proposed_price, message_type, timestamp
+                    FROM negotiation_messages
+                    WHERE negotiation_id = ?
+                    ORDER BY round ASC
+                    """,
+                    (negotiation_id,),
+                )
+                msg_cols = ["round", "sender", "action_taken", "our_price",
+                            "their_price", "proposed_price", "message_type", "timestamp"]
+                result["messages"] = [dict(zip(msg_cols, r)) for r in cur.fetchall()]
+                return result
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def get_decision(self, *, decision_id: str) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT d.decision_id, d.event_id, d.event_type, d.agent_id,
+                           d.policy_used, d.action_type, d.context_json, d.timestamp,
+                           o.outcome_json, o.timestamp AS outcome_timestamp
+                    FROM decisions d
+                    LEFT JOIN decision_outcomes o ON d.decision_id = o.decision_id
+                    WHERE d.decision_id = ?
+                    """,
+                    (decision_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "decision_id": row[0], "event_id": row[1],
+                    "event_type": row[2], "agent_id": row[3],
+                    "policy_used": row[4], "action_type": row[5],
+                    "context_json": row[6], "timestamp": row[7],
+                    "outcome_json": row[8], "outcome_timestamp": row[9],
+                }
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def list_decisions_with_outcomes(
+        self,
+        *,
+        agent_id: str,
+        limit: int = 50,
+        event_type: str | None = None,
+        action_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                filters = ["d.agent_id = ?"]
+                params: list[Any] = [agent_id]
+                if event_type:
+                    filters.append("d.event_type = ?")
+                    params.append(event_type)
+                if action_type:
+                    filters.append("d.action_type = ?")
+                    params.append(action_type)
+                where = " WHERE " + " AND ".join(filters)
+                params.append(limit)
+                cur.execute(
+                    f"""
+                    SELECT d.decision_id, d.event_type, d.policy_used,
+                           d.action_type, d.timestamp, o.outcome_json
+                    FROM decisions d
+                    LEFT JOIN decision_outcomes o ON d.decision_id = o.decision_id
+                    {where}
+                    ORDER BY d.timestamp DESC LIMIT ?
+                    """,
+                    params,
+                )
+                cols = ["decision_id", "event_type", "policy_used",
+                        "action_type", "timestamp", "outcome_json"]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
     async def get_orders(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         def _load() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)

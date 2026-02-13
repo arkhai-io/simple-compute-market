@@ -1345,15 +1345,62 @@ async def list_decisions_endpoint(request: Request) -> JSONResponse:
     db = get_sqlite_client()
     limit = int(request.query_params.get("limit", "20"))
     event_type = request.query_params.get("event_type")
-    decisions = await db.load_recent_decisions(
-        agent_id=CONFIG.agent_id, limit=limit, event_type=event_type,
+    action_type = request.query_params.get("action_type")
+    decisions = await db.list_decisions_with_outcomes(
+        agent_id=CONFIG.agent_id, limit=limit,
+        event_type=event_type, action_type=action_type,
     )
+    for d in decisions:
+        if isinstance(d.get("outcome_json"), str):
+            try:
+                d["outcome_json"] = json.loads(d["outcome_json"])
+            except Exception:
+                pass
     return JSONResponse({"decisions": decisions, "total": len(decisions)})
+
+
+async def get_decision_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    decision_id = request.path_params["decision_id"]
+    db = get_sqlite_client()
+    decision = await db.get_decision(decision_id=decision_id)
+    if not decision:
+        return JSONResponse({"error": "Decision not found"}, status_code=404)
+    for field in ("context_json", "outcome_json"):
+        if isinstance(decision.get(field), str):
+            try:
+                decision[field] = json.loads(decision[field])
+            except Exception:
+                pass
+    return JSONResponse(decision)
+
+
+async def list_negotiations_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    status = request.query_params.get("status")
+    order_id = request.query_params.get("order_id")
+    limit = int(request.query_params.get("limit", "50"))
+    negotiations = await db.list_negotiations(status=status, order_id=order_id, limit=limit)
+    return JSONResponse({"negotiations": negotiations, "total": len(negotiations)})
+
+
+async def get_negotiation_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    negotiation_id = request.path_params["negotiation_id"]
+    db = get_sqlite_client()
+    detail = await db.get_negotiation_detail(negotiation_id=negotiation_id, owner_id=CONFIG.agent_id)
+    if not detail:
+        return JSONResponse({"error": "Negotiation not found"}, status_code=404)
+    return JSONResponse(detail)
 
 
 agent_list_orders_route = Route("/orders", list_orders_endpoint, methods=["GET"])
 agent_get_order_route = Route("/orders/{order_id}", get_order_endpoint, methods=["GET"])
 agent_list_decisions_route = Route("/decisions", list_decisions_endpoint, methods=["GET"])
+agent_get_decision_route = Route("/decisions/{decision_id}", get_decision_endpoint, methods=["GET"])
+agent_list_negotiations_route = Route("/negotiations", list_negotiations_endpoint, methods=["GET"])
+agent_get_negotiation_route = Route("/negotiations/{negotiation_id}", get_negotiation_endpoint, methods=["GET"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
@@ -1367,6 +1414,9 @@ a2a_app.routes.append(agent_order_close_route)
 a2a_app.routes.append(agent_list_orders_route)
 a2a_app.routes.append(agent_get_order_route)
 a2a_app.routes.append(agent_list_decisions_route)
+a2a_app.routes.append(agent_get_decision_route)
+a2a_app.routes.append(agent_list_negotiations_route)
+a2a_app.routes.append(agent_get_negotiation_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
