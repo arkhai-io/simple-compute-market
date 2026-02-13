@@ -965,7 +965,10 @@ def config_init(
         elif status == "generated":
             continue
         else:
-            typer.secho(f"{key}: set to {value}", fg=typer.colors.GREEN)
+            if is_secret:
+                typer.secho(f"{key}: set to [hidden]", fg=typer.colors.GREEN)
+            else:
+                typer.secho(f"{key}: set to {value}", fg=typer.colors.GREEN)
 
     provided = {key: value for key, value in values if value is not None}
     missing_required = []
