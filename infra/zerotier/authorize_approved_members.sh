@@ -119,7 +119,7 @@ while IFS= read -r record; do
     # Update Airtable status to "authorized"
     echo "Updating Airtable status to 'authorized'..."
     UPDATE_RESPONSE=$(curl -sf -X PATCH \
-      "https://api.airtable.com/v0/appY1WZgCrnD5QW1q/Waitlist%20Responses/$RECORD_ID" \
+      "https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/$RECORD_ID" \
       -H "Authorization: Bearer $AIRTABLE_API_KEY" \
       -H "Content-Type: application/json" \
       -d "{\"fields\": {\"Status\": \"authorized\", \"Error Message\": \"\"}}" 2>&1) || {
@@ -141,7 +141,7 @@ while IFS= read -r record; do
     # Update Airtable status to "error" with error message
     echo "Updating Airtable status to 'error'..."
     UPDATE_RESPONSE=$(curl -sf -X PATCH \
-      "https://api.airtable.com/v0/appY1WZgCrnD5QW1q/Waitlist%20Responses/$RECORD_ID" \
+      "https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/$RECORD_ID" \
       -H "Authorization: Bearer $AIRTABLE_API_KEY" \
       -H "Content-Type: application/json" \
       -d "{\"fields\": {\"Status\": \"error\", \"Error Message\": $ERROR_MSG}}" 2>&1) || {
