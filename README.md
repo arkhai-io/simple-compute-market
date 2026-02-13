@@ -155,6 +155,34 @@ Both registry and agent will auto-join ZeroTier when started if `ZEROTIER_NETWOR
    ./infra/zerotier/authorize_approved_members.sh --max-entries 10
    ```
 
+### Direct Script Usage
+
+The `make` targets above wrap the following scripts in `infra/zerotier/`. You can run them directly if needed.
+
+#### `create_ztnetwork.sh`
+
+Creates a new private ZeroTier network, joins the controller node, and writes the generated network ID back to `infra/zerotier/.env`.
+
+```bash
+./infra/zerotier/create_ztnetwork.sh
+```
+
+Required env vars in `infra/zerotier/.env`: `NETWORK_NAME`, `IP_RANGE_START`, `IP_RANGE_END`, `NETWORK_CIDR`, `CONTROLLER_URL`, `CONTROLLER_PORT`. Optionally set `CONTROLLER_AUTH_TOKEN` (falls back to reading the local auth token file). Requires `sudo`.
+
+#### `authorize_zt_member.sh`
+
+Authorizes a pending member on an existing network. The member must have already run `zerotier-cli join <NETWORK_ID>`.
+
+```bash
+# Uses ZEROTIER_NETWORK from .env as the network ID
+./infra/zerotier/authorize_zt_member.sh <MEMBER_ID>
+
+# Explicit network ID
+./infra/zerotier/authorize_zt_member.sh <NETWORK_ID> <MEMBER_ID>
+```
+
+Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `CONTROLLER_PORT`, `ZEROTIER_NETWORK`. Requires `sudo`.
+
 ## Useful Commands
 
 - Agent playground: `make playground` in `agent`
