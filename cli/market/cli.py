@@ -946,7 +946,8 @@ def config_init(
         _write_env_tmp(target_dir, values)
 
         if status == "resumed":
-            typer.secho(f"{key}: {value}", fg=typer.colors.CYAN)
+            display_value = "[hidden]" if is_secret else value
+            typer.secho(f"{key}: {display_value}", fg=typer.colors.CYAN)
         elif status == "default":
             typer.secho(f"{key}: used default value {value}", fg=typer.colors.GREEN)
         elif status == "skipped":
