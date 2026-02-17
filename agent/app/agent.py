@@ -204,16 +204,31 @@ def _extract_content_payload(
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
+            # Determine event_type: prefer the payload's own event_type over
+            # the tool name (e.g. tool "counter_offer" carries event_type "negotiation")
+            resolved_event_type = tool_name
             try:
                 EventType(tool_name)
             except ValueError:
-                logger.warning(
-                    f"Unknown event_type from tool '{tool_name}'. "
-                    f"Known types: {[e.value for e in EventType]}"
-                )
+                payload_event_type = payload_dict.get("event_type") if isinstance(payload_dict, dict) else None
+                if payload_event_type:
+                    try:
+                        EventType(payload_event_type)
+                        resolved_event_type = payload_event_type
+                        logger.info(
+                            f"[EXTRACT CONTENT PAYLOAD] Resolved event_type from payload: "
+                            f"'{tool_name}' -> '{resolved_event_type}'"
+                        )
+                    except ValueError:
+                        pass
+                if resolved_event_type == tool_name:
+                    logger.warning(
+                        f"Unknown event_type from tool '{tool_name}'. "
+                        f"Known types: {[e.value for e in EventType]}"
+                    )
             response_dict = {
                 "source": agent_str,
-                "event_type": tool_name,
+                "event_type": resolved_event_type,
                 "message": None,
                 "data": payload_dict
             }
@@ -325,10 +340,14 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             order = MarketOrder.model_validate(offer_data)
             escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
+            taker_order_id = data.get("taker_order_id") or payload.get("taker_order_id")
+            agreed_price = data.get("agreed_price") or payload.get("agreed_price")
             return AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
+                taker_order_id=taker_order_id,
+                agreed_price=agreed_price,
             )
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
@@ -346,8 +365,18 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             missing = [f for f in required_fields if f not in data]
             if missing:
                 raise ValueError(f"NegotiationEvent missing required fields in data: {missing}")
-            
-            return NegotiationEvent.model_validate(payload)
+
+            # Build validated payload with defaults for fields the A2A layer doesn't carry
+            negotiation_payload = {
+                "event_id": payload.get("event_id") or f"negotiation_{uuid.uuid4()}",
+                "event_type": EventType.NEGOTIATION.value,
+                "source": payload.get("source") or data.get("sender", "unknown"),
+                "negotiation_id": data.get("negotiation_id"),
+                "message_type": data.get("message_type"),
+                "sender": data.get("sender"),
+                "data": data.get("data", {}),
+            }
+            return NegotiationEvent.model_validate(negotiation_payload)
             
         else:
             # For other known event types, use model_validate
@@ -451,13 +480,13 @@ class TraderAgent(BaseAgent):
                 )
 
         # In-memory stand-in for compute nodes under the Agent's control.
-        # Fallback matches ww1 reality: 1 GPU, sla=99.0
+        # Fallback matches ww1 reality: 1 GPU, sla=99.9
         self.resource_portfolio = ComputeResourcePortfolio(
             resources=[
                 ComputeResource(
                     gpu_model=GPUModel.H200,
                     quantity=1,
-                    sla=99.0,
+                    sla=99.9,
                     region=Region.CALIFORNIA_US,
                 ),
             ]
@@ -538,7 +567,7 @@ class TraderAgent(BaseAgent):
                         resources.append(ComputeResource(
                             gpu_model=GPUModel.H200,
                             quantity=gpu_count,
-                            sla=99.0,
+                            sla=99.9,
                             region=Region.CALIFORNIA_US,
                         ))
                     live_portfolio = ComputeResourcePortfolio(resources=resources)
@@ -563,8 +592,6 @@ class TraderAgent(BaseAgent):
         if isinstance(event, DomainEvent):
             domain_event = event
         else:
-            resource_portfolio = await self.get_resource_portfolio()
-            
             # Extract domain event payload
             # A2A messages come in as text
             content = _extract_content_payload(event.content)
@@ -593,8 +620,13 @@ class TraderAgent(BaseAgent):
                     data={},
                 )
         
-        # Get resource portfolio
-        resource_portfolio = await self.get_resource_portfolio()
+        # Get resource portfolio — skip live provisioning query for negotiation events
+        # since the policy chain only uses price data and thread state, not available_resources.
+        if isinstance(domain_event, NegotiationEvent):
+            resource_portfolio = self.resource_portfolio.model_dump()
+            logger.debug("[CONTEXT] Using cached portfolio for NegotiationEvent (skipping provisioning query)")
+        else:
+            resource_portfolio = await self.get_resource_portfolio()
         
         # Load market state
         market_state = await self._market_provider.get_state()
@@ -765,15 +797,19 @@ class TraderAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         if len(ctx.session.events[-1].content.parts) > 10:
+            logger.warning(
+                f"[RUN ASYNC] Too many message parts ({len(ctx.session.events[-1].content.parts)}), aborting"
+            )
             yield Event(
-            author=self.name,
-            content=genai_types.Content(
-                role="model",
-                parts=[genai_types.Part.from_text(text=f"Too many message parts. Aborting.")],
-            ),
-            invocation_id=ctx.invocation_id,
-            branch=ctx.branch,
-        )
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_text(text="Too many message parts. Aborting.")],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
+            return
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
 

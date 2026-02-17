@@ -143,6 +143,8 @@ class Config:
     provisioning_service_url: str  # PROVISIONING_SERVICE_URL - URL of async provisioning service
     provisioning_timeout: int  # PROVISIONING_TIMEOUT - timeout for provisioning jobs in seconds
     provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL - interval between status polls in seconds
+    default_vm_host: str  # DEFAULT_VM_HOST - default KVM host for provisioning
+    default_vm_target: str  # DEFAULT_VM_TARGET - default VM name for provisioning
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -236,6 +238,8 @@ def load_config() -> Config:
         provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8081"),
         provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),  # Default: 1 hour
         provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),  # Default: 15 seconds
+        default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
+        default_vm_target=os.getenv("DEFAULT_VM_TARGET", "tenant-vm"),
     )
 
 

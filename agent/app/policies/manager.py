@@ -135,7 +135,8 @@ class PolicyManager:
                     "mo.guard.trigger_is_make_offer",
                     # "mo.action.accept_offer", # Uncomment this to use the default accept offer policy
                     # "mo.action.torch_always_accept_offer", # Uncomment this to use the Always Accept offer TorchScript policy
-                    "mo.action.torch_market_seller", # Uncomment this to use the Market Seller TorchScript policy
+                    # "mo.action.torch_market_seller", # Uncomment this to use the Market Seller TorchScript policy
+                    "negotiation.respond_to_make_offer", # Rule-based: price comparison with counter-offers
                 ],
             )
             logger.debug("[POLICY MANAGER] Ensured make_offer policy")
@@ -180,17 +181,28 @@ class PolicyManager:
 
     async def ensure_negotiation_policy(self) -> None:
         """Ensure negotiation policy is saved to the store.
-        
+
         Lazy initialization: policy is created on first use.
+        Uses rule-based price interval concession with round/timeout guards.
         """
         try:
             await self._policy_store.save_policy(
                 agent_id=self._agent_id,
-                policy_name="simple_negotiation_random",
+                policy_name="negotiation_price_concession_v1",
                 trigger_type=EventType.NEGOTIATION.value,
-                callable_ref="simple_negotiation_random",
+                callable_ref="negotiation.price_concession.v1",
             )
-            logger.debug("[POLICY MANAGER] Ensured negotiation policy")
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name="negotiation.price_concession.v1",
+                components=[
+                    "negotiation.guard.bounded_rounds_and_timeout",
+                    "negotiation.guard.always_negotiate_on_price_diff",
+                    "negotiation.action.price_interval_concession",
+                    "negotiation.action.safe_default_reject",
+                ],
+            )
+            logger.debug("[POLICY MANAGER] Ensured negotiation policy (price_interval_concession)")
         except Exception as e:
             logger.warning(f"[POLICY MANAGER] Failed to save negotiation policy: {e}")
 

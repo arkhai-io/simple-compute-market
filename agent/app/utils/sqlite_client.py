@@ -106,6 +106,10 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
             except sqlite3.OperationalError:
                 pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price INTEGER")
+            except sqlite3.OperationalError:
+                pass
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_local_state (
@@ -803,24 +807,35 @@ class SQLiteClient:
         *,
         negotiation_id: str,
         terminal_state: str | None,
+        agreed_price: int | None = None,
     ) -> None:
         """Update the terminal state of a negotiation thread."""
         def _update() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    UPDATE negotiation_threads
-                    SET terminal_state = ?, updated_at = ?
-                    WHERE negotiation_id = ?
-                    """,
-                    (terminal_state, datetime.now().isoformat(), negotiation_id),
-                )
+                if agreed_price is not None:
+                    cur.execute(
+                        """
+                        UPDATE negotiation_threads
+                        SET terminal_state = ?, status = 'terminated', updated_at = ?, agreed_price = ?
+                        WHERE negotiation_id = ?
+                        """,
+                        (terminal_state, datetime.now().isoformat(), agreed_price, negotiation_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE negotiation_threads
+                        SET terminal_state = ?, status = 'terminated', updated_at = ?
+                        WHERE negotiation_id = ?
+                        """,
+                        (terminal_state, datetime.now().isoformat(), negotiation_id),
+                    )
                 conn.commit()
             finally:
                 conn.close()
-        
+
         await asyncio.to_thread(_update)
 
     async def delete_negotiation_thread(
@@ -942,10 +957,10 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
-                           t.our_agent_id, t.their_agent_id, t.status,
-                           l.our_initial_price, l.our_strategy
+                           t.our_agent_id, t.their_agent_id, t.status, t.terminal_state,
+                           l.our_initial_price, l.our_strategy, t.agreed_price
                     FROM negotiation_threads t
-                    LEFT JOIN negotiation_local_state l 
+                    LEFT JOIN negotiation_local_state l
                            ON t.negotiation_id = l.negotiation_id AND l.owner_id = ?
                     WHERE t.negotiation_id = ?
                     """,
@@ -960,9 +975,11 @@ class SQLiteClient:
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
+                        "terminal_state": row[6],
                         # Default to None if no local state found for this owner
-                        "our_initial_price": row[6],
-                        "our_strategy": row[7],
+                        "our_initial_price": row[7],
+                        "our_strategy": row[8],
+                        "agreed_price": row[9],
                     }
                 return None
             finally:
@@ -1181,7 +1198,7 @@ class SQLiteClient:
                     f"""
                     SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
                            t.status, t.terminal_state, t.updated_at,
-                           COUNT(m.message_id) AS round_count
+                           COUNT(m.message_id) AS round_count, t.agreed_price
                     FROM negotiation_threads t
                     LEFT JOIN negotiation_messages m ON m.negotiation_id = t.negotiation_id
                     {where}
@@ -1191,7 +1208,8 @@ class SQLiteClient:
                     params,
                 )
                 cols = ["negotiation_id", "our_order_id", "their_order_id",
-                        "status", "terminal_state", "updated_at", "round_count"]
+                        "status", "terminal_state", "updated_at", "round_count",
+                        "agreed_price"]
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
             finally:
                 conn.close()
@@ -1212,7 +1230,7 @@ class SQLiteClient:
                     SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
                            t.our_agent_id, t.their_agent_id, t.status, t.terminal_state,
                            t.created_at, t.updated_at,
-                           l.our_strategy, l.our_initial_price
+                           l.our_strategy, l.our_initial_price, t.agreed_price
                     FROM negotiation_threads t
                     LEFT JOIN negotiation_local_state l
                            ON t.negotiation_id = l.negotiation_id AND l.owner_id = ?
@@ -1229,7 +1247,7 @@ class SQLiteClient:
                     "their_agent_id": row[4], "status": row[5],
                     "terminal_state": row[6], "created_at": row[7],
                     "updated_at": row[8], "our_strategy": row[9],
-                    "our_initial_price": row[10],
+                    "our_initial_price": row[10], "agreed_price": row[11],
                 }
                 cur.execute(
                     """

@@ -126,6 +126,9 @@ class TestExtractInitialPrice:
 class TestRespondToMakeOffer:
     """Test negotiation.respond_to_make_offer policy."""
 
+    # Default CONFIG.base_url_override used in C1 owner filter
+    OUR_AGENT_URL = "http://localhost:8000"
+
     @pytest.fixture
     def policy_store(self, temp_db):
         from app.policies.registry import CALLABLE_REGISTRY
@@ -149,7 +152,7 @@ class TestRespondToMakeOffer:
         """Minimizer accepts when their_price <= our_price."""
         minimizer_our_order = MarketOrder(
             order_id="our_order",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(
                     symbol="USDC",
@@ -200,7 +203,7 @@ class TestRespondToMakeOffer:
         # Our minimizer order: we offer 100 tokens
         minimizer_our_order = MarketOrder(
             order_id="our_order",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(
                     symbol="USDC",
@@ -292,7 +295,7 @@ class TestRespondToMakeOffer:
 
         minimizer_our_order = MarketOrder(
             order_id="our_order",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(
                     symbol="USDC",
@@ -341,7 +344,7 @@ class TestRespondToMakeOffer:
         """Maximizer accepts when their_price >= our_price."""
         maximizer_our_order = MarketOrder(
             order_id="our_order",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=ComputeResource(
                 gpu_model=GPUModel.H200,
                 quantity=1,
@@ -403,7 +406,7 @@ class TestRespondToMakeOffer:
 
         maximizer_our_order = MarketOrder(
             order_id="our_order",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=ComputeResource(
                 gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
             ),
@@ -499,7 +502,7 @@ class TestRespondToMakeOffer:
         """Negotiation ID is deterministic regardless of which agent initiates."""
         minimizer_our_order = MarketOrder(
             order_id="order_A",
-            order_maker="our_agent",
+            order_maker=self.OUR_AGENT_URL,
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
                 amount=100,

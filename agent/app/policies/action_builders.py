@@ -76,11 +76,12 @@ class NegotiationActionBuilder:
             self.data.get("their_order_id")
         )
 
-    def accept(self, reason: str) -> DomainAction:
+    def accept(self, reason: str, agreed_price: int | None = None) -> DomainAction:
         """Build ACCEPT_OFFER action.
 
         Args:
             reason: Human-readable reason for accepting (e.g., "within_band", "price_equal")
+            agreed_price: The mutually agreed price in base units
 
         Returns:
             DomainAction configured for accepting an offer
@@ -93,6 +94,7 @@ class NegotiationActionBuilder:
                 "reason": reason,
                 "our_order_id": self.data.get("our_order_id"),
                 "their_order_id": self.data.get("their_order_id"),
+                "agreed_price": agreed_price,
             },
         )
 

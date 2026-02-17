@@ -98,7 +98,7 @@ async def provision_machine_async(
                 raise ProvisioningTimeoutError(f"Provisioning job {job_id} timed out after {timeout} seconds")
 
             try:
-                response = await client.get(f"{base_url}/provision/{job_id}")
+                response = await client.get(f"{base_url}/provision/{job_id}", headers=headers)
                 response.raise_for_status()
                 status_data = response.json()
 
@@ -118,7 +118,7 @@ async def provision_machine_async(
 
                     # Try to get logs for additional context
                     try:
-                        logs_response = await client.get(f"{base_url}/provision/{job_id}/logs")
+                        logs_response = await client.get(f"{base_url}/provision/{job_id}/logs", headers=headers)
                         if logs_response.status_code == 200:
                             logs_data = logs_response.json()
                             logs = logs_data.get("logs")
@@ -230,7 +230,7 @@ async def schedule_vm_shutdown_async(
                 raise ProvisioningTimeoutError(f"Shutdown scheduling job {job_id} timed out after {timeout} seconds")
 
             try:
-                response = await client.get(f"{base_url}/provision/{job_id}")
+                response = await client.get(f"{base_url}/provision/{job_id}", headers=headers)
                 response.raise_for_status()
                 status_data = response.json()
 
@@ -248,7 +248,7 @@ async def schedule_vm_shutdown_async(
 
                     # Try to get logs for additional context
                     try:
-                        logs_response = await client.get(f"{base_url}/provision/{job_id}/logs")
+                        logs_response = await client.get(f"{base_url}/provision/{job_id}/logs", headers=headers)
                         if logs_response.status_code == 200:
                             logs_data = logs_response.json()
                             logs = logs_data.get("logs")

@@ -50,7 +50,7 @@ from .provisioning_client import (
     ProvisioningError,
 )
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
-from ..policies.action_builders import CounterOfferParams
+from ..policies.action_builders import CounterOfferParams, _generate_negotiation_id
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
@@ -97,6 +97,86 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
 def _resolve_oracle_address(oracle_address: str | None) -> str:
     """Return the oracle signer address."""
     return oracle_address or DEMO_ORACLE_ADDRESS
+
+
+async def _send_exit_notification(
+    ctx: InvocationContext | None,
+    negotiation_id: str,
+    reason: str,
+    parameters: dict[str, Any],
+) -> None:
+    """Send EXIT_NEGOTIATION notification to counterparty via A2A (C2).
+
+    Looks up the counterparty URL from thread info or order registry,
+    then sends a negotiation exit event so the remote agent can clean up.
+    """
+    if not ctx:
+        logger.warning("[ACTION] No invocation context; EXIT notification not sent")
+        return
+
+    counterparty_url = None
+
+    # Try to get counterparty URL from thread info in DB
+    try:
+        sqlite_client = get_sqlite_client()
+        thread_info = await sqlite_client.get_thread_info(
+            negotiation_id=negotiation_id,
+            owner_id=AGENT_ID,
+        )
+        if thread_info:
+            counterparty_url = thread_info.get("their_agent_id")
+    except Exception as e:
+        logger.warning(f"[ACTION] Failed to look up thread info for exit notification: {e}")
+
+    # Fall back to looking up the order in the registry
+    if not counterparty_url or not counterparty_url.startswith(("http://", "https://")):
+        order_id = parameters.get("order_id")
+        if order_id:
+            try:
+                registry_client = get_registry_client()
+                order = await registry_client.get_order(order_id)
+                if order:
+                    counterparty_url = order.get("order_maker")
+            except Exception as e:
+                logger.warning(f"[ACTION] Failed to look up order for exit notification: {e}")
+
+    if not counterparty_url or not counterparty_url.startswith(("http://", "https://")):
+        logger.warning(
+            f"[ACTION] Cannot send EXIT notification for {negotiation_id}: "
+            f"no valid counterparty URL found"
+        )
+        return
+
+    event_payload = {
+        "event_type": EventType.NEGOTIATION.value,
+        "negotiation_id": negotiation_id,
+        "message_type": "exit",
+        "sender": AGENT_ID,
+        "data": {
+            "action": "EXIT_NEGOTIATION",
+            "reason": reason,
+        },
+    }
+
+    try:
+        event = Event(
+            author=AGENT_ID,
+            content=genai_types.Content(
+                role="model",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="exit_negotiation",
+                        response=event_payload,
+                    )
+                ],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
+        await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
+        logger.info(f"[ACTION] Sent EXIT notification to {counterparty_url} for negotiation {negotiation_id}")
+    except Exception as e:
+        logger.warning(f"[ACTION] Failed to send EXIT notification: {e}")
 
 
 async def execute_action(
@@ -257,6 +337,45 @@ async def execute_action(
             if not ssh_public_key:
                 raise ValueError("ssh_public_key is required for fulfill_compute_obligation")
 
+            # Mark negotiation thread as success on the maker's side (mirrors
+            # what the taker does in accept_offer at line ~1134).
+            fulfill_negotiation_id = parameters.get("negotiation_id")
+            fulfill_our_order_id = parameters.get("our_order_id")
+            fulfill_agreed_price = parameters.get("agreed_price")
+            if fulfill_negotiation_id:
+                async with NegotiationThreadTransaction("FULFILL") as txn:
+                    await txn.mark_terminal(fulfill_negotiation_id, "success", agreed_price=fulfill_agreed_price)
+
+            # Update maker's order status to accepted.
+            if fulfill_our_order_id:
+                try:
+                    sqlite_client = get_sqlite_client()
+                    order_taker = order.get("order_taker") if isinstance(order, dict) else None
+                    await sqlite_client.update_order(
+                        order_id=fulfill_our_order_id,
+                        status="accepted",
+                        order_taker=order_taker,
+                        escrow_uid=escrow_uid,
+                        matched_offer_id=parameters.get("their_order_id"),
+                    )
+                    logger.info(
+                        "[LOCAL DB] Updated maker order %s as accepted (negotiation %s)",
+                        fulfill_our_order_id,
+                        fulfill_negotiation_id,
+                    )
+                except Exception as exc:
+                    logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", fulfill_our_order_id, exc)
+
+            # Stamp marketplace IDs onto order for downstream provisioning context
+            if isinstance(order, dict):
+                if fulfill_negotiation_id:
+                    order["_negotiation_id"] = fulfill_negotiation_id
+                if fulfill_our_order_id:
+                    order["_order_id"] = fulfill_our_order_id
+                their_order_id = parameters.get("their_order_id")
+                if their_order_id:
+                    order["_their_order_id"] = their_order_id
+
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
@@ -399,7 +518,7 @@ async def execute_action(
                     }
                 else:
                     outcome["result"] = {
-                        "status": "collected",
+                        "status": "error",
                         "message": "Failed to collect escrow",
                         "escrow_uid": escrow_uid,
                         "fulfillment_uid": fulfillment_uid,
@@ -415,6 +534,32 @@ async def execute_action(
                 }
                 outcome["message"] = outcome["result"]["message"]
             
+        case ActionType.EXIT_NEGOTIATION.value:
+            logger.info(f"[ACTION] Exiting negotiation with params: {parameters}")
+            negotiation_id = parameters.get("negotiation_id")
+            reason = parameters.get("reason", "unknown")
+            if negotiation_id:
+                async with NegotiationThreadTransaction("EXIT") as txn:
+                    await txn.mark_terminal(negotiation_id, "failure")
+                # Only notify counterparty for locally-initiated exits.
+                # Exits triggered by incoming notifications (already_terminated:*,
+                # counterparty_exited:*) must NOT echo back to avoid infinite ping-pong.
+                _triggered_by_counterparty = (
+                    reason.startswith("already_terminated:")
+                    or reason.startswith("counterparty_exited:")
+                )
+                if not _triggered_by_counterparty:
+                    await _send_exit_notification(ctx, negotiation_id, reason, parameters)
+                else:
+                    logger.info(
+                        "[ACTION] Suppressing exit notification for %s (reason: %s) "
+                        "-- counterparty already knows",
+                        negotiation_id,
+                        reason,
+                    )
+            outcome["result"] = {"status": "exited", "reason": reason, "negotiation_id": negotiation_id}
+            outcome["message"] = f"Exited negotiation: {reason}"
+
         case ActionType.COUNTER_OFFER.value:
             logger.info(f"[ACTION] Countering offer with params: {parameters}")
             # Execute counter offer: create negotiation thread and send negotiation event
@@ -427,7 +572,7 @@ async def execute_action(
             
         case ActionType.GET_AVAILABLE_RESOURCES.value:
             logger.info(f"[ACTION] Getting available resources with params: {parameters}")
-            vm_host = parameters.get("vm_host", "ww1")
+            vm_host = parameters.get("vm_host", CONFIG.default_vm_host)
 
             if CONFIG.use_mock_provisioning:
                 result = {
@@ -557,11 +702,20 @@ async def send_to_remote_agent(
     logger.info(f"[A2A] Sending event to remote agent: {event}")
 
     await ctx.session_service.append_event(ctx.session, event)
-    async for event in remote_agent.run_async(ctx):
-        #text_from_remote = _extract_text_from_content(event.content)
-        if event.is_final_response():
-            logger.info(f"[A2A] Received from remote agent: {event}")
-            return event
+
+    # Trim session to only the latest event before sending via A2A.
+    # The session accumulates all previous events across negotiation rounds,
+    # causing "Too many message parts" errors on the receiving agent after
+    # 2-3 rounds.  The remote agent only needs the current event.
+    original_events = ctx.session.events
+    ctx.session.events = [ctx.session.events[-1]]
+    try:
+        async for resp in remote_agent.run_async(ctx):
+            if resp.is_final_response():
+                logger.info(f"[A2A] Received from remote agent: {resp}")
+                return resp
+    finally:
+        ctx.session.events = original_events
 
 
 def rebalance_internal_resources() -> bool:
@@ -658,11 +812,12 @@ def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
     logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
 
 
-async def provision_machine(ssh_public_key: str) -> dict:
+async def provision_machine(ssh_public_key: str, order: dict | None = None) -> dict:
     """Provision a machine using the provided SSH public key.
 
     Args:
         ssh_public_key: SSH public key to install on the provisioned machine.
+        order: Optional marketplace order dict with buyer/seller/negotiation context.
 
     Returns:
         Full provisioning result dict.
@@ -684,14 +839,37 @@ async def provision_machine(ssh_public_key: str) -> dict:
             except Exception as e:
                 logger.warning("[TOOL] Failed to build ERC-8004 agent ID, using CONFIG.agent_id: %s", e)
 
+        import secrets
+        vm_suffix = secrets.token_hex(4)  # 8-char random suffix to avoid name collisions
+        vm_target = f"{CONFIG.default_vm_target}-{vm_suffix}"
+        params = {
+            "vm_host": CONFIG.default_vm_host,
+            "vm_action": "create",
+            "vm_target": vm_target,
+            "ssh_pubkey": ssh_public_key,
+        }
+        if order:
+            params["order_id"] = order.get("_order_id") or order.get("order_id")
+            params["seller_agent_id"] = agent_id  # ERC-8004 ID built above
+            params["negotiation_id"] = order.get("_negotiation_id")
+            params["escrow_uid"] = order.get("taker_attestation") or order.get("escrow_uid")
+
+            # Resolve buyer's ERC-8004 ID from their registry order
+            buyer_agent_id = None
+            their_order_id = order.get("_their_order_id")
+            if their_order_id and CONFIG.enable_registry_discovery:
+                try:
+                    registry_client = get_registry_client()
+                    their_order = await registry_client.get_order(their_order_id)
+                    if their_order:
+                        buyer_agent_id = their_order.get("agent_id")
+                except Exception as e:
+                    logger.warning("[TOOL] Failed to resolve buyer ERC-8004 ID: %s", e)
+            params["buyer_agent_id"] = buyer_agent_id or order.get("order_taker")
+
         result = await provision_machine_async(
             provisioning_service_url=CONFIG.provisioning_service_url,
-            params={
-                "vm_host": "ww1",
-                "vm_action": "create",
-                "vm_target": "tenant-vm",
-                "ssh_pubkey": ssh_public_key,
-            },
+            params=params,
             timeout=CONFIG.provisioning_timeout,
             poll_interval=CONFIG.provisioning_poll_interval,
             agent_id=agent_id,
@@ -778,17 +956,12 @@ async def counter_offer(
 
         their_agent_id = order.get("order_maker")
 
-        # Validate that we have a valid agent URL for the counterparty
-        if not their_agent_id:
-            logger.warning(
-                f"[ACTION] Order {params.order_id} missing 'order_maker' field. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
-            )
-        elif not their_agent_id.startswith(("http://", "https://")):
-            logger.warning(
-                f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
-            )
+        # H2: Fail early if counterparty URL is missing or invalid
+        if not their_agent_id or not their_agent_id.startswith(("http://", "https://")):
+            return {
+                "status": "error",
+                "message": f"Cannot send counter-offer: invalid counterparty URL '{their_agent_id}' for order {params.order_id}",
+            }
 
         # Determine our strategy by looking up our order (for internal policy use)
         strategy = None
@@ -877,6 +1050,17 @@ async def accept_offer(
 
     order_payload = parameters.get("order") or parameters.get("offer")
 
+    # Fallback: if no order payload, try to fetch from registry by order_id
+    if order_payload is None:
+        order_id = parameters.get("order_id") or parameters.get("their_order_id")
+        if order_id:
+            try:
+                registry_client = get_registry_client()
+                order_payload = await registry_client.get_order(order_id)
+                logger.info(f"[TOOL] Fetched order {order_id} from registry for accept_offer")
+            except Exception as exc:
+                logger.warning(f"[TOOL] Failed to fetch order {order_id} from registry: {exc}")
+
     if isinstance(order_payload, MarketOrder):
         order_dict = order_payload.model_dump(mode="json")
     elif isinstance(order_payload, dict):
@@ -949,6 +1133,8 @@ async def accept_offer(
         "offer": order_dict,
         "escrow_uid": escrow_uid,
         "ssh_public_key": SSH_PUBLIC_KEY,
+        "taker_order_id": parameters.get("our_order_id"),
+        "agreed_price": parameters.get("agreed_price"),
     }
 
     if ctx is None:
@@ -976,16 +1162,12 @@ async def accept_offer(
 
     logger.info("[TOOL] Accepting offer and notifying counterparty: %s", event_payload)
 
-    # Cancel competing negotiations and mark as terminal using transaction
+    # Update order DB BEFORE marking negotiation terminal to avoid race conditions
+    # where the counterparty reacts to the acceptance and queries stale order state.
     order_id = order_dict.get("order_id")
     our_order_id = parameters.get("our_order_id")
     their_order_id = parameters.get("their_order_id")
     negotiation_id = parameters.get("negotiation_id")
-
-    async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
-        await txn.cancel_competing(order_id, their_order_id, negotiation_id)
-        if negotiation_id:
-            await txn.mark_terminal(negotiation_id, "success")
 
     if not our_order_id:
         try:
@@ -999,7 +1181,6 @@ async def accept_offer(
                 our_order_id = inferred.get("order_id")
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
-        
 
     try:
         sqlite_client = get_sqlite_client()
@@ -1014,6 +1195,12 @@ async def accept_offer(
             )
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
+
+    agreed_price = parameters.get("agreed_price")
+    async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
+        await txn.cancel_competing(order_id, their_order_id, negotiation_id)
+        if negotiation_id:
+            await txn.mark_terminal(negotiation_id, "success", agreed_price=agreed_price)
 
     # Update registry if order exists there
     # This updates the MAKER's order (the order we're accepting)
@@ -1044,14 +1231,20 @@ async def accept_offer(
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
     counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")
-    if not counterparty_url or not counterparty_url.strip():
-        logger.warning(
+    if not counterparty_url or not str(counterparty_url).strip():
+        logger.error(
             "[A2A] accept_offer: no counterparty URL in order (order_maker) or parameters (their_agent_id); "
-            "order_dict keys=%s",
+            "order_dict keys=%s — cannot send acceptance",
             list(order_dict.keys()),
         )
+        return {
+            "status": "error",
+            "message": "Cannot send acceptance: no counterparty URL (order_maker or their_agent_id)",
+            "escrow_uid": escrow_uid,
+            "offer": order_dict,
+        }
     try:
-        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
         return {
             "status": "sent",
             "message": "Offer accepted and forwarded to counterparty",
@@ -1249,7 +1442,7 @@ async def _find_and_send_matching_offers(
         # For retries without context, we just log matches - actual offers will be sent
         # when other agents query the registry and find our orders
         results = []
-        if ctx and event:
+        if ctx:
             # Create event if not provided
             if event is None:
                 event = Event(
@@ -1268,7 +1461,7 @@ async def _find_and_send_matching_offers(
                     invocation_id=ctx.invocation_id,
                     branch=ctx.branch,
                 )
-            
+
             # Send offer to each matching agent
             for idx, agent_url in enumerate(agent_urls):
                 try:
@@ -1286,7 +1479,7 @@ async def _find_and_send_matching_offers(
                                 continue
 
                             # Create thread BEFORE sending offer to track in-flight negotiations
-                            negotiation_id = f"{order_id}_{matched_order_id}_{AGENT_ID[:8]}"
+                            negotiation_id = _generate_negotiation_id(order_id, matched_order_id)
 
                             # Get our order to determine strategy and initial price
                             our_order_dict = await registry_client.get_order(order_id)
@@ -1659,11 +1852,23 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
+
+    # Resolve order to dict for marketplace context injection
+    order_dict = None
+    if order:
+        if isinstance(order, str):
+            try:
+                order_dict = json.loads(order)
+            except json.JSONDecodeError:
+                order_dict = None
+        elif isinstance(order, dict):
+            order_dict = order
+
     try:
         if CONFIG.use_mock_provisioning:
             connection_details = await mock_provision_machine(ssh_public_key)
         else:
-            connection_details = await provision_machine(ssh_public_key)
+            connection_details = await provision_machine(ssh_public_key, order=order_dict)
     except Exception as error:
         logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
         return {
@@ -1700,19 +1905,8 @@ async def fulfill_compute_obligation(
     duration_hours = 1
 
     logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
-    order_dict = None
     order_id = None
-    order_bytes = b""
-
-    if order:
-        if isinstance(order, str):
-            try:
-                order_dict = json.loads(order)
-            except json.JSONDecodeError:
-                order_dict = None
-            order_bytes = order.encode("utf-8")
-        elif isinstance(order, dict):
-            order_dict = order
+    order_bytes = order.encode("utf-8") if isinstance(order, str) else b""
 
     if order_dict:
         order_id = order_dict.get("order_id")
@@ -1753,11 +1947,13 @@ async def fulfill_compute_obligation(
                 except Exception:
                     pass
 
+            # Use the actual provisioned VM name (with random suffix) for shutdown
+            provisioned_vm_target = connection_details.get("vm_name") or CONFIG.default_vm_target
             await schedule_vm_shutdown_async(
                 provisioning_service_url=CONFIG.provisioning_service_url,
                 lease_end_utc=lease_end_utc,
-                vm_host="ww1",
-                vm_target="tenant-vm",
+                vm_host=CONFIG.default_vm_host,
+                vm_target=provisioned_vm_target,
                 timeout=300,
                 poll_interval=5,
                 agent_id=shutdown_agent_id,
@@ -1905,7 +2101,7 @@ async def collect_escrow(
     result = None
     if client is None:
         result = f"escrow_collected_{uuid.uuid4()}"
-        logger.info("[ALKAHEST] (Simulated) Escrow collected {result}")
+        logger.info(f"[ALKAHEST] (Simulated) Escrow collected {result}")
     else:
         try:
             logger.info(f"[ALKAHEST] Collecting escrow: escrow_uid={escrow_uid}, fulfillment_uid={fulfillment_uid}")

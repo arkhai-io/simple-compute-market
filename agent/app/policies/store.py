@@ -259,6 +259,15 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
 
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
+    agreed_price = context.event.agreed_price
+
+    # Derive negotiation_id so the FULFILL handler can mark the maker's thread terminal
+    # and update the maker's order status.
+    our_order_id = context.event.order.order_id  # maker's order (we are the maker)
+    their_order_id = context.event.taker_order_id  # taker's order
+    negotiation_id = None
+    if our_order_id and their_order_id:
+        negotiation_id = f"{min(our_order_id, their_order_id)}_{max(our_order_id, their_order_id)}"
 
     return DomainAction(
         action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
@@ -266,6 +275,10 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "order": context.event.order.model_dump(mode="json"),
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
+            "our_order_id": our_order_id,
+            "their_order_id": their_order_id,
+            "negotiation_id": negotiation_id,
+            "agreed_price": agreed_price,
         },
     )
 
@@ -346,18 +359,45 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
         return None
 
     data = context.event.data or {}
-    
+
     their_price = data.get("proposed_price")
-    
+
     thread_info = context.market_state.get("thread_info", {})
     our_price = thread_info.get("our_initial_price")
+
+    # Inject order IDs from thread_info so downstream actions can find counterparty
+    data = {**data,
+        "our_order_id": thread_info.get("our_order_id"),
+        "their_order_id": thread_info.get("their_order_id"),
+    }
 
     if our_price is not None and their_price is not None and our_price == their_price:
         logger.info(f"[NEGOTIATION] Prices equal ({our_price}), accepting directly")
         actions = NegotiationActionBuilder(data)
-        return actions.accept("price_equal")
+        return actions.accept("price_equal", agreed_price=their_price)
 
     return None
+
+
+REASONABLE_MULTIPLIER = 1.5
+MAX_NEGOTIATION_ROUNDS = 5
+
+
+def _relaxed_acceptance_threshold(our_price, strategy, round_num, max_rounds):
+    """Compute round-dependent acceptance threshold with linear relaxation.
+
+    Each agent's threshold linearly relaxes from initial price toward max concession
+    boundary (1.5x) over the negotiation rounds:
+    - Minimizer (buyer): Round 0 accepts at ceiling, final round at ceiling x 1.5
+    - Maximizer (seller): Round 0 accepts at floor, final round at floor / 1.5
+    """
+    concession_fraction = min(round_num / max(max_rounds - 1, 1), 1.0)
+    if strategy == "minimize":
+        max_concession = int(our_price * REASONABLE_MULTIPLIER)
+        return our_price + int((max_concession - our_price) * concession_fraction)
+    else:
+        max_concession = int(our_price / REASONABLE_MULTIPLIER)
+        return our_price - int((our_price - max_concession) * concession_fraction)
 
 
 @policy_callable("negotiation.action.price_interval_concession")
@@ -407,26 +447,32 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
     # Ensure negotiation_id is in data for the builder
     if context.event.negotiation_id and "negotiation_id" not in data:
         data = {**data, "negotiation_id": context.event.negotiation_id}
-    
-    # Add our_price and their_price to data for action builder
-    data = {**data, "our_price": our_price, "their_price": their_price}
+
+    # Add our_price, their_price, and order IDs to data for action builder
+    data = {**data,
+        "our_price": our_price,
+        "their_price": their_price,
+        "our_order_id": thread_info.get("our_order_id"),
+        "their_order_id": thread_info.get("their_order_id"),
+    }
 
     # Create action builder for clean action construction
     actions = NegotiationActionBuilder(data)
 
-    REASONABLE_MULTIPLIER = 1.5  # Exit threshold
+    # Strategy-aware price acceptance logic with round-dependent threshold relaxation
+    current_round = len(negotiation_history)
+    acceptance_threshold = _relaxed_acceptance_threshold(our_price, strategy, current_round, MAX_NEGOTIATION_ROUNDS)
 
-    # Strategy-aware price acceptance logic
     if strategy == "minimize":
         # Minimizer: our_price is the MAX we're willing to pay (ceiling)
-        # Accept if favorable (at or below ceiling), counter if reasonable, exit if unreasonable
+        # Accept if at or below relaxed threshold, counter if reasonable, exit if unreasonable
 
-        if their_price <= our_price:
-            # Favorable - at or below our ceiling
-            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} <= our_price {our_price}, accepting")
-            return actions.accept("favorable_price")
+        if their_price <= acceptance_threshold:
+            # Favorable - at or below our relaxed ceiling
+            logger.info(f"[NEGOTIATION][MINIMIZE] Their price {their_price} <= threshold {acceptance_threshold} (round {current_round}), accepting")
+            return actions.accept("favorable_price", agreed_price=their_price)
         elif their_price <= our_price * REASONABLE_MULTIPLIER:
-            # Above ceiling but reasonable - counter with midpoint
+            # Above threshold but reasonable - counter with midpoint
             last_our_proposal = our_price
             if negotiation_history:
                 for msg in reversed(negotiation_history):
@@ -444,14 +490,14 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
 
     elif strategy == "maximize":
         # Maximizer: our_price is the MIN we're willing to accept (floor)
-        # Accept if favorable (at or above floor), counter if reasonable, exit if unreasonable
+        # Accept if at or above relaxed threshold, counter if reasonable, exit if unreasonable
 
-        if their_price >= our_price:
-            # Favorable - at or above our floor
-            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} >= our_price {our_price}, accepting")
-            return actions.accept("favorable_price")
+        if their_price >= acceptance_threshold:
+            # Favorable - at or above our relaxed floor
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Their price {their_price} >= threshold {acceptance_threshold} (round {current_round}), accepting")
+            return actions.accept("favorable_price", agreed_price=their_price)
         elif their_price >= our_price / REASONABLE_MULTIPLIER:
-            # Below floor but reasonable - counter with midpoint
+            # Below threshold but reasonable - counter with midpoint
             last_our_proposal = our_price
             if negotiation_history:
                 for msg in reversed(negotiation_history):
@@ -493,15 +539,32 @@ def negotiation_guard_bounded_rounds_and_timeout(context: DecisionContext) -> Do
     if not isinstance(context.event, NegotiationEvent):
         return None
 
-    negotiation_history = context.negotiation_history or []
-    max_rounds = 5  # Configurable default
-    timeout_seconds = 300  # 5 minutes default
-
     # Build data dict for action builder
     data = context.event.data or {}
     if context.event.negotiation_id and "negotiation_id" not in data:
         data = {**data, "negotiation_id": context.event.negotiation_id}
     actions = NegotiationActionBuilder(data)
+
+    # Terminal state guard: reject if negotiation already terminated (H1)
+    thread_info = context.market_state.get("thread_info", {})
+    if thread_info.get("terminal_state"):
+        logger.info(f"[NEGOTIATION] Negotiation already terminated ({thread_info['terminal_state']}), rejecting")
+        # NOTE: "already_terminated:" prefix is used by action_executor.py to suppress
+        # echo exit notifications. Do not change this prefix without updating that guard.
+        return actions.exit(f"already_terminated:{thread_info['terminal_state']}")
+
+    # Handle incoming exit notification from counterparty
+    message_type = data.get("message_type") or context.event.message_type
+    if message_type == "exit":
+        exit_reason = (data.get("data") or {}).get("reason", "counterparty_exited")
+        logger.info(f"[NEGOTIATION] Received exit notification from counterparty: {exit_reason}")
+        # NOTE: "counterparty_exited:" prefix is used by action_executor.py to suppress
+        # echo exit notifications. Do not change this prefix without updating that guard.
+        return actions.exit(f"counterparty_exited:{exit_reason}")
+
+    negotiation_history = context.negotiation_history or []
+    max_rounds = 5  # Configurable default
+    timeout_seconds = 300  # 5 minutes default
 
     # Check round limit
     if len(negotiation_history) >= max_rounds:
@@ -552,15 +615,19 @@ def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAc
         return None
 
     data = context.event.data or {}
-    
+
     their_price = data.get("proposed_price")
-    
+
     thread_info = context.market_state.get("thread_info", {})
     our_price = thread_info.get("our_initial_price")
 
-    # Build data dict for action builder
+    # Build data dict for action builder with order IDs from thread_info
     if context.event.negotiation_id and "negotiation_id" not in data:
         data = {**data, "negotiation_id": context.event.negotiation_id}
+    data = {**data,
+        "our_order_id": thread_info.get("our_order_id"),
+        "their_order_id": thread_info.get("their_order_id"),
+    }
     actions = NegotiationActionBuilder(data)
 
     # If price data is missing or invalid, reject for safety
@@ -640,6 +707,24 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     )
 
 
+def _resources_are_complementary(our_order: dict, their_order: dict) -> bool:
+    """Check if two orders have complementary resource types (M1).
+
+    Complementary means our offer type matches their demand type and vice versa.
+    E.g., if we offer compute and demand tokens, they should offer tokens and demand compute.
+    """
+    def _is_compute(res: Any) -> bool:
+        return isinstance(res, dict) and "gpu_model" in res
+
+    our_offer = our_order.get("offer_resource", {})
+    our_demand = our_order.get("demand_resource", {})
+    their_offer = their_order.get("offer_resource", {})
+    their_demand = their_order.get("demand_resource", {})
+
+    return (_is_compute(our_offer) == _is_compute(their_demand) and
+            _is_compute(our_demand) == _is_compute(their_offer))
+
+
 @policy_callable("negotiation.respond_to_make_offer")
 async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainAction | None:
     et = context.event.event_type
@@ -661,13 +746,19 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
     their_proposed_price = _extract_initial_price_from_order(incoming_order)
     registry_client = get_registry_client()
     our_orders = await registry_client.query_orders({"status": "open"})
+    # C1: Filter to only our own orders to prevent matching another agent's order
+    our_orders = [o for o in our_orders if o.get("order_maker") == CONFIG.base_url_override]
     our_order = None
 
     for order_dict in our_orders:
         if order_dict.get("order_id") == incoming_order.get("order_id"):
             continue
         order = MarketOrder.model_validate(order_dict)
-        if determine_strategy_from_order(order):
+        strategy = determine_strategy_from_order(order)
+        if not strategy:
+            continue
+        # M1: Verify resource compatibility — our order's demand should match their offer type
+        if _resources_are_complementary(order_dict, incoming_order):
             our_order = order_dict
             break
 
@@ -685,7 +776,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
 
     actions = NegotiationActionBuilder({
         "negotiation_id": negotiation_id,
-        "order_id": their_order_id,
+        "their_order_id": their_order_id,
         "our_order_id": our_order_id,
         "our_price": our_price,
         "their_price": their_proposed_price,
@@ -693,18 +784,21 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         "our_strategy": strategy,
     })
 
+    # Round 0 threshold — functionally identical to our_price at round 0
+    threshold = _relaxed_acceptance_threshold(our_price, strategy, 0, MAX_NEGOTIATION_ROUNDS)
+
     if strategy == "minimize":
-        if their_proposed_price <= our_price:
-            return actions.accept("favorable_price")
-        if their_proposed_price <= our_price * 1.5:
+        if their_proposed_price <= threshold:
+            return actions.accept("favorable_price", agreed_price=their_proposed_price)
+        if their_proposed_price <= our_price * REASONABLE_MULTIPLIER:
             proposed_price = (our_price + their_proposed_price) // 2
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")
 
     if strategy == "maximize":
-        if their_proposed_price >= our_price:
-            return actions.accept("favorable_price")
-        if their_proposed_price >= our_price / 1.5:
+        if their_proposed_price >= threshold:
+            return actions.accept("favorable_price", agreed_price=their_proposed_price)
+        if their_proposed_price >= our_price / REASONABLE_MULTIPLIER:
             proposed_price = (our_price + their_proposed_price) // 2
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")

@@ -334,6 +334,14 @@ class AcceptOfferEvent(DomainEvent):
         default=None,
         description="Buyer-provided SSH public key for provisioning access",
     )
+    taker_order_id: str | None = Field(
+        default=None,
+        description="The taker's own order ID, used by the maker to derive negotiation_id",
+    )
+    agreed_price: int | None = Field(
+        default=None,
+        description="The mutually agreed price in base units",
+    )
 
     @classmethod
     def from_order(
@@ -341,6 +349,8 @@ class AcceptOfferEvent(DomainEvent):
         order: MarketOrder,
         escrow_uid: str | None = None,
         ssh_public_key: str | None = None,
+        taker_order_id: str | None = None,
+        agreed_price: int | None = None,
     ) -> "AcceptOfferEvent":
         """Create an accept-offer event from a market order and optional escrow UID."""
         return cls(
@@ -349,6 +359,8 @@ class AcceptOfferEvent(DomainEvent):
             order=order,
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
+            taker_order_id=taker_order_id,
+            agreed_price=agreed_price,
             data={
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
@@ -356,6 +368,7 @@ class AcceptOfferEvent(DomainEvent):
                 "duration_hours": order.duration_hours,
                 "escrow_uid": escrow_uid,
                 "ssh_public_key": ssh_public_key,
+                "agreed_price": agreed_price,
             },
         )
 

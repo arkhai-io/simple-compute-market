@@ -157,12 +157,13 @@ class NegotiationThreadTransaction:
         )
         return existing is not None
 
-    async def mark_terminal(self, negotiation_id: str, state: str) -> None:
+    async def mark_terminal(self, negotiation_id: str, state: str, agreed_price: int | None = None) -> None:
         """Mark negotiation as terminal (success/failure/timeout).
 
         Args:
             negotiation_id: The negotiation to mark as terminal
             state: Terminal state - one of "success", "failure", "timeout"
+            agreed_price: The mutually agreed price in base units (if applicable)
         """
         if not self.thread_store:
             logger.warning(f"[{self.component}] No thread store available")
@@ -172,8 +173,9 @@ class NegotiationThreadTransaction:
             await self.thread_store._sqlite.update_negotiation_thread_terminal(
                 negotiation_id=negotiation_id,
                 terminal_state=state,
+                agreed_price=agreed_price,
             )
-            logger.info(f"[{self.component}] Marked negotiation {negotiation_id} as {state}")
+            logger.info(f"[{self.component}] Marked negotiation {negotiation_id} as {state} (agreed_price={agreed_price})")
         except Exception as e:
             logger.error(f"[{self.component}] Failed to mark terminal: {e}")
 
@@ -486,6 +488,7 @@ class NegotiationThreadStore:
                 their_order_id=their_order_id,
                 our_agent_id=AGENT_ID,
                 their_agent_id=their_agent_id,
+                owner_id=AGENT_ID,
             )
             logger.info(
                 f"[NEGOTIATION THREAD] Created thread {negotiation_id} for incoming offer "
