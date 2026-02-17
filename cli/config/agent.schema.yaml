@@ -1,0 +1,140 @@
+component: agent
+schema_version: 1
+fields:
+  # Core server
+  BASE_URL_OVERRIDE:
+    required: true
+    default: "http://localhost:8000/"
+    secret: false
+    description: "Public base URL the agent advertises for callbacks and orders. Can be ZeroTier or public."
+  PORT:
+    required: true
+    default: 8000
+    secret: false
+    description: "Agent HTTP port."
+  LOG_FILE_PATH:
+    required: false
+    default: "./logs/agent.log"
+    secret: false
+    description: "Path to the agent log file."
+  ENABLE_EVENT_QUEUE:
+    required: false
+    default: false
+    secret: false
+    description: "Enable asynchronous event queue processing."
+
+  # Agent identity and local state
+  AGENT_ID:
+    required: true
+    default: "agent_xxx"
+    secret: false
+    description: "Local agent identifier (pre-onchain)."
+  ONCHAIN_AGENT_ID:
+    required: true
+    default: null
+    secret: false
+    generated: true
+    description: "On-chain agent ID after registration."
+  AGENT_DB_PATH:
+    required: true
+    default: "./agent.db"
+    secret: false
+    description: "Path to the agent database, which contains policy and order history."
+  AUTO_REGISTER:
+    required: false
+    default: true
+    secret: false
+    description: "Auto-register agent on startup."
+
+  # Chain and Registry
+  CHAIN_RPC_URL:
+    required: true
+    default: "ws://127.0.0.1:8545"
+    secret: false
+    description: "Chain RPC endpoint."
+  REGISTRY_URL:
+    required: true
+    default: "http://localhost:8080/"
+    secret: false
+    description: "Registry Indexer base URL."
+  IDENTITY_REGISTRY_ADDRESS:
+    required: true
+    default: "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb"
+    secret: false
+    description: "On-chain ERC-8004 identity registry address."
+  REPUTATION_REGISTRY_ADDRESS:
+    required: false
+    default: "0x8004bd8daB57f14Ed299135749a5CB5c42d341BF"
+    secret: false
+    description: "On-chain reputation registry address. Currently not used by the agent but reserved for future use."
+  VALIDATION_REGISTRY_ADDRESS:
+    required: false
+    default: "0x8004C269D0A5647E51E121FeB226200ECE932d55"
+    secret: false
+    description: "On-chain validation registry address. Currently not used by the agent but reserved for future use."
+
+  # Wallet
+  AGENT_PRIV_KEY:
+    required: true
+    secret: true
+    default: null
+    description: "Private key for the agent wallet."
+  AGENT_WALLET_ADDRESS:
+    required: true
+    default: null
+    secret: false
+    description: "Agent wallet address."
+
+  # Token catalog and SSH access
+  TOKEN_REGISTRY_PATH:
+    required: true
+    default: "./app/data/token_registry.json"
+    secret: false
+    description: "Path to token registry JSON. This is the catalog of all known and supported tokens for trade."
+  SSH_PUBLIC_KEY:
+    required: true
+    default: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
+    secret: false
+    description: "SSH public key for compute access."
+
+  # ZeroTier
+  ZEROTIER_NETWORK:
+    required: true
+    default: null
+    secret: false
+    description: "ZeroTier network ID."
+  ZEROTIER_IP:
+    required: false
+    default: null
+    secret: false
+    generated: true
+    description: "ZeroTier-assigned IP for the agent (optional; is assigned upon registration)."
+
+  # Provisioning
+  USE_MOCK_PROVISIONING:
+    required: false
+    default: true
+    secret: false
+    description: "For developer use. Use mock provisioning service instead of provisioning an actual VM."
+  PROVISIONING_SERVICE_URL:
+    required: false
+    default: "http://localhost:8085"
+    secret: false
+    description: "Provisioning service base URL when USE_MOCK_PROVISIONING=false (supports {ZEROTIER_IP})."
+  PROVISIONING_TIMEOUT:
+    required: false
+    default: 3600
+    secret: false
+    description: "Provisioning timeout in seconds."
+  PROVISIONING_POLL_INTERVAL:
+    required: false
+    default: 15
+    secret: false
+    description: "Provisioning poll interval in seconds."
+
+  # AI
+  GEMINI_API_KEY: # For removal. These features are currently not used.
+    required: false
+    default: "AIxx"
+    secret: true
+    description: "API key for Gemini/Google GenAI."
