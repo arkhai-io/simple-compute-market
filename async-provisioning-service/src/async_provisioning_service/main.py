@@ -2,10 +2,10 @@ import logging
 import uvicorn
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from async_provisioning_service.api.auth import AgentAuthMiddleware
+from async_provisioning_service.api.auth import AgentAuthMiddleware, clear_registry_cache
 from async_provisioning_service.api.rate_limit import AgentRateLimitMiddleware
 from async_provisioning_service.api.routes import router
 from async_provisioning_service.config import settings
@@ -83,6 +83,17 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+
+@app.post("/admin/cache/clear", tags=["admin"])
+async def admin_clear_cache(x_admin_secret: str = Header(..., alias="X-Admin-Secret")):
+    """Clear the agent registry lookup cache. Requires `X-Admin-Secret` header."""
+    if not settings.admin_secret:
+        raise HTTPException(status_code=501, detail="Admin secret not configured")
+    if x_admin_secret != settings.admin_secret:
+        raise HTTPException(status_code=403, detail="Invalid admin secret")
+    count = clear_registry_cache()
+    return {"cleared": count, "message": f"Registry cache cleared ({count} entries removed)"}
 
 
 if __name__ == "__main__":

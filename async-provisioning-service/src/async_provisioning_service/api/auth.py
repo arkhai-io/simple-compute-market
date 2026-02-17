@@ -22,7 +22,7 @@ _registry_cache: TTLCache = TTLCache(
     ttl=settings.registry_cache_ttl_seconds,
 )
 
-EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc", "/admin/cache/clear"})
 
 
 def validate_erc8004_agent_id(agent_id: str) -> bool:
@@ -43,7 +43,7 @@ async def verify_agent_with_registry(registry_url: str, agent_id: str) -> bool:
 
         if response.status_code == 200:
             data = response.json()
-            is_valid = data.get("status") == "healthy" or data.get("exists", False)
+            is_valid = data.get("healthStatus") == "healthy" or data.get("status") == "healthy" or data.get("exists", False)
             _registry_cache[agent_id] = is_valid
             return is_valid
         elif response.status_code == 404:
@@ -61,6 +61,14 @@ async def verify_agent_with_registry(registry_url: str, agent_id: str) -> bool:
     except Exception as exc:
         logger.warning("Registry verification failed for %s (failing open): %s", agent_id, exc)
         return True
+
+
+def clear_registry_cache() -> int:
+    """Clear the registry lookup cache. Returns the number of entries cleared."""
+    count = len(_registry_cache)
+    _registry_cache.clear()
+    logger.info("Registry cache cleared (%d entries removed)", count)
+    return count
 
 
 class AgentAuthMiddleware(BaseHTTPMiddleware):

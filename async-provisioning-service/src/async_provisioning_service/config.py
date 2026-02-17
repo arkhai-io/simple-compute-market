@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     redis_queue_name: str = "provisioning_jobs"
 
     ansible_timeout_seconds: int = 1800
+    ansible_become_pass: str | None = None  # sudo password for Ansible become; env: ANSIBLE_BECOME_PASS
     default_vm_host: str = "ww1"
 
     playbook_path: str | None = None
@@ -59,6 +60,7 @@ class Settings(BaseSettings):
         "Cannot determine IP address for VM",  # VM already undefined/cleaned up
         "failed to get domain",  # libvirt domain not found
         "Domain not found",  # virsh domain doesn't exist
+        "already exists",  # VM with same name already provisioned on host
     ]
 
     # FRP tunneling defaults (applied when request doesn't specify FRP params)
@@ -71,6 +73,9 @@ class Settings(BaseSettings):
     registry_url: str | None = None  # URL of agent registry API for verification
     registry_cache_ttl_seconds: int = 300  # TTL for registry lookup cache (5 min)
     registry_cache_max_size: int = 256  # Max entries in registry cache
+
+    # Admin
+    admin_secret: str | None = None  # Secret token for admin endpoints (cache clear, etc.)
 
     # Rate limiting
     enable_rate_limiting: bool = False

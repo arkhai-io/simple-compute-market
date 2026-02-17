@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import select
 import subprocess
@@ -275,12 +276,17 @@ async def start_playbook(params: ProvisioningParams) -> RunningPlaybook:
         params.vm_host,
     ]
 
+    env = os.environ.copy()
+    if settings.ansible_become_pass:
+        env["ANSIBLE_BECOME_PASS"] = settings.ansible_become_pass
+
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         cwd=settings.repo_root,
+        env=env,
     )
 
     logger.info("Started ansible-playbook: PID=%d, job_params=%s", process.pid, params)
@@ -442,6 +448,10 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
         params.vm_host,
     ]
 
+    env = os.environ.copy()
+    if settings.ansible_become_pass:
+        env["ANSIBLE_BECOME_PASS"] = settings.ansible_become_pass
+
     process = None
     try:
         process = subprocess.Popen(
@@ -450,6 +460,7 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
             stderr=subprocess.PIPE,
             text=True,
             cwd=settings.repo_root,
+            env=env,
         )
 
         process_id = process.pid

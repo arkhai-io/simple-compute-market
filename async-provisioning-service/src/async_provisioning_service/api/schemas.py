@@ -88,6 +88,13 @@ class ProvisionRequest(BaseModel):
     # --- Retry ---
     max_retries: Optional[int] = Field(default=None, description="Max retry attempts (overrides default)", ge=0, le=10)
 
+    # --- Marketplace context ---
+    order_id: Optional[str] = Field(default=None, description="Marketplace order ID this VM fulfills")
+    seller_agent_id: Optional[str] = Field(default=None, description="Seller agent ID (compute provider)")
+    buyer_agent_id: Optional[str] = Field(default=None, description="Buyer agent ID (compute consumer)")
+    negotiation_id: Optional[str] = Field(default=None, description="Negotiation thread ID")
+    escrow_uid: Optional[str] = Field(default=None, description="Escrow UID from alkahest")
+
     @model_validator(mode="after")
     def validate_action_params(self):
         """Validate required params per action."""
@@ -144,3 +151,36 @@ class JobListResponse(BaseModel):
     total: int = Field(description="Total number of jobs matching the query")
     offset: int = Field(description="Number of jobs skipped (pagination offset)")
     limit: int = Field(description="Maximum jobs returned per page")
+
+
+class ProvisionedVMResponse(BaseModel):
+    """Provisioned VM with credential fields filtered by requesting agent's role."""
+
+    id: str
+    job_id: str
+    vm_name: str
+    vm_host: str
+    vm_ip_internal: str | None = None
+    vm_state: str | None = None
+    order_id: str | None = None
+    seller_agent_id: str | None = None
+    buyer_agent_id: str | None = None
+    negotiation_id: str | None = None
+    escrow_uid: str | None = None
+    # Credential fields — populated based on requesting agent's role
+    root_password: str | None = None
+    root_ssh_key_path: str | None = None
+    root_ssh_commands: dict | None = None
+    tenant_user: str | None = None
+    tenant_password: str | None = None
+    tenant_ssh_commands: dict | None = None
+    external_ssh_port: str | None = None
+    frp_domain: str | None = None
+    created_at: datetime | None = None
+
+
+class ProvisionedVMListResponse(BaseModel):
+    """List of provisioned VMs."""
+
+    vms: list[ProvisionedVMResponse]
+    total: int

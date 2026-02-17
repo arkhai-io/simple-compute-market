@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta
 from typing import Set
 
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import SessionLocal, init_db
-from async_provisioning_service.db.models import JobStatus, ProvisioningJob
+from async_provisioning_service.db.models import JobStatus, ProvisionedVM, ProvisioningJob
 from async_provisioning_service.services.provisioning import (
     PlaybookError,
     ProvisioningParams,
@@ -61,6 +62,11 @@ def _should_retry_error(error_message: str) -> bool:
         if non_retryable.lower() in error_lower:
             return False
     return True
+
+
+def _is_vm_exists_error(error_stdout: str) -> bool:
+    """Return True if the playbook failed because the VM already exists."""
+    return "already exists" in error_stdout.lower()
 
 
 def _build_params(params: dict) -> ProvisioningParams:
@@ -197,6 +203,43 @@ def _build_result_payload(result: ProvisioningResult) -> dict:
     return payload
 
 
+def _create_provisioned_vm_record(db: Session, job: ProvisioningJob, result_payload: dict) -> None:
+    """Create a ProvisionedVM record from a successful create job."""
+    try:
+        auth = result_payload.get("authentication", {}) or {}
+        root_auth = auth.get("root", {}) or {}
+        tenant_auth = auth.get("tenant", {}) or {}
+        frp = result_payload.get("frp", {}) or {}
+
+        vm = ProvisionedVM(
+            id=str(uuid.uuid4()),
+            job_id=job.id,
+            vm_name=result_payload.get("vm_name") or job.params.get("vm_target"),
+            vm_host=result_payload.get("host") or job.params.get("vm_host"),
+            vm_ip_internal=result_payload.get("vm_ip_internal"),
+            vm_state=result_payload.get("vm_state"),
+            order_id=job.params.get("order_id"),
+            seller_agent_id=job.params.get("seller_agent_id") or job.agent_id,
+            buyer_agent_id=job.params.get("buyer_agent_id"),
+            negotiation_id=job.params.get("negotiation_id"),
+            escrow_uid=job.params.get("escrow_uid"),
+            root_password=root_auth.get("password"),
+            root_ssh_key_path=root_auth.get("ssh_key_path_host"),
+            root_ssh_commands=root_auth.get("ssh_commands"),
+            tenant_user=result_payload.get("tenant_user"),
+            tenant_password=tenant_auth.get("password"),
+            tenant_ssh_commands=tenant_auth.get("ssh_commands"),
+            external_ssh_port=str(frp.get("remote_port", "")) if frp else None,
+            frp_domain=frp.get("domain"),
+        )
+        db.add(vm)
+        db.commit()
+        logger.info("Created provisioned_vm record %s for job %s (vm=%s)", vm.id, job.id, vm.vm_name)
+    except Exception as exc:
+        logger.warning("Failed to create provisioned_vm record for job %s: %s", job.id, exc)
+        db.rollback()
+
+
 async def _process_job(job_id: str) -> None:
     """Process a single provisioning job: start playbook, track PID, handle retries."""
     db = SessionLocal()
@@ -256,9 +299,54 @@ async def _process_job(job_id: str) -> None:
             )
             logger.info("Job %s succeeded", job_id)
 
+            if params.vm_action == "create":
+                _create_provisioned_vm_record(db, job, result_payload)
+
         except PlaybookError as exc:
             logs = exc.stdout + ("\n\nSTDERR:\n" + exc.stderr if exc.stderr else "")
             error_message = str(exc)
+
+            # Fallback: if a "create" failed because the VM already exists,
+            # run a "monitor" action to retrieve the existing VM's info and
+            # return it as a success instead of failing the job.
+            if params.vm_action == "create" and _is_vm_exists_error(exc.stdout):
+                logger.info(
+                    "Job %s: VM '%s' already exists on '%s', falling back to monitor",
+                    job_id, params.vm_target, params.vm_host,
+                )
+                try:
+                    monitor_params = ProvisioningParams(
+                        vm_host=params.vm_host,
+                        vm_target=params.vm_target,
+                        vm_action="monitor",
+                    )
+                    monitor_running = await start_playbook(monitor_params)
+                    monitor_result = await wait_for_playbook(monitor_running)
+
+                    monitor_logs = monitor_result.stdout + (
+                        "\n\nSTDERR:\n" + monitor_result.stderr if monitor_result.stderr else ""
+                    )
+                    result_payload = _build_result_payload(monitor_result)
+                    result_payload["note"] = (
+                        f"VM '{params.vm_target}' already existed on '{params.vm_host}'. "
+                        "Returning existing VM info via monitor fallback."
+                    )
+                    _update_job(
+                        db,
+                        job,
+                        status=JobStatus.succeeded.value,
+                        result=result_payload,
+                        error=None,
+                        logs=monitor_logs,
+                    )
+                    logger.info("Job %s succeeded (monitor fallback for existing VM)", job_id)
+                    _create_provisioned_vm_record(db, job, result_payload)
+                    return
+                except Exception as monitor_exc:
+                    logger.warning(
+                        "Job %s: monitor fallback failed: %s", job_id, monitor_exc,
+                    )
+                    # Fall through to normal error handling below
 
             should_retry = (
                 job.retry_count < job.max_retries

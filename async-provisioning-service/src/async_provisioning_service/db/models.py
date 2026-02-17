@@ -34,3 +34,38 @@ class ProvisioningJob(Base):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class ProvisionedVM(Base):
+    __tablename__ = "provisioned_vms"
+
+    id = Column(String, primary_key=True)
+    job_id = Column(String, nullable=False, index=True)
+    vm_name = Column(String, nullable=False, index=True)
+    vm_host = Column(String, nullable=False)
+    vm_ip_internal = Column(String, nullable=True)
+    vm_state = Column(String, nullable=True)
+
+    # Marketplace context
+    order_id = Column(String, nullable=True, index=True)
+    seller_agent_id = Column(String, nullable=True, index=True)
+    buyer_agent_id = Column(String, nullable=True, index=True)
+    negotiation_id = Column(String, nullable=True, index=True)
+    escrow_uid = Column(String, nullable=True, index=True)
+
+    # Root credentials (seller-only visibility)
+    root_password = Column(String, nullable=True)
+    root_ssh_key_path = Column(String, nullable=True)
+    root_ssh_commands = Column(JSON, nullable=True)
+
+    # Tenant credentials (buyer-only visibility)
+    tenant_user = Column(String, nullable=True)
+    tenant_password = Column(String, nullable=True)
+    tenant_ssh_commands = Column(JSON, nullable=True)
+
+    # Network/access
+    external_ssh_port = Column(String, nullable=True)
+    frp_domain = Column(String, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

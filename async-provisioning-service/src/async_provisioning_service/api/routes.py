@@ -4,6 +4,7 @@ import signal
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from async_provisioning_service.api.schemas import (
@@ -12,10 +13,12 @@ from async_provisioning_service.api.schemas import (
     ProvisionRequest,
     ProvisionResponse,
     ProvisionStatusResponse,
+    ProvisionedVMListResponse,
+    ProvisionedVMResponse,
 )
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import get_db
-from async_provisioning_service.db.models import JobStatus, ProvisioningJob
+from async_provisioning_service.db.models import JobStatus, ProvisionedVM, ProvisioningJob
 from async_provisioning_service.services.queue import enqueue_job
 
 
@@ -272,3 +275,111 @@ async def cancel_job(job_id: str, request: Request, db: Session = Depends(get_db
         "status": job.status,
         "message": "Job cancelled successfully",
     }
+
+
+# ---------------------------------------------------------------------------
+# Provisioned VMs — credential-filtered access
+# ---------------------------------------------------------------------------
+
+def _filter_vm_credentials(vm: ProvisionedVM, agent_id: str | None) -> ProvisionedVMResponse:
+    """Build a response with credentials filtered by the requesting agent's role."""
+    is_seller = bool(agent_id and vm.seller_agent_id == agent_id)
+    is_buyer = bool(agent_id and vm.buyer_agent_id == agent_id)
+    return ProvisionedVMResponse(
+        id=vm.id,
+        job_id=vm.job_id,
+        vm_name=vm.vm_name,
+        vm_host=vm.vm_host,
+        vm_ip_internal=vm.vm_ip_internal,
+        vm_state=vm.vm_state,
+        order_id=vm.order_id,
+        seller_agent_id=vm.seller_agent_id,
+        buyer_agent_id=vm.buyer_agent_id,
+        negotiation_id=vm.negotiation_id,
+        escrow_uid=vm.escrow_uid,
+        external_ssh_port=vm.external_ssh_port,
+        frp_domain=vm.frp_domain,
+        created_at=vm.created_at,
+        # Root creds — seller only
+        root_password=vm.root_password if is_seller else None,
+        root_ssh_key_path=vm.root_ssh_key_path if is_seller else None,
+        root_ssh_commands=vm.root_ssh_commands if is_seller else None,
+        # Tenant creds — buyer only
+        tenant_user=vm.tenant_user if is_buyer else None,
+        tenant_password=vm.tenant_password if is_buyer else None,
+        tenant_ssh_commands=vm.tenant_ssh_commands if is_buyer else None,
+    )
+
+
+@router.get(
+    "/provisioned",
+    response_model=ProvisionedVMListResponse,
+    tags=["provisioned-vms"],
+    summary="List provisioned VMs for the requesting agent",
+    response_description="VMs where the agent is buyer or seller, with filtered credentials",
+)
+async def list_provisioned_vms(
+    request: Request,
+    order_id: str | None = Query(default=None, description="Filter by marketplace order ID"),
+    negotiation_id: str | None = Query(default=None, description="Filter by negotiation ID"),
+    db: Session = Depends(get_db),
+):
+    """List VMs where the requesting agent is buyer or seller.
+
+    Credentials are filtered: sellers see root creds, buyers see tenant creds.
+    Supports filtering by ``order_id`` and ``negotiation_id``.
+    Requires `X-Agent-ID` header.
+    """
+    agent_id = _get_agent_id(request)
+
+    query = db.query(ProvisionedVM)
+    if agent_id:
+        query = query.filter(
+            or_(
+                ProvisionedVM.seller_agent_id == agent_id,
+                ProvisionedVM.buyer_agent_id == agent_id,
+            )
+        )
+    if order_id:
+        query = query.filter(ProvisionedVM.order_id == order_id)
+    if negotiation_id:
+        query = query.filter(ProvisionedVM.negotiation_id == negotiation_id)
+
+    vms = query.order_by(ProvisionedVM.created_at.desc()).all()
+    return ProvisionedVMListResponse(
+        vms=[_filter_vm_credentials(vm, agent_id) for vm in vms],
+        total=len(vms),
+    )
+
+
+@router.get(
+    "/provisioned/{vm_name}",
+    response_model=ProvisionedVMResponse,
+    tags=["provisioned-vms"],
+    summary="Get a provisioned VM by name",
+    response_description="VM details with credentials filtered by agent role",
+)
+async def get_provisioned_vm(
+    vm_name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return a single provisioned VM by name.
+
+    Returns **403** if the requesting agent is neither buyer nor seller.
+    Returns **404** if no VM with that name exists.
+    """
+    vm = db.query(ProvisionedVM).filter(ProvisionedVM.vm_name == vm_name).order_by(
+        ProvisionedVM.created_at.desc()
+    ).first()
+    if not vm:
+        raise HTTPException(status_code=404, detail="Provisioned VM not found")
+
+    agent_id = _get_agent_id(request)
+    if agent_id and vm.seller_agent_id != agent_id and vm.buyer_agent_id != agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: you are neither the buyer nor seller for this VM",
+        )
+
+    return _filter_vm_credentials(vm, agent_id)
