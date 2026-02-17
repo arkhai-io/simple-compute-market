@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from importlib.metadata import version, PackageNotFoundError
 
 import typer
+import json
+import urllib.parse
 
 from .common import REPO_ROOT, run_step
 from .groups.order import order_app
@@ -11,6 +14,20 @@ from .groups.registry import registry_app
 from .groups.network import network_app
 from .groups.config import config_app
 from .groups.dev import dev_app
+
+from market.helpers import (
+    REPO_ROOT,
+    _fetch_json,
+    _format_resource,
+    _format_resource_full,
+    _normalize_registry_resource,
+    _normalize_registry_url,
+    _post_json,
+    _resolve_agent_url,
+    _short_ts,
+    _shorten,
+)
+from market.groups.agent import agent_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -82,9 +99,6 @@ def install(
 
     typer.echo("Done.")
 
-from market.groups.agent import agent_app  # noqa: E402
-
-app.add_typer(agent_app, name="agent", help="Query a running agent's local API (orders, decisions).")
 
 @app.command()
 def register(
@@ -127,6 +141,7 @@ def start(
 
 
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+app.add_typer(agent_app, name="agent", help="Inspect agent orders, negotiation threads, and decisions.")
 app.add_typer(
     config_app,
     name="config",
