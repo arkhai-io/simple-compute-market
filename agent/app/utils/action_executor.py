@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import traceback
 import uuid
+from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
@@ -262,7 +263,7 @@ async def execute_action(
                 # Include event_type for downstream parsing and propagate to remote agent.
                 result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
                 if ctx:
-                    # Counterparty to notify is the order taker (we are the maker fulfilling for them).
+                    # Notify the other party in the order.
                     order_obj = parameters.get("order")
                     if isinstance(order_obj, dict):
                         order_dict = order_obj
@@ -270,12 +271,14 @@ async def execute_action(
                         order_dict = order_obj.model_dump(mode="json") if order_obj else {}
                     else:
                         order_dict = {}
-                    counterparty_url = order_dict.get("order_taker") if order_dict else None
-                    if not counterparty_url or not str(counterparty_url).strip():
-                        logger.warning(
-                            "[A2A] fulfill_compute_obligation: no counterparty URL in order (order_taker); parameters keys=%s",
-                            list(parameters.keys()),
+                    try:
+                        counterparty_url = _resolve_counterparty_url_from_order(order_dict=order_dict)
+                    except ValueError as resolve_err:
+                        logger.error(
+                            "[A2A] fulfill_compute_obligation: failed to resolve counterparty URL from order: %s",
+                            resolve_err,
                         )
+                        raise RuntimeError(f"Unable to resolve fulfill counterparty URL: {resolve_err}") from resolve_err
                     try:
                         event = Event(
                             author=AGENT_ID,
@@ -326,13 +329,20 @@ async def execute_action(
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
-                # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
-                counterparty_url = parameters.get("counterparty_url") or parameters.get("agent_url")
-                if not counterparty_url or not str(counterparty_url).strip():
-                    logger.warning(
-                        "[A2A] trust_compute_obligation_fulfillment: no counterparty URL in parameters; keys=%s",
-                        list(parameters.keys()),
-                    )
+                # Resolve counterparty from any local order bound to this escrow.
+                escrow_uid = parameters.get("escrow_uid")
+                if not escrow_uid:
+                    raise RuntimeError("Cannot route arbitration_complete without escrow_uid")
+                sqlite_client = get_sqlite_client()
+                order_dicts = await sqlite_client.load_orders_by_escrow_uid(escrow_uid=escrow_uid)
+                if not order_dicts:
+                    raise RuntimeError(f"No local orders found for escrow_uid={escrow_uid}")
+                try:
+                    counterparty_url = _resolve_counterparty_url_from_orders(order_dicts=order_dicts)
+                except ValueError as resolve_err:
+                    raise RuntimeError(
+                        f"Unable to resolve arbitration counterparty URL for escrow_uid={escrow_uid}: {resolve_err}"
+                    ) from resolve_err
                 try:
                     event = Event(
                         author=AGENT_ID,
@@ -843,6 +853,62 @@ def _normalize_agent_url(value: str | None) -> str:
     return value.rstrip("/")
 
 
+def _is_http_url(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _agent_urls_match(lhs: str | None, rhs: str | None) -> bool:
+    left = _normalize_agent_url(lhs)
+    right = _normalize_agent_url(rhs)
+    if not left or not right:
+        return False
+    return left == right or left.endswith(right) or right.endswith(left)
+
+
+def _resolve_counterparty_url_from_order(*, order_dict: dict[str, Any]) -> str:
+    maker_url = order_dict.get("order_maker")
+    taker_url = order_dict.get("order_taker")
+    our_url = BASE_URL_OVERRIDE
+
+    if not _is_http_url(maker_url) or not _is_http_url(taker_url):
+        raise ValueError(
+            f"Order must include valid HTTP(S) URLs for maker/taker; maker={maker_url!r} taker={taker_url!r}"
+        )
+    if not _is_http_url(our_url):
+        raise ValueError(f"Invalid local BASE_URL_OVERRIDE: {our_url!r}")
+
+    if _agent_urls_match(maker_url, our_url):
+        return taker_url
+    if _agent_urls_match(taker_url, our_url):
+        return maker_url
+
+    raise ValueError(
+        f"Order participants do not match local agent URL; maker={maker_url!r} taker={taker_url!r} ours={our_url!r}"
+    )
+
+
+def _resolve_counterparty_url_from_orders(*, order_dicts: list[dict[str, Any]]) -> str:
+    if not order_dicts:
+        raise ValueError("No orders found for escrow_uid")
+
+    resolve_errors: list[str] = []
+    for order_dict in order_dicts:
+        if not isinstance(order_dict, dict):
+            continue
+        try:
+            return _resolve_counterparty_url_from_order(order_dict=order_dict)
+        except ValueError as exc:
+            resolve_errors.append(f"order_id={order_dict.get('order_id')!r}: {exc}")
+
+    raise ValueError(
+        "Unable to resolve counterparty URL from escrow-linked orders. "
+        + "; ".join(resolve_errors)
+    )
+
+
 async def _is_current_agent_order_maker(order_dict: dict[str, Any]) -> bool:
     order_id = order_dict.get("order_id")
     if not isinstance(order_id, str) or not order_id.strip():
@@ -928,7 +994,9 @@ async def _complete_accept_offer(
     ssh_public_key: str | None,
 ) -> dict[str, Any]:
     # Stamp taker metadata onto the order.
-    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    if not _normalize_agent_url(order_dict.get("order_taker")):
+        order_dict["order_taker"] = BASE_URL_OVERRIDE
+    order_taker = order_dict.get("order_taker")
     order_dict["taker_attestation"] = escrow_uid
 
     event_payload: dict[str, Any] = {
@@ -997,7 +1065,7 @@ async def _complete_accept_offer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=BASE_URL_OVERRIDE,
+                order_taker=order_taker,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1012,7 +1080,7 @@ async def _complete_accept_offer(
             if order_id:
                 updates: dict[str, Any] = {
                     "status": "accepted",
-                    "order_taker": BASE_URL_OVERRIDE,
+                    "order_taker": order_taker or BASE_URL_OVERRIDE,
                 }
                 if escrow_uid:
                     updates["taker_attestation"] = escrow_uid
@@ -1029,14 +1097,17 @@ async def _complete_accept_offer(
             logger.warning("[REGISTRY] Failed to update order in registry: %s", exc)
             logger.debug("[REGISTRY] Update order traceback: %s", traceback.format_exc())
 
-    # Counterparty to notify is the order maker (we are the taker accepting their offer).
-    counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")
-    if not counterparty_url or not str(counterparty_url).strip():
-        logger.warning(
-            "[A2A] accept_offer: no counterparty URL in order (order_maker) or parameters (their_agent_id); "
-            "order_dict keys=%s",
-            list(order_dict.keys()),
-        )
+    # Counterparty is the other party in the order.
+    try:
+        counterparty_url = _resolve_counterparty_url_from_order(order_dict=order_dict)
+    except ValueError as resolve_err:
+        logger.error("[A2A] accept_offer: failed to resolve counterparty URL: %s", resolve_err)
+        return {
+            "status": "error",
+            "message": f"Failed to resolve counterparty URL: {resolve_err}",
+            "escrow_uid": escrow_uid,
+            "offer": order_dict,
+        }
     try:
         result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
         return {

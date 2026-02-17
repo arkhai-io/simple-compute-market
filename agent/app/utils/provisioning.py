@@ -60,6 +60,22 @@ def _extract_tenant_user(playbook_output: str, vm_host: str | None = None) -> Op
     return None
 
 
+def _extract_external_ssh_command(playbook_output: str) -> Optional[str]:
+    """Extract authentication.tenant.ssh_commands.external from playbook stdout."""
+    patterns = [
+        r'"tenant"\s*:\s*\{[\s\S]*?"ssh_commands"\s*:\s*\{[\s\S]*?"external"\s*:\s*"(?P<cmd>[^"]+)"',
+        r'"external"\s*:\s*"(?P<cmd>ssh\s+-i\s+<your_private_key>\s+-p\s+\d+\s+(?!root@)[^\s"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, playbook_output, re.DOTALL)
+        if match:
+            candidate = match.group("cmd").strip()
+            if " root@" in candidate or candidate.endswith("root"):
+                continue
+            return candidate
+    return None
+
+
 def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:
     """Read the Ansible inventory to find the external IP for a given host."""
     project_root = _find_project_root()
@@ -109,8 +125,9 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
         "vm_action: create\n"
         "vm_ram: 2048\n"
         "vm_vcpus: 2\n"
-        "vm_disk_size: 25G\n"
+        "vm_disk_size: 16G\n"
         f'vm_tenant_pubkey: "{escaped_pubkey}"\n'
+        "image_setup_type: scratch\n"
     )
 
     vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
@@ -129,7 +146,7 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
         "--extra-vars",
         f"@{management_vars_path}",
         "--limit",
-        "kvm_hosts"
+        f"{vm_host}"
     ]
     cwd = project_root
 
@@ -156,30 +173,12 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
     if result.stderr:
         logger.warning("VM provisioning playbook stderr:\n%s", result.stderr)
 
-    external_port = _extract_external_port(result.stdout, vm_host)
-    if external_port:
-        logger.info("External SSH port for %s: %s", vm_host, external_port)
-    else:
-        logger.warning("External SSH port not found in playbook output.")
-
-    vm_host_ip = _lookup_vm_host_ip(vm_host)
-    if vm_host_ip:
-        logger.info("External IP for %s: %s", vm_host, vm_host_ip)
-    else:
-        logger.warning("Could not determine external IP for %s.", vm_host)
-
-    tenant_user = _extract_tenant_user(result.stdout, vm_host)
-    if tenant_user:
-        logger.info("Tenant SSH user: %s", tenant_user)
-    else:
-        logger.warning("Tenant SSH user not found in playbook output.")
-
-    ssh_command = None
-    if external_port and vm_host_ip and tenant_user:
-        ssh_command = f"ssh -i <your_private_key> -p {external_port} {tenant_user}@{vm_host_ip}"
-        logger.info("SSH command: %s", ssh_command)
-
-    return ssh_command
+    external_ssh_command = _extract_external_ssh_command(result.stdout)
+    if external_ssh_command:
+        logger.info("Tenant external SSH command: %s", external_ssh_command)
+        return external_ssh_command
+    logger.warning("Tenant external SSH command not found in playbook output.")
+    return None
 
 
 def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: str = "tenant-vm") -> None:
@@ -215,7 +214,7 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
         "--extra-vars",
         f"@{management_vars_path}",
         "--limit",
-        "kvm_hosts",
+        f"{vm_host}",
     ]
     cwd = project_root
 

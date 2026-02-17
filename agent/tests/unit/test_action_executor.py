@@ -4,6 +4,7 @@ import json
 import sqlite3
 from types import SimpleNamespace
 from datetime import datetime
+from typing import Any
 
 import pytest
 
@@ -206,10 +207,20 @@ async def test_execute_action_fulfill_skips_event_on_error(monkeypatch):
 
     monkeypatch.setattr(action_executor, "fulfill_compute_obligation", fake_fulfill_compute_obligation)
     monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+    counterparty_url = "http://counterparty:8001"
+    order = {
+        "order_id": "order-escrow-1",
+        "order_maker": action_executor.BASE_URL_OVERRIDE,
+        "order_taker": counterparty_url,
+    }
 
     action = Action(
         action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={"escrow_uid": "escrow-1", "ssh_public_key": "ssh-rsa AAA"},
+        parameters={
+            "escrow_uid": "escrow-1",
+            "ssh_public_key": "ssh-rsa AAA",
+            "order": order,
+        },
         timestamp=datetime.now(),
     )
 
@@ -228,21 +239,110 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 
     async def fake_send_to_remote_agent(_ctx, event, agent_url=None):
         captured["event"] = event
+        captured["agent_url"] = agent_url
 
     monkeypatch.setattr(action_executor, "fulfill_compute_obligation", fake_fulfill_compute_obligation)
     monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+    counterparty_url = "http://counterparty:8001"
+    order = {
+        "order_id": "order-escrow-2",
+        "order_maker": action_executor.BASE_URL_OVERRIDE,
+        "order_taker": counterparty_url,
+    }
 
     action = Action(
         action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={"escrow_uid": "escrow-2", "ssh_public_key": "ssh-rsa AAA"},
+        parameters={
+            "escrow_uid": "escrow-2",
+            "ssh_public_key": "ssh-rsa AAA",
+            "order": order,
+        },
         timestamp=datetime.now(),
     )
 
     await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
 
     assert "event" in captured
+    assert captured["agent_url"] == counterparty_url
     response = captured["event"].content.parts[0].function_response.response
     assert response["event_type"] == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+
+
+@pytest.mark.asyncio
+async def test_execute_action_trust_resolves_counterparty_from_multiple_orders(monkeypatch, tmp_path):
+    """Trust action routes to counterparty even when escrow maps to multiple local orders."""
+    db_path = str(tmp_path / "agent.db")
+    sqlite_client = SQLiteClient(db_path=db_path)
+    escrow_uid = "escrow-shared-1"
+    counterparty_url = "http://counterparty:8001"
+
+    await sqlite_client.upsert_order(
+        order_id="order-unrelated",
+        status="accepted",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=_compute_resource().model_dump(mode="json"),
+        demand_resource=_token_rate(1_000_000).model_dump(mode="json"),
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker="http://unrelated:8000",
+        order_taker="http://someone-else:8000",
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=escrow_uid,
+    )
+    await sqlite_client.upsert_order(
+        order_id="order-local",
+        status="accepted",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=_compute_resource().model_dump(mode="json"),
+        demand_resource=_token_rate(1_000_000).model_dump(mode="json"),
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker=action_executor.BASE_URL_OVERRIDE,
+        order_taker=counterparty_url,
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=escrow_uid,
+    )
+
+    async def fake_arbitrate_compute_fulfillment(**_kwargs):
+        return {
+            "status": "trusted",
+            "escrow_uid": escrow_uid,
+            "fulfillment_uid": "fulfill-1",
+            "oracle_address": action_executor.DEMO_ORACLE_ADDRESS,
+            "decisions": [{"decision": True, "tx_hash": "0xabc"}],
+        }
+
+    captured: dict[str, Any] = {}
+
+    async def fake_send_to_remote_agent(_ctx, event, agent_url=None):
+        captured["agent_url"] = agent_url
+        captured["response"] = event.content.parts[0].function_response.response
+        return None
+
+    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
+    monkeypatch.setattr(action_executor, "arbitrate_compute_fulfillment", fake_arbitrate_compute_fulfillment)
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+
+    action = Action(
+        action_type=ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT,
+        parameters={
+            "escrow_uid": escrow_uid,
+            "fulfillment_uid": "fulfill-1",
+            "connection_details": "tenant@host.example.net",
+        },
+        timestamp=datetime.now(),
+    )
+
+    await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
+
+    assert captured["agent_url"] == counterparty_url
+    assert captured["response"]["event_type"] == EventType.ARBITRATION_COMPLETE.value
 
 
 @pytest.mark.asyncio
@@ -263,7 +363,7 @@ def _fetch_order_row(db_path: str, order_id: str) -> dict:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT status, escrow_uid, taker_attestation, matched_offer_id, maker_attestation, fulfillment_resource
+            SELECT status, escrow_uid, order_taker, taker_attestation, matched_offer_id, maker_attestation, fulfillment_resource
             FROM orders
             WHERE order_id=?
             """,
@@ -275,10 +375,11 @@ def _fetch_order_row(db_path: str, order_id: str) -> dict:
         return {
             "status": row[0],
             "escrow_uid": row[1],
-            "taker_attestation": row[2],
-            "matched_offer_id": row[3],
-            "maker_attestation": row[4],
-            "fulfillment_resource": row[5],
+            "order_taker": row[2],
+            "taker_attestation": row[3],
+            "matched_offer_id": row[4],
+            "maker_attestation": row[5],
+            "fulfillment_resource": row[6],
         }
     finally:
         conn.close()
@@ -355,6 +456,89 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
     assert row["escrow_uid"] == "escrow-uid-123"
     assert row["taker_attestation"] == "escrow-uid-123"
     assert row["matched_offer_id"] == "sell-order-2"
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_preserves_existing_taker_and_routes_to_counterparty(monkeypatch, tmp_path):
+    """Buyer follow-up accept should keep seller as order_taker and notify seller."""
+    db_path = str(tmp_path / "agent.db")
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    async def fake_buy_compute_with_erc20(*_args, **_kwargs):
+        return {"log": {"uid": "escrow-uid-999"}}
+
+    class _DummyTxn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def cancel_competing(self, *_args, **_kwargs):
+            return None
+
+        async def mark_terminal(self, *_args, **_kwargs):
+            return None
+
+    captured: dict[str, object] = {}
+
+    async def fake_send_to_remote_agent(_ctx, event, agent_url=None):
+        captured["agent_url"] = agent_url
+        captured["response"] = event.content.parts[0].function_response.response
+        return None
+
+    class _RegistryClient:
+        async def update_order(self, *_args, **_kwargs):
+            return {"ok": True}
+
+    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
+    monkeypatch.setattr(action_executor, "NegotiationThreadTransaction", lambda *_args, **_kwargs: _DummyTxn())
+    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+    monkeypatch.setattr(action_executor, "get_registry_client", lambda: _RegistryClient())
+
+    order_id = "buy-order-followup"
+    seller_url = "http://10.10.10.185:8001"
+    await sqlite_client.upsert_order(
+        order_id=order_id,
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=_token_rate(900).model_dump(mode="json"),
+        demand_resource=_compute_resource().model_dump(mode="json"),
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker=action_executor.BASE_URL_OVERRIDE,
+        order_taker=None,
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=None,
+    )
+
+    incoming_order = {
+        "order_id": order_id,
+        "order_maker": action_executor.BASE_URL_OVERRIDE,
+        "order_taker": seller_url,
+        "offer_resource": _token_rate(900).model_dump(mode="json"),
+        "demand_resource": _compute_resource().model_dump(mode="json"),
+        "duration_hours": 1,
+    }
+
+    await action_executor.accept_offer(
+        alkahest_client=_FakeClient({}),
+        ctx=_FakeCtx(),
+        parameters={"order": incoming_order, "their_order_id": "sell-order-9"},
+    )
+
+    assert captured["agent_url"] == seller_url
+    response = captured["response"]
+    assert response["offer"]["order_taker"] == seller_url
+    assert response["escrow_uid"] == "escrow-uid-999"
+
+    row = _fetch_order_row(db_path, order_id)
+    assert row["order_taker"] == seller_url
+    assert row["escrow_uid"] == "escrow-uid-999"
 
 
 @pytest.mark.asyncio
