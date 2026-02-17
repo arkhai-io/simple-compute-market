@@ -3,7 +3,7 @@ import pytest
 
 from typer import BadParameter
 
-from market.cli import _init_env_file
+from market.groups.config import _init_env_file
 
 
 def test_init_env_creates_env_when_none_exist(tmp_path: Path) -> None:
