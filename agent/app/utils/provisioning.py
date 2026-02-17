@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from app.utils.config import CONFIG
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,6 +131,12 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
         f'vm_tenant_pubkey: "{escaped_pubkey}"\n'
         "image_setup_type: scratch\n"
     )
+    if CONFIG.frp_server_addr:
+        vm_vars_payload += f'frp_server_addr: "{CONFIG.frp_server_addr}"\n'
+    if CONFIG.frp_domain:
+        vm_vars_payload += f'frp_domain: "{CONFIG.frp_domain}"\n'
+    if CONFIG.frp_dashboard_password:
+        vm_vars_payload += f'frp_dashboard_password: "{CONFIG.frp_dashboard_password}"\n'
 
     vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
 
