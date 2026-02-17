@@ -430,13 +430,14 @@ def _format_resource_full(resource: dict | str | None) -> str:
 
 
 def _get_cli_http_timeout() -> float:
-    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "10")
+    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
+    default_value = 120.0
     try:
         timeout = float(raw)
     except ValueError:
-        return 10.0
+        return default_value
     if timeout <= 0:
-        return 10.0
+        return default_value
     return timeout
 
 
