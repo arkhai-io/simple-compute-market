@@ -182,7 +182,7 @@ def order_history(
     table.add_column("Status")
     table.add_column("Offer")
     table.add_column("Demand")
-    table.add_column("Fulfillment")
+    table.add_column("Fulfillment", overflow="fold")
     table.add_column("Created", justify="right")
     table.add_column("Updated", justify="right")
 
