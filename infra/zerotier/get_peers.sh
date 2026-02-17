@@ -39,7 +39,7 @@ if [[ -z "${CONTROLLER_AUTH_TOKEN:-}" ]]; then
 fi
 TOKEN="$CONTROLLER_AUTH_TOKEN"
 
-API="$CONTROLLER_URL:$CONTROLLER_PORT"
+API="$CONTROLLER_URL"
 
 echo "Using ZeroTier controller at: $API"
 echo "Network ID: $NWID"

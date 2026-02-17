@@ -103,14 +103,14 @@ fi
 
 echo "Retrieving node ID from controller status..." >&2
 set +e
-STATUS_RESPONSE=$(curl -s --max-time 5 -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" $CONTROLLER_URL:$CONTROLLER_PORT/status 2>&1)
+STATUS_RESPONSE=$(curl -s --max-time 5 -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" $CONTROLLER_URL/status 2>&1)
 STATUS_EXIT=$?
 set -e
 
 if [[ $STATUS_EXIT -ne 0 ]]; then
   echo "Error: Failed to fetch controller status (curl exit code: $STATUS_EXIT)" >&2
   echo "Response: $STATUS_RESPONSE" >&2
-  echo "Check that the controller is reachable at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
+  echo "Check that the controller is reachable at $CONTROLLER_URL" >&2
   exit 1
 fi
 
@@ -139,7 +139,7 @@ echo "   This may take a few seconds..."
 
 # Use timeout and better error handling
 set +e
-RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID} \
+RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL/controller/network/${NETWORK_ID} \
   -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -169,7 +169,7 @@ if [[ $CURL_EXIT -ne 0 ]]; then
     echo "Response: $BODY" >&2
   fi
   echo "This might mean:" >&2
-  echo "  - ZeroTier controller API is not accessible at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
+  echo "  - ZeroTier controller API is not accessible at $CONTROLLER_URL" >&2
   echo "  - Network already exists (try a different network ID)" >&2
   echo "  - ZeroTier service needs to be restarted" >&2
   exit 1
@@ -192,7 +192,7 @@ echo "   Network created successfully!"
 echo -e "\n\n2. Verifying network..."
 sleep 3
 set +e
-NETWORK_LIST=$(curl -s --max-time 5 -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" $CONTROLLER_URL:$CONTROLLER_PORT/controller/network 2>&1)
+NETWORK_LIST=$(curl -s --max-time 5 -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" $CONTROLLER_URL/controller/network 2>&1)
 VERIFY_EXIT=$?
 set -e
 
@@ -228,7 +228,7 @@ if [[ "$JOIN" == true ]]; then
   sleep 2
   # Use set +e to allow curl to fail without exiting the script
   set +e
-  RESPONSE=$(curl -s -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID}/member/${LOCAL_NODE_ID} \
+  RESPONSE=$(curl -s -X POST $CONTROLLER_URL/controller/network/${NETWORK_ID}/member/${LOCAL_NODE_ID} \
     -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"authorized": true}' \
@@ -284,6 +284,6 @@ echo "To authorize new members:"
 echo "  make add-node NODE_ID=<member-id>"
 echo ""
 echo "Or manually:"
-echo "  curl -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
+echo "  curl -X POST $CONTROLLER_URL/controller/network/${NETWORK_ID}/member/MEMBER_ID \\"
 echo "    -H \"X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN\" \\"
 echo "    -d '{\"authorized\": true}'"

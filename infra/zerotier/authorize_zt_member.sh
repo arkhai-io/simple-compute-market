@@ -35,8 +35,8 @@ if [[ -z "$NETWORK_ID" ]] || [[ -z "$MEMBER_ID" ]]; then
 fi
 # Check if ZeroTier controller API is accessible
 echo "Checking ZeroTier controller API..."
-if ! curl -s --max-time 2 $CONTROLLER_URL:$CONTROLLER_PORT/status &> /dev/null; then
-  echo "Error: ZeroTier controller API is not accessible at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
+if ! curl -s --max-time 2 $CONTROLLER_URL/status &> /dev/null; then
+  echo "Error: ZeroTier controller API is not accessible at $CONTROLLER_URL" >&2
   echo "" >&2
   echo "The ZeroTier controller service needs to be running to authorize members." >&2
   exit 1
@@ -82,7 +82,7 @@ fi
 echo "Authorizing member $MEMBER_ID on network $NETWORK_ID..."
 
 set +e
-RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL:$CONTROLLER_PORT/controller/network/${NETWORK_ID}/member/${MEMBER_ID} \
+RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL/controller/network/${NETWORK_ID}/member/${MEMBER_ID} \
   -H "X-ZT1-Auth: $CONTROLLER_AUTH_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"authorized": true}' \
@@ -98,7 +98,7 @@ if [[ $CURL_EXIT -ne 0 ]]; then
   if [[ -n "$BODY" ]]; then
     echo "Response: $BODY" >&2
   fi
-  echo "Check that ZeroTier controller is reachable at $CONTROLLER_URL:$CONTROLLER_PORT" >&2
+  echo "Check that ZeroTier controller is reachable at $CONTROLLER_URL" >&2
   exit 1
 fi
 
