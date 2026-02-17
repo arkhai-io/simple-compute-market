@@ -253,21 +253,57 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
 # Accept-offer -> fulfill flow
 @policy_callable("ao.action.fulfill_after_accept")
 def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
-    """When we receive an AcceptOfferEvent, move directly to fulfill compute obligation."""
+    """Handle accept-offer handshake by role.
+
+    - Compute buyer: create escrow and send accept_offer with escrow_uid.
+    - Compute seller: fulfill only after escrow_uid is present.
+    """
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
+    order = context.event.order
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
 
-    return DomainAction(
-        action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={
-            "order": context.event.order.model_dump(mode="json"),
-            "escrow_uid": escrow_uid,
-            "ssh_public_key": ssh_key,
-        },
-    )
+    maker_url = (order.order_maker or "").rstrip("/")
+    our_url = (CONFIG.base_url_override or "").rstrip("/")
+    is_maker = bool(maker_url and our_url and (maker_url == our_url or maker_url.endswith(our_url) or our_url.endswith(maker_url)))
+
+    maker_offers_compute = isinstance(order.offer_resource, ComputeResource) and isinstance(order.demand_resource, TokenResource)
+    maker_offers_tokens = isinstance(order.offer_resource, TokenResource) and isinstance(order.demand_resource, ComputeResource)
+    if not (maker_offers_compute or maker_offers_tokens):
+        return None
+
+    compute_buyer = (maker_offers_compute and not is_maker) or (maker_offers_tokens and is_maker)
+    compute_seller = not compute_buyer
+
+    if compute_buyer:
+        # Buyer creates escrow after receiving seller acceptance (which has no escrow_uid).
+        if escrow_uid:
+            return None
+        return DomainAction(
+            action_type=DomainActionType.ACCEPT_OFFER,
+            parameters={
+                "order": order.model_dump(mode="json"),
+                "order_id": order.order_id,
+                "their_order_id": order.order_id,
+            },
+        )
+
+    if compute_seller:
+        # Seller should only fulfill once buyer has supplied escrow_uid.
+        if not escrow_uid or not ssh_key:
+            return None
+        return DomainAction(
+            action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
+            parameters={
+                "order": order.model_dump(mode="json"),
+                "escrow_uid": escrow_uid,
+                "ssh_public_key": ssh_key,
+            },
+        )
+
+    return None
 
 # Receive fulfillment -> trust arbitration path
 @policy_callable("rcf.action.trust_fulfillment")

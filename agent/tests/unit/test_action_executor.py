@@ -2,21 +2,26 @@
 
 import json
 import sqlite3
+from types import SimpleNamespace
 from datetime import datetime
 
 import pytest
 
 from app.schema.pydantic_models import (
+    AcceptOfferEvent,
     Action,
     ActionType,
     ComputeResource,
+    DecisionContext,
     ERC20TokenMetadata,
     EventType,
     GPUModel,
+    MarketOrder,
     Region,
     TokenResource,
 )
 from app.utils import action_executor
+import app.policies.store as policy_store_module
 from app.utils.sqlite_client import SQLiteClient
 
 
@@ -323,7 +328,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
         demand_resource=_compute_resource().model_dump(mode="json"),
         fulfillment_resource=None,
         duration_hours=1,
-        order_maker="buyer",
+        order_maker=action_executor.BASE_URL_OVERRIDE,
         order_taker=None,
         matched_offer_id=None,
         maker_attestation=None,
@@ -333,7 +338,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
 
     order_dict = {
         "order_id": order_id,
-        "order_maker": "buyer",
+        "order_maker": action_executor.BASE_URL_OVERRIDE,
         "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
         "demand_resource": _compute_resource().model_dump(mode="json"),
         "duration_hours": 1,
@@ -413,3 +418,60 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
     assert row["escrow_uid"] == "escrow-uid-456"
     assert row["maker_attestation"] is not None
     assert row["fulfillment_resource"] == "user@host.example.net"
+
+
+def test_accept_offer_handshake_policy_requires_escrow_and_ssh_for_seller(monkeypatch):
+    """Handshake gate: buyer reacts to initial accept; seller fulfills only on escrow+ssh follow-up."""
+    seller_url = "http://seller-agent:8000"
+    buyer_url = "http://buyer-agent:8000"
+    order = MarketOrder(
+        order_id="order-handshake-1",
+        order_maker=seller_url,
+        offer_resource=_compute_resource(),
+        demand_resource=_token_rate(1_000_000),
+        duration_hours=1,
+    )
+
+    # Seller's initial acceptance (no escrow/key yet) should trigger buyer-side escrow action.
+    initial_accept = AcceptOfferEvent.from_order(order, escrow_uid=None, ssh_public_key=None)
+    monkeypatch.setattr(policy_store_module, "CONFIG", SimpleNamespace(base_url_override=buyer_url))
+    buyer_action = policy_store_module.ao_action_fulfill_after_accept(
+        DecisionContext(
+            event=initial_accept,
+            agent_id="buyer",
+            available_resources={},
+            market_state={},
+        )
+    )
+    assert buyer_action is not None
+    assert buyer_action.action_type == ActionType.ACCEPT_OFFER
+
+    # Seller should not fulfill until escrow_uid and ssh_public_key are present.
+    monkeypatch.setattr(policy_store_module, "CONFIG", SimpleNamespace(base_url_override=seller_url))
+    seller_no_escrow_action = policy_store_module.ao_action_fulfill_after_accept(
+        DecisionContext(
+            event=initial_accept,
+            agent_id="seller",
+            available_resources={},
+            market_state={},
+        )
+    )
+    assert seller_no_escrow_action is None
+
+    buyer_followup_accept = AcceptOfferEvent.from_order(
+        order,
+        escrow_uid="escrow-uid-abc",
+        ssh_public_key="ssh-rsa AAA",
+    )
+    seller_fulfill_action = policy_store_module.ao_action_fulfill_after_accept(
+        DecisionContext(
+            event=buyer_followup_accept,
+            agent_id="seller",
+            available_resources={},
+            market_state={},
+        )
+    )
+    assert seller_fulfill_action is not None
+    assert seller_fulfill_action.action_type == ActionType.FULFILL_COMPUTE_OBLIGATION
+    assert seller_fulfill_action.parameters.get("escrow_uid") == "escrow-uid-abc"
+    assert seller_fulfill_action.parameters.get("ssh_public_key") == "ssh-rsa AAA"

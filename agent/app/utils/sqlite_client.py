@@ -464,6 +464,58 @@ class SQLiteClient:
 
         await asyncio.to_thread(_save)
 
+    async def load_order(self, *, order_id: str) -> dict[str, Any] | None:
+        """Load a single local order by ID."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT
+                      order_id,
+                      status,
+                      created_at,
+                      updated_at,
+                      offer_resource,
+                      demand_resource,
+                      fulfillment_resource,
+                      duration_hours,
+                      order_maker,
+                      order_taker,
+                      matched_offer_id,
+                      maker_attestation,
+                      taker_attestation,
+                      escrow_uid
+                    FROM orders
+                    WHERE order_id = ?
+                    """,
+                    (order_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "order_id": row[0],
+                    "status": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                    "offer_resource": self._normalize_resource(row[4]),
+                    "demand_resource": self._normalize_resource(row[5]),
+                    "fulfillment_resource": row[6],
+                    "duration_hours": row[7],
+                    "order_maker": row[8],
+                    "order_taker": row[9],
+                    "matched_offer_id": row[10],
+                    "maker_attestation": row[11],
+                    "taker_attestation": row[12],
+                    "escrow_uid": row[13],
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
     async def save_policy(
         self,
         *,

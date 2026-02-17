@@ -797,82 +797,148 @@ async def accept_offer(
 ) -> dict[str, Any]:
     """Accept a received offer and send acceptance to the counterparty via A2A."""
     parameters = parameters or {}
-
-    order_payload = parameters.get("order") or parameters.get("offer")
-
-    if isinstance(order_payload, MarketOrder):
-        order_dict = order_payload.model_dump(mode="json")
-    elif isinstance(order_payload, dict):
-        order_dict = order_payload
-    else:
+    order_dict = _extract_order_payload(parameters)
+    if not order_dict:
         logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
         return {"status": "error", "message": "Missing order payload for accept_offer"}
 
+    maker_offers_compute = _maker_offers_compute(order_dict)
+    maker_offers_tokens = _maker_offers_tokens(order_dict)
+    if not (maker_offers_compute or maker_offers_tokens):
+        return {
+            "status": "error",
+            "message": "Order must include one compute and one token resource",
+        }
+
+    is_maker = await _is_current_agent_order_maker(order_dict)
+    compute_buyer = (maker_offers_compute and not is_maker) or (maker_offers_tokens and is_maker)
+
+    if compute_buyer:
+        return await _accept_compute_offer(
+            alkahest_client=alkahest_client,
+            ctx=ctx,
+            parameters=parameters,
+            order_dict=order_dict,
+        )
+
+    return await _accept_token_offer(
+        ctx=ctx,
+        parameters=parameters,
+        order_dict=order_dict,
+    )
+
+
+def _extract_order_payload(parameters: dict[str, Any]) -> dict[str, Any] | None:
+    order_payload = parameters.get("order") or parameters.get("offer")
+    if isinstance(order_payload, MarketOrder):
+        return order_payload.model_dump(mode="json")
+    if isinstance(order_payload, dict):
+        return order_payload
+    return None
+
+
+def _normalize_agent_url(value: str | None) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.rstrip("/")
+
+
+async def _is_current_agent_order_maker(order_dict: dict[str, Any]) -> bool:
+    order_id = order_dict.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        return False
+    try:
+        sqlite_client = get_sqlite_client()
+        local_order = await sqlite_client.load_order(order_id=order_id)
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to load order %s for maker check: %s", order_id, exc)
+        return False
+    if not local_order:
+        return False
+
+    maker = _normalize_agent_url(local_order.get("order_maker"))
+    ours = _normalize_agent_url(BASE_URL_OVERRIDE)
+    if not maker or not ours:
+        return False
+    return maker == ours or maker.endswith(ours) or ours.endswith(maker)
+
+
+def _maker_offers_compute(order_dict: dict[str, Any]) -> bool:
+    offer_resource = order_dict.get("offer_resource", {})
+    demand_resource = order_dict.get("demand_resource", {})
+    return isinstance(offer_resource, dict) and isinstance(demand_resource, dict) and "gpu_model" in offer_resource and "token" in demand_resource
+
+
+def _maker_offers_tokens(order_dict: dict[str, Any]) -> bool:
+    offer_resource = order_dict.get("offer_resource", {})
+    demand_resource = order_dict.get("demand_resource", {})
+    return isinstance(offer_resource, dict) and isinstance(demand_resource, dict) and "token" in offer_resource and "gpu_model" in demand_resource
+
+
+async def _create_escrow(
+    *,
+    alkahest_client: Any | None,
+    order_dict: dict[str, Any],
+) -> str:
+    if not alkahest_client:
+        raise RuntimeError("AlkahestClient is required for compute-buyer accept path.")
+
+    compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
     escrow_uid = None
     escrow_receipt = None
 
-    # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
-    # When accepting an offer, the taker is buying compute and paying tokens.
-    # The mapping depends on what the maker is offering:
-    # - If maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
-    # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
-    escrow_uid = None
-    escrow_receipt = None
-    
-    if alkahest_client:
-        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-        
-        # Retry logic with exponential backoff
-        max_retries = 3
-        base_delay = 1.0  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"[ALKAHEST] Attempting to put tokens in escrow (attempt {attempt + 1}/{max_retries})")
-                escrow_receipt = await buy_compute_with_erc20(
-                    compute_resource=compute_resource,
-                    token_resource=token_resource,
-                    duration_hours=order_dict.get("duration_hours", 1),
-                    oracle_address=DEMO_ORACLE_ADDRESS,
-                    client=alkahest_client,
-                )
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-                if escrow_uid:
-                    logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
-                    break
-                else:
-                    logger.warning(f"[ALKAHEST] Escrow receipt missing uid on attempt {attempt + 1}")
-            except Exception as e:
-                logger.warning(f"[ALKAHEST] Failed to create escrow on attempt {attempt + 1}/{max_retries}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.info(f"[ALKAHEST] Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("[ALKAHEST] All retry attempts failed. Cannot create escrow.")
-                    raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
-        
-        if not escrow_uid:
-            if isinstance(escrow_receipt, dict):
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-                if escrow_uid:
-                    logger.info(f"[ALKAHEST] Got escrow_uid from receipt: {escrow_uid}")
-            
-            if not escrow_uid:
-                raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
-    else:
-        raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
+    max_retries = 3
+    base_delay = 1.0 # seconds
 
+    for attempt in range(max_retries):
+        try:
+            logger.info("[ALKAHEST] Attempting to put tokens in escrow (attempt %d/%d)", attempt + 1, max_retries)
+            escrow_receipt = await buy_compute_with_erc20(
+                compute_resource=compute_resource,
+                token_resource=token_resource,
+                duration_hours=order_dict.get("duration_hours", 1),
+                oracle_address=DEMO_ORACLE_ADDRESS,
+                client=alkahest_client,
+            )
+            escrow_uid = escrow_receipt.get("log", {}).get("uid")
+            if escrow_uid:
+                logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
+                break
+            logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
+        except Exception as exc:
+            logger.warning("[ALKAHEST] Failed to create escrow on attempt %d/%d: %s", attempt + 1, max_retries, exc)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+            else:
+                raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {exc}") from exc
+
+    if not escrow_uid and isinstance(escrow_receipt, dict):
+        escrow_uid = escrow_receipt.get("log", {}).get("uid")
+    if not escrow_uid:
+        raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
+    return escrow_uid
+
+
+async def _complete_accept_offer(
+    *,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any],
+    order_dict: dict[str, Any],
+    escrow_uid: str | None,
+    ssh_public_key: str | None,
+) -> dict[str, Any]:
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
     order_dict["taker_attestation"] = escrow_uid
 
-    event_payload = {
+    event_payload: dict[str, Any] = {
         "event_type": EventType.ACCEPT_OFFER.value,
         "offer": order_dict,
-        "escrow_uid": escrow_uid,
-        "ssh_public_key": SSH_PUBLIC_KEY,
     }
+    if escrow_uid is not None:
+        event_payload["escrow_uid"] = escrow_uid
+    if ssh_public_key is not None:
+        event_payload["ssh_public_key"] = ssh_public_key
 
     if ctx is None:
         logger.warning("[TOOL] No invocation context; acceptance not sent.")
@@ -922,7 +988,8 @@ async def accept_offer(
                 our_order_id = inferred.get("order_id")
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
-        
+        if not our_order_id:
+            our_order_id = order_id
 
     try:
         sqlite_client = get_sqlite_client()
@@ -939,35 +1006,32 @@ async def accept_offer(
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
 
     # Update registry if order exists there
-    # This updates the MAKER's order (the order we're accepting)
-    # The registry will also update the symmetric order (taker's order) automatically
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            order_id = order_dict.get("order_id")
             if order_id:
-                updates = {
+                updates: dict[str, Any] = {
                     "status": "accepted",
                     "order_taker": BASE_URL_OVERRIDE,
-                    "taker_attestation": escrow_uid,
                 }
+                if escrow_uid:
+                    updates["taker_attestation"] = escrow_uid
                 result = await registry_client.update_order(order_id, updates)
                 if result:
-                    logger.info(f"[REGISTRY] Updated maker's order {order_id} status to accepted")
+                    logger.info("[REGISTRY] Updated maker's order %s status to accepted", order_id)
                     if result.get("symmetric_order_updated"):
-                        logger.info(f"[REGISTRY] Also updated symmetric order {result.get('symmetric_order_updated')}")
+                        logger.info("[REGISTRY] Also updated symmetric order %s", result.get("symmetric_order_updated"))
                     else:
-                        logger.warning(f"[REGISTRY] No symmetric order found/updated for order {order_id}")
+                        logger.warning("[REGISTRY] No symmetric order found/updated for order %s", order_id)
                 else:
-                    logger.warning(f"[REGISTRY] Failed to update maker's order {order_id} - order may not exist in registry")
-        except Exception as e:
-            logger.warning(f"[REGISTRY] Failed to update order in registry: {e}")
-            import traceback
-            logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
+                    logger.warning("[REGISTRY] Failed to update maker's order %s - order may not exist in registry", order_id)
+        except Exception as exc:
+            logger.warning("[REGISTRY] Failed to update order in registry: %s", exc)
+            logger.debug("[REGISTRY] Update order traceback: %s", traceback.format_exc())
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
     counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")
-    if not counterparty_url or not counterparty_url.strip():
+    if not counterparty_url or not str(counterparty_url).strip():
         logger.warning(
             "[A2A] accept_offer: no counterparty URL in order (order_maker) or parameters (their_agent_id); "
             "order_dict keys=%s",
@@ -982,14 +1046,50 @@ async def accept_offer(
             "offer": order_dict,
             "remote_response": getattr(result, "content", None),
         }
-    except Exception as e:
-        logger.error("[TOOL] Failed to send acceptance: %s", e)
+    except Exception as exc:
+        logger.error("[TOOL] Failed to send acceptance: %s", exc)
         return {
             "status": "error",
-            "message": f"Failed to send acceptance: {e}",
+            "message": f"Failed to send acceptance: {exc}",
             "escrow_uid": escrow_uid,
             "offer": order_dict,
         }
+
+
+async def _accept_compute_offer(
+    *,
+    alkahest_client: Any | None,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any],
+    order_dict: dict[str, Any],
+) -> dict[str, Any]:
+    escrow_uid = await _create_escrow(
+        alkahest_client=alkahest_client,
+        order_dict=order_dict,
+    )
+    return await _complete_accept_offer(
+        ctx=ctx,
+        parameters=parameters,
+        order_dict=order_dict,
+        escrow_uid=escrow_uid,
+        ssh_public_key=SSH_PUBLIC_KEY,
+    )
+
+
+async def _accept_token_offer(
+    *,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any],
+    order_dict: dict[str, Any],
+) -> dict[str, Any]:
+    # Compute seller accepts terms, but waits for to send escrow data.
+    return await _complete_accept_offer(
+        ctx=ctx,
+        parameters=parameters,
+        order_dict=order_dict,
+        escrow_uid=None,
+        ssh_public_key=None,
+    )
 
 
 def create_order(
