@@ -436,6 +436,18 @@ def _format_resource_full(resource: dict | str | None) -> str:
         return str(resource)
 
 
+def _get_cli_http_timeout() -> float:
+    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
+    default_value = 120.0
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return default_value
+    if timeout <= 0:
+        return default_value
+    return timeout
+
+
 def _fetch_json(url: str) -> dict:
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -459,7 +471,7 @@ def _post_json(url: str, payload: dict) -> dict:
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=_get_cli_http_timeout()) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8") if exc.fp else str(exc)
