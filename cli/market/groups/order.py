@@ -39,6 +39,12 @@ def order_create(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file used to read BASE_URL_OVERRIDE.",
+    ),
     duration_hours: int | None = typer.Option(
         None,
         "--duration-hours",
@@ -47,7 +53,8 @@ def order_create(
     ),
 ) -> None:
     """Create a new order via the Agent endpoint."""
-    base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    env_base_url = _read_env_value(Path(env), "BASE_URL_OVERRIDE") if env else None
+    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     duration = duration_hours if duration_hours is not None else 1
     if duration < 1:
