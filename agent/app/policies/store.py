@@ -257,6 +257,17 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
+    # Only the compute provider (seller) should fulfill.
+    # context.event.order is the maker's order (we are the maker receiving this event).
+    # If our order offers tokens (not compute), we are the buyer — skip.
+    order = context.event.order
+    offer_res = order.offer_resource if hasattr(order, "offer_resource") else {}
+    if isinstance(offer_res, dict):
+        if "gpu_model" not in offer_res:
+            return None
+    elif not hasattr(offer_res, "gpu_model"):
+        return None
+
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
     agreed_price = context.event.agreed_price
@@ -695,6 +706,13 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
         # Simulated assumption: we have enough tokens in our wallet
         pass
     
+    # Extract agreed price from whichever resource is the TokenResource
+    agreed_price = None
+    if isinstance(offer_resource, TokenResource):
+        agreed_price = offer_resource.amount
+    elif isinstance(demand_resource, TokenResource):
+        agreed_price = demand_resource.amount
+
     # Accept offer with resource details
     return DomainAction(
         action_type=ActionType.ACCEPT_OFFER,
@@ -703,6 +721,7 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "order": order,
             "offer_resource": offer_resource.model_dump(mode='json'),
             "demand_resource": demand_resource.model_dump(mode='json'),
+            "agreed_price": agreed_price,
         }
     )
 

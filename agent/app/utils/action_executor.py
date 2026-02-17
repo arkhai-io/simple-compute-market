@@ -220,7 +220,42 @@ async def execute_action(
             )
             outcome["result"] = result
             outcome["message"] = result.get("message", "Offer accepted")
-            
+
+            # If we are the compute provider (seller), chain into fulfill.
+            # The accepted order's demand_resource having gpu_model means
+            # the counterparty demands compute → we provide it.
+            if result.get("status") == "sent":
+                order_data = parameters.get("order") or parameters.get("offer") or result.get("offer") or {}
+                if isinstance(order_data, dict):
+                    demand_res = order_data.get("demand_resource", {})
+                    if isinstance(demand_res, dict) and "gpu_model" in demand_res:
+                        logger.info("[ACTION] Seller accepted buyer offer — chaining to fulfill")
+                        escrow_uid = result.get("escrow_uid")
+                        our_order_id = parameters.get("our_order_id")
+                        their_order_id = parameters.get("their_order_id")
+                        negotiation_id = parameters.get("negotiation_id")
+                        agreed_price = parameters.get("agreed_price")
+
+                        # Stamp marketplace IDs onto order for provisioning context
+                        order_for_fulfill = dict(order_data)
+                        if negotiation_id:
+                            order_for_fulfill["_negotiation_id"] = negotiation_id
+                        if our_order_id:
+                            order_for_fulfill["_order_id"] = our_order_id
+                        if their_order_id:
+                            order_for_fulfill["_their_order_id"] = their_order_id
+
+                        if agreed_price is not None:
+                            _patch_order_token_amount(order_for_fulfill, agreed_price)
+
+                        fulfill_result = await fulfill_compute_obligation(
+                            client=alkahest_client,
+                            escrow_uid=escrow_uid,
+                            ssh_public_key=SSH_PUBLIC_KEY,
+                            order=order_for_fulfill,
+                        )
+                        outcome["fulfill_result"] = fulfill_result
+
         case ActionType.REJECT_OFFER.value:
             result = reject_offer()
             logger.info(f"[ACTION] [SIMULATED] Rejecting offer with params: {parameters}")
@@ -375,6 +410,10 @@ async def execute_action(
                 their_order_id = parameters.get("their_order_id")
                 if their_order_id:
                     order["_their_order_id"] = their_order_id
+
+            # Patch order amount to agreed_price for correct lease encoding
+            if fulfill_agreed_price is not None and isinstance(order, dict):
+                _patch_order_token_amount(order, fulfill_agreed_price)
 
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
@@ -849,23 +888,29 @@ async def provision_machine(ssh_public_key: str, order: dict | None = None) -> d
             "ssh_pubkey": ssh_public_key,
         }
         if order:
-            params["order_id"] = order.get("_order_id") or order.get("order_id")
-            params["seller_agent_id"] = agent_id  # ERC-8004 ID built above
+            our_order_id = order.get("_order_id") or order.get("order_id")
+            their_order_id = order.get("_their_order_id")
             params["negotiation_id"] = order.get("_negotiation_id")
             params["escrow_uid"] = order.get("taker_attestation") or order.get("escrow_uid")
 
-            # Resolve buyer's ERC-8004 ID from their registry order
-            buyer_agent_id = None
-            their_order_id = order.get("_their_order_id")
+            # Resolve counterparty's ERC-8004 ID from their registry order
+            counterparty_agent_id = None
             if their_order_id and CONFIG.enable_registry_discovery:
                 try:
                     registry_client = get_registry_client()
                     their_order = await registry_client.get_order(their_order_id)
                     if their_order:
-                        buyer_agent_id = their_order.get("agent_id")
+                        counterparty_agent_id = their_order.get("agent_id")
                 except Exception as e:
-                    logger.warning("[TOOL] Failed to resolve buyer ERC-8004 ID: %s", e)
-            params["buyer_agent_id"] = buyer_agent_id or order.get("order_taker")
+                    logger.warning("[TOOL] Failed to resolve counterparty ERC-8004 ID: %s", e)
+
+            # The provisioning agent is always the compute seller.
+            # Chaining from accept_offer only fires when counterparty demands GPU;
+            # FULFILL dispatch only fires when our order offers GPU.
+            params["seller_agent_id"] = agent_id
+            params["buyer_agent_id"] = counterparty_agent_id
+            params["seller_order_id"] = our_order_id
+            params["buyer_order_id"] = their_order_id
 
         result = await provision_machine_async(
             provisioning_service_url=CONFIG.provisioning_service_url,
@@ -883,6 +928,16 @@ async def provision_machine(ssh_public_key: str, order: dict | None = None) -> d
     except Exception as exc:
         logger.error("[TOOL] Unexpected provisioning error: %s", exc)
         raise RuntimeError(f"Provisioning failed: {exc}") from exc
+
+def _patch_order_token_amount(order_dict: dict, agreed_price: int) -> None:
+    """Overwrite the token-resource amount in *order_dict* with the negotiated price."""
+    offer = order_dict.get("offer_resource", {})
+    demand = order_dict.get("demand_resource", {})
+    if "token" in offer:          # offer is the token side
+        offer["amount"] = agreed_price
+    elif "token" in demand:       # demand is the token side
+        demand["amount"] = agreed_price
+
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""
@@ -1072,6 +1127,11 @@ async def accept_offer(
     escrow_uid = None
     escrow_receipt = None
 
+    # Patch order amount to agreed_price for correct on-chain commitment
+    agreed_price = parameters.get("agreed_price")
+    if agreed_price is not None and order_dict:
+        _patch_order_token_amount(order_dict, agreed_price)
+
     # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
     # When accepting an offer, the taker is buying compute and paying tokens.
     # The mapping depends on what the maker is offering:
@@ -1079,7 +1139,7 @@ async def accept_offer(
     # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
     escrow_uid = None
     escrow_receipt = None
-    
+
     if alkahest_client:
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         
@@ -1188,7 +1248,7 @@ async def accept_offer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=BASE_URL_OVERRIDE,
+                order_taker=order_dict.get("order_maker", ""),
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1228,6 +1288,36 @@ async def accept_offer(
             logger.warning(f"[REGISTRY] Failed to update order in registry: {e}")
             import traceback
             logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
+
+        # Explicitly update the TAKER's own order in the registry.
+        # The symmetric-order auto-detection fails when token amounts
+        # differ between the two orders (the common case after negotiation),
+        # so we update our own order directly.
+        if our_order_id and our_order_id != order_id:
+            try:
+                taker_updates = {
+                    "status": "accepted",
+                    "order_taker": order_dict.get("order_maker", ""),
+                    "taker_attestation": escrow_uid,
+                }
+                taker_result = await registry_client.update_order(
+                    our_order_id, taker_updates
+                )
+                if taker_result:
+                    logger.info(
+                        "[REGISTRY] Updated taker's order %s status to accepted",
+                        our_order_id,
+                    )
+                else:
+                    logger.warning(
+                        "[REGISTRY] Failed to update taker's order %s",
+                        our_order_id,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[REGISTRY] Failed to update taker's order %s: %s",
+                    our_order_id, e,
+                )
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
     counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")

@@ -276,8 +276,8 @@ def test_match_with_price_override() -> None:
         return {"status": "ok", "order_id": "new-order-456"}
 
     with (
-        patch("market.cli._fetch_json", return_value=copy.deepcopy(SAMPLE_REGISTRY_ORDER)),
-        patch("market.cli._post_json", side_effect=mock_post),
+        patch("market.groups.order._fetch_json", return_value=copy.deepcopy(SAMPLE_REGISTRY_ORDER)),
+        patch("market.groups.order._post_json", side_effect=mock_post),
     ):
         result = runner.invoke(app, [
             "order", "match", "order-123",
@@ -302,8 +302,8 @@ def test_match_without_price_keeps_original() -> None:
         return {"status": "ok", "order_id": "new-order-789"}
 
     with (
-        patch("market.cli._fetch_json", return_value=copy.deepcopy(SAMPLE_REGISTRY_ORDER)),
-        patch("market.cli._post_json", side_effect=mock_post),
+        patch("market.groups.order._fetch_json", return_value=copy.deepcopy(SAMPLE_REGISTRY_ORDER)),
+        patch("market.groups.order._post_json", side_effect=mock_post),
     ):
         result = runner.invoke(app, [
             "order", "match", "order-123",

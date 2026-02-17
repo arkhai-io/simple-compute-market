@@ -18,7 +18,7 @@ from async_provisioning_service.api.auth import AgentAuthMiddleware
 from async_provisioning_service.api.routes import router
 from async_provisioning_service.api.schemas import ProvisionRequest
 from async_provisioning_service.db.database import get_db
-from async_provisioning_service.db.models import Base, JobStatus, ProvisioningJob
+from async_provisioning_service.db.models import Base, JobStatus, ProvisionedVM, ProvisioningJob
 
 AGENT_1 = "eip155:31337:0x5FbDB2315678afecb367f032d93F642f64180aa3:1"
 AGENT_2 = "eip155:31337:0x70997970C51812dc3A010C7d01b50e0d17dc79C8:2"
@@ -342,3 +342,173 @@ class TestProvisionSchema:
                 vm_action="create",
                 frp_server_addr="10.0.0.1",
             )
+
+
+# ---------------------------------------------------------------------------
+# Provisioned VM Access (two-record model) tests
+# ---------------------------------------------------------------------------
+
+SELLER_ORDER = "order-seller-001"
+BUYER_ORDER = "order-buyer-002"
+VM_NAME = "test-vm-abc123"
+
+
+@pytest.fixture()
+def seeded_vms(db_session: Session) -> dict[str, str]:
+    """Seed the database with seller + buyer ProvisionedVM access records.
+
+    Returns a mapping of logical names to record IDs.
+    """
+    seller_id = str(uuid.uuid4())
+    buyer_id = str(uuid.uuid4())
+
+    seller_vm = ProvisionedVM(
+        id=seller_id,
+        job_id="job-001",
+        vm_name=VM_NAME,
+        vm_host="ww1",
+        vm_ip_internal="192.168.1.10",
+        vm_state="running",
+        seller_order_id=SELLER_ORDER,
+        buyer_order_id=BUYER_ORDER,
+        role="seller",
+        seller_agent_id=AGENT_1,
+        buyer_agent_id=AGENT_2,
+        negotiation_id="neg-001",
+        escrow_uid="escrow-001",
+        root_password="rootpass123",
+        root_ssh_key_path="/root/.ssh/id_ed25519",
+        root_ssh_commands={"internal": "ssh root@192.168.1.10", "external": "ssh -p 2222 root@example.com"},
+        tenant_user="tenant",
+        tenant_password="tenantpass456",
+        tenant_ssh_commands={"internal": "ssh tenant@192.168.1.10", "external": "ssh -p 2222 tenant@example.com"},
+        external_ssh_port="2222",
+        frp_domain="example.com",
+    )
+    buyer_vm = ProvisionedVM(
+        id=buyer_id,
+        job_id="job-001",
+        vm_name=VM_NAME,
+        vm_host="ww1",
+        vm_ip_internal="192.168.1.10",
+        vm_state="running",
+        seller_order_id=SELLER_ORDER,
+        buyer_order_id=BUYER_ORDER,
+        role="buyer",
+        seller_agent_id=AGENT_1,
+        buyer_agent_id=AGENT_2,
+        negotiation_id="neg-001",
+        escrow_uid="escrow-001",
+        root_password=None,
+        root_ssh_key_path=None,
+        root_ssh_commands=None,
+        tenant_user="tenant",
+        tenant_password="tenantpass456",
+        tenant_ssh_commands={"internal": "ssh tenant@192.168.1.10", "external": "ssh -p 2222 tenant@example.com"},
+        external_ssh_port="2222",
+        frp_domain="example.com",
+    )
+    db_session.add_all([seller_vm, buyer_vm])
+    db_session.commit()
+    return {"seller": seller_id, "buyer": buyer_id}
+
+
+class TestProvisionedVMAccess:
+    """Tests for the two-record provisioned_vm_access model."""
+
+    @pytest.mark.anyio
+    async def test_seller_finds_vm_by_seller_order_id(self, client, seeded_vms):
+        """Seller queries by their order ID and sees root + tenant creds."""
+        async with client:
+            resp = await client.get(
+                "/provisioned",
+                params={"order_id": SELLER_ORDER},
+                headers={"X-Agent-ID": AGENT_1},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        seller_vms = [v for v in data["vms"] if v["role"] == "seller"]
+        assert len(seller_vms) == 1
+        vm = seller_vms[0]
+        assert vm["seller_order_id"] == SELLER_ORDER
+        assert vm["root_password"] == "rootpass123"
+        assert vm["root_ssh_key_path"] == "/root/.ssh/id_ed25519"
+        assert vm["tenant_user"] == "tenant"
+        assert vm["tenant_password"] == "tenantpass456"
+
+    @pytest.mark.anyio
+    async def test_buyer_finds_vm_by_buyer_order_id(self, client, seeded_vms):
+        """Buyer queries by their order ID and sees only tenant creds (root fields None)."""
+        async with client:
+            resp = await client.get(
+                "/provisioned",
+                params={"order_id": BUYER_ORDER},
+                headers={"X-Agent-ID": AGENT_2},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        buyer_vms = [v for v in data["vms"] if v["role"] == "buyer"]
+        assert len(buyer_vms) == 1
+        vm = buyer_vms[0]
+        assert vm["buyer_order_id"] == BUYER_ORDER
+        assert vm["root_password"] is None
+        assert vm["root_ssh_key_path"] is None
+        assert vm["root_ssh_commands"] is None
+        assert vm["tenant_user"] == "tenant"
+        assert vm["tenant_password"] == "tenantpass456"
+
+    @pytest.mark.anyio
+    async def test_cross_lookup_seller_queries_buyer_order(self, client, seeded_vms):
+        """Seller queries with buyer's order_id — still finds their record."""
+        async with client:
+            resp = await client.get(
+                "/provisioned",
+                params={"order_id": BUYER_ORDER},
+                headers={"X-Agent-ID": AGENT_1},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        seller_vms = [v for v in data["vms"] if v["role"] == "seller"]
+        assert len(seller_vms) == 1
+
+    @pytest.mark.anyio
+    async def test_get_provisioned_vm_by_name_seller(self, client, seeded_vms):
+        """GET /provisioned/{vm_name} with seller agent_id returns seller record."""
+        async with client:
+            resp = await client.get(
+                f"/provisioned/{VM_NAME}",
+                headers={"X-Agent-ID": AGENT_1},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["vm_name"] == VM_NAME
+        assert data["role"] == "seller"
+        assert data["root_password"] == "rootpass123"
+
+    @pytest.mark.anyio
+    async def test_get_provisioned_vm_by_name_buyer(self, client, seeded_vms):
+        """GET /provisioned/{vm_name} with buyer agent_id returns buyer record."""
+        async with client:
+            resp = await client.get(
+                f"/provisioned/{VM_NAME}",
+                headers={"X-Agent-ID": AGENT_2},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["vm_name"] == VM_NAME
+        assert data["role"] == "buyer"
+        assert data["root_password"] is None
+        assert data["tenant_user"] == "tenant"
+
+    @pytest.mark.anyio
+    async def test_get_provisioned_vm_unknown_agent_404(self, client, seeded_vms):
+        """GET /provisioned/{vm_name} with unrelated agent returns 404."""
+        async with client:
+            resp = await client.get(
+                f"/provisioned/{VM_NAME}",
+                headers={"X-Agent-ID": "eip155:31337:0x1111111111111111111111111111111111111111:99"},
+            )
+        assert resp.status_code == 404

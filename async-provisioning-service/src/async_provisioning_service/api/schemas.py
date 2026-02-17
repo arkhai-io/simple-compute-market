@@ -89,7 +89,8 @@ class ProvisionRequest(BaseModel):
     max_retries: Optional[int] = Field(default=None, description="Max retry attempts (overrides default)", ge=0, le=10)
 
     # --- Marketplace context ---
-    order_id: Optional[str] = Field(default=None, description="Marketplace order ID this VM fulfills")
+    seller_order_id: Optional[str] = Field(default=None, description="Seller's marketplace order ID")
+    buyer_order_id: Optional[str] = Field(default=None, description="Buyer's marketplace order ID")
     seller_agent_id: Optional[str] = Field(default=None, description="Seller agent ID (compute provider)")
     buyer_agent_id: Optional[str] = Field(default=None, description="Buyer agent ID (compute consumer)")
     negotiation_id: Optional[str] = Field(default=None, description="Negotiation thread ID")
@@ -162,7 +163,9 @@ class ProvisionedVMResponse(BaseModel):
     vm_host: str
     vm_ip_internal: str | None = None
     vm_state: str | None = None
-    order_id: str | None = None
+    seller_order_id: str | None = None
+    buyer_order_id: str | None = None
+    role: str | None = None
     seller_agent_id: str | None = None
     buyer_agent_id: str | None = None
     negotiation_id: str | None = None

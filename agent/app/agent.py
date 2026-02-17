@@ -424,6 +424,21 @@ def _serialize_context_for_storage(decision_context: DecisionContext) -> str:
     return context_json
 
 
+_SENSITIVE_RESULT_KEYS = frozenset({"connection_details", "ssh_public_key", "tenant_password"})
+
+
+def _redact_outcome_for_storage(outcome: dict) -> dict:
+    """Strip sensitive connection details before DB storage."""
+    redacted = dict(outcome)
+    result = redacted.get("result")
+    if isinstance(result, dict):
+        redacted["result"] = {
+            k: ("***" if k in _SENSITIVE_RESULT_KEYS else v)
+            for k, v in result.items()
+        }
+    return redacted
+
+
 def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
     """Serialize outcome with a size guard to prevent oversized blobs."""
     outcome_json = json.dumps(outcome, default=json_serializer)
@@ -770,7 +785,7 @@ class TraderAgent(BaseAgent):
             
             await self._sqlite_client.save_decision_outcome(
                 decision_id=decision.decision_id,
-                outcome_json=_serialize_outcome_for_storage(outcome),
+                outcome_json=_serialize_outcome_for_storage(_redact_outcome_for_storage(outcome)),
                 timestamp=datetime.now().isoformat(),
             )
             logger.info(f"[PIPELINE] Recorded decision {decision.decision_id} with outcome")
@@ -789,7 +804,7 @@ class TraderAgent(BaseAgent):
         }
         outcome_message = outcome.get("message", None)
         fallback_message = action_mappings.get(action_type_str.lower(), f"{action_type_str.upper()} action executed.")
-        logger.info(f"{outcome} {outcome_message}")
+        logger.info(f"{_redact_outcome_for_storage(outcome)} {outcome_message}")
         return outcome_message or fallback_message
 
     @override
@@ -1431,12 +1446,178 @@ async def get_negotiation_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(detail)
 
 
+def _decode_abi_strings(data: bytes) -> list[str]:
+    """Extract readable strings from ABI-encoded attestation data."""
+    found = []
+    for i in range(0, len(data) - 32, 32):
+        potential_len = int.from_bytes(data[i:i + 32], "big")
+        if 1 <= potential_len <= 2000 and i + 32 + potential_len <= len(data):
+            candidate = data[i + 32:i + 32 + potential_len]
+            try:
+                text = candidate.decode("utf-8")
+                if text.isprintable() and len(text) > 3:
+                    found.append(text)
+            except Exception:
+                pass
+    return found
+
+
+async def get_attestation_endpoint(request: Request) -> JSONResponse:
+    uid = request.path_params["uid"]
+    client = root_agent._alkahest_client
+    if client is None:
+        return JSONResponse({"error": "Alkahest client not initialized"}, status_code=503)
+    try:
+        att = await client.attestation.util.get_attestation(uid)
+        result = {
+            "uid": att.uid,
+            "schema": att.schema,
+            "attester": att.attester,
+            "recipient": att.recipient,
+            "ref_uid": att.ref_uid,
+            "revocable": att.revocable,
+            "revocation_time": att.revocation_time,
+            "expiration_time": att.expiration_time,
+            "time": att.time,
+            "is_valid": att.is_valid(),
+            "is_revoked": att.is_revoked(),
+            "is_expired": att.is_expired(),
+            "data_hex": att.data.hex() if isinstance(att.data, bytes) else str(att.data),
+        }
+        # Decode readable strings/JSON from ABI-encoded data
+        if isinstance(att.data, bytes):
+            decoded = _decode_abi_strings(att.data)
+            for text in decoded:
+                try:
+                    parsed = json.loads(text)
+                    result["demand_data"] = parsed
+                except json.JSONDecodeError:
+                    result.setdefault("obligation_data", text)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
 agent_list_orders_route = Route("/orders", list_orders_endpoint, methods=["GET"])
 agent_get_order_route = Route("/orders/{order_id}", get_order_endpoint, methods=["GET"])
 agent_list_decisions_route = Route("/decisions", list_decisions_endpoint, methods=["GET"])
 agent_get_decision_route = Route("/decisions/{decision_id}", get_decision_endpoint, methods=["GET"])
 agent_list_negotiations_route = Route("/negotiations", list_negotiations_endpoint, methods=["GET"])
 agent_get_negotiation_route = Route("/negotiations/{negotiation_id}", get_negotiation_endpoint, methods=["GET"])
+agent_get_attestation_route = Route("/attestations/{uid}", get_attestation_endpoint, methods=["GET"])
+
+
+# ---------------------------------------------------------------------------
+# Balance endpoint – queries ETH + ERC20 balances via JSON-RPC
+# ---------------------------------------------------------------------------
+
+# ERC-20 function selectors
+_BALANCE_OF_SEL = "0x70a08231"
+_SYMBOL_SEL = "0x95d89b41"
+_DECIMALS_SEL = "0x313ce567"
+
+
+def _rpc_call(url: str, method: str, params: list) -> Any:
+    """Make a raw JSON-RPC call using urllib (no extra deps)."""
+    import urllib.request as _urlreq
+
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+        "id": 1,
+    }).encode()
+    req = _urlreq.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    with _urlreq.urlopen(req, timeout=10) as resp:
+        body = json.loads(resp.read().decode())
+    if "error" in body and body["error"]:
+        raise RuntimeError(f"RPC error: {body['error']}")
+    return body.get("result")
+
+
+def _query_erc20(rpc_url: str, token_address: str, wallet: str) -> dict:
+    """Query symbol, decimals, and balanceOf for an ERC-20 token."""
+    padded_addr = wallet.lower().replace("0x", "").zfill(64)
+
+    raw_balance = _rpc_call(rpc_url, "eth_call", [
+        {"to": token_address, "data": f"{_BALANCE_OF_SEL}{padded_addr}"}, "latest",
+    ])
+    raw_symbol = _rpc_call(rpc_url, "eth_call", [
+        {"to": token_address, "data": _SYMBOL_SEL}, "latest",
+    ])
+    raw_decimals = _rpc_call(rpc_url, "eth_call", [
+        {"to": token_address, "data": _DECIMALS_SEL}, "latest",
+    ])
+
+    # Decode symbol (ABI-encoded string)
+    symbol = "UNKNOWN"
+    try:
+        sym_bytes = bytes.fromhex(raw_symbol.replace("0x", ""))
+        # ABI string: offset(32) + length(32) + data
+        str_len = int.from_bytes(sym_bytes[32:64], "big")
+        symbol = sym_bytes[64:64 + str_len].decode("utf-8").rstrip("\x00")
+    except Exception:
+        pass
+
+    decimals = int(raw_decimals, 16) if raw_decimals else 18
+    balance_raw = int(raw_balance, 16) if raw_balance else 0
+    balance_human = balance_raw / (10 ** decimals)
+
+    return {
+        "address": token_address,
+        "symbol": symbol,
+        "decimals": decimals,
+        "balance_raw": str(balance_raw),
+        "balance_human": str(balance_human),
+    }
+
+
+async def get_balance_endpoint(request: Request) -> JSONResponse:
+    """Return ETH and ERC-20 token balances for a wallet address."""
+    address = request.query_params.get("address") or CONFIG.agent_wallet_address
+    extra_token = request.query_params.get("token")  # optional additional ERC-20
+
+    if not address:
+        return JSONResponse({"error": "No address provided and AGENT_WALLET_ADDRESS is not set"}, status_code=400)
+
+    # Build an HTTP URL from the configured RPC (may be ws://)
+    rpc_url = CHAIN_RPC_URL.replace("ws://", "http://").replace("wss://", "https://")
+
+    try:
+        # ETH balance
+        raw_eth = _rpc_call(rpc_url, "eth_getBalance", [address, "latest"])
+        eth_wei = int(raw_eth, 16) if raw_eth else 0
+        eth_human = eth_wei / 1e18
+
+        # Default token: MOCK (from EnvTestManager)
+        tokens: list[dict] = []
+        try:
+            env = EnvTestManager()
+            mock_addr = str(env.mock_addresses.erc20_a)
+            tokens.append(_query_erc20(rpc_url, mock_addr, address))
+        except Exception as e:
+            logger.debug(f"[BALANCE] Could not query default mock token: {e}")
+
+        # Additional token requested via ?token=
+        if extra_token:
+            try:
+                tokens.append(_query_erc20(rpc_url, extra_token, address))
+            except Exception as e:
+                logger.warning(f"[BALANCE] Failed to query token {extra_token}: {e}")
+                tokens.append({"address": extra_token, "error": str(e)})
+
+        return JSONResponse({
+            "address": address,
+            "eth_balance": str(eth_wei),
+            "eth_balance_human": f"{eth_human:.4f}",
+            "tokens": tokens,
+        })
+    except Exception as e:
+        logger.error(f"[BALANCE] RPC error: {e}")
+        return JSONResponse({"error": f"Failed to query balance: {e}"}, status_code=502)
+
+
+agent_get_balance_route = Route("/balance", get_balance_endpoint, methods=["GET"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
@@ -1453,6 +1634,9 @@ a2a_app.routes.append(agent_list_decisions_route)
 a2a_app.routes.append(agent_get_decision_route)
 a2a_app.routes.append(agent_list_negotiations_route)
 a2a_app.routes.append(agent_get_negotiation_route)
+a2a_app.routes.append(agent_get_attestation_route)
+# Add balance route
+a2a_app.routes.append(agent_get_balance_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file

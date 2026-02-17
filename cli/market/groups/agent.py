@@ -189,6 +189,16 @@ def agent_order(
                 if price_val is not None:
                     prices.append(f"R{m.get('round', '?')}: {price_val}")
 
+            agreed = thread_data.get("agreed_price")
+            if prices:
+                if agreed is not None:
+                    prices.append(f"Agreed: {agreed}")
+                progression = " → ".join(prices)
+            elif agreed is not None:
+                progression = str(agreed) + " (instant match)"
+            else:
+                progression = "-"
+
             neg_rows = [
                 ("Negotiation ID", _d(neg_id)),
                 ("Terminal State", _d(thread_data.get("terminal_state"))),
@@ -196,7 +206,7 @@ def agent_order(
                 ("Agreed Price", _d(thread_data.get("agreed_price"))),
                 ("Strategy", _d(thread_data.get("our_strategy"))),
                 ("Initial Price", _d(thread_data.get("our_initial_price"))),
-                ("Price Progression", " → ".join(prices) if prices else "-"),
+                ("Price Progression", progression),
             ]
             console.print(Panel(_detail_grid(neg_rows), title="Negotiation Summary", border_style="cyan"))
         else:
@@ -217,19 +227,45 @@ def agent_order(
         if prov_data and isinstance(prov_data, dict):
             vms = prov_data.get("vms", prov_data.get("machines", []))
             if isinstance(vms, list):
-                matched = [vm for vm in vms if vm.get("order_id") == order_id]
+                matched = [
+                    vm for vm in vms
+                    if vm.get("seller_order_id") == order_id or vm.get("buyer_order_id") == order_id
+                ]
                 if matched:
                     vm = matched[0]
                     cred_rows = [
-                        ("VM ID", _d(vm.get("vm_id") or vm.get("id"))),
-                        ("Status", _d(vm.get("status"))),
-                        ("Host", _d(vm.get("host") or vm.get("ip"))),
-                        ("Port", _d(vm.get("port"))),
-                        ("Username", _d(vm.get("username") or vm.get("user"))),
-                        ("SSH Key", _d(vm.get("ssh_key") or vm.get("ssh_public_key"))),
-                        ("Password", _d(vm.get("password"))),
-                        ("Connection", _d(vm.get("connection_string") or vm.get("connection_details"))),
+                        ("VM ID", _d(vm.get("id"))),
+                        ("VM Name", _d(vm.get("vm_name"))),
+                        ("State", _d(vm.get("vm_state"))),
+                        ("Host", _d(vm.get("vm_host"))),
+                        ("Internal IP", _d(vm.get("vm_ip_internal"))),
+                        ("SSH Port", _d(vm.get("external_ssh_port"))),
+                        ("FRP Domain", _d(vm.get("frp_domain"))),
+                        ("Escrow UID", _d(vm.get("escrow_uid"))),
                     ]
+                    # Seller credentials (root)
+                    if vm.get("root_password") or vm.get("root_ssh_commands"):
+                        cred_rows.append(("Root Password", _d(vm.get("root_password"))))
+                        if vm.get("root_ssh_commands"):
+                            cmds = vm["root_ssh_commands"]
+                            if isinstance(cmds, dict):
+                                for label, cmd in cmds.items():
+                                    cred_rows.append((f"SSH ({label})", str(cmd)))
+                            elif isinstance(cmds, list):
+                                for cmd in cmds:
+                                    cred_rows.append(("SSH Command", str(cmd)))
+                    # Buyer credentials (tenant)
+                    if vm.get("tenant_user") or vm.get("tenant_ssh_commands"):
+                        cred_rows.append(("Tenant User", _d(vm.get("tenant_user"))))
+                        cred_rows.append(("Tenant Password", _d(vm.get("tenant_password"))))
+                        if vm.get("tenant_ssh_commands"):
+                            cmds = vm["tenant_ssh_commands"]
+                            if isinstance(cmds, dict):
+                                for label, cmd in cmds.items():
+                                    cred_rows.append((f"SSH ({label})", str(cmd)))
+                            elif isinstance(cmds, list):
+                                for cmd in cmds:
+                                    cred_rows.append(("SSH Command", str(cmd)))
                     # Filter out rows where the value is "-"
                     cred_rows = [(k, v) for k, v in cred_rows if v != "-"]
                     if cred_rows:
@@ -364,13 +400,57 @@ def agent_thread(
         if price_val is not None:
             prices.append(f"R{rnd}: {price_val}")
 
-    agreed = data.get("agreed_price")
-    if agreed is not None:
-        prices.append(f"Agreed: {agreed}")
-
     console.print(rounds_table)
     if prices:
         console.print(Panel(" → ".join(prices), title="Price Progression", border_style="cyan"))
+
+
+@agent_app.command("balance")
+def agent_balance(
+    agent_url: str | None = typer.Option(
+        None, "--agent-url", "-a", help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+    address: str | None = typer.Option(
+        None, "--address", help="Wallet address to check (default: agent's own).",
+    ),
+    token: str | None = typer.Option(
+        None, "--token", "-t", help="Additional ERC20 contract address to query.",
+    ),
+) -> None:
+    """Show wallet balances (ETH + ERC20 tokens) via the running agent."""
+    base_url = _resolve_agent_url(agent_url)
+    params: dict[str, str] = {}
+    if address:
+        params["address"] = address
+    if token:
+        params["token"] = token
+    qs = urllib.parse.urlencode(params)
+    url = f"{base_url}/balance" + (f"?{qs}" if qs else "")
+
+    data = _fetch_json(url)
+    console = Console()
+
+    if data.get("error"):
+        typer.secho(f"Error: {data['error']}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    rows: list[tuple[str, str]] = [
+        ("Address", _d(data.get("address"))),
+        ("ETH Balance", f"{_d(data.get('eth_balance_human'))} ETH"),
+    ]
+
+    tokens = data.get("tokens", [])
+    for tk in tokens:
+        if tk.get("error"):
+            rows.append((f"Token {_shorten(_d(tk.get('address')), 20)}", f"[red]Error: {tk['error']}[/red]"))
+            continue
+        symbol = tk.get("symbol", "???")
+        human = tk.get("balance_human", "0")
+        contract = tk.get("address", "")
+        rows.append((f"{symbol} Balance", f"{human} {symbol}"))
+        rows.append((f"{symbol} Contract", _shorten(contract, 44)))
+
+    console.print(Panel(_detail_grid(rows), title="Wallet Balances", border_style="green"))
 
 
 @agent_app.command("decisions")

@@ -37,7 +37,7 @@ class ProvisioningJob(Base):
 
 
 class ProvisionedVM(Base):
-    __tablename__ = "provisioned_vms"
+    __tablename__ = "provisioned_vm_access"
 
     id = Column(String, primary_key=True)
     job_id = Column(String, nullable=False, index=True)
@@ -47,7 +47,9 @@ class ProvisionedVM(Base):
     vm_state = Column(String, nullable=True)
 
     # Marketplace context
-    order_id = Column(String, nullable=True, index=True)
+    seller_order_id = Column(String, nullable=True, index=True)
+    buyer_order_id = Column(String, nullable=True, index=True)
+    role = Column(String, nullable=False, index=True)  # 'seller' or 'buyer'
     seller_agent_id = Column(String, nullable=True, index=True)
     buyer_agent_id = Column(String, nullable=True, index=True)
     negotiation_id = Column(String, nullable=True, index=True)

@@ -204,39 +204,90 @@ def _build_result_payload(result: ProvisioningResult) -> dict:
 
 
 def _create_provisioned_vm_record(db: Session, job: ProvisioningJob, result_payload: dict) -> None:
-    """Create a ProvisionedVM record from a successful create job."""
+    """Create ProvisionedVM access records from a successful create job.
+
+    Creates two rows per VM — one for the seller (with root + tenant creds)
+    and one for the buyer (tenant creds only, root fields None).
+    If no buyer_agent_id is present (standalone VM), only the seller record is created.
+    """
     try:
         auth = result_payload.get("authentication", {}) or {}
         root_auth = auth.get("root", {}) or {}
         tenant_auth = auth.get("tenant", {}) or {}
         frp = result_payload.get("frp", {}) or {}
 
-        vm = ProvisionedVM(
+        # Common fields shared by both records
+        vm_name = result_payload.get("vm_name") or job.params.get("vm_target")
+        vm_host = result_payload.get("host") or job.params.get("vm_host")
+        seller_order_id = job.params.get("seller_order_id")
+        buyer_order_id = job.params.get("buyer_order_id")
+        seller_agent_id = job.params.get("seller_agent_id") or job.agent_id
+        buyer_agent_id = job.params.get("buyer_agent_id")
+        negotiation_id = job.params.get("negotiation_id")
+        escrow_uid = job.params.get("escrow_uid")
+        vm_ip_internal = result_payload.get("vm_ip_internal")
+        vm_state = result_payload.get("vm_state")
+        external_ssh_port = str(frp.get("remote_port", "")) if frp else None
+        frp_domain = frp.get("domain")
+
+        # Seller record: root + tenant credentials
+        seller_vm = ProvisionedVM(
             id=str(uuid.uuid4()),
             job_id=job.id,
-            vm_name=result_payload.get("vm_name") or job.params.get("vm_target"),
-            vm_host=result_payload.get("host") or job.params.get("vm_host"),
-            vm_ip_internal=result_payload.get("vm_ip_internal"),
-            vm_state=result_payload.get("vm_state"),
-            order_id=job.params.get("order_id"),
-            seller_agent_id=job.params.get("seller_agent_id") or job.agent_id,
-            buyer_agent_id=job.params.get("buyer_agent_id"),
-            negotiation_id=job.params.get("negotiation_id"),
-            escrow_uid=job.params.get("escrow_uid"),
+            vm_name=vm_name,
+            vm_host=vm_host,
+            vm_ip_internal=vm_ip_internal,
+            vm_state=vm_state,
+            seller_order_id=seller_order_id,
+            buyer_order_id=buyer_order_id,
+            role="seller",
+            seller_agent_id=seller_agent_id,
+            buyer_agent_id=buyer_agent_id,
+            negotiation_id=negotiation_id,
+            escrow_uid=escrow_uid,
             root_password=root_auth.get("password"),
             root_ssh_key_path=root_auth.get("ssh_key_path_host"),
             root_ssh_commands=root_auth.get("ssh_commands"),
             tenant_user=result_payload.get("tenant_user"),
             tenant_password=tenant_auth.get("password"),
             tenant_ssh_commands=tenant_auth.get("ssh_commands"),
-            external_ssh_port=str(frp.get("remote_port", "")) if frp else None,
-            frp_domain=frp.get("domain"),
+            external_ssh_port=external_ssh_port,
+            frp_domain=frp_domain,
         )
-        db.add(vm)
+        db.add(seller_vm)
+        logger.info("Created seller provisioned_vm_access record %s for job %s (vm=%s)", seller_vm.id, job.id, vm_name)
+
+        # Buyer record: tenant credentials only (root fields None)
+        if buyer_agent_id:
+            buyer_vm = ProvisionedVM(
+                id=str(uuid.uuid4()),
+                job_id=job.id,
+                vm_name=vm_name,
+                vm_host=vm_host,
+                vm_ip_internal=vm_ip_internal,
+                vm_state=vm_state,
+                seller_order_id=seller_order_id,
+                buyer_order_id=buyer_order_id,
+                role="buyer",
+                seller_agent_id=seller_agent_id,
+                buyer_agent_id=buyer_agent_id,
+                negotiation_id=negotiation_id,
+                escrow_uid=escrow_uid,
+                root_password=None,
+                root_ssh_key_path=None,
+                root_ssh_commands=None,
+                tenant_user=result_payload.get("tenant_user"),
+                tenant_password=tenant_auth.get("password"),
+                tenant_ssh_commands=tenant_auth.get("ssh_commands"),
+                external_ssh_port=external_ssh_port,
+                frp_domain=frp_domain,
+            )
+            db.add(buyer_vm)
+            logger.info("Created buyer provisioned_vm_access record %s for job %s (vm=%s)", buyer_vm.id, job.id, vm_name)
+
         db.commit()
-        logger.info("Created provisioned_vm record %s for job %s (vm=%s)", vm.id, job.id, vm.vm_name)
     except Exception as exc:
-        logger.warning("Failed to create provisioned_vm record for job %s: %s", job.id, exc)
+        logger.warning("Failed to create provisioned_vm_access records for job %s: %s", job.id, exc)
         db.rollback()
 
 

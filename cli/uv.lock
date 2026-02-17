@@ -79,6 +79,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
+
 [[package]]
 name = "mdurl"
 version = "0.1.2"

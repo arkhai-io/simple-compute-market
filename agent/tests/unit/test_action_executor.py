@@ -376,7 +376,7 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
     db_path = str(tmp_path / "agent.db")
     sqlite_client = SQLiteClient(db_path=db_path)
 
-    async def fake_provision_machine(_ssh_public_key: str) -> dict:
+    async def fake_provision_machine(_ssh_public_key: str, **_kwargs) -> dict:
         return {
             "ssh_command": "ssh user@host.example.net",
             "tenant_user": "user",

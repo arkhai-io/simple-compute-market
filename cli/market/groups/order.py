@@ -241,6 +241,12 @@ def order_match(
         "-t",
         help="Order duration in hours (default: from target order or 1).",
     ),
+    price: float | None = typer.Option(
+        None,
+        "--price",
+        "-p",
+        help="Override token amount on the flipped order.",
+    ),
 ) -> None:
     """Match an existing order by flipping offer/demand and creating a new order."""
     if not order_id.strip():
@@ -267,6 +273,13 @@ def order_match(
             raise typer.BadParameter("duration-hours must be an integer")
     if duration < 1:
         raise typer.BadParameter("duration-hours must be >= 1")
+
+    if price is not None:
+        # Override the token amount on whichever side is the token resource
+        if "token" in offer_resource:
+            offer_resource["amount"] = price
+        elif "token" in demand_resource:
+            demand_resource["amount"] = price
 
     payload = {
         "offer": offer_resource,
@@ -443,7 +456,7 @@ def _fetch_json(url: str) -> dict:
         raise typer.Exit(code=1)
 
 
-def _post_json(url: str, payload: dict) -> dict:
+def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:
     try:
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
@@ -452,7 +465,7 @@ def _post_json(url: str, payload: dict) -> dict:
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8") if exc.fp else str(exc)
