@@ -558,6 +558,12 @@ def order_list(
 @order_app.command("show")
 def order_show(
     order_id: str = typer.Argument(..., help="Order ID"),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file for local DB lookup (reads AGENT_DB_PATH).",
+    ),
     registry_url: str = typer.Option(
         None,
         "--registry-url",
@@ -566,6 +572,71 @@ def order_show(
     ),
 ) -> None:
     """Show a single order by ID."""
+    if env:
+        env_path = Path(env)
+        db_path = _read_env_value(env_path, "AGENT_DB_PATH")
+        if not db_path:
+            typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        if not Path(db_path).exists():
+            typer.secho(f"No local order database found at {db_path}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource
+                    FROM orders
+                    WHERE order_id = ?
+                    LIMIT 1
+                    """,
+                    (order_id,),
+                )
+                row = cur.fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:
+            typer.secho(f"Failed to read local orders: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+        if not row:
+            typer.secho(f"Order not found in local DB: {order_id}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+
+        (
+            local_order_id,
+            status,
+            created_at,
+            updated_at,
+            offer_resource,
+            demand_resource,
+            fulfillment_resource,
+        ) = row
+        offer_parsed = _parse_db_resource(offer_resource)
+        demand_parsed = _parse_db_resource(demand_resource)
+        fulfillment_parsed = _parse_db_resource(fulfillment_resource)
+
+        console = Console()
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold", no_wrap=True)
+        table.add_column()
+        table.add_row("Order ID", str(local_order_id or "-"))
+        table.add_row("Status", str(status or "-"))
+        table.add_row("Created", _short_ts(created_at))
+        table.add_row("Updated", _short_ts(updated_at))
+        table.add_row("Offer", _format_resource(offer_parsed) if offer_parsed is not None else "-")
+        table.add_row("Demand", _format_resource(demand_parsed) if demand_parsed is not None else "-")
+        table.add_row("Fulfillment", _format_resource_full(fulfillment_parsed))
+
+        console.print(Panel(table, title="Market Order (Agent DB)", border_style="blue"))
+        return
+
     base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
     base_url = _normalize_registry_url(base_url)
     url = f"{base_url}/orders/{order_id}"
