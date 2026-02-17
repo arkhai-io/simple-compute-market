@@ -285,6 +285,57 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_find)
 
+    async def find_latest_order_by_matched_offer_id(
+        self,
+        *,
+        matched_offer_id: str,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find the most recently updated local order linked to a remote matched offer ID."""
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                if order_maker:
+                    cur.execute(
+                        """
+                        SELECT order_id, status, order_maker, order_taker, matched_offer_id, escrow_uid, updated_at, created_at
+                        FROM orders
+                        WHERE matched_offer_id = ? AND order_maker = ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (matched_offer_id, order_maker),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT order_id, status, order_maker, order_taker, matched_offer_id, escrow_uid, updated_at, created_at
+                        FROM orders
+                        WHERE matched_offer_id = ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT 1
+                        """,
+                        (matched_offer_id,),
+                    )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "order_id": row[0],
+                    "status": row[1],
+                    "order_maker": row[2],
+                    "order_taker": row[3],
+                    "matched_offer_id": row[4],
+                    "escrow_uid": row[5],
+                    "updated_at": row[6],
+                    "created_at": row[7],
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_find)
+
     async def upsert_order(
         self,
         *,

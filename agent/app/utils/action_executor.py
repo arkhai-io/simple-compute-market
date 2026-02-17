@@ -1037,6 +1037,7 @@ async def _complete_accept_offer(
     order_id = order_dict.get("order_id")
     our_order_id = parameters.get("our_order_id")
     their_order_id = parameters.get("their_order_id")
+    remote_order_id = their_order_id or order_id
     negotiation_id = parameters.get("negotiation_id")
 
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
@@ -1068,7 +1069,7 @@ async def _complete_accept_offer(
                 order_taker=order_taker,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
-                matched_offer_id=their_order_id,
+                matched_offer_id=remote_order_id,
             )
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
@@ -1112,7 +1113,7 @@ async def _complete_accept_offer(
         result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
         return {
             "status": "sent",
-            "message": "Offer accepted and forwarded to counterparty",
+            "message": "Offer matched and accepted.",
             "escrow_uid": escrow_uid,
             "offer": order_dict,
             "remote_response": getattr(result, "content", None),
@@ -1850,17 +1851,62 @@ async def fulfill_compute_obligation(
         except Exception as e:
             logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
 
-    if order_id:
-        try:
-            sqlite_client = get_sqlite_client()
+    try:
+        sqlite_client = get_sqlite_client()
+        logger.info(f"[LOCAL DB] Updating order fulfillment for escrow_uid {escrow_uid} and order_id {order_id} with connection details {connection_details}")
+        if escrow_uid:
+            # Escrow UID is the stable cross-party link; update local seller order through it first.
+            logger.info(f"[LOCAL DB] Updating order by escrow_uid {escrow_uid} with fulfillment details and connection string {connection_details}")
+            await sqlite_client.update_order_by_escrow_uid(
+                escrow_uid=escrow_uid,
+                status="accepted",
+                fulfillment_resource=connection_details,
+                maker_attestation=maker_attestation,
+            )
+
+        local_order_id: str | None = None
+        if order_id:
+            maybe_local = await sqlite_client.load_order(order_id=order_id)
+            if maybe_local:
+                local_order_id = order_id
+
+        if not local_order_id and order_id:
+            matched_local = await sqlite_client.find_latest_order_by_matched_offer_id(
+                matched_offer_id=order_id,
+                order_maker=BASE_URL_OVERRIDE,
+            )
+            if matched_local:
+                local_order_id = matched_local.get("order_id")
+
+        if not local_order_id and escrow_uid:
+            escrow_orders = await sqlite_client.load_orders_by_escrow_uid(escrow_uid=escrow_uid)
+            if escrow_orders:
+                maker_scoped = [o for o in escrow_orders if _agent_urls_match(o.get("order_maker"), BASE_URL_OVERRIDE)]
+                candidates = maker_scoped or escrow_orders
+                local_order_id = candidates[0].get("order_id")
+
+        if local_order_id:
+            logger.info(f"[LOCAL DB] Updating local seller order {local_order_id} with fulfillment details and connection string {connection_details}")
             await sqlite_client.update_order(
-                order_id=order_id,
+                order_id=local_order_id,
+                status="accepted",
                 maker_attestation=maker_attestation,
                 fulfillment_resource=connection_details,
                 escrow_uid=escrow_uid,
             )
-        except Exception as exc:
-            logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+        else:
+            logger.warning(
+                "[LOCAL DB] Could not resolve local seller order for fulfillment (incoming_order_id=%s, escrow_uid=%s)",
+                order_id,
+                escrow_uid,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[LOCAL DB] Failed to update fulfillment for escrow %s / order %s: %s",
+            escrow_uid,
+            order_id,
+            exc,
+        )
 
     return {
         "status": "fulfilled",
