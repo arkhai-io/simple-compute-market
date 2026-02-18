@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import json
 import textwrap
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -12,11 +13,154 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.live import Live
+from rich.spinner import Spinner
 from rich import box
 
 from ..common import REPO_ROOT
 
 order_app = typer.Typer(no_args_is_help=True)
+
+
+def _format_neg_price(raw: int | None, decimals: int) -> str:
+    """Convert base-unit integer price to human-readable string."""
+    if raw is None:
+        return "-"
+    from decimal import Decimal
+
+    return str((Decimal(raw) / Decimal(10) ** decimals).normalize())
+
+
+def _render_negotiation(negotiation: dict, decimals: int) -> Panel:
+    """Build a Rich Panel showing negotiation rounds."""
+    status = negotiation.get("status", "active")
+    terminal_state = negotiation.get("terminal_state", "")
+    if status in ("completed", "agreed") or terminal_state == "success":
+        border = "green"
+    elif status in ("failed", "timeout", "rejected") or terminal_state in ("failed", "timeout", "rejected"):
+        border = "red"
+    else:
+        border = "yellow"
+
+    messages = negotiation.get("messages", [])
+
+    if not messages:
+        return Panel("Waiting for response…", title=f"Negotiation ({status})", border_style=border)
+
+    table = Table(box=box.SIMPLE, expand=True, padding=(0, 1))
+    table.add_column("Round", justify="right", style="bold")
+    table.add_column("Ours", justify="right")
+    table.add_column("Theirs", justify="right")
+    table.add_column("Action")
+    table.add_column("Proposed", justify="right")
+
+    for msg in messages:
+        table.add_row(
+            str(msg.get("round", "-")),
+            _format_neg_price(msg.get("our_price"), decimals),
+            _format_neg_price(msg.get("their_price"), decimals),
+            str(msg.get("action_taken", "-")),
+            _format_neg_price(msg.get("proposed_price"), decimals),
+        )
+
+    return Panel(table, title=f"Negotiation ({status})", border_style=border)
+
+
+def _poll_activity(
+    base_url: str,
+    event_id: str,
+    timeout: int = 300,
+    interval: int = 3,
+    order_id: str | None = None,
+    token_decimals: int = 2,
+) -> dict:
+    """Poll GET /activities/{event_id} until completed or failed."""
+    from rich.console import Group
+
+    console = Console()
+    deadline = time.monotonic() + timeout
+    url = f"{base_url}/activities/{event_id}"
+    negotiation_id: str | None = None
+
+    with Live(Spinner("dots", text=f"Processing {event_id}..."), console=console, refresh_per_second=4) as live:
+        while time.monotonic() < deadline:
+            try:
+                activity = _fetch_json(url)
+            except SystemExit:
+                # _fetch_json calls typer.Exit on error; treat as transient
+                time.sleep(interval)
+                continue
+
+            status = activity.get("status", "")
+            if status in ("completed", "failed"):
+                return activity
+
+            # Poll negotiation progress if order_id provided
+            neg_panel = None
+            if order_id:
+                if negotiation_id is None:
+                    neg_list = _try_fetch_json(f"{base_url}/negotiations?order_id={order_id}")
+                    if neg_list and neg_list.get("negotiations"):
+                        negotiation_id = neg_list["negotiations"][0].get("negotiation_id")
+                if negotiation_id is not None:
+                    neg_detail = _try_fetch_json(f"{base_url}/negotiations/{negotiation_id}")
+                    if neg_detail:
+                        round_count = neg_detail.get("round_count", len(neg_detail.get("messages", [])))
+                        neg_panel = _render_negotiation(neg_detail, token_decimals)
+
+            if neg_panel is not None:
+                spinner_text = f"Negotiating… Round {round_count}"
+                live.update(Group(Spinner("dots", text=spinner_text), neg_panel))
+            else:
+                live.update(Spinner("dots", text=f"Processing {event_id}..."))
+
+            time.sleep(interval)
+
+    return {"status": "timeout", "event_id": event_id, "error": f"Timed out after {timeout}s"}
+
+
+def _display_activity_result(activity: dict, title: str = "Result") -> None:
+    """Display the final activity result panel."""
+    console = Console()
+    status = activity.get("status", "-")
+    border = "green" if status == "completed" else "red"
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Status", status)
+    table.add_row("Event ID", str(activity.get("event_id", "-")))
+    if activity.get("order_id"):
+        table.add_row("Order ID", str(activity["order_id"]))
+    if activity.get("summary"):
+        table.add_row("Summary", str(activity["summary"]))
+    if activity.get("error"):
+        table.add_row("Error", str(activity["error"]))
+    console.print(Panel(table, title=title, border_style=border))
+
+
+def _show_queued_panel(
+    console: Console,
+    event_id: str | None,
+    title: str = "Order Submitted",
+    order_id: str | None = None,
+) -> None:
+    """Display the queued status panel with query instructions."""
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold", no_wrap=True)
+    table.add_column()
+    table.add_row("Status", "[yellow]queued[/yellow]")
+    if order_id:
+        table.add_row("Order ID", order_id)
+    table.add_row("Event ID", str(event_id or "-"))
+    console.print(Panel(table, title=title, border_style="yellow"))
+
+    if event_id:
+        console.print()
+        console.print("[bold]Query commands:[/bold]")
+        console.print(f"  [dim]Check this activity:[/dim]   market agent activity {event_id}")
+        console.print(f"  [dim]List all activities:[/dim]   market agent activities")
+        console.print(f"  [dim]Wait for completion:[/dim]   re-run with [bold]--wait[/bold]")
+        console.print()
 
 
 @order_app.command("create")
@@ -45,6 +189,12 @@ def order_create(
         "-t",
         help="Order duration in hours (default: 1).",
     ),
+    wait: bool = typer.Option(
+        False,
+        "--wait",
+        "-w",
+        help="Wait for the order to be processed (poll for completion).",
+    ),
 ) -> None:
     """Create a new order via the Agent endpoint."""
     base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
@@ -71,27 +221,28 @@ def order_create(
     response = _post_json(url, payload)
 
     console = Console()
+    event_id = response.get("event_id")
+
+    if response.get("status") == "queued" and not wait:
+        _show_queued_panel(console, event_id, title="Order Submitted")
+        return
+
+    if response.get("status") == "queued" and wait and event_id:
+        activity = _poll_activity(base_url, event_id)
+        _display_activity_result(activity, title="Order Create")
+        return
+
+    # Fallback: display raw response
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
     table.add_row("Status", str(response.get("status", "-")))
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
+    if event_id:
+        table.add_row("Event ID", str(event_id))
     if "order_id" in response:
         table.add_row("Order ID", str(response.get("order_id")))
     if "root_agent_response" in response:
         table.add_row("Agent", str(response.get("root_agent_response")))
-    order_request = response.get("order_request")
-    if isinstance(order_request, dict):
-        offer_req = order_request.get("offer")
-        demand_req = order_request.get("demand")
-        if offer_req is not None:
-            table.add_row("Offer", _format_resource(offer_req))
-        if demand_req is not None:
-            table.add_row("Demand", _format_resource(demand_req))
-        if "duration_hours" in order_request:
-            table.add_row("Duration (h)", str(order_request.get("duration_hours")))
-
     console.print(Panel(table, title="Order Create", border_style="green"))
 
 
@@ -107,6 +258,12 @@ def order_close(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    wait: bool = typer.Option(
+        False,
+        "--wait",
+        "-w",
+        help="Wait for the close to be processed (poll for completion).",
+    ),
 ) -> None:
     """Close an order via the Agent endpoint."""
     base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
@@ -119,16 +276,27 @@ def order_close(
     response = _post_json(url, payload)
 
     console = Console()
+    event_id = response.get("event_id")
+
+    if response.get("status") == "queued" and not wait:
+        _show_queued_panel(console, event_id, title="Order Close Submitted", order_id=order_id)
+        return
+
+    if response.get("status") == "queued" and wait and event_id:
+        activity = _poll_activity(base_url, event_id)
+        _display_activity_result(activity, title="Order Close")
+        return
+
+    # Fallback: display raw response
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
     table.add_row("Status", str(response.get("status", "-")))
     table.add_row("Order ID", order_id)
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
+    if event_id:
+        table.add_row("Event ID", str(event_id))
     if "root_agent_response" in response:
         table.add_row("Agent", str(response.get("root_agent_response")))
-
     console.print(Panel(table, title="Order Close", border_style="green"))
 
 
@@ -247,6 +415,12 @@ def order_match(
         "-p",
         help="Override token amount on the flipped order.",
     ),
+    wait: bool = typer.Option(
+        False,
+        "--wait",
+        "-w",
+        help="Wait for the match to be processed (poll for completion).",
+    ),
 ) -> None:
     """Match an existing order by flipping offer/demand and creating a new order."""
     if not order_id.strip():
@@ -293,17 +467,39 @@ def order_match(
     response = _post_json(create_url, payload)
 
     console = Console()
+    event_id = response.get("event_id")
+
+    if response.get("status") == "queued" and not wait:
+        _show_queued_panel(console, event_id, title="Order Match Submitted")
+        return
+
+    if response.get("status") == "queued" and wait and event_id:
+        # Extract token decimals from the target order for price formatting
+        token_decimals = 2
+        for res in (offer_resource, demand_resource):
+            token_info = res.get("token") if isinstance(res, dict) else None
+            if isinstance(token_info, dict) and "decimals" in token_info:
+                try:
+                    token_decimals = int(token_info["decimals"])
+                except (TypeError, ValueError):
+                    pass
+                break
+
+        activity = _poll_activity(base_agent_url, event_id, order_id=order_id, token_decimals=token_decimals)
+        _display_activity_result(activity, title="Order Match")
+        return
+
+    # Fallback: display raw response
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
     table.add_row("Status", str(response.get("status", "-")))
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
+    if event_id:
+        table.add_row("Event ID", str(event_id))
     if "order_id" in response:
         table.add_row("Order ID", str(response.get("order_id")))
     if "root_agent_response" in response:
         table.add_row("Agent", str(response.get("root_agent_response")))
-
     console.print(Panel(table, title="Order Match", border_style="green"))
 
 
@@ -454,6 +650,16 @@ def _fetch_json(url: str) -> dict:
     except Exception as exc:
         typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+
+def _try_fetch_json(url: str) -> dict | None:
+    """Non-throwing variant of _fetch_json — returns None on any error."""
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
 
 
 def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:

@@ -90,16 +90,9 @@ def queue_event(payload: dict[str, Any]) -> bool:
     
     normalized = normalize_event_payload(payload)
     
-    if CONFIG.enable_event_queue:
-        queue = get_event_queue()
-        queue.append(normalized)
-        logger.info(f"[QUEUE] Event queued: {normalized.get('event_id')} ({normalized.get('event_type')})")
-    else:
-        # Process inline if queue disabled
-        logger.info(f"[INGEST] Processing event inline: {normalized.get('event_id')} ({normalized.get('event_type')})")
-        # This will be handled by the caller
-        return True
-    
+    queue = get_event_queue()
+    queue.append(normalized)
+    logger.info(f"[QUEUE] Event queued: {normalized.get('event_id')} ({normalized.get('event_type')})")
     return True
 
 
@@ -188,9 +181,6 @@ async def stop_redis_subscriber() -> None:
 
 def pop_event() -> Optional[dict[str, Any]]:
     """Pop an event from the queue if available."""
-    if not CONFIG.enable_event_queue:
-        return None
-    
     queue = get_event_queue()
     if queue:
         return queue.popleft()
@@ -199,8 +189,6 @@ def pop_event() -> Optional[dict[str, Any]]:
 
 def has_queued_events() -> bool:
     """Check if there are events in the queue."""
-    if not CONFIG.enable_event_queue:
-        return False
     queue = get_event_queue()
     return len(queue) > 0
 

@@ -553,3 +553,156 @@ def agent_decision(
         if outcome_ts:
             out_display += f"\n\nOutcome timestamp: {_short_ts(outcome_ts)}"
         console.print(Panel(out_display, title="Outcome", border_style="green"))
+
+
+# ---------------------------------------------------------------------------
+# Activity log commands
+# ---------------------------------------------------------------------------
+
+_ACTIVITY_STATUS_STYLES = {
+    "queued": "yellow", "processing": "cyan",
+    "completed": "green", "failed": "red",
+}
+
+
+@agent_app.command("identity")
+def agent_identity(
+    agent_url: str | None = typer.Option(
+        None, "--agent-url", "-a", help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+) -> None:
+    """Show agent identity in EIP-8004 canonical format."""
+    base_url = _resolve_agent_url(agent_url)
+    data = _fetch_json(f"{base_url}/.well-known/erc-8004-registration.json")
+
+    console = Console()
+
+    # Extract registrations to build the canonical ID
+    registrations = data.get("registrations", [])
+    canonical_id = None
+    agent_registry = None
+    numeric_id = None
+    if registrations:
+        reg = registrations[0]
+        numeric_id = reg.get("agentId")
+        agent_registry = reg.get("agentRegistry")
+        if agent_registry is not None and numeric_id is not None:
+            canonical_id = f"{agent_registry}:{numeric_id}"
+
+    # Extract A2A endpoint
+    endpoints = data.get("endpoints", [])
+    a2a_url = endpoints[0].get("endpoint") if endpoints else None
+
+    rows = [
+        ("Canonical ID", _d(canonical_id)),
+        ("Name", _d(data.get("name"))),
+        ("Description", _d(data.get("description"))),
+        ("Agent Registry", _d(agent_registry)),
+        ("Token ID", _d(numeric_id)),
+        ("A2A Endpoint", _d(a2a_url)),
+        ("Base URL", base_url),
+    ]
+    console.print(Panel(_detail_grid(rows), title="Agent Identity", border_style="blue"))
+
+    if canonical_id:
+        console.print(f"\n  [bold]{canonical_id}[/bold]\n")
+
+
+@agent_app.command("activities")
+def agent_activities(
+    status: str | None = typer.Option(
+        None, "--status", "-s",
+        help="Filter by status (queued, processing, completed, failed).",
+    ),
+    event_type: str | None = typer.Option(
+        None, "--event-type", "-t", help="Filter by event type (order_create, order_close, resource_imbalance).",
+    ),
+    limit: int = typer.Option(20, "--limit", "-l", help="Maximum activities to show."),
+    agent_url: str | None = typer.Option(
+        None, "--agent-url", "-a", help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+) -> None:
+    """List activity log entries from the running agent API."""
+    base_url = _resolve_agent_url(agent_url)
+    params: dict[str, str] = {}
+    if status:
+        params["status"] = status
+    if event_type:
+        params["event_type"] = event_type
+    if limit:
+        params["limit"] = str(limit)
+    qs = urllib.parse.urlencode(params)
+    data = _fetch_json(f"{base_url}/activities" + (f"?{qs}" if qs else ""))
+    activities = data.get("activities", [])
+
+    if not activities:
+        Console().print("[dim]No activities found.[/dim]")
+        return
+
+    console = Console()
+    table = Table(title="Activities", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Event ID", style="bold", overflow="fold")
+    table.add_column("Type")
+    table.add_column("Status")
+    table.add_column("Order ID", overflow="fold")
+    table.add_column("Summary")
+    table.add_column("Created", justify="right")
+
+    for a in activities:
+        table.add_row(
+            _d(a.get("event_id")),
+            _d(a.get("event_type")),
+            _styled(a.get("status"), _ACTIVITY_STATUS_STYLES),
+            _shorten(_d(a.get("order_id")), 32),
+            _shorten(_d(a.get("summary")), 50),
+            _short_ts(a.get("created_at")),
+        )
+    console.print(table)
+
+
+@agent_app.command("activity")
+def agent_activity(
+    event_id: str = typer.Argument(..., help="Activity event ID to inspect."),
+    agent_url: str | None = typer.Option(
+        None, "--agent-url", "-a", help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+) -> None:
+    """Show activity detail with related order information."""
+    base_url = _resolve_agent_url(agent_url)
+    data = _fetch_json(f"{base_url}/activities/{event_id}")
+
+    if data.get("error"):
+        typer.secho(f"Activity {event_id} not found.", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    console = Console()
+    console.print(Panel(
+        _detail_grid([
+            ("Event ID", _d(data.get("event_id"))),
+            ("Event Type", _d(data.get("event_type"))),
+            ("Status", _styled(data.get("status"), _ACTIVITY_STATUS_STYLES)),
+            ("Order ID", _d(data.get("order_id"))),
+            ("Summary", _d(data.get("summary"))),
+            ("Error", _d(data.get("error"))),
+            ("Created", _short_ts(data.get("created_at"))),
+            ("Updated", _short_ts(data.get("updated_at"))),
+        ]),
+        title="Activity Detail", border_style="blue",
+    ))
+
+    # Show related order panel if available
+    order = data.get("order")
+    if isinstance(order, dict):
+        order_rows = [
+            ("Order ID", _d(order.get("order_id"))),
+            ("Agent ID", _d(order.get("agent_id"))),
+            ("Maker", _d(order.get("order_maker"))),
+            ("Taker", _d(order.get("order_taker"))),
+            ("Status", _d(order.get("status"))),
+            ("Offer", _format_resource(order.get("offer_resource", {}))),
+            ("Demand", _format_resource(order.get("demand_resource", {}))),
+            ("Escrow UID", _d(order.get("escrow_uid"))),
+            ("Created", _short_ts(order.get("created_at"))),
+            ("Updated", _short_ts(order.get("updated_at"))),
+        ]
+        console.print(Panel(_detail_grid(order_rows), title="Related Order", border_style="green"))

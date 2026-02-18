@@ -99,6 +99,7 @@ from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
 from .utils.provisioning_client import get_vm_available_resources
 from pydantic import PrivateAttr
+import time as _time
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
@@ -465,6 +466,8 @@ class TraderAgent(BaseAgent):
     _market_provider: MarketProvider = PrivateAttr()
     _alkahest_client: Any = PrivateAttr()
     _last_action_outcomes: dict[str, dict] = PrivateAttr()
+    _portfolio_cache: dict | None = PrivateAttr(default=None)
+    _portfolio_cache_ts: float = PrivateAttr(default=0.0)
 
     def __init__(
         self,
@@ -553,9 +556,16 @@ class TraderAgent(BaseAgent):
     async def get_resource_portfolio(self) -> dict:
         """Get current resource portfolio, querying live host data if available.
 
+        Uses a 30-second TTL cache to avoid redundant provisioning calls
+        during the same event processing cycle (context building + action execution).
+
         Returns:
             A dictionary representing the current portfolio stock.
         """
+        # Return cached result if still fresh (30s TTL)
+        if self._portfolio_cache is not None and (_time.monotonic() - self._portfolio_cache_ts) < 30:
+            return self._portfolio_cache
+
         if not CONFIG.use_mock_provisioning:
             try:
                 from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
@@ -592,11 +602,17 @@ class TraderAgent(BaseAgent):
                         available.get("vcpus", 0),
                         available.get("ram_mb", 0),
                     )
-                    return live_portfolio.model_dump()
+                    portfolio = live_portfolio.model_dump()
+                    self._portfolio_cache = portfolio
+                    self._portfolio_cache_ts = _time.monotonic()
+                    return portfolio
             except Exception as e:
                 logger.warning("[PORTFOLIO] Failed to query live resources, using fallback: %s", e)
         # Fallback to static portfolio
-        return self.resource_portfolio.model_dump()
+        portfolio = self.resource_portfolio.model_dump()
+        self._portfolio_cache = portfolio
+        self._portfolio_cache_ts = _time.monotonic()
+        return portfolio
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
         """Build domain context from ADK Event, converting to DomainEvent.
@@ -898,62 +914,14 @@ async def _run_alert_conversation(alert_request: ResourceAlertRequest) -> str:
         source=ALERTS_USER_ID,
     )
     
-    # Validate and queue event if enabled
-    if CONFIG.enable_event_queue:
-        queue_event(resource_event.model_dump(mode='json'))
-        return "Alert processing queued."
-    
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=ALERTS_APP_NAME,
-        user_id=ALERTS_USER_ID,
-    )
-    runner = Runner(
-        agent=root_agent,
-        app_name=ALERTS_APP_NAME,
-        session_service=session_service,
-    )
+    # Always queue - process asynchronously
+    queue_event(resource_event.model_dump(mode='json'))
 
-    # Convert ResourceImbalanceEvent to function response format
-    alert_payload = {
-        "event_type": EventType.RESOURCE_IMBALANCE.value,
-        "event_id": resource_event.event_id,
-        "source": resource_event.source,
-        "data": resource_event.model_dump(mode='json'),
-    }
-    
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="get_alert",
-                response=alert_payload
-            )
-        ],
-    )
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    await db.create_activity(event_id=resource_event.event_id, event_type="resource_imbalance")
 
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=ALERTS_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the resource alert.",
-        )
-    return final_response
+    return "Alert processing queued."
 
 
 async def handle_resource_alert(request: Request) -> JSONResponse:
@@ -1141,71 +1109,17 @@ async def _run_create_order_flow(request: Request) -> dict:
         },
     )
 
-    if CONFIG.enable_event_queue:
-        queue_event(order_create_event.model_dump(mode="json"))
-        return {
-            "status": "queued",
-            "event_id": event_id,
-            "order_request": order_create_event.model_dump(mode="json"),
-        }
+    queue_event(order_create_event.model_dump(mode="json"))
 
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=AGENT_REST_API_APP_NAME,
-        user_id=AGENT_REST_API_USER_ID,
-    )
-    runner = Runner(
-        agent=root_agent,
-        app_name=AGENT_REST_API_APP_NAME,
-        session_service=session_service,
-    )
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    await db.create_activity(event_id=event_id, event_type="order_create")
 
-    event_payload = order_create_event.model_dump(mode="json")
-
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="create_order",
-                response=event_payload
-            )
-        ],
-    )
-
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=AGENT_REST_API_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the order creation request.",
-        )
-
-    outcome = root_agent._last_action_outcomes.pop(event_id, None)
-    order_id = _extract_order_id(outcome)
-
-    response_payload = {
-        "status": "created",
+    return {
+        "status": "queued",
         "event_id": event_id,
         "order_request": order_create_event.model_dump(mode="json"),
-        "root_agent_response": final_response,
     }
-    if order_id:
-        response_payload["order_id"] = order_id
-    return response_payload
 
 async def _run_close_order_flow(request: Request) -> dict:
     """
@@ -1233,64 +1147,16 @@ async def _run_close_order_flow(request: Request) -> dict:
         data={"order_id": order_id},
     )
 
-    if CONFIG.enable_event_queue:
-        queue_event(order_close_event.model_dump(mode="json"))
-        return {
-            "status": "queued",
-            "event_id": event_id,
-            "order_request": order_close_event.model_dump(mode="json"),
-        }
+    queue_event(order_close_event.model_dump(mode="json"))
 
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=AGENT_REST_API_APP_NAME,
-        user_id=AGENT_REST_API_USER_ID,
-    )
-    runner = Runner(
-        agent=root_agent,
-        app_name=AGENT_REST_API_APP_NAME,
-        session_service=session_service,
-    )
-
-    event_payload = order_close_event.model_dump(mode="json")
-
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="close_order",
-                response=event_payload
-            )
-        ],
-    )
-
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=AGENT_REST_API_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the order close request.",
-        )
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    await db.create_activity(event_id=event_id, event_type="order_close")
 
     return {
-        "status": "closed",
+        "status": "queued",
         "event_id": event_id,
         "order_request": order_close_event.model_dump(mode="json"),
-        "root_agent_response": final_response,
     }
 
 async def create_market_order_endpoint(request: Request) -> JSONResponse:
@@ -1619,6 +1485,51 @@ async def get_balance_endpoint(request: Request) -> JSONResponse:
 
 agent_get_balance_route = Route("/balance", get_balance_endpoint, methods=["GET"])
 
+
+# ---------------------------------------------------------------------------
+# Activity log endpoints
+# ---------------------------------------------------------------------------
+
+async def list_activities_endpoint(request: Request) -> JSONResponse:
+    """List activity log entries with optional filtering."""
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    status_filter = request.query_params.get("status")
+    event_type = request.query_params.get("event_type")
+    limit = int(request.query_params.get("limit", "20"))
+    activities = await db.list_activities(
+        status=status_filter, event_type=event_type, limit=limit,
+    )
+    return JSONResponse({"activities": activities, "total": len(activities)})
+
+
+async def get_activity_endpoint(request: Request) -> JSONResponse:
+    """Get a single activity, enriched with related order data if available."""
+    from app.utils.sqlite_client import get_sqlite_client
+    event_id = request.path_params["event_id"]
+    db = get_sqlite_client()
+    activity = await db.get_activity(event_id=event_id)
+    if not activity:
+        return JSONResponse({"error": "Activity not found"}, status_code=404)
+
+    # Enrich with related order data when order_id is populated
+    if activity.get("order_id"):
+        order = await db.get_order(order_id=activity["order_id"])
+        if order:
+            for field in ("offer_resource", "demand_resource", "fulfillment_resource"):
+                if isinstance(order.get(field), str):
+                    try:
+                        order[field] = json.loads(order[field])
+                    except Exception:
+                        pass
+            activity["order"] = order
+
+    return JSONResponse(activity)
+
+
+agent_list_activities_route = Route("/activities", list_activities_endpoint, methods=["GET"])
+agent_get_activity_route = Route("/activities/{event_id}", get_activity_endpoint, methods=["GET"])
+
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
 # Add the alert route to the A2A app
@@ -1637,6 +1548,9 @@ a2a_app.routes.append(agent_get_negotiation_route)
 a2a_app.routes.append(agent_get_attestation_route)
 # Add balance route
 a2a_app.routes.append(agent_get_balance_route)
+# Add activity log routes
+a2a_app.routes.append(agent_list_activities_route)
+a2a_app.routes.append(agent_get_activity_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
@@ -1690,20 +1604,70 @@ a2a_app.routes.append(registration_file_route)
 
 
 # Background task to process queued events
-# TODO Refactor this to run through _run_async_impl for it to have access to ctx
+QUEUE_APP_NAME = "queue_processor"
+QUEUE_USER_ID = "queue"
+
+
+def _create_queue_invocation_context() -> InvocationContext:
+    """Create a synthetic InvocationContext for queue-processed events.
+
+    The queue processor needs an InvocationContext so that action executors
+    (make_offer, accept_offer, etc.) can create Event objects and send A2A
+    messages to remote agents.
+    """
+    session_service = InMemorySessionService()
+    session = session_service.create_session_sync(
+        app_name=QUEUE_APP_NAME,
+        user_id=QUEUE_USER_ID,
+    )
+    return InvocationContext(
+        invocation_id=str(uuid.uuid4()),
+        session_service=session_service,
+        session=session,
+        agent=root_agent,
+    )
+
+
 async def process_queued_events():
     """Background task to process events from queue."""
+    from app.utils.sqlite_client import get_sqlite_client
+
     while True:
         try:
             if has_queued_events():
                 event_payload = pop_event()
                 if event_payload:
+                    event_id = event_payload.get("event_id", "unknown")
+                    db = get_sqlite_client()
                     try:
+                        await db.update_activity(event_id=event_id, status="processing")
                         domain_event = _parse_domain_event(event_payload)
-                        await root_agent._process_event_with_pipeline(domain_event)
+                        ctx = _create_queue_invocation_context()
+                        await root_agent._process_event_with_pipeline(domain_event, ctx=ctx)
+
+                        # Extract order_id from action outcomes if available
+                        outcome = root_agent._last_action_outcomes.pop(domain_event.event_id, None)
+                        order_id = _extract_order_id(outcome)
+
+                        summary_parts = [f"Processed {domain_event.event_type.value}"]
+                        if order_id:
+                            summary_parts.append(f"order={order_id}")
+                        summary = ", ".join(summary_parts)
+
+                        await db.update_activity(
+                            event_id=event_id,
+                            status="completed",
+                            order_id=order_id,
+                            summary=summary,
+                        )
                         logger.info(f"[QUEUE] Processed queued event: {domain_event.event_id}")
                     except Exception as e:
                         logger.error(f"[QUEUE] Error processing queued event: {e}")
+                        await db.update_activity(
+                            event_id=event_id,
+                            status="failed",
+                            error=str(e),
+                        )
             await asyncio.sleep(1)  # Check every second
         except asyncio.CancelledError:
             break
@@ -1732,13 +1696,10 @@ async def _startup_tasks():
         await start_redis_subscriber()
         logger.info("[STARTUP] Redis subscriber started")
 
-    if CONFIG.enable_event_queue:
-        # Start queue processor in background
-        task = asyncio.create_task(process_queued_events())
-        logger.info("[STARTUP] Event queue processor started")
-        return task
-
-    return None
+    # Always start queue processor — event processing is always async
+    task = asyncio.create_task(process_queued_events())
+    logger.info("[STARTUP] Event queue processor started")
+    return task
 
 
 # Background tasks are now started via FastAPI startup event in server.py

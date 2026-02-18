@@ -220,6 +220,30 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
             )
+            # Activity log table (tracks async event processing lifecycle)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS activity_log (
+                    event_id    TEXT PRIMARY KEY,
+                    event_type  TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'queued',
+                    order_id    TEXT,
+                    error       TEXT,
+                    summary     TEXT,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_log_status ON activity_log(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_log_created_at ON activity_log(created_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_log_event_type ON activity_log(event_type)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -1468,6 +1492,131 @@ class SQLiteClient:
             finally:
                 conn.close()
         return await asyncio.to_thread(_find)
+
+    # ------------------------------------------------------------------
+    # Activity log CRUD
+    # ------------------------------------------------------------------
+
+    async def create_activity(
+        self,
+        *,
+        event_id: str,
+        event_type: str,
+        status: str = "queued",
+    ) -> None:
+        """Create a new activity log entry."""
+        def _create() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                now = datetime.now().isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO activity_log(event_id, event_type, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(event_id) DO NOTHING
+                    """,
+                    (event_id, event_type, status, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_create)
+
+    async def update_activity(
+        self,
+        *,
+        event_id: str,
+        status: str | None = None,
+        order_id: str | None = None,
+        error: str | None = None,
+        summary: str | None = None,
+    ) -> None:
+        """Update fields on an existing activity log entry."""
+        def _update() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(field: str, value: Any) -> None:
+                if value is None:
+                    return
+                updates.append(f"{field}=?")
+                values.append(value)
+
+            add("status", status)
+            add("order_id", order_id)
+            add("error", error)
+            add("summary", summary)
+
+            if not updates:
+                return
+
+            updates.append("updated_at=?")
+            values.append(datetime.now().isoformat())
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE activity_log SET {', '.join(updates)} WHERE event_id=?",
+                    (*values, event_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_update)
+
+    async def get_activity(self, *, event_id: str) -> dict[str, Any] | None:
+        """Retrieve a single activity by event_id."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM activity_log WHERE event_id = ?", (event_id,))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return dict(zip(cols, row))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_activities(
+        self,
+        *,
+        status: str | None = None,
+        event_type: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """List activities with optional filtering."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                filters: list[str] = []
+                params: list[Any] = []
+                if status:
+                    filters.append("status = ?")
+                    params.append(status)
+                if event_type:
+                    filters.append("event_type = ?")
+                    params.append(event_type)
+                where = " WHERE " + " AND ".join(filters) if filters else ""
+                params.append(limit)
+                cur.execute(
+                    f"SELECT * FROM activity_log{where} ORDER BY created_at DESC LIMIT ?",
+                    params,
+                )
+                cols = [desc[0] for desc in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def get_orders(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         def _load() -> list[dict[str, Any]]:
