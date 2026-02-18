@@ -27,6 +27,7 @@ from app.utils.validation import (
 )
 from app.utils.registry_client import get_registry_client
 from app.utils.action_executor import _extract_initial_price_from_order
+from app.utils.sqlite_client import get_sqlite_client
 from app.utils.config import CONFIG
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
@@ -250,48 +251,124 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
         },
     )
 
-# Accept-offer -> fulfill flow
+# Accept-offer -> two-phase handshake flow
 @policy_callable("ao.action.fulfill_after_accept")
 def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
-    """When we receive an AcceptOfferEvent, move directly to fulfill compute obligation."""
+    """Two-phase handshake for AcceptOfferEvent.
+
+    Handles both Seller-as-Maker and Buyer-as-Maker flows:
+
+    Seller-as-Maker (existing flow):
+      Buyer sends AcceptOfferEvent (with escrow+ssh) → Seller fulfills
+
+    Buyer-as-Maker (new flow):
+      Seller sends AcceptOfferEvent (no escrow) → Buyer creates escrow,
+      sends AcceptOfferEvent (with escrow+ssh) → Seller fulfills
+
+    Decision matrix:
+      compute_buyer  + no escrow_uid  → ACCEPT_OFFER (trigger escrow creation)
+      compute_seller + escrow_uid + ssh_key → FULFILL_COMPUTE_OBLIGATION
+      otherwise → None (wait)
+    """
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
-    # Only the compute provider (seller) should fulfill.
-    # context.event.order is the maker's order (we are the maker receiving this event).
-    # If our order offers tokens (not compute), we are the buyer — skip.
     order = context.event.order
-    offer_res = order.offer_resource if hasattr(order, "offer_resource") else {}
-    if isinstance(offer_res, dict):
-        if "gpu_model" not in offer_res:
-            return None
-    elif not hasattr(offer_res, "gpu_model"):
-        return None
+    order_dict = order.model_dump(mode="json") if hasattr(order, "model_dump") else order
 
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
     agreed_price = context.event.agreed_price
 
-    # Derive negotiation_id so the FULFILL handler can mark the maker's thread terminal
-    # and update the maker's order status.
-    our_order_id = context.event.order.order_id  # maker's order (we are the maker)
+    # Determine if we are the maker (our URL matches order_maker)
+    our_url = CONFIG.base_url_override
+    order_maker = order_dict.get("order_maker", "")
+    is_maker = (
+        our_url.rstrip("/") == order_maker.rstrip("/")
+        if our_url and order_maker
+        else False
+    )
+
+    # Determine resource orientation from order
+    offer_res = order_dict.get("offer_resource", {})
+    demand_res = order_dict.get("demand_resource", {})
+    if isinstance(offer_res, str):
+        import json as _json
+        try:
+            offer_res = _json.loads(offer_res)
+        except Exception:
+            offer_res = {}
+    if isinstance(demand_res, str):
+        import json as _json
+        try:
+            demand_res = _json.loads(demand_res)
+        except Exception:
+            demand_res = {}
+
+    maker_offers_compute = isinstance(offer_res, dict) and "gpu_model" in offer_res
+    maker_offers_tokens = isinstance(offer_res, dict) and "token" in offer_res
+
+    # Determine our role in compute terms
+    # compute_seller = we provide compute (GPU)
+    # compute_buyer  = we pay tokens for compute
+    if is_maker:
+        compute_seller = maker_offers_compute
+        compute_buyer = maker_offers_tokens
+    else:
+        compute_seller = maker_offers_tokens  # Taker is seller when maker offers tokens
+        compute_buyer = maker_offers_compute   # Taker is buyer when maker offers compute
+
+    # Derive negotiation_id
+    our_order_id = order_dict.get("order_id")  # maker's order
     their_order_id = context.event.taker_order_id  # taker's order
     negotiation_id = None
     if our_order_id and their_order_id:
         negotiation_id = f"{min(our_order_id, their_order_id)}_{max(our_order_id, their_order_id)}"
 
-    return DomainAction(
-        action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={
-            "order": context.event.order.model_dump(mode="json"),
-            "escrow_uid": escrow_uid,
-            "ssh_public_key": ssh_key,
-            "our_order_id": our_order_id,
-            "their_order_id": their_order_id,
-            "negotiation_id": negotiation_id,
-            "agreed_price": agreed_price,
-        },
+    if compute_buyer and not escrow_uid:
+        # We are the compute buyer and no escrow yet — create escrow via ACCEPT_OFFER
+        logger.info(
+            "[HANDSHAKE] Buyer received AcceptOfferEvent without escrow — "
+            "triggering escrow creation (is_maker=%s)", is_maker,
+        )
+        return DomainAction(
+            action_type=DomainActionType.ACCEPT_OFFER,
+            parameters={
+                "order": order_dict,
+                "our_order_id": our_order_id if is_maker else their_order_id,
+                "their_order_id": their_order_id if is_maker else our_order_id,
+                "negotiation_id": negotiation_id,
+                "agreed_price": agreed_price,
+            },
+        )
+
+    if compute_seller and escrow_uid and ssh_key:
+        # We are the compute seller and escrow + SSH key present — fulfill
+        logger.info(
+            "[HANDSHAKE] Seller received AcceptOfferEvent with escrow+ssh — "
+            "fulfilling (is_maker=%s, escrow_uid=%s)", is_maker, escrow_uid,
+        )
+        return DomainAction(
+            action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
+            parameters={
+                "order": order_dict,
+                "escrow_uid": escrow_uid,
+                "ssh_public_key": ssh_key,
+                "our_order_id": our_order_id if is_maker else their_order_id,
+                "their_order_id": their_order_id if is_maker else our_order_id,
+                "negotiation_id": negotiation_id,
+                "agreed_price": agreed_price,
+            },
+        )
+
+    # Neither condition met — wait (e.g., seller received accept without escrow,
+    # but we're computing buyer status and somehow neither matched)
+    logger.info(
+        "[HANDSHAKE] AcceptOfferEvent: no action taken. "
+        "compute_buyer=%s, compute_seller=%s, escrow_uid=%s, ssh_key=%s",
+        compute_buyer, compute_seller, bool(escrow_uid), bool(ssh_key),
     )
+    return None
 
 # Receive fulfillment -> trust arbitration path
 @policy_callable("rcf.action.trust_fulfillment")
@@ -792,6 +869,18 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
     their_order_id = incoming_order.get("order_id", "")
     our_order_id = our_order.get("order_id", "")
     negotiation_id = f"{min(our_order_id, their_order_id)}_{max(our_order_id, their_order_id)}"
+
+    # Populate cross-references on our local order early
+    if our_order_id:
+        try:
+            sqlite_client = get_sqlite_client()
+            await sqlite_client.update_order(
+                order_id=our_order_id,
+                matched_offer_id=their_order_id,
+                negotiation_id=negotiation_id,
+            )
+        except Exception:
+            pass  # Non-fatal; cross-ref is an optimization
 
     actions = NegotiationActionBuilder({
         "negotiation_id": negotiation_id,

@@ -162,7 +162,21 @@ class SQLiteClient:
                 )
                 """
             )
+            # Add negotiation_id column to orders if it doesn't exist
+            try:
+                cur.execute("ALTER TABLE orders ADD COLUMN negotiation_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             # Create indexes
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_negotiation_id ON orders(negotiation_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_matched_offer_id ON orders(matched_offer_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_escrow_uid ON orders(escrow_uid)"
+            )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
             )
@@ -306,6 +320,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        negotiation_id: str | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -327,9 +342,10 @@ class SQLiteClient:
                       matched_offer_id,
                       maker_attestation,
                       taker_attestation,
-                      escrow_uid
+                      escrow_uid,
+                      negotiation_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -342,7 +358,8 @@ class SQLiteClient:
                       matched_offer_id=excluded.matched_offer_id,
                       maker_attestation=excluded.maker_attestation,
                       taker_attestation=excluded.taker_attestation,
-                      escrow_uid=excluded.escrow_uid
+                      escrow_uid=excluded.escrow_uid,
+                      negotiation_id=excluded.negotiation_id
                     """,
                     (
                         order_id,
@@ -359,6 +376,7 @@ class SQLiteClient:
                         maker_attestation,
                         taker_attestation,
                         escrow_uid,
+                        negotiation_id,
                     ),
                 )
                 conn.commit()
@@ -383,6 +401,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        negotiation_id: str | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -406,6 +425,7 @@ class SQLiteClient:
             add("maker_attestation", maker_attestation)
             add("taker_attestation", taker_attestation)
             add("escrow_uid", escrow_uid)
+            add("negotiation_id", negotiation_id)
 
             if not updates:
                 return
@@ -1336,6 +1356,118 @@ class SQLiteClient:
             finally:
                 conn.close()
         return await asyncio.to_thread(_load)
+
+    async def load_order(self, *, order_id: str) -> dict[str, Any] | None:
+        """Load a single order by primary key (no decision joins)."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return dict(zip(cols, row))
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def find_latest_order_by_matched_offer_id(
+        self,
+        *,
+        matched_offer_id: str,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find the most recent local order linked to a remote order via matched_offer_id."""
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                if order_maker:
+                    cur.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE matched_offer_id = ? AND order_maker = ?
+                        ORDER BY updated_at DESC LIMIT 1
+                        """,
+                        (matched_offer_id, order_maker),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE matched_offer_id = ?
+                        ORDER BY updated_at DESC LIMIT 1
+                        """,
+                        (matched_offer_id,),
+                    )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return dict(zip(cols, row))
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_find)
+
+    async def load_orders_by_escrow_uid(
+        self,
+        *,
+        escrow_uid: str,
+    ) -> list[dict[str, Any]]:
+        """Find all orders sharing an escrow UID."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT * FROM orders WHERE escrow_uid = ? ORDER BY updated_at DESC",
+                    (escrow_uid,),
+                )
+                cols = [desc[0] for desc in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def find_order_by_negotiation_id(
+        self,
+        *,
+        negotiation_id: str,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find a local order by its negotiation_id."""
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                if order_maker:
+                    cur.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE negotiation_id = ? AND order_maker = ?
+                        ORDER BY updated_at DESC LIMIT 1
+                        """,
+                        (negotiation_id, order_maker),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT * FROM orders
+                        WHERE negotiation_id = ?
+                        ORDER BY updated_at DESC LIMIT 1
+                        """,
+                        (negotiation_id,),
+                    )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                return dict(zip(cols, row))
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_find)
 
     async def get_orders(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         def _load() -> list[dict[str, Any]]:
