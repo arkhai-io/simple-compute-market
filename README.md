@@ -168,7 +168,7 @@ Creates a new private ZeroTier network and writes the generated network ID back 
 ./infra/zerotier/create_ztnetwork.sh --join    # create network then join and authorize local node
 ```
 
-Required env vars in `infra/zerotier/.env`: `NETWORK_NAME`, `IP_RANGE_START`, `IP_RANGE_END`, `NETWORK_CIDR`, `CONTROLLER_URL`, `CONTROLLER_PORT`. Optionally set `CONTROLLER_AUTH_TOKEN` (falls back to reading the local auth token file). Requires `sudo`.
+Required env vars in `infra/zerotier/.env`: `NETWORK_NAME`, `IP_RANGE_START`, `IP_RANGE_END`, `NETWORK_CIDR`, `CONTROLLER_URL`. Optionally set `CONTROLLER_AUTH_TOKEN` (falls back to reading the local auth token file). Requires `sudo`.
 
 #### `authorize_zt_member.sh`
 
@@ -182,7 +182,7 @@ Authorizes a pending member on an existing network. The member must have already
 ./infra/zerotier/authorize_zt_member.sh <NETWORK_ID> <MEMBER_ID>
 ```
 
-Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `CONTROLLER_PORT`, `ZEROTIER_NETWORK`. Requires `sudo`.
+Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `ZEROTIER_NETWORK`. Requires `sudo`.
 
 ## Useful Commands
 

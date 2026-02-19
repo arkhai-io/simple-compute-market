@@ -18,7 +18,7 @@ set -a
 source "$ENV_FILE"
 set +a
 
-for var in CONTROLLER_URL CONTROLLER_PORT ZEROTIER_NETWORK; do
+for var in CONTROLLER_URL ZEROTIER_NETWORK; do
   if [[ -z "${!var:-}" ]]; then
     echo "Missing required env var: $var in $ENV_FILE" >&2
     exit 1
