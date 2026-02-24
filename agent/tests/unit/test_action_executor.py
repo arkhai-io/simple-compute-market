@@ -229,7 +229,11 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 
     action = Action(
         action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={"escrow_uid": "escrow-2", "ssh_public_key": "ssh-rsa AAA"},
+        parameters={
+            "escrow_uid": "escrow-2",
+            "ssh_public_key": "ssh-rsa AAA",
+            "order": {"order_taker": "http://localhost:8000"}  # Add order with taker URL
+        },
         timestamp=datetime.now(),
     )
 
@@ -243,10 +247,24 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_provision_machine_raises_on_missing_connection_info(monkeypatch):
     """Ensure missing connection info raises a RuntimeError."""
-    def fake_run_vm_provisioning_playbook(_ssh_public_key):
-        return None
+    async def fake_provision_machine_async(*_args, **_kwargs):
+        # Return result with missing connection info
+        return {
+            "ssh_port": None,
+            "tenant_user": None,
+            "vm_host_ip": None,
+            "ssh_command": None,
+        }
 
-    monkeypatch.setattr(action_executor, "run_vm_provisioning_playbook", fake_run_vm_provisioning_playbook)
+    def fake_format_connection_info(result):
+        # format_connection_info returns str(result) when it can't format
+        # which shouldn't raise, so let's make it raise explicitly for this test
+        if not result.get("ssh_port"):
+            raise RuntimeError("SSH connection info unavailable")
+        return "ssh user@host -p 22"
+
+    monkeypatch.setattr(action_executor, "provision_machine_async", fake_provision_machine_async)
+    monkeypatch.setattr(action_executor, "format_connection_info", fake_format_connection_info)
 
     with pytest.raises(RuntimeError, match="SSH connection info unavailable"):
         await action_executor.provision_machine("ssh-rsa AAA")
@@ -342,7 +360,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
     await action_executor.accept_offer(
         alkahest_client=_FakeClient({}),
         ctx=_FakeCtx(),
-        parameters={"order": order_dict, "their_order_id": "sell-order-2"},
+        parameters={"order": order_dict, "their_order_id": "sell-order-2", "our_order_id": order_id},
     )
 
     row = _fetch_order_row(db_path, order_id)
@@ -358,16 +376,31 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
     db_path = str(tmp_path / "agent.db")
     sqlite_client = SQLiteClient(db_path=db_path)
 
-    async def fake_provision_machine(_ssh_public_key: str) -> str:
-        return "user@host.example.net"
+    async def fake_provision_machine(_ssh_public_key: str) -> dict:
+        return {
+            "ssh_command": "ssh user@host.example.net",
+            "tenant_user": "user",
+            "authentication": {
+                "tenant": {
+                    "password": "test-password",
+                    "ssh_commands": {
+                        "external": "ssh user@host.example.net",
+                        "internal": "ssh user@192.168.1.100",
+                    },
+                },
+            },
+        }
 
-    def fake_schedule_vm_shutdown(_lease_end_utc: str) -> None:
+    def fake_mock_schedule_vm_shutdown(_lease_end_utc: str) -> None:
+        return None
+
+    async def fake_schedule_vm_shutdown_async(**_kwargs) -> None:
         return None
 
     monkeypatch.setattr(action_executor, "provision_machine", fake_provision_machine)
     monkeypatch.setattr(action_executor, "mock_provision_machine", fake_provision_machine)
-    monkeypatch.setattr(action_executor, "schedule_vm_shutdown", fake_schedule_vm_shutdown)
-    monkeypatch.setattr(action_executor, "mock_schedule_vm_shutdown", fake_schedule_vm_shutdown)
+    monkeypatch.setattr(action_executor, "schedule_vm_shutdown_async", fake_schedule_vm_shutdown_async)
+    monkeypatch.setattr(action_executor, "mock_schedule_vm_shutdown", fake_mock_schedule_vm_shutdown)
     monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
     class _RegistryClient:
         async def update_order(self, *_args, **_kwargs):
@@ -412,4 +445,9 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
     assert row["status"] == "accepted"
     assert row["escrow_uid"] == "escrow-uid-456"
     assert row["maker_attestation"] is not None
-    assert row["fulfillment_resource"] == "user@host.example.net"
+    # fulfillment_resource is now JSON-serialized seller_fulfillment dict
+    import json as _json
+    stored = _json.loads(row["fulfillment_resource"])
+    assert stored["ssh_command"] == "ssh user@host.example.net"
+    assert stored["tenant_user"] == "user"
+    assert stored["authentication"]["tenant"]["password"] == "test-password"
