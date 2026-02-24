@@ -43,18 +43,12 @@ jobs:
           images: |
             ${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
           tags: |
-            # For releases/tags: use semantic version
+            # Always tag as latest
+            type=raw,value=latest
+            # Use version tag if available (e.g., v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            # For branches: use branch name
-            type=ref,event=branch
-            # Always tag as latest for main branch
-            type=raw,value=latest,enable={{is_default_branch}}
-            # For PRs: use PR number
-            type=ref,event=pr
-            # Git short SHA
-            type=sha,prefix={{branch}}-
+            # Use git SHA as fallback for non-tag pushes
+            type=sha,format=short
           labels: |
             org.opencontainers.image.title=ERC-8004 Registry
             org.opencontainers.image.description=ERC-8004 Identity and Reputation Registry Service
