@@ -6,6 +6,7 @@ from importlib.metadata import version, PackageNotFoundError
 import typer
 
 from .common import REPO_ROOT, run_step
+from .groups.agent import agent_app
 from .groups.order import order_app
 from .groups.registry import registry_app
 from .groups.network import network_app
@@ -123,6 +124,7 @@ def start(
     )
 
 
+app.add_typer(agent_app, name="agent", help="Query a running agent's local API (orders, decisions).")
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 app.add_typer(
     config_app,

@@ -42,7 +42,13 @@ from .config import CONFIG
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
-from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
+from .provisioning_client import (
+    provision_machine_async,
+    schedule_vm_shutdown_async,
+    format_connection_info,
+    get_vm_available_resources,
+    ProvisioningError,
+)
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from ..policies.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
@@ -419,11 +425,43 @@ async def execute_action(
             outcome["result"] = result
             outcome["message"] = result.get("message", "Counter offer sent")
             
+        case ActionType.GET_AVAILABLE_RESOURCES.value:
+            logger.info(f"[ACTION] Getting available resources with params: {parameters}")
+            vm_host = parameters.get("vm_host", "ww1")
+
+            if CONFIG.use_mock_provisioning:
+                result = {
+                    "vm_host": vm_host,
+                    "status": "success",
+                    "total": {"vcpus": 64, "ram_mb": 262144, "gpus": 4},
+                    "allocated": {"vcpus": 16, "ram_mb": 65536, "gpus": 1},
+                    "available": {"vcpus": 48, "ram_mb": 196608, "gpus": 3},
+                    "gpu_details": ["NVIDIA H200 (NVIDIA)", "NVIDIA H200 (NVIDIA)"],
+                    "utilization": {"vcpu_percent": 25.0, "ram_percent": 25.0, "gpu_percent": 25.0},
+                }
+            else:
+                result = await get_vm_available_resources(
+                    provisioning_service_url=CONFIG.provisioning_service_url,
+                    vm_host=vm_host,
+                    timeout=120,
+                    poll_interval=5,
+                    agent_id=CONFIG.agent_id,
+                )
+
+            outcome["result"] = result
+            outcome["status"] = result.get("status", "success")
+            outcome["message"] = (
+                f"Resources on {vm_host}: "
+                f"{result.get('available', {}).get('vcpus', '?')} vCPUs, "
+                f"{result.get('available', {}).get('ram_mb', '?')} MB RAM, "
+                f"{result.get('available', {}).get('gpus', '?')} GPUs available"
+            )
+
         case ActionType.NOOP.value:
             logger.info(f"[ACTION] [SIMULATED] No operation required")
             outcome["result"] = None
             outcome["message"] = "No operation"
-            
+
         case _:
             logger.warning(f"[ACTION] [SIMULATED] Unknown action type: {action_type_str}")
             outcome["result"] = None
@@ -593,14 +631,26 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-async def mock_provision_machine(ssh_public_key: str) -> str:
+async def mock_provision_machine(ssh_public_key: str) -> dict:
     """Mock stand-in for provisioning a machine.
 
     Return:
-        String with connection details.
+        Dict with provisioning result matching real provisioning shape.
     """
     logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
-    return "demo-user@node-01.example.net"
+    return {
+        "ssh_command": "ssh demo-user@node-01.example.net",
+        "tenant_user": "demo-user",
+        "authentication": {
+            "tenant": {
+                "password": "mock-password",
+                "ssh_commands": {
+                    "external": "ssh demo-user@node-01.example.net",
+                    "internal": "ssh demo-user@192.168.1.100",
+                },
+            },
+        },
+    }
 
 
 def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
@@ -608,25 +658,52 @@ def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
     logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
 
 
-async def provision_machine(ssh_public_key: str) -> str:
+async def provision_machine(ssh_public_key: str) -> dict:
     """Provision a machine using the provided SSH public key.
 
     Args:
         ssh_public_key: SSH public key to install on the provisioned machine.
 
     Returns:
-        String with connection details.
+        Full provisioning result dict.
     """
-    logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
+    logger.info("[TOOL] Provisioning machine via async provisioning service")
     try:
-        connection_info = run_vm_provisioning_playbook(ssh_public_key)
-        if connection_info:
-            logger.info(f"[TOOL] Machine provisioned: {connection_info}")
-            return connection_info
-        logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
-    except Exception as exc:
+        # Build ERC-8004 canonical ID for provisioning service auth
+        agent_id = CONFIG.agent_id
+        if CONFIG.onchain_agent_id is not None and CONFIG.identity_registry_address:
+            try:
+                from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                import os
+                agent_id = build_erc8004_canonical_id(
+                    chain_id=int(os.getenv("CHAIN_ID", "31337")),
+                    identity_registry=CONFIG.identity_registry_address,
+                    agent_id=int(CONFIG.onchain_agent_id),
+                )
+                logger.info("[TOOL] Using ERC-8004 agent ID for provisioning: %s", agent_id)
+            except Exception as e:
+                logger.warning("[TOOL] Failed to build ERC-8004 agent ID, using CONFIG.agent_id: %s", e)
+
+        result = await provision_machine_async(
+            provisioning_service_url=CONFIG.provisioning_service_url,
+            params={
+                "vm_host": "ww1",
+                "vm_action": "create",
+                "vm_target": "tenant-vm",
+                "ssh_pubkey": ssh_public_key,
+            },
+            timeout=CONFIG.provisioning_timeout,
+            poll_interval=CONFIG.provisioning_poll_interval,
+            agent_id=agent_id,
+        )
+        connection_info = format_connection_info(result)
+        logger.info("[TOOL] Machine provisioned: %s", connection_info)
+        return result
+    except ProvisioningError as exc:
         logger.error("[TOOL] Provisioning failed: %s", exc)
+        raise RuntimeError(f"Provisioning failed: {exc}") from exc
+    except Exception as exc:
+        logger.error("[TOOL] Unexpected provisioning error: %s", exc)
         raise RuntimeError(f"Provisioning failed: {exc}") from exc
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
@@ -1596,6 +1673,28 @@ async def fulfill_compute_obligation(
             "connection_details": None,
             "ssh_public_key": ssh_public_key,
         }
+    # Build seller-side fulfillment (full auth: root + tenant + VM details)
+    seller_fulfillment = {
+        "ssh_command": format_connection_info(connection_details),
+        "authentication": connection_details.get("authentication"),
+        "tenant_user": connection_details.get("tenant_user"),
+        "vm_name": connection_details.get("vm_name"),
+        "vm_state": connection_details.get("vm_state"),
+        "vm_ip_internal": connection_details.get("vm_ip_internal"),
+        "frp": connection_details.get("frp"),
+        "gpu": connection_details.get("gpu"),
+        "network": connection_details.get("network"),
+    }
+
+    # Build buyer-side fulfillment (tenant auth only, no root)
+    tenant_auth = (connection_details.get("authentication") or {}).get("tenant", {})
+    buyer_fulfillment = {
+        "ssh_command": format_connection_info(connection_details),
+        "tenant_user": connection_details.get("tenant_user"),
+        "tenant_password": tenant_auth.get("password"),
+        "ssh_commands": tenant_auth.get("ssh_commands"),
+    }
+
     fulfillment_uid = None
     maker_attestation = None
     duration_hours = 1
@@ -1639,7 +1738,34 @@ async def fulfill_compute_obligation(
     if CONFIG.use_mock_provisioning:
         mock_schedule_vm_shutdown(lease_end_utc)
     else:
-        schedule_vm_shutdown(lease_end_utc)
+        try:
+            # Build ERC-8004 canonical ID for provisioning service auth
+            shutdown_agent_id = None
+            if CONFIG.onchain_agent_id is not None and CONFIG.identity_registry_address:
+                try:
+                    from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                    import os
+                    shutdown_agent_id = build_erc8004_canonical_id(
+                        chain_id=int(os.getenv("CHAIN_ID", "31337")),
+                        identity_registry=CONFIG.identity_registry_address,
+                        agent_id=int(CONFIG.onchain_agent_id),
+                    )
+                except Exception:
+                    pass
+
+            await schedule_vm_shutdown_async(
+                provisioning_service_url=CONFIG.provisioning_service_url,
+                lease_end_utc=lease_end_utc,
+                vm_host="ww1",
+                vm_target="tenant-vm",
+                timeout=300,
+                poll_interval=5,
+                agent_id=shutdown_agent_id,
+            )
+            logger.info("[TOOL] VM shutdown scheduled via async provisioning service for %s UTC", lease_end_utc)
+        except ProvisioningError as exc:
+            logger.error("[TOOL] Failed to schedule VM shutdown: %s", exc)
+            # Non-fatal: continue with fulfillment even if shutdown scheduling fails
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
@@ -1649,7 +1775,7 @@ async def fulfill_compute_obligation(
     else:
         try:
             fulfillment_uid = await client.string_obligation.do_obligation(
-                connection_details,
+                format_connection_info(connection_details),
                 escrow_uid
             )
             maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
@@ -1685,7 +1811,7 @@ async def fulfill_compute_obligation(
             await sqlite_client.update_order(
                 order_id=order_id,
                 maker_attestation=maker_attestation,
-                fulfillment_resource=connection_details,
+                fulfillment_resource=seller_fulfillment,
                 escrow_uid=escrow_uid,
             )
         except Exception as exc:
@@ -1696,7 +1822,7 @@ async def fulfill_compute_obligation(
         "message": "Compute obligation fulfilled",
         "escrow_uid": escrow_uid,
         "fulfillment_uid": fulfillment_uid,
-        "connection_details": connection_details,
+        "connection_details": buyer_fulfillment,
         "ssh_public_key": ssh_public_key,
     }
 
