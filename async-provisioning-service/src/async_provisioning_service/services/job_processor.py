@@ -1,5 +1,7 @@
 import asyncio
+import copy
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Set
 
@@ -7,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import SessionLocal, init_db
-from async_provisioning_service.db.models import JobStatus, ProvisioningJob
+from async_provisioning_service.db.models import Credential, CredentialRole, JobStatus, ProvisioningJob
 from async_provisioning_service.services.provisioning import (
     PlaybookError,
     ProvisioningParams,
@@ -88,6 +90,91 @@ def _build_params(params: dict) -> ProvisioningParams:
         gcs_image_path=params.get("gcs_image_path"),
         vm_lease_end=params.get("vm_lease_end"),
     )
+
+
+def _redact_logs(logs: str) -> str:
+    """Scrub sensitive credential data from log output."""
+    if not logs:
+        return logs
+    # JSON-style: "password": "value" or "ssh_key_path_host": "value"
+    redacted = re.sub(
+        r'("(?:password|ssh_key_path_host)":\s*)"[^"]*"',
+        r'\1"[REDACTED]"',
+        logs,
+    )
+    # YAML-style: password: value (not already quoted/redacted)
+    redacted = re.sub(
+        r'(password:\s*)(?!\[REDACTED\]).+',
+        r'\1[REDACTED]',
+        redacted,
+    )
+    # SSH key paths in commands: -i /path/to/key
+    redacted = re.sub(
+        r'-i\s+\S+\.ssh/\S+',
+        '-i [REDACTED]',
+        redacted,
+    )
+    # sshpass -p arguments
+    redacted = re.sub(
+        r'sshpass\s+-p\s+\S+',
+        'sshpass -p [REDACTED]',
+        redacted,
+    )
+    return redacted
+
+
+def _extract_and_store_credentials(
+    db: Session,
+    job: ProvisioningJob,
+    result_payload: dict,
+) -> dict:
+    """Extract credentials from result, store as Credential rows, return sanitized payload.
+
+    Does NOT commit — the caller's _update_job() commits atomically.
+    """
+    auth = result_payload.get("authentication")
+    if not auth:
+        return result_payload
+
+    sanitized = copy.deepcopy(result_payload)
+
+    def _store_role(role_name: str, role_data: dict, granted_to: str) -> None:
+        if not role_data or not granted_to:
+            return
+        cred = Credential(
+            job_id=job.id,
+            role=role_name,
+            granted_to=granted_to,
+            password=role_data.get("password"),
+            ssh_commands=role_data.get("ssh_commands"),
+            ssh_key_path_host=role_data.get("ssh_key_path_host"),
+            key_type=role_data.get("key_type"),
+        )
+        db.add(cred)
+
+    tenant_data = auth.get("tenant", {})
+    root_data = auth.get("root", {})
+
+    # Seller (job.agent_id) gets root + tenant
+    if job.agent_id:
+        if root_data:
+            _store_role(CredentialRole.root.value, root_data, job.agent_id)
+        if tenant_data:
+            _store_role(CredentialRole.tenant.value, tenant_data, job.agent_id)
+
+    # Buyer gets tenant only
+    if job.buyer_agent_id:
+        if tenant_data:
+            _store_role(CredentialRole.tenant.value, tenant_data, job.buyer_agent_id)
+
+    # Strip authentication from the sanitized payload
+    sanitized.pop("authentication", None)
+
+    # Also strip from nested ansible_result if present
+    if isinstance(sanitized.get("ansible_result"), dict):
+        sanitized["ansible_result"].pop("authentication", None)
+
+    return sanitized
 
 
 def _build_result_payload(result: ProvisioningResult) -> dict:
@@ -225,17 +312,20 @@ async def _process_job(job_id: str) -> None:
 
         def log_callback(stdout: str, stderr: str):
             try:
-                # Needs its own session — called from a different thread
+                # Needs its own session — called from a different thread.
+                # Use begin() to ensure an active transaction (SQLite + StaticPool
+                # shares one connection, so the implicit transaction may already
+                # have been consumed by the main thread's session).
                 callback_db = SessionLocal()
                 try:
-                    callback_job = callback_db.query(ProvisioningJob).filter(
-                        ProvisioningJob.id == job_id
-                    ).one_or_none()
-                    if callback_job:
-                        logs = stdout + ("\n\nSTDERR:\n" + stderr if stderr else "")
-                        callback_job.logs = logs
-                        callback_db.commit()
-                        logger.debug("Updated logs for job %s (%d bytes)", job_id, len(logs))
+                    with callback_db.begin():
+                        callback_job = callback_db.query(ProvisioningJob).filter(
+                            ProvisioningJob.id == job_id
+                        ).one_or_none()
+                        if callback_job:
+                            logs = stdout + ("\n\nSTDERR:\n" + stderr if stderr else "")
+                            callback_job.logs = _redact_logs(logs)
+                            logger.debug("Updated logs for job %s (%d bytes)", job_id, len(logs))
                 finally:
                     callback_db.close()
             except Exception as e:
@@ -245,12 +335,14 @@ async def _process_job(job_id: str) -> None:
             result = await wait_for_playbook(running, log_callback=log_callback)
 
             logs = result.stdout + ("\n\nSTDERR:\n" + result.stderr if result.stderr else "")
+            logs = _redact_logs(logs)
             result_payload = _build_result_payload(result)
+            sanitized_payload = _extract_and_store_credentials(db, job, result_payload)
             _update_job(
                 db,
                 job,
                 status=JobStatus.succeeded.value,
-                result=result_payload,
+                result=sanitized_payload,
                 error=None,
                 logs=logs,
             )
@@ -258,6 +350,7 @@ async def _process_job(job_id: str) -> None:
 
         except PlaybookError as exc:
             logs = exc.stdout + ("\n\nSTDERR:\n" + exc.stderr if exc.stderr else "")
+            logs = _redact_logs(logs)
             error_message = str(exc)
 
             should_retry = (
