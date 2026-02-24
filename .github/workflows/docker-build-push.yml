@@ -46,8 +46,8 @@ jobs:
           images: |
             ${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Always tag as latest
-            type=raw,value=latest
+            # Tag as latest only for version tag pushes
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
             # Use version tag if available (e.g., v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
             # Use git SHA only for non-tag pushes (branch pushes)
