@@ -4,6 +4,8 @@ import signal
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from async_provisioning_service.api.schemas import (
@@ -16,7 +18,7 @@ from async_provisioning_service.api.schemas import (
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import get_db
 from async_provisioning_service.db.models import JobStatus, ProvisioningJob
-from async_provisioning_service.services.queue import enqueue_job
+from async_provisioning_service.services.queue import enqueue_job, get_redis
 
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,13 @@ def agent_id_header(
     return x_agent_id
 
 
-router = APIRouter(dependencies=[Depends(agent_id_header)])
+health_router = APIRouter(tags=["health"])
+router = APIRouter(tags=["provisioning"], dependencies=[Depends(agent_id_header)])
+
+SORT_OPTIONS = {
+    "created_at_asc": lambda: ProvisioningJob.created_at.asc(),
+    "created_at_desc": lambda: ProvisioningJob.created_at.desc(),
+}
 
 
 def _get_agent_id(request: Request) -> str | None:
@@ -40,17 +48,58 @@ def _get_agent_id(request: Request) -> str | None:
     return getattr(request.state, "agent_id", None)
 
 
-@router.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+@health_router.get(
+    "/health",
+    summary="Service health check",
+    response_description="Health status with dependency checks",
+)
+async def health(db: Session = Depends(get_db)) -> JSONResponse:
+    """Verifies API, database, and Redis connectivity.
+
+    Returns **200** when all dependencies are healthy,
+    **503** when any dependency is unreachable.
+    """
+    checks: dict[str, str] = {"api": "ok"}
+
+    try:
+        db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    try:
+        redis = await get_redis()
+        await redis.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    return JSONResponse(
+        content={"status": "ok" if all_ok else "degraded", "checks": checks},
+        status_code=200 if all_ok else 503,
+    )
 
 
-@router.post("/provision", response_model=ProvisionResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/jobs",
+    response_model=ProvisionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a provisioning job",
+    response_description="Job ID and initial queued status",
+)
 async def submit_provisioning(
     provision_request: ProvisionRequest,
     request: Request,
     db: Session = Depends(get_db),
 ):
+    """Enqueue a new VM provisioning job.
+
+    The request is validated, persisted to the database, and pushed onto the
+    Redis queue.  The background worker picks it up asynchronously.
+
+    Requires `X-Agent-ID` header when auth is enabled.
+    """
     job_id = str(uuid.uuid4())
     agent_id = _get_agent_id(request)
 
@@ -77,14 +126,25 @@ async def submit_provisioning(
     return ProvisionResponse(job_id=job_id, status=job.status)
 
 
-@router.get("/provision", response_model=JobListResponse)
+@router.get(
+    "/jobs",
+    response_model=JobListResponse,
+    summary="List provisioning jobs",
+    response_description="Paginated list of jobs",
+)
 async def list_jobs(
     request: Request,
-    offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=20, ge=1, le=100),
-    status_filter: str | None = Query(default=None, alias="status"),
+    offset: int = Query(default=0, ge=0, description="Number of jobs to skip (pagination offset)"),
+    limit: int = Query(default=20, ge=1, le=100, description="Max jobs per page (1-100)"),
+    status_filter: str | None = Query(default=None, alias="status", description="Filter by job status: queued, running, succeeded, failed, cancelled"),
+    sort: str = Query(default="created_at_desc", description="Sort order: created_at_asc or created_at_desc"),
     db: Session = Depends(get_db),
 ):
+    """List provisioning jobs with pagination, filtering, and sorting.
+
+    Authenticated agents only see their own jobs.  Unauthenticated requests
+    (when auth is disabled) see all jobs.
+    """
     agent_id = _get_agent_id(request)
 
     query = db.query(ProvisioningJob)
@@ -97,7 +157,8 @@ async def list_jobs(
         query = query.filter(ProvisioningJob.status == status_filter)
 
     total = query.count()
-    jobs = query.order_by(ProvisioningJob.created_at.desc()).offset(offset).limit(limit).all()
+    order_fn = SORT_OPTIONS.get(sort, SORT_OPTIONS["created_at_desc"])
+    jobs = query.order_by(order_fn()).offset(offset).limit(limit).all()
 
     return JobListResponse(
         jobs=[
@@ -120,8 +181,18 @@ async def list_jobs(
     )
 
 
-@router.get("/provision/{job_id}", response_model=ProvisionStatusResponse)
+@router.get(
+    "/jobs/{job_id}",
+    response_model=ProvisionStatusResponse,
+    summary="Get job status",
+    response_description="Full job status with params, result, and retry info",
+)
 async def get_status(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return the full status of a single provisioning job.
+
+    Includes parameters, result (on success), error (on failure), and retry
+    metadata.  Returns **403** if the job belongs to a different agent.
+    """
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -146,8 +217,19 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
     )
 
 
-@router.get("/provision/{job_id}/logs", response_model=ProvisionLogsResponse)
+@router.get(
+    "/jobs/{job_id}/logs",
+    response_model=ProvisionLogsResponse,
+    summary="Get Ansible playbook logs",
+    response_description="Raw Ansible stdout/stderr for the job",
+)
 async def get_logs(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return the raw Ansible playbook output captured during job execution.
+
+    Logs are updated in real-time while the job is running and remain
+    available after completion.  Returns **403** if the job belongs to a
+    different agent.
+    """
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -162,8 +244,18 @@ async def get_logs(job_id: str, request: Request, db: Session = Depends(get_db))
     return ProvisionLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
 
-@router.post("/provision/{job_id}/cancel")
+@router.post(
+    "/jobs/{job_id}/cancel",
+    summary="Cancel a provisioning job",
+    response_description="Cancellation confirmation with final job status",
+)
 async def cancel_job(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Cancel a queued or running provisioning job.
+
+    If the job is currently running, sends SIGTERM to the Ansible process.
+    Agents can only cancel their own jobs (returns **403** otherwise).
+    Jobs that have already completed cannot be cancelled.
+    """
     job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
