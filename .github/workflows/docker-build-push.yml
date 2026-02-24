@@ -47,8 +47,8 @@ jobs:
             type=raw,value=latest
             # Use version tag if available (e.g., v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
-            # Use git SHA as fallback for non-tag pushes
-            type=sha,format=short
+            # Use git SHA only for non-tag pushes (branch pushes)
+            type=sha,format=short,enable=${{ github.ref_type != 'tag' }}
           labels: |
             org.opencontainers.image.title=ERC-8004 Registry
             org.opencontainers.image.description=ERC-8004 Identity and Reputation Registry Service
