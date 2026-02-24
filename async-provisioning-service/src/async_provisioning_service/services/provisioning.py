@@ -100,10 +100,49 @@ def _extract_tenant_user(playbook_output: str, vm_host: str | None = None) -> Op
     return None
 
 
-def _extract_ansible_json(stdout: str, action: str) -> Optional[dict]:
-    """Extract structured JSON from Ansible's ``debug: var: vm_*_data`` output.
+def _extract_json_block(text: str, search_start: int) -> Optional[dict]:
+    """Find and parse the first complete JSON object from *search_start* using brace-depth counting."""
+    brace_start = text.find("{", search_start)
+    if brace_start == -1:
+        return None
 
-    Uses brace-depth counting to handle arbitrarily nested JSON.
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(brace_start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                json_str = text[brace_start : i + 1]
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def _extract_ansible_json(stdout: str, action: str) -> Optional[dict]:
+    """Extract structured JSON from Ansible output.
+
+    Tries two strategies:
+    1. Quoted fact-variable marker (``"vm_creation_data":``) — works with JSON callback format.
+    2. JSON embedded in ``msg: |-`` blocks — works with YAML callback format
+       (``callback_result_format = yaml`` in ansible.cfg).
     """
     fact_names = {
         "create": "vm_creation_data",
@@ -123,43 +162,25 @@ def _extract_ansible_json(stdout: str, action: str) -> Optional[dict]:
     if not fact_name:
         return None
 
+    # Strategy 1: quoted marker — JSON callback format (e.g. "vm_creation_data": {…})
     marker = f'"{fact_name}":'
     idx = stdout.find(marker)
-    if idx == -1:
-        return None
+    if idx != -1:
+        result = _extract_json_block(stdout, idx + len(marker))
+        if result is not None:
+            return result
 
-    brace_start = stdout.find("{", idx + len(marker))
-    if brace_start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape_next = False
-    for i in range(brace_start, len(stdout)):
-        ch = stdout[i]
-        if escape_next:
-            escape_next = False
-            continue
-        if ch == "\\":
-            if in_string:
-                escape_next = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                json_str = stdout[brace_start:i + 1]
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    return None
-    return None
+    # Strategy 2: JSON inside msg: |- blocks — YAML callback format.
+    # The playbook's "Output VM creation JSON string" task renders as:
+    #     msg: |-
+    #         { "action": "create", … }
+    # Scan for the last such block whose JSON contains an "action" key.
+    last_result = None
+    for m in re.finditer(r"msg:\s*\|[-]?\s*\n", stdout):
+        result = _extract_json_block(stdout, m.end())
+        if result is not None and "action" in result:
+            last_result = result
+    return last_result
 
 
 def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:

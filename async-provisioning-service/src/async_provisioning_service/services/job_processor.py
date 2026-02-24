@@ -225,17 +225,20 @@ async def _process_job(job_id: str) -> None:
 
         def log_callback(stdout: str, stderr: str):
             try:
-                # Needs its own session — called from a different thread
+                # Needs its own session — called from a different thread.
+                # Use begin() to ensure an active transaction (SQLite + StaticPool
+                # shares one connection, so the implicit transaction may already
+                # have been consumed by the main thread's session).
                 callback_db = SessionLocal()
                 try:
-                    callback_job = callback_db.query(ProvisioningJob).filter(
-                        ProvisioningJob.id == job_id
-                    ).one_or_none()
-                    if callback_job:
-                        logs = stdout + ("\n\nSTDERR:\n" + stderr if stderr else "")
-                        callback_job.logs = logs
-                        callback_db.commit()
-                        logger.debug("Updated logs for job %s (%d bytes)", job_id, len(logs))
+                    with callback_db.begin():
+                        callback_job = callback_db.query(ProvisioningJob).filter(
+                            ProvisioningJob.id == job_id
+                        ).one_or_none()
+                        if callback_job:
+                            logs = stdout + ("\n\nSTDERR:\n" + stderr if stderr else "")
+                            callback_job.logs = logs
+                            logger.debug("Updated logs for job %s (%d bytes)", job_id, len(logs))
                 finally:
                     callback_db.close()
             except Exception as e:
