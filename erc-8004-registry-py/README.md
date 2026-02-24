@@ -612,7 +612,7 @@ Only 2 GitHub secrets needed:
 - `DOCKERHUB_USERNAME` - Your Docker Hub username
 - `DOCKERHUB_TOKEN` - Docker Hub access token (Read & Write)
 
-See detailed instructions in [.github/CI-CD-SETUP.md](.github/CI-CD-SETUP.md) and [.github/SECRETS-CHECKLIST.md](.github/SECRETS-CHECKLIST.md).
+See detailed instructions in [../.github/CI-CD-SETUP.md](../.github/CI-CD-SETUP.md) and [../.github/SECRETS-CHECKLIST.md](../.github/SECRETS-CHECKLIST.md).
 
 ### Security Best Practices
 
