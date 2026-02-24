@@ -10,6 +10,42 @@ VM_ACTIONS = Literal[
 
 
 class ProvisionRequest(BaseModel):
+    """VM provisioning job request.
+
+    Specifies the target host, action, and optional resource/network parameters.
+    Required fields depend on the chosen ``vm_action`` (see validation rules).
+    """
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "vm_host": "ww1",
+                    "vm_target": "agent-vm-01",
+                    "vm_action": "create",
+                    "vm_ram": 4096,
+                    "vm_vcpus": 2,
+                    "vm_disk_size": "20G",
+                    "ssh_pubkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... agent@market",
+                    "gpu_provisioned": True,
+                    "frp_server_addr": "34.87.54.66",
+                    "frp_domain": "example.com",
+                    "frp_dashboard_password": "secret",
+                },
+                {
+                    "vm_host": "ww1",
+                    "vm_action": "list",
+                },
+                {
+                    "vm_host": "ww1",
+                    "vm_target": "agent-vm-01",
+                    "vm_action": "lease_end",
+                    "vm_lease_end": "2025-12-31 23:59",
+                },
+            ]
+        }
+    }
+
     # --- Core (always required) ---
     vm_host: str = Field(default="ww1", description="KVM host from inventory")
     vm_action: VM_ACTIONS = Field(default="create")
@@ -67,8 +103,10 @@ class ProvisionRequest(BaseModel):
 
 
 class ProvisionResponse(BaseModel):
-    job_id: str
-    status: str
+    """Confirmation returned when a provisioning job is accepted."""
+
+    job_id: str = Field(description="Unique identifier for the queued job")
+    status: str = Field(description="Initial job status (always 'queued')")
 
 
 class AnsibleActionResult(BaseModel):
@@ -78,25 +116,31 @@ class AnsibleActionResult(BaseModel):
 
 
 class ProvisionStatusResponse(BaseModel):
-    job_id: str
-    status: str
-    params: dict[str, Any]
-    result: Optional[dict[str, Any]] = None
-    error: Optional[str] = None
-    retry_count: int = 0
-    max_retries: int = 3
-    next_retry_at: Optional[datetime] = None
-    agent_id: Optional[str] = None
+    """Full job status including parameters, result, and retry metadata."""
+
+    job_id: str = Field(description="Unique job identifier")
+    status: str = Field(description="Current status: queued, running, succeeded, failed, or cancelled")
+    params: dict[str, Any] = Field(description="Original request parameters submitted with the job")
+    result: Optional[dict[str, Any]] = Field(default=None, description="Structured result from Ansible on success (SSH info, VM state, etc.)")
+    error: Optional[str] = Field(default=None, description="Error message if the job failed")
+    retry_count: int = Field(default=0, description="Number of retries attempted so far")
+    max_retries: int = Field(default=3, description="Maximum retries allowed for this job")
+    next_retry_at: Optional[datetime] = Field(default=None, description="Scheduled time for the next retry attempt (UTC)")
+    agent_id: Optional[str] = Field(default=None, description="ERC-8004 agent ID that submitted the job")
 
 
 class ProvisionLogsResponse(BaseModel):
-    job_id: str
-    status: str
-    logs: Optional[str] = None
+    """Raw Ansible playbook output for a provisioning job."""
+
+    job_id: str = Field(description="Unique job identifier")
+    status: str = Field(description="Current job status")
+    logs: Optional[str] = Field(default=None, description="Raw Ansible stdout/stderr captured during execution")
 
 
 class JobListResponse(BaseModel):
-    jobs: list[ProvisionStatusResponse]
-    total: int
-    offset: int
-    limit: int
+    """Paginated list of provisioning jobs."""
+
+    jobs: list[ProvisionStatusResponse] = Field(description="Jobs on the current page")
+    total: int = Field(description="Total number of jobs matching the query")
+    offset: int = Field(description="Number of jobs skipped (pagination offset)")
+    limit: int = Field(description="Maximum jobs returned per page")
