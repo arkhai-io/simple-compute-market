@@ -11,16 +11,8 @@ dependencies = [
     "sqlalchemy>=2.0",
     "psycopg2-binary>=2.9",
     "redis>=5.0",
-    "pytest>=9.0.2",
-    "httpx>=0.28.1",
     "cachetools>=5.3",
     "pyyaml>=6.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4",
-    "httpx>=0.26",
 ]
 
 [tool.setuptools]
@@ -28,3 +20,10 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4",
+    "httpx>=0.26",
+    "pytest-cov>=7.0.0",
+]
