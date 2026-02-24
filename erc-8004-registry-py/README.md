@@ -608,11 +608,13 @@ docker-compose up -d
 
 **Setup CI/CD for your repository:**
 
-Only 2 GitHub secrets needed:
-- `DOCKERHUB_USERNAME` - Your Docker Hub username
-- `DOCKERHUB_TOKEN` - Docker Hub access token (Read & Write)
+The repository includes a GitHub Actions workflow at `.github/workflows/docker-build-push.yml` that automatically builds and pushes to Docker Hub.
 
-See detailed instructions in [../.github/CI-CD-SETUP.md](../.github/CI-CD-SETUP.md) and [../.github/SECRETS-CHECKLIST.md](../.github/SECRETS-CHECKLIST.md).
+**Required GitHub Secrets:**
+- `DOCKERHUB_USERNAME` - Your Docker Hub username
+- `DOCKERHUB_TOKEN` - Docker Hub access token (Read & Write permissions)
+
+Add these in your GitHub repository: `Settings` → `Secrets and variables` → `Actions`
 
 ### Security Best Practices
 
