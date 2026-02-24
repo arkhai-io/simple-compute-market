@@ -184,6 +184,11 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
 
 def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: str = "tenant-vm") -> None:
     """
+    DEPRECATED: Use schedule_vm_shutdown_async from provisioning_client instead.
+
+    This function directly executes Ansible playbooks and is deprecated in favor of
+    using the async provisioning service for consistency and better separation of concerns.
+
     Schedule a VM shutdown by setting its lease end time.
 
     Args:
@@ -191,6 +196,10 @@ def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: st
         vm_host: The host where the VM is located.
         vm_target: The name of the VM to schedule for shutdown.
     """
+    logger.warning(
+        "schedule_vm_shutdown() is deprecated. Use schedule_vm_shutdown_async() from provisioning_client instead. "
+        "This function will be removed in a future version."
+    )
     nonce = uuid.uuid4().hex
     vm_vars_path = Path(f"/tmp/vm_lease_vars_{nonce}.yml")
     vm_vars_payload = (

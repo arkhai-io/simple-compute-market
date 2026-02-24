@@ -97,6 +97,7 @@ from .utils.action_executor import execute_action
 from .utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
+from .utils.provisioning_client import get_vm_available_resources
 from pydantic import PrivateAttr
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
@@ -450,19 +451,14 @@ class TraderAgent(BaseAgent):
                 )
 
         # In-memory stand-in for compute nodes under the Agent's control.
-        self.resource_portfolio =  ComputeResourcePortfolio(
+        # Fallback matches ww1 reality: 1 GPU, sla=99.0
+        self.resource_portfolio = ComputeResourcePortfolio(
             resources=[
                 ComputeResource(
                     gpu_model=GPUModel.H200,
-                    quantity=3,
-                    sla=90.0,
+                    quantity=1,
+                    sla=99.0,
                     region=Region.CALIFORNIA_US,
-                ),
-                ComputeResource(
-                    gpu_model=GPUModel.TESLA_V100,
-                    quantity=2,
-                    sla=99.9,
-                    region=Region.TOKYO_JP,
                 ),
             ]
         )
@@ -511,11 +507,51 @@ class TraderAgent(BaseAgent):
             self._alkahest_client = None
 
     async def get_resource_portfolio(self) -> dict:
-        """Get the current stock of all resources managed by the node portfolio.
+        """Get current resource portfolio, querying live host data if available.
 
         Returns:
             A dictionary representing the current portfolio stock.
         """
+        if not CONFIG.use_mock_provisioning:
+            try:
+                from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                agent_id = None
+                if CONFIG.onchain_agent_id is not None and CONFIG.identity_registry_address:
+                    agent_id = build_erc8004_canonical_id(
+                        chain_id=int(os.getenv("CHAIN_ID", "31337")),
+                        identity_registry=CONFIG.identity_registry_address,
+                        agent_id=int(CONFIG.onchain_agent_id),
+                    )
+
+                result = await get_vm_available_resources(
+                    provisioning_service_url=CONFIG.provisioning_service_url,
+                    vm_host="ww1",
+                    timeout=30,
+                    poll_interval=3,
+                    agent_id=agent_id,
+                )
+                if result.get("status") == "success":
+                    available = result.get("available", {})
+                    gpu_count = available.get("gpus", 0)
+                    resources = []
+                    if gpu_count > 0:
+                        resources.append(ComputeResource(
+                            gpu_model=GPUModel.H200,
+                            quantity=gpu_count,
+                            sla=99.0,
+                            region=Region.CALIFORNIA_US,
+                        ))
+                    live_portfolio = ComputeResourcePortfolio(resources=resources)
+                    logger.info(
+                        "[PORTFOLIO] Live resources from ww1: %d GPUs, %d vCPUs, %d MB RAM",
+                        gpu_count,
+                        available.get("vcpus", 0),
+                        available.get("ram_mb", 0),
+                    )
+                    return live_portfolio.model_dump()
+            except Exception as e:
+                logger.warning("[PORTFOLIO] Failed to query live resources, using fallback: %s", e)
+        # Fallback to static portfolio
         return self.resource_portfolio.model_dump()
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
@@ -1262,6 +1298,63 @@ async def close_market_order_endpoint(request: Request) -> JSONResponse:
 agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
 agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
 
+
+async def list_orders_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    status_filter = request.query_params.get("status")
+    limit = int(request.query_params.get("limit", "50"))
+    orders = await db.get_orders(status=status_filter, limit=limit)
+    # Parse JSON string fields for cleaner output
+    for o in orders:
+        for field in ("offer_resource", "demand_resource", "fulfillment_resource"):
+            if isinstance(o.get(field), str):
+                try:
+                    o[field] = json.loads(o[field])
+                except Exception:
+                    pass
+    return JSONResponse({"orders": orders, "total": len(orders)})
+
+
+async def get_order_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    order_id = request.path_params["order_id"]
+    db = get_sqlite_client()
+    order = await db.get_order(order_id=order_id)
+    if not order:
+        return JSONResponse({"error": "Order not found"}, status_code=404)
+    # Parse JSON string fields
+    for field in ("offer_resource", "demand_resource", "fulfillment_resource"):
+        if isinstance(order.get(field), str):
+            try:
+                order[field] = json.loads(order[field])
+            except Exception:
+                pass
+    # Parse outcome_json in decisions
+    for d in order.get("decisions", []):
+        if isinstance(d.get("outcome_json"), str):
+            try:
+                d["outcome_json"] = json.loads(d["outcome_json"])
+            except Exception:
+                pass
+    return JSONResponse(order)
+
+
+async def list_decisions_endpoint(request: Request) -> JSONResponse:
+    from app.utils.sqlite_client import get_sqlite_client
+    db = get_sqlite_client()
+    limit = int(request.query_params.get("limit", "20"))
+    event_type = request.query_params.get("event_type")
+    decisions = await db.load_recent_decisions(
+        agent_id=CONFIG.agent_id, limit=limit, event_type=event_type,
+    )
+    return JSONResponse({"decisions": decisions, "total": len(decisions)})
+
+
+agent_list_orders_route = Route("/orders", list_orders_endpoint, methods=["GET"])
+agent_get_order_route = Route("/orders/{order_id}", get_order_endpoint, methods=["GET"])
+agent_list_decisions_route = Route("/decisions", list_decisions_endpoint, methods=["GET"])
+
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
 # Add the alert route to the A2A app
@@ -1270,6 +1363,10 @@ a2a_app.routes.append(alert_route)
 a2a_app.routes.append(agent_order_creation_route)
 # Add the order close route to the A2A app
 a2a_app.routes.append(agent_order_close_route)
+# Add query routes
+a2a_app.routes.append(agent_list_orders_route)
+a2a_app.routes.append(agent_get_order_route)
+a2a_app.routes.append(agent_list_decisions_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file

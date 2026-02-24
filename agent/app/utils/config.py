@@ -139,6 +139,10 @@ class Config:
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
     use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
+    # Provisioning service settings
+    provisioning_service_url: str  # PROVISIONING_SERVICE_URL - URL of async provisioning service
+    provisioning_timeout: int  # PROVISIONING_TIMEOUT - timeout for provisioning jobs in seconds
+    provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL - interval between status polls in seconds
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -228,6 +232,10 @@ def load_config() -> Config:
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
         use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
+        # Provisioning service settings
+        provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8081"),
+        provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),  # Default: 1 hour
+        provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),  # Default: 15 seconds
     )
 
 

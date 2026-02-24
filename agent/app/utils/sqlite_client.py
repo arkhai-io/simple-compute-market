@@ -1156,6 +1156,57 @@ class SQLiteClient:
         await asyncio.to_thread(_cancel)
 
 
+    async def get_orders(self, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                if status:
+                    cur.execute(
+                        "SELECT * FROM orders WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                        (status, limit),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT * FROM orders ORDER BY updated_at DESC LIMIT ?",
+                        (limit,),
+                    )
+                cols = [desc[0] for desc in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def get_order(self, *, order_id: str) -> dict[str, Any] | None:
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                cols = [desc[0] for desc in cur.description]
+                order = dict(zip(cols, row))
+                # Join decision outcomes for this order
+                cur.execute(
+                    """
+                    SELECT d.decision_id, d.event_type, d.action_type, d.timestamp, do.outcome_json
+                    FROM decisions d
+                    LEFT JOIN decision_outcomes do ON d.decision_id = do.decision_id
+                    WHERE d.event_id = ?
+                    ORDER BY d.timestamp DESC
+                    """,
+                    (order_id,),
+                )
+                dcols = [desc[0] for desc in cur.description]
+                order["decisions"] = [dict(zip(dcols, r)) for r in cur.fetchall()]
+                return order
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+
 _sqlite_client: SQLiteClient | None = None
 
 
