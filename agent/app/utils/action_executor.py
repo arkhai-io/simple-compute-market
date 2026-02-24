@@ -47,6 +47,7 @@ from .provisioning_client import (
     schedule_vm_shutdown_async,
     format_connection_info,
     get_vm_available_resources,
+    get_job_credentials,
     ProvisioningError,
 )
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
@@ -631,26 +632,18 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-async def mock_provision_machine(ssh_public_key: str) -> dict:
+async def mock_provision_machine(ssh_public_key: str) -> tuple[str, dict]:
     """Mock stand-in for provisioning a machine.
 
     Return:
-        Dict with provisioning result matching real provisioning shape.
+        Tuple of (job_id, result_dict). The result_dict matches the real provisioning
+        shape but does not contain authentication (credentials are fetched separately).
     """
     logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
-    return {
+    return ("mock-job-id", {
         "ssh_command": "ssh demo-user@node-01.example.net",
         "tenant_user": "demo-user",
-        "authentication": {
-            "tenant": {
-                "password": "mock-password",
-                "ssh_commands": {
-                    "external": "ssh demo-user@node-01.example.net",
-                    "internal": "ssh demo-user@192.168.1.100",
-                },
-            },
-        },
-    }
+    })
 
 
 def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
@@ -658,14 +651,15 @@ def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
     logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
 
 
-async def provision_machine(ssh_public_key: str) -> dict:
+async def provision_machine(ssh_public_key: str) -> tuple[str, dict]:
     """Provision a machine using the provided SSH public key.
 
     Args:
         ssh_public_key: SSH public key to install on the provisioned machine.
 
     Returns:
-        Full provisioning result dict.
+        Tuple of (job_id, result_dict). The result_dict contains connection details
+        but not authentication — use get_job_credentials() for credentials.
     """
     logger.info("[TOOL] Provisioning machine via async provisioning service")
     try:
@@ -684,7 +678,7 @@ async def provision_machine(ssh_public_key: str) -> dict:
             except Exception as e:
                 logger.warning("[TOOL] Failed to build ERC-8004 agent ID, using CONFIG.agent_id: %s", e)
 
-        result = await provision_machine_async(
+        job_id, result = await provision_machine_async(
             provisioning_service_url=CONFIG.provisioning_service_url,
             params={
                 "vm_host": "ww1",
@@ -698,7 +692,7 @@ async def provision_machine(ssh_public_key: str) -> dict:
         )
         connection_info = format_connection_info(result)
         logger.info("[TOOL] Machine provisioned: %s", connection_info)
-        return result
+        return job_id, result
     except ProvisioningError as exc:
         logger.error("[TOOL] Provisioning failed: %s", exc)
         raise RuntimeError(f"Provisioning failed: {exc}") from exc
@@ -1661,9 +1655,50 @@ async def fulfill_compute_obligation(
     oracle_address = _resolve_oracle_address(oracle_address)
     try:
         if CONFIG.use_mock_provisioning:
-            connection_details = await mock_provision_machine(ssh_public_key)
+            job_id, connection_details = await mock_provision_machine(ssh_public_key)
+            seller_credentials = [
+                {
+                    "role": "root",
+                    "password": "mock-root-pass",
+                    "ssh_commands": {"external": "ssh root@node-01.example.net"},
+                    "ssh_key_path_host": None,
+                    "key_type": None,
+                },
+                {
+                    "role": "tenant",
+                    "password": "mock-password",
+                    "ssh_commands": {
+                        "external": "ssh demo-user@node-01.example.net",
+                        "internal": "ssh demo-user@192.168.1.100",
+                    },
+                    "ssh_key_path_host": None,
+                    "key_type": "provided",
+                },
+            ]
         else:
-            connection_details = await provision_machine(ssh_public_key)
+            job_id, connection_details = await provision_machine(ssh_public_key)
+            seller_credentials = []
+            try:
+                # Build ERC-8004 canonical ID for credential fetch
+                cred_agent_id = CONFIG.agent_id
+                if CONFIG.onchain_agent_id is not None and CONFIG.identity_registry_address:
+                    try:
+                        from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                        import os
+                        cred_agent_id = build_erc8004_canonical_id(
+                            chain_id=int(os.getenv("CHAIN_ID", "31337")),
+                            identity_registry=CONFIG.identity_registry_address,
+                            agent_id=int(CONFIG.onchain_agent_id),
+                        )
+                    except Exception:
+                        pass
+                seller_credentials = await get_job_credentials(
+                    provisioning_service_url=CONFIG.provisioning_service_url,
+                    job_id=job_id,
+                    agent_id=cred_agent_id,
+                )
+            except Exception as e:
+                logger.warning("[ALKAHEST] Failed to fetch seller credentials: %s", e)
     except Exception as error:
         logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
         return {
@@ -1673,10 +1708,26 @@ async def fulfill_compute_obligation(
             "connection_details": None,
             "ssh_public_key": ssh_public_key,
         }
+
+    # Extract role-specific credentials
+    root_cred = next((c for c in seller_credentials if c["role"] == "root"), {})
+    tenant_cred = next((c for c in seller_credentials if c["role"] == "tenant"), {})
+
     # Build seller-side fulfillment (full auth: root + tenant + VM details)
     seller_fulfillment = {
         "ssh_command": format_connection_info(connection_details),
-        "authentication": connection_details.get("authentication"),
+        "authentication": {
+            "root": {
+                "password": root_cred.get("password"),
+                "ssh_commands": root_cred.get("ssh_commands"),
+                "ssh_key_path_host": root_cred.get("ssh_key_path_host"),
+            },
+            "tenant": {
+                "password": tenant_cred.get("password"),
+                "ssh_commands": tenant_cred.get("ssh_commands"),
+                "key_type": tenant_cred.get("key_type"),
+            },
+        } if seller_credentials else None,
         "tenant_user": connection_details.get("tenant_user"),
         "vm_name": connection_details.get("vm_name"),
         "vm_state": connection_details.get("vm_state"),
@@ -1687,12 +1738,11 @@ async def fulfill_compute_obligation(
     }
 
     # Build buyer-side fulfillment (tenant auth only, no root)
-    tenant_auth = (connection_details.get("authentication") or {}).get("tenant", {})
     buyer_fulfillment = {
         "ssh_command": format_connection_info(connection_details),
         "tenant_user": connection_details.get("tenant_user"),
-        "tenant_password": tenant_auth.get("password"),
-        "ssh_commands": tenant_auth.get("ssh_commands"),
+        "tenant_password": tenant_cred.get("password"),
+        "ssh_commands": tenant_cred.get("ssh_commands"),
     }
 
     fulfillment_uid = None

@@ -35,7 +35,8 @@ async def provision_machine_async(
     timeout: int = 3600,
     poll_interval: int = 15,
     agent_id: str | None = None,
-) -> dict[str, Any]:
+    buyer_agent_id: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """
     Submit a provisioning job to the async provisioning service and wait for completion.
 
@@ -43,7 +44,7 @@ async def provision_machine_async(
     1. Submits a POST /api/v1/jobs request with the provisioning parameters
     2. Receives a job_id
     3. Polls GET /api/v1/jobs/{job_id} until status is 'succeeded' or 'failed'
-    4. Returns the result on success, raises exception on failure
+    4. Returns (job_id, result) on success, raises exception on failure
 
     Args:
         provisioning_service_url: Base URL of the provisioning service (e.g., "http://localhost:8081")
@@ -51,10 +52,12 @@ async def provision_machine_async(
         timeout: Maximum time to wait for job completion in seconds (default: 3600 = 1 hour)
         poll_interval: Interval between status checks in seconds (default: 15)
         agent_id: Optional agent ID to include in X-Agent-ID header for authentication
+        buyer_agent_id: Optional buyer agent ID to include in the job submission body
 
     Returns:
-        Job result dictionary containing SSH connection details, authentication,
-        GPU, FRP, and full ansible_result.
+        Tuple of (job_id, result_dict). The result_dict contains SSH connection details,
+        GPU, FRP, and full ansible_result. Note: authentication/credentials are no longer
+        included in the result — use get_job_credentials() to fetch them separately.
 
     Raises:
         ProvisioningJobError: If the provisioning job fails
@@ -68,6 +71,10 @@ async def provision_machine_async(
     headers = {}
     if agent_id:
         headers["X-Agent-ID"] = agent_id
+
+    # Include buyer_agent_id in job submission body if provided
+    if buyer_agent_id:
+        params = {**params, "buyer_agent_id": buyer_agent_id}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Step 1: Submit provisioning job
@@ -110,7 +117,7 @@ async def provision_machine_async(
                     if not result:
                         raise ProvisioningError(f"Job {job_id} succeeded but no result returned")
                     logger.info("[PROVISIONING] Job %s succeeded: %s", job_id, result)
-                    return result
+                    return job_id, result
 
                 elif status == "failed":
                     error = status_data.get("error", "Unknown error")
@@ -151,6 +158,58 @@ async def provision_machine_async(
             except Exception as exc:
                 logger.error("[PROVISIONING] Unexpected error polling job %s: %s", job_id, exc)
                 raise ProvisioningError(f"Failed to poll job status: {exc}") from exc
+
+
+async def get_job_credentials(
+    provisioning_service_url: str,
+    job_id: str,
+    agent_id: str,
+) -> list[dict[str, Any]]:
+    """Fetch credentials for a job from the provisioning service.
+
+    Args:
+        provisioning_service_url: Base URL of the provisioning service
+        job_id: The job ID to fetch credentials for
+        agent_id: The agent ID (X-Agent-ID header) — determines which credentials are visible
+
+    Returns:
+        List of credential dicts with keys: role, password, ssh_commands, ssh_key_path_host, key_type
+
+    Raises:
+        ProvisioningError: On network/API errors, 401, or 403
+    """
+    base_url = provisioning_service_url.rstrip("/")
+    headers = {"X-Agent-ID": agent_id}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.get(
+                f"{base_url}/api/v1/jobs/{job_id}/credentials",
+                headers=headers,
+            )
+            response.raise_for_status()
+            data = response.json()
+            credentials = data.get("credentials", [])
+            logger.info("[PROVISIONING] Fetched %d credential(s) for job %s", len(credentials), job_id)
+            return credentials
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in (401, 403):
+                logger.error(
+                    "[PROVISIONING] Credential access denied for job %s (HTTP %d): %s",
+                    job_id, status_code, exc.response.text,
+                )
+                raise ProvisioningError(
+                    f"Credential access denied for job {job_id} (HTTP {status_code})"
+                ) from exc
+            logger.error(
+                "[PROVISIONING] Failed to fetch credentials for job %s: %s %s",
+                job_id, status_code, exc.response.text,
+            )
+            raise ProvisioningError(f"Failed to fetch credentials for job {job_id}: {exc}") from exc
+        except Exception as exc:
+            logger.error("[PROVISIONING] Unexpected error fetching credentials for job %s: %s", job_id, exc)
+            raise ProvisioningError(f"Failed to fetch credentials for job {job_id}: {exc}") from exc
 
 
 async def schedule_vm_shutdown_async(
@@ -299,7 +358,7 @@ async def get_vm_available_resources(
         Dict with keys: vm_host, status, total, allocated,
         available, gpu_details, utilization, and full ansible_result.
     """
-    result = await provision_machine_async(
+    _job_id, result = await provision_machine_async(
         provisioning_service_url=provisioning_service_url,
         params={"vm_host": vm_host, "vm_action": "check"},
         timeout=timeout,
@@ -324,8 +383,13 @@ def format_connection_info(result: dict[str, Any]) -> str:
     """
     Format provisioning result into a connection info string.
 
+    Note: The result dict no longer contains an 'authentication' block. Credentials
+    (passwords, SSH keys, etc.) are now stored separately and must be fetched via
+    get_job_credentials().
+
     Args:
-        result: Provisioning result dictionary from the service
+        result: Provisioning result dictionary from the service (contains ssh_command,
+                ssh_port, tenant_user, vm_host_ip, etc. but NOT authentication)
 
     Returns:
         Formatted connection info string (e.g., "ssh tenant@host -p 2222")
