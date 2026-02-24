@@ -85,6 +85,9 @@ class ProvisionRequest(BaseModel):
     # --- Lease (lease_end action) ---
     vm_lease_end: Optional[str] = Field(default=None, description="UTC datetime 'YYYY-MM-DD HH:MM'")
 
+    # --- Buyer ---
+    buyer_agent_id: Optional[str] = Field(default=None, description="ERC-8004 agent ID of the buyer (tenant)")
+
     # --- Retry ---
     max_retries: Optional[int] = Field(default=None, description="Max retry attempts (overrides default)", ge=0, le=10)
 
@@ -126,7 +129,25 @@ class ProvisionStatusResponse(BaseModel):
     retry_count: int = Field(default=0, description="Number of retries attempted so far")
     max_retries: int = Field(default=3, description="Maximum retries allowed for this job")
     next_retry_at: Optional[datetime] = Field(default=None, description="Scheduled time for the next retry attempt (UTC)")
-    agent_id: Optional[str] = Field(default=None, description="ERC-8004 agent ID that submitted the job")
+    agent_id: Optional[str] = Field(default=None, description="ERC-8004 agent ID (seller) that submitted the job")
+    buyer_agent_id: Optional[str] = Field(default=None, description="ERC-8004 agent ID of the buyer")
+
+
+class CredentialResponse(BaseModel):
+    """A single credential granted to the requesting agent."""
+
+    role: str = Field(description="Credential role: 'root' or 'tenant'")
+    password: Optional[str] = Field(default=None, description="Login password")
+    ssh_commands: Optional[dict] = Field(default=None, description="SSH connection commands (external/internal)")
+    ssh_key_path_host: Optional[str] = Field(default=None, description="Path to SSH key on the host")
+    key_type: Optional[str] = Field(default=None, description="SSH key type (e.g. 'provided')")
+
+
+class CredentialListResponse(BaseModel):
+    """List of credentials the requesting agent is granted for a job."""
+
+    job_id: str = Field(description="Unique job identifier")
+    credentials: list[CredentialResponse] = Field(description="Credentials granted to the requesting agent")
 
 
 class ProvisionLogsResponse(BaseModel):

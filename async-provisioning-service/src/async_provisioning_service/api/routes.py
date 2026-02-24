@@ -5,10 +5,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from async_provisioning_service.api.schemas import (
+    CredentialListResponse,
+    CredentialResponse,
     JobListResponse,
     ProvisionLogsResponse,
     ProvisionRequest,
@@ -17,7 +19,7 @@ from async_provisioning_service.api.schemas import (
 )
 from async_provisioning_service.config import settings
 from async_provisioning_service.db.database import get_db
-from async_provisioning_service.db.models import JobStatus, ProvisioningJob
+from async_provisioning_service.db.models import Credential, JobStatus, ProvisioningJob
 from async_provisioning_service.services.queue import enqueue_job, get_redis
 
 
@@ -114,6 +116,7 @@ async def submit_provisioning(
         status=JobStatus.queued.value,
         params=provision_request.model_dump(),
         agent_id=agent_id,
+        buyer_agent_id=provision_request.buyer_agent_id,
         retry_count=0,
         max_retries=max_retries,
         next_retry_at=None,
@@ -149,9 +152,14 @@ async def list_jobs(
 
     query = db.query(ProvisioningJob)
 
-    # Authenticated agents only see their own jobs
+    # Authenticated agents see jobs where they are the seller OR buyer
     if agent_id:
-        query = query.filter(ProvisioningJob.agent_id == agent_id)
+        query = query.filter(
+            or_(
+                ProvisioningJob.agent_id == agent_id,
+                ProvisioningJob.buyer_agent_id == agent_id,
+            )
+        )
 
     if status_filter:
         query = query.filter(ProvisioningJob.status == status_filter)
@@ -172,6 +180,7 @@ async def list_jobs(
                 max_retries=job.max_retries,
                 next_retry_at=job.next_retry_at,
                 agent_id=job.agent_id,
+                buyer_agent_id=job.buyer_agent_id,
             )
             for job in jobs
         ],
@@ -198,7 +207,9 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Job not found")
 
     agent_id = _get_agent_id(request)
-    if job.agent_id and job.agent_id != agent_id:
+    is_seller = job.agent_id and job.agent_id == agent_id
+    is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
+    if job.agent_id and not is_seller and not is_buyer:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: job belongs to another agent",
@@ -214,6 +225,60 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
         max_retries=job.max_retries,
         next_retry_at=job.next_retry_at,
         agent_id=job.agent_id,
+        buyer_agent_id=job.buyer_agent_id,
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/credentials",
+    response_model=CredentialListResponse,
+    summary="Get job credentials",
+    response_description="Credentials granted to the requesting agent for this job",
+)
+async def get_credentials(job_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return credentials the requesting agent is granted for a job.
+
+    Sellers (job.agent_id) see root + tenant credentials.
+    Buyers (job.buyer_agent_id) see tenant credentials only.
+    Returns **401** without X-Agent-ID, **403** for unauthorized agents.
+    """
+    agent_id = _get_agent_id(request)
+    if not agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-Agent-ID header is required",
+        )
+
+    job = db.query(ProvisioningJob).filter(ProvisioningJob.id == job_id).one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    is_seller = job.agent_id and job.agent_id == agent_id
+    is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
+    if not is_seller and not is_buyer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: you are not the seller or buyer of this job",
+        )
+
+    creds = (
+        db.query(Credential)
+        .filter(Credential.job_id == job_id, Credential.granted_to == agent_id)
+        .all()
+    )
+
+    return CredentialListResponse(
+        job_id=job_id,
+        credentials=[
+            CredentialResponse(
+                role=c.role,
+                password=c.password,
+                ssh_commands=c.ssh_commands,
+                ssh_key_path_host=c.ssh_key_path_host,
+                key_type=c.key_type,
+            )
+            for c in creds
+        ],
     )
 
 
@@ -235,7 +300,9 @@ async def get_logs(job_id: str, request: Request, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="Job not found")
 
     agent_id = _get_agent_id(request)
-    if job.agent_id and job.agent_id != agent_id:
+    is_seller = job.agent_id and job.agent_id == agent_id
+    is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
+    if job.agent_id and not is_seller and not is_buyer:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: job belongs to another agent",
