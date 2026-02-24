@@ -369,7 +369,7 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
         default=None,
         description="UID of the fulfillment (may be provided by seller/chain)",
     )
-    connection_details: str | None = Field(
+    connection_details: str | dict | None = Field(
         default=None,
         description="Connection string/details for the provisioned compute",
     )
@@ -649,6 +649,7 @@ class ActionType(str, Enum):
     TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
     COLLECT_ESCROW = "collect_escrow"
     VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
+    GET_AVAILABLE_RESOURCES = "get_available_resources"
 
     # No-op
     NOOP = "noop"
