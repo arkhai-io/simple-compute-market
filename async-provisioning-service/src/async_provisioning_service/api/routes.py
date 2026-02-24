@@ -210,6 +210,10 @@ async def get_status(job_id: str, request: Request, db: Session = Depends(get_db
     is_seller = job.agent_id and job.agent_id == agent_id
     is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
     if job.agent_id and not is_seller and not is_buyer:
+        logger.warning(
+            "Access denied for job %s: request_agent=%r, job.agent_id=%r, job.buyer_agent_id=%r",
+            job_id, agent_id, job.agent_id, job.buyer_agent_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied: job belongs to another agent",

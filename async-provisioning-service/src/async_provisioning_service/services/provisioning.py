@@ -292,6 +292,8 @@ async def start_playbook(params: ProvisioningParams) -> RunningPlaybook:
         str(settings.resolved_playbook_path),
         "--extra-vars",
         f"@{vm_vars_path}",
+        "-e",
+        f"vm_host={params.vm_host}",
         "--limit",
         params.vm_host,
     ]
@@ -459,6 +461,8 @@ def run_playbook(params: ProvisioningParams) -> ProvisioningResult:
         str(settings.resolved_playbook_path),
         "--extra-vars",
         f"@{vm_vars_path}",
+        "-e",
+        f"vm_host={params.vm_host}",
         "--limit",
         params.vm_host,
     ]
