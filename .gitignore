@@ -192,3 +192,4 @@ node_modules
 # Puffer artifacts — ignore any resources/ dir or symlink at any depth
 **/resources
 pr-message-puffer.md
+*/uv.lock
