@@ -36,9 +36,11 @@ To build the CLI and add `market` to your PATH:
 make build-cli
 ```
 
-If `market` isn't found, ensure your user bin is on PATH (common default is `~/.local/bin`).
+This will make the cli at ./cli/dist/market
 
-Personally when I built it it didn't install it to ~/.local/bin or anywhere outside of the local folder. I just ran it using uv from there which is *fine* but everything will be cleaner if you build a standalone exe.
+You can then run it using e.g. market -v
+
+If `market` isn't found, ensure the dist folder is on PATH.
 
 ## Order Creation (CLI)
 
