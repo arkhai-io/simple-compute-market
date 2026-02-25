@@ -1,16 +1,16 @@
-name: Build and Push Docker Image
+name: Build and Push ERC-8004 Registry Docker Image
 
 on:
   push:
     branches:
       - main
       - develop
-      - feature/registry-containerization  # Test on this branch
+      - feature/registry-containerization
     paths:
       - 'erc-8004-registry-py/**'
-      - '.github/workflows/docker-build-push.yml'
+      - '.github/workflows/docker-build-push-erc8004-registry.yml'
     tags:
-      - 'v*.*.*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
+      - 'registry-v*.*.*'  # Triggers on version tags like registry-v1.0.0
   release:
     types: [published]
   workflow_dispatch:  # Allow manual triggers
@@ -18,6 +18,10 @@ on:
 env:
   DOCKER_REGISTRY_ORG: whitewidget
   IMAGE_NAME: arkhai-erc-8004-registry
+  PYTHON_VERSION: "3.13"
+  UV_VERSION: "0.10.0"
+  APP_PORT: "8080"
+  CHAIN_ID: "84532"
 
 jobs:
   build-and-push:
@@ -48,7 +52,7 @@ jobs:
           tags: |
             # Tag as latest only for version tag pushes
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
-            # Use version tag if available (e.g., v1.0.0 -> 1.0.0)
+            # Use version tag if available (e.g., registry-v1.0.0 -> 1.0.0)
             type=semver,pattern={{version}}
             # Use git SHA only for non-tag pushes (branch pushes)
             type=sha,format=short,enable=${{ github.ref_type != 'tag' }}
@@ -71,6 +75,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+            UV_VERSION=${{ env.UV_VERSION }}
+            PORT=${{ env.APP_PORT }}
+            CHAIN_ID=${{ env.CHAIN_ID }}
 
       - name: Generate build summary
         run: |
