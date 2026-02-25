@@ -5,12 +5,12 @@ from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
-from .common import REPO_ROOT, run_step
-from .groups.order import order_app
-from .groups.registry import registry_app
-from .groups.network import network_app
-from .groups.config import config_app
-from .groups.dev import dev_app
+#from .common import REPO_ROOT, run_step
+#from .groups.order import order_app
+#from .groups.registry import registry_app
+#from .groups.network import network_app
+#from .groups.config import config_app
+#from .groups.dev import dev_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -38,53 +38,53 @@ def main(
     """Market CLI - Unified interface for Arkhai market operations."""
     pass
 
-@app.command()
-def register(
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file passed as ENV_FILE to make register.",
-    ),
-) -> None:
-    """Register agent on-chain (make register)."""
-    cmd = ["make", "register"]
-    if env:
-        cmd.append(f"ENV_FILE={env}")
-    run_step(
-        "Register agent (make register)",
-        cmd,
-        REPO_ROOT / "agent",
-    )
+#@app.command()
+#def register(
+#    env: str | None = typer.Option(
+#        None,
+#        "--env",
+#        "-e",
+#        help="Path to env file passed as ENV_FILE to make register.",
+#    ),
+#) -> None:
+#    """Register agent on-chain (make register)."""
+#    cmd = ["make", "register"]
+#    if env:
+#        cmd.append(f"ENV_FILE={env}")
+#    run_step(
+#        "Register agent (make register)",
+#        cmd,
+#        REPO_ROOT / "agent",
+#    )
 
-@app.command()
-def start(
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file passed as ENV_FILE to make serve-a2a.",
-    ),
-) -> None:
-    """Start Agent service."""
-    cmd = ["make", "serve-a2a"]
-    if env:
-        cmd.append(f"ENV_FILE={env}")
-    run_step(
-        "Start agent (make serve-a2a)",
-        cmd,
-        REPO_ROOT / "agent",
-    )
+#@app.command()
+#def start(
+#    env: str | None = typer.Option(
+#        None,
+#        "--env",
+#        "-e",
+#        help="Path to env file passed as ENV_FILE to make serve-a2a.",
+#    ),
+#) -> None:
+#    """Start Agent service."""
+#    cmd = ["make", "serve-a2a"]
+#    if env:
+#        cmd.append(f"ENV_FILE={env}")
+#    run_step(
+#        "Start agent (make serve-a2a)",
+#        cmd,
+#        REPO_ROOT / "agent",
+#    )
 
-app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
-app.add_typer(
-    config_app,
-    name="config",
-    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
-)
-app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
-app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
-app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
+#app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+#app.add_typer(
+#    config_app,
+#    name="config",
+#    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
+#)
+#app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
+#app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
+#app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
 
 if __name__ == "__main__":
     app()
