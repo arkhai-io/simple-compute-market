@@ -19,21 +19,15 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 
 ## CLI
 
-Install the CLI and add `market` to your PATH:
+To build the CLI and add `market` to your PATH:
 
 ```bash
-cd cli
-uv venv
-uv pip install -e .
+make build-cli
 ```
 
 If `market` isn't found, ensure your user bin is on PATH (common default is `~/.local/bin`).
 
-Install all component dependencies and venvs:
-
-```bash
-market install
-```
+Personally when I built it it didn't install it to ~/.local/bin or anywhere outside of the local folder. I just ran it using uv from there which is *fine* but everything will be cleaner if you build a standalone exe.
 
 ## Order Creation (CLI)
 
@@ -60,7 +54,7 @@ cd agent
 make test-env
 ```
 
-Note the RPC URL and port (keep this terminal open).
+Note the RPC URL and port (keep this terminal open). It runs on `http://localhost:45165` by default.
 
 ### 2. Deploy Contracts
 

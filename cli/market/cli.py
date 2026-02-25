@@ -14,7 +14,6 @@ from .groups.dev import dev_app
 
 app = typer.Typer(no_args_is_help=True)
 
-
 def version_callback(value: bool) -> None:
     """Show version and exit."""
     if value:
@@ -24,7 +23,6 @@ def version_callback(value: bool) -> None:
             __version__ = "unknown (not installed)"
         typer.echo(f"Market CLI version {__version__}")
         raise typer.Exit()
-
 
 @app.callback()
 def main(
@@ -39,49 +37,6 @@ def main(
 ) -> None:
     """Market CLI - Unified interface for Arkhai market operations."""
     pass
-
-
-@app.command()
-def install(
-    with_zerotier: bool = typer.Option(
-        False,
-        "--with-zerotier",
-        help="Install ZeroTier (runs 'make install' in infra, requires sudo).",
-    ),
-) -> None:
-    """Install dependencies for Agent and Registry.\nWith the --with-zerotier flag, also installs ZeroTier."""
-    steps: list[tuple[str, list[str], Path]] = [
-        (
-            "Agent dependencies (uv sync)",
-            ["make", "install"],
-            REPO_ROOT / "agent",
-        ),
-        (
-            "Registry dependencies (uv sync)",
-            ["make", "install"],
-            REPO_ROOT / "erc-8004-registry-py",
-        ),
-        (
-            "Contracts dependencies (npm install)",
-            ["npm", "install"],
-            REPO_ROOT / "erc-8004-contracts",
-        ),
-    ]
-
-    if with_zerotier:
-        steps.append(
-            (
-                "ZeroTier install (requires sudo)",
-                ["make", "install"],
-                REPO_ROOT / "infra",
-            )
-        )
-
-    for label, cmd, cwd in steps:
-        run_step(label, cmd, cwd)
-
-    typer.echo("Done.")
-
 
 @app.command()
 def register(
@@ -102,7 +57,6 @@ def register(
         REPO_ROOT / "agent",
     )
 
-
 @app.command()
 def start(
     env: str | None = typer.Option(
@@ -122,7 +76,6 @@ def start(
         REPO_ROOT / "agent",
     )
 
-
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 app.add_typer(
     config_app,
@@ -132,7 +85,6 @@ app.add_typer(
 app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
 app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
 app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
-
 
 if __name__ == "__main__":
     app()
