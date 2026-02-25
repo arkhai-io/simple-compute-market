@@ -2,6 +2,8 @@
 ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.10.0
 
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # TODO: Pin with SHA256 digest for production: FROM python:3.13-slim@sha256:...
 FROM python:${PYTHON_VERSION}-slim
 
@@ -11,7 +13,7 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*
 
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 # Create non-root user with explicit UID/GID for security
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
