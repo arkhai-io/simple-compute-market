@@ -144,6 +144,7 @@ lint:
 
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
+	uv run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
 	uv run python app/utils/test_env.py
 # Market Environment Build Targets
 # ==============================================================================

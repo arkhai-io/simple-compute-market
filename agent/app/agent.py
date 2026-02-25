@@ -19,7 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
-from alkahest_py import AlkahestClient, EnvTestManager
+from alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
@@ -94,10 +94,17 @@ from .utils.event_ingestion import (
 )
 from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
+from .utils.alkahest_config import (
+    get_alkahest_network,
+    prewarm_alkahest_address_config_cache,
+    resolve_alkahest_address_config,
+)
 from .utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
+
+ALKAHEST_NETWORK = get_alkahest_network(CONFIG.alkahest_network)
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
@@ -493,16 +500,23 @@ class TraderAgent(BaseAgent):
         
         if has_priv_key and has_rpc_url:
             try:
-                # DEMO ONLY:
-                # We use a short-lived EnvTestManager just for extracting custom addresses.
-                env = EnvTestManager()
+                prewarm_alkahest_address_config_cache(
+                    CONFIG.alkahest_address_config_path
+                )
+                address_config = resolve_alkahest_address_config(
+                    ALKAHEST_NETWORK,
+                    config_path=CONFIG.alkahest_address_config_path,
+                )
                 self._alkahest_client = AlkahestClient(
                     private_key=AGENT_PRIV_KEY,
                     rpc_url=CHAIN_RPC_URL,
-                    address_config=env.addresses
+                    address_config=address_config,
                 )
-                # self._alkahest_client = None
-                logger.info(f"[ALKAHEST]: AlkahestClient initialized: {self._alkahest_client}.")
+                logger.info(
+                    "[ALKAHEST] Initialized client on network=%s (custom_config=%s)",
+                    ALKAHEST_NETWORK,
+                    address_config is not None,
+                )
             except Exception as e:
                 logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
                 self._alkahest_client = None

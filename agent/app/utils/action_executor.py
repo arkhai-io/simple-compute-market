@@ -39,6 +39,7 @@ from app.schema.pydantic_models import (
 )
 
 from .config import CONFIG
+from .alkahest_config import get_trusted_oracle_arbiter
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
@@ -54,7 +55,6 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
-TRUSTED_ORACLE_ARBITER = "0x8a791620dd6260079bf849dc5567adc3f2fdc318"
 DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 logger = logging.getLogger(__name__)
@@ -1515,7 +1515,8 @@ async def buy_compute_with_erc20(
 
     logger.info(f"[ALKAHEST]: Buying compute with Client {client}")
 
-    arbiter_address = TRUSTED_ORACLE_ARBITER
+    trusted_oracle_arbiter = get_trusted_oracle_arbiter()
+    arbiter_address = trusted_oracle_arbiter
 
     # 1) Encode lease terms into demand bytes
     demand_data = TrustedOracleArbiterDemandData(
