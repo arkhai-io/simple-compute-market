@@ -1334,7 +1334,8 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
                             try:
                                 from web3 import Web3
                                 from web3.providers import HTTPProvider
-                                http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+                                from app.utils.registry.blockchain_utils import rpc_url_for_http_provider
+                                http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
                                 w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
                                 chain_id = w3.eth.chain_id
                             except Exception:

@@ -1274,7 +1274,7 @@ a2a_app.routes.append(agent_order_close_route)
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from .utils.agent_card import build_erc8004_registration_file
-from .utils.registry.blockchain_utils import build_erc8004_canonical_id
+from .utils.registry.blockchain_utils import build_erc8004_canonical_id, rpc_url_for_http_provider
 
 async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     """
@@ -1292,7 +1292,7 @@ async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
         try:
             from web3 import Web3
             from web3.providers import HTTPProvider
-            http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+            http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
             w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
             chain_id = w3.eth.chain_id
         except Exception:
