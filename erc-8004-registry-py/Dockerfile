@@ -3,11 +3,13 @@ ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.10.0
 ARG PORT=8080
 
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 # TODO: Pin with SHA256 digest for production: FROM python:3.13-slim@sha256:...
 FROM python:${PYTHON_VERSION}-slim
 
 # Install uv package manager
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 # Non-root user for security
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
