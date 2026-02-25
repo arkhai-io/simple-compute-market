@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -73,7 +74,16 @@ def test_get_trusted_oracle_arbiter_prefers_override(
     }
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
-    monkeypatch.setattr("app.utils.alkahest_config.CONFIG.alkahest_network", NETWORK_BASE_SEPOLIA)
-    monkeypatch.setattr("app.utils.alkahest_config.CONFIG.alkahest_address_config_path", str(path))
+    from app.utils import alkahest_config as module
+
+    monkeypatch.setattr(
+        module,
+        "CONFIG",
+        replace(
+            module.CONFIG,
+            alkahest_network=NETWORK_BASE_SEPOLIA,
+            alkahest_address_config_path=str(path),
+        ),
+    )
     resolved = get_trusted_oracle_arbiter()
     assert resolved == override["arbiters_addresses"]["trusted_oracle_arbiter"]

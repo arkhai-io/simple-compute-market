@@ -219,6 +219,10 @@ def _extract_content_payload(
                 )
             response_dict = {
                 "source": agent_str,
+                "source_url": payload_dict.get("source")
+                if isinstance(payload_dict.get("source"), str)
+                and payload_dict.get("source", "").startswith(("http://", "https://"))
+                else None,
                 "event_type": tool_name,
                 "message": None,
                 "data": payload_dict
@@ -339,7 +343,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
-            fulfillment_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
+            source_url = payload.get("source_url") or (
+                payload.get("source")
+                if isinstance(payload.get("source"), str)
+                and payload.get("source", "").startswith(("http://", "https://"))
+                else None
+            )
+            fulfillment_payload = {
+                **data,
+                "source": payload.get("source") or data.get("source", "unknown"),
+                "source_url": source_url,
+            }
             return ReceiveComputeObligationFulfillmentEvent.from_payload(fulfillment_payload)
 
         elif event_type == EventType.ARBITRATION_COMPLETE:
