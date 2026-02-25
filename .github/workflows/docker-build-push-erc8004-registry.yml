@@ -50,12 +50,11 @@ jobs:
           images: |
             ${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
           tags: |
-            # Tag as latest only for version tag pushes
+            # Branch pushes: use git SHA
+            type=sha,format=short,enable=${{ github.ref_type == 'branch' }}
+            # Tag pushes: use latest + version
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
-            # Extract version from tag (e.g., registry-v0.1.0 -> v0.1.0)
-            type=match,pattern=registry-(v.*),group=1
-            # Use git SHA only for non-tag pushes (branch pushes)
-            type=sha,format=short,enable=${{ github.ref_type != 'tag' }}
+            type=match,pattern=registry-(v.*),group=1,enable=${{ github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.title=ERC-8004 Registry
             org.opencontainers.image.description=ERC-8004 Identity and Reputation Registry Service
