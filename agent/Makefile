@@ -7,7 +7,7 @@ ALKAHEST_WHEEL_SOURCE := ${REPO_ROOT}/../alkahest/sdks/py/dist
 
 # Install dependencies using uv package manager
 init: init-alkahest
-	uv sync --dev --python 3.13
+	uv sync --dev --python 3.12
 	cp .env.sample .env
 
 init-alkahest:
@@ -17,12 +17,14 @@ init-alkahest:
 build-images: build-a2a-agent-image build-test-env-image
 
 build-a2a-agent-image:
-	docker build -f Dockerfile -t arkhai:agent-$(GIT_SUFFIX) .
+	docker build -f Dockerfile -t arkhai:a2a-agent-$(GIT_SUFFIX) .
 
 #This is where we will run the chain as a container, make side effects to initialize addresses and balances, deploy contracts, etc, then commit the container to a new image.
 build-test-env-image:
 	echo "NYI"
 
+deploy-a2a-agent:
+	docker run -it --rm arkhai:a2a-agent-$(GIT_SUFFIX)
 # ==============================================================================
 # Agent Registration
 # ==============================================================================
