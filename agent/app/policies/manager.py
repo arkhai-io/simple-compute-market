@@ -133,9 +133,9 @@ class PolicyManager:
                 policy_name="make_offer.default.v1",
                 components=[
                     "mo.guard.trigger_is_make_offer",
-                    # "mo.action.accept_offer", # Uncomment this to use the default accept offer policy
-                    # "mo.action.torch_always_accept_offer", # Uncomment this to use the Always Accept offer TorchScript policy
-                    "mo.action.torch_market_seller", # Uncomment this to use the Market Seller TorchScript policy
+                    "mo.action.accept_offer", # Uncomment this to use the default accept offer policy
+                    # "mo.action.torch_market_seller", # Old Market Seller TorchScript policy (deprecated)
+                    # "mo.action.torch_arkhai_seller", # Arkhai seller policy adapter (RL-based)
                 ],
             )
             logger.debug("[POLICY MANAGER] Ensured make_offer policy")

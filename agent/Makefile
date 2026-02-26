@@ -145,122 +145,83 @@ lint:
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
 	uv run python app/utils/test_env.py
-# Market Environment Build Targets
+# ==============================================================================
+# Arkhai Training Environment Targets
 # ==============================================================================
 
-# Build the Market C extension binding
-build-market-env:
-	@echo "Building Market C extension..."
-	@cd app/environment/seller && uv run python build_binding.py
+# Train Arkhai model using upstream puffer CLI.
+# Usage: make train-arkhai [DEVICE=cpu] [TOTAL_TIMESTEPS=10000000] [WANDB=true] [TAG=exp_name] [ARGS="..."]
+train-arkhai:
+	@echo "Training Arkhai model via puffer..."
+	@DEVICE=$${DEVICE:-cpu}; \
+	TOTAL_TIMESTEPS=$${TOTAL_TIMESTEPS:-10000000}; \
+	WANDB_FLAG=""; \
+	TAG_FLAG=""; \
+	ARGS="$${ARGS:-}"; \
+	if [ "$${WANDB:-false}" = "true" ]; then WANDB_FLAG="--wandb"; fi; \
+	if [ -n "$${TAG:-}" ]; then TAG_FLAG="--tag $${TAG}"; fi; \
+	echo "Device: $$DEVICE"; \
+	echo "Total timesteps: $$TOTAL_TIMESTEPS"; \
+	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	uv run puffer train puffer_arkhai \
+		--train.device $$DEVICE \
+		--train.total-timesteps $$TOTAL_TIMESTEPS \
+		$$WANDB_FLAG $$TAG_FLAG $$ARGS
 
-# Check Market environment build dependencies
-check-market-env:
-	@echo "Checking Market environment build dependencies..."
-	@which uv > /dev/null || (echo "ERROR: uv not found" && exit 1)
-	@uv run python -c "import pufferlib" 2>/dev/null && echo "✓ pufferlib installed" || echo "⚠ pufferlib not found"
-	@uv run python -c "from setuptools import setup" 2>/dev/null && echo "✓ setuptools available" || echo "⚠ setuptools not found"
-	@which gcc > /dev/null && echo "✓ gcc compiler found" || (which clang > /dev/null && echo "✓ clang compiler found" || echo "⚠ C compiler not found")
-
-# Clean Market environment build artifacts
-clean-market-env:
-	@echo "Cleaning Market environment build artifacts..."
-	@cd app/environment/seller && rm -f *.so *.o binding.cpython-*.so
-	@cd app/environment/seller && rm -rf build/ __pycache__/ *.egg-info/
-	@rm -f app/env_binding.h
-
-# Test Market environment
-test-market-env: build-market-env
-	@echo "Testing Market environment..."
-	@uv run test_market_env.py
-
-# Train Market environment model
-# Usage: make train-market-env [CONFIG=app/environment/seller/market.ini] [DEVICE=cpu] [USE_WANDB=true] [WANDB_TAG=tag_name]
-# Note: Uses Python API since puffer_market is a local environment
-# For CLI usage, the environment needs to be registered with pufferlib's ocean package
-train-market-env: build-market-env
-	@echo "Training Market environment model..."
-	@echo "Note: Using Python API for local environment"
-	@echo "For CLI usage, register the environment with pufferlib's ocean package"
-	@CONFIG_FILE=$${CONFIG:-app/environment/seller/market.ini}; \
+# Evaluate Arkhai policy with upstream puffer CLI.
+# Usage: make eval-arkhai [MODEL=latest] [DEVICE=cpu] [ARGS="..."]
+eval-arkhai:
+	@echo "Evaluating Arkhai model via puffer..."
+	@MODEL=$${MODEL:-latest}; \
 	DEVICE=$${DEVICE:-cpu}; \
-	USE_WANDB=$${USE_WANDB:-false}; \
-	WANDB_TAG=$${WANDB_TAG:-}; \
-	echo "Using config: $$CONFIG_FILE"; \
-	echo "Using device: $$DEVICE"; \
-	echo "Using wandb: $$USE_WANDB"; \
-	[ -n "$$WANDB_TAG" ] && echo "Wandb tag: $$WANDB_TAG" || true; \
-	PUFFERLIB_CONFIG=$$CONFIG_FILE \
-	PUFFERLIB_DEVICE=$$DEVICE \
-	USE_WANDB=$$USE_WANDB \
-	WANDB_TAG=$$WANDB_TAG \
-	uv run python app/environment/seller/train.py
+	ARGS="$${ARGS:-}"; \
+	echo "Model: $$MODEL"; \
+	echo "Device: $$DEVICE"; \
+	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	uv run puffer eval puffer_arkhai \
+		--load-model-path $$MODEL \
+		--train.device $$DEVICE \
+		$$ARGS
 
-# Evaluate Market environment (render with random agent)
-# Usage: make eval-market-env [LOAD_MODEL_PATH=latest]
-eval-market-env: build-market-env
-	@echo "Evaluating Market environment..."
-	@MODEL_PATH=$${LOAD_MODEL_PATH:-latest}; \
-	LOAD_MODEL_PATH=$$MODEL_PATH \
-	uv run python app/environment/seller/eval.py
+# Backward-compatible alias for previous target name.
+eval-arkhai-seller: eval-arkhai
 
-# Run hyperparameter sweep for Market environment
-# Usage: make sweep-market-env [LOGGER=wandb] [TAG=sweep_name] [CONFIG=app/environment/seller/market.ini]
-# Examples:
-#   make sweep-market-env LOGGER=wandb TAG=my_sweep
-#   make sweep-market-env LOGGER=neptune TAG=my_sweep
-# Note: Sweeps may require the environment to be registered with pufferlib
-sweep-market-env: build-market-env
-	@echo "Running hyperparameter sweep for Market environment..."
-	@CONFIG_FILE=$${CONFIG:-app/environment/seller/market.ini}; \
-	LOGGER=$${LOGGER:-wandb}; \
-	TAG=$${TAG:-market_sweep}; \
-	if [ "$$LOGGER" = "neptune" ]; then \
-		uv run python -m pufferlib.pufferl sweep puffer_market \
-			--config $$CONFIG_FILE \
-			--neptune --tag $$TAG || \
-		echo "Note: Sweep failed. You may need to register the environment with pufferlib."; \
-	else \
-		uv run python -m pufferlib.pufferl sweep puffer_market \
-			--config $$CONFIG_FILE \
-			--wandb --tag $$TAG || \
-		echo "Note: Sweep failed. You may need to register the environment with pufferlib."; \
-	fi
+# Export model weights in puffer's native format.
+# Usage: make export-arkhai-weights [MODEL=latest]
+export-arkhai-weights:
+	@echo "Exporting Arkhai weights via puffer..."
+	@MODEL=$${MODEL:-latest}; \
+	echo "Model: $$MODEL"; \
+	uv run puffer export puffer_arkhai --load-model-path $$MODEL
 
-# Export model checkpoint to TorchScript
-# Usage: make export-model [CHECKPOINT=path/to/model.pt] [OUTPUT=output.ts] [DEVICE=cpu] [SCRIPT=false]
-# Examples:
-#   make export-model  # Exports latest checkpoint
-#   make export-model CHECKPOINT=experiments/123/model_000200.pt OUTPUT=model.ts
-#   make export-model CHECKPOINT=experiments/123/model_000200.pt DEVICE=cuda
-#   make export-model CHECKPOINT=experiments/123/model_000200.pt SCRIPT=true  # Use torch.jit.script
-export-model: build-market-env
-	@echo "Exporting model to TorchScript..."
-	@CHECKPOINT=$${CHECKPOINT:-}; \
-	OUTPUT=$${OUTPUT:-}; \
-	DEVICE=$${DEVICE:-cpu}; \
-	SCRIPT=$${SCRIPT:-false}; \
-	if [ -n "$$CHECKPOINT" ]; then \
-		CHECKPOINT_ARG="$$CHECKPOINT"; \
-	else \
-		CHECKPOINT_ARG=""; \
-	fi; \
-	if [ -n "$$OUTPUT" ]; then \
-		OUTPUT_ARG="-o $$OUTPUT"; \
-	else \
-		OUTPUT_ARG=""; \
-	fi; \
-	if [ "$$SCRIPT" = "true" ]; then \
-		SCRIPT_ARG="--script"; \
-	else \
-		SCRIPT_ARG=""; \
-	fi; \
-	uv run python app/environment/seller/export_model.py $$CHECKPOINT_ARG $$OUTPUT_ARG --device $$DEVICE $$SCRIPT_ARG
+# Backward-compatible alias for previous target name.
+export-arkhai-model: export-arkhai-weights
 
-# Test TorchScript model inference
-# Usage: make test-torchscript MODEL=<path_to_torchscript_model.ts>
-test-torchscript:
-	@if [ -z "$(MODEL)" ]; then \
-		echo "Usage: make test-torchscript MODEL=<path_to_torchscript_model.ts>"; \
-		exit 1; \
-	fi
-	@uv run python app/environment/seller/test_torchscript.py $(MODEL)
+# Test Arkhai environment integration
+# Usage: make test-arkhai-env
+test-arkhai-env:
+	@echo "Testing Arkhai environment..."
+	@uv run python -c "\
+	from pufferlib.ocean.arkhai.arkhai import Arkhai; \
+	import numpy as np; \
+	env = Arkhai(num_envs=2, seed=42, node_types=3, ai_sellers=1, ai_buyers=0, scripted_sellers=0, scripted_buyers=3, \
+	    episode_length=100, request_timeout=5, \
+	    job_gpu_0_nodes=10, job_gpu_0_nodes_dr=0.2, job_gpu_1_nodes=10, job_gpu_1_nodes_dr=0.2, job_gpu_2_nodes=10, job_gpu_2_nodes_dr=0.2, \
+	    job_duration=10, job_duration_dr=0.2, job_tb_usage=0.2, job_tb_usage_dr=0.2, job_efficiency=0.8, job_efficiency_dr=0.2, \
+	    scripted_buy_price=0.9, scripted_buy_price_dr=0.2, scripted_sell_price=0.9, scripted_sell_price_dr=0.2, \
+	    reward_scale=0.0001, tb_price=0.03, gpu_0_price=5.31, gpu_0_kw=6.5, gpu_1_price=15.92, gpu_1_kw=10.0, gpu_2_price=0.37, gpu_2_kw=1.0, \
+	    energy_demand_base=1500.0, kwh_price_base=0.02, kwh_price_sensitivity=0.0000001, kwh_demand_threshold=1400, \
+	    a1=-374, b1=-387, a2=-4.6, b2=-17.1, a3=3.2, b3=18.9, randomize_offset=1, preset=0, \
+	    cluster_gpu_0_capacity=100, cluster_gpu_0_capacity_dr=0.2, cluster_gpu_1_capacity=100, cluster_gpu_1_capacity_dr=0.2, \
+	    cluster_gpu_2_capacity=100, cluster_gpu_2_capacity_dr=0.2, cluster_tb_capacity=100, cluster_tb_capacity_dr=0.2, \
+	    cluster_kwh_capacity=100, cluster_kwh_capacity_dr=0.2, cluster_kw_generation=10, cluster_kw_generation_dr=0.2); \
+	obs, info = env.reset(); \
+	print(f'✓ Environment created: {env.num_agents} agents'); \
+	print(f'✓ Observation shape: {obs.shape}'); \
+	print(f'✓ Observation space: {env.single_observation_space}'); \
+	print(f'✓ Action space: {env.single_action_space}'); \
+	actions = np.array([[4, 0]] * env.num_agents); \
+	obs, reward, done, trunc, info = env.step(actions); \
+	print(f'✓ Step completed: obs={obs.shape}, reward={reward.shape}'); \
+	print('✓ Arkhai environment integration test passed'); \
+	"
