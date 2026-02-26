@@ -9,6 +9,8 @@ from collections import deque
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from app.adapters.from_core import core_domain_event_to_payload
+from app.adapters.to_core import event_payload_to_core_domain_event
 from app.schema.pydantic_models import EventType
 from app.utils.config import CONFIG
 
@@ -77,8 +79,14 @@ def normalize_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
     
     if "data" not in normalized:
         normalized["data"] = payload.copy()
-    
-    return normalized
+
+    # Adapter seam: normalize through core contracts, then return legacy payload shape.
+    try:
+        core_event = event_payload_to_core_domain_event(normalized)
+        return core_domain_event_to_payload(core_event)
+    except Exception as exc:
+        logger.warning("[VALIDATION] Core adapter normalization failed, using legacy payload: %s", exc)
+        return normalized
 
 
 def queue_event(payload: dict[str, Any]) -> bool:
@@ -203,4 +211,3 @@ def has_queued_events() -> bool:
         return False
     queue = get_event_queue()
     return len(queue) > 0
-
