@@ -57,7 +57,7 @@ market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
-alkahest-py = { path = "packages/alkahest_py-0.1.0-cp313-cp313-linux_x86_64.whl" }
+alkahest-py = { path = "packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -118,7 +118,6 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.metadata]
 allow-direct-references=true
-# Keep commit pin until the ADK A2A PR https://github.com/google/adk-python/pull/3262 is merged.
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent"]

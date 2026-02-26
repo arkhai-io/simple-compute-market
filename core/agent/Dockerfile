@@ -1,31 +1,33 @@
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Stage 1: Dependency Downloading and building the wheel
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 FROM python:3.12-slim
 
-RUN pip install --no-cache-dir uv==0.8.13
+#This installs the dependencies to a cache layer so they don't need to be redownloaded every docker build
+#The output is a cache of the .venv folder
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-WORKDIR /code
+WORKDIR /app
 
-COPY ./pyproject.toml ./README.md ./uv.lock* ./
+COPY packages/ ./packages/
+COPY pyproject.toml uv.lock ./
 
-COPY ./app ./app
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project --no-dev
 
-RUN uv sync --frozen
+# Stage 2: Lean runtime image
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
 
-ARG COMMIT_SHA=""
-ENV COMMIT_SHA=${COMMIT_SHA}
+WORKDIR /app
+
+# Copy the cached venv from builder
+COPY --from=builder /app/.venv ./.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Copy the application code
+COPY ./app .
+COPY .env.sample .
 
 ARG MODEL_VERSION=""
 ENV MODEL_VERSION=${MODEL_VERSION}
