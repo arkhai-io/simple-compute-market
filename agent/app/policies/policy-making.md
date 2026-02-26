@@ -40,7 +40,7 @@ A policy maps context (event + resources + market state) to an Action, e.g., "ac
 Callable policies accept a `DecisionContext` and return `Action | None`. Use the decorator to register the stable name.
 
 ```python
-from app.policies.registry import policy_callable
+from core.agent.policies.registry import policy_callable
 from app.schema.pydantic_models import Action as Action, ActionType, DecisionContext
 
 @policy_callable("mo.action.accept_offer")
@@ -52,8 +52,8 @@ def mo_action_accept_offer(ctx: DecisionContext) -> Action | None:
 At startup, import policy modules so decorators run and then bulk-register the discovered callables.
 
 ```python
-from app.policies.discovery import discover_and_register
-from app.policies.registry import CALLABLE_REGISTRY
+from core.agent.policies.discovery import discover_and_register
+from core.agent.policies.registry import CALLABLE_REGISTRY
 
 discover_and_register("app.policies")
 store.register_callables(CALLABLE_REGISTRY)
@@ -67,10 +67,10 @@ Evaluation executes sub-callables in order and returns the first non-None action
 Recommended naming: `domain.variant.vN` (e.g., `resource_imbalance.default.v1`).
 
 ### Programmatically building composites
-For programmatic composite creation, use utilities from `app.policies.composite`:
+For programmatic composite creation, use utilities from `core.agent.policies.composite`:
 
 ```python
-from app.policies.composite import build_composite_callable
+from core.agent.policies.composite import build_composite_callable
 
 # Build a composite callable and register it in the store
 composite_func = build_composite_callable(
@@ -150,7 +150,7 @@ ORDER BY position;
 
 ### Decorated guard/action callables
 ```python
-from app.policies.registry import policy_callable
+from core.agent.policies.registry import policy_callable
 from app.schema.pydantic_models import Action as Action, DecisionContext
 
 @policy_callable("ri.guard.trigger_is_resource_imbalance")
@@ -229,7 +229,7 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> Action | No
 
 ### Negotiation policies
 ```python
-from app.policies.registry import policy_callable
+from core.agent.policies.registry import policy_callable
 from app.schema.pydantic_models import Action as Action, ActionType, DecisionContext
 import random
 
@@ -271,8 +271,8 @@ def simple_negotiation_callable(context: DecisionContext) -> Action | None:
 ### Discovery and bulk registration at startup
 ```python
 # app/agent.py
-from app.policies.discovery import discover_and_register
-from app.policies.registry import CALLABLE_REGISTRY
+from core.agent.policies.discovery import discover_and_register
+from core.agent.policies.registry import CALLABLE_REGISTRY
 
 discover_and_register("app.policies")
 self._policy_store.register_callables(CALLABLE_REGISTRY)

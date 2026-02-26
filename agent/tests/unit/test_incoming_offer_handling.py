@@ -128,7 +128,7 @@ class TestRespondToMakeOffer:
 
     @pytest.fixture
     def policy_store(self, temp_db):
-        from app.policies.registry import CALLABLE_REGISTRY
+        from core.agent.policies.registry import CALLABLE_REGISTRY
 
         CALLABLE_REGISTRY.clear()
 

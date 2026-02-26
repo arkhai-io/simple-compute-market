@@ -14,11 +14,11 @@ def chain_callables(
     registry: Dict[str, Callable[[DecisionContext], DomainAction | None]],
 ) -> Callable[[DecisionContext], DomainAction | None]:
     """Chain multiple callables together, returning the first non-None action.
-    
+
     Args:
         names: Ordered list of callable names to chain
         registry: Dictionary mapping callable names to their functions
-        
+
     Returns:
         A callable that executes each component in order until one returns an action
     """
@@ -40,16 +40,16 @@ def build_composite_callable(
     component_names: List[str],
 ) -> Callable[[DecisionContext], DomainAction | None]:
     """Create a composite callable from registered sub-callables and record its components.
-    
+
     This function:
     1. Records the composite name and its components in the store
     2. Returns a callable that chains the components together
-    
+
     Args:
         store: PolicyStore instance to register the composite in
         name: Name for the composite callable
         component_names: Ordered list of component callable names
-        
+
     Returns:
         A callable that executes each component in order until one returns an action
     """

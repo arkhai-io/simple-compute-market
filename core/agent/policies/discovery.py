@@ -28,3 +28,4 @@ def discover_and_register(package: str) -> None:
             importlib.import_module(m.name)
         except Exception as e:
             logger.warning("Failed to import module %s: %s", m.name, e)
+
