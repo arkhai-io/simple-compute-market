@@ -6,7 +6,7 @@ map in/out without immediate domain extraction.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,7 +18,7 @@ class DomainEvent(BaseModel):
     event_id: str = Field(description="Unique event identifier")
     event_type: str = Field(description="Event type identifier")
     source: str = Field(description="Source identifier")
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -27,7 +27,7 @@ class DomainAction(BaseModel):
 
     action_type: str = Field(description="Action type identifier")
     parameters: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Decision(BaseModel):
