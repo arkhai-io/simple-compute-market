@@ -5,12 +5,12 @@ from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
-#from .common import REPO_ROOT, run_step
-#from .groups.order import order_app
-#from .groups.registry import registry_app
-#from .groups.network import network_app
-#from .groups.config import config_app
-#from .groups.dev import dev_app
+#from .common import run_step
+from .groups.order import order_app
+from .groups.registry import registry_app
+from .groups.network import network_app
+from .groups.config import config_app
+from .groups.dev import dev_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -38,6 +38,9 @@ def main(
     """Market CLI - Unified interface for Arkhai market operations."""
     pass
 
+# This functionality needs to be refactored to remove any assumptions this is running in a git repo.
+# You cannot import repo root, you cannot call makefile targets, etc.
+# You can run a container for the agent or build a wheel of the agent, import the dependency here like I showed for alkahest within the agent, and call it within this standalone executable.
 #@app.command()
 #def register(
 #    env: str | None = typer.Option(
@@ -76,15 +79,12 @@ def main(
 #        REPO_ROOT / "agent",
 #    )
 
-#app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
-#app.add_typer(
-#    config_app,
-#    name="config",
-#    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
-#)
-#app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
-#app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
-#app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
-
-if __name__ == "__main__":
-    app()
+app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+app.add_typer(
+    config_app,
+    name="config",
+    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
+)
+app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
+app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
+app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")

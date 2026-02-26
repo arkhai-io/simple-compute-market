@@ -4,8 +4,7 @@ REPO_ROOT := $(shell git rev-parse --show-toplevel)
 
 init:
 	uv venv --allow-existing
-	uv pip install -e .
-	uv pip install pyinstaller
+	uv sync --python 3.10
 
 # Requires foreign python projects dependencies have already been initialized
 # Also we need to work on lean dependencies here because while this built the resuling cli is 700MB
@@ -14,6 +13,7 @@ init:
 #	--add-data "${REPO_ROOT}/erc-8004-registry-py:erc-8004-registry-py" \
 #	--add-data "${REPO_ROOT}/infra:infra"
 build:
-	uv run pyinstaller --onefile \
-	--name market \
-	./market/cli.py
+	uv run pyinstaller --onefile --name market ./main.py
+
+smoke-test:
+	cd dist && ./market -v
