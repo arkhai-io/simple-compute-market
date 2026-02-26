@@ -282,7 +282,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
+                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
@@ -337,7 +337,7 @@ async def execute_action(
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=parameters.get("oracle_address", DEMO_ORACLE_ADDRESS),
+                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
                 escrow_uid=parameters.get("escrow_uid"),
             )
             logger.info(f"[ALKAHEST]: {result}")
