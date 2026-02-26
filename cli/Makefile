@@ -6,12 +6,6 @@ init:
 	uv venv --allow-existing
 	uv sync --python 3.10
 
-# Requires foreign python projects dependencies have already been initialized
-# Also we need to work on lean dependencies here because while this built the resuling cli is 700MB
-#	--add-data "${REPO_ROOT}/agent:agent" \
-#	--add-data "${REPO_ROOT}/erc-8004-contracts:erc-8004-contracts" \
-#	--add-data "${REPO_ROOT}/erc-8004-registry-py:erc-8004-registry-py" \
-#	--add-data "${REPO_ROOT}/infra:infra"
 build:
 	uv run pyinstaller --onefile --name market ./main.py
 
