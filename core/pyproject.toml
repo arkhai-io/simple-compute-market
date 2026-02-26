@@ -57,6 +57,7 @@ market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
+alkahest-py = { path = "packages/alkahest_py-0.1.0-cp313-cp313-linux_x86_64.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
