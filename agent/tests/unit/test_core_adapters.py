@@ -26,8 +26,8 @@ from app.schema.pydantic_models import (  # noqa: E402
     DomainEvent,
     EventType,
 )
-from core.action import ActionDispatcher, ActionHandler  # noqa: E402
-from core.policy import PolicyEngine  # noqa: E402
+from core.agent.action import ActionDispatcher, ActionHandler  # noqa: E402
+from core.agent.policy import PolicyEngine  # noqa: E402
 from core.schemas import DomainAction as CoreDomainAction  # noqa: E402
 from core.schemas import DecisionContext as CoreDecisionContext  # noqa: E402
 
@@ -89,7 +89,8 @@ async def test_action_dispatcher_smoke() -> None:
     assert result["kwargs"]["trace_id"] == "t1"
 
 
-def test_policy_engine_smoke() -> None:
+@pytest.mark.asyncio
+async def test_policy_engine_smoke() -> None:
     engine = PolicyEngine()
 
     def returns_none(_ctx):
@@ -112,6 +113,6 @@ def test_policy_engine_smoke() -> None:
         ),
         agent_id="agent",
     )
-    action = engine.evaluate(ctx)
+    action = await engine.evaluate(ctx)
     assert action is not None
     assert action.action_type == "make_offer"

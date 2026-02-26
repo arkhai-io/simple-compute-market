@@ -23,3 +23,4 @@ class DomainPlugin(Protocol):
 
     def policies(self) -> list[Policy]:
         ...
+

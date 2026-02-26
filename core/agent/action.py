@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from .schemas import DomainAction
+from core.schemas import DomainAction
 
 
 class ActionHandler(ABC):
@@ -45,3 +45,4 @@ class ActionDispatcher:
                 f"No action handler registered for '{self._normalize_action_type(action.action_type)}'"
             )
         return await handler.execute(action, **kwargs)
+
