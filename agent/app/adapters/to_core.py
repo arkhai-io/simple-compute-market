@@ -6,11 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.schema.pydantic_models import Action, Decision, DecisionContext, DomainEvent
+from app.schema.pydantic_models import Action, DecisionContext, DomainEvent
 
 try:
     from core.schemas import (
-        Decision as CoreDecision,
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
@@ -20,7 +19,6 @@ except ModuleNotFoundError:
     if str(repo_root) not in sys.path:
         sys.path.append(str(repo_root))
     from core.schemas import (  # type: ignore[no-redef]
-        Decision as CoreDecision,
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
@@ -61,17 +59,8 @@ def legacy_decision_context_to_core(context: DecisionContext) -> CoreDecisionCon
         event=legacy_domain_event_to_core(context.event),
         agent_id=context.agent_id,
         available_resources=context.available_resources,
+        past_experiences=context.past_experiences,
         market_state=context.market_state,
-        memory={
-            "past_experiences": context.past_experiences,
-            "negotiation_history": context.negotiation_history,
-        },
-    )
-
-
-def legacy_decision_to_core(decision: Decision) -> CoreDecision:
-    """Convert legacy Decision to core Decision."""
-    return CoreDecision(
-        action=legacy_action_to_core(decision.action),
+        negotiation_history=context.negotiation_history,
     )
 

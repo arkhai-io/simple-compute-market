@@ -9,15 +9,11 @@ from typing import Any
 from app.schema.pydantic_models import (
     Action,
     ActionType,
-    Decision,
-    DecisionContext,
-    DomainEvent,
+    DomainEvent
 )
 
 try:
     from core.schemas import (
-        Decision as CoreDecision,
-        DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
     )
@@ -26,8 +22,6 @@ except ModuleNotFoundError:
     if str(repo_root) not in sys.path:
         sys.path.append(str(repo_root))
     from core.schemas import (  # type: ignore[no-redef]
-        Decision as CoreDecision,
-        DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
     )
@@ -55,37 +49,4 @@ def core_domain_action_to_legacy(action: CoreDomainAction) -> Action:
         action_type=ActionType(action.action_type),
         parameters=action.parameters,
         timestamp=action.timestamp,
-    )
-
-
-def core_decision_context_to_legacy(context: CoreDecisionContext) -> DecisionContext:
-    """Convert core DecisionContext to legacy DecisionContext."""
-    memory = context.memory or {}
-    return DecisionContext(
-        event=core_domain_event_to_legacy(context.event),
-        agent_id=context.agent_id,
-        available_resources=context.available_resources,
-        market_state=context.market_state,
-        past_experiences=memory.get("past_experiences", []),
-        negotiation_history=memory.get("negotiation_history", []),
-    )
-
-
-def core_decision_to_legacy(
-    core_decision: CoreDecision,
-    *,
-    decision_id: str,
-    agent_id: str,
-    context: DecisionContext,
-    policy_used: str,
-) -> Decision:
-    """Convert core Decision to legacy Decision."""
-    if core_decision.action is None:
-        raise ValueError("core_decision.action is required for legacy Decision")
-    return Decision(
-        decision_id=decision_id,
-        agent_id=agent_id,
-        context=context,
-        action=core_domain_action_to_legacy(core_decision.action),
-        policy_used=policy_used,
     )

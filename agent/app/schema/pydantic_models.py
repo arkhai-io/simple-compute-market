@@ -1,9 +1,28 @@
 from enum import Enum
 from datetime import datetime
+import sys
+from pathlib import Path
 from typing import Any, Literal, Union
 from pydantic import BaseModel, Field, SerializeAsAny, field_validator, model_validator
-from pydantic import ConfigDict
 import uuid
+
+try:
+    from core.schemas import (
+        Decision as CoreDecision,
+        DecisionContext as CoreDecisionContext,
+        DomainAction as CoreDomainAction,
+        DomainEvent as CoreDomainEvent,
+    )
+except ModuleNotFoundError:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.append(str(repo_root))
+    from core.schemas import (  # type: ignore[no-redef]
+        Decision as CoreDecision,
+        DecisionContext as CoreDecisionContext,
+        DomainAction as CoreDomainAction,
+        DomainEvent as CoreDomainEvent,
+    )
 
 
 class ERC20TokenMetadata(BaseModel):
@@ -254,22 +273,7 @@ class EventType(str, Enum):
     NEGOTIATION = "negotiation"
 
 
-class DomainEvent(BaseModel):
-    """Base event model"""
-
-    model_config = ConfigDict(use_enum_values=False)
-
-    event_id: str = Field(description="Unique event identifier")
-    event_type: EventType = Field(description="Type of event")
-    timestamp: datetime = Field(
-        default_factory=datetime.now,
-        description="When the event occurred",
-    )
-    source: str = Field(description="Source of the event (agent_id, system, etc.)")
-    data: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Event-specific data payload",
-    )
+DomainEvent = CoreDomainEvent
 
 
 class OrderCreateEvent(DomainEvent):
@@ -654,79 +658,6 @@ class ActionType(str, Enum):
     NOOP = "noop"
 
 
-class Action(BaseModel):
-    """An action to be taken by an agent."""
-
-    action_type: ActionType = Field(description="Type of action")
-    parameters: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Action-specific parameters",
-    )
-    timestamp: datetime = Field(
-        default_factory=datetime.now,
-        description="When the action was created",
-    )
-
-
-class DecisionContext(BaseModel):
-    """Context information for making a reactive decision."""
-
-    # Trigger information
-    event: DomainEvent = Field(description="The triggering event")
-
-    # Agent state
-    agent_id: str = Field(description="Agent making the decision")
-    available_resources: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Agent's current resource state",
-    )
-
-    # Historical context
-    past_experiences: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Relevant past experiences",
-    )
-
-    # Market context
-    market_state: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Current market conditions",
-    )
-
-    # Negotiation context (if applicable)
-    negotiation_history: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="History of current negotiation thread",
-    )
-
-    def get_event_type(self) -> EventType:
-        """Get the type of triggering event."""
-        return self.event.event_type
-
-    def has_negotiation_context(self) -> bool:
-        """Check if this context includes negotiation history."""
-        return len(self.negotiation_history) > 0
-
-
-class Decision(BaseModel):
-    """A decision made by a reactive agent."""
-
-    decision_id: str = Field(description="Unique decision identifier")
-    agent_id: str = Field(description="Agent who made the decision")
-    context: DecisionContext = Field(description="Context that led to the decision")
-    action: Action = Field(description="The chosen action")
-    policy_used: str = Field(description="Policy that produced this decision")
-    timestamp: datetime = Field(
-        default_factory=datetime.now,
-        description="When the decision was made",
-    )
-
-    # Outcome tracking (filled in later)
-    outcome: dict[str, Any] | None = Field(
-        default=None,
-        description="Outcome of executing this decision",
-    )
-
-    def record_outcome(self, outcome: dict[str, Any]) -> None:
-        """Record the outcome of this decision."""
-        self.outcome = outcome
+Action = CoreDomainAction
+DecisionContext = CoreDecisionContext
+Decision = CoreDecision

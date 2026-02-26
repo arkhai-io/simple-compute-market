@@ -79,9 +79,6 @@ from .schema.pydantic_models import (
     OrderCreateEvent,
     OrderCloseEvent,
 )
-from .adapters.from_core import core_decision_context_to_legacy, core_domain_event_to_payload
-from .adapters.to_core import event_payload_to_core_domain_event, legacy_decision_context_to_core
-
 from .policies.store import PolicyStore
 from .policies.manager import PolicyManager
 from .utils.sqlite_client import SQLiteClient
@@ -257,9 +254,6 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     if not payload:
         raise ValueError("Cannot parse empty payload as DomainEvent")
 
-    # Adapter seam: canonicalize through core schemas before parsing legacy event models.
-    payload = core_domain_event_to_payload(event_payload_to_core_domain_event(payload))
-    
     event_type_str = payload.get("event_type")
     if not event_type_str:
         raise ValueError("Missing required field: event_type")
@@ -644,10 +638,6 @@ class TraderAgent(BaseAgent):
             negotiation_history=context_data.get("negotiation_history", []),
             past_experiences=context_data.get("past_experiences", []),
         )
-
-        # Adapter seam: pass through core model boundary while preserving legacy policy behavior.
-        core_context = legacy_decision_context_to_core(decision_context)
-        decision_context = core_decision_context_to_legacy(core_context)
 
         try:
             action = await self._policy_store.evaluate_policy(

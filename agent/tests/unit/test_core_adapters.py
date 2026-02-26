@@ -12,26 +12,24 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
 from app.adapters.from_core import (  # noqa: E402
-    core_decision_context_to_legacy,
     core_domain_action_to_legacy,
     core_domain_event_to_legacy,
 )
 from app.adapters.to_core import (  # noqa: E402
     event_payload_to_core_domain_event,
     legacy_action_to_core,
-    legacy_decision_context_to_core,
     legacy_domain_event_to_core,
 )
 from app.schema.pydantic_models import (  # noqa: E402
     Action,
     ActionType,
-    DecisionContext,
     DomainEvent,
     EventType,
 )
 from core.action import ActionDispatcher, ActionHandler  # noqa: E402
 from core.policy import PolicyEngine  # noqa: E402
 from core.schemas import DomainAction as CoreDomainAction  # noqa: E402
+from core.schemas import DecisionContext as CoreDecisionContext  # noqa: E402
 
 
 def test_domain_event_round_trip_legacy_core_legacy() -> None:
@@ -62,31 +60,6 @@ def test_action_round_trip_legacy_core_legacy() -> None:
 
     assert restored.action_type == legacy_action.action_type
     assert restored.parameters == legacy_action.parameters
-
-
-def test_decision_context_round_trip_legacy_core_legacy() -> None:
-    legacy_event = DomainEvent(
-        event_id="evt_abc",
-        event_type=EventType.NEGOTIATION,
-        source="peer-1",
-        data={"message_type": "offer"},
-    )
-    legacy_context = DecisionContext(
-        event=legacy_event,
-        agent_id="agent-1",
-        available_resources={"gpus": 2},
-        market_state={"tick": 1},
-        past_experiences=[{"decision_id": "d1"}],
-        negotiation_history=[{"message": "hello"}],
-    )
-
-    core_context = legacy_decision_context_to_core(legacy_context)
-    restored = core_decision_context_to_legacy(core_context)
-
-    assert restored.agent_id == legacy_context.agent_id
-    assert restored.event.event_id == legacy_context.event.event_id
-    assert restored.past_experiences == legacy_context.past_experiences
-    assert restored.negotiation_history == legacy_context.negotiation_history
 
 
 def test_event_payload_to_core_domain_event_normalizes_event_type() -> None:
@@ -128,16 +101,16 @@ def test_policy_engine_smoke() -> None:
     engine.register(returns_none)
     engine.register(choose_make_offer)
 
-    ctx = legacy_decision_context_to_core(
-        DecisionContext(
-            event=DomainEvent(
-                event_id="evt_p",
-                event_type=EventType.MAKE_OFFER,
-                source="s",
-                data={},
-            ),
-            agent_id="agent",
-        )
+    ctx = CoreDecisionContext(
+        event=event_payload_to_core_domain_event(
+            {
+                "event_id": "evt_p",
+                "event_type": EventType.MAKE_OFFER.value,
+                "source": "s",
+                "data": {},
+            }
+        ),
+        agent_id="agent",
     )
     action = engine.evaluate(ctx)
     assert action is not None
