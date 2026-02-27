@@ -14,6 +14,7 @@ try:
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
         ERC20TokenMetadata as CoreERC20TokenMetadata,
+        Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
 except ModuleNotFoundError:
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
         ERC20TokenMetadata as CoreERC20TokenMetadata,
+        Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
 
@@ -53,10 +55,9 @@ class Region(str, Enum):
 Attestation = CoreAttestation
 
 
-class Resource(BaseModel):
-    """Generic resource.
-    """
-    
+class ComputeDomainResource(CoreResource):
+    """Compute-domain resource parser extension on top of core Resource."""
+
     @staticmethod
     def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
         """Convert token identifiers into ERC20TokenMetadata."""
@@ -73,7 +74,7 @@ class Resource(BaseModel):
         )
     
     @classmethod
-    def parse_from_dict(cls, data: Any) -> "Resource":
+    def parse_from_dict(cls, data: Any) -> CoreResource:
         """Parse a resource from a dictionary or return existing Resource instance.
         
         Converts dictionary payloads into the appropriate Resource subclass:
@@ -94,7 +95,7 @@ class Resource(BaseModel):
             ValueError: If data is a dict but doesn't contain required keys for any resource type
         """
         # If already a Resource instance, return it unchanged
-        if isinstance(data, Resource):
+        if isinstance(data, CoreResource):
             return data
         
         # If not a dict, return as-is (pass through)
@@ -108,16 +109,12 @@ class Resource(BaseModel):
             return TokenResource(**data)
         elif "gpu_model" in data:
             return ComputeResource(**data)
-        else:
-            raise ValueError(
-                "Resource dict must have either 'token' (TokenResource) "
-                "or 'gpu_model' (ComputeResource) key"
-            )
+        return super().parse_from_dict(data)
 
 
 TokenResource = CoreTokenResource
 
-class ComputeResource(Resource):
+class ComputeResource(ComputeDomainResource):
     """Describes the compute resources that are available to each Agent,
     and may be put on the market. This is before any valuation.
     Not all resources in the resource portfolio are on sale
@@ -218,11 +215,11 @@ class MarketOrder(BaseModel):
         
         # Parse offer_resource using Resource helper
         if "offer_resource" in data:
-            data["offer_resource"] = Resource.parse_from_dict(data["offer_resource"])
+            data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
         
         # Parse demand_resource using Resource helper
         if "demand_resource" in data:
-            data["demand_resource"] = Resource.parse_from_dict(data["demand_resource"])
+            data["demand_resource"] = ComputeDomainResource.parse_from_dict(data["demand_resource"])
         
         return data
 
@@ -262,8 +259,8 @@ class OrderCreateEvent(DomainEvent):
     """Event triggered when a local client requests order creation."""
 
     event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: Resource = Field(description="Offered resource (compute or token)")
-    demand: Resource = Field(description="Demanded resource (compute or token)")
+    offer: ComputeDomainResource = Field(description="Offered resource (compute or token)")
+    demand: ComputeDomainResource = Field(description="Demanded resource (compute or token)")
     duration_hours: int = Field(default=1, description="Duration of the order in hours")
 
     @model_validator(mode="before")
@@ -272,9 +269,9 @@ class OrderCreateEvent(DomainEvent):
         if not isinstance(data, dict):
             return data
         if "offer" in data:
-            data["offer"] = Resource.parse_from_dict(data["offer"])
+            data["offer"] = ComputeDomainResource.parse_from_dict(data["offer"])
         if "demand" in data:
-            data["demand"] = Resource.parse_from_dict(data["demand"])
+            data["demand"] = ComputeDomainResource.parse_from_dict(data["demand"])
         return data
 
 

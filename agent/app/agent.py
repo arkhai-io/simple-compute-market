@@ -75,7 +75,7 @@ from .schema.pydantic_models import (
     ComputeResource,
     ComputeResourcePortfolio,
     TokenResource,
-    Resource,
+    ComputeDomainResource,
     OrderCreateEvent,
     OrderCloseEvent,
 )
@@ -1054,8 +1054,8 @@ async def _run_create_order_flow(request: Request) -> dict:
         return normalized
 
     try:
-        offer_resource = Resource.parse_from_dict(normalize_token_resource(offer_data))
-        demand_resource = Resource.parse_from_dict(normalize_token_resource(demand_data))
+        offer_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(offer_data))
+        demand_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(demand_data))
     except Exception as e:
         raise ValueError(f"Invalid offer/demand resource: {e}") from e
 

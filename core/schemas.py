@@ -22,7 +22,26 @@ class ERC20TokenMetadata(BaseModel):
     )
 
 
-class TokenResource(BaseModel):
+class Resource(BaseModel):
+    """Domain-agnostic base resource model."""
+
+    @classmethod
+    def parse_from_dict(cls, data: Any) -> "Resource":
+        """Parse core-known resource shapes.
+
+        Core only understands universally valid resources. Domain-specific
+        resources should be parsed by domain adapters that extend this method.
+        """
+        if isinstance(data, Resource):
+            return data
+        if not isinstance(data, dict):
+            return data
+        if "token" in data:
+            return TokenResource(**data)
+        raise ValueError("Unsupported resource payload for core Resource parser")
+
+
+class TokenResource(Resource):
     """Describes a given value and amount of a token used for trade/payment."""
 
     token: SerializeAsAny[ERC20TokenMetadata] = Field(
