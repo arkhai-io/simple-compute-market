@@ -1308,7 +1308,10 @@ a2a_app.routes.append(agent_order_close_route)
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from .utils.agent_card import build_erc8004_registration_file
-from .utils.registry.blockchain_utils import build_erc8004_canonical_id, rpc_url_for_http_provider
+from core.agent.app.utils.registry.blockchain_utils import (
+    build_erc8004_canonical_id,
+    rpc_url_for_http_provider,
+)
 
 async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     """
@@ -1383,7 +1386,7 @@ async def process_queued_events():
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from .utils.config import CONFIG
-    from .agent_heartbeat import start_agent_heartbeat
+    from core.agent.app.agent_heartbeat import start_agent_heartbeat
     await start_agent_heartbeat(CONFIG)
 
 

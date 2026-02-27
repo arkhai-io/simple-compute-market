@@ -42,7 +42,7 @@ from app.schema.pydantic_models import (
 from .config import CONFIG
 from .alkahest_config import get_trusted_oracle_arbiter
 from .token_registry import TOKEN_REGISTRY
-from .registry_client import get_registry_client
+from core.agent.app.utils.registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from core.agent.app.policy.negotiation_thread import (
@@ -1384,14 +1384,18 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
                     # Build canonical ID from numeric agent ID
                     try:
                         numeric_agent_id = int(onchain_agent_id) if isinstance(onchain_agent_id, str) else onchain_agent_id
-                        from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+                        from core.agent.app.utils.registry.blockchain_utils import (
+                            build_erc8004_canonical_id,
+                        )
                         # Get chain_id - try from RPC or use default
                         chain_id = 31337  # Default for Anvil/local
                         if CONFIG.chain_rpc_url:
                             try:
                                 from web3 import Web3
                                 from web3.providers import HTTPProvider
-                                from app.utils.registry.blockchain_utils import rpc_url_for_http_provider
+                                from core.agent.app.utils.registry.blockchain_utils import (
+                                    rpc_url_for_http_provider,
+                                )
                                 http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
                                 w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
                                 chain_id = w3.eth.chain_id
