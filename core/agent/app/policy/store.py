@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Tuple
 
 from app.schema.pydantic_models import Action as DomainAction, DecisionContext
-from app.utils.sqlite_client import SQLiteClient
+from core.agent.app.ports.persistence import PolicyPersistencePort
 
 from core.agent.app.policy.evaluator import CallableEvaluator
 
@@ -11,7 +11,7 @@ CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 
 
 class PolicyStore:
-    def __init__(self, sqlite_client: SQLiteClient):
+    def __init__(self, sqlite_client: PolicyPersistencePort):
         self._sqlite = sqlite_client
         self._registry: Dict[str, Callable[[DecisionContext], DomainAction | None]] = {}
         self._cache: Dict[CacheKey, Dict[str, Any]] = {}

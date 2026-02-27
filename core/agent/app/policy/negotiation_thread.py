@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
-from app.utils.sqlite_client import SQLiteClient
+from core.agent.app.ports.persistence import NegotiationThreadPersistencePort
 from app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
@@ -266,11 +266,11 @@ class NegotiationThreadStore:
     - Thread history for policy evaluation
     """
     
-    def __init__(self, sqlite_client: SQLiteClient):
+    def __init__(self, sqlite_client: NegotiationThreadPersistencePort):
         """Initialize thread store with SQLite client.
         
         Args:
-            sqlite_client: SQLiteClient instance for database operations
+            sqlite_client: Persistence client implementing negotiation thread operations
         """
         self._sqlite = sqlite_client
     
@@ -501,11 +501,13 @@ class NegotiationThreadStore:
 _thread_store: Optional[NegotiationThreadStore] = None
 
 
-def get_thread_store(sqlite_client: SQLiteClient | None = None) -> NegotiationThreadStore:
+def get_thread_store(
+    sqlite_client: NegotiationThreadPersistencePort | None = None,
+) -> NegotiationThreadStore:
     """Get or create global negotiation thread store.
     
     Args:
-        sqlite_client: SQLiteClient instance. If None, uses the global instance.
+        sqlite_client: Persistence client instance. If None, uses the global instance.
                       Must be provided on first call.
     
     Returns:
@@ -516,8 +518,8 @@ def get_thread_store(sqlite_client: SQLiteClient | None = None) -> NegotiationTh
         if sqlite_client is None:
             raise ValueError(
                 "SQLiteClient must be provided on first call to get_thread_store(). "
+                "Persistence client must be provided on first call to get_thread_store(). "
                 "Call from agent initialization with sqlite_client parameter."
             )
         _thread_store = NegotiationThreadStore(sqlite_client)
     return _thread_store
-

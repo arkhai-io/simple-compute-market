@@ -1,8 +1,8 @@
 """Validation utilities for alerts, orders, and resource extraction."""
 
 from typing import Any
-from pydantic import ValidationError
 
+from core.agent.app.utils.validation import validate_model
 from app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
@@ -26,7 +26,7 @@ def validate_alert(alert_dict: dict[str, Any]) -> ResourceAlertRequest:
     Raises:
         ValidationError: If alert structure is invalid
     """
-    return ResourceAlertRequest.model_validate(alert_dict)
+    return validate_model(ResourceAlertRequest, alert_dict)
 
 
 def validate_market_order(order_dict: dict[str, Any]) -> MarketOrder:
@@ -41,7 +41,7 @@ def validate_market_order(order_dict: dict[str, Any]) -> MarketOrder:
     Raises:
         ValidationError: If order structure is invalid
     """
-    return MarketOrder.model_validate(order_dict)
+    return validate_model(MarketOrder, order_dict)
 
 
 def extract_compute_resource(resource: ComputeDomainResource) -> ComputeResource | None:
