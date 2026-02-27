@@ -3,8 +3,40 @@ Blockchain utilities for agent registration.
 """
 import logging
 from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
+
+
+def rpc_url_for_http_provider(rpc_url: str) -> str:
+    """
+    Convert an RPC URL to an HTTP(S) URL compatible with web3 HTTPProvider.
+
+    Generic behavior:
+    - ws:// -> http://
+    - wss:// -> https://
+
+    Provider-specific behavior:
+    - Infura websocket endpoints use /ws/v3/<project_id>, while HTTP uses
+      /v3/<project_id>. This rewrite is Infura-specific.
+    """
+    if not rpc_url:
+        return rpc_url
+
+    parsed = urlparse(rpc_url.strip())
+    scheme = parsed.scheme.lower()
+
+    if scheme == "ws":
+        parsed = parsed._replace(scheme="http")
+    elif scheme == "wss":
+        parsed = parsed._replace(scheme="https")
+
+    path = parsed.path or ""
+    # Infura-specific path normalization: /ws/v3/<project_id> -> /v3/<project_id>
+    if path.startswith("/ws/v3/"):
+        parsed = parsed._replace(path=path.replace("/ws/v3/", "/v3/", 1))
+
+    return urlunparse(parsed)
 
 
 def build_erc8004_canonical_id(chain_id: int, identity_registry: str, agent_id: int) -> str:
@@ -88,4 +120,3 @@ def extract_agent_id_from_receipt(contract, receipt) -> Optional[int]:
             logger.debug(f"[BLOCKCHAIN] Error parsing event log: {e}")
             continue
     return None
-

@@ -13,7 +13,7 @@ except ImportError:
     HAS_WEB3 = False
 
 from .utils.registry.heartbeat_logic import heartbeat_loop
-from .utils.registry.blockchain_utils import build_erc8004_canonical_id
+from .utils.registry.blockchain_utils import build_erc8004_canonical_id, rpc_url_for_http_provider
 
 if TYPE_CHECKING:
     from .utils.config import Config
@@ -54,7 +54,7 @@ async def start_agent_heartbeat(config: "Config") -> Optional[str]:
     chain_id = 1337  # Default
     if HAS_WEB3 and config.chain_rpc_url:
         try:
-            http_url = config.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+            http_url = rpc_url_for_http_provider(config.chain_rpc_url)
             w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
             chain_id = w3.eth.chain_id
         except Exception:
@@ -71,4 +71,3 @@ async def start_agent_heartbeat(config: "Config") -> Optional[str]:
     logger.info(f"[HEARTBEAT] Started heartbeat for {canonical_id}")
     
     return config.agent_wallet_address
-

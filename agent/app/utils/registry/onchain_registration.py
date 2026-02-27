@@ -3,6 +3,7 @@ On-chain registration logic for ERC-8004 Identity Registry.
 """
 import json
 import logging
+import re
 import urllib.request
 from typing import Optional, Tuple
 
@@ -20,10 +21,24 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
-from .blockchain_utils import find_agent_id_by_owner, extract_agent_id_from_receipt
+from .blockchain_utils import (
+    find_agent_id_by_owner,
+    extract_agent_id_from_receipt,
+    rpc_url_for_http_provider,
+)
 from ...abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_revert_reason(error: Exception) -> str:
+    """Best-effort extraction of Solidity revert reason from provider error text."""
+    msg = str(error)
+    m = re.search(r"execution reverted(?::\s*(.*))?$", msg, flags=re.IGNORECASE)
+    if m:
+        reason = (m.group(1) or "").strip()
+        return reason or "execution reverted (no reason string)"
+    return msg
 
 
 def build_agent_card_url(base_url: str) -> str:
@@ -396,9 +411,8 @@ async def register_onchain(
     logger.info(f"[ONCHAIN REGISTRATION] Contract: {contract_address}")
     
     try:
-        # Use HTTP provider for now (most RPC providers support HTTP even if URL is ws://)
-        # Convert ws:// to http:// for compatibility
-        http_url = rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+        # Use HTTP provider for chain calls; normalize ws/wss RPC URLs if needed.
+        http_url = rpc_url_for_http_provider(rpc_url)
         logger.debug(f"[REGISTRATION] Connecting to RPC: {http_url} (converted from {rpc_url})")
         
         try:
@@ -576,15 +590,23 @@ async def register_onchain(
         # Log metadata for debugging
         logger.debug(f"[ONCHAIN REGISTRATION] Metadata to store: {json.dumps(metadata, indent=2)}")
 
+        # Preflight: estimate gas first. If this fails, provider usually includes
+        # the contract revert reason and we can exit before broadcasting a tx.
+        register_fn = contract.functions.register(registration_file_url, metadata)
+        try:
+            estimated_gas = register_fn.estimate_gas({"from": account.address})
+            logger.debug(f"[REGISTRATION] register() gas estimate: {estimated_gas}")
+        except Exception as gas_error:
+            revert_reason = _extract_revert_reason(gas_error)
+            logger.error(f"[REGISTRATION] register() preflight failed: {revert_reason}")
+            return None
+
         # Build transaction - no 'to' parameter, always mints to msg.sender
         # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
-        tx = contract.functions.register(
-            registration_file_url,
-            metadata
-        ).build_transaction({
+        tx = register_fn.build_transaction({
             "from": account.address,
             "nonce": w3.eth.get_transaction_count(account.address),
-            "gas": 500000,  # Reasonable gas limit for registration
+            "gas": max(int(estimated_gas * 2), 500000),
             "gasPrice": w3.eth.gas_price,
         })
         
@@ -649,9 +671,14 @@ async def register_onchain(
                 return None
         else:
             logger.error(f"[REGISTRATION] On-chain registration failed! TX reverted.")
+            logger.error(
+                "[REGISTRATION] Reverted tx details: hash=%s block=%s gasUsed=%s",
+                tx_hash_str,
+                receipt.blockNumber,
+                receipt.gasUsed,
+            )
             return None
             
     except Exception as e:
         logger.error(f"[REGISTRATION] On-chain registration error: {e}")
         return None
-

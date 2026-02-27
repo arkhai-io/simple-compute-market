@@ -19,7 +19,7 @@ import random
 import uuid
 from datetime import datetime
 import ast
-from alkahest_py import AlkahestClient, EnvTestManager
+from alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
 from enum import Enum
 import re
@@ -94,10 +94,17 @@ from .utils.event_ingestion import (
 )
 from .utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
+from .utils.alkahest_config import (
+    get_alkahest_network,
+    prewarm_alkahest_address_config_cache,
+    resolve_alkahest_address_config,
+)
 from .utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
+
+ALKAHEST_NETWORK = get_alkahest_network(CONFIG.alkahest_network)
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
@@ -212,6 +219,10 @@ def _extract_content_payload(
                 )
             response_dict = {
                 "source": agent_str,
+                "source_url": payload_dict.get("source")
+                if isinstance(payload_dict.get("source"), str)
+                and payload_dict.get("source", "").startswith(("http://", "https://"))
+                else None,
                 "event_type": tool_name,
                 "message": None,
                 "data": payload_dict
@@ -332,7 +343,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
-            fulfillment_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
+            source_url = payload.get("source_url") or (
+                payload.get("source")
+                if isinstance(payload.get("source"), str)
+                and payload.get("source", "").startswith(("http://", "https://"))
+                else None
+            )
+            fulfillment_payload = {
+                **data,
+                "source": payload.get("source") or data.get("source", "unknown"),
+                "source_url": source_url,
+            }
             return ReceiveComputeObligationFulfillmentEvent.from_payload(fulfillment_payload)
 
         elif event_type == EventType.ARBITRATION_COMPLETE:
@@ -493,16 +514,23 @@ class TraderAgent(BaseAgent):
         
         if has_priv_key and has_rpc_url:
             try:
-                # DEMO ONLY:
-                # We use a short-lived EnvTestManager just for extracting custom addresses.
-                env = EnvTestManager()
+                prewarm_alkahest_address_config_cache(
+                    CONFIG.alkahest_address_config_path
+                )
+                address_config = resolve_alkahest_address_config(
+                    ALKAHEST_NETWORK,
+                    config_path=CONFIG.alkahest_address_config_path,
+                )
                 self._alkahest_client = AlkahestClient(
                     private_key=AGENT_PRIV_KEY,
                     rpc_url=CHAIN_RPC_URL,
-                    address_config=env.addresses
+                    address_config=address_config,
                 )
-                # self._alkahest_client = None
-                logger.info(f"[ALKAHEST]: AlkahestClient initialized: {self._alkahest_client}.")
+                logger.info(
+                    "[ALKAHEST] Initialized client on network=%s (custom_config=%s)",
+                    ALKAHEST_NETWORK,
+                    address_config is not None,
+                )
             except Exception as e:
                 logger.warning(f"[ALKAHEST]: Failed to initialize client: {e}. Continuing without Alkahest client.")
                 self._alkahest_client = None
@@ -1274,7 +1302,7 @@ a2a_app.routes.append(agent_order_close_route)
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from .utils.agent_card import build_erc8004_registration_file
-from .utils.registry.blockchain_utils import build_erc8004_canonical_id
+from .utils.registry.blockchain_utils import build_erc8004_canonical_id, rpc_url_for_http_provider
 
 async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     """
@@ -1292,7 +1320,7 @@ async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
         try:
             from web3 import Web3
             from web3.providers import HTTPProvider
-            http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+            http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
             w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
             chain_id = w3.eth.chain_id
         except Exception:

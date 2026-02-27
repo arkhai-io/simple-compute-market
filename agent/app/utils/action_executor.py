@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from google.adk.agents import InvocationContext
 from google.adk.events import Event
@@ -39,6 +40,7 @@ from app.schema.pydantic_models import (
 )
 
 from .config import CONFIG
+from .alkahest_config import get_trusted_oracle_arbiter
 from .token_registry import TOKEN_REGISTRY
 from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
@@ -54,8 +56,7 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
-TRUSTED_ORACLE_ARBITER = "0x8a791620dd6260079bf849dc5567adc3f2fdc318"
-DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+DEMO_ORACLE_ADDRESS = "0x8C523BC3EA8AC363E0b58Fd6cefff706D7885B3e"
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,33 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
 def _resolve_oracle_address(oracle_address: str | None) -> str:
     """Return the oracle signer address."""
     return oracle_address or DEMO_ORACLE_ADDRESS
+
+
+def _is_http_url(value: str | None) -> bool:
+    """Return True if value is a valid http(s) URL with hostname."""
+    if not value or not isinstance(value, str):
+        return False
+    parsed = urlparse(value.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
+    """Best-effort conversion from agent ref/alias to resolvable URL."""
+    if not isinstance(agent_ref, str):
+        return None
+    ref = agent_ref.strip()
+    if not ref:
+        return None
+
+    if _is_http_url(ref):
+        return ref
+
+    # Handle host[:port] strings without scheme.
+    if "://" not in ref and (":" in ref or "." in ref):
+        candidate = f"http://{ref}"
+        if _is_http_url(candidate):
+            return candidate
+    return None
 
 
 async def execute_action(
@@ -254,7 +282,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address") or DEMO_ORACLE_ADDRESS,
+                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
@@ -270,10 +298,12 @@ async def execute_action(
                         order_dict = order_obj.model_dump(mode="json") if order_obj else {}
                     else:
                         order_dict = {}
-                    counterparty_url = order_dict.get("order_taker") if order_dict else None
+                    counterparty_ref = order_dict.get("order_taker") if order_dict else None
+                    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
                     if not counterparty_url or not str(counterparty_url).strip():
                         logger.warning(
-                            "[A2A] fulfill_compute_obligation: no counterparty URL in order (order_taker); parameters keys=%s",
+                            "[A2A] fulfill_compute_obligation: unresolved counterparty URL from order_taker=%s; parameters keys=%s",
+                            counterparty_ref,
                             list(parameters.keys()),
                         )
                     try:
@@ -307,7 +337,7 @@ async def execute_action(
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=parameters.get("oracle_address", DEMO_ORACLE_ADDRESS),
+                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
                 escrow_uid=parameters.get("escrow_uid"),
             )
             logger.info(f"[ALKAHEST]: {result}")
@@ -327,12 +357,19 @@ async def execute_action(
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
-                counterparty_url = parameters.get("counterparty_url") or parameters.get("agent_url")
+                counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
+                counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
                 if not counterparty_url or not str(counterparty_url).strip():
                     logger.warning(
-                        "[A2A] trust_compute_obligation_fulfillment: no counterparty URL in parameters; keys=%s",
-                        list(parameters.keys()),
+                        "[A2A] trust_compute_obligation_fulfillment: unresolved counterparty reference=%s",
+                        counterparty_ref,
                     )
+                    if REMOTE_AGENT_URL_OVERRIDE:
+                        counterparty_url = REMOTE_AGENT_URL_OVERRIDE
+                        logger.warning(
+                            "[A2A] trust_compute_obligation_fulfillment: using REMOTE_AGENT_URL_OVERRIDE fallback=%s",
+                            counterparty_url,
+                        )
                 try:
                     event = Event(
                         author=AGENT_ID,
@@ -450,6 +487,17 @@ def connect_to_remote_agent(agent_url: str | None = None):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("[A2A] Fallback call stack:\n%s", "".join(traceback.format_stack(limit=8)[:-1]))
         agent_url = REMOTE_AGENT_URL_OVERRIDE
+    resolved_agent_url = _coerce_agent_reference_to_url(agent_url)
+    if not resolved_agent_url:
+        logger.warning(
+            "[A2A] Invalid agent_url reference '%s'. Falling back to REMOTE_AGENT_URL_OVERRIDE=%s",
+            agent_url,
+            REMOTE_AGENT_URL_OVERRIDE,
+        )
+        resolved_agent_url = REMOTE_AGENT_URL_OVERRIDE
+    if not _is_http_url(resolved_agent_url):
+        raise ValueError(f"Unable to resolve valid remote agent URL from reference '{agent_url}'")
+    agent_url = resolved_agent_url
     agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
     
     # Sanitize URL to create valid identifier (remove protocol, slashes, colons)
@@ -966,11 +1014,12 @@ async def accept_offer(
             logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
-    counterparty_url = order_dict.get("order_maker") or parameters.get("their_agent_id")
+    counterparty_ref = order_dict.get("order_maker") or parameters.get("their_agent_id")
+    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
     if not counterparty_url or not counterparty_url.strip():
         logger.warning(
-            "[A2A] accept_offer: no counterparty URL in order (order_maker) or parameters (their_agent_id); "
-            "order_dict keys=%s",
+            "[A2A] accept_offer: unresolved counterparty reference from order_maker/their_agent_id=%s; order_dict keys=%s",
+            counterparty_ref,
             list(order_dict.keys()),
         )
     try:
@@ -1334,7 +1383,8 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
                             try:
                                 from web3 import Web3
                                 from web3.providers import HTTPProvider
-                                http_url = CONFIG.chain_rpc_url.replace("ws://", "http://").replace("wss://", "https://")
+                                from app.utils.registry.blockchain_utils import rpc_url_for_http_provider
+                                http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
                                 w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
                                 chain_id = w3.eth.chain_id
                             except Exception:
@@ -1514,7 +1564,8 @@ async def buy_compute_with_erc20(
 
     logger.info(f"[ALKAHEST]: Buying compute with Client {client}")
 
-    arbiter_address = TRUSTED_ORACLE_ARBITER
+    trusted_oracle_arbiter = get_trusted_oracle_arbiter()
+    arbiter_address = trusted_oracle_arbiter
 
     # 1) Encode lease terms into demand bytes
     demand_data = TrustedOracleArbiterDemandData(

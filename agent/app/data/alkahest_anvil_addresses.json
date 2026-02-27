@@ -1,0 +1,80 @@
+{
+  "arbiters_addresses": {
+    "all_arbiter": "0x0dcd1bf9a1b36ce34237eeafef220932846bcd82",
+    "any_arbiter": "0xa51c1fc2f0d1a1b8494ed1fe312d7c3a78ed91c0",
+    "attester_arbiter": "0x9a676e781a523b5d0c0e43731313a708cb607508",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "erc8004_arbiter": "0x0000000000000000000000000000000000000000",
+    "exclusive_revocable_confirmation_arbiter": "0x7a2088a1bfc9d81c55368ae168c2c02570cb814f",
+    "exclusive_unrevocable_confirmation_arbiter": "0x09635f643e140090a9a8dcd712ed6285858cebef",
+    "expiration_time_after_arbiter": "0x0b306bf915c4d645ff596e518faf3f9669b97016",
+    "expiration_time_before_arbiter": "0x959922be3caee4b8cd9a407cc3ac1c251c2007b1",
+    "expiration_time_equal_arbiter": "0x9a9f2ccfde556a7e9ff0848998aa4a0cfd8863ae",
+    "intrinsics_arbiter": "0x610178da211fef7d417bc0e6fed39f05609ad788",
+    "intrinsics_arbiter_2": "0xb7f8bc63bbcad18155201308c8f3540b07f84f5e",
+    "nonexclusive_revocable_confirmation_arbiter": "0xc5a5c42992decbae36851359345fe25997f5c42d",
+    "nonexclusive_unrevocable_confirmation_arbiter": "0x67d269191c92caf3cd7723f116c85e6e9bf55933",
+    "recipient_arbiter": "0x68b1d87f95878fe05b998f19b66f4baba5de1aed",
+    "ref_uid_arbiter": "0x3aa5ebb10dc797cac828524e59a333d0a371443c",
+    "revocable_arbiter": "0xc6e7df5e7b4f2a278906862b61205850344d4e7d",
+    "schema_arbiter": "0x59b670e9fa9d0a427751af201d676719a970857b",
+    "time_after_arbiter": "0x4ed7c70f96b99c776995fb64377f0d4ab3b0e1c1",
+    "time_before_arbiter": "0x322813fd9a801c5507c9de605d63cea4f2ce6c44",
+    "time_equal_arbiter": "0xa85233c63b9ee964add6f2cffe00fd84eb32338f",
+    "trivial_arbiter": "0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6",
+    "trusted_oracle_arbiter": "0x8a791620dd6260079bf849dc5567adc3f2fdc318",
+    "uid_arbiter": "0x4a679253410272dd5232b3ff7cf5dbb88f295319"
+  },
+  "attestation_addresses": {
+    "barter_utils": "0x5f3f1dbd7b74c6b46e8c44f98792a1daf8d69154",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "eas_schema_registry": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "escrow_obligation_2_nontierable": "0xc3e53f4d16ae77db1c982e75a937b9f60fe63690",
+    "escrow_obligation_2_tierable": "0x0e801d84fa97b50751dbf25036d067dcf18858bf",
+    "escrow_obligation_nontierable": "0xe6e340d132b5f46d1e472debcd681b2abc16e57e",
+    "escrow_obligation_tierable": "0x99bba657f2bbc93c02d617f8ba121cb8fc104acf"
+  },
+  "commit_reveal_obligation_addresses": {
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "obligation": "0x1291be112d480055dafd8a610b7d1e203891c274"
+  },
+  "erc1155_addresses": {
+    "barter_utils": "0x2bdcc0de6be1f7d2ee689a0342d76f52e8efaba3",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "escrow_obligation_nontierable": "0x95401dc811bb5740090279ba06cfa8fcf6113778",
+    "escrow_obligation_tierable": "0x36c02da8a0983159322a80ffe9f24b1acff8b570",
+    "payment_obligation": "0x998abeb3e57409262ae5b751f60747921b33613e"
+  },
+  "erc20_addresses": {
+    "barter_utils": "0xcd8a1c3ba11cf5ecfa6267617243239504a98d90",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "escrow_obligation_nontierable": "0xa82ff9afd8f496c3d6ac40e2a0f282e47488cfc9",
+    "escrow_obligation_tierable": "0x9d4454b023096f34b160d6b654540c56a1f81688",
+    "payment_obligation": "0x1613beb3b2c4f22ee086b2b38c1476a3ce7f78e8"
+  },
+  "erc721_addresses": {
+    "barter_utils": "0x82e01223d51eb87e16a03e24687edf0f294da6f1",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "escrow_obligation_nontierable": "0x851356ae760d987e095750cceb3bc6014560891c",
+    "escrow_obligation_tierable": "0x5eb3bc0a489c5a8288765d2336659ebca68fcd00",
+    "payment_obligation": "0xf5059a5d33d5853360d16c683c16e67980206f36"
+  },
+  "native_token_addresses": {
+    "barter_utils": "0x7969c5ed335650692bc04293b07f5bf2e7a673c0",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "escrow_obligation_nontierable": "0x70e0ba845a1a0f2da3359c97e0285013525ffc49",
+    "escrow_obligation_tierable": "0x809d550fca64d94bd9f66e60752a544199cfac3d",
+    "payment_obligation": "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
+  },
+  "string_obligation_addresses": {
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "obligation": "0x4c5859f0f772848b2d91f1d83e2fe57935348029"
+  },
+  "token_bundle_addresses": {
+    "barter_utils": "0xb7278a61aa25c888815afc32ad3cc52ff24fe575",
+    "eas": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+    "escrow_obligation_nontierable": "0x84ea74d481ee0a5332c457a4d796187f6ba67feb",
+    "escrow_obligation_tierable": "0x8f86403a4de0bb5791fa46b8e795c547942fe4cf",
+    "payment_obligation": "0x9e545e3c0baab3e08cdfd552c960a1050f373042"
+  }
+}

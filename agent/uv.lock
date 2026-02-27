@@ -240,7 +240,7 @@ wheels = [
 [[package]]
 name = "alkahest-py"
 version = "0.1.0"
-source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=main#75ff1c631957e315b145f4544e5b44cbcc751b91" }
+source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=main#2cbafc6345369be23aa6563602891726ed5a0b7c" }
 
 [[package]]
 name = "annotated-types"
