@@ -46,7 +46,7 @@ from .registry_client import get_registry_client
 from .sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from ..policies.negotiation_thread import get_thread_store, NegotiationThreadTransaction
-from ..policies.action_builders import CounterOfferParams
+from core.agent.app.policy.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override

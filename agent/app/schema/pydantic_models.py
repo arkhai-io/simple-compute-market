@@ -109,7 +109,10 @@ class ComputeDomainResource(CoreResource):
             return TokenResource(**data)
         elif "gpu_model" in data:
             return ComputeResource(**data)
-        return super().parse_from_dict(data)
+        raise ValueError(
+            "Resource dict must have either 'token' (TokenResource) "
+            "or 'gpu_model' (ComputeResource) key"
+        )
 
 
 TokenResource = CoreTokenResource

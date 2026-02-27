@@ -4,8 +4,8 @@ import logging
 
 from core.agent.app.policy.discovery import discover_and_register
 from core.agent.app.policy.registry import CALLABLE_REGISTRY
+from core.agent.app.policy.store import PolicyStore
 from app.utils.sqlite_client import SQLiteClient
-from app.policies.store import PolicyStore
 from app.schema.pydantic_models import EventType
 
 logger = logging.getLogger(__name__)

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 from .action import ActionHandler
-from .policy import Policy
+
+Policy = Callable[[Any], Any]
 
 
 class DomainPlugin(Protocol):
@@ -23,4 +24,3 @@ class DomainPlugin(Protocol):
 
     def policies(self) -> list[Policy]:
         ...
-

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List
 from app.schema.pydantic_models import Action as DomainAction, DecisionContext
 
 if TYPE_CHECKING:
-    from app.policies.store import PolicyStore
+    from core.agent.app.policy.store import PolicyStore
 
 
 def chain_callables(
@@ -55,4 +55,3 @@ def build_composite_callable(
     """
     store.register_composite(name, component_names)
     return chain_callables(component_names, registry=store._registry)
-
