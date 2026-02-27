@@ -99,7 +99,7 @@ from .utils.alkahest_config import (
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
-from .utils.serializer import json_serializer
+from core.agent.app.utils.serializer import json_serializer
 from .utils.token_registry import TOKEN_REGISTRY
 from .utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr

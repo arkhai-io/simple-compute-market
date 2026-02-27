@@ -21,7 +21,7 @@ def json_serializer(obj: Any) -> Any:
     
     Example:
         import json
-        from app.utils.serializer import json_serializer
+        from core.agent.app.utils.serializer import json_serializer
         
         data = {"enum": MyEnum.VALUE, "date": datetime.now()}
         json_str = json.dumps(data, default=json_serializer)
@@ -43,4 +43,3 @@ def json_serializer(obj: Any) -> Any:
     if hasattr(obj, '__dict__'):
         return obj.__dict__
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-
