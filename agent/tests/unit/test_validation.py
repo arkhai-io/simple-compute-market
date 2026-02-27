@@ -19,7 +19,7 @@ from app.schema.pydantic_models import (
     Region,
     ERC20TokenMetadata,
 )
-from app.agent import _parse_domain_event
+from core.agent.app.agent import _parse_domain_event
 from app.utils.validation import (
     validate_alert,
     validate_market_order,

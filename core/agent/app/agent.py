@@ -58,7 +58,7 @@ AGENT_DB_PATH = CONFIG.agent_db_path
 AGENT_PRIV_KEY = CONFIG.agent_priv_key
 CHAIN_RPC_URL = CONFIG.chain_rpc_url
 
-from .schema.pydantic_models import (
+from app.schema.pydantic_models import (
     ActionType,
     EventType,
     DomainEvent,
@@ -82,9 +82,9 @@ from .schema.pydantic_models import (
 from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
-from .policies.seeding import ComputePolicySeeder
+from app.policies.seeding import ComputePolicySeeder
 from core.agent.app.utils.sqlite_client import SQLiteClient
-from .schema.pydantic_models import DecisionContext, Action, Decision
+from app.schema.pydantic_models import DecisionContext, Action, Decision
 from core.agent.app.utils.event_ingestion import (
     configure_default_ingestion,
     queue_event,
@@ -94,7 +94,7 @@ from core.agent.app.utils.event_ingestion import (
     stop_redis_subscriber,
 )
 from core.agent.app.utils.market_provider import create_market_provider, MarketProvider
-from .utils.action_executor import execute_action
+from app.utils.action_executor import execute_action
 from core.agent.app.utils.alkahest_config import (
     get_alkahest_network,
     prewarm_alkahest_address_config_cache,

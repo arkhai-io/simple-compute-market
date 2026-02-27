@@ -18,7 +18,7 @@ import asyncio
 from fastapi import FastAPI
 
 # Import the use_vertex_ai flag and a2a_app from agent.py
-from app.agent import a2a_app, _startup_tasks
+from core.agent.app.agent import a2a_app, _startup_tasks
 from core.agent.app.utils.config import CONFIG
 
 # Conditional imports based on use_vertex_ai flag

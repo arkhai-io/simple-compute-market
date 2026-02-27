@@ -88,7 +88,7 @@ serve-a2a:
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo zerotier-cli join $$ZT_NETWORK; \
 	fi; \
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
+	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn core.agent.app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
 
 
 # ==============================================================================
