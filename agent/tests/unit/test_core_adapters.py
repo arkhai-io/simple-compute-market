@@ -27,9 +27,7 @@ from app.schema.pydantic_models import (  # noqa: E402
     EventType,
 )
 from core.agent.action import ActionDispatcher, ActionHandler  # noqa: E402
-from core.agent.policy import PolicyEngine  # noqa: E402
 from core.schemas import DomainAction as CoreDomainAction  # noqa: E402
-from core.schemas import DecisionContext as CoreDecisionContext  # noqa: E402
 
 
 def test_domain_event_round_trip_legacy_core_legacy() -> None:
@@ -88,31 +86,3 @@ async def test_action_dispatcher_smoke() -> None:
     assert result["action_type"] == "make_offer"
     assert result["kwargs"]["trace_id"] == "t1"
 
-
-@pytest.mark.asyncio
-async def test_policy_engine_smoke() -> None:
-    engine = PolicyEngine()
-
-    def returns_none(_ctx):
-        return None
-
-    def choose_make_offer(_ctx):
-        return CoreDomainAction(action_type="make_offer", parameters={"x": 1})
-
-    engine.register(returns_none)
-    engine.register(choose_make_offer)
-
-    ctx = CoreDecisionContext(
-        event=event_payload_to_core_domain_event(
-            {
-                "event_id": "evt_p",
-                "event_type": EventType.MAKE_OFFER.value,
-                "source": "s",
-                "data": {},
-            }
-        ),
-        agent_id="agent",
-    )
-    action = await engine.evaluate(ctx)
-    assert action is not None
-    assert action.action_type == "make_offer"

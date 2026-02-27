@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import gymnasium as gym
 
-from core.agent.policies.registry import policy_callable
+from core.agent.policy.registry import policy_callable
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,

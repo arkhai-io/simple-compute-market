@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Tuple
 
-from core.agent.policies.evaluator import CallableEvaluator
+from core.agent.policy.evaluator import CallableEvaluator
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
@@ -18,7 +18,7 @@ from app.schema.pydantic_models import (
     TokenResource,
     ComputeResourcePortfolio,
 )
-from core.agent.policies.registry import policy_callable
+from core.agent.policy.registry import policy_callable
 from app.utils.sqlite_client import SQLiteClient
 from app.policies.action_builders import NegotiationActionBuilder
 from app.utils.validation import (

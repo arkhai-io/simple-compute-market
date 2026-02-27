@@ -21,7 +21,7 @@ import pytest
 from app.schema.pydantic_models import DecisionContext, NegotiationEvent
 from app.policies.store import PolicyStore
 from app.utils.sqlite_client import SQLiteClient
-from core.agent.policies.evaluator import CallableEvaluator
+from core.agent.policy.evaluator import CallableEvaluator
 import tempfile
 import os
 
@@ -39,7 +39,7 @@ def temp_db():
 @pytest.fixture
 def policy_store(temp_db):
     """Create a PolicyStore with registered policies for testing."""
-    from core.agent.policies.registry import CALLABLE_REGISTRY
+    from core.agent.policy.registry import CALLABLE_REGISTRY
 
     # Clear registry to ensure clean state
     CALLABLE_REGISTRY.clear()
