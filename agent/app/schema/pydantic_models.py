@@ -3,36 +3,35 @@ from datetime import datetime
 import sys
 from pathlib import Path
 from typing import Any, Literal, Union
-from pydantic import BaseModel, Field, SerializeAsAny, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 try:
     from core.schemas import (
+        Attestation as CoreAttestation,
         Decision as CoreDecision,
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
+        ERC20TokenMetadata as CoreERC20TokenMetadata,
+        TokenResource as CoreTokenResource,
     )
 except ModuleNotFoundError:
     repo_root = Path(__file__).resolve().parents[3]
     if str(repo_root) not in sys.path:
         sys.path.append(str(repo_root))
     from core.schemas import (  # type: ignore[no-redef]
+        Attestation as CoreAttestation,
         Decision as CoreDecision,
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
+        ERC20TokenMetadata as CoreERC20TokenMetadata,
+        TokenResource as CoreTokenResource,
     )
 
 
-class ERC20TokenMetadata(BaseModel):
-    """Describes registry metadata for an ERC-20 token."""
-
-    symbol: str = Field(description="Ticker symbol, e.g. USDC")
-    contract_address: str = Field(description="Checksummed ERC-20 contract address")
-    decimals: int = Field(
-        description="Number of decimal places the token uses", ge=0, le=30
-    )
+ERC20TokenMetadata = CoreERC20TokenMetadata
 
 
 class GPUModel(str, Enum):
@@ -51,16 +50,7 @@ class Region(str, Enum):
     TOKYO_JP = "Tokyo, JP"
 
 
-class Attestation(BaseModel):
-    """Describes the attestation of an agent with respect to a compute resource.
-
-    Who bought and who sold the compute resource.
-    The attestation is a signed message from the maker to the taker,
-    and a signed message from the taker to the maker.
-    """
-
-    maker_attestation: str = Field(description="The attestation of the maker")
-    taker_attestation: str = Field(description="The attestation of the taker")
+Attestation = CoreAttestation
 
 
 class Resource(BaseModel):
@@ -125,15 +115,7 @@ class Resource(BaseModel):
             )
 
 
-class TokenResource(Resource):
-    """Describes a given value and amount of a token used for trade."""
-
-    token: SerializeAsAny[ERC20TokenMetadata] = Field(
-        description="Token metadata resolved from registry"
-    )
-    amount: int = Field(
-        description="Integer amount in base units (token amount * 10**decimals)"
-    )
+TokenResource = CoreTokenResource
 
 class ComputeResource(Resource):
     """Describes the compute resources that are available to each Agent,

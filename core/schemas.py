@@ -9,7 +9,35 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+
+
+class ERC20TokenMetadata(BaseModel):
+    """Describes metadata for an ERC-20 token."""
+
+    symbol: str = Field(description="Ticker symbol, e.g. USDC")
+    contract_address: str = Field(description="Checksummed ERC-20 contract address")
+    decimals: int = Field(
+        description="Number of decimal places the token uses", ge=0, le=30
+    )
+
+
+class TokenResource(BaseModel):
+    """Describes a given value and amount of a token used for trade/payment."""
+
+    token: SerializeAsAny[ERC20TokenMetadata] = Field(
+        description="Token metadata resolved from registry"
+    )
+    amount: int = Field(
+        description="Integer amount in base units (token amount * 10**decimals)"
+    )
+
+
+class Attestation(BaseModel):
+    """Mutual attestations exchanged between maker and taker."""
+
+    maker_attestation: str = Field(description="The attestation of the maker")
+    taker_attestation: str = Field(description="The attestation of the taker")
 
 
 class DomainEvent(BaseModel):
