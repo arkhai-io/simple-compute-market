@@ -80,7 +80,7 @@ from .schema.pydantic_models import (
     OrderCloseEvent,
 )
 from .policies.store import PolicyStore
-from core.agent.policy.manager import PolicyManager
+from core.agent.app.policy.manager import PolicyManager
 from .utils.sqlite_client import SQLiteClient
 from .policies.negotiation_thread import get_thread_store
 from .schema.pydantic_models import DecisionContext, Action, Decision
