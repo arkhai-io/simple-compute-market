@@ -24,7 +24,7 @@ register:
 	if [ -f "$$ENV_FILE" ]; then \
 		ENV_FILE_ARG="--env-file $$ENV_FILE"; \
 	fi; \
-	uv run python ../core/scripts/register_onchain.py $$ENV_FILE_ARG
+	uv run python scripts/register_onchain.py $$ENV_FILE_ARG
 
 # ==============================================================================
 # Playground Targets
@@ -120,7 +120,7 @@ backend:
 # Set up development environment resources using Terraform
 setup-dev-env:
 	PROJECT_ID=$$(gcloud config get-value project) && \
-	(cd ../core/deployment/terraform/dev && terraform init && terraform apply --var-file vars/env.tfvars --var dev_project_id=$$PROJECT_ID --auto-approve)
+	(cd deployment/terraform/dev && terraform init && terraform apply --var-file vars/env.tfvars --var dev_project_id=$$PROJECT_ID --auto-approve)
 
 # ==============================================================================
 # Testing & Code Quality
@@ -144,7 +144,7 @@ lint:
 
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
-	uv run python ../core/scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
+	uv run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
 	uv run python app/utils/test_env.py
 # ==============================================================================
 # Arkhai Training Environment Targets

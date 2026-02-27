@@ -1,5 +1,5 @@
 """
-Agent heartbeat setup. Requires ONCHAIN_AGENT_ID from `make register-onchain`.
+Agent heartbeat setup. Requires ONCHAIN_AGENT_ID from `make register`.
 """
 import asyncio
 import logging
@@ -27,7 +27,7 @@ HEARTBEAT_DELAY = 5
 
 async def start_agent_heartbeat(config: "Config") -> Optional[str]:
     """
-    Start agent heartbeat loop. Requires ONCHAIN_AGENT_ID from `make register-onchain`.
+    Start agent heartbeat loop. Requires ONCHAIN_AGENT_ID from `make register`.
     """
     if not config.indexer_url or not config.identity_registry_address:
         return None
@@ -37,7 +37,7 @@ async def start_agent_heartbeat(config: "Config") -> Optional[str]:
         return None
 
     if not config.onchain_agent_id:
-        logger.warning("[HEARTBEAT] ONCHAIN_AGENT_ID not set. Run 'make register-onchain' first.")
+        logger.warning("[HEARTBEAT] ONCHAIN_AGENT_ID not set. Run 'make register' first.")
         return None
 
     # Parse agent ID

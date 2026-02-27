@@ -1764,7 +1764,7 @@ git add . && git commit -m "Initial commit" && git push -u origin main
 ```
 
 * Note: For coding agents - ask user for required project IDs and repo details before running with `--auto-approve`.
-* Note: If user prefers different git provider, refer to `../core/deployment/README.md` for manual deployment.
+* Note: If user prefers different git provider, refer to `../core/agent/deployment/README.md` for manual deployment.
 ---
 ### Section 6: Operational Guidelines for Coding Agents
 

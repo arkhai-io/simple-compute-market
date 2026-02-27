@@ -131,7 +131,7 @@ class Config:
     # Indexer/Registry settings
     indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
     identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
-    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (set by make register-onchain)
+    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (set by make register)
     # Registry discovery settings
     enable_registry_discovery: bool  # ENABLE_REGISTRY_DISCOVERY - enable registry-based agent discovery
     registry_order_timeout: int  # REGISTRY_ORDER_TIMEOUT - timeout for registry API calls in seconds
@@ -144,7 +144,7 @@ class Config:
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
-    Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
+    Path(__file__).resolve().parents[3] / "core" / "agent" / "app" / "data" / "token_registry.json"
 )
 
 

@@ -3,9 +3,9 @@
 Standalone script to register an agent on-chain before starting the agent server.
 
 Usage:
-    python core/scripts/register_onchain.py
+    python core/agent/scripts/register_onchain.py
     # Or via make:
-    make register-onchain
+    make register
 
 The script will:
 1. Read configuration from .env file

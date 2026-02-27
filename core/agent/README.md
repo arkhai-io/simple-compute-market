@@ -8,18 +8,12 @@ Agent generated with [`googleCloudPlatform/agent-starter-pack`](https://github.c
 This project is organized as follows:
 
 ```
-agent/
-├── app/                 # Core application code
-│   ├── agent.py         # Main agent logic
-│   ├── server.py        # FastAPI Backend server
-│   └── utils/           # Utility functions and helpers
-├── .cloudbuild/         # CI/CD pipeline configurations for Google Cloud Build
-├── ../core/deployment/  # Infrastructure and deployment scripts (transitional location)
-├── notebooks/           # Jupyter notebooks for prototyping and evaluation
-├── tests/               # Unit, integration, and load tests
-├── Makefile             # Makefile for common commands
-├── GEMINI.md            # AI-assisted development guide
-└── pyproject.toml       # Project dependencies and configuration
+core/agent/
+├── app/                 # Core Python package modules
+├── deployment/          # Infrastructure and deployment scripts
+├── scripts/             # Operational scripts
+├── Makefile             # Make targets for core-agent workflows
+└── README.md            # This file
 ```
 
 ## Requirements
@@ -44,7 +38,7 @@ make install && make playground
 | Command              | Description                                                                                 |
 | -------------------- | ------------------------------------------------------------------------------------------- |
 | `make install`       | Install all required dependencies using uv                                                  |
-| `make register-onchain` | Register agent on-chain before starting |
+| `make register`      | Register agent on-chain before starting |
 | `make serve-a2a`     | Start A2A agent server (requires on-chain registration first) |
 | `make playground`    | Launch local development environment with backend and frontend - leveraging `adk web` command.|
 | `make backend`       | Deploy agent to Cloud Run (use `IAP=true` to enable Identity-Aware Proxy) |
@@ -70,7 +64,7 @@ Register your agent on-chain **before** starting the agent server:
 # - AGENT_WALLET_ADDRESS
 # - CHAIN_ID (optional, defaults to 1337)
 
-make register-onchain
+make register
 ```
 
 This will:
@@ -120,11 +114,11 @@ make backend
 
 
 The repository includes a Terraform configuration for the setup of the Dev Google Cloud project.
-See [../core/deployment/README.md](../core/deployment/README.md) for instructions.
+See [deployment/README.md](deployment/README.md) for instructions.
 
 ### Production Deployment
 
-The repository includes a Terraform configuration for the setup of a production Google Cloud project. Refer to [../core/deployment/README.md](../core/deployment/README.md) for detailed instructions on how to deploy the infrastructure and application.
+The repository includes a Terraform configuration for the setup of a production Google Cloud project. Refer to [deployment/README.md](deployment/README.md) for detailed instructions on how to deploy the infrastructure and application.
 
 
 ## Monitoring and Observability

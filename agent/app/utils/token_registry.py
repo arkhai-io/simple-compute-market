@@ -12,7 +12,14 @@ from app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
+DEFAULT_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "core"
+    / "agent"
+    / "app"
+    / "data"
+    / "token_registry.json"
+)
 
 
 class TokenRegistryError(RuntimeError):

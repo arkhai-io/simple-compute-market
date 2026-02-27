@@ -113,7 +113,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--output",
-        default="agent/app/data/alkahest_anvil_addresses.json",
+        default="core/agent/app/data/alkahest_anvil_addresses.json",
         help="Path to write JSON config",
     )
     args = parser.parse_args()
