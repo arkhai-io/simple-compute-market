@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from app.utils.sqlite_client import SQLiteClient
-from app.policies.negotiation_thread import get_thread_store, NegotiationThreadStore
+from core.agent.app.policy.negotiation_thread import get_thread_store, NegotiationThreadStore
 
 
 @pytest.fixture
@@ -225,7 +225,7 @@ class TestGetThreadStore:
         """Test that get_thread_store() requires sqlite_client on first call."""
         # Reset global state by importing fresh
         import importlib
-        import app.policies.negotiation_thread as nthread_module
+        import core.agent.app.policy.negotiation_thread as nthread_module
         importlib.reload(nthread_module)
         
         # Get the NegotiationThreadStore class from the reloaded module
@@ -246,7 +246,7 @@ class TestGetThreadStore:
     def test_get_thread_store_singleton(self, sqlite_client):
         """Test that get_thread_store() returns singleton instance."""
         import importlib
-        import app.policies.negotiation_thread as nthread_module
+        import core.agent.app.policy.negotiation_thread as nthread_module
         importlib.reload(nthread_module)
         
         # Get the NegotiationThreadStore class from the reloaded module

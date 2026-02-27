@@ -79,10 +79,11 @@ from .schema.pydantic_models import (
     OrderCreateEvent,
     OrderCloseEvent,
 )
-from .policies.store import PolicyStore
+from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
+from core.agent.app.policy.negotiation_thread import get_thread_store
+from .policies.seeding import ComputePolicySeeder
 from .utils.sqlite_client import SQLiteClient
-from .policies.negotiation_thread import get_thread_store
 from .schema.pydantic_models import DecisionContext, Action, Decision
 from .utils.event_ingestion import (
     queue_event,
@@ -436,6 +437,7 @@ class TraderAgent(BaseAgent):
     resource_portfolio: dict
     _policy_store: PolicyStore = PrivateAttr()
     _policy_manager: PolicyManager = PrivateAttr()
+    _policy_seeder: ComputePolicySeeder = PrivateAttr()
     _sqlite_client: SQLiteClient = PrivateAttr()
     _market_provider: MarketProvider = PrivateAttr()
     _alkahest_client: Any = PrivateAttr()
@@ -495,12 +497,17 @@ class TraderAgent(BaseAgent):
         
         # Initialize PolicyStore (private attribute to avoid Pydantic field requirements)
         self._policy_store = PolicyStore(self._sqlite_client)
+        self._policy_seeder = ComputePolicySeeder(
+            policy_store=self._policy_store,
+            sqlite_client=self._sqlite_client,
+            agent_id=self.name,
+        )
         
         # Initialize PolicyManager for policy lifecycle management
         self._policy_manager = PolicyManager(
             policy_store=self._policy_store,
-            sqlite_client=self._sqlite_client,
             agent_id=self.name,
+            seed_policies_for_event_type=self._policy_seeder.ensure_for_event_type,
         )
         self._policy_manager.initialize()
         
