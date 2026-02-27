@@ -3,7 +3,7 @@
 Standalone script to register an agent on-chain before starting the agent server.
 
 Usage:
-    python scripts/register_onchain.py
+    python core/scripts/register_onchain.py
     # Or via make:
     make register-onchain
 
@@ -356,4 +356,3 @@ async def main():
 if __name__ == "__main__":
     exit_code = asyncio.run(main())
     sys.exit(exit_code)
-

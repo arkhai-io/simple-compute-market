@@ -14,7 +14,7 @@ agent/
 │   ├── server.py        # FastAPI Backend server
 │   └── utils/           # Utility functions and helpers
 ├── .cloudbuild/         # CI/CD pipeline configurations for Google Cloud Build
-├── deployment/          # Infrastructure and deployment scripts
+├── ../core/deployment/  # Infrastructure and deployment scripts (transitional location)
 ├── notebooks/           # Jupyter notebooks for prototyping and evaluation
 ├── tests/               # Unit, integration, and load tests
 ├── Makefile             # Makefile for common commands
@@ -120,11 +120,11 @@ make backend
 
 
 The repository includes a Terraform configuration for the setup of the Dev Google Cloud project.
-See [deployment/README.md](deployment/README.md) for instructions.
+See [../core/deployment/README.md](../core/deployment/README.md) for instructions.
 
 ### Production Deployment
 
-The repository includes a Terraform configuration for the setup of a production Google Cloud project. Refer to [deployment/README.md](deployment/README.md) for detailed instructions on how to deploy the infrastructure and application.
+The repository includes a Terraform configuration for the setup of a production Google Cloud project. Refer to [../core/deployment/README.md](../core/deployment/README.md) for detailed instructions on how to deploy the infrastructure and application.
 
 
 ## Monitoring and Observability

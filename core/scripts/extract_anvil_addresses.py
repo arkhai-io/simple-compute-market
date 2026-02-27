@@ -113,7 +113,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--output",
-        default="app/data/alkahest_anvil_addresses.json",
+        default="agent/app/data/alkahest_anvil_addresses.json",
         help="Path to write JSON config",
     )
     args = parser.parse_args()
@@ -144,4 +144,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
