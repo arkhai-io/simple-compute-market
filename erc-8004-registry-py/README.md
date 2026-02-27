@@ -580,6 +580,176 @@ docker build -t erc-8004-registry .
 docker run --env-file .env.development -p 8080:8080 erc-8004-registry
 ```
 
+### CI/CD - Automated Builds
+
+The project includes GitHub Actions for automated Docker image builds and pushes to **Docker Hub**.
+
+**Automated builds trigger on:**
+- Push to `main` or `develop` branches
+- New release tags (`v*.*.*`)
+- Manual workflow dispatch
+
+**Pre-built images available at:**
+```
+whitewidget/arkhai-erc-8004-registry:latest
+whitewidget/arkhai-erc-8004-registry:v1.0.0
+```
+
+**Deploy using pre-built image:**
+
+```bash
+# Pull and run (public images, no auth needed)
+docker pull whitewidget/arkhai-erc-8004-registry:latest
+docker run --env-file .env -p 8080:8080 whitewidget/arkhai-erc-8004-registry:latest
+
+# Or use docker-compose
+docker-compose up -d
+```
+
+**Setup CI/CD for your repository:**
+
+The repository includes a GitHub Actions workflow at `.github/workflows/docker-build-push.yml` that automatically builds and pushes to Docker Hub.
+
+**Required GitHub Secrets:**
+- `DOCKERHUB_USERNAME` - Your Docker Hub username
+- `DOCKERHUB_TOKEN` - Docker Hub access token (Read & Write permissions)
+
+Add these in your GitHub repository: `Settings` → `Secrets and variables` → `Actions`
+
+### Security Best Practices
+
+#### 🔒 Environment Variables & Secrets Management
+
+**⚠️ CRITICAL: Never commit secrets to version control**
+
+The Dockerfile has been configured with **empty values** for sensitive environment variables. This prevents credentials from being baked into Docker image layers.
+
+**Required Environment Variables:**
+
+**Sensitive (must be provided at runtime):**
+- `DATABASE_URL` - PostgreSQL connection string with credentials
+- `RPC_URL` - Blockchain RPC endpoint URL with API key
+
+**Non-sensitive (have defaults, can be overridden):**
+- `CHAIN_ID` - Default: 84532 (Base Sepolia)
+- `IDENTITY_REGISTRY_ADDRESS`
+- `REPUTATION_REGISTRY_ADDRESS`
+- `VALIDATION_REGISTRY_ADDRESS`
+- `PORT` - Default: 8080
+- `HOST` - Default: 0.0.0.0
+- `ENABLE_HEALTH_CHECKS` - Default: false
+- `HEALTH_CHECK_INTERVAL` - Default: 60
+- `ENDPOINT_CHECK_TIMEOUT` - Default: 10
+- `HEARTBEAT_TTL_SECS` - Default: 60
+- `LOG_LEVEL` - Default: info
+
+#### Secure Deployment Methods
+
+**1. Using Docker Compose (Recommended for Development)**
+
+```bash
+# 1. Create .env file from sample (do this once)
+cp .env.sample .env
+
+# 2. Edit .env with your actual credentials
+nano .env
+
+# 3. Run with docker-compose (reads .env automatically)
+docker-compose up
+```
+
+**2. Using Docker Run with Environment File**
+
+```bash
+docker build -t erc-8004-registry .
+docker run --env-file .env -p 8080:8080 erc-8004-registry
+```
+
+**3. Using Docker Run with Individual Variables**
+
+```bash
+docker run -p 8080:8080 \
+  -e DATABASE_URL="postgresql://user:pass@host/db" \
+  -e RPC_URL="https://base-sepolia.infura.io/v3/YOUR_API_KEY" \
+  -e CHAIN_ID=84532 \
+  erc-8004-registry
+```
+
+**4. Using Docker Secrets (Production - Swarm/Kubernetes)**
+
+For production deployments, use your orchestration platform's secrets management:
+
+**Docker Swarm:**
+```bash
+echo "postgresql://..." | docker secret create db_url -
+docker service create \
+  --name erc-8004-registry \
+  --secret db_url \
+  --secret rpc_url \
+  erc-8004-registry
+```
+
+**Kubernetes:**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: erc-8004-secrets
+type: Opaque
+stringData:
+  DATABASE_URL: postgresql://...
+  RPC_URL: https://...
+---
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: registry
+    image: erc-8004-registry
+    envFrom:
+    - secretRef:
+        name: erc-8004-secrets
+```
+
+#### Security Checklist
+
+- [x] `.env` is in `.gitignore` (never commit it)
+- [x] Sensitive ENV variables have empty defaults in Dockerfile
+- [x] Credentials are provided at runtime, not build time
+- [x] Docker image runs as non-root user (`appuser`)
+- [ ] Use secrets management in production (Vault, AWS Secrets Manager, etc.)
+- [ ] Rotate credentials regularly
+- [ ] Use read-only database credentials where possible
+- [ ] Enable network policies to restrict container access
+- [ ] Scan images for vulnerabilities regularly
+
+#### Image Security Best Practices
+
+```bash
+# Scan for vulnerabilities
+docker scan erc-8004-registry
+
+# Verify no secrets in image layers
+docker history erc-8004-registry
+
+# Check running container for exposed secrets
+docker exec <container_id> env
+```
+
+#### What NOT to Do
+
+❌ **Never hardcode credentials in Dockerfile:**
+```dockerfile
+# BAD - credentials baked into image layers
+ENV DATABASE_URL=postgresql://user:password@host/db
+```
+
+❌ **Never commit .env files to git**
+
+❌ **Never build images with secrets as build args in CI/CD logs**
+
+✅ **Instead:** Use runtime environment variables or secrets management systems
+
 ## Troubleshooting
 
 ### Database Connection Issues

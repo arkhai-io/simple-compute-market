@@ -1,12 +1,72 @@
+# Python
 .venv
 __pycache__
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+.ruff_cache
+.hypothesis
+
+# Databases
 *.db
 *.bak.db
+*.sqlite
+*.sqlite3
+
+# Version Control
 .git
 .gitignore
+.gitattributes
+.github
+
+# Environment & Secrets
 .env
 .env.*
+*.pem
+*.key
+*.crt
+*.p12
+
+# Documentation & Development
 tests
+test
+*.md
+!README.md
 Makefile
-README.md
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# IDE & Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
