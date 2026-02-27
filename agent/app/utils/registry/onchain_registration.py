@@ -26,7 +26,7 @@ from .blockchain_utils import (
     extract_agent_id_from_receipt,
     rpc_url_for_http_provider,
 )
-from ...abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
+from core.agent.app.abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
 
 logger = logging.getLogger(__name__)
 
