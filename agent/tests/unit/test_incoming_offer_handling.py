@@ -19,7 +19,7 @@ from app.schema.pydantic_models import (
 )
 from core.agent.app.policy.store import PolicyStore
 from app.policies.store import negotiation_respond_to_make_offer
-from app.utils.sqlite_client import SQLiteClient
+from core.agent.app.utils.sqlite_client import SQLiteClient
 from app.utils.action_executor import _extract_initial_price_from_order
 from app.utils.validation import determine_strategy_from_order
 import tempfile

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from core.agent.app.ports.persistence import NegotiationThreadPersistencePort
-from app.utils.config import CONFIG
+from core.agent.app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 

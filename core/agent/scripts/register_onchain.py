@@ -22,13 +22,13 @@ from urllib.parse import urlparse
 # Add parent directory to path to import app modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.utils.registry.onchain_registration import (
+from core.agent.app.utils.registry.onchain_registration import (
     register_onchain_from_env,
     build_agent_card_url,
     build_registration_file_url,
 )
-from app.utils.registry.blockchain_utils import build_erc8004_canonical_id
-from app.utils.zerotier import (
+from core.agent.app.utils.registry.blockchain_utils import build_erc8004_canonical_id
+from core.agent.app.utils.zerotier import (
     await_base_url_resolution,
     join_zerotier_network,
     get_zerotier_node_id,

@@ -7,7 +7,7 @@ import aiohttp
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
-from app.utils.config import CONFIG
+from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 

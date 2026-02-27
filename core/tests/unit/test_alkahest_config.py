@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.utils.alkahest_config import (
+from core.agent.app.utils.alkahest_config import (
     NETWORK_ANVIL,
     NETWORK_BASE_SEPOLIA,
     NETWORK_ETHEREUM_MAINNET,
@@ -74,7 +74,7 @@ def test_get_trusted_oracle_arbiter_prefers_override(
     }
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
-    from app.utils import alkahest_config as module
+    from core.agent.app.utils import alkahest_config as module
 
     monkeypatch.setattr(
         module,

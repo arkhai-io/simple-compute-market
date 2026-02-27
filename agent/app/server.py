@@ -19,7 +19,7 @@ from fastapi import FastAPI
 
 # Import the use_vertex_ai flag and a2a_app from agent.py
 from app.agent import a2a_app, _startup_tasks
-from app.utils.config import CONFIG
+from core.agent.app.utils.config import CONFIG
 
 # Conditional imports based on use_vertex_ai flag
 if CONFIG.use_vertex_ai:
@@ -29,8 +29,8 @@ if CONFIG.use_vertex_ai:
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider, export
 
-    from app.utils.gcs import create_bucket_if_not_exists
-    from app.utils.tracing import CloudTraceLoggingSpanExporter
+    from core.agent.app.utils.gcs import create_bucket_if_not_exists
+    from core.agent.app.utils.tracing import CloudTraceLoggingSpanExporter
     from core.agent.app.utils.typing import Feedback
 
     _, project_id = google.auth.default()

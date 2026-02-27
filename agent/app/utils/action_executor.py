@@ -39,7 +39,7 @@ from app.schema.pydantic_models import (
     ComputeDomainResource,
 )
 
-from .config import CONFIG
+from core.agent.app.utils.config import CONFIG
 from .alkahest_config import get_trusted_oracle_arbiter
 from .token_registry import TOKEN_REGISTRY
 from core.agent.app.utils.registry_client import get_registry_client

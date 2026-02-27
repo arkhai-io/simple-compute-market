@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 
 from app.schema.pydantic_models import ERC20TokenMetadata
-from app.utils.config import CONFIG
+from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 

@@ -66,7 +66,7 @@ class ComputeDomainResource(CoreResource):
         if isinstance(token_value, dict):
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
-            from app.utils.token_registry import TOKEN_REGISTRY
+            from core.agent.app.utils.token_registry import TOKEN_REGISTRY
 
             return TOKEN_REGISTRY.require(token_value)
         raise ValueError(

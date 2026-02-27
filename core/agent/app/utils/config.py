@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.utils.zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
+from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
 # Load .env file if it exists (before loading any config values)
 try:

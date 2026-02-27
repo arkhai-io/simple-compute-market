@@ -7,7 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.utils.config import CONFIG
+from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -101,4 +101,3 @@ def create_market_provider() -> MarketProvider:
     else:
         # Default to static
         return StaticMarketProvider()
-

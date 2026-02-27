@@ -6,7 +6,7 @@ import tempfile
 import os
 from pathlib import Path
 
-from app.utils.sqlite_client import SQLiteClient
+from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.policy.negotiation_thread import get_thread_store, NegotiationThreadStore
 
 

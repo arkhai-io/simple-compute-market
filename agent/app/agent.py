@@ -43,10 +43,10 @@ from pydantic import ValidationError
 import logging
 
 # Import config first
-from .utils.config import CONFIG
+from core.agent.app.utils.config import CONFIG
 
 # Setup file-based logging early, before any other imports that might log
-from .utils.logging_config import setup_file_logging
+from core.agent.app.utils.logging_config import setup_file_logging
 setup_file_logging(CONFIG.log_file_path, CONFIG.log_level)
 
 logger = logging.getLogger(__name__)
@@ -83,26 +83,45 @@ from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
 from .policies.seeding import ComputePolicySeeder
-from .utils.sqlite_client import SQLiteClient
+from core.agent.app.utils.sqlite_client import SQLiteClient
 from .schema.pydantic_models import DecisionContext, Action, Decision
-from .utils.event_ingestion import (
+from core.agent.app.utils.event_ingestion import (
+    configure_default_ingestion,
     queue_event,
     pop_event,
     has_queued_events,
     start_redis_subscriber,
     stop_redis_subscriber,
 )
-from .utils.market_provider import create_market_provider, MarketProvider
+from core.agent.app.utils.market_provider import create_market_provider, MarketProvider
 from .utils.action_executor import execute_action
-from .utils.alkahest_config import (
+from core.agent.app.utils.alkahest_config import (
     get_alkahest_network,
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
 from core.agent.app.utils.serializer import json_serializer
-from .utils.token_registry import TOKEN_REGISTRY
-from .utils.zerotier import get_zerotier_ip
+from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+from core.agent.app.utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
+
+
+def _is_known_event_type(event_type: Any) -> bool:
+    try:
+        EventType(event_type)
+        return True
+    except (ValueError, KeyError, TypeError):
+        return False
+
+
+configure_default_ingestion(
+    event_validation_mode=CONFIG.event_validation_mode,
+    enable_event_queue=CONFIG.enable_event_queue,
+    enable_redis_ingest=CONFIG.enable_redis_ingest,
+    redis_url=CONFIG.redis_url,
+    redis_channels=CONFIG.redis_channels,
+    is_known_event_type=_is_known_event_type,
+)
 
 ALKAHEST_NETWORK = get_alkahest_network(CONFIG.alkahest_network)
 
@@ -817,7 +836,7 @@ root_agent = TraderAgent(
 # In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
 
 # Build agent card from config (shared with registration script)
-from .utils.agent_card import build_agent_card_data
+from core.agent.app.utils.agent_card import build_agent_card_data
 agent_card_data = build_agent_card_data(
     agent_name=CONFIG.agent_name,
     base_url=BASE_URL_OVERRIDE
@@ -1307,7 +1326,7 @@ a2a_app.routes.append(agent_order_close_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
-from .utils.agent_card import build_erc8004_registration_file
+from core.agent.app.utils.agent_card import build_erc8004_registration_file
 from core.agent.app.utils.registry.blockchain_utils import (
     build_erc8004_canonical_id,
     rpc_url_for_http_provider,
@@ -1385,7 +1404,7 @@ async def process_queued_events():
 # Background task to start heartbeat after server is ready
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
-    from .utils.config import CONFIG
+    from core.agent.app.utils.config import CONFIG
     from core.agent.app.agent_heartbeat import start_agent_heartbeat
     await start_agent_heartbeat(CONFIG)
 
@@ -1393,7 +1412,7 @@ async def _start_heartbeat():
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
-    from .utils.config import CONFIG
+    from core.agent.app.utils.config import CONFIG
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())

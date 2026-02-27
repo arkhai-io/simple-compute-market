@@ -182,3 +182,58 @@ class EventIngestion:
         if not self._enable_event_queue:
             return False
         return len(self._event_queue) > 0
+
+
+_DEFAULT_INGESTION: EventIngestion | None = None
+
+
+def configure_default_ingestion(
+    *,
+    event_validation_mode: str,
+    enable_event_queue: bool,
+    enable_redis_ingest: bool,
+    redis_url: str,
+    redis_channels: str,
+    is_known_event_type: Callable[[Any], bool] | None = None,
+) -> None:
+    global _DEFAULT_INGESTION
+    _DEFAULT_INGESTION = EventIngestion(
+        event_validation_mode=event_validation_mode,
+        enable_event_queue=enable_event_queue,
+        enable_redis_ingest=enable_redis_ingest,
+        redis_url=redis_url,
+        redis_channels=redis_channels,
+        is_known_event_type=is_known_event_type,
+    )
+
+
+def _require_default_ingestion() -> EventIngestion:
+    if _DEFAULT_INGESTION is None:
+        raise RuntimeError(
+            "Event ingestion not configured. Call configure_default_ingestion() first."
+        )
+    return _DEFAULT_INGESTION
+
+
+def get_event_queue():
+    return _require_default_ingestion().get_event_queue()
+
+
+def queue_event(payload: dict[str, Any]) -> bool:
+    return _require_default_ingestion().queue_event(payload)
+
+
+async def start_redis_subscriber() -> None:
+    await _require_default_ingestion().start_redis_subscriber()
+
+
+async def stop_redis_subscriber() -> None:
+    await _require_default_ingestion().stop_redis_subscriber()
+
+
+def pop_event() -> dict[str, Any] | None:
+    return _require_default_ingestion().pop_event()
+
+
+def has_queued_events() -> bool:
+    return _require_default_ingestion().has_queued_events()

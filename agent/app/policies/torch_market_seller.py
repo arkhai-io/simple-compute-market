@@ -21,7 +21,7 @@ from app.schema.pydantic_models import (
     ComputeResourcePortfolio,
 )
 from app.utils.validation import extract_resources_from_make_offer_event
-from app.utils.config import CONFIG
+from core.agent.app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
