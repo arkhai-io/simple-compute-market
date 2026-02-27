@@ -40,10 +40,10 @@ from app.schema.pydantic_models import (
 )
 
 from core.agent.app.utils.config import CONFIG
-from .alkahest_config import get_trusted_oracle_arbiter
-from .token_registry import TOKEN_REGISTRY
+from core.agent.app.utils.alkahest_config import get_trusted_oracle_arbiter
+from core.agent.app.utils.token_registry import TOKEN_REGISTRY
 from core.agent.app.utils.registry_client import get_registry_client
-from .sqlite_client import get_sqlite_client
+from core.agent.app.utils.sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,

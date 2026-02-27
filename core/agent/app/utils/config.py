@@ -144,7 +144,7 @@ class Config:
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
-    Path(__file__).resolve().parents[3] / "core" / "agent" / "app" / "data" / "token_registry.json"
+    Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
 )
 
 
