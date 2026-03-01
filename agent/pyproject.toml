@@ -6,7 +6,7 @@ authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
 dependencies = [
-    "google-adk[a2a] @ git+https://github.com/google/adk-python@5eca72f9bfd05c7c28a3d738391138a59a31167d",
+    "google-adk>=1.17.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "google-cloud-aiplatform[evaluation]>=1.118.0,<2.0.0",
@@ -15,15 +15,16 @@ dependencies = [
     "psycopg2-binary>=2.9.10,<3.0.0",
     "a2a-sdk>=0.3.9",
     "torch>=2.7.0",
-    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@ef59f84c989ddc6a30d0590c807507c4e09b65c7",
-    "alkahest-py @ git+https://github.com/arkhai-io/alkahest@main#subdirectory=sdks/py",
+    "pufferlib>=3.0.0",
+	"alkahest-py",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "aiohttp>=3.12.15",
 ]
 
-requires-python = ">=3.10,<3.14"
-
+#3.13 requires numpy>2 or else you have to install the gcc toolchain and compile numpy yourself.
+#pufferlib requires numpy<2. So we're stuck with python 3.12
+requires-python = ">=3.12"
 
 [dependency-groups]
 dev = [
@@ -52,6 +53,7 @@ no-build-isolation-package = ["pufferlib"]
 torch = [
     { index = "pytorch-cpu" },
 ]
+alkahest-py = { path = "packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -112,7 +114,6 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.metadata]
 allow-direct-references=true
-# Keep commit pin until the ADK A2A PR https://github.com/google/adk-python/pull/3262 is merged.
 
 [tool.hatch.build.targets.wheel]
 packages = ["app","frontend"]

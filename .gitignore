@@ -188,3 +188,4 @@ experiments/
 wandb/
 !.env.sample
 .cursor/
+*/uv.lock

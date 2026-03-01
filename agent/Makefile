@@ -1,12 +1,30 @@
+REPO_ROOT := $(shell git rev-parse --show-toplevel)
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+ALKAHEST_WHEEL_SOURCE := ${REPO_ROOT}/../alkahest/sdks/py/dist
 # ==============================================================================
 # Installation & Setup
 # ==============================================================================
 
 # Install dependencies using uv package manager
-install:
-	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
-	uv sync --dev
+init: init-alkahest
+	uv sync --dev --python 3.12
+	cp .env.sample .env
 
+init-alkahest:
+	mkdir -p packages
+	cp -r ${ALKAHEST_WHEEL_SOURCE}/*.whl ./packages/
+
+build-images: build-a2a-agent-image build-test-env-image
+
+build-a2a-agent-image:
+	docker build -f Dockerfile -t arkhai:a2a-agent-$(GIT_SUFFIX) .
+
+#This is where we will run the chain as a container, make side effects to initialize addresses and balances, deploy contracts, etc, then commit the container to a new image.
+build-test-env-image:
+	echo "NYI"
+
+deploy-a2a-agent:
+	docker run -it --rm arkhai:a2a-agent-$(GIT_SUFFIX)
 # ==============================================================================
 # Agent Registration
 # ==============================================================================
@@ -146,8 +164,8 @@ lint:
 test-env:
 	uv run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
 	uv run python app/utils/test_env.py
-# ==============================================================================
-# Arkhai Training Environment Targets
+
+# Market Environment Build Targets
 # ==============================================================================
 
 # Train Arkhai model using upstream puffer CLI.
