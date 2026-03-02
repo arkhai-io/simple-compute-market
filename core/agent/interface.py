@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
-from .action import ActionHandler
-
 Policy = Callable[[Any], Any]
 
 
@@ -19,7 +17,7 @@ class DomainPlugin(Protocol):
     def event_types(self) -> set[str]:
         ...
 
-    def action_handlers(self) -> dict[str, ActionHandler]:
+    def action_handlers(self) -> dict[str, Any]:
         ...
 
     def policies(self) -> list[Policy]:
