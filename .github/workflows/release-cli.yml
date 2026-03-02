@@ -1,0 +1,67 @@
+name: Release Market CLI Installer
+
+on:
+  push:
+    tags:
+      - 'cli-v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT_SUBMODULES }}
+
+      - name: Lint install script
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: .
+          additional_files: install.sh scripts/build-installer.sh
+
+      - name: Build self-extracting installer
+        run: bash scripts/build-installer.sh market-installer.sh
+
+      - name: Verify installer was created
+        run: |
+          if [ ! -f market-installer.sh ]; then
+            echo "::error::market-installer.sh was not created"
+            exit 1
+          fi
+          ls -lh market-installer.sh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: market-installer.sh
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Download and run the installer:
+
+            ```bash
+            curl -sSL https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/market-installer.sh -o market-installer.sh
+            bash market-installer.sh
+            ```
+
+      - name: Generate build summary
+        run: |
+          INSTALLER_SIZE=$(wc -c < market-installer.sh | tr -d ' ')
+          INSTALLER_SIZE_KB=$(( INSTALLER_SIZE / 1024 ))
+          echo "### Market CLI Installer Release :package:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Installer size:** ${INSTALLER_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Install command:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "curl -sSL https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/market-installer.sh -o market-installer.sh" >> $GITHUB_STEP_SUMMARY
+          echo "bash market-installer.sh" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
