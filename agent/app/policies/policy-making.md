@@ -10,7 +10,7 @@ Core-generic policy authoring and evaluation guidance:
   - compute default policy seeding by trigger type
 - `agent/app/schema/pydantic_models.py`
   - compute event/resource enums and models
-- `agent/app/utils/action_executor.py`
+- `core/agent/app/utils/action_executor.py`
   - compute-domain action execution
 
 ## Compute policy checklist

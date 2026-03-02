@@ -16,7 +16,7 @@ from app.schema.pydantic_models import (
     Region,
     TokenResource,
 )
-from app.utils import action_executor
+from core.agent.app.utils import action_executor
 from core.agent.app.utils.sqlite_client import SQLiteClient
 
 
