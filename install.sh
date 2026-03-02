@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────
-INSTALL_DIR="${MARKET_INSTALL_DIR:-$HOME/.market}"
 BIN_DIR="${MARKET_BIN_DIR:-$HOME/.local/bin}"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=10
 UV_VERSION="0.8.13"
+PACKAGE_NAME="market-cli"
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -94,7 +94,6 @@ install_uv() {
         . "$HOME/.cargo/env"
     fi
 
-    # Add to PATH directly as fallback
     export PATH="$HOME/.local/bin:$PATH"
 
     if ! command -v uv &>/dev/null; then
@@ -105,103 +104,39 @@ install_uv() {
     ok "uv installed ($(uv --version))"
 }
 
-# ── Copy files to install directory ────────────────────────────
+# ── Install market-cli from PyPI ───────────────────────────────
 
-copy_to_install_dir() {
-    local source_dir
-    source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-    if [ "$source_dir" = "$INSTALL_DIR" ]; then
-        ok "Already running from install directory"
-        return
-    fi
-
-    info "Installing to $INSTALL_DIR..."
-    mkdir -p "$INSTALL_DIR"
-
-    # Preserve existing .env files
-    local env_backup_dir
-    env_backup_dir="$(mktemp -d)"
-    local env_files_found=false
-
-    while IFS= read -r -d '' env_file; do
-        env_files_found=true
-        local rel_path="${env_file#"$INSTALL_DIR"/}"
-        local backup_path="$env_backup_dir/$rel_path"
-        mkdir -p "$(dirname "$backup_path")"
-        cp "$env_file" "$backup_path"
-    done < <(find "$INSTALL_DIR" -name ".env" -type f -print0 2>/dev/null || true)
-
-    # Copy source files (rsync if available, otherwise cp)
-    if command -v rsync &>/dev/null; then
-        rsync -a --delete \
-            --exclude='.git' \
-            --exclude='.github' \
-            --exclude='__pycache__' \
-            --exclude='.venv' \
-            --exclude='node_modules' \
-            --exclude='.env' \
-            --exclude='.env.tmp' \
-            --exclude='*.egg-info' \
-            --exclude='.claude' \
-            "$source_dir/" "$INSTALL_DIR/"
-    else
-        rm -rf "${INSTALL_DIR:?}/"*
-        cp -R "$source_dir/." "$INSTALL_DIR/"
-    fi
-
-    # Restore .env files
-    if [ "$env_files_found" = true ]; then
-        while IFS= read -r -d '' env_file; do
-            local rel_path="${env_file#"$env_backup_dir"/}"
-            local target_path="$INSTALL_DIR/$rel_path"
-            mkdir -p "$(dirname "$target_path")"
-            cp "$env_file" "$target_path"
-        done < <(find "$env_backup_dir" -name ".env" -type f -print0 2>/dev/null || true)
-        info "Preserved existing .env files"
-    fi
-
-    rm -rf "$env_backup_dir"
-    ok "Files installed to $INSTALL_DIR"
-}
-
-# ── Set up CLI virtual environment ─────────────────────────────
-
-setup_cli() {
-    info "Setting up Market CLI..."
-    cd "$INSTALL_DIR/cli"
-
-    uv venv --quiet
-    uv pip install -e . --quiet
-
-    ok "Market CLI installed"
+install_market_cli() {
+    info "Installing $PACKAGE_NAME from PyPI..."
+    uv tool install "$PACKAGE_NAME" --force
+    ok "$PACKAGE_NAME installed"
 }
 
 # ── Set up PATH ────────────────────────────────────────────────
 
 setup_path() {
-    local market_bin="$INSTALL_DIR/cli/.venv/bin/market"
+    # uv tool install puts binaries in ~/.local/bin by default
+    local market_bin
+    market_bin="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
 
-    if [ ! -f "$market_bin" ]; then
-        error "market binary not found at $market_bin"
-        exit 1
+    if ! command -v market &>/dev/null; then
+        # Check if market exists in the uv tool bin directory
+        if [ -f "$market_bin/market" ]; then
+            export PATH="$market_bin:$PATH"
+        fi
     fi
 
-    mkdir -p "$BIN_DIR"
-    ln -sf "$market_bin" "$BIN_DIR/market"
-    ok "Symlinked market → $BIN_DIR/market"
-
-    # Check if BIN_DIR is already in PATH (resolve $HOME in both)
-    local resolved_bin_dir="${BIN_DIR/#\$HOME/$HOME}"
-    if echo "$PATH" | tr ':' '\n' | grep -qxF "$resolved_bin_dir"; then
-        ok "$BIN_DIR is already in PATH"
+    if command -v market &>/dev/null; then
+        ok "market is on PATH"
         return
     fi
 
+    # If still not found, try to add the bin dir to shell RC
+    local resolved_bin_dir="${market_bin}"
     local shell_name
     shell_name="$(basename "${SHELL:-/bin/bash}")"
     local rc_file=""
-    local path_line="export PATH=\"$BIN_DIR:\$PATH\""
+    local path_line="export PATH=\"$resolved_bin_dir:\$PATH\""
 
     case "$shell_name" in
         zsh)  rc_file="$HOME/.zshrc" ;;
@@ -214,7 +149,7 @@ setup_path() {
             ;;
         fish)
             rc_file="$HOME/.config/fish/config.fish"
-            path_line="fish_add_path $BIN_DIR"
+            path_line="fish_add_path $resolved_bin_dir"
             ;;
         *)
             rc_file="$HOME/.profile"
@@ -222,9 +157,8 @@ setup_path() {
     esac
 
     if [ -n "$rc_file" ] && [ -f "$rc_file" ]; then
-        # Check if the rc file already references this directory (handles $HOME, ~, or absolute paths)
-        if grep -qF "$BIN_DIR" "$rc_file" 2>/dev/null || grep -qF "$resolved_bin_dir" "$rc_file" 2>/dev/null; then
-            ok "$BIN_DIR is already in $rc_file"
+        if grep -qF "$resolved_bin_dir" "$rc_file" 2>/dev/null; then
+            ok "$resolved_bin_dir is already in $rc_file"
             return
         fi
     fi
@@ -233,21 +167,14 @@ setup_path() {
         echo "" >> "$rc_file"
         echo "# Added by Market CLI installer" >> "$rc_file"
         echo "$path_line" >> "$rc_file"
-        warn "Added $BIN_DIR to PATH in $rc_file — restart your shell or run: source $rc_file"
+        warn "Added $resolved_bin_dir to PATH in $rc_file — restart your shell or run: source $rc_file"
     fi
 }
 
 # ── Verify installation ───────────────────────────────────────
 
 verify() {
-    local market_bin="$BIN_DIR/market"
-
-    if [ ! -L "$market_bin" ] && [ ! -f "$market_bin" ]; then
-        error "Verification failed: market not found at $market_bin"
-        exit 1
-    fi
-
-    if "$market_bin" --help &>/dev/null; then
+    if command -v market &>/dev/null && market --help &>/dev/null; then
         ok "Verification passed"
     else
         error "Verification failed: 'market --help' exited with an error"
@@ -268,8 +195,7 @@ main() {
     check_command make
     check_python_version
     install_uv
-    copy_to_install_dir
-    setup_cli
+    install_market_cli
     setup_path
     verify
 
