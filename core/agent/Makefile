@@ -5,7 +5,7 @@
 # Install dependencies using uv package manager
 install:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
-	uv sync --dev
+	uv --project .. sync --dev
 
 # ==============================================================================
 # Agent Registration
@@ -24,7 +24,7 @@ register:
 	if [ -f "$$ENV_FILE" ]; then \
 		ENV_FILE_ARG="--env-file $$ENV_FILE"; \
 	fi; \
-	uv run python scripts/register_onchain.py $$ENV_FILE_ARG
+	uv --project .. run python scripts/register_onchain.py $$ENV_FILE_ARG
 
 # ==============================================================================
 # Playground Targets
@@ -39,7 +39,7 @@ playground:
 	@echo "|                                                                             |"
 	@echo "| 🔍 IMPORTANT: Select the 'app' folder to interact with your agent.          |"
 	@echo "==============================================================================="
-	uv run adk web . --port 8501 --reload_agents
+	uv --project .. run adk web . --port 8501 --reload_agents
 
 # Serve the A2A version of the app
 # Usage: make serve-a2a [PORT=8000]
@@ -88,7 +88,7 @@ serve-a2a:
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo zerotier-cli join $$ZT_NETWORK; \
 	fi; \
-	GOOGLE_GENAI_USE_VERTEXAI=False uv run uvicorn core.agent.app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
+	GOOGLE_GENAI_USE_VERTEXAI=False uv --project .. run uvicorn core.agent.app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
 
 
 # ==============================================================================
@@ -128,15 +128,15 @@ setup-dev-env:
 
 # Run unit and integration tests
 test:
-	uv run pytest tests/unit && uv run pytest tests/integration
+	uv --project .. run pytest tests/unit && uv --project .. run pytest tests/integration
 
 # Run code quality checks (codespell, ruff, mypy)
 lint:
-	uv sync --dev --extra lint
-	uv run codespell
-	uv run ruff check . --diff
-	uv run ruff format . --check --diff
-	uv run mypy .
+	uv --project .. sync --dev --extra lint
+	uv --project .. run codespell
+	uv --project .. run ruff check . --diff
+	uv --project .. run ruff format . --check --diff
+	uv --project .. run mypy .
 
 # ==============================================================================
 # Local test chain helper
@@ -144,8 +144,8 @@ lint:
 
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
-	uv run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
-	uv run python app/utils/test_env.py
+	uv --project .. run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
+	uv --project .. run python app/utils/test_env.py
 # ==============================================================================
 # Arkhai Training Environment Targets
 # ==============================================================================
@@ -164,7 +164,7 @@ train-arkhai:
 	echo "Device: $$DEVICE"; \
 	echo "Total timesteps: $$TOTAL_TIMESTEPS"; \
 	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
-	uv run puffer train puffer_arkhai \
+	uv --project .. run puffer train puffer_arkhai \
 		--train.device $$DEVICE \
 		--train.total-timesteps $$TOTAL_TIMESTEPS \
 		$$WANDB_FLAG $$TAG_FLAG $$ARGS
@@ -179,7 +179,7 @@ eval-arkhai:
 	echo "Model: $$MODEL"; \
 	echo "Device: $$DEVICE"; \
 	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
-	uv run puffer eval puffer_arkhai \
+	uv --project .. run puffer eval puffer_arkhai \
 		--load-model-path $$MODEL \
 		--train.device $$DEVICE \
 		$$ARGS
@@ -193,7 +193,7 @@ export-arkhai-weights:
 	@echo "Exporting Arkhai weights via puffer..."
 	@MODEL=$${MODEL:-latest}; \
 	echo "Model: $$MODEL"; \
-	uv run puffer export puffer_arkhai --load-model-path $$MODEL
+	uv --project .. run puffer export puffer_arkhai --load-model-path $$MODEL
 
 # Backward-compatible alias for previous target name.
 export-arkhai-model: export-arkhai-weights
@@ -202,7 +202,7 @@ export-arkhai-model: export-arkhai-weights
 # Usage: make test-arkhai-env
 test-arkhai-env:
 	@echo "Testing Arkhai environment..."
-	@uv run python -c "\
+	@uv --project .. run python -c "\
 	from pufferlib.ocean.arkhai.arkhai import Arkhai; \
 	import numpy as np; \
 	env = Arkhai(num_envs=2, seed=42, node_types=3, ai_sellers=1, ai_buyers=0, scripted_sellers=0, scripted_buyers=3, \

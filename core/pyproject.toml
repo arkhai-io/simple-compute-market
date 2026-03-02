@@ -1,5 +1,5 @@
 [project]
-name = "a2a-agent"
+name = "market-core"
 version = "0.1.0"
 description = ""
 authors = [
@@ -76,7 +76,7 @@ select = [
 ignore = ["E501", "C901", "B006"] # ignore line too long, too complex
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "frontend"]
+known-first-party = ["agent", "app"]
 
 [tool.mypy]
 disallow_untyped_calls = true
@@ -107,7 +107,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = [".", ".."]
+pythonpath = [".", "..", "../agent"]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.metadata]
@@ -115,4 +115,4 @@ allow-direct-references=true
 # Keep commit pin until the ADK A2A PR https://github.com/google/adk-python/pull/3262 is merged.
 
 [tool.hatch.build.targets.wheel]
-packages = ["app","frontend"]
+packages = ["agent"]

@@ -79,10 +79,21 @@ def test_rust():
     mock_erc20.transfer(env.alice, 90000000000)
     mock_erc20.transfer(env.bob, 90000000000)
 
+    alice_client = AlkahestClient(
+        private_key=env.alice_private_key,
+        rpc_url=env.rpc_url,
+        address_config=env.addresses,
+    )
+    bob_client = AlkahestClient(
+        private_key=env.bob_private_key,
+        rpc_url=env.rpc_url,
+        address_config=env.addresses,
+    )
+
     arbitration_flow = asyncio.run(full_arbitration_flow(
         arbiter_address = env.addresses.arbiters_addresses.trusted_oracle_arbiter,
-        seller_client = env.alice_client,
-        buyer_client = env.bob_client,
+        seller_client = alice_client,
+        buyer_client = bob_client,
         oracle_address = env.bob
     ))
 

@@ -1,4 +1,4 @@
-# a2a-agent
+# Market Agent
 
 A base ReAct agent built with Google's Agent Development Kit (ADK)
 Agent generated with [`googleCloudPlatform/agent-starter-pack`](https://github.com/GoogleCloudPlatform/agent-starter-pack) version `0.16.0`
@@ -15,6 +15,11 @@ core/agent/
 ├── Makefile             # Make targets for core-agent workflows
 └── README.md            # This file
 ```
+
+Project tooling root:
+- `core/pyproject.toml` (single project config)
+- `core/.venv` (single virtual environment)
+- Commands in `core/agent/Makefile` are wired to use the parent project via `uv --project ..`.
 
 ## Requirements
 
