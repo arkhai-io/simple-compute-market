@@ -18,6 +18,12 @@ def run_step(
     typer.echo(f"==> {label} at {cwd}")
     env = os.environ.copy()
     venv_path = cwd / ".venv"
+    # TODO(refactor): After migration completes, always prefer core/.venv.
+    # Transitional rule: commands run from core/agent should use core/.venv.
+    if cwd.resolve() == (REPO_ROOT / "core" / "agent").resolve():
+        core_venv = REPO_ROOT / "core" / ".venv"
+        if core_venv.exists():
+            venv_path = core_venv
     venv_bin = venv_path / "bin"
     if venv_bin.exists():
         env["VIRTUAL_ENV"] = str(venv_path)

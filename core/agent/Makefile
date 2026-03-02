@@ -24,7 +24,7 @@ register:
 	if [ -f "$$ENV_FILE" ]; then \
 		ENV_FILE_ARG="--env-file $$ENV_FILE"; \
 	fi; \
-	uv --project .. run python scripts/register_onchain.py $$ENV_FILE_ARG
+	PYTHONPATH="$(PYTHONPATH)" uv --project .. run python scripts/register_onchain.py $$ENV_FILE_ARG
 
 # ==============================================================================
 # Playground Targets

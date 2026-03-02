@@ -138,11 +138,11 @@ def order_history(
         None,
         "--env",
         "-e",
-        help="Path to env file (default: agent/.env).",
+        help="Path to env file (default: core/agent/.env).",
     ),
 ) -> None:
     """Show order history from local SQLite."""
-    env_path = Path(env) if env else REPO_ROOT / "agent" / ".env"
+    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
     db_path = _read_env_value(env_path, "AGENT_DB_PATH")
     if not db_path:
         typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
