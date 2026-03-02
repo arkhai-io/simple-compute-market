@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Dict, List
 
-from app.schema.pydantic_models import Action as DomainAction, DecisionContext
+from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
 
 if TYPE_CHECKING:
     from core.agent.app.policy.store import PolicyStore

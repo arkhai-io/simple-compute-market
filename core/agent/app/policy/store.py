@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Tuple
 
-from app.schema.pydantic_models import Action as DomainAction, DecisionContext
+from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
 from core.agent.app.ports.persistence import PolicyPersistencePort
 
 from core.agent.app.policy.evaluator import CallableEvaluator

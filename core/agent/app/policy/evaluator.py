@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
-from app.schema.pydantic_models import Action, DecisionContext
+from core.agent.app.schema.pydantic_models import Action, DecisionContext
 
 
 class CallableEvaluator:

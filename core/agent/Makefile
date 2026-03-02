@@ -46,6 +46,7 @@ playground:
 
 ENV_FILE ?= .env
 ENV_ARG := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
+PYTHONPATH := ../..$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 # Load .env variables into Make if the file exists
 ifneq (,$(wildcard $(ENV_FILE)))
@@ -58,6 +59,7 @@ serve-a2a:
 	PORT="$(or $(PORT),8000)"; \
 	ZT_NETWORK="$(ZEROTIER_NETWORK)"; \
 	ENV_ARG="$(ENV_ARG)"; \
+	export PYTHONPATH="$(PYTHONPATH)"; \
 	if [ -n "$$ZT_NETWORK" ]; then \
 		if ! command -v zerotier-cli >/dev/null 2>&1; then \
 			echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2; \
@@ -145,7 +147,7 @@ lint:
 # Spin up EnvTestManager once, print useful details, and hold the process open.
 test-env:
 	uv --project .. run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
-	uv --project .. run python app/utils/test_env.py
+	uv --project .. run python -m app.utils.test_env
 # ==============================================================================
 # Arkhai Training Environment Targets
 # ==============================================================================
