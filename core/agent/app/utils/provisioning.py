@@ -5,6 +5,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+# TODO(refactor): Provisioning behavior here is compute-domain specific.
+# Move this logic into the compute domain package in later refactor phases.
+
 logger = logging.getLogger(__name__)
 
 

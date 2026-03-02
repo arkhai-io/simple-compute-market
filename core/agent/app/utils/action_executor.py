@@ -1,4 +1,8 @@
-"""Action execution."""
+"""Action execution.
+
+TODO(refactor): This module still contains compute-domain action logic.
+Move domain-specific execution into the domain package as refactor continues.
+"""
 
 from __future__ import annotations
 

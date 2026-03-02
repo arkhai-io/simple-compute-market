@@ -1,4 +1,8 @@
-"""Validation utilities for alerts, orders, and resource extraction."""
+"""Validation utilities for alerts, orders, and resource extraction.
+
+TODO(refactor): This module still includes compute-domain validation helpers.
+Split domain-specific checks into the compute domain package as refactor continues.
+"""
 
 from __future__ import annotations
 
