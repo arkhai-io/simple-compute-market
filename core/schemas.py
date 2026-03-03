@@ -6,7 +6,9 @@ map in/out without immediate domain extraction.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny

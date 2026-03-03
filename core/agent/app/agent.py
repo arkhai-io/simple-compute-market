@@ -20,7 +20,8 @@ import uuid
 from datetime import datetime
 import ast
 from alkahest_py import AlkahestClient
-from typing import AsyncGenerator, Any, Dict, Optional, override, Tuple
+from typing import AsyncGenerator, Any, Dict, Optional, Tuple
+from typing_extensions import override
 from enum import Enum
 import re
 
