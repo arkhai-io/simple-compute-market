@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────────
-BIN_DIR="${MARKET_BIN_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${MARKET_INSTALL_DIR:-$HOME/.market}"
+BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=10
 UV_VERSION="0.8.13"
-PACKAGE_NAME="market-cli"
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -104,39 +104,82 @@ install_uv() {
     ok "uv installed ($(uv --version))"
 }
 
-# ── Install market-cli from PyPI ───────────────────────────────
+# ── Copy repo to install directory ────────────────────────────
 
-install_market_cli() {
-    info "Installing $PACKAGE_NAME from PyPI..."
-    uv tool install "$PACKAGE_NAME" --force
-    ok "$PACKAGE_NAME installed"
+install_repo() {
+    local src_dir
+    src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    info "Installing to $INSTALL_DIR..."
+
+    # Back up existing .env files before overwriting
+    local env_backup_dir=""
+    if [ -d "$INSTALL_DIR" ]; then
+        env_backup_dir="$(mktemp -d)"
+        while IFS= read -r -d '' env_file; do
+            local rel="${env_file#$INSTALL_DIR/}"
+            local backup_path="$env_backup_dir/$rel"
+            mkdir -p "$(dirname "$backup_path")"
+            cp "$env_file" "$backup_path"
+        done < <(find "$INSTALL_DIR" -name '.env' -print0 2>/dev/null || true)
+    fi
+
+    # Copy files to install directory
+    mkdir -p "$INSTALL_DIR"
+    rsync -a --delete \
+        --exclude='.git' \
+        --exclude='market-installer.sh' \
+        "$src_dir/" "$INSTALL_DIR/"
+
+    # Restore backed-up .env files
+    if [ -n "$env_backup_dir" ] && [ -d "$env_backup_dir" ]; then
+        while IFS= read -r -d '' env_file; do
+            local rel="${env_file#$env_backup_dir/}"
+            local target="$INSTALL_DIR/$rel"
+            mkdir -p "$(dirname "$target")"
+            cp "$env_file" "$target"
+        done < <(find "$env_backup_dir" -name '.env' -print0 2>/dev/null || true)
+        rm -rf "$env_backup_dir"
+    fi
+
+    ok "Files installed to $INSTALL_DIR"
 }
 
-# ── Set up PATH ────────────────────────────────────────────────
+# ── Set up venv and install CLI ───────────────────────────────
+
+install_cli() {
+    local cli_dir="$INSTALL_DIR/cli"
+
+    info "Setting up Python environment..."
+    cd "$cli_dir"
+    uv venv
+    uv pip install -e .
+
+    ok "CLI installed in $cli_dir/.venv"
+}
+
+# ── Create symlink and set up PATH ────────────────────────────
 
 setup_path() {
-    # uv tool install puts binaries in ~/.local/bin by default
-    local market_bin
-    market_bin="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
+    local market_bin="$INSTALL_DIR/cli/.venv/bin/market"
 
-    if ! command -v market &>/dev/null; then
-        # Check if market exists in the uv tool bin directory
-        if [ -f "$market_bin/market" ]; then
-            export PATH="$market_bin:$PATH"
-        fi
+    mkdir -p "$BIN_DIR"
+
+    # Create or update symlink
+    if [ -L "$BIN_DIR/market" ] || [ -e "$BIN_DIR/market" ]; then
+        rm -f "$BIN_DIR/market"
     fi
+    ln -s "$market_bin" "$BIN_DIR/market"
+    ok "Symlinked $BIN_DIR/market -> $market_bin"
 
-    if command -v market &>/dev/null; then
-        ok "market is on PATH"
-        return
-    fi
+    # Ensure BIN_DIR is on PATH for this session
+    export PATH="$BIN_DIR:$PATH"
 
-    # If still not found, try to add the bin dir to shell RC
-    local resolved_bin_dir="${market_bin}"
+    # Add to shell RC if not already present
     local shell_name
     shell_name="$(basename "${SHELL:-/bin/bash}")"
     local rc_file=""
-    local path_line="export PATH=\"$resolved_bin_dir:\$PATH\""
+    local path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     case "$shell_name" in
         zsh)  rc_file="$HOME/.zshrc" ;;
@@ -149,7 +192,7 @@ setup_path() {
             ;;
         fish)
             rc_file="$HOME/.config/fish/config.fish"
-            path_line="fish_add_path $resolved_bin_dir"
+            path_line="fish_add_path $BIN_DIR"
             ;;
         *)
             rc_file="$HOME/.profile"
@@ -157,8 +200,8 @@ setup_path() {
     esac
 
     if [ -n "$rc_file" ] && [ -f "$rc_file" ]; then
-        if grep -qF "$resolved_bin_dir" "$rc_file" 2>/dev/null; then
-            ok "$resolved_bin_dir is already in $rc_file"
+        if grep -qF "$BIN_DIR" "$rc_file" 2>/dev/null; then
+            ok "$BIN_DIR is already in $rc_file"
             return
         fi
     fi
@@ -167,7 +210,7 @@ setup_path() {
         echo "" >> "$rc_file"
         echo "# Added by Market CLI installer" >> "$rc_file"
         echo "$path_line" >> "$rc_file"
-        warn "Added $resolved_bin_dir to PATH in $rc_file — restart your shell or run: source $rc_file"
+        warn "Added $BIN_DIR to PATH in $rc_file — restart your shell or run: source $rc_file"
     fi
 }
 
@@ -195,7 +238,8 @@ main() {
     check_command make
     check_python_version
     install_uv
-    install_market_cli
+    install_repo
+    install_cli
     setup_path
     verify
 

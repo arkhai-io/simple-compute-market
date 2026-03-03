@@ -1,4 +1,4 @@
-name: Release Market CLI to PyPI
+name: Release Market CLI
 
 on:
   push:
@@ -7,11 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-publish:
+  build-and-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
 
     steps:
       - name: Checkout code
@@ -23,53 +22,40 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install build tools
-        run: pip install build
+          python-version: '3.11'
 
       - name: Build wheel
-        run: python -m build --wheel
-
-      - name: Verify wheel contents
         run: |
-          pip install dist/*.whl
-          market --help
+          pip install build
+          python -m build --wheel
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Verify wheel was built
+        run: ls -lh dist/*.whl
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*.whl
           generate_release_notes: true
           body: |
             ## Install
 
             ```bash
-            pip install market-cli
-            ```
-
-            Or with uv:
-
-            ```bash
-            uv tool install market-cli
+            pip install market_cli-*.whl
             ```
 
       - name: Generate build summary
         run: |
-          WHEEL=$(ls dist/*.whl)
-          WHEEL_SIZE=$(wc -c < "$WHEEL" | tr -d ' ')
+          WHEEL_FILE=$(ls dist/*.whl)
+          WHEEL_SIZE=$(wc -c < "$WHEEL_FILE" | tr -d ' ')
           WHEEL_SIZE_KB=$(( WHEEL_SIZE / 1024 ))
-          echo "### Market CLI Release :package:" >> $GITHUB_STEP_SUMMARY
+          echo "### Market CLI Release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Wheel size:** ${WHEEL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Install:**" >> $GITHUB_STEP_SUMMARY
+          echo "**Install (pip):**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "pip install market-cli" >> $GITHUB_STEP_SUMMARY
+          echo "pip install market_cli-*.whl" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

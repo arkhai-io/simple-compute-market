@@ -9,11 +9,6 @@ dependencies = [
   "PyYAML>=6.0.0",
 ]
 
-[project.optional-dependencies]
-test = [
-  "pytest>=8.0.0",
-]
-
 [project.scripts]
 market = "market.cli:app"
 
@@ -35,19 +30,15 @@ packages = ["cli/market"]
 
 [tool.hatch.build]
 exclude = [
-  "**/.venv",
-  "**/node_modules",
-  "**/__pycache__",
+  "**/.venv/**",
+  "**/node_modules/**",
+  "**/__pycache__/**",
   "**/.env",
-  "**/.env.tmp",
-  "**/*.egg-info",
-  "**/.git",
-  "**/Dockerfile",
-  "**/docker-compose*.yml",
-  ".github",
-  ".claude",
-  "scripts",
+  "**/.git/**",
+  "**/Dockerfile*",
+  ".github/**",
+  ".claude/**",
+  "scripts/**",
   "install.sh",
   "market-installer.sh",
-  "Dockerfile.*",
 ]
