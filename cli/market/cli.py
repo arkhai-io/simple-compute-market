@@ -54,7 +54,7 @@ def install(
         (
             "Agent dependencies (uv sync)",
             ["make", "install"],
-            REPO_ROOT / "agent",
+            REPO_ROOT / "core" / "agent",
         ),
         (
             "Registry dependencies (uv sync)",
@@ -99,7 +99,7 @@ def register(
     run_step(
         "Register agent (make register)",
         cmd,
-        REPO_ROOT / "agent",
+        REPO_ROOT / "core" / "agent",
     )
 
 
@@ -119,7 +119,7 @@ def start(
     run_step(
         "Start agent (make serve-a2a)",
         cmd,
-        REPO_ROOT / "agent",
+        REPO_ROOT / "core" / "agent",
     )
 
 

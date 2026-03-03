@@ -1,14 +1,14 @@
 """Validation utilities for alerts, orders, and resource extraction."""
 
 from typing import Any
-from pydantic import ValidationError
 
+from core.agent.app.utils.validation import validate_model
 from app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
     ComputeResource,
+    ComputeDomainResource,
     TokenResource,
-    Resource,
     MakeOfferEvent,
     DecisionContext,
 )
@@ -26,7 +26,7 @@ def validate_alert(alert_dict: dict[str, Any]) -> ResourceAlertRequest:
     Raises:
         ValidationError: If alert structure is invalid
     """
-    return ResourceAlertRequest.model_validate(alert_dict)
+    return validate_model(ResourceAlertRequest, alert_dict)
 
 
 def validate_market_order(order_dict: dict[str, Any]) -> MarketOrder:
@@ -41,10 +41,10 @@ def validate_market_order(order_dict: dict[str, Any]) -> MarketOrder:
     Raises:
         ValidationError: If order structure is invalid
     """
-    return MarketOrder.model_validate(order_dict)
+    return validate_model(MarketOrder, order_dict)
 
 
-def extract_compute_resource(resource: Resource) -> ComputeResource | None:
+def extract_compute_resource(resource: ComputeDomainResource) -> ComputeResource | None:
     """Type-safe extraction of ComputeResource from Resource.
     
     Args:
@@ -58,7 +58,7 @@ def extract_compute_resource(resource: Resource) -> ComputeResource | None:
     return None
 
 
-def extract_token_resource(resource: Resource) -> TokenResource | None:
+def extract_token_resource(resource: ComputeDomainResource) -> TokenResource | None:
     """Type-safe extraction of TokenResource from Resource.
     
     Args:
@@ -74,7 +74,7 @@ def extract_token_resource(resource: Resource) -> TokenResource | None:
 
 def extract_resources_from_make_offer_event(
     context: DecisionContext,
-) -> tuple[MarketOrder | None, Resource | None, Resource | None]:
+) -> tuple[MarketOrder | None, ComputeDomainResource | None, ComputeDomainResource | None]:
     """Safely extract offer_resource and demand_resource from MakeOfferEvent.
 
     Extracts resources from a MakeOfferEvent, returning the order and both resources.
@@ -100,8 +100,8 @@ def extract_resources_from_make_offer_event(
 
 
 def determine_strategy_from_resources(
-    offer_resource: Resource | None,
-    demand_resource: Resource | None,
+    offer_resource: ComputeDomainResource | None,
+    demand_resource: ComputeDomainResource | None,
 ) -> str | None:
     """Determine negotiation strategy from resource types.
 
@@ -143,4 +143,3 @@ def determine_strategy_from_order(order: MarketOrder | None) -> str | None:
         return None
 
     return determine_strategy_from_resources(order.offer_resource, order.demand_resource)
-

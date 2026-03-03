@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import gymnasium as gym
 
-from app.policies.registry import policy_callable
+from core.agent.app.policy.registry import policy_callable
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
@@ -27,7 +27,7 @@ from app.schema.pydantic_models import (
     MakeOfferEvent,
     TokenResource,
 )
-from app.utils.config import CONFIG
+from core.agent.app.utils.config import CONFIG
 from app.utils.validation import extract_resources_from_make_offer_event
 
 try:  # Torch is optional at runtime; fail gracefully if unavailable.

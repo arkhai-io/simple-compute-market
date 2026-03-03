@@ -11,15 +11,15 @@ from app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
     ComputeResource,
+    ComputeDomainResource,
     TokenResource,
-    Resource,
     ResourceImbalanceEvent,
     MakeOfferEvent,
     GPUModel,
     Region,
     ERC20TokenMetadata,
 )
-from app.agent import _parse_domain_event
+from core.agent.app.agent import _parse_domain_event
 from app.utils.validation import (
     validate_alert,
     validate_market_order,
@@ -132,7 +132,7 @@ class TestResourceParseFromDict:
             "token": "USDT",
             "amount": 1000000000000000000,
         }
-        resource = Resource.parse_from_dict(token_dict)
+        resource = ComputeDomainResource.parse_from_dict(token_dict)
         
         assert isinstance(resource, TokenResource)
         assert resource.token.symbol == "USDT"
@@ -146,7 +146,7 @@ class TestResourceParseFromDict:
             "sla": 90.0,
             "region": "California, US",
         }
-        resource = Resource.parse_from_dict(compute_dict)
+        resource = ComputeDomainResource.parse_from_dict(compute_dict)
         
         assert isinstance(resource, ComputeResource)
         assert resource.gpu_model == GPUModel.H200
@@ -162,7 +162,7 @@ class TestResourceParseFromDict:
             "gpu_model": "H200",  # Should be ignored
             "quantity": 1,  # Should be ignored
         }
-        resource = Resource.parse_from_dict(mixed_dict)
+        resource = ComputeDomainResource.parse_from_dict(mixed_dict)
         
         assert isinstance(resource, TokenResource)
         assert resource.token.symbol == "USDT"
@@ -175,7 +175,7 @@ class TestResourceParseFromDict:
         }
         
         with pytest.raises(ValueError) as exc_info:
-            Resource.parse_from_dict(invalid_dict)
+            ComputeDomainResource.parse_from_dict(invalid_dict)
         
         assert "token" in str(exc_info.value).lower() or "gpu_model" in str(exc_info.value).lower()
     
@@ -187,7 +187,7 @@ class TestResourceParseFromDict:
             sla=90.0,
             region=Region.CALIFORNIA_US,
         )
-        result = Resource.parse_from_dict(compute_res)
+        result = ComputeDomainResource.parse_from_dict(compute_res)
         
         assert result is compute_res
         assert isinstance(result, ComputeResource)
@@ -195,7 +195,7 @@ class TestResourceParseFromDict:
     def test_parse_existing_token_resource_passes_through(self):
         """Test that existing TokenResource instance passes through unchanged."""
         token_res = TokenResource(token=USDT_METADATA, amount=1000000000000000000)
-        result = Resource.parse_from_dict(token_res)
+        result = ComputeDomainResource.parse_from_dict(token_res)
         
         assert result is token_res
         assert isinstance(result, TokenResource)
@@ -203,19 +203,19 @@ class TestResourceParseFromDict:
     def test_parse_non_dict_passes_through(self):
         """Test that non-dict, non-Resource values pass through unchanged."""
         # Test with string
-        result = Resource.parse_from_dict("some_string")
+        result = ComputeDomainResource.parse_from_dict("some_string")
         assert result == "some_string"
         
         # Test with int
-        result = Resource.parse_from_dict(42)
+        result = ComputeDomainResource.parse_from_dict(42)
         assert result == 42
         
         # Test with None
-        result = Resource.parse_from_dict(None)
+        result = ComputeDomainResource.parse_from_dict(None)
         assert result is None
         
         # Test with list
-        result = Resource.parse_from_dict([1, 2, 3])
+        result = ComputeDomainResource.parse_from_dict([1, 2, 3])
         assert result == [1, 2, 3]
 
 
@@ -576,4 +576,3 @@ class TestValidationUtilities:
         assert order is None
         assert offer_resource is None
         assert demand_resource is None
-

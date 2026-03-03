@@ -19,9 +19,9 @@ NOTE: Policy requires strategy to be specified. If no strategy, passes to next p
 
 import pytest
 from app.schema.pydantic_models import DecisionContext, NegotiationEvent
-from app.policies.store import PolicyStore
-from app.utils.sqlite_client import SQLiteClient
-from app.policies.evaluator import CallableEvaluator
+from core.agent.app.policy.store import PolicyStore
+from core.agent.app.utils.sqlite_client import SQLiteClient
+from core.agent.app.policy.evaluator import CallableEvaluator
 import tempfile
 import os
 
@@ -39,7 +39,7 @@ def temp_db():
 @pytest.fixture
 def policy_store(temp_db):
     """Create a PolicyStore with registered policies for testing."""
-    from app.policies.registry import CALLABLE_REGISTRY
+    from core.agent.app.policy.registry import CALLABLE_REGISTRY
 
     # Clear registry to ensure clean state
     CALLABLE_REGISTRY.clear()
@@ -458,7 +458,7 @@ class TestMultipleBilateralNegotiations:
     @pytest.fixture
     def thread_store(self, temp_db):
         """Create a NegotiationThreadStore for multi-party tests."""
-        from app.policies.negotiation_thread import NegotiationThreadStore
+        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
         sqlite_client = SQLiteClient(db_path=temp_db)
         return NegotiationThreadStore(sqlite_client=sqlite_client)
 
