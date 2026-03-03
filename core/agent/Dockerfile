@@ -27,6 +27,9 @@ RUN uv sync --frozen
 ARG COMMIT_SHA=""
 ENV COMMIT_SHA=${COMMIT_SHA}
 
+ARG MODEL_VERSION=""
+ENV MODEL_VERSION=${MODEL_VERSION}
+
 EXPOSE 8080
 
 CMD ["uv", "run", "uvicorn", "core.agent.app.server:app", "--host", "0.0.0.0", "--port", "8080"]

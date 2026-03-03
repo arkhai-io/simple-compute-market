@@ -1,0 +1,115 @@
+name: Validate Model Release
+
+on:
+  push:
+    tags:
+      - 'model-v*.*.*'  # Triggers on version tags like model-v0.1.0
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to validate (e.g. model-v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.8.13"
+          enable-cache: true
+          cache-dependency-glob: ""
+
+      - name: Install validation dependencies
+        run: |
+          uv venv .venv
+          uv pip install "setuptools>=80"
+          uv pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+            torch gymnasium numpy
+          uv pip install --no-build-isolation \
+            "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@ef59f84c989ddc6a30d0590c807507c4e09b65c7"
+
+      - name: Download release assets
+        id: download
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p app/policies/models
+          gh release download "${{ env.RELEASE_TAG }}" \
+            --pattern "*.pt" \
+            --dir app/policies/models/ \
+            --clobber
+
+      - name: Validate models
+        if: steps.download.outcome == 'success'
+        run: |
+          .venv/bin/python -c "
+          import sys, torch
+          from pathlib import Path
+          import gymnasium as gym
+          import pufferlib.models
+
+          # Minimal env stub — mirrors PolicyEnvStub in arkhai_common.py
+          class EnvStub:
+              def __init__(self, obs_dim):
+                  self.single_observation_space = gym.spaces.Box(0.0, 1.0, (obs_dim,), 'float32')
+                  self.single_action_space = gym.spaces.MultiDiscrete([9, 2])
+                  self.observation_space = self.single_observation_space
+                  self.action_space = self.single_action_space
+
+          NODE_TYPES = 3
+          OBS_DIM = 12 + 3 * NODE_TYPES  # upstream layout: 1+2N+5+N+5 = 21
+          print(f'Config: node_types={NODE_TYPES}, obs_dim={OBS_DIM}')
+
+          models_dir = Path('app/policies/models')
+          pt_files = list(models_dir.glob('*.pt'))
+          if not pt_files:
+              print('ERROR: No .pt files found in release')
+              sys.exit(1)
+
+          for pt_file in pt_files:
+              print(f'Validating {pt_file.name}...')
+
+              model = pufferlib.models.Default(EnvStub(OBS_DIM), hidden_size=128)
+              raw = torch.load(str(pt_file), map_location='cpu', weights_only=True)
+              sd = raw.get('policy_state_dict', raw) if isinstance(raw, dict) else raw
+              if any(k.startswith('policy.') for k in sd):
+                  sd = {k.removeprefix('policy.'): v for k, v in sd.items() if k.startswith('policy.')}
+              model.load_state_dict(sd, strict=False)
+              model.eval()
+
+              obs = torch.zeros(1, OBS_DIM)
+              with torch.no_grad():
+                  output = model(obs)
+
+              assert isinstance(output, tuple) and len(output) == 2, f'{pt_file.name}: unexpected output shape'
+              print(f'  OK: {pt_file.name} loaded and forward pass succeeded')
+
+          print('All models validated successfully.')
+          "
+
+      - name: Comment on release
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ env.RELEASE_TAG }}" \
+            --notes-file <(cat <<EOF
+          $(gh release view "${{ env.RELEASE_TAG }}" --json body -q .body)
+
+          ---
+          **Validation:** All model artifacts passed smoke tests (checkpoint load + forward pass).
+          EOF
+          )

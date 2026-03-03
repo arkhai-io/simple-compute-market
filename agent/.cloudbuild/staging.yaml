@@ -13,6 +13,22 @@
 # limitations under the License.
 
 steps:
+  # Download trained model artifacts from GitHub Release
+  - name: "gcr.io/cloud-builders/git"
+    id: download-models
+    entrypoint: /bin/bash
+    args:
+      - "-c"
+      - |
+        apt-get update && apt-get install -y gh
+        mkdir -p agent/app/policies/models
+        gh release download "${_MODEL_VERSION}" \
+          --repo "${_GITHUB_REPO}" \
+          --pattern "*.pt" \
+          --dir agent/app/policies/models/ \
+          --clobber || echo "WARNING: Model download failed, continuing without models"
+    secretEnv: ['GITHUB_TOKEN']
+
   # Build and Push
   - name: "gcr.io/cloud-builders/docker"
     args:
@@ -129,6 +145,8 @@ steps:
 substitutions:
   _STAGING_PROJECT_ID: YOUR_STAGING_PROJECT_ID
   _REGION: asia-southeast1
+  _MODEL_VERSION: "latest"
+  _GITHUB_REPO: "arkhai-io/simple-market-service"
 
 logsBucket: gs://${PROJECT_ID}-a2a-agent-logs/build-logs
 options:

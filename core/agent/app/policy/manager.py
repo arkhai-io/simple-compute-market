@@ -52,6 +52,7 @@ class PolicyManager:
 
         # Auto-discover and bulk-register callable policies
         discover_and_register("core.agent.app.policy")
+        discover_and_register("app.policies")
         self._policy_store.register_callables(CALLABLE_REGISTRY)
         self._initialized = True
         logger.info(f"[POLICY MANAGER] Initialized and registered {len(CALLABLE_REGISTRY)} callable policies")

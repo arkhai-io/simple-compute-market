@@ -149,6 +149,17 @@ test-env:
 	uv --project .. run python scripts/extract_anvil_addresses.py --output app/data/alkahest_anvil_addresses.json
 	uv --project .. run python -m app.utils.test_env
 # ==============================================================================
+# GPU Installation (for training)
+# ==============================================================================
+
+# Install PyTorch with CUDA support for GPU training.
+# Default install uses CPU-only torch. Run this after `make install` for GPU.
+install-gpu:
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
+	uv --project .. sync --dev
+	uv pip install torch --reinstall-package torch --index-url https://download.pytorch.org/whl/cu128
+
+# ==============================================================================
 # Arkhai Training Environment Targets
 # ==============================================================================
 
@@ -171,8 +182,13 @@ train-arkhai:
 		--train.total-timesteps $$TOTAL_TIMESTEPS \
 		$$WANDB_FLAG $$TAG_FLAG $$ARGS
 
+# Patch pufferlib's eval loop to guard driver.render() with a render_mode check.
+# Re-run after every `uv sync`.
+patch-puffer-eval:
+	uv --project .. run python scripts/patch_puffer_eval.py
+
 # Evaluate Arkhai policy with upstream puffer CLI.
-# Usage: make eval-arkhai [MODEL=latest] [DEVICE=cpu] [ARGS="..."]
+# Usage: make eval-arkhai [MODEL=latest] [DEVICE=cpu] [ARGS="--render-mode None"]
 eval-arkhai:
 	@echo "Evaluating Arkhai model via puffer..."
 	@MODEL=$${MODEL:-latest}; \
@@ -181,13 +197,11 @@ eval-arkhai:
 	echo "Model: $$MODEL"; \
 	echo "Device: $$DEVICE"; \
 	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	$(MAKE) patch-puffer-eval; \
 	uv --project .. run puffer eval puffer_arkhai \
 		--load-model-path $$MODEL \
 		--train.device $$DEVICE \
 		$$ARGS
-
-# Backward-compatible alias for previous target name.
-eval-arkhai-seller: eval-arkhai
 
 # Export model weights in puffer's native format.
 # Usage: make export-arkhai-weights [MODEL=latest]
@@ -197,8 +211,120 @@ export-arkhai-weights:
 	echo "Model: $$MODEL"; \
 	uv --project .. run puffer export puffer_arkhai --load-model-path $$MODEL
 
-# Backward-compatible alias for previous target name.
-export-arkhai-model: export-arkhai-weights
+# ==============================================================================
+# Arkhai Buyer Training
+# ==============================================================================
+
+# Train Arkhai BUYER model. Buyer learns against 3 scripted sellers.
+# Usage: make train-arkhai-buyer [DEVICE=cpu] [TOTAL_TIMESTEPS=100000000] [WANDB=true] [TAG=exp_name]
+train-arkhai-buyer:
+	@echo "Training Arkhai BUYER model via puffer..."
+	@DEVICE=$${DEVICE:-cpu}; \
+	TOTAL_TIMESTEPS=$${TOTAL_TIMESTEPS:-100000000}; \
+	WANDB_FLAG=""; \
+	TAG_FLAG=""; \
+	ARGS="$${ARGS:-}"; \
+	if [ "$${WANDB:-false}" = "true" ]; then WANDB_FLAG="--wandb"; fi; \
+	if [ -n "$${TAG:-}" ]; then TAG_FLAG="--tag $${TAG}"; fi; \
+	echo "Device: $$DEVICE"; \
+	echo "Total timesteps: $$TOTAL_TIMESTEPS"; \
+	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	uv --project .. run puffer train puffer_arkhai \
+		--train.device $$DEVICE \
+		--train.total-timesteps $$TOTAL_TIMESTEPS \
+		--env.ai-sellers 0 \
+		--env.ai-buyers 1 \
+		--env.scripted-sellers 3 \
+		--env.scripted-buyers 0 \
+		$$WANDB_FLAG $$TAG_FLAG $$ARGS
+
+# Evaluate Arkhai BUYER policy.
+eval-arkhai-buyer:
+	@echo "Evaluating Arkhai BUYER model via puffer..."
+	@MODEL=$${MODEL:-latest}; \
+	DEVICE=$${DEVICE:-cpu}; \
+	ARGS="$${ARGS:-}"; \
+	echo "Model: $$MODEL"; \
+	echo "Device: $$DEVICE"; \
+	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	$(MAKE) patch-puffer-eval; \
+	uv --project .. run puffer eval puffer_arkhai \
+		--load-model-path $$MODEL \
+		--train.device $$DEVICE \
+		--env.ai-sellers 0 \
+		--env.ai-buyers 1 \
+		--env.scripted-sellers 3 \
+		--env.scripted-buyers 0 \
+		$$ARGS
+
+# ==============================================================================
+# Arkhai Bilateral Training (Experimental)
+# ==============================================================================
+
+# Train both AI seller and AI buyer simultaneously.
+train-arkhai-bilateral:
+	@echo "Training Arkhai BILATERAL model via puffer (experimental)..."
+	@DEVICE=$${DEVICE:-cpu}; \
+	TOTAL_TIMESTEPS=$${TOTAL_TIMESTEPS:-100000000}; \
+	WANDB_FLAG=""; \
+	TAG_FLAG=""; \
+	ARGS="$${ARGS:-}"; \
+	if [ "$${WANDB:-false}" = "true" ]; then WANDB_FLAG="--wandb"; fi; \
+	if [ -n "$${TAG:-}" ]; then TAG_FLAG="--tag $${TAG}"; fi; \
+	echo "Device: $$DEVICE"; \
+	echo "Total timesteps: $$TOTAL_TIMESTEPS"; \
+	[ -n "$$ARGS" ] && echo "Extra args: $$ARGS" || true; \
+	uv --project .. run puffer train puffer_arkhai \
+		--train.device $$DEVICE \
+		--train.total-timesteps $$TOTAL_TIMESTEPS \
+		--env.ai-sellers 1 \
+		--env.ai-buyers 1 \
+		--env.scripted-sellers 0 \
+		--env.scripted-buyers 0 \
+		$$WANDB_FLAG $$TAG_FLAG $$ARGS
+
+# ==============================================================================
+# Model Release & Download
+# ==============================================================================
+
+REPO ?= arkhai-io/simple-market-service
+
+# Download trained models from a GitHub release.
+# Usage: make download-models [VERSION=model-v0.1.0]
+download-models:
+	@VERSION=$${VERSION:-latest}; \
+	echo "Downloading models (version: $$VERSION)..."; \
+	bash scripts/download_models.sh $$VERSION
+
+# Create a GitHub release with trained model artifacts.
+# Usage: make release-models VERSION=model-v0.1.0 [MODELS_DIR=path/to/models]
+MODELS_DIR ?= ../../agent/app/policies/models
+release-models:
+	@if [ -z "$${VERSION:-}" ]; then echo "ERROR: VERSION is required. Usage: make release-models VERSION=model-v0.1.0"; exit 1; fi; \
+	MODELS_DIR="$(MODELS_DIR)"; \
+	ASSETS=""; \
+	if [ -f "$$MODELS_DIR/arkhai_seller.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_seller.pt"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_buyer.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_buyer.pt"; fi; \
+	if [ -z "$$ASSETS" ]; then echo "ERROR: No .pt model files found in $$MODELS_DIR"; exit 1; fi; \
+	echo "Creating release $$VERSION with:$$ASSETS"; \
+	git tag "$$VERSION" || true; \
+	git push origin "$$VERSION" || true; \
+	NOTES="Model Release $$VERSION"; \
+	NOTES="$$NOTES\n\nPufferLib commit: ef59f84c"; \
+	NOTES="$$NOTES\nEnvironment: puffer_arkhai (node_types=3, episode_length=100)"; \
+	NOTES="$$NOTES\n\nArtifacts:"; \
+	if [ -f "$$MODELS_DIR/arkhai_seller.pt" ]; then NOTES="$$NOTES\n- arkhai_seller.pt: Single-agent seller (1 AI seller vs 3 scripted buyers)"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_buyer.pt" ]; then NOTES="$$NOTES\n- arkhai_buyer.pt: Single-agent buyer (1 AI buyer vs 3 scripted sellers)"; fi; \
+	gh release create "$$VERSION" \
+		--repo $(REPO) \
+		--title "Model Release $$VERSION" \
+		--notes "$$(printf "$$NOTES")" \
+		$$ASSETS; \
+	echo "Release $$VERSION created successfully."
+
+# ==============================================================================
+# Test Arkhai environment integration
+# ==============================================================================
 
 # Test Arkhai environment integration
 # Usage: make test-arkhai-env

@@ -91,6 +91,8 @@ class ComputePolicySeeder:
                 policy_name="make_offer.default.v1",
                 components=[
                     "mo.guard.trigger_is_make_offer",
+                    "mo.action.torch_arkhai_seller",
+                    "mo.action.torch_arkhai_buyer",
                     "mo.action.accept_offer",
                 ],
             )
