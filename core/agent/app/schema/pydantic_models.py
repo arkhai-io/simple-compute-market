@@ -123,6 +123,10 @@ class ComputeResource(ComputeDomainResource):
     Not all resources in the resource portfolio are on sale
     """
 
+    resource_id: str | None = Field(
+        default=None,
+        description="Canonical DB resource identifier for this compute resource",
+    )
     gpu_model: GPUModel = Field(
         description="The model of the GPU (H200, Tesla V100, RTX 5080)"
     )

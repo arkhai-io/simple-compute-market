@@ -433,6 +433,117 @@ class SQLiteClient:
             occurred_at=occurred_at,
         )
 
+    # TODO(refactor): Move compute-specific VM reservation logic to the Compute domain
+    # as part of the resource portfolio refactor.
+    async def reserve_available_compute_vm(
+        self,
+        *,
+        required_attributes: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve one available compute resource.
+
+        Args:
+            required_attributes: Optional exact-match filters (for example:
+                {"region": "California, US", "gpu_model": "H200"}).
+                Keys are checked first in resource attributes, then in top-level
+                resource fields (resource_type/resource_subtype/unit/state/value).
+        """
+        def _reserve() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_subtype, unit, state, value, attributes
+                    FROM resources
+                    WHERE resource_type = 'compute.gpu'
+                      AND state = 'available'
+                    ORDER BY updated_at ASC
+                    """
+                )
+                rows = cur.fetchall()
+                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                    attrs: dict[str, Any]
+                    try:
+                        attrs = json.loads(attributes_raw) if isinstance(attributes_raw, str) else {}
+                    except Exception:
+                        attrs = {}
+
+                    if required_attributes:
+                        top_level = {
+                            "resource_type": "compute.gpu",
+                            "resource_subtype": resource_subtype,
+                            "unit": unit,
+                            "state": state,
+                            "value": value,
+                        }
+                        is_match = True
+                        for key, expected in required_attributes.items():
+                            actual = attrs.get(key, top_level.get(key))
+                            if actual != expected:
+                                is_match = False
+                                break
+                        if not is_match:
+                            continue
+
+                    vm_host = attrs.get("vm_host")
+                    if not isinstance(vm_host, str) or not vm_host.strip():
+                        continue
+
+                    now_iso = datetime.now().isoformat()
+                    cur.execute(
+                        """
+                        UPDATE resources
+                        SET state = 'reserved',
+                            updated_at = ?
+                        WHERE resource_id = ?
+                          AND state = 'available'
+                        """,
+                        (now_iso, resource_id),
+                    )
+                    if cur.rowcount != 1:
+                        continue
+
+                    cur.execute(
+                        """
+                        INSERT INTO resource_transition_events(
+                          event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            resource_id,
+                            "reserve_for_provisioning",
+                            value,
+                            "reserved",
+                            None,
+                            f"reserve:{resource_id}:{uuid.uuid4()}",
+                            now_iso,
+                        ),
+                    )
+                    conn.commit()
+                    return {
+                        "resource_id": resource_id,
+                        "vm_host": vm_host,
+                        "resource_subtype": resource_subtype,
+                        "unit": unit,
+                        "state": "reserved",
+                        "value": value,
+                        "attributes": attrs,
+                    }
+
+                conn.rollback()
+                return None
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_reserve)
+
     async def find_symmetric_open_order(
         self,
         *,

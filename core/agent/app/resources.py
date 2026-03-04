@@ -54,6 +54,7 @@ class ComputeGpuResourceAdapter:
             )
 
         return ComputeResource(
+            resource_id=str(db_resource.get("resource_id")) if db_resource.get("resource_id") is not None else None,
             gpu_model=gpu_model,
             quantity=int(quantity),
             sla=float(sla),
