@@ -663,7 +663,12 @@ def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
     logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
 
 
-async def provision_machine(ssh_public_key: str) -> str:
+async def provision_machine(
+    ssh_public_key: str,
+    *,
+    vm_host: str = "vm1",
+    vm_target: str = "tenant-vm",
+) -> str:
     """Provision a machine using the provided SSH public key.
 
     Args:
@@ -674,7 +679,11 @@ async def provision_machine(ssh_public_key: str) -> str:
     """
     logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
     try:
-        connection_info = run_vm_provisioning_playbook(ssh_public_key)
+        connection_info = run_vm_provisioning_playbook(
+            ssh_public_key,
+            vm_host=vm_host,
+            vm_target=vm_target,
+        )
         if connection_info:
             logger.info(f"[TOOL] Machine provisioned: {connection_info}")
             return connection_info
@@ -1649,28 +1658,19 @@ async def fulfill_compute_obligation(
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     oracle_address = _resolve_oracle_address(oracle_address)
-    try:
-        if CONFIG.use_mock_provisioning:
-            connection_details = await mock_provision_machine(ssh_public_key)
-        else:
-            connection_details = await provision_machine(ssh_public_key)
-    except Exception as error:
-        logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
-        return {
-            "status": "error",
-            "message": f"Provisioning failed: {error}",
-            "escrow_uid": escrow_uid,
-            "connection_details": None,
-            "ssh_public_key": ssh_public_key,
-        }
     fulfillment_uid = None
     maker_attestation = None
     duration_hours = 1
+    connection_details: str | None = None
+    reserved_resource_id: str | None = None
+    reserved_vm_host: str | None = None
+    vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
 
     logger.info(f"[ALKAHEST] Order for fulfillment: {order}")
     order_dict = None
     order_id = None
     order_bytes = b""
+    required_attributes: dict[str, Any] = {}
 
     if order:
         if isinstance(order, str):
@@ -1686,6 +1686,10 @@ async def fulfill_compute_obligation(
         order_id = order_dict.get("order_id")
         duration_hours = order_dict.get("duration_hours", 1)
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        if isinstance(compute_resource, dict):
+            for key in ("region", "gpu_model"):
+                if compute_resource.get(key) is not None:
+                    required_attributes[key] = compute_resource.get(key)
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
@@ -1702,11 +1706,74 @@ async def fulfill_compute_obligation(
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
 
+    try:
+        sqlite_client = get_sqlite_client()
+        reserved = await sqlite_client.reserve_available_compute_vm(
+            required_attributes=required_attributes or None
+        )
+        if not reserved:
+            raise RuntimeError("No available compute VM matched required attributes")
+        reserved_resource_id = str(reserved.get("resource_id"))
+        reserved_vm_host = reserved.get("vm_host")
+        if not reserved_vm_host:
+            raise RuntimeError("Reserved resource missing vm_host")
+
+        if CONFIG.use_mock_provisioning:
+            connection_details = await mock_provision_machine(ssh_public_key)
+        else:
+            connection_details = await provision_machine(
+                ssh_public_key,
+                vm_host=reserved_vm_host,
+                vm_target=vm_target,
+            )
+    except Exception as error:
+        if reserved_resource_id:
+            try:
+                await get_sqlite_client().apply_resource_set_transition(
+                    resource_id=reserved_resource_id,
+                    event_type="reservation_released_after_provisioning_failure",
+                    idempotency_key=f"release:{escrow_uid}:{reserved_resource_id}",
+                    set_state="available",
+                )
+            except Exception as release_err:
+                logger.warning(
+                    "[LOCAL DB] Failed to release reserved resource %s after provisioning failure: %s",
+                    reserved_resource_id,
+                    release_err,
+                )
+        logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
+        return {
+            "status": "error",
+            "message": f"Provisioning failed: {error}",
+            "escrow_uid": escrow_uid,
+            "connection_details": None,
+            "ssh_public_key": ssh_public_key,
+        }
+
+    if reserved_resource_id:
+        try:
+            await get_sqlite_client().apply_resource_set_transition(
+                resource_id=reserved_resource_id,
+                event_type="lease_started_after_provisioning",
+                idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
+                set_state="leased",
+            )
+        except Exception as lease_err:
+            logger.warning(
+                "[LOCAL DB] Failed to mark resource %s as leased after provisioning: %s",
+                reserved_resource_id,
+                lease_err,
+            )
+
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     if CONFIG.use_mock_provisioning:
         mock_schedule_vm_shutdown(lease_end_utc)
     else:
-        schedule_vm_shutdown(lease_end_utc)
+        schedule_vm_shutdown(
+            lease_end_utc,
+            vm_host=reserved_vm_host or "vm1",
+            vm_target=vm_target,
+        )
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
