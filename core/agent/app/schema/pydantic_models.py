@@ -131,6 +131,10 @@ class ComputeResource(ComputeDomainResource):
     region: Region = Field(
         description="The region of the GPU (California, US, Tokyo, JP, etc.)"
     )
+    vm_host: str | None = Field(
+        default=None,
+        description="Provisioning host identifier for VM placement (e.g., vm1)",
+    )
 
 
 class ComputeResourcePortfolio(BaseModel):

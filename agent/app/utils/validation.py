@@ -3,7 +3,7 @@
 from typing import Any
 
 from core.agent.app.utils.validation import validate_model
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
     ComputeResource,

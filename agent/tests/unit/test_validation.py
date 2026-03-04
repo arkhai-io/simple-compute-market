@@ -7,7 +7,7 @@ import os
 # Set a valid agent_id before importing agent module to avoid validation errors
 os.environ['AGENT_ID'] = 'test_agent'
 
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
     ComputeResource,
@@ -27,7 +27,7 @@ from app.utils.validation import (
     extract_token_resource,
     extract_resources_from_make_offer_event,
 )
-from app.schema.pydantic_models import DecisionContext
+from core.agent.app.schema.pydantic_models import DecisionContext
 
 USDT_METADATA = ERC20TokenMetadata(
     symbol="USDT",

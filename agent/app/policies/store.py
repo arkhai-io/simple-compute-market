@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from core.agent.app.policy.store import PolicyStore
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
     AcceptOfferEvent,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 def simple_negotiation_random(context: DecisionContext) -> DomainAction | None:
     """50/50 accept/reject for negotiation offers."""
     import random
-    from app.schema.pydantic_models import ActionType
+    from core.agent.app.schema.pydantic_models import ActionType
 
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
@@ -55,7 +55,7 @@ def simple_negotiation_random(context: DecisionContext) -> DomainAction | None:
 @policy_callable("simple_negotiation_callable")
 def simple_negotiation_callable(context: DecisionContext) -> DomainAction | None:
     """Accept offer if GPU threshold is met, otherwise reject."""
-    from app.schema.pydantic_models import ActionType
+    from core.agent.app.schema.pydantic_models import ActionType
 
     et = context.event.event_type
     trigger = et.value if hasattr(et, "value") else str(et)
@@ -95,7 +95,7 @@ def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("oc.action.make_offer_from_order_create")
 def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAction | None:
-    from app.schema.pydantic_models import ActionType, OrderCreateEvent
+    from core.agent.app.schema.pydantic_models import ActionType, OrderCreateEvent
 
     if not isinstance(context.event, OrderCreateEvent):
         return None
@@ -118,7 +118,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
 
 @policy_callable("oc.action.close_order")
 def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
-    from app.schema.pydantic_models import ActionType, OrderCloseEvent
+    from core.agent.app.schema.pydantic_models import ActionType, OrderCloseEvent
 
     if not isinstance(context.event, OrderCloseEvent):
         return None
@@ -132,7 +132,7 @@ def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("ri.action.make_offer_from_resource")
 def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
-    from app.schema.pydantic_models import ActionType
+    from core.agent.app.schema.pydantic_models import ActionType
 
     res = getattr(context.event, "resource", None)
     if not res:
@@ -490,7 +490,7 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     - If demand is a TokenResource: accepts the offer (simulated assumption: we have enough tokens).
     Includes resource details in action parameters.
     """
-    from app.schema.pydantic_models import ActionType
+    from core.agent.app.schema.pydantic_models import ActionType
     
     # Only process MakeOfferEvent
     if not isinstance(context.event, MakeOfferEvent):

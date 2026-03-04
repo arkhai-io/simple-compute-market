@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action,
     ActionType,
     ComputeResource,

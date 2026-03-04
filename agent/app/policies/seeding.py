@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from core.agent.app.policy.store import PolicyStore
-from app.schema.pydantic_models import EventType
+from core.agent.app.schema.pydantic_models import EventType
 from core.agent.app.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)

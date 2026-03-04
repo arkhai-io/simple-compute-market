@@ -22,7 +22,7 @@ from app.policies.arkhai_common import (
     torch,
 )
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,

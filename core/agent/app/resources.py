@@ -46,6 +46,7 @@ class ComputeGpuResourceAdapter:
             quantity = attrs.get("quantity", 0)
         sla = attrs.get("sla")
         region = attrs.get("region")
+        vm_host = attrs.get("vm_host")
 
         if gpu_model is None or sla is None or region is None:
             raise ValueError(
@@ -57,6 +58,7 @@ class ComputeGpuResourceAdapter:
             quantity=int(quantity),
             sla=float(sla),
             region=region,
+            vm_host=str(vm_host) if vm_host is not None else None,
         )
 
     def from_domain_resource(
@@ -77,6 +79,7 @@ class ComputeGpuResourceAdapter:
                 "gpu_model": resource.gpu_model.value,
                 "sla": resource.sla,
                 "region": resource.region.value,
+                "vm_host": resource.vm_host,
             },
         }
 

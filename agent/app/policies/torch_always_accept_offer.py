@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     DecisionContext,

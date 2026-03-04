@@ -6,7 +6,7 @@ with our_initial_price and our_strategy.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     DecisionContext,
     MakeOfferEvent,
     MarketOrder,
@@ -473,7 +473,7 @@ class TestRespondToMakeOffer:
     @pytest.mark.asyncio
     async def test_non_make_offer_event_returns_none(self, policy_store):
         """Policy returns None for non-make_offer events."""
-        from app.schema.pydantic_models import NegotiationEvent
+        from core.agent.app.schema.pydantic_models import NegotiationEvent
 
         event = NegotiationEvent.create(
             event_id="evt_negotiation",
