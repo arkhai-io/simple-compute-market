@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -158,6 +159,54 @@ class SQLiteClient:
                 )
                 """
             )
+            # Resources table (local source of truth across all resource types)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resources (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  resource_id TEXT NOT NULL UNIQUE,
+                  resource_type TEXT NOT NULL,
+                  resource_subtype TEXT,
+                  unit TEXT,
+                  value NUMERIC,
+                  state TEXT,
+                  attributes TEXT,
+                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+                """
+            )
+            # Keep resources.updated_at fresh whenever rows are updated.
+            cur.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_resources_updated_at
+                AFTER UPDATE ON resources
+                FOR EACH ROW
+                WHEN NEW.updated_at = OLD.updated_at
+                BEGIN
+                  UPDATE resources
+                  SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                  WHERE pk = NEW.pk;
+                END
+                """
+            )
+            # Resource transition events (append-only, idempotent)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resource_transition_events (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  event_id TEXT NOT NULL UNIQUE,
+                  resource_id TEXT NOT NULL,
+                  event_type TEXT NOT NULL,
+                  set_value NUMERIC,
+                  set_state TEXT,
+                  set_attribute_json TEXT,
+                  idempotency_key TEXT NOT NULL UNIQUE,
+                  occurred_at TIMESTAMPTZ NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  FOREIGN KEY(resource_id) REFERENCES resources(resource_id)
+                )
+                """
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -202,6 +251,24 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_type_subtype ON resources(resource_type, resource_subtype)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_state ON resources(state)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_updated_at ON resources(updated_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_resource_time ON resource_transition_events(resource_id, occurred_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_type_time ON resource_transition_events(event_type, occurred_at)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -238,6 +305,133 @@ class SQLiteClient:
             return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
         except Exception:
             return False
+
+    async def apply_resource_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert one transition event and apply one resource snapshot update.
+
+        Supports direct-set semantics only: set_value, set_state, set_attribute.
+        """
+        if set_value is None and set_state is None and not set_attribute:
+            raise ValueError("Transition must include set_value, set_state, or set_attribute")
+
+        resolved_event_id = event_id or str(uuid.uuid4())
+        set_attribute_json = json.dumps(set_attribute) if set_attribute else None
+
+        def _apply() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO resource_transition_events(
+                      event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')))
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        resolved_event_id,
+                        resource_id,
+                        event_type,
+                        set_value,
+                        set_state,
+                        set_attribute_json,
+                        idempotency_key,
+                        occurred_at,
+                    ),
+                )
+
+                # Duplicate command retry: already applied.
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return {
+                        "applied": False,
+                        "duplicate": True,
+                        "resource_id": resource_id,
+                        "event_id": resolved_event_id,
+                        "idempotency_key": idempotency_key,
+                    }
+
+                updates: list[str] = []
+                values: list[Any] = []
+
+                if set_value is not None:
+                    updates.append("value = ?")
+                    values.append(set_value)
+
+                if set_state is not None:
+                    updates.append("state = ?")
+                    values.append(set_state)
+
+                if set_attribute:
+                    attr_expr = "COALESCE(attributes, '{}')"
+                    for path, path_value in set_attribute.items():
+                        if not isinstance(path, str) or not path.startswith("$."):
+                            raise ValueError(f"Invalid JSON path for set_attribute: {path}")
+                        attr_expr = f"json_set({attr_expr}, ?, json(?))"
+                        values.append(path)
+                        values.append(json.dumps(path_value))
+                    updates.append(f"attributes = {attr_expr}")
+
+                updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
+
+                cur.execute(
+                    f"UPDATE resources SET {', '.join(updates)} WHERE resource_id = ?",
+                    (*values, resource_id),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError(f"Resource not found: {resource_id}")
+
+                conn.commit()
+                return {
+                    "applied": True,
+                    "duplicate": False,
+                    "resource_id": resource_id,
+                    "event_id": resolved_event_id,
+                    "idempotency_key": idempotency_key,
+                }
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_apply)
+
+    async def apply_resource_set_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Convenience wrapper for absolute-value transitions."""
+        return await self.apply_resource_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key,
+            set_value=set_value,
+            set_state=set_state,
+            set_attribute=set_attribute,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
 
     async def find_symmetric_open_order(
         self,
