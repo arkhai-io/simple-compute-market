@@ -71,10 +71,7 @@ from core.agent.app.schema.pydantic_models import (
     ResourceImbalanceEvent,
     ResourceAlertRequest,
     NegotiationEvent,
-    GPUModel,
-    Region,
     ComputeResource,
-    ComputeResourcePortfolio,
     TokenResource,
     ComputeDomainResource,
     OrderCreateEvent,
@@ -491,24 +488,6 @@ class TraderAgent(BaseAgent):
                     zerotier_network,
                 )
 
-        # In-memory stand-in for compute nodes under the Agent's control.
-        self.resource_portfolio =  ComputeResourcePortfolio(
-            resources=[
-                ComputeResource(
-                    gpu_model=GPUModel.H200,
-                    quantity=3,
-                    sla=90.0,
-                    region=Region.CALIFORNIA_US,
-                ),
-                ComputeResource(
-                    gpu_model=GPUModel.TESLA_V100,
-                    quantity=2,
-                    sla=99.9,
-                    region=Region.TOKYO_JP,
-                ),
-            ]
-        )
-        
         # Initialize SQLite client (shared for policies and decisions)
         self._sqlite_client = SQLiteClient(db_path=AGENT_DB_PATH)
         
@@ -570,7 +549,8 @@ class TraderAgent(BaseAgent):
         Returns:
             A dictionary representing the current portfolio stock.
         """
-        return self.resource_portfolio.model_dump()
+        resources = await self._sqlite_client.list_resources()
+        return {"resources": resources}
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
         """Build domain context from ADK Event, converting to DomainEvent.
@@ -581,8 +561,6 @@ class TraderAgent(BaseAgent):
         if isinstance(event, DomainEvent):
             domain_event = event
         else:
-            resource_portfolio = await self.get_resource_portfolio()
-            
             # Extract domain event payload
             # A2A messages come in as text
             content = _extract_content_payload(event.content)
