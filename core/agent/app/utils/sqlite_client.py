@@ -306,6 +306,162 @@ class SQLiteClient:
         except Exception:
             return False
 
+    async def upsert_resource(
+        self,
+        *,
+        resource_id: str,
+        resource_type: str,
+        resource_subtype: str | None = None,
+        unit: str | None = None,
+        value: int | float | None = None,
+        state: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        """Create or update a generic resource snapshot row."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                now_iso = datetime.now().isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(resource_id) DO UPDATE SET
+                      resource_type=excluded.resource_type,
+                      resource_subtype=excluded.resource_subtype,
+                      unit=excluded.unit,
+                      value=excluded.value,
+                      state=excluded.state,
+                      attributes=excluded.attributes,
+                      updated_at=excluded.updated_at
+                    """,
+                    (
+                        resource_id,
+                        resource_type,
+                        resource_subtype,
+                        unit,
+                        value,
+                        state,
+                        json.dumps(attributes) if attributes is not None else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def list_resources(
+        self,
+        *,
+        resource_type: str | None = None,
+        state: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List resource rows from local DB as generic DB-resource dicts."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                clauses: list[str] = []
+                params: list[Any] = []
+                if resource_type is not None:
+                    clauses.append("resource_type = ?")
+                    params.append(resource_type)
+                if state is not None:
+                    clauses.append("state = ?")
+                    params.append(state)
+                where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(
+                    f"""
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    {where_clause}
+                    ORDER BY updated_at DESC
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+                result: list[dict[str, Any]] = []
+                for (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) in rows:
+                    attrs: dict[str, Any] = {}
+                    if isinstance(row_attributes, str) and row_attributes.strip():
+                        try:
+                            parsed = json.loads(row_attributes)
+                            if isinstance(parsed, dict):
+                                attrs = parsed
+                        except Exception:
+                            attrs = {}
+                    result.append(
+                        {
+                            "resource_id": row_resource_id,
+                            "resource_type": row_resource_type,
+                            "resource_subtype": row_resource_subtype,
+                            "unit": row_unit,
+                            "value": row_value,
+                            "state": row_state,
+                            "attributes": attrs,
+                            "created_at": row_created_at,
+                            "updated_at": row_updated_at,
+                        }
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
+        """Seed default resources only when the resources table is empty."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM resources")
+            count = int(cur.fetchone()[0] or 0)
+            if count > 0:
+                return
+
+            now_iso = datetime.now().isoformat()
+            for resource in resources:
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        resource.get("resource_id"),
+                        resource.get("resource_type"),
+                        resource.get("resource_subtype"),
+                        resource.get("unit"),
+                        resource.get("value"),
+                        resource.get("state"),
+                        json.dumps(resource.get("attributes"))
+                        if isinstance(resource.get("attributes"), dict)
+                        else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     async def apply_resource_transition(
         self,
         *,
