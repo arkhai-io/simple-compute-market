@@ -33,7 +33,10 @@ except ModuleNotFoundError:
     )
 
 
-ERC20TokenMetadata = CoreERC20TokenMetadata
+try:
+    from service.clients.token import ERC20TokenMetadata
+except ImportError:
+    ERC20TokenMetadata = CoreERC20TokenMetadata  # type: ignore[assignment]
 
 
 class GPUModel(str, Enum):
