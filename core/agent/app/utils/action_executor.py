@@ -45,7 +45,11 @@ from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import get_trusted_oracle_arbiter
 from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
-from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
+from service.clients.provisioning import provision_machine_async, ProvisioningError
+from service.clients.mock_provisioning import provision_machine_async as mock_provision_machine_async
+from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
+from service.clients.ansible_provisioning import provision_machine_async as ansible_provision_machine_async
+from service.clients.ansible_provisioning import schedule_vm_shutdown_async as ansible_schedule_vm_shutdown_async
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
@@ -681,50 +685,61 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-async def mock_provision_machine(ssh_public_key: str) -> str:
-    """Mock stand-in for provisioning a machine.
-
-    Return:
-        String with connection details.
-    """
-    logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
-    return "ssh -i <your_private_key> -p 7021 demo-user@node-01.example.net | password: demo-password"
-
-
-def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
-    """Mock stand-in for scheduling VM shutdown."""
-    logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
+def _get_provision_fn():
+    mode = CONFIG.provisioning_mode
+    if mode == "mock":
+        return mock_provision_machine_async
+    if mode == "ansible":
+        return ansible_provision_machine_async
+    return provision_machine_async
 
 
-async def provision_machine(
-    ssh_public_key: str,
-    *,
-    vm_host: str = "vm1",
-    vm_target: str = "tenant-vm",
-) -> str:
-    """Provision a machine using the provided SSH public key.
+def _get_shutdown_fn():
+    mode = CONFIG.provisioning_mode
+    if mode == "mock":
+        return mock_schedule_vm_shutdown_async
+    if mode == "ansible":
+        return ansible_schedule_vm_shutdown_async
+    return None  # http mode uses provision_machine_async with vm_action=lease_end
 
-    Args:
-        ssh_public_key: SSH public key to install on the provisioned machine.
 
-    Returns:
-        String with connection details.
-    """
-    logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
-    try:
-        connection_info = run_vm_provisioning_playbook(
-            ssh_public_key,
-            vm_host=vm_host,
-            vm_target=vm_target,
+async def _do_provision(ssh_public_key: str) -> dict:
+    """Dispatch to the configured provisioning client."""
+    params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": "ww1", "vm_target": "tenant-vm"}
+    if CONFIG.frp_server_addr:
+        params["frp_server_addr"] = CONFIG.frp_server_addr
+    if CONFIG.frp_domain:
+        params["frp_domain"] = CONFIG.frp_domain
+    if CONFIG.frp_dashboard_password:
+        params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+    return await _get_provision_fn()(
+        CONFIG.provisioning_service_url,
+        params,
+        timeout=CONFIG.provisioning_timeout,
+        poll_interval=CONFIG.provisioning_poll_interval,
+        agent_id=CONFIG.onchain_agent_id,
+    )
+
+
+async def _do_shutdown(lease_end_utc: str) -> dict:
+    """Dispatch VM shutdown to the configured provisioning client."""
+    shutdown_fn = _get_shutdown_fn()
+    if shutdown_fn is not None:
+        return await shutdown_fn(
+            CONFIG.provisioning_service_url,
+            lease_end_utc,
+            timeout=CONFIG.provisioning_timeout,
+            poll_interval=CONFIG.provisioning_poll_interval,
+            agent_id=CONFIG.onchain_agent_id,
         )
-        if connection_info:
-            logger.info(f"[TOOL] Machine provisioned: {connection_info}")
-            return connection_info
-        logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
-    except Exception as exc:
-        logger.error("[TOOL] Provisioning failed: %s", exc)
-        raise RuntimeError(f"Provisioning failed: {exc}") from exc
+    # http mode: reuse provision_machine_async with lease_end action
+    return await provision_machine_async(
+        CONFIG.provisioning_service_url,
+        {"vm_action": "lease_end", "vm_lease_end": lease_end_utc, "vm_host": "ww1", "vm_target": "tenant-vm"},
+        timeout=300,
+        poll_interval=5,
+        agent_id=CONFIG.onchain_agent_id,
+    )
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""
@@ -1762,14 +1777,7 @@ async def fulfill_compute_obligation(
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
 
-        if CONFIG.use_mock_provisioning:
-            connection_details = await mock_provision_machine(ssh_public_key)
-        else:
-            connection_details = await provision_machine(
-                ssh_public_key,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-            )
+        connection_details = await _do_provision(ssh_public_key)
     except Exception as error:
         if reserved_resource_id:
             try:
@@ -1810,14 +1818,7 @@ async def fulfill_compute_obligation(
             )
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
-    if CONFIG.use_mock_provisioning:
-        mock_schedule_vm_shutdown(lease_end_utc)
-    else:
-        schedule_vm_shutdown(
-            lease_end_utc,
-            vm_host=reserved_vm_host or "vm1",
-            vm_target=vm_target,
-        )
+    await _do_shutdown(lease_end_utc)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid

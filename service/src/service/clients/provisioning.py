@@ -1,0 +1,152 @@
+"""HTTP client for the async-provisioning-service (port 8085)."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+
+class ProvisioningError(Exception):
+    """Base class for provisioning errors."""
+
+
+class ProvisioningJobError(ProvisioningError):
+    """Raised when a provisioning job terminates in a failed state."""
+
+
+class ProvisioningTimeoutError(ProvisioningError):
+    """Raised when polling a provisioning job exceeds the timeout."""
+
+
+async def _submit_job(
+    session: aiohttp.ClientSession,
+    service_url: str,
+    params: dict[str, Any],
+    agent_id: str | None,
+) -> str:
+    """POST /api/v1/jobs and return the job_id."""
+    headers = {}
+    if agent_id:
+        headers["X-Agent-ID"] = agent_id
+    url = f"{service_url.rstrip('/')}/api/v1/jobs"
+    async with session.post(url, json=params, headers=headers) as resp:
+        resp.raise_for_status()
+        data = await resp.json()
+        job_id = data.get("job_id") or data.get("id")
+        if not job_id:
+            raise ProvisioningError(f"No job_id in response: {data}")
+        return str(job_id)
+
+
+async def _poll_job(
+    session: aiohttp.ClientSession,
+    service_url: str,
+    job_id: str,
+    *,
+    timeout: int,
+    poll_interval: int,
+    agent_id: str | None,
+) -> dict[str, Any]:
+    """Poll GET /api/v1/jobs/{job_id} until terminal state. Returns result dict."""
+    headers = {}
+    if agent_id:
+        headers["X-Agent-ID"] = agent_id
+    url = f"{service_url.rstrip('/')}/api/v1/jobs/{job_id}"
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        async with session.get(url, headers=headers) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+        status = data.get("status", "")
+        if status == "succeeded":
+            return data.get("result") or data
+        if status == "failed":
+            reason = data.get("error") or data.get("message") or "unknown"
+            raise ProvisioningJobError(f"Job {job_id} failed: {reason}")
+        # queued / running — keep polling
+        if asyncio.get_event_loop().time() >= deadline:
+            raise ProvisioningTimeoutError(
+                f"Job {job_id} did not complete within {timeout}s (status={status})"
+            )
+        await asyncio.sleep(poll_interval)
+
+
+async def provision_machine_async(
+    provisioning_service_url: str,
+    params: dict[str, Any],
+    *,
+    timeout: int = 3600,
+    poll_interval: int = 15,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """POST /api/v1/jobs and poll until succeeded.
+
+    Returns connection details dict with: ssh_command, ssh_port, tenant_user, vm_host_ip.
+    Raises ProvisioningJobError on terminal failure, ProvisioningTimeoutError on timeout.
+    """
+    async with aiohttp.ClientSession() as session:
+        job_id = await _submit_job(session, provisioning_service_url, params, agent_id)
+        logger.info("[PROVISIONING] Submitted job %s to %s", job_id, provisioning_service_url)
+        result = await _poll_job(
+            session,
+            provisioning_service_url,
+            job_id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            agent_id=agent_id,
+        )
+    logger.info("[PROVISIONING] Job %s completed successfully", job_id)
+    return result
+
+
+async def schedule_vm_shutdown_async(
+    provisioning_service_url: str,
+    lease_end_utc: str,
+    vm_host: str = "ww1",
+    vm_target: str = "tenant-vm",
+    *,
+    timeout: int = 300,
+    poll_interval: int = 5,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """POST /api/v1/jobs with vm_action=lease_end and poll until succeeded."""
+    params = {
+        "vm_host": vm_host,
+        "vm_target": vm_target,
+        "vm_action": "lease_end",
+        "vm_lease_end": lease_end_utc,
+    }
+    return await provision_machine_async(
+        provisioning_service_url,
+        params,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        agent_id=agent_id,
+    )
+
+
+async def get_vm_available_resources(
+    provisioning_service_url: str,
+    vm_host: str = "ww1",
+    *,
+    timeout: int = 120,
+    poll_interval: int = 5,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """POST /api/v1/jobs with vm_action=check and poll for inventory result."""
+    params = {
+        "vm_host": vm_host,
+        "vm_action": "check",
+    }
+    return await provision_machine_async(
+        provisioning_service_url,
+        params,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        agent_id=agent_id,
+    )
