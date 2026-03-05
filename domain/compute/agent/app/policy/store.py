@@ -20,7 +20,7 @@ from core.agent.app.schema.pydantic_models import (
 )
 from core.agent.app.policy.registry import policy_callable
 from core.agent.app.policy.action_builders import NegotiationActionBuilder
-from app.utils.validation import (
+from core.agent.app.utils.validation import (
     extract_resources_from_make_offer_event,
     determine_strategy_from_order,
 )
