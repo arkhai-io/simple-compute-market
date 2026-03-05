@@ -4,11 +4,11 @@ Core-generic policy authoring and evaluation guidance:
 - `core/agent/app/policy/policy-making.md`
 
 ## Compute-specific modules
-- `agent/app/policies/store.py`
+- `domain/compute/agent/app/policy/store.py`
   - compute callables (`ri.*`, `mo.*`, `negotiation.*`, fulfillment/arbitration transitions)
-- `agent/app/policies/seeding.py`
+- `core/agent/app/policy/seeding.py`
   - compute default policy seeding by trigger type
-- `agent/app/schema/pydantic_models.py`
+- `core/agent/app/schema/pydantic_models.py`
   - compute event/resource enums and models
 - `core/agent/app/utils/action_executor.py`
   - compute-domain action execution

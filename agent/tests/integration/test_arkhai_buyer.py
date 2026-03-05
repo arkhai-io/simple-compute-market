@@ -8,7 +8,7 @@ import pytest
 def test_torch_arkhai_buyer_import():
     """Test that torch_arkhai_buyer module can be imported."""
     try:
-        from app.policies import torch_arkhai_buyer
+        import domain.compute.agent.app.policy.torch_arkhai_buyer as torch_arkhai_buyer
         assert torch_arkhai_buyer is not None
     except ImportError as e:
         pytest.fail(f"Failed to import torch_arkhai_buyer: {e}")
@@ -17,7 +17,7 @@ def test_torch_arkhai_buyer_import():
 def test_arkhai_common_import():
     """Test that arkhai_common shared module can be imported."""
     try:
-        from app.policies import arkhai_common
+        import domain.compute.agent.app.policy.arkhai_common as arkhai_common
         assert arkhai_common is not None
     except ImportError as e:
         pytest.fail(f"Failed to import arkhai_common: {e}")
@@ -26,7 +26,7 @@ def test_arkhai_common_import():
 def test_buyer_action_extraction():
     """Test that action extraction works with mock model output."""
     import torch
-    from app.policies.arkhai_common import extract_actions_from_logits
+    from domain.compute.agent.app.policy.arkhai_common import extract_actions_from_logits
 
     # Create mock output (action_logits, values)
     action_logits = torch.randn(1, 11)  # 9 price + 2 sell
@@ -44,11 +44,11 @@ def test_buyer_action_extraction():
 
 def test_buyer_model_path_environment_variable(monkeypatch):
     """Test that ARKHAI_BUYER_MODEL_PATH environment variable is respected."""
-    from app.policies.arkhai_common import _MODEL_CACHE
+    from domain.compute.agent.app.policy.arkhai_common import _MODEL_CACHE
     # Clear cache to ensure fresh load attempt
     _MODEL_CACHE.clear()
 
-    from app.policies.torch_arkhai_buyer import _get_model
+    from domain.compute.agent.app.policy.torch_arkhai_buyer import _get_model
 
     test_path = "/tmp/test_arkhai_buyer_model.pt"
     monkeypatch.setenv("ARKHAI_BUYER_MODEL_PATH", test_path)
@@ -64,7 +64,7 @@ def test_buyer_model_path_environment_variable(monkeypatch):
 
 def test_obs_dim_calculation():
     """Test observation dimension calculation for different node type counts."""
-    from app.policies.arkhai_common import obs_dim
+    from domain.compute.agent.app.policy.arkhai_common import obs_dim
 
     # 3 node types (default): 12 + 3*3 = 21
     assert obs_dim(3) == 21
@@ -76,7 +76,7 @@ def test_obs_dim_calculation():
 
 def test_build_action_parameters():
     """Test action parameter builder includes expected keys."""
-    from app.policies.arkhai_common import build_action_parameters
+    from domain.compute.agent.app.policy.arkhai_common import build_action_parameters
 
     params = build_action_parameters(
         order_id="test-order-123",

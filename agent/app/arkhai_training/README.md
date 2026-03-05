@@ -152,8 +152,8 @@ See `agent/.env.sample` for a complete reference of all configurable variables.
 
 The trained models are loaded by the policy adapters at runtime:
 
-- `app/policies/torch_arkhai_seller.py` loads `arkhai_seller.pt`
-- `app/policies/torch_arkhai_buyer.py` loads `arkhai_buyer.pt`
+- `domain/compute/agent/app/policy/torch_arkhai_seller.py` loads `arkhai_seller.pt`
+- `domain/compute/agent/app/policy/torch_arkhai_buyer.py` loads `arkhai_buyer.pt`
 - Override paths via env vars: `ARKHAI_SELLER_MODEL_PATH`, `ARKHAI_BUYER_MODEL_PATH`
 
 The policy manager chains: RL seller -> RL buyer -> rule-based accept. Each RL policy returns `None` when its `.pt` file is absent, falling through gracefully.

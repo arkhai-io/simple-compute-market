@@ -20,7 +20,7 @@ from core.agent.app.schema.pydantic_models import (
     TokenResource,
     ComputeResourcePortfolio,
 )
-from app.utils.validation import extract_resources_from_make_offer_event
+from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 

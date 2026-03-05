@@ -45,7 +45,7 @@ def policy_store(temp_db):
     CALLABLE_REGISTRY.clear()
 
     # Import policies to register them via @policy_callable decorator
-    from app.policies.store import (
+    from domain.compute.agent.app.policy.store import (
         negotiation_action_price_interval_concession,
         negotiation_action_safe_default_reject,
     )
