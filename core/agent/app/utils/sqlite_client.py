@@ -375,6 +375,9 @@ class SQLiteClient:
                 if state is not None:
                     clauses.append("state = ?")
                     params.append(state)
+                else:
+                    # Default listing omits soft-deleted resources.
+                    clauses.append("(state IS NULL OR state != 'deleted')")
                 where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 cur.execute(
                     f"""
@@ -424,6 +427,81 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
+        """Fetch a single resource row by resource_id."""
+        def _load_one() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    WHERE resource_id = ?
+                    LIMIT 1
+                    """,
+                    (resource_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+
+                (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) = row
+                attrs: dict[str, Any] = {}
+                if isinstance(row_attributes, str) and row_attributes.strip():
+                    try:
+                        parsed = json.loads(row_attributes)
+                        if isinstance(parsed, dict):
+                            attrs = parsed
+                    except Exception:
+                        attrs = {}
+
+                return {
+                    "resource_id": row_resource_id,
+                    "resource_type": row_resource_type,
+                    "resource_subtype": row_resource_subtype,
+                    "unit": row_unit,
+                    "value": row_value,
+                    "state": row_state,
+                    "attributes": attrs,
+                    "created_at": row_created_at,
+                    "updated_at": row_updated_at,
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load_one)
+
+    async def delete_resource(
+        self,
+        *,
+        resource_id: str,
+        idempotency_key: str | None = None,
+        event_type: str = "delete_resource",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete a resource by transitioning it to state='deleted'."""
+        set_attribute: dict[str, Any] | None = None
+        if reason:
+            set_attribute = {"$.deleted_reason": reason}
+        return await self.apply_resource_set_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key or f"delete_resource:{resource_id}",
+            set_state="deleted",
+            set_attribute=set_attribute,
+        )
 
     def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
         """Seed default resources only when the resources table is empty."""
