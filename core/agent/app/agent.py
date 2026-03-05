@@ -1143,7 +1143,7 @@ async def _run_create_order_flow(request: Request) -> dict:
     order_id = _extract_order_id(outcome)
 
     response_payload = {
-        "status": "created",
+        "status": "created" if order_id else "no_action",
         "event_id": event_id,
         "order_request": order_create_event.model_dump(mode="json"),
         "root_agent_response": final_response,
