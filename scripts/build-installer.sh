@@ -82,7 +82,7 @@ if [ -z "$ARCHIVE_LINE" ]; then
 fi
 
 # Extract the embedded tarball
-tail -n +"$ARCHIVE_LINE" "$0" | tar xz -C "$EXTRACT_DIR" 2>/dev/null
+tail -n +"$ARCHIVE_LINE" "$0" | tar xz -C "$EXTRACT_DIR" --no-same-owner --no-same-permissions
 
 # Find the extracted directory (it's the repo basename)
 EXTRACTED="$(find "$EXTRACT_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)"

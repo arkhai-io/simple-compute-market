@@ -83,7 +83,11 @@ install_uv() {
     fi
 
     info "Installing uv v${UV_VERSION}..."
-    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh
+    local uv_installer
+    uv_installer="$(mktemp)"
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" -o "$uv_installer"
+    bash "$uv_installer"
+    rm -f "$uv_installer"
 
     # Source the env to make uv available in this session
     if [ -f "$HOME/.local/bin/env" ]; then

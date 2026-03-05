@@ -4,7 +4,8 @@ set -euo pipefail
 # ── Market CLI cURL Installer ────────────────────────────────
 #
 # Usage:
-#   curl -sL https://storage.googleapis.com/ww-migration-installer-stg/install.sh | sudo bash
+#   curl -sL https://storage.googleapis.com/ww-migration-installer-stg/install.sh -o install.sh
+#   bash install.sh
 #
 # This script downloads the latest Market CLI tarball from GCS,
 # extracts it, and runs the bundled install.sh.
@@ -109,8 +110,22 @@ main() {
     fi
     ok "Download complete"
 
+    info "Verifying checksum..."
+    local checksum_url="${tarball_url}.sha256"
+    local checksum_path="${TMPDIR_INSTALL}/checksum.sha256"
+    if download "$checksum_url" "$checksum_path"; then
+        cd "$TMPDIR_INSTALL"
+        if ! sha256sum -c "$checksum_path" 2>/dev/null && ! shasum -a 256 -c "$checksum_path" 2>/dev/null; then
+            error "Checksum verification failed! The download may be corrupted or tampered with."
+            exit 1
+        fi
+        ok "Checksum verified"
+    else
+        warn "Checksum file not available — skipping verification"
+    fi
+
     info "Extracting..."
-    tar xzf "$tarball_path" -C "$TMPDIR_INSTALL"
+    tar xzf "$tarball_path" -C "$TMPDIR_INSTALL" --no-same-owner --no-same-permissions
 
     # Find the extracted directory
     local extracted
