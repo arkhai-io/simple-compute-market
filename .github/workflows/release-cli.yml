@@ -110,6 +110,8 @@ jobs:
         with:
           files: |
             install.sh
+            market-cli.tar.gz
+            market-cli.tar.gz.sha256
           generate_release_notes: true
           body: |
             ## Install
