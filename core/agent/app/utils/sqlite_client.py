@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import CONFIG
+from .resource_csv_importer import upsert_resources_from_csv
 
 
 class SQLiteClient:
@@ -502,6 +503,20 @@ class SQLiteClient:
             set_state="deleted",
             set_attribute=set_attribute,
         )
+
+    async def upsert_resources_from_csv(
+        self,
+        *,
+        csv_path: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import resources from CSV and upsert rows into the resources table."""
+        report = await upsert_resources_from_csv(
+            csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
 
     def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
         """Seed default resources only when the resources table is empty."""
