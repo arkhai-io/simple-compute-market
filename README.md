@@ -51,6 +51,31 @@ Optional flags:
 - `--duration-hours` to set duration (defaults to `1`)
 - `token` may be a known symbol or contract address; amount is a float and converted using token decimals
 
+## Portfolio Import (CLI)
+
+Seed/update the local resource portfolio from CSV:
+
+```bash
+market portfolio import-csv path/to/resources.csv
+```
+
+Try the bundled sample:
+
+```bash
+market portfolio import-csv core/agent/app/data/resources.sample.csv --dry-run
+```
+
+Optional flags:
+
+- `--dry-run` validate and report without writing to DB
+- `--env` path to env file used by core agent import script (defaults to `core/agent/.env`)
+- `--db-path` override target SQLite DB path (otherwise uses `AGENT_DB_PATH` from env)
+
+CSV columns:
+
+- Core columns: `resource_id` (optional, UUID auto-generated if blank), `resource_type` (required), `resource_subtype`, `unit`, `value`, `state`
+- Attribute columns: any `attribute.*` column maps into `attributes` JSON (e.g., `attribute.region`, `attribute.vm_host`)
+
 ## Quick Start
 
 ### 1. Start Local Chain

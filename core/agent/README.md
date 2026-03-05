@@ -46,6 +46,7 @@ make install && make playground
 | `make register`      | Register agent on-chain before starting |
 | `make serve-a2a`     | Start A2A agent server (requires on-chain registration first) |
 | `make playground`    | Launch local development environment with backend and frontend - leveraging `adk web` command.|
+| `make import-resources` | Import resource portfolio rows from CSV into Agent DB |
 | `make backend`       | Deploy agent to Cloud Run (use `IAP=true` to enable Identity-Aware Proxy) |
 | `make local-backend` | Launch local development server |
 | `make test`          | Run unit and integration tests                                                              |
@@ -54,6 +55,26 @@ make install && make playground
 | `uv run jupyter lab` | Launch Jupyter notebook                                                                     |
 
 For full command options and usage, refer to the [Makefile](Makefile).
+
+### Resource Portfolio CSV Import
+
+Import resources into the local Agent DB:
+
+```bash
+make import-resources CSV=path/to/resources.csv
+```
+
+Try the bundled sample:
+
+```bash
+make import-resources CSV=app/data/resources.sample.csv DRY_RUN=true
+```
+
+Optional:
+
+- `ENV_FILE=.env` (env file for `AGENT_DB_PATH`)
+- `DB_PATH=/tmp/agent.db` (explicit DB path override)
+- `DRY_RUN=true` (validate/report only, no DB write)
 
 ## Agent Registration Workflow
 

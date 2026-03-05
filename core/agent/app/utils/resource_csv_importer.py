@@ -115,6 +115,8 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
 
     attributes: dict[str, Any] = {}
     for key, raw in row.items():
+        if not isinstance(key, str):
+            continue
         if not key.startswith(ATTRIBUTE_PREFIX):
             continue
         attr_key = key[len(ATTRIBUTE_PREFIX) :].strip()

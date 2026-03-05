@@ -1,0 +1,6 @@
+resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw
+compute-h200-001,compute.gpu,h200,count,1,available,H200,99.0,"California, US",vm1,,,,,,,
+,compute.gpu,h200,count,2,available,H200,95.0,"California, US",vm2,,,,,,,
+token-usdc-main,token.erc20,usdc,base_units,100000000,available,,,,USDC,0xdac17f958d2ee523a2206206994597c13d831ec7,6,,,,
+battery-edge-01,energy.battery,kwh,kwh,56,discharging,,,,,,,,64.3,80.0,-1.52
+info-note-001,information.note,,,,available,,,,,,,market-overview,,,
