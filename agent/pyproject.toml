@@ -20,6 +20,7 @@ dependencies = [
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "aiohttp>=3.12.15",
+    "setuptools",
 ]
 
 requires-python = ">=3.10,<3.14"

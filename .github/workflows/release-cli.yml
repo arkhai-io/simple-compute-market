@@ -6,11 +6,16 @@ on:
       - 'cli-v*.*.*'
   workflow_dispatch:
 
+env:
+  GCS_BUCKET: ww-migration-installer-stg
+  TARBALL_NAME: market-cli-latest.tar.gz
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
 
     steps:
       - name: Checkout code
@@ -32,6 +37,49 @@ jobs:
       - name: Verify wheel was built
         run: ls -lh dist/*.whl
 
+      - name: Build tarball for cURL installer
+        run: |
+          tar czf "$TARBALL_NAME" \
+            --transform 's,^\./,market-cli/,' \
+            --transform 's,^\.$$,market-cli,' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='*.pyo' \
+            --exclude='.venv' \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            --exclude='.env.tmp' \
+            --exclude='*.egg-info' \
+            --exclude='.claude' \
+            --exclude='Dockerfile' \
+            --exclude='docker-compose*.yml' \
+            --exclude='market-installer.sh' \
+            --exclude='.DS_Store' \
+            .
+          ls -lh "$TARBALL_NAME"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Upload to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: ${{ env.TARBALL_NAME }}
+          destination: ${{ env.GCS_BUCKET }}
+
+      - name: Prepare installer script
+        run: cp scripts/install-remote.sh install.sh
+
+      - name: Upload installer script to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: install.sh
+          destination: ${{ env.GCS_BUCKET }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -41,6 +89,12 @@ jobs:
           body: |
             ## Install
 
+            **cURL (recommended):**
+            ```bash
+            curl -sL https://storage.googleapis.com/${{ env.GCS_BUCKET }}/install.sh | sudo bash
+            ```
+
+            **pip:**
             ```bash
             pip install market_cli-*.whl
             ```
@@ -50,12 +104,15 @@ jobs:
           WHEEL_FILE=$(ls dist/*.whl)
           WHEEL_SIZE=$(wc -c < "$WHEEL_FILE" | tr -d ' ')
           WHEEL_SIZE_KB=$(( WHEEL_SIZE / 1024 ))
+          TARBALL_SIZE=$(wc -c < "$TARBALL_NAME" | tr -d ' ')
+          TARBALL_SIZE_KB=$(( TARBALL_SIZE / 1024 ))
           echo "### Market CLI Release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Wheel size:** ${WHEEL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
+          echo "**Tarball size:** ${TARBALL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Install (pip):**" >> $GITHUB_STEP_SUMMARY
+          echo "**Install (cURL):**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "pip install market_cli-*.whl" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sL https://storage.googleapis.com/${{ env.GCS_BUCKET }}/install.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
