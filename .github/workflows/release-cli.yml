@@ -39,7 +39,7 @@ jobs:
 
       - name: Build tarball for cURL installer
         run: |
-          tar czf "$TARBALL_NAME" \
+          tar czf "/tmp/$TARBALL_NAME" \
             --transform 's,^\./,market-cli/,' \
             --transform 's,^\.$$,market-cli,' \
             --exclude='.git' \
@@ -57,8 +57,8 @@ jobs:
             --exclude='docker-compose*.yml' \
             --exclude='market-installer.sh' \
             --exclude='.DS_Store' \
-            --exclude="$TARBALL_NAME" \
             .
+          mv "/tmp/$TARBALL_NAME" .
           ls -lh "$TARBALL_NAME"
 
       - name: Authenticate to Google Cloud
