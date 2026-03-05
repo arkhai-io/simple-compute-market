@@ -24,18 +24,13 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PAT_SUBMODULES }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Build wheel
+      - name: Determine CLI version
         run: |
-          pip install build
-          python -m build --wheel
-
-      - name: Verify wheel was built
-        run: ls -lh dist/*.whl
+          if [[ "$GITHUB_REF_NAME" == cli-v* ]]; then
+            echo "CLI_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "CLI_VERSION=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          fi
 
       - name: Build tarball for cURL installer
         run: |
@@ -66,11 +61,20 @@ jobs:
         with:
           credentials_json: ${{ secrets.GCS_STG_WRITER_KEY }}
 
-      - name: Upload to GCS
+      - name: Upload latest tarball to GCS
         uses: google-github-actions/upload-cloud-storage@v2
         with:
           path: ${{ env.TARBALL_NAME }}
           destination: ${{ env.GCS_BUCKET }}
+
+      - name: Prepare versioned tarball
+        run: cp "$TARBALL_NAME" market-cli.tar.gz
+
+      - name: Upload versioned tarball to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: market-cli.tar.gz
+          destination: ${{ env.GCS_BUCKET }}/${{ env.CLI_VERSION }}
 
       - name: Prepare installer script
         run: cp scripts/install-remote.sh install.sh
@@ -85,32 +89,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.whl
+            install.sh
           generate_release_notes: true
           body: |
             ## Install
 
-            **cURL (recommended):**
             ```bash
             curl -sL https://storage.googleapis.com/${{ env.GCS_BUCKET }}/install.sh | sudo bash
             ```
 
-            **pip:**
-            ```bash
-            pip install market_cli-*.whl
-            ```
-
       - name: Generate build summary
         run: |
-          WHEEL_FILE=$(ls dist/*.whl)
-          WHEEL_SIZE=$(wc -c < "$WHEEL_FILE" | tr -d ' ')
-          WHEEL_SIZE_KB=$(( WHEEL_SIZE / 1024 ))
           TARBALL_SIZE=$(wc -c < "$TARBALL_NAME" | tr -d ' ')
           TARBALL_SIZE_KB=$(( TARBALL_SIZE / 1024 ))
           echo "### Market CLI Release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Wheel size:** ${WHEEL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
           echo "**Tarball size:** ${TARBALL_SIZE_KB} KB" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Install (cURL):**" >> $GITHUB_STEP_SUMMARY
