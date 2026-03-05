@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Tuple
 
 from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
@@ -8,6 +9,7 @@ from core.agent.app.ports.persistence import PolicyPersistencePort
 from core.agent.app.policy.evaluator import CallableEvaluator
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
+logger = logging.getLogger(__name__)
 
 
 class PolicyStore:
@@ -81,6 +83,12 @@ class PolicyStore:
         et = context.event.event_type
         trigger_type = et.value if hasattr(et, "value") else str(et)
         data = await self._load_cached(agent_id=agent_id, trigger_type=trigger_type)
+        if not data["callables"]:
+            logger.warning(
+                "[POLICY] No policies configured for agent_id=%s trigger_type=%s",
+                agent_id,
+                trigger_type,
+            )
         # Evaluate policies by callable_ref; support composite by expanding from DB
         policy_action: DomainAction | None = None
         for ref in data["callables"]:
@@ -93,17 +101,48 @@ class PolicyStore:
             # Composite: expand ordered components from DB and execute
             try:
                 components = await self._sqlite.load_policy_composite(agent_id=agent_id, policy_name=ref)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "[POLICY] Failed to load composite for ref=%s (agent_id=%s trigger_type=%s): %s",
+                    ref,
+                    agent_id,
+                    trigger_type,
+                    exc,
+                )
                 components = []
             if components:
+                resolved_any = False
                 for comp in components:
                     func = self._registry.get(comp)
                     if not func:
+                        logger.warning(
+                            "[POLICY] Composite component not registered: %s (composite=%s agent_id=%s trigger_type=%s)",
+                            comp,
+                            ref,
+                            agent_id,
+                            trigger_type,
+                        )
                         continue
+                    resolved_any = True
                     ce = CallableEvaluator(func)
                     policy_action = await ce.evaluate(context)
                     if policy_action is not None:
                         break
+                if not resolved_any:
+                    logger.warning(
+                        "[POLICY] Composite ref=%s has no resolvable components (agent_id=%s trigger_type=%s)",
+                        ref,
+                        agent_id,
+                        trigger_type,
+                    )
                 if policy_action is not None:
                     break
+            elif ref not in self._registry:
+                logger.warning(
+                    "[POLICY] Callable ref is neither registered direct callable nor composite: %s "
+                    "(agent_id=%s trigger_type=%s)",
+                    ref,
+                    agent_id,
+                    trigger_type,
+                )
         return policy_action
