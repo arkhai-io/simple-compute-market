@@ -45,7 +45,7 @@ from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import get_trusted_oracle_arbiter
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+from service.clients.token import TOKEN_REGISTRY
 from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
