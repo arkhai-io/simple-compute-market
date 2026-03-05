@@ -313,7 +313,7 @@ download-models:
 
 # Create a GitHub release with trained model artifacts.
 # Usage: make release-models VERSION=model-v0.1.0 [MODELS_DIR=path/to/models]
-MODELS_DIR ?= ../../agent/app/policies/models
+MODELS_DIR ?= ../../domain/compute/agent/app/policy/models
 release-models:
 	@if [ -z "$${VERSION:-}" ]; then echo "ERROR: VERSION is required. Usage: make release-models VERSION=model-v0.1.0"; exit 1; fi; \
 	MODELS_DIR="$(MODELS_DIR)"; \

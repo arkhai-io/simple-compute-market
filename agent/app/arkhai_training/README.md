@@ -82,8 +82,8 @@ After training, copy the checkpoint and release it as a GitHub asset:
 
 ```bash
 # 1. Copy checkpoint to model directory
-cp experiments/puffer_arkhai_<run_id>.pt app/policies/models/arkhai_seller.pt
-cp experiments/puffer_arkhai_<run_id>.pt app/policies/models/arkhai_buyer.pt
+cp experiments/puffer_arkhai_<run_id>.pt domain/compute/agent/app/policy/models/arkhai_seller.pt
+cp experiments/puffer_arkhai_<run_id>.pt domain/compute/agent/app/policy/models/arkhai_buyer.pt
 
 # 2. Release to GitHub (requires gh CLI authenticated)
 make release-models VERSION=model-v0.1.0
