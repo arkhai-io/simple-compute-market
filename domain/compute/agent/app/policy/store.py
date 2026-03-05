@@ -23,7 +23,7 @@ from core.agent.app.utils.validation import (
     extract_resources_from_make_offer_event,
     determine_strategy_from_order,
 )
-from core.agent.app.utils.registry_client import get_registry_client
+from service.clients.indexer import get_registry_client
 from core.agent.app.utils.action_executor import _extract_initial_price_from_order
 
 logger = logging.getLogger(__name__)

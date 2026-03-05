@@ -1306,7 +1306,7 @@ a2a_app.routes.append(agent_order_close_route)
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from core.agent.app.utils.agent_card import build_erc8004_registration_file
-from core.agent.app.utils.registry.blockchain_utils import (
+from service.clients.erc8004.blockchain import (
     build_erc8004_canonical_id,
     rpc_url_for_http_provider,
 )
