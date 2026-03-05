@@ -10,6 +10,7 @@ os.environ['AGENT_ID'] = 'test_agent'
 from core.agent.app.schema.pydantic_models import (
     ResourceAlertRequest,
     MarketOrder,
+    OrderCreateEvent,
     ComputeResource,
     ComputeDomainResource,
     TokenResource,
@@ -401,6 +402,34 @@ class TestParseDomainEvent:
         assert event.order.order_id == "test_order"
         assert isinstance(event.order.offer_resource, ComputeResource)
         assert isinstance(event.order.demand_resource, TokenResource)
+
+    def test_parse_order_create_event_with_token_offer(self):
+        """OrderCreateEvent should allow token offer + compute demand."""
+        payload = {
+            "event_type": "order_create",
+            "event_id": "test_order_create_evt",
+            "source": "test_source",
+            "data": {
+                "offer": {
+                    "token": "WETH",
+                    "amount": 9000000000000,
+                },
+                "demand": {
+                    "gpu_model": "H200",
+                    "quantity": 1,
+                    "sla": 90.0,
+                    "region": "California, US",
+                },
+                "duration_hours": 1,
+            },
+        }
+        event = _parse_domain_event(payload)
+
+        assert isinstance(event, OrderCreateEvent)
+        assert isinstance(event.offer, TokenResource)
+        assert event.offer.token.symbol == "WETH"
+        assert isinstance(event.demand, ComputeResource)
+        assert event.demand.gpu_model == GPUModel.H200
     
     def test_parse_missing_required_fields(self):
         """Test that missing required fields raise ValueError."""

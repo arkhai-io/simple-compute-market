@@ -270,8 +270,12 @@ class OrderCreateEvent(DomainEvent):
     """Event triggered when a local client requests order creation."""
 
     event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: ComputeDomainResource = Field(description="Offered resource (compute or token)")
-    demand: ComputeDomainResource = Field(description="Demanded resource (compute or token)")
+    offer: Union[ComputeResource, TokenResource] = Field(
+        description="Offered resource (compute or token)"
+    )
+    demand: Union[ComputeResource, TokenResource] = Field(
+        description="Demanded resource (compute or token)"
+    )
     duration_hours: int = Field(default=1, description="Duration of the order in hours")
 
     @model_validator(mode="before")
