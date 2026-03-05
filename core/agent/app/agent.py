@@ -91,16 +91,16 @@ from core.agent.app.utils.event_ingestion import (
     start_redis_subscriber,
     stop_redis_subscriber,
 )
-from core.agent.app.utils.market_provider import create_market_provider, MarketProvider
+from service.clients.market import create_market_provider, MarketProvider
 from core.agent.app.utils.action_executor import execute_action
-from core.agent.app.utils.alkahest_config import (
+from service.clients.alkahest import (
     get_alkahest_network,
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
 from core.agent.app.utils.serializer import json_serializer
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
-from core.agent.app.utils.zerotier import get_zerotier_ip
+from service.clients.token import TOKEN_REGISTRY
+from service.clients.network import get_zerotier_ip
 from pydantic import PrivateAttr
 
 
@@ -1384,8 +1384,15 @@ async def process_queued_events():
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from core.agent.app.utils.config import CONFIG
-    from core.agent.app.agent_heartbeat import start_agent_heartbeat
-    await start_agent_heartbeat(CONFIG)
+    from service.clients.erc8004.heartbeat import start_agent_heartbeat
+    await start_agent_heartbeat({
+        "indexer_url": CONFIG.indexer_url,
+        "identity_registry_address": CONFIG.identity_registry_address,
+        "agent_wallet_address": CONFIG.agent_wallet_address,
+        "onchain_agent_id": CONFIG.onchain_agent_id,
+        "chain_rpc_url": CONFIG.chain_rpc_url,
+        "agent_priv_key": CONFIG.agent_priv_key,
+    })
 
 
 # Initialize startup tasks
