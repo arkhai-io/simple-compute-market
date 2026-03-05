@@ -45,12 +45,10 @@ from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import get_trusted_oracle_arbiter
-from service.clients.token import TOKEN_REGISTRY
+from core.agent.app.utils.token_registry import TOKEN_REGISTRY
 from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
-from service.clients.provisioning import provision_machine_async, ProvisioningError
-from service.clients.mock_provisioning import provision_machine_async as mock_provision_machine_async
-from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
+from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
