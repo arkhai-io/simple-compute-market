@@ -57,6 +57,7 @@ jobs:
             --exclude='docker-compose*.yml' \
             --exclude='market-installer.sh' \
             --exclude='.DS_Store' \
+            --exclude="$TARBALL_NAME" \
             .
           ls -lh "$TARBALL_NAME"
 
