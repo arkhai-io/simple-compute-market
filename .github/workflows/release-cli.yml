@@ -39,6 +39,9 @@ jobs:
             --transform 's,^\.$$,market-cli,' \
             --exclude='.git' \
             --exclude='.github' \
+            --exclude='mcp' \
+            --exclude='scripts' \
+            --exclude='tmp' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
             --exclude='*.pyo' \
