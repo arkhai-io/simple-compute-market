@@ -21,7 +21,7 @@ from core.agent.app.schema.pydantic_models import (
     ERC20TokenMetadata,
 )
 from core.agent.app.agent import _parse_domain_event
-from app.utils.validation import (
+from core.agent.app.utils.validation import (
     validate_alert,
     validate_market_order,
     extract_compute_resource,

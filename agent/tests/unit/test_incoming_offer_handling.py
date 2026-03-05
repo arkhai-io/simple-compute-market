@@ -21,7 +21,7 @@ from core.agent.app.policy.store import PolicyStore
 from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.utils.action_executor import _extract_initial_price_from_order
-from app.utils.validation import determine_strategy_from_order
+from core.agent.app.utils.validation import determine_strategy_from_order
 import tempfile
 import os
 
