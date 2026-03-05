@@ -6,7 +6,7 @@ authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
 dependencies = [
-    "market-service @ ../service",
+    "market-service",
     "google-adk[a2a] @ git+https://github.com/google/adk-python@5eca72f9bfd05c7c28a3d738391138a59a31167d",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
@@ -50,6 +50,7 @@ lint = [
 no-build-isolation-package = ["pufferlib"]
 
 [tool.uv.sources]
+market-service = { path = "../service", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
