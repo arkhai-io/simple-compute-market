@@ -123,18 +123,6 @@ def start(
     )
 
 
-@app.command()
-def join(
-    network_id: str = typer.Argument(..., help="ZeroTier network ID to join."),
-) -> None:
-    """Join a ZeroTier network."""
-    run_step(
-        f"Join ZeroTier network {network_id}",
-        ["sudo", "zerotier-cli", "join", network_id],
-        REPO_ROOT,
-    )
-
-
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 app.add_typer(
     config_app,
