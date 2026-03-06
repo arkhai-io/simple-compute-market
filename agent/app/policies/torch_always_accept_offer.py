@@ -10,7 +10,7 @@ try:  # Torch is optional at runtime; fail gracefully if unavailable.
 except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
-from app.policies.registry import policy_callable
+from core.agent.app.policy.registry import policy_callable
 from app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,

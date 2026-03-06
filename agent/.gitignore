@@ -195,3 +195,9 @@ my_env.tfvars
 .saved_chats
 .env
 .requirements.txt
+
+# Trained model checkpoints (distributed via GitHub Releases)
+app/policies/models/*.pt
+
+# Puffer training experiments
+experiments/
