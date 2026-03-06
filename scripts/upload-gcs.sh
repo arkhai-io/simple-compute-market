@@ -10,14 +10,14 @@ set -euo pipefail
 #   - gcloud CLI authenticated with access to the bucket
 #
 # Uploads:
-#   gs://ww-migration-installer-stg/install.sh                       (curl installer)
-#   gs://ww-migration-installer-stg/releases/latest/market-cli.tar.gz (tarball)
+#   gs://ww-migration-arkhai-installer-files/install.sh                       (curl installer)
+#   gs://ww-migration-arkhai-installer-files/releases/latest/market-cli.tar.gz (tarball)
 # ─────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-GCS_BUCKET="ww-migration-installer-stg"
+GCS_BUCKET="ww-migration-arkhai-installer-files"
 TARBALL_NAME="market-cli.tar.gz"
 
 info()  { printf '\033[1;34m[upload]\033[0m %s\n' "$*"; }

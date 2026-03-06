@@ -4,14 +4,14 @@ set -euo pipefail
 # ── Market CLI cURL Installer ────────────────────────────────
 #
 # Usage:
-#   curl -sL https://storage.googleapis.com/ww-migration-installer-stg/install.sh -o install.sh
+#   curl -sL https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh -o install.sh
 #   bash install.sh
 #
 # This script downloads the latest Market CLI tarball from GCS,
 # extracts it, and runs the bundled install.sh.
 # ─────────────────────────────────────────────────────────────
 
-GCS_BUCKET="ww-migration-installer-stg"
+GCS_BUCKET="ww-migration-arkhai-installer-files"
 GCS_BASE_URL="https://storage.googleapis.com/${GCS_BUCKET}"
 TARBALL_NAME="market-cli.tar.gz"
 CLI_VERSION=""

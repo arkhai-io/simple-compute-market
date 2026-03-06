@@ -188,3 +188,6 @@ experiments/
 wandb/
 !.env.sample
 .cursor/
+
+# Cloud Function
+node_modules

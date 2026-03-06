@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  GCS_BUCKET: ww-migration-installer-stg
+  GCS_BUCKET: ww-migration-arkhai-installer-files
   TARBALL_NAME: market-cli.tar.gz
 
 jobs:
