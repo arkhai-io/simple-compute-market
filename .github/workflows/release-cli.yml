@@ -124,8 +124,7 @@ jobs:
             ## Install
 
             ```bash
-            curl -sL https://storage.googleapis.com/${{ env.GCS_BUCKET }}/install.sh -o install.sh
-            bash install.sh
+            curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
             ```
 
       - name: Generate build summary
@@ -139,5 +138,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Install (cURL):**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sL https://storage.googleapis.com/${{ env.GCS_BUCKET }}/install.sh -o install.sh && bash install.sh" >> $GITHUB_STEP_SUMMARY
+          echo "curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

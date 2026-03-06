@@ -11,27 +11,32 @@ const downloadMarketCli: HttpFunction = async (req, res) => {
   req.setTimeout(REQUEST_TIMEOUT_MS);
   res.setTimeout(REQUEST_TIMEOUT_MS);
   const version = req.query.version as string | undefined;
+  const file = req.query.file as string | undefined;
 
   const storage = new Storage();
   const bucket = storage.bucket(GCS_BUCKET);
 
   // No params → return the install.sh script
   // With version param → return the versioned .tar.gz
-  const gcsPath = version
-    ? `releases/${version}/${TARBALL_NAME}`
-    : "install.sh";
+  // With version + file=checksum → return the .sha256
+  let gcsPath: string;
+  if (version) {
+    const filename =
+      file === "checksum" ? `${TARBALL_NAME}.sha256` : TARBALL_NAME;
+    gcsPath = `releases/${version}/${filename}`;
+  } else {
+    gcsPath = "install.sh";
+  }
 
-  console.log(gcsPath);
+  const gcsFile = bucket.file(gcsPath);
 
-  const file = bucket.file(gcsPath);
-
-  const [exists] = await file.exists();
+  const [exists] = await gcsFile.exists();
   if (!exists) {
     res.status(404).send(`Not found: ${gcsPath}`);
     return;
   }
 
-  const [signedUrl] = await file.getSignedUrl({
+  const [signedUrl] = await gcsFile.getSignedUrl({
     action: "read",
     expires: Date.now() + SIGNED_URL_EXPIRY_MS,
   });

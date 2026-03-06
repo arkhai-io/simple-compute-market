@@ -7,14 +7,13 @@ Cross-platform installer for the Market CLI, supporting both offline and cloud-b
 ### Remote Install (Latest)
 
 ```bash
-curl -sL https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh -o install.sh
-bash install.sh
+curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
 ```
 
 ### Remote Install (Specific Version)
 
 ```bash
-curl -sL https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh -o install.sh
+curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli -o install.sh
 bash install.sh --version market-cli-v1.0.0
 ```
 
@@ -174,7 +173,7 @@ Releases follow the tag format `market-cli-v{major}.{minor}.{patch}` (e.g., `mar
 |----------|---------|-------------|
 | `MARKET_INSTALL_DIR` | `~/.market` | Where the CLI is installed |
 | `CLI_VERSION` | latest | Target version for remote installs |
-| `GCS_BUCKET` | `ww-migration-arkhai-installer-files` | GCS bucket name |
+| `GCS_BUCKET` | `ww-migration-arkhai-installer-files` | GCS bucket name (CI/CD and upload script only) |
 | `GCS_STG_WRITER_KEY` | — | GCP service account credentials (CI/CD secret) |
 
 ## Creating a Dev Build
@@ -192,7 +191,7 @@ gh workflow run release-cli.yml
 The tarball is uploaded to `/releases/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
 
 ```bash
-curl -sL https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh -o install.sh
+curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli -o install.sh
 bash install.sh --version dev-abc1234
 ```
 
@@ -208,5 +207,5 @@ Test against a remote URL:
 
 ```bash
 docker build -f Dockerfile.installer-test \
-  --build-arg INSTALLER_URL=https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh .
+  --build-arg INSTALLER_URL=https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli .
 ```

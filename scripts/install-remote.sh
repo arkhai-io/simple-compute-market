@@ -4,15 +4,13 @@ set -euo pipefail
 # ── Market CLI cURL Installer ────────────────────────────────
 #
 # Usage:
-#   curl -sL https://storage.googleapis.com/ww-migration-arkhai-installer-files/install.sh -o install.sh
-#   bash install.sh
+#   curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash
 #
-# This script downloads the latest Market CLI tarball from GCS,
+# This script downloads the latest Market CLI tarball,
 # extracts it, and runs the bundled install.sh.
 # ─────────────────────────────────────────────────────────────
 
-GCS_BUCKET="ww-migration-arkhai-installer-files"
-GCS_BASE_URL="https://storage.googleapis.com/${GCS_BUCKET}"
+CF_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli"
 TARBALL_NAME="market-cli.tar.gz"
 CLI_VERSION=""
 
@@ -94,15 +92,15 @@ main() {
     # Create temp directory for download and extraction
     TMPDIR_INSTALL="$(mktemp -d)"
 
-    local tarball_url
+    local version_param="latest"
     if [ -n "$CLI_VERSION" ]; then
-        tarball_url="${GCS_BASE_URL}/releases/${CLI_VERSION}/${TARBALL_NAME}"
-    else
-        tarball_url="${GCS_BASE_URL}/releases/latest/${TARBALL_NAME}"
+        version_param="$CLI_VERSION"
     fi
+
+    local tarball_url="${CF_URL}?version=${version_param}"
     local tarball_path="${TMPDIR_INSTALL}/${TARBALL_NAME}"
 
-    info "Downloading Market CLI from ${tarball_url}..."
+    info "Downloading Market CLI (${version_param})..."
     if ! download "$tarball_url" "$tarball_path"; then
         error "Failed to download tarball from ${tarball_url}"
         error "Check that the URL is accessible and try again."
@@ -111,7 +109,7 @@ main() {
     ok "Download complete"
 
     info "Verifying checksum..."
-    local checksum_url="${tarball_url}.sha256"
+    local checksum_url="${CF_URL}?version=${version_param}&file=checksum"
     local checksum_path="${TMPDIR_INSTALL}/checksum.sha256"
     if download "$checksum_url" "$checksum_path"; then
         cd "$TMPDIR_INSTALL"
