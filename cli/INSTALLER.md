@@ -13,8 +13,7 @@ curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMa
 ### Remote Install (Specific Version)
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli -o install.sh
-bash install.sh --version market-cli-v1.0.0
+curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version market-cli-v1.0.0
 ```
 
 ### Self-Extracting Script (Offline)
@@ -191,8 +190,7 @@ gh workflow run release-cli.yml
 The tarball is uploaded to `/releases/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
 
 ```bash
-curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli -o install.sh
-bash install.sh --version dev-abc1234
+curl -fsSL https://us-central1-ww-migration-arkhai.cloudfunctions.net/downloadMarketCli | bash -s -- --version dev-abc1234
 ```
 
 ## Testing
