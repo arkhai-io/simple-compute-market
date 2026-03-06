@@ -16,7 +16,7 @@ on:
   workflow_dispatch:  # Allow manual triggers
 
 env:
-  GAR_REGISTRY: asia-southeast1-docker.pkg.dev
+  GAR_REGISTRY: us-east4-docker.pkg.dev
   GCP_PROJECT_ID: ww-migration-arkhai
   GAR_REPOSITORY: erc-8004-registry
   IMAGE_NAME: erc-8004-registry-py
