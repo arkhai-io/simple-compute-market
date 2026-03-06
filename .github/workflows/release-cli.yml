@@ -3,12 +3,12 @@ name: Release Market CLI
 on:
   push:
     tags:
-      - 'cli-v*.*.*'
+      - 'market-cli-v*.*.*'
   workflow_dispatch:
 
 env:
   GCS_BUCKET: ww-migration-installer-stg
-  TARBALL_NAME: market-cli-latest.tar.gz
+  TARBALL_NAME: market-cli.tar.gz
 
 jobs:
   build-and-release:
@@ -26,7 +26,7 @@ jobs:
 
       - name: Determine CLI version
         run: |
-          if [[ "$GITHUB_REF_NAME" == cli-v* ]]; then
+          if [[ "$GITHUB_REF_NAME" == market-cli-v* ]]; then
             echo "CLI_VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
           else
             echo "CLI_VERSION=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
@@ -62,7 +62,11 @@ jobs:
       - name: Generate checksums
         run: |
           sha256sum "$TARBALL_NAME" > "${TARBALL_NAME}.sha256"
-          cp "${TARBALL_NAME}.sha256" "market-cli.tar.gz.sha256"
+
+      - name: Generate aggregate checksum manifest
+        run: |
+          mkdir -p checksums
+          cp "${TARBALL_NAME}.sha256" "checksums/${CLI_VERSION}.sha256"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -73,28 +77,31 @@ jobs:
         uses: google-github-actions/upload-cloud-storage@v2
         with:
           path: ${{ env.TARBALL_NAME }}
-          destination: ${{ env.GCS_BUCKET }}
+          destination: ${{ env.GCS_BUCKET }}/releases/latest
 
       - name: Upload latest checksum to GCS
         uses: google-github-actions/upload-cloud-storage@v2
         with:
           path: ${{ env.TARBALL_NAME }}.sha256
-          destination: ${{ env.GCS_BUCKET }}
-
-      - name: Prepare versioned tarball
-        run: cp "$TARBALL_NAME" market-cli.tar.gz
+          destination: ${{ env.GCS_BUCKET }}/releases/latest
 
       - name: Upload versioned tarball to GCS
         uses: google-github-actions/upload-cloud-storage@v2
         with:
-          path: market-cli.tar.gz
-          destination: ${{ env.GCS_BUCKET }}/${{ env.CLI_VERSION }}
+          path: ${{ env.TARBALL_NAME }}
+          destination: ${{ env.GCS_BUCKET }}/releases/${{ env.CLI_VERSION }}
 
       - name: Upload versioned checksum to GCS
         uses: google-github-actions/upload-cloud-storage@v2
         with:
-          path: market-cli.tar.gz.sha256
-          destination: ${{ env.GCS_BUCKET }}/${{ env.CLI_VERSION }}
+          path: ${{ env.TARBALL_NAME }}.sha256
+          destination: ${{ env.GCS_BUCKET }}/releases/${{ env.CLI_VERSION }}
+
+      - name: Upload aggregate checksum manifest to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: checksums/${{ env.CLI_VERSION }}.sha256
+          destination: ${{ env.GCS_BUCKET }}/checksums
 
       - name: Prepare installer script
         run: cp scripts/install-remote.sh install.sh
@@ -110,8 +117,8 @@ jobs:
         with:
           files: |
             install.sh
-            market-cli.tar.gz
-            market-cli.tar.gz.sha256
+            ${{ env.TARBALL_NAME }}
+            ${{ env.TARBALL_NAME }}.sha256
           generate_release_notes: true
           body: |
             ## Install

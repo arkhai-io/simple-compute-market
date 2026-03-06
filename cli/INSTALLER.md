@@ -15,7 +15,7 @@ bash install.sh
 
 ```bash
 curl -sL https://storage.googleapis.com/ww-migration-installer-stg/install.sh -o install.sh
-bash install.sh --version cli-v1.0.0
+bash install.sh --version market-cli-v1.0.0
 ```
 
 ### Self-Extracting Script (Offline)
@@ -44,7 +44,7 @@ uv pip install -e .
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CI/CD Pipeline                           │
-│  Tag push (cli-v*) or manual dispatch                           │
+│  Tag push (market-cli-v*) or manual dispatch                     │
 │                                                                 │
 │  1. Checkout repo                                               │
 │  2. Determine version from tag or dev-{sha}                     │
@@ -59,11 +59,18 @@ uv pip install -e .
 │                     GCS Bucket Layout                           │
 │  gs://ww-migration-installer-stg/                               │
 │  ├── install.sh                  (remote installer entry point) │
-│  ├── market-cli-latest.tar.gz    (always latest build)          │
-│  ├── cli-v1.0.0/                                                │
-│  │   └── market-cli.tar.gz       (pinned release)               │
-│  └── dev-a1b2c3d/                                               │
-│      └── market-cli.tar.gz       (dev build)                    │
+│  ├── releases/                                                   │
+│  │   ├── latest/                                                 │
+│  │   │   ├── market-cli.tar.gz        (always latest build)     │
+│  │   │   └── market-cli.tar.gz.sha256                            │
+│  │   ├── market-cli-v1.0.0/                                      │
+│  │   │   ├── market-cli.tar.gz        (pinned release)          │
+│  │   │   └── market-cli.tar.gz.sha256                            │
+│  │   └── dev-a1b2c3d/                                            │
+│  │       ├── market-cli.tar.gz        (dev build)               │
+│  │       └── market-cli.tar.gz.sha256                            │
+│  └── checksums/                                                   │
+│      └── market-cli-v1.0.0.sha256  (aggregate manifest)          │
 └──────────────────────────┬──────────────────────────────────────┘
                            │
                            ▼
@@ -96,10 +103,10 @@ uv pip install -e .
 
 ### Build Phase
 
-The CI/CD pipeline (`.github/workflows/release-cli.yml`) triggers on `cli-v*` tag pushes or manual dispatch. It creates a tarball of the repository excluding build artifacts:
+The CI/CD pipeline (`.github/workflows/release-cli.yml`) triggers on `market-cli-v*` tag pushes or manual dispatch. It creates a tarball of the repository excluding build artifacts:
 
 ```bash
-tar czf market-cli-latest.tar.gz \
+tar czf market-cli.tar.gz \
   --transform 's,^\./,market-cli/,' \
   --exclude='.git' --exclude='__pycache__' --exclude='.venv' ...
 ```
@@ -112,8 +119,10 @@ The workflow authenticates to GCP using the `GCS_STG_WRITER_KEY` secret and uplo
 
 | File | Destination | Purpose |
 |------|-------------|---------|
-| `market-cli-latest.tar.gz` | Bucket root | Always points to the latest build |
-| `market-cli.tar.gz` | `/{CLI_VERSION}/` | Version-pinned release |
+| `market-cli.tar.gz` | `/releases/latest/` | Always points to the latest build |
+| `market-cli.tar.gz` | `/releases/{CLI_VERSION}/` | Version-pinned release |
+| `market-cli.tar.gz.sha256` | `/releases/latest/` and `/releases/{CLI_VERSION}/` | Checksum files |
+| `{CLI_VERSION}.sha256` | `/checksums/` | Aggregate checksum manifest |
 | `install.sh` | Bucket root | Remote installer entry point |
 
 ### Download & Extract Phase
@@ -141,11 +150,12 @@ The main script (`install.sh`) handles:
 
 ## Versioning
 
-Releases follow the tag format `cli-v{major}.{minor}.{patch}` (e.g., `cli-v1.0.0`).
+Releases follow the tag format `market-cli-v{major}.{minor}.{patch}` (e.g., `market-cli-v1.0.0`).
 
-- **Tagged builds** → `/{CLI_VERSION}/market-cli.tar.gz`
-- **Dev builds** → `/dev-{short-sha}/market-cli.tar.gz`
-- **Latest** → always updated at root as `market-cli-latest.tar.gz`
+- **Tagged builds** → `/releases/{CLI_VERSION}/market-cli.tar.gz`
+- **Dev builds** → `/releases/dev-{short-sha}/market-cli.tar.gz`
+- **Latest** → always updated at `/releases/latest/market-cli.tar.gz`
+- **Checksums** → `/checksums/{CLI_VERSION}.sha256`
 
 ## Key Files
 
@@ -155,7 +165,7 @@ Releases follow the tag format `cli-v{major}.{minor}.{patch}` (e.g., `cli-v1.0.0
 | `scripts/install-remote.sh` | Remote cURL installer — downloads tarball from GCS then calls `install.sh` |
 | `scripts/build-installer.sh` | Builds the self-extracting `market-installer.sh` for offline use |
 | `scripts/upload-gcs.sh` | Manual upload script for pushing artifacts to GCS |
-| `.github/workflows/release-cli.yml` | CI/CD workflow triggered by `cli-v*` tags or manual dispatch |
+| `.github/workflows/release-cli.yml` | CI/CD workflow triggered by `market-cli-v*` tags or manual dispatch |
 | `Dockerfile.installer-test` | Docker image for testing the installer in a clean environment |
 
 ## Environment Variables
@@ -169,7 +179,7 @@ Releases follow the tag format `cli-v{major}.{minor}.{patch}` (e.g., `cli-v1.0.0
 
 ## Creating a Dev Build
 
-Dev builds are created by triggering the CI/CD workflow manually (without a `cli-v*` tag). The version will be `dev-{short-sha}`.
+Dev builds are created by triggering the CI/CD workflow manually (without a `market-cli-v*` tag). The version will be `dev-{short-sha}`.
 
 **GitHub UI**: Go to Actions → "Release Market CLI" → "Run workflow".
 
@@ -179,7 +189,7 @@ Dev builds are created by triggering the CI/CD workflow manually (without a `cli
 gh workflow run release-cli.yml
 ```
 
-The tarball is uploaded to `/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
+The tarball is uploaded to `/releases/dev-{sha}/market-cli.tar.gz` in the GCS bucket and can be installed with:
 
 ```bash
 curl -sL https://storage.googleapis.com/ww-migration-installer-stg/install.sh -o install.sh

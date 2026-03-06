@@ -10,15 +10,15 @@ set -euo pipefail
 #   - gcloud CLI authenticated with access to the bucket
 #
 # Uploads:
-#   gs://ww-migration-installer-stg/install.sh             (curl installer)
-#   gs://ww-migration-installer-stg/market-cli-latest.tar.gz (tarball)
+#   gs://ww-migration-installer-stg/install.sh                       (curl installer)
+#   gs://ww-migration-installer-stg/releases/latest/market-cli.tar.gz (tarball)
 # ─────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 GCS_BUCKET="ww-migration-installer-stg"
-TARBALL_NAME="market-cli-latest.tar.gz"
+TARBALL_NAME="market-cli.tar.gz"
 
 info()  { printf '\033[1;34m[upload]\033[0m %s\n' "$*"; }
 ok()    { printf '\033[1;32m[upload]\033[0m %s\n' "$*"; }
@@ -65,10 +65,20 @@ tar czf "$TARBALL" \
 TARBALL_SIZE=$(wc -c < "$TARBALL" | tr -d ' ')
 ok "Tarball: $(( TARBALL_SIZE / 1024 )) KB"
 
+# ── Generate checksum ───────────────────────────────────────
+
+info "Generating checksum..."
+cd "$TMPDIR_BUILD"
+sha256sum "$TARBALL_NAME" > "${TARBALL_NAME}.sha256"
+ok "Checksum generated"
+
 # ── Upload to GCS ───────────────────────────────────────────
 
-info "Uploading tarball to gs://${GCS_BUCKET}/${TARBALL_NAME}..."
-gcloud storage cp "$TARBALL" "gs://${GCS_BUCKET}/${TARBALL_NAME}"
+info "Uploading tarball to gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}..."
+gcloud storage cp "$TARBALL" "gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}"
+
+info "Uploading checksum to gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}.sha256..."
+gcloud storage cp "${TARBALL}.sha256" "gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}.sha256"
 
 info "Uploading installer script to gs://${GCS_BUCKET}/install.sh..."
 gcloud storage cp "$SCRIPT_DIR/install-remote.sh" "gs://${GCS_BUCKET}/install.sh"
@@ -76,7 +86,9 @@ gcloud storage cp "$SCRIPT_DIR/install-remote.sh" "gs://${GCS_BUCKET}/install.sh
 # ── Make objects publicly readable ──────────────────────────
 
 info "Setting public read access..."
-gcloud storage objects update "gs://${GCS_BUCKET}/${TARBALL_NAME}" --add-acl-grant=entity=allUsers,role=READER 2>/dev/null || \
+gcloud storage objects update "gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}" --add-acl-grant=entity=allUsers,role=READER 2>/dev/null || \
+    info "Skipped ACL update (bucket may use uniform access). Ensure bucket-level public access is configured."
+gcloud storage objects update "gs://${GCS_BUCKET}/releases/latest/${TARBALL_NAME}.sha256" --add-acl-grant=entity=allUsers,role=READER 2>/dev/null || \
     info "Skipped ACL update (bucket may use uniform access). Ensure bucket-level public access is configured."
 gcloud storage objects update "gs://${GCS_BUCKET}/install.sh" --add-acl-grant=entity=allUsers,role=READER 2>/dev/null || \
     info "Skipped ACL update (bucket may use uniform access). Ensure bucket-level public access is configured."
