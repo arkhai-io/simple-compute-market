@@ -57,9 +57,7 @@ from core.agent.app.policy.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
-REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
-REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
@@ -363,17 +361,11 @@ async def execute_action(
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
                 counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                if not counterparty_url or not str(counterparty_url).strip():
-                    logger.warning(
-                        "[A2A] trust_compute_obligation_fulfillment: unresolved counterparty reference=%s",
-                        counterparty_ref,
+                if not counterparty_url:
+                    raise ValueError(
+                        f"trust_compute_obligation_fulfillment: cannot send arbitration result — "
+                        f"unresolved counterparty reference={counterparty_ref!r}"
                     )
-                    if REMOTE_AGENT_URL_OVERRIDE:
-                        counterparty_url = REMOTE_AGENT_URL_OVERRIDE
-                        logger.warning(
-                            "[A2A] trust_compute_obligation_fulfillment: using REMOTE_AGENT_URL_OVERRIDE fallback=%s",
-                            counterparty_url,
-                        )
                 try:
                     event = Event(
                         author=AGENT_ID,
@@ -474,32 +466,11 @@ async def execute_action(
 
 
 def connect_to_remote_agent(agent_url: str | None = None):
-    """Connect to a remote agent by URL.
-
-    Args:
-        agent_url: Agent URL (defaults to REMOTE_AGENT_URL_OVERRIDE for backward compatibility)
-
-    Warning:
-        If agent_url is None, falls back to REMOTE_AGENT_URL_OVERRIDE which may misroute
-        counter-offers in staging environments.
-    """
+    """Connect to a remote agent by URL."""
     if agent_url is None:
-        logger.warning(
-            "[A2A] No agent_url provided, falling back to REMOTE_AGENT_URL_OVERRIDE. "
-            "This may misroute messages in staging environments."
-        )
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("[A2A] Fallback call stack:\n%s", "".join(traceback.format_stack(limit=8)[:-1]))
-        agent_url = REMOTE_AGENT_URL_OVERRIDE
+        raise ValueError("[A2A] send_to_remote_agent called with no agent_url")
     resolved_agent_url = _coerce_agent_reference_to_url(agent_url)
-    if not resolved_agent_url:
-        logger.warning(
-            "[A2A] Invalid agent_url reference '%s'. Falling back to REMOTE_AGENT_URL_OVERRIDE=%s",
-            agent_url,
-            REMOTE_AGENT_URL_OVERRIDE,
-        )
-        resolved_agent_url = REMOTE_AGENT_URL_OVERRIDE
-    if not _is_http_url(resolved_agent_url):
+    if not resolved_agent_url or not _is_http_url(resolved_agent_url):
         raise ValueError(f"Unable to resolve valid remote agent URL from reference '{agent_url}'")
     agent_url = resolved_agent_url
     agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
@@ -764,14 +735,10 @@ async def counter_offer(
 
         # Validate that we have a valid agent URL for the counterparty
         if not their_agent_id:
-            logger.warning(
-                f"[ACTION] Order {params.order_id} missing 'order_maker' field. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
-            )
+            logger.warning(f"[ACTION] Order {params.order_id} missing 'order_maker' field.")
         elif not their_agent_id.startswith(("http://", "https://")):
             logger.warning(
-                f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
+                f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}"
             )
 
         # Determine our strategy by looking up our order (for internal policy use)
@@ -1359,7 +1326,6 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
     """Propagate an offer to the network using registry discovery.
     
     Queries the registry for matching orders and sends offers to discovered agents.
-    Falls back to REMOTE_AGENT_URL_OVERRIDE if registry discovery is disabled or fails.
     
     Args:
         ctx: Invocation context
@@ -1476,18 +1442,9 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
         elif result.get("status") == "no_delivery":
             return result
         elif result.get("status") == "error":
-            logger.warning(f"[REGISTRY] Registry discovery failed: {result.get('message')}, falling back to default")
+            raise RuntimeError(f"Registry discovery failed: {result.get('message')}")
         else:
-            logger.warning(f"[REGISTRY] Unexpected result status: {result.get('status')}, falling back to default")
-    
-    # Fallback to hard-coded remote agent URL (backward compatibility)
-    try:
-        logger.info(f"[A2A] Using fallback: sending to {REMOTE_AGENT_URL_OVERRIDE}")
-        result = await send_to_remote_agent(ctx, event)
-        return result
-    except Exception as e:
-        logger.error(f"[TOOL] Failed to make offer: {e}")
-        raise
+            raise RuntimeError(f"Registry discovery returned unexpected status: {result.get('status')}")
 
 
 def encode_compute_lease(

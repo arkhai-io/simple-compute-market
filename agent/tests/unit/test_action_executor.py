@@ -450,8 +450,8 @@ def test_coerce_agent_reference_to_url_host_port():
 
 
 @pytest.mark.asyncio
-async def test_execute_action_trust_falls_back_for_non_url_counterparty(monkeypatch):
-    """Trust fulfillment should fall back when counterparty ref is not a URL."""
+async def test_execute_action_trust_raises_for_non_url_counterparty(monkeypatch):
+    """Trust fulfillment should raise when counterparty ref cannot be resolved to a URL."""
     async def fake_arbitrate_compute_fulfillment(**_kwargs):
         return {
             "status": "trusted",
@@ -462,15 +462,7 @@ async def test_execute_action_trust_falls_back_for_non_url_counterparty(monkeypa
             "decisions": [{"decision": True, "tx_hash": "0xdead"}],
         }
 
-    captured: dict = {}
-
-    async def fake_send_to_remote_agent(_ctx, _event, agent_url=None):
-        captured["agent_url"] = agent_url
-        return None
-
     monkeypatch.setattr(action_executor, "arbitrate_compute_fulfillment", fake_arbitrate_compute_fulfillment)
-    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
-    monkeypatch.setattr(action_executor, "REMOTE_AGENT_URL_OVERRIDE", "http://fallback.example:9000")
 
     action = Action(
         action_type=ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT,
@@ -482,9 +474,8 @@ async def test_execute_action_trust_falls_back_for_non_url_counterparty(monkeypa
         timestamp=datetime.now(),
     )
 
-    await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
-
-    assert captured["agent_url"] == "http://fallback.example:9000"
+    with pytest.raises(ValueError, match="unresolved counterparty"):
+        await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
 
 
 # ---------------------------------------------------------------------------

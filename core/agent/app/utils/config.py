@@ -109,8 +109,6 @@ class Config:
     base_url_override_raw: str
     base_url_override: str
     port: int
-    remote_agent_port: int
-    remote_agent_url_override: str
     chain_rpc_url: str
     agent_priv_key: str
     agent_wallet_address: str
@@ -193,10 +191,6 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_get_int_env("PORT", 8000),
-        remote_agent_port=_get_int_env("REMOTE_AGENT_PORT", 8000),
-        remote_agent_url_override=os.getenv(
-            "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
-        ),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
