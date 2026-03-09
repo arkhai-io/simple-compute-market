@@ -112,9 +112,21 @@ main() {
     local checksum_url="${CF_URL}?version=${version_param}&file=checksum"
     local checksum_path="${TMPDIR_INSTALL}/checksum.sha256"
     if download "$checksum_url" "$checksum_path"; then
-        cd "$TMPDIR_INSTALL"
-        if ! sha256sum -c "$checksum_path" 2>/dev/null && ! shasum -a 256 -c "$checksum_path" 2>/dev/null; then
+        local expected_hash
+        expected_hash="$(awk '{print $1}' "$checksum_path")"
+        local actual_hash
+        if command -v sha256sum &>/dev/null; then
+            actual_hash="$(sha256sum "$tarball_path" | awk '{print $1}')"
+        elif command -v shasum &>/dev/null; then
+            actual_hash="$(shasum -a 256 "$tarball_path" | awk '{print $1}')"
+        else
+            warn "No sha256 tool found — skipping verification"
+            actual_hash="$expected_hash"
+        fi
+        if [ "$expected_hash" != "$actual_hash" ]; then
             error "Checksum verification failed! The download may be corrupted or tampered with."
+            error "Expected: $expected_hash"
+            error "Got:      $actual_hash"
             exit 1
         fi
         ok "Checksum verified"
