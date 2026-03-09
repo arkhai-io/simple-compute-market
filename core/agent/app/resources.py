@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 from core.agent.app.schema.pydantic_models import (
     ComputeResource,
@@ -12,11 +12,14 @@ from core.agent.app.utils.token_registry import TOKEN_REGISTRY
 
 
 class ResourceAdapter(Protocol):
-    """Adapter interface for mapping generic DB resources to domain resources."""
+    """Adapter interface for mapping between DB rows, network dicts, and domain schemas."""
 
-    resource_type: str
+    resource_type: Final[str]
+    domain_type: Final[type]
+    discriminator_key: Final[str]
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> Any:
+        """DB row -> Python schema."""
         ...
 
     def from_domain_resource(
@@ -26,6 +29,15 @@ class ResourceAdapter(Protocol):
         resource_id: str,
         state: str | None = None,
     ) -> dict[str, Any]:
+        """Python schema -> DB row."""
+        ...
+
+    def from_dict(self, data: dict[str, Any]) -> Any:
+        """Network dict (A2A) -> Python schema."""
+        ...
+
+    def to_dict(self, resource: Any) -> dict[str, Any]:
+        """Python schema -> network dict (A2A)."""
         ...
 
 
@@ -36,6 +48,8 @@ def _ensure_dict(value: Any) -> dict[str, Any]:
 @dataclass(frozen=True)
 class ComputeGpuResourceAdapter:
     resource_type: str = "compute.gpu"
+    domain_type: type = ComputeResource
+    discriminator_key: str = "gpu_model"
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> ComputeResource:
         attrs = _ensure_dict(db_resource.get("attributes"))
@@ -84,10 +98,18 @@ class ComputeGpuResourceAdapter:
             },
         }
 
+    def from_dict(self, data: dict[str, Any]) -> ComputeResource:
+        return ComputeResource(**data)
+
+    def to_dict(self, resource: ComputeResource) -> dict[str, Any]:
+        return {"resource_type": self.resource_type, **resource.model_dump()}
+
 
 @dataclass(frozen=True)
 class TokenErc20ResourceAdapter:
     resource_type: str = "token.erc20"
+    domain_type: type = TokenResource
+    discriminator_key: str = "token"
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> TokenResource:
         attrs = _ensure_dict(db_resource.get("attributes"))
@@ -133,16 +155,24 @@ class TokenErc20ResourceAdapter:
             },
         }
 
+    def from_dict(self, data: dict[str, Any]) -> TokenResource:
+        return TokenResource(**data)
 
-RESOURCE_ADAPTERS: dict[str, ResourceAdapter] = {}
+    def to_dict(self, resource: TokenResource) -> dict[str, Any]:
+        return {"resource_type": self.resource_type, **resource.model_dump()}
+
+
+_RESOURCE_TYPE_TO_ADAPTER: dict[str, ResourceAdapter] = {}
+_DOMAIN_TYPE_TO_ADAPTER: dict[type, ResourceAdapter] = {}
 
 
 def register_resource_adapter(adapter: ResourceAdapter) -> None:
-    RESOURCE_ADAPTERS[adapter.resource_type] = adapter
+    _RESOURCE_TYPE_TO_ADAPTER[adapter.resource_type] = adapter
+    _DOMAIN_TYPE_TO_ADAPTER[adapter.domain_type] = adapter
 
 
 def get_resource_adapter(resource_type: str) -> ResourceAdapter | None:
-    return RESOURCE_ADAPTERS.get(resource_type)
+    return _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
 
 
 def adapt_db_resource_to_domain_resource(db_resource: dict[str, Any]) -> Any:
@@ -161,21 +191,32 @@ def adapt_domain_resource_to_db_resource(
     resource_id: str,
     state: str | None = None,
 ) -> dict[str, Any]:
-    if isinstance(resource, ComputeResource):
-        adapter = get_resource_adapter("compute.gpu")
-        if adapter is None:
-            raise ValueError("Adapter not registered for compute.gpu")
-        return adapter.from_domain_resource(
-            resource, resource_id=resource_id, state=state
-        )
-    if isinstance(resource, TokenResource):
-        adapter = get_resource_adapter("token.erc20")
-        if adapter is None:
-            raise ValueError("Adapter not registered for token.erc20")
-        return adapter.from_domain_resource(
-            resource, resource_id=resource_id, state=state
-        )
-    raise ValueError(f"Unsupported domain resource type: {type(resource).__name__}")
+    adapter = _DOMAIN_TYPE_TO_ADAPTER.get(type(resource))
+    if adapter is None:
+        raise ValueError(f"Unsupported domain resource type: {type(resource).__name__}")
+    return adapter.from_domain_resource(resource, resource_id=resource_id, state=state)
+
+
+def parse_resource_from_dict(data: dict[str, Any]) -> Any:
+    """Parse a network dict (A2A payload) to a Python schema.
+
+    Prefers explicit ``resource_type`` field; falls back to discriminator_key
+    heuristics for backward compatibility.
+    """
+    resource_type = data.get("resource_type")
+    if isinstance(resource_type, str):
+        adapter = _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
+        if adapter is not None:
+            return adapter.from_dict(data)
+
+    # Fallback: heuristic matching via discriminator_key
+    for adapter in _RESOURCE_TYPE_TO_ADAPTER.values():
+        if adapter.discriminator_key in data:
+            return adapter.from_dict(data)
+
+    raise ValueError(
+        f"Cannot determine resource type from dict keys: {list(data.keys())}"
+    )
 
 
 # Register built-in adapters.
