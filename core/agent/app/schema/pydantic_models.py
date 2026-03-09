@@ -216,6 +216,10 @@ class MarketOrder(BaseModel):
         default=None,
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
+    oracle_address: str | None = Field(
+        default=None,
+        description="The oracle wallet address used for arbitration and escrow workflows",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -315,6 +319,7 @@ class MakeOfferEvent(DomainEvent):
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration_hours": order.duration_hours,
+                "oracle_address": order.oracle_address,
             },
         )
 
@@ -354,6 +359,7 @@ class AcceptOfferEvent(DomainEvent):
                 "duration_hours": order.duration_hours,
                 "escrow_uid": escrow_uid,
                 "ssh_public_key": ssh_public_key,
+                "oracle_address": order.oracle_address,
             },
         )
 

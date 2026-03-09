@@ -156,7 +156,8 @@ class SQLiteClient:
                   matched_offer_id TEXT,
                   maker_attestation TEXT,
                   taker_attestation TEXT,
-                  escrow_uid TEXT
+                  escrow_uid TEXT,
+                  oracle_address TEXT
                 )
                 """
             )
@@ -856,6 +857,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -877,9 +879,10 @@ class SQLiteClient:
                       matched_offer_id,
                       maker_attestation,
                       taker_attestation,
-                      escrow_uid
+                      escrow_uid,
+                      oracle_address
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -892,7 +895,8 @@ class SQLiteClient:
                       matched_offer_id=excluded.matched_offer_id,
                       maker_attestation=excluded.maker_attestation,
                       taker_attestation=excluded.taker_attestation,
-                      escrow_uid=excluded.escrow_uid
+                      escrow_uid=excluded.escrow_uid,
+                      oracle_address=excluded.oracle_address
                     """,
                     (
                         order_id,
@@ -909,6 +913,7 @@ class SQLiteClient:
                         maker_attestation,
                         taker_attestation,
                         escrow_uid,
+                        oracle_address,
                     ),
                 )
                 conn.commit()
@@ -933,6 +938,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -956,6 +962,7 @@ class SQLiteClient:
             add("maker_attestation", maker_attestation)
             add("taker_attestation", taker_attestation)
             add("escrow_uid", escrow_uid)
+            add("oracle_address", oracle_address)
 
             if not updates:
                 return
@@ -982,6 +989,7 @@ class SQLiteClient:
         fulfillment_resource: Any | None = None,
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         """
         Update order fields based on escrow_uid, when order_id is not available.
@@ -1001,6 +1009,7 @@ class SQLiteClient:
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("maker_attestation", maker_attestation)
             add("taker_attestation", taker_attestation)
+            add("oracle_address", oracle_address)
 
             if not updates:
                 return
