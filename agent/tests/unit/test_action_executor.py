@@ -1,5 +1,6 @@
 """Unit tests for action executor helpers."""
 
+import dataclasses
 import json
 import sqlite3
 from datetime import datetime
@@ -13,6 +14,7 @@ from core.agent.app.schema.pydantic_models import (
     ERC20TokenMetadata,
     EventType,
     GPUModel,
+    MarketOrder,
     Region,
     TokenResource,
 )
@@ -160,6 +162,7 @@ async def test_accept_offer_passes_duration_and_hourly_rate(monkeypatch):
         "offer_resource": _compute_resource().model_dump(mode="json"),
         "demand_resource": _token_rate(rate).model_dump(mode="json"),
         "duration_hours": duration_hours,
+        "oracle_address": "0xBuyerWallet",
     }
 
     async def fake_buy_compute_with_erc20(
@@ -337,6 +340,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
         "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
         "demand_resource": _compute_resource().model_dump(mode="json"),
         "duration_hours": 1,
+        "oracle_address": "0xBuyerWallet",
     }
 
     await action_executor.accept_offer(
@@ -481,3 +485,186 @@ async def test_execute_action_trust_falls_back_for_non_url_counterparty(monkeypa
     await action_executor.execute_action(action, alkahest_client=None, ctx=_FakeCtx())
 
     assert captured["agent_url"] == "http://fallback.example:9000"
+
+
+# ---------------------------------------------------------------------------
+# Oracle address lookup
+# ---------------------------------------------------------------------------
+
+BUYER_WALLET = "0xBuyerWallet000000000000000000000000000000"
+
+
+def test_create_order_deficit_sets_oracle_address(monkeypatch):
+    """Token-offering (deficit) maker stamps their wallet as oracle_address."""
+    monkeypatch.setattr(
+        action_executor,
+        "CONFIG",
+        dataclasses.replace(action_executor.CONFIG, agent_wallet_address=BUYER_WALLET),
+    )
+
+    result = action_executor.create_order(
+        gpu_model_str="H200",
+        sla=99.0,
+        region_str="California, US",
+        imbalance_type="deficit",
+    )
+
+    assert result is not None
+    assert result["oracle_address"] == BUYER_WALLET
+
+
+def test_create_order_surplus_oracle_address_is_none(monkeypatch):
+    """Compute-offering (surplus) maker leaves oracle_address unset."""
+    monkeypatch.setattr(
+        action_executor,
+        "CONFIG",
+        dataclasses.replace(action_executor.CONFIG, agent_wallet_address=BUYER_WALLET),
+    )
+
+    result = action_executor.create_order(
+        gpu_model_str="H200",
+        sla=99.0,
+        region_str="California, US",
+        imbalance_type="surplus",
+    )
+
+    assert result is not None
+    assert result["oracle_address"] is None
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_passes_oracle_address_to_escrow(monkeypatch):
+    """oracle_address on the order is forwarded to buy_compute_with_erc20."""
+    captured: dict = {}
+
+    async def fake_buy_compute_with_erc20(
+        compute_resource, token_resource, duration_hours, oracle_address, client
+    ):
+        captured["oracle_address"] = oracle_address
+        return {"log": {"uid": "escrow-abc"}}
+
+    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
+
+    order_dict = {
+        "order_id": "order-oracle-1",
+        "order_maker": "buyer",
+        "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
+        "demand_resource": _compute_resource().model_dump(mode="json"),
+        "duration_hours": 1,
+        "oracle_address": BUYER_WALLET,
+    }
+
+    await action_executor.accept_offer(
+        alkahest_client=_FakeClient({}),
+        ctx=None,
+        parameters={"order": order_dict},
+    )
+
+    assert captured["oracle_address"] == BUYER_WALLET
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_raises_without_oracle_address(monkeypatch):
+    """accept_offer raises ValueError when oracle_address is absent from the order."""
+    async def fake_buy_compute_with_erc20(**_kwargs):
+        return {"log": {"uid": "escrow-xyz"}}
+
+    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
+
+    order_dict = {
+        "order_id": "order-no-oracle",
+        "order_maker": "seller",
+        "offer_resource": _compute_resource().model_dump(mode="json"),
+        "demand_resource": _token_rate(1_000_000).model_dump(mode="json"),
+        "duration_hours": 1,
+        # oracle_address intentionally absent
+    }
+
+    with pytest.raises(ValueError, match="oracle_address is required"):
+        await action_executor.accept_offer(
+            alkahest_client=_FakeClient({}),
+            ctx=None,
+            parameters={"order": order_dict},
+        )
+
+
+@pytest.mark.asyncio
+async def test_accept_offer_persists_oracle_address_to_db(monkeypatch, tmp_path):
+    """Compute seller (taker) persists oracle_address to the local DB on acceptance."""
+    db_path = str(tmp_path / "agent.db")
+    sqlite_client = SQLiteClient(db_path=db_path)
+
+    async def fake_buy_compute_with_erc20(**_kwargs):
+        return {"log": {"uid": "escrow-persist-1"}}
+
+    class _DummyTxn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def cancel_competing(self, *_args, **_kwargs):
+            return None
+
+        async def mark_terminal(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
+    monkeypatch.setattr(action_executor, "NegotiationThreadTransaction", lambda *_a, **_kw: _DummyTxn())
+    monkeypatch.setattr(action_executor, "get_sqlite_client", lambda: sqlite_client)
+
+    async def fake_send_to_remote_agent(_ctx, _event, agent_url=None):
+        return None
+
+    monkeypatch.setattr(action_executor, "send_to_remote_agent", fake_send_to_remote_agent)
+
+    class _RegistryClient:
+        async def update_order(self, *_args, **_kwargs):
+            return {"ok": True}
+
+    monkeypatch.setattr(action_executor, "get_registry_client", lambda: _RegistryClient())
+
+    order_id = "taker-oracle-order-1"
+    await sqlite_client.upsert_order(
+        order_id=order_id,
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        offer_resource=_token_rate(1_000_000).model_dump(mode="json"),
+        demand_resource=_compute_resource().model_dump(mode="json"),
+        fulfillment_resource=None,
+        duration_hours=1,
+        order_maker="buyer",
+        order_taker=None,
+        matched_offer_id=None,
+        maker_attestation=None,
+        taker_attestation=None,
+        escrow_uid=None,
+    )
+
+    order_dict = {
+        "order_id": order_id,
+        "order_maker": "buyer",
+        "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
+        "demand_resource": _compute_resource().model_dump(mode="json"),
+        "duration_hours": 1,
+        "oracle_address": BUYER_WALLET,
+    }
+
+    await action_executor.accept_offer(
+        alkahest_client=_FakeClient({}),
+        ctx=_FakeCtx(),
+        parameters={"order": order_dict},
+    )
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT oracle_address FROM orders WHERE order_id=?", (order_id,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row[0] == BUYER_WALLET
