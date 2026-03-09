@@ -78,6 +78,9 @@ ENV FRP_SERVER_ADDR=""
 ENV FRP_DOMAIN=""
 ENV FRP_DASHBOARD_PASSWORD=""
 
+# SSH private key (base64-encoded or raw PEM). Written to ~/.ssh/id_ed25519 at startup.
+ENV SSH_PRIVATE_KEY=""
+
 # Authentication
 ENV ENABLE_AUTH=false
 ENV REGISTRY_URL=""
