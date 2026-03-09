@@ -5,7 +5,7 @@ set -euo pipefail
 INSTALL_DIR="${MARKET_INSTALL_DIR:-$HOME/.market}"
 BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
-MIN_PYTHON_MINOR=13
+MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
 
 # ── Color helpers ──────────────────────────────────────────────
@@ -30,7 +30,7 @@ check_python_version() {
     elif command -v python &>/dev/null; then
         python_cmd="python"
     else
-        error "Python 3.13+ is required but neither 'python3' nor 'python' was found."
+        error "Python 3.12+ is required but neither 'python3' nor 'python' was found."
         exit 1
     fi
 

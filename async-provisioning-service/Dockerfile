@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.4
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.10.0
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
-# TODO: Pin with SHA256 digest for production: FROM python:3.13-slim@sha256:...
+# TODO: Pin with SHA256 digest for production: FROM python:3.12-slim@sha256:...
 FROM python:${PYTHON_VERSION}-slim
 
 # System dependencies (SSH for Ansible)
@@ -32,8 +32,8 @@ COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /
 RUN uv pip install ansible-core && \
     uv run ansible-galaxy collection install -r /tmp/requirements.yml && \
     rm -rf /tmp/* /home/appuser/.cache && \
-    find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "*.pyc" -delete && \
-    find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    find /usr/local/lib/python${PYTHON_VERSION:-3.12} -name "*.pyc" -delete && \
+    find /usr/local/lib/python${PYTHON_VERSION:-3.12} -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Application code
 COPY --chown=appuser:appuser async-provisioning-service/src ./src

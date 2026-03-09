@@ -34,7 +34,7 @@ uv pip install -e .
 
 - **OS**: macOS or Linux
 - **Architecture**: x86_64 or arm64
-- **Python**: 3.13+
+- **Python**: 3.12+
 - **Tools**: curl or wget, make, git
 
 ## Overall Flow
@@ -88,7 +88,7 @@ uv pip install -e .
 │                      install.sh                                 │
 │                                                                 │
 │  1. Detect platform (macOS/Linux) and arch (x86_64/arm64)       │
-│  2. Validate Python 3.13+ is installed                          │
+│  2. Validate Python 3.12+ is installed                          │
 │  3. Install/verify uv v0.8.13                                   │
 │  4. Copy project files to ~/.market                             │
 │  5. Create Python venv in cli/.venv                             │
@@ -137,7 +137,7 @@ When a user runs the remote installer (`scripts/install-remote.sh`):
 The main script (`install.sh`) handles:
 
 1. **Platform detection** — OS (macOS/Linux) and architecture (x86_64/arm64)
-2. **Python validation** — Ensures Python 3.13+ is available
+2. **Python validation** — Ensures Python 3.12+ is available
 3. **uv installation** — Installs or verifies `uv` v0.8.13
 4. **File copy** — Copies project to `$MARKET_INSTALL_DIR` (default: `~/.market`)
 5. **Virtual environment** — Creates a venv in `cli/.venv`

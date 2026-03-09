@@ -18,7 +18,7 @@ on:
 env:
   DOCKER_REGISTRY_ORG: whitewidget
   IMAGE_NAME: arkhai-async-provisioning-service
-  PYTHON_VERSION: "3.13"
+  PYTHON_VERSION: "3.12"
   UV_VERSION: "0.10.0"
 
 jobs:

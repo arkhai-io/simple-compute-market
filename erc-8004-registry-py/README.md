@@ -47,7 +47,7 @@ Where:
 
 ## Prerequisites
 
-- Python 3.13+
+- Python 3.12+
 - uv or pip
 - Database: SQLite (dev) or PostgreSQL (prod)
 

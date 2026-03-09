@@ -12,7 +12,7 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 ## Prerequisites
 
 - make, curl, git
-- Python 3.13+ with `uv`
+- Python 3.12+ with `uv`
 - Node.js 12+ with npm
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
