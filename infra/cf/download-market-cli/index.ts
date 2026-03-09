@@ -41,6 +41,7 @@ const downloadMarketCli: HttpFunction = async (req, res) => {
     expires: Date.now() + SIGNED_URL_EXPIRY_MS,
   });
 
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
   res.redirect(301, signedUrl);
 };
 
