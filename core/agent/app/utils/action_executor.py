@@ -63,12 +63,6 @@ REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
-# TODO: Make this a lookup!
-# LOCAL ANVIL
-DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-# BASE SEPOLIA
-# DEMO_ORACLE_ADDRESS = "0x8C523BC3EA8AC363E0b58Fd6cefff706D7885B3e"
-
 logger = logging.getLogger(__name__)
 
 
@@ -99,10 +93,6 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
         return [_serialize_decision(d) for d in decisions]
     return [_serialize_decision(decisions)]
 
-
-def _resolve_oracle_address(oracle_address: str | None) -> str:
-    """Return the oracle signer address."""
-    return oracle_address or DEMO_ORACLE_ADDRESS
 
 
 def _is_http_url(value: str | None) -> bool:
@@ -247,6 +237,7 @@ async def execute_action(
                         matched_offer_id=parameters.get("matched_offer_id"),
                         maker_attestation=order.get("maker_attestation"),
                         taker_attestation=order.get("taker_attestation"),
+                        oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
                     )
                 except Exception as exc:
@@ -293,7 +284,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
+                oracle_address=parameters.get("oracle_address"),
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
@@ -348,7 +339,7 @@ async def execute_action(
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
+                oracle_address=parameters.get("oracle_address"),
                 escrow_uid=parameters.get("escrow_uid"),
             )
             logger.info(f"[ALKAHEST]: {result}")
@@ -888,8 +879,12 @@ async def accept_offer(
     escrow_receipt = None
     
     if alkahest_client:
+        oracle_address = order_dict.get("oracle_address")
+        if not oracle_address:
+            raise ValueError("oracle_address is required on the order to create an escrow")
+
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-        
+
         # Retry logic with exponential backoff
         max_retries = 3
         base_delay = 1.0  # seconds
@@ -901,7 +896,7 @@ async def accept_offer(
                     compute_resource=compute_resource,
                     token_resource=token_resource,
                     duration_hours=order_dict.get("duration_hours", 1),
-                    oracle_address=DEMO_ORACLE_ADDRESS,
+                    oracle_address=oracle_address,
                     client=alkahest_client,
                 )
                 escrow_uid = escrow_receipt.get("log", {}).get("uid")
@@ -1007,6 +1002,7 @@ async def accept_offer(
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
+                oracle_address=order_dict.get("oracle_address"),
             )
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
@@ -1136,6 +1132,9 @@ def create_order(
                 amount=9 * 10**settlement_token.decimals,
             )
     
+    # Token offerer (deficit) sets their own wallet as oracle so both sides agree on the oracle.
+    oracle_address = CONFIG.agent_wallet_address if imbalance_type == "deficit" else None
+
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
         order_maker=BASE_URL_OVERRIDE,
@@ -1144,7 +1143,8 @@ def create_order(
         demand_resource=demand_resource,
         duration_hours=duration_hours,
         maker_attestation=None,
-        taker_attestation=None
+        taker_attestation=None,
+        oracle_address=oracle_address,
     )
 
     order_dict = order.model_dump(mode='json')
@@ -1661,7 +1661,6 @@ async def fulfill_compute_obligation(
     
     When the maker fulfills, this sets maker_attestation in the registry.
     """
-    oracle_address = _resolve_oracle_address(oracle_address)
     fulfillment_uid = None
     maker_attestation = None
     duration_hours = 1
@@ -1844,7 +1843,6 @@ async def arbitrate_compute_fulfillment(
     oracle_address: str | None,
     escrow_uid: str | None = None,
 ):
-    oracle_address = _resolve_oracle_address(oracle_address)
     logger.info(f"[ALKAHEST] Oracle address: {oracle_address}")
     
     async def decision_function(attestation, demand):
