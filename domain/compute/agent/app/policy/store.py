@@ -162,6 +162,7 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "order": context.event.order.model_dump(mode="json"),
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
+            "oracle_address": context.event.order.oracle_address,
         },
     )
 

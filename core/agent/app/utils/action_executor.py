@@ -284,7 +284,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address"),
+                oracle_address=parameters.get("oracle_address") or (order if isinstance(order, dict) else {}).get("oracle_address"),
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
@@ -336,10 +336,12 @@ async def execute_action(
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
+            # The agent trusting a fulfillment is always the oracle (token buyer).
+            oracle_address = parameters.get("oracle_address") or CONFIG.agent_wallet_address
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=parameters.get("oracle_address"),
+                oracle_address=oracle_address,
                 escrow_uid=parameters.get("escrow_uid"),
             )
             logger.info(f"[ALKAHEST]: {result}")
@@ -877,11 +879,9 @@ async def accept_offer(
     # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
     escrow_uid = None
     escrow_receipt = None
-    
+
     if alkahest_client:
-        oracle_address = order_dict.get("oracle_address")
-        if not oracle_address:
-            raise ValueError("oracle_address is required on the order to create an escrow")
+        oracle_address = CONFIG.agent_wallet_address
 
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
 
@@ -929,6 +929,7 @@ async def accept_offer(
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
     order_dict["taker_attestation"] = escrow_uid
+    order_dict["oracle_address"] = oracle_address
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
@@ -1002,7 +1003,7 @@ async def accept_offer(
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
-                oracle_address=order_dict.get("oracle_address"),
+                oracle_address=oracle_address,
             )
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
@@ -1132,8 +1133,11 @@ def create_order(
                 amount=9 * 10**settlement_token.decimals,
             )
     
-    # Token offerer (deficit) sets their own wallet as oracle so both sides agree on the oracle.
-    oracle_address = CONFIG.agent_wallet_address if imbalance_type == "deficit" else None
+    # The token-offering side is always the oracle/buyer.
+    offering_tokens = isinstance(offer_resource, TokenResource) or (
+        isinstance(offer_resource, dict) and "token" in offer_resource
+    )
+    oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
 
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
