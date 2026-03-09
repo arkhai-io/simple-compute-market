@@ -1,0 +1,172 @@
+"""Unit tests for the resource adapter registry (resources.py)."""
+
+import pytest
+
+from core.agent.app.schema.pydantic_models import (
+    ComputeResource,
+    ERC20TokenMetadata,
+    GPUModel,
+    Region,
+    TokenResource,
+)
+from core.agent.app.resources import (
+    adapt_db_resource_to_domain_resource,
+    adapt_domain_resource_to_db_resource,
+    parse_resource_from_dict,
+)
+
+USDT = ERC20TokenMetadata(
+    symbol="USDT",
+    contract_address="0xdac17f958d2ee523a2206206994597c13d831ec7",
+    decimals=6,
+)
+
+COMPUTE = ComputeResource(
+    gpu_model=GPUModel.H200,
+    quantity=2,
+    sla=99.0,
+    region=Region.CALIFORNIA_US,
+)
+
+TOKEN = TokenResource(token=USDT, amount=5_000_000)
+
+
+# ---------------------------------------------------------------------------
+# parse_resource_from_dict
+# ---------------------------------------------------------------------------
+
+class TestParseResourceFromDict:
+    def test_compute_via_resource_type(self):
+        data = {
+            "resource_type": "compute.gpu",
+            "gpu_model": "H200",
+            "quantity": 2,
+            "sla": 99.0,
+            "region": "California, US",
+        }
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, ComputeResource)
+        assert result.gpu_model == GPUModel.H200
+        assert result.quantity == 2
+
+    def test_compute_via_discriminator_key_fallback(self):
+        """No resource_type in payload — falls back to gpu_model discriminator."""
+        data = {"gpu_model": "H200", "quantity": 1, "sla": 90.0, "region": "California, US"}
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, ComputeResource)
+
+    def test_token_via_resource_type(self):
+        data = {
+            "resource_type": "token.erc20",
+            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
+            "amount": 5_000_000,
+        }
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, TokenResource)
+        assert result.token.symbol == "USDT"
+        assert result.amount == 5_000_000
+
+    def test_token_via_discriminator_key_fallback(self):
+        """No resource_type — falls back to token discriminator."""
+        data = {
+            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
+            "amount": 1_000_000,
+        }
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, TokenResource)
+
+    def test_non_dict_passes_through(self):
+        assert parse_resource_from_dict("raw_string") == "raw_string"
+        assert parse_resource_from_dict(42) == 42
+        assert parse_resource_from_dict(None) is None
+
+    def test_existing_domain_instance_passes_through(self):
+        assert parse_resource_from_dict(COMPUTE) is COMPUTE
+        assert parse_resource_from_dict(TOKEN) is TOKEN
+
+    def test_unknown_dict_raises(self):
+        with pytest.raises(ValueError, match="Cannot determine resource type"):
+            parse_resource_from_dict({"unknown_key": "value"})
+
+
+# ---------------------------------------------------------------------------
+# TokenErc20ResourceAdapter.from_dict — token normalization
+# ---------------------------------------------------------------------------
+
+class TestTokenFromDict:
+    def test_full_token_dict(self):
+        data = {
+            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
+            "amount": 1_000_000,
+        }
+        result = parse_resource_from_dict(data)
+        assert result.token.symbol == "USDT"
+        assert result.token.decimals == 6
+
+    def test_token_string_symbol_resolves_via_registry(self):
+        data = {"token": "USDT", "amount": 500_000}
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, TokenResource)
+        assert result.token.symbol == "USDT"
+
+    def test_token_partial_dict_symbol_only(self):
+        data = {"token": {"symbol": "USDT"}, "amount": 1_000_000}
+        result = parse_resource_from_dict(data)
+        assert isinstance(result, TokenResource)
+        assert result.token.symbol == "USDT"
+
+    def test_token_metadata_instance_passes_through(self):
+        data = {"token": USDT, "amount": 1_000_000}
+        result = parse_resource_from_dict(data)
+        assert result.token is USDT
+
+    def test_unknown_symbol_raises(self):
+        with pytest.raises(Exception):
+            parse_resource_from_dict({"token": "NOT_A_REAL_TOKEN", "amount": 1})
+
+    def test_missing_amount_raises(self):
+        with pytest.raises((KeyError, ValueError)):
+            parse_resource_from_dict({"token": "USDT"})
+
+
+# ---------------------------------------------------------------------------
+# DB round-trip: from_domain_resource / to_domain_resource
+# ---------------------------------------------------------------------------
+
+class TestDbRoundTrip:
+    def test_compute_round_trip(self):
+        db_row = adapt_domain_resource_to_db_resource(
+            COMPUTE, resource_id="res-1", state="available"
+        )
+        assert db_row["resource_type"] == "compute.gpu"
+        assert db_row["resource_id"] == "res-1"
+        assert db_row["state"] == "available"
+        assert db_row["attributes"]["gpu_model"] == "H200"
+
+        restored = adapt_db_resource_to_domain_resource(db_row)
+        assert isinstance(restored, ComputeResource)
+        assert restored.gpu_model == COMPUTE.gpu_model
+        assert restored.quantity == COMPUTE.quantity
+        assert restored.sla == COMPUTE.sla
+        assert restored.region == COMPUTE.region
+
+    def test_token_round_trip(self):
+        db_row = adapt_domain_resource_to_db_resource(
+            TOKEN, resource_id="res-2", state="locked"
+        )
+        assert db_row["resource_type"] == "token.erc20"
+        assert db_row["resource_id"] == "res-2"
+        assert db_row["attributes"]["symbol"] == "USDT"
+
+        restored = adapt_db_resource_to_domain_resource(db_row)
+        assert isinstance(restored, TokenResource)
+        assert restored.token.symbol == TOKEN.token.symbol
+        assert restored.amount == TOKEN.amount
+
+    def test_unsupported_domain_type_raises(self):
+        with pytest.raises(ValueError, match="Unsupported domain resource type"):
+            adapt_domain_resource_to_db_resource(object(), resource_id="x")
+
+    def test_missing_resource_type_raises(self):
+        with pytest.raises(ValueError, match="missing resource_type"):
+            adapt_db_resource_to_domain_resource({"value": 1})

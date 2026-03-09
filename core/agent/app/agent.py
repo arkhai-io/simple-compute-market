@@ -73,10 +73,10 @@ from core.agent.app.schema.pydantic_models import (
     NegotiationEvent,
     ComputeResource,
     TokenResource,
-    ComputeDomainResource,
     OrderCreateEvent,
     OrderCloseEvent,
 )
+from core.agent.app.resources import parse_resource_from_dict
 from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
@@ -1059,8 +1059,8 @@ async def _run_create_order_flow(request: Request) -> dict:
         return normalized
 
     try:
-        offer_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(offer_data))
-        demand_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(demand_data))
+        offer_resource = parse_resource_from_dict(normalize_token_resource(offer_data))
+        demand_resource = parse_resource_from_dict(normalize_token_resource(demand_data))
     except Exception as e:
         raise ValueError(f"Invalid offer/demand resource: {e}") from e
 

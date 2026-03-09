@@ -40,8 +40,8 @@ from core.agent.app.schema.pydantic_models import (
     MarketOrder,
     Region,
     TokenResource,
-    ComputeDomainResource,
 )
+from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
 from core.agent.app.utils.alkahest_config import get_trusted_oracle_arbiter
@@ -192,8 +192,8 @@ async def execute_action(
             created_order_id: str | None = None
             if offer_param is not None and demand_param is not None:
                 try:
-                    offer_resource = ComputeDomainResource.parse_from_dict(offer_param)
-                    demand_resource = ComputeDomainResource.parse_from_dict(demand_param)
+                    offer_resource = parse_resource_from_dict(offer_param)
+                    demand_resource = parse_resource_from_dict(demand_param)
                 except Exception as exc:
                     raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
 

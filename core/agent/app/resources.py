@@ -156,7 +156,23 @@ class TokenErc20ResourceAdapter:
         }
 
     def from_dict(self, data: dict[str, Any]) -> TokenResource:
-        return TokenResource(**data)
+        token_value = data.get("token")
+        if isinstance(token_value, ERC20TokenMetadata):
+            token_meta = token_value
+        elif isinstance(token_value, dict):
+            if all(k in token_value for k in ("symbol", "contract_address", "decimals")):
+                token_meta = ERC20TokenMetadata(**token_value)
+            elif "symbol" in token_value:
+                token_meta = TOKEN_REGISTRY.require(token_value["symbol"])
+            elif "contract_address" in token_value:
+                token_meta = TOKEN_REGISTRY.require(token_value["contract_address"])
+            else:
+                raise ValueError("Token dict must include symbol, contract_address, or decimals")
+        elif isinstance(token_value, str):
+            token_meta = TOKEN_REGISTRY.require(token_value)
+        else:
+            raise ValueError(f"Unsupported token value type: {type(token_value).__name__}")
+        return TokenResource(token=token_meta, amount=int(data["amount"]))
 
     def to_dict(self, resource: TokenResource) -> dict[str, Any]:
         return {"resource_type": self.resource_type, **resource.model_dump()}
@@ -197,12 +213,16 @@ def adapt_domain_resource_to_db_resource(
     return adapter.from_domain_resource(resource, resource_id=resource_id, state=state)
 
 
-def parse_resource_from_dict(data: dict[str, Any]) -> Any:
+def parse_resource_from_dict(data: Any) -> Any:
     """Parse a network dict (A2A payload) to a Python schema.
 
-    Prefers explicit ``resource_type`` field; falls back to discriminator_key
-    heuristics for backward compatibility.
+    - Non-dict values (including existing domain instances) are returned as-is.
+    - Prefers explicit ``resource_type`` field; falls back to discriminator_key
+      heuristics for backward compatibility.
     """
+    if not isinstance(data, dict):
+        return data
+
     resource_type = data.get("resource_type")
     if isinstance(resource_type, str):
         adapter = _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
