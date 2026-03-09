@@ -123,6 +123,10 @@ class ComputeResource(ComputeDomainResource):
     Not all resources in the resource portfolio are on sale
     """
 
+    resource_id: str | None = Field(
+        default=None,
+        description="Canonical DB resource identifier for this compute resource",
+    )
     gpu_model: GPUModel = Field(
         description="The model of the GPU (H200, Tesla V100, RTX 5080)"
     )
@@ -130,6 +134,10 @@ class ComputeResource(ComputeDomainResource):
     sla: float = Field(description="The SLA of the GPU")
     region: Region = Field(
         description="The region of the GPU (California, US, Tokyo, JP, etc.)"
+    )
+    vm_host: str | None = Field(
+        default=None,
+        description="Provisioning host identifier for VM placement (e.g., vm1)",
     )
 
 
@@ -262,8 +270,12 @@ class OrderCreateEvent(DomainEvent):
     """Event triggered when a local client requests order creation."""
 
     event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: ComputeDomainResource = Field(description="Offered resource (compute or token)")
-    demand: ComputeDomainResource = Field(description="Demanded resource (compute or token)")
+    offer: Union[ComputeResource, TokenResource] = Field(
+        description="Offered resource (compute or token)"
+    )
+    demand: Union[ComputeResource, TokenResource] = Field(
+        description="Demanded resource (compute or token)"
+    )
     duration_hours: int = Field(default=1, description="Duration of the order in hours")
 
     @model_validator(mode="before")

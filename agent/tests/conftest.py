@@ -1,7 +1,7 @@
 """Test configuration for agent tests.
 
 Pre-registers the ``app`` package so that imports like
-``from app.policies.arkhai_common import ...`` work without triggering
+``from domain.compute.agent.app.policy.arkhai_common import ...`` work without triggering
 ``app/__init__.py`` (which pulls in ``core.agent.app.agent`` and its full
 dependency chain — incompatible with the agent venv's Python 3.10).
 """

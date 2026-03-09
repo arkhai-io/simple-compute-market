@@ -11,7 +11,7 @@ except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     DecisionContext,
@@ -20,14 +20,14 @@ from app.schema.pydantic_models import (
     TokenResource,
     ComputeResourcePortfolio,
 )
-from app.utils.validation import extract_resources_from_make_offer_event
+from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 from core.agent.app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 
 # Default model path - can be overridden via environment variable
-_DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "policies" / "models" / "torch_market_seller.ts"
+_DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "torch_market_seller.ts"
 _loaded_model: Optional[Any] = None
 
 

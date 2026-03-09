@@ -128,6 +128,21 @@ setup-dev-env:
 # Testing & Code Quality
 # ==============================================================================
 
+# Import resources from CSV into Agent DB.
+# Usage: make import-resources CSV=path/to/resources.csv [ENV_FILE=.env] [DB_PATH=/tmp/agent.db] [DRY_RUN=true]
+import-resources:
+	@bash -c 'set -e; \
+	if [ -z "$$CSV" ]; then \
+		echo "ERROR: CSV is required. Usage: make import-resources CSV=path/to/resources.csv [ENV_FILE=.env] [DB_PATH=...] [DRY_RUN=true]" >&2; \
+		exit 1; \
+	fi; \
+	ENV_FILE="$${ENV_FILE:-.env}"; \
+	DB_ARG=""; \
+	DRY_ARG=""; \
+	if [ -n "$$DB_PATH" ]; then DB_ARG="--db-path $$DB_PATH"; fi; \
+	if [ "$${DRY_RUN:-false}" = "true" ]; then DRY_ARG="--dry-run"; fi; \
+	uv --project .. run python scripts/import_resources_csv.py --csv "$$CSV" --env-file "$$ENV_FILE" $$DB_ARG $$DRY_ARG'
+
 # Run unit and integration tests
 test:
 	uv --project .. run pytest tests/unit && uv --project .. run pytest tests/integration
@@ -298,7 +313,7 @@ download-models:
 
 # Create a GitHub release with trained model artifacts.
 # Usage: make release-models VERSION=model-v0.1.0 [MODELS_DIR=path/to/models]
-MODELS_DIR ?= ../../agent/app/policies/models
+MODELS_DIR ?= ../../domain/compute/agent/app/policy/models
 release-models:
 	@if [ -z "$${VERSION:-}" ]; then echo "ERROR: VERSION is required. Usage: make release-models VERSION=model-v0.1.0"; exit 1; fi; \
 	MODELS_DIR="$(MODELS_DIR)"; \

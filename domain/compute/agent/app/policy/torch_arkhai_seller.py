@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from app.policies.arkhai_common import (
+from domain.compute.agent.app.policy.arkhai_common import (
     build_action_parameters,
     build_arkhai_observation,
     detect_agent_role,
@@ -22,7 +22,7 @@ from app.policies.arkhai_common import (
     torch,
 )
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,
@@ -31,7 +31,7 @@ from app.schema.pydantic_models import (
     MakeOfferEvent,
 )
 from core.agent.app.utils.config import CONFIG
-from app.utils.validation import extract_resources_from_make_offer_event
+from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 

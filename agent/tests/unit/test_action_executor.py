@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action,
     ActionType,
     ComputeResource,
@@ -243,7 +243,7 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_provision_machine_raises_on_missing_connection_info(monkeypatch):
     """Ensure missing connection info raises a RuntimeError."""
-    def fake_run_vm_provisioning_playbook(_ssh_public_key):
+    def fake_run_vm_provisioning_playbook(_ssh_public_key, *, vm_host="vm1", vm_target="tenant-vm"):
         return None
 
     monkeypatch.setattr(action_executor, "run_vm_provisioning_playbook", fake_run_vm_provisioning_playbook)
@@ -358,10 +358,20 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
     db_path = str(tmp_path / "agent.db")
     sqlite_client = SQLiteClient(db_path=db_path)
 
-    async def fake_provision_machine(_ssh_public_key: str) -> str:
+    async def fake_provision_machine(
+        _ssh_public_key: str,
+        *,
+        vm_host: str = "vm1",
+        vm_target: str = "tenant-vm",
+    ) -> str:
         return "user@host.example.net"
 
-    def fake_schedule_vm_shutdown(_lease_end_utc: str) -> None:
+    def fake_schedule_vm_shutdown(
+        _lease_end_utc: str,
+        *,
+        vm_host: str = "vm1",
+        vm_target: str = "tenant-vm",
+    ) -> None:
         return None
 
     monkeypatch.setattr(action_executor, "provision_machine", fake_provision_machine)
@@ -399,6 +409,19 @@ async def test_fulfill_compute_obligation_updates_seller_order(monkeypatch, tmp_
         maker_attestation=None,
         taker_attestation=None,
         escrow_uid=None,
+    )
+
+    # Seed a reservable compute resource for provisioning flow.
+    await sqlite_client.upsert_resource(
+        resource_id="resource-compute-1",
+        resource_type="compute.gpu",
+        resource_subtype="h200",
+        state="available",
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "vm1",
+        },
     )
 
     await action_executor.fulfill_compute_obligation(

@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import gymnasium as gym
 
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,

@@ -71,15 +71,12 @@ from core.agent.app.schema.pydantic_models import (
     ResourceImbalanceEvent,
     ResourceAlertRequest,
     NegotiationEvent,
-    GPUModel,
-    Region,
     ComputeResource,
-    ComputeResourcePortfolio,
     TokenResource,
-    ComputeDomainResource,
     OrderCreateEvent,
     OrderCloseEvent,
 )
+from core.agent.app.resources import parse_resource_from_dict
 from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
@@ -491,24 +488,6 @@ class TraderAgent(BaseAgent):
                     zerotier_network,
                 )
 
-        # In-memory stand-in for compute nodes under the Agent's control.
-        self.resource_portfolio =  ComputeResourcePortfolio(
-            resources=[
-                ComputeResource(
-                    gpu_model=GPUModel.H200,
-                    quantity=3,
-                    sla=90.0,
-                    region=Region.CALIFORNIA_US,
-                ),
-                ComputeResource(
-                    gpu_model=GPUModel.TESLA_V100,
-                    quantity=2,
-                    sla=99.9,
-                    region=Region.TOKYO_JP,
-                ),
-            ]
-        )
-        
         # Initialize SQLite client (shared for policies and decisions)
         self._sqlite_client = SQLiteClient(db_path=AGENT_DB_PATH)
         
@@ -570,7 +549,8 @@ class TraderAgent(BaseAgent):
         Returns:
             A dictionary representing the current portfolio stock.
         """
-        return self.resource_portfolio.model_dump()
+        resources = await self._sqlite_client.list_resources()
+        return {"resources": resources}
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
         """Build domain context from ADK Event, converting to DomainEvent.
@@ -581,8 +561,6 @@ class TraderAgent(BaseAgent):
         if isinstance(event, DomainEvent):
             domain_event = event
         else:
-            resource_portfolio = await self.get_resource_portfolio()
-            
             # Extract domain event payload
             # A2A messages come in as text
             content = _extract_content_payload(event.content)
@@ -1081,8 +1059,8 @@ async def _run_create_order_flow(request: Request) -> dict:
         return normalized
 
     try:
-        offer_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(offer_data))
-        demand_resource = ComputeDomainResource.parse_from_dict(normalize_token_resource(demand_data))
+        offer_resource = parse_resource_from_dict(normalize_token_resource(offer_data))
+        demand_resource = parse_resource_from_dict(normalize_token_resource(demand_data))
     except Exception as e:
         raise ValueError(f"Invalid offer/demand resource: {e}") from e
 
@@ -1165,7 +1143,7 @@ async def _run_create_order_flow(request: Request) -> dict:
     order_id = _extract_order_id(outcome)
 
     response_payload = {
-        "status": "created",
+        "status": "created" if order_id else "no_action",
         "event_id": event_id,
         "order_request": order_create_event.model_dump(mode="json"),
         "root_agent_response": final_response,
