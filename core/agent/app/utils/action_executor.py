@@ -936,11 +936,6 @@ async def accept_offer(
     their_order_id = parameters.get("their_order_id")
     negotiation_id = parameters.get("negotiation_id")
 
-    # TODO(core-refactor): Order ID ownership/shape will be revised when order schemas are refactored.
-    # For now, default to payload order_id so local status transitions still apply.
-    if not our_order_id and isinstance(order_id, str) and order_id.strip():
-        our_order_id = order_id
-
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
         await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
