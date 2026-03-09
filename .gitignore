@@ -1,3 +1,5 @@
+.vscode/
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -177,4 +179,12 @@ infra/*/*.tfstate
 infra/*/*.tfstate.backup
 infra/*/.terraform*
 infra/*/*.plan
-policies.db
+*.db
+agent/resources
+agent/app/environment/resources
+agent/app/environment/seller/resources
+# PufferRL Experiments
+experiments/
+wandb/
+!.env.sample
+.cursor/

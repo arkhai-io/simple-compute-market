@@ -1,0 +1,1720 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import sqlite3
+import uuid
+from datetime import datetime
+from typing import Any
+
+from .config import CONFIG
+from .resource_csv_importer import upsert_resources_from_csv
+
+
+class SQLiteClient:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._ensure_tables_sync()
+
+    def _ensure_tables_sync(self) -> None:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.cursor()
+            # Policies table (callable-only)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS policies (
+                  agent_id TEXT NOT NULL,
+                  name TEXT NOT NULL,
+                  trigger_type TEXT NOT NULL,
+                  callable_ref TEXT,
+                  PRIMARY KEY(agent_id, name)
+                )
+                """
+            )
+            # Policy composites (ordered components per policy)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS policy_composites (
+                  agent_id TEXT NOT NULL,
+                  policy_name TEXT NOT NULL,
+                  position INTEGER NOT NULL,
+                  component_name TEXT NOT NULL,
+                  PRIMARY KEY(agent_id, policy_name, position),
+                  FOREIGN KEY(agent_id, policy_name) REFERENCES policies(agent_id, name)
+                )
+                """
+            )
+            # Decisions table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS decisions (
+                  decision_id TEXT PRIMARY KEY,
+                  event_id TEXT NOT NULL,
+                  event_type TEXT NOT NULL,
+                  agent_id TEXT NOT NULL,
+                  policy_used TEXT,
+                  action_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  context_json TEXT
+                )
+                """
+            )
+            # Decision outcomes table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS decision_outcomes (
+                  decision_id TEXT PRIMARY KEY,
+                  outcome_json TEXT,
+                  timestamp TEXT NOT NULL,
+                  FOREIGN KEY(decision_id) REFERENCES decisions(decision_id)
+                )
+                """
+            )
+            # Negotiation threads table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_threads (
+                  negotiation_id TEXT PRIMARY KEY,
+                  our_order_id TEXT,
+                  their_order_id TEXT,
+                  our_agent_id TEXT,
+                  their_agent_id TEXT,
+                  status TEXT DEFAULT 'active',
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  terminal_state TEXT
+                )
+                """
+            )
+            # Add columns if they don't exist (for existing databases)
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_order_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_order_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_agent_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_agent_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_local_state (
+                  negotiation_id TEXT NOT NULL,
+                  owner_id TEXT NOT NULL,
+                  our_initial_price INTEGER,
+                  our_strategy TEXT,
+                  PRIMARY KEY(negotiation_id, owner_id),
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)
+                )
+                """
+            )
+            # Negotiation messages table
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS negotiation_messages (
+                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  negotiation_id TEXT NOT NULL,
+                  round INTEGER NOT NULL,
+                  sender TEXT NOT NULL,
+                  our_price INTEGER,
+                  their_price INTEGER,
+                  proposed_price INTEGER,
+                  action_taken TEXT NOT NULL,
+                  message_type TEXT NOT NULL,
+                  timestamp TEXT NOT NULL,
+                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),
+                  UNIQUE(negotiation_id, round)
+                )
+                """
+            )
+            # Orders table (local source of truth)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders (
+                  order_id TEXT PRIMARY KEY,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  offer_resource TEXT NOT NULL,
+                  demand_resource TEXT NOT NULL,
+                  fulfillment_resource TEXT,
+                  duration_hours INTEGER NOT NULL,
+                  order_maker TEXT NOT NULL,
+                  order_taker TEXT,
+                  matched_offer_id TEXT,
+                  maker_attestation TEXT,
+                  taker_attestation TEXT,
+                  escrow_uid TEXT
+                )
+                """
+            )
+            # Resources table (local source of truth across all resource types)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resources (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  resource_id TEXT NOT NULL UNIQUE,
+                  resource_type TEXT NOT NULL,
+                  resource_subtype TEXT,
+                  unit TEXT,
+                  value NUMERIC,
+                  state TEXT,
+                  attributes TEXT,
+                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+                """
+            )
+            # Keep resources.updated_at fresh whenever rows are updated.
+            cur.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_resources_updated_at
+                AFTER UPDATE ON resources
+                FOR EACH ROW
+                WHEN NEW.updated_at = OLD.updated_at
+                BEGIN
+                  UPDATE resources
+                  SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                  WHERE pk = NEW.pk;
+                END
+                """
+            )
+            # Resource transition events (append-only, idempotent)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resource_transition_events (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  event_id TEXT NOT NULL UNIQUE,
+                  resource_id TEXT NOT NULL,
+                  event_type TEXT NOT NULL,
+                  set_value NUMERIC,
+                  set_state TEXT,
+                  set_attribute_json TEXT,
+                  idempotency_key TEXT NOT NULL UNIQUE,
+                  occurred_at TIMESTAMPTZ NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  FOREIGN KEY(resource_id) REFERENCES resources(resource_id)
+                )
+                """
+            )
+            # Create indexes
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decisions_event_type ON decisions(event_type)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON decisions(timestamp)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decisions_agent_id ON decisions(agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_messages_round ON negotiation_messages(negotiation_id, round)"
+            )
+            # Indexes for negotiation tracking
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_order_id ON negotiation_threads(our_order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_order_id ON negotiation_threads(their_order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_agent_id ON negotiation_threads(our_agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_agent_id ON negotiation_threads(their_agent_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_type_subtype ON resources(resource_type, resource_subtype)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_state ON resources(state)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_updated_at ON resources(updated_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_resource_time ON resource_transition_events(resource_id, occurred_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_type_time ON resource_transition_events(event_type, occurred_at)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _serialize_resource(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value)
+        except Exception:
+            return str(value)
+
+    def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                return None
+        return None
+
+    def _resources_equal(self, a: Any, b: Any) -> bool:
+        a_dict = self._normalize_resource(a)
+        b_dict = self._normalize_resource(b)
+        if a_dict is None or b_dict is None:
+            return False
+        try:
+            return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
+        except Exception:
+            return False
+
+    async def upsert_resource(
+        self,
+        *,
+        resource_id: str,
+        resource_type: str,
+        resource_subtype: str | None = None,
+        unit: str | None = None,
+        value: int | float | None = None,
+        state: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        """Create or update a generic resource snapshot row."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                now_iso = datetime.now().isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(resource_id) DO UPDATE SET
+                      resource_type=excluded.resource_type,
+                      resource_subtype=excluded.resource_subtype,
+                      unit=excluded.unit,
+                      value=excluded.value,
+                      state=excluded.state,
+                      attributes=excluded.attributes,
+                      updated_at=excluded.updated_at
+                    """,
+                    (
+                        resource_id,
+                        resource_type,
+                        resource_subtype,
+                        unit,
+                        value,
+                        state,
+                        json.dumps(attributes) if attributes is not None else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def list_resources(
+        self,
+        *,
+        resource_type: str | None = None,
+        state: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List resource rows from local DB as generic DB-resource dicts."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                clauses: list[str] = []
+                params: list[Any] = []
+                if resource_type is not None:
+                    clauses.append("resource_type = ?")
+                    params.append(resource_type)
+                if state is not None:
+                    clauses.append("state = ?")
+                    params.append(state)
+                else:
+                    # Default listing omits soft-deleted resources.
+                    clauses.append("(state IS NULL OR state != 'deleted')")
+                where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(
+                    f"""
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    {where_clause}
+                    ORDER BY updated_at DESC
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+                result: list[dict[str, Any]] = []
+                for (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) in rows:
+                    attrs: dict[str, Any] = {}
+                    if isinstance(row_attributes, str) and row_attributes.strip():
+                        try:
+                            parsed = json.loads(row_attributes)
+                            if isinstance(parsed, dict):
+                                attrs = parsed
+                        except Exception:
+                            attrs = {}
+                    result.append(
+                        {
+                            "resource_id": row_resource_id,
+                            "resource_type": row_resource_type,
+                            "resource_subtype": row_resource_subtype,
+                            "unit": row_unit,
+                            "value": row_value,
+                            "state": row_state,
+                            "attributes": attrs,
+                            "created_at": row_created_at,
+                            "updated_at": row_updated_at,
+                        }
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
+        """Fetch a single resource row by resource_id."""
+        def _load_one() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    WHERE resource_id = ?
+                    LIMIT 1
+                    """,
+                    (resource_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+
+                (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) = row
+                attrs: dict[str, Any] = {}
+                if isinstance(row_attributes, str) and row_attributes.strip():
+                    try:
+                        parsed = json.loads(row_attributes)
+                        if isinstance(parsed, dict):
+                            attrs = parsed
+                    except Exception:
+                        attrs = {}
+
+                return {
+                    "resource_id": row_resource_id,
+                    "resource_type": row_resource_type,
+                    "resource_subtype": row_resource_subtype,
+                    "unit": row_unit,
+                    "value": row_value,
+                    "state": row_state,
+                    "attributes": attrs,
+                    "created_at": row_created_at,
+                    "updated_at": row_updated_at,
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load_one)
+
+    async def delete_resource(
+        self,
+        *,
+        resource_id: str,
+        idempotency_key: str | None = None,
+        event_type: str = "delete_resource",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete a resource by transitioning it to state='deleted'."""
+        set_attribute: dict[str, Any] | None = None
+        if reason:
+            set_attribute = {"$.deleted_reason": reason}
+        return await self.apply_resource_set_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key or f"delete_resource:{resource_id}",
+            set_state="deleted",
+            set_attribute=set_attribute,
+        )
+
+    async def upsert_resources_from_csv(
+        self,
+        *,
+        csv_path: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import resources from CSV and upsert rows into the resources table."""
+        report = await upsert_resources_from_csv(
+            csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+
+    def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
+        """Seed default resources only when the resources table is empty."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM resources")
+            count = int(cur.fetchone()[0] or 0)
+            if count > 0:
+                return
+
+            now_iso = datetime.now().isoformat()
+            for resource in resources:
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        resource.get("resource_id"),
+                        resource.get("resource_type"),
+                        resource.get("resource_subtype"),
+                        resource.get("unit"),
+                        resource.get("value"),
+                        resource.get("state"),
+                        json.dumps(resource.get("attributes"))
+                        if isinstance(resource.get("attributes"), dict)
+                        else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def apply_resource_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert one transition event and apply one resource snapshot update.
+
+        Supports direct-set semantics only: set_value, set_state, set_attribute.
+        """
+        if set_value is None and set_state is None and not set_attribute:
+            raise ValueError("Transition must include set_value, set_state, or set_attribute")
+
+        resolved_event_id = event_id or str(uuid.uuid4())
+        set_attribute_json = json.dumps(set_attribute) if set_attribute else None
+
+        def _apply() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO resource_transition_events(
+                      event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')))
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        resolved_event_id,
+                        resource_id,
+                        event_type,
+                        set_value,
+                        set_state,
+                        set_attribute_json,
+                        idempotency_key,
+                        occurred_at,
+                    ),
+                )
+
+                # Duplicate command retry: already applied.
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return {
+                        "applied": False,
+                        "duplicate": True,
+                        "resource_id": resource_id,
+                        "event_id": resolved_event_id,
+                        "idempotency_key": idempotency_key,
+                    }
+
+                updates: list[str] = []
+                values: list[Any] = []
+
+                if set_value is not None:
+                    updates.append("value = ?")
+                    values.append(set_value)
+
+                if set_state is not None:
+                    updates.append("state = ?")
+                    values.append(set_state)
+
+                if set_attribute:
+                    attr_expr = "COALESCE(attributes, '{}')"
+                    for path, path_value in set_attribute.items():
+                        if not isinstance(path, str) or not path.startswith("$."):
+                            raise ValueError(f"Invalid JSON path for set_attribute: {path}")
+                        attr_expr = f"json_set({attr_expr}, ?, json(?))"
+                        values.append(path)
+                        values.append(json.dumps(path_value))
+                    updates.append(f"attributes = {attr_expr}")
+
+                updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
+
+                cur.execute(
+                    f"UPDATE resources SET {', '.join(updates)} WHERE resource_id = ?",
+                    (*values, resource_id),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError(f"Resource not found: {resource_id}")
+
+                conn.commit()
+                return {
+                    "applied": True,
+                    "duplicate": False,
+                    "resource_id": resource_id,
+                    "event_id": resolved_event_id,
+                    "idempotency_key": idempotency_key,
+                }
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_apply)
+
+    async def apply_resource_set_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Convenience wrapper for absolute-value transitions."""
+        return await self.apply_resource_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key,
+            set_value=set_value,
+            set_state=set_state,
+            set_attribute=set_attribute,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
+
+    # TODO(refactor): Move compute-specific VM reservation logic to the Compute domain
+    # as part of the resource portfolio refactor.
+    async def reserve_available_compute_vm(
+        self,
+        *,
+        required_attributes: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve one available compute resource.
+
+        Args:
+            required_attributes: Optional exact-match filters (for example:
+                {"region": "California, US", "gpu_model": "H200"}).
+                Keys are checked first in resource attributes, then in top-level
+                resource fields (resource_type/resource_subtype/unit/state/value).
+        """
+        def _reserve() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_subtype, unit, state, value, attributes
+                    FROM resources
+                    WHERE resource_type = 'compute.gpu'
+                      AND state = 'available'
+                    ORDER BY updated_at ASC
+                    """
+                )
+                rows = cur.fetchall()
+                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                    attrs: dict[str, Any]
+                    try:
+                        attrs = json.loads(attributes_raw) if isinstance(attributes_raw, str) else {}
+                    except Exception:
+                        attrs = {}
+
+                    if required_attributes:
+                        top_level = {
+                            "resource_type": "compute.gpu",
+                            "resource_subtype": resource_subtype,
+                            "unit": unit,
+                            "state": state,
+                            "value": value,
+                        }
+                        is_match = True
+                        for key, expected in required_attributes.items():
+                            actual = attrs.get(key, top_level.get(key))
+                            if actual != expected:
+                                is_match = False
+                                break
+                        if not is_match:
+                            continue
+
+                    vm_host = attrs.get("vm_host")
+                    if not isinstance(vm_host, str) or not vm_host.strip():
+                        continue
+
+                    now_iso = datetime.now().isoformat()
+                    cur.execute(
+                        """
+                        UPDATE resources
+                        SET state = 'reserved',
+                            updated_at = ?
+                        WHERE resource_id = ?
+                          AND state = 'available'
+                        """,
+                        (now_iso, resource_id),
+                    )
+                    if cur.rowcount != 1:
+                        continue
+
+                    cur.execute(
+                        """
+                        INSERT INTO resource_transition_events(
+                          event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            resource_id,
+                            "reserve_for_provisioning",
+                            value,
+                            "reserved",
+                            None,
+                            f"reserve:{resource_id}:{uuid.uuid4()}",
+                            now_iso,
+                        ),
+                    )
+                    conn.commit()
+                    return {
+                        "resource_id": resource_id,
+                        "vm_host": vm_host,
+                        "resource_subtype": resource_subtype,
+                        "unit": unit,
+                        "state": "reserved",
+                        "value": value,
+                        "attributes": attrs,
+                    }
+
+                conn.rollback()
+                return None
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_reserve)
+
+    async def find_symmetric_open_order(
+        self,
+        *,
+        offer_resource: Any,
+        demand_resource: Any,
+        order_maker: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Find an open local order whose resources are symmetric to the given pair.
+
+        Symmetric means:
+        - local.offer_resource == demand_resource
+        - local.demand_resource == offer_resource
+        """
+        def _find() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, offer_resource, demand_resource, order_maker, status, order_taker, created_at
+                    FROM orders
+                    WHERE status = 'open'
+                      AND (order_taker IS NULL OR order_taker = '')
+                    """
+                )
+                rows = cur.fetchall()
+                matches: list[dict[str, Any]] = []
+                for row in rows:
+                    row_order_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
+                    if order_maker and row_maker != order_maker:
+                        continue
+                    if self._resources_equal(row_offer, demand_resource) and self._resources_equal(row_demand, offer_resource):
+                        matches.append({
+                            "order_id": row_order_id,
+                            "order_maker": row_maker,
+                            "created_at": row_created,
+                        })
+                if not matches:
+                    return None
+                matches.sort(key=lambda m: m.get("created_at") or "", reverse=True)
+                return matches[0]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_find)
+
+    async def upsert_order(
+        self,
+        *,
+        order_id: str,
+        status: str,
+        created_at: str,
+        updated_at: str,
+        offer_resource: Any,
+        demand_resource: Any,
+        fulfillment_resource: Any | None,
+        duration_hours: int,
+        order_maker: str,
+        order_taker: str | None = None,
+        matched_offer_id: str | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> None:
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO orders(
+                      order_id,
+                      status,
+                      created_at,
+                      updated_at,
+                      offer_resource,
+                      demand_resource,
+                      fulfillment_resource,
+                      duration_hours,
+                      order_maker,
+                      order_taker,
+                      matched_offer_id,
+                      maker_attestation,
+                      taker_attestation,
+                      escrow_uid
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(order_id) DO UPDATE SET
+                      status=excluded.status,
+                      updated_at=excluded.updated_at,
+                      offer_resource=excluded.offer_resource,
+                      demand_resource=excluded.demand_resource,
+                      fulfillment_resource=excluded.fulfillment_resource,
+                      duration_hours=excluded.duration_hours,
+                      order_maker=excluded.order_maker,
+                      order_taker=excluded.order_taker,
+                      matched_offer_id=excluded.matched_offer_id,
+                      maker_attestation=excluded.maker_attestation,
+                      taker_attestation=excluded.taker_attestation,
+                      escrow_uid=excluded.escrow_uid
+                    """,
+                    (
+                        order_id,
+                        status,
+                        created_at,
+                        updated_at,
+                        self._serialize_resource(offer_resource),
+                        self._serialize_resource(demand_resource),
+                        self._serialize_resource(fulfillment_resource),
+                        duration_hours,
+                        order_maker,
+                        order_taker,
+                        matched_offer_id,
+                        maker_attestation,
+                        taker_attestation,
+                        escrow_uid,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def update_order(
+        self,
+        *,
+        order_id: str,
+        status: str | None = None,
+        updated_at: str | None = None,
+        offer_resource: Any | None = None,
+        demand_resource: Any | None = None,
+        fulfillment_resource: Any | None = None,
+        duration_hours: int | None = None,
+        order_maker: str | None = None,
+        order_taker: str | None = None,
+        matched_offer_id: str | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+        escrow_uid: str | None = None,
+    ) -> None:
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(field: str, value: Any, *, serialize: bool = False) -> None:
+                if value is None:
+                    return
+                updates.append(f"{field}=?")
+                values.append(self._serialize_resource(value) if serialize else value)
+
+            add("status", status)
+            add("updated_at", updated_at or datetime.now().isoformat())
+            add("offer_resource", offer_resource, serialize=True)
+            add("demand_resource", demand_resource, serialize=True)
+            add("fulfillment_resource", fulfillment_resource, serialize=True)
+            add("duration_hours", duration_hours)
+            add("order_maker", order_maker)
+            add("order_taker", order_taker)
+            add("matched_offer_id", matched_offer_id)
+            add("maker_attestation", maker_attestation)
+            add("taker_attestation", taker_attestation)
+            add("escrow_uid", escrow_uid)
+
+            if not updates:
+                return
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE orders SET {', '.join(updates)} WHERE order_id=?",
+                    (*values, order_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def update_order_by_escrow_uid(
+        self,
+        *,
+        escrow_uid: str,
+        status: str | None = None,
+        updated_at: str | None = None,
+        fulfillment_resource: Any | None = None,
+        maker_attestation: str | None = None,
+        taker_attestation: str | None = None,
+    ) -> None:
+        """
+        Update order fields based on escrow_uid, when order_id is not available.
+        """
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(field: str, value: Any, *, serialize: bool = False) -> None:
+                if value is None:
+                    return
+                updates.append(f"{field}=?")
+                values.append(self._serialize_resource(value) if serialize else value)
+
+            add("status", status)
+            add("updated_at", updated_at or datetime.now().isoformat())
+            add("fulfillment_resource", fulfillment_resource, serialize=True)
+            add("maker_attestation", maker_attestation)
+            add("taker_attestation", taker_attestation)
+
+            if not updates:
+                return
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f"UPDATE orders SET {', '.join(updates)} WHERE escrow_uid=?",
+                    (*values, escrow_uid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def save_policy(
+        self,
+        *,
+        agent_id: str,
+        name: str,
+        trigger_type: str,
+        callable_ref: str | None,
+    ) -> None:
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO policies(agent_id, name, trigger_type, callable_ref)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(agent_id, name) DO UPDATE SET
+                        trigger_type=excluded.trigger_type,
+                        callable_ref=excluded.callable_ref
+                    """,
+                    (agent_id, name, trigger_type, callable_ref),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_policies_by_trigger(self, *, agent_id: str, trigger_type: str) -> list[dict[str, Any]]:
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT name, callable_ref FROM policies WHERE agent_id=? AND trigger_type=?",
+                    (agent_id, trigger_type),
+                )
+                rows = cur.fetchall()
+                result: list[dict[str, Any]] = []
+                for (name, callable_ref) in rows:
+                    result.append(
+                        {
+                            "name": name,
+                            "callable_ref": callable_ref,
+                        }
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def save_policy_composite(self, *, agent_id: str, policy_name: str, components: list[str]) -> None:
+        """Persist ordered component names for a composite policy."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Clear existing components to avoid duplicates
+                cur.execute(
+                    "DELETE FROM policy_composites WHERE agent_id=? AND policy_name=?",
+                    (agent_id, policy_name),
+                )
+                # Insert ordered components
+                for idx, comp in enumerate(components):
+                    cur.execute(
+                        """
+                        INSERT INTO policy_composites(agent_id, policy_name, position, component_name)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (agent_id, policy_name, idx, comp),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_policy_composite(self, *, agent_id: str, policy_name: str) -> list[str]:
+        def _load() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT component_name from policy_composites
+                    WHERE agent_id=? AND policy_name=?
+                    ORDER BY position ASC
+                    """,
+                    (agent_id, policy_name),
+                )
+                return [row[0] for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+    
+    async def save_decision(
+        self,
+        *,
+        decision_id: str,
+        event_id: str,
+        event_type: str,
+        agent_id: str,
+        policy_used: str,
+        action_type: str,
+        timestamp: str,
+        context_json: str | None,
+    ) -> None:
+        """Save a decision record."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO decisions(decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (decision_id, event_id, event_type, agent_id, policy_used, action_type, timestamp, context_json),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_save)
+    
+    async def save_decision_outcome(
+        self,
+        *,
+        decision_id: str,
+        outcome_json: str | None,
+        timestamp: str,
+    ) -> None:
+        """Save a decision outcome record."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO decision_outcomes(decision_id, outcome_json, timestamp)
+                    VALUES (?, ?, ?)
+                    """,
+                    (decision_id, outcome_json, timestamp),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_save)
+    
+    async def load_recent_decisions(
+        self,
+        *,
+        agent_id: str,
+        limit: int = 10,
+        event_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Load recent decisions for context building (without heavy context_json payloads)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                if event_type:
+                    cur.execute(
+                        """
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
+                        FROM decisions
+                        WHERE agent_id = ? AND event_type = ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (agent_id, event_type, limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT decision_id, event_id, event_type, policy_used, action_type, timestamp
+                        FROM decisions
+                        WHERE agent_id = ?
+                        ORDER BY timestamp DESC
+                        LIMIT ?
+                        """,
+                        (agent_id, limit),
+                    )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "decision_id": row[0],
+                        "event_id": row[1],
+                        "event_type": row[2],
+                        "policy_used": row[3],
+                        "action_type": row[4],
+                        "timestamp": row[5],
+                    })
+                return result
+            finally:
+                conn.close()
+        
+        return await asyncio.to_thread(_load)
+    
+    async def save_negotiation_message(
+        self,
+        *,
+        negotiation_id: str,
+        round: int | None = None,
+        sender: str,
+        our_price: int | None,
+        their_price: int | None,
+        proposed_price: int | None,
+        action_taken: str,
+        message_type: str,
+        timestamp: str,
+    ) -> int:
+        """Save a negotiation message to the database.
+
+        Args:
+            negotiation_id: Unique negotiation identifier
+            round: Round number (if None, computed atomically as max(round) + 1)
+            sender: Agent ID or card URL of the sender
+            our_price: Our price in base units
+            their_price: Their price in base units
+            proposed_price: Proposed counter price
+            action_taken: Action taken (ACCEPT_OFFER, REJECT_OFFER, COUNTER_OFFER, EXIT_NEGOTIATION)
+            message_type: Type of message (initial_proposal, counter_proposal, etc.)
+            timestamp: ISO format timestamp
+
+        Returns:
+            The actual round number that was assigned
+        """
+        def _save() -> int:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Ensure thread exists
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_threads(negotiation_id, created_at, updated_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (negotiation_id, timestamp, timestamp),
+                )
+
+                if round is None:
+                    # Compute next round atomically to avoid race conditions
+                    cur.execute(
+                        """
+                        SELECT COALESCE(MAX(round), -1) + 1
+                        FROM negotiation_messages
+                        WHERE negotiation_id = ?
+                        """,
+                        (negotiation_id,),
+                    )
+                    actual_round = cur.fetchone()[0]
+                else:
+                    actual_round = round
+
+                # Update thread updated_at
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads SET updated_at = ? WHERE negotiation_id = ?
+                    """,
+                    (timestamp, negotiation_id),
+                )
+                # Insert message with ON CONFLICT handling to gracefully handle races
+                cur.execute(
+                    """
+                    INSERT INTO negotiation_messages(
+                        negotiation_id, round, sender, our_price, their_price,
+                        proposed_price, action_taken, message_type, timestamp
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(negotiation_id, round) DO UPDATE SET
+                        sender = excluded.sender,
+                        our_price = excluded.our_price,
+                        their_price = excluded.their_price,
+                        proposed_price = excluded.proposed_price,
+                        action_taken = excluded.action_taken,
+                        message_type = excluded.message_type,
+                        timestamp = excluded.timestamp
+                    """,
+                    (
+                        negotiation_id, actual_round, sender, our_price, their_price,
+                        proposed_price, action_taken, message_type, timestamp
+                    ),
+                )
+                conn.commit()
+                return actual_round
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_save)
+
+    async def load_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> list[dict[str, Any]]:
+        """Load all messages for a negotiation thread, ordered by round."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT round, sender, our_price, their_price, proposed_price,
+                           action_taken, message_type, timestamp
+                    FROM negotiation_messages
+                    WHERE negotiation_id = ?
+                    ORDER BY round ASC
+                    """,
+                    (negotiation_id,),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "round": row[0],
+                        "sender": row[1],
+                        "our_price": row[2],
+                        "their_price": row[3],
+                        "proposed_price": row[4],
+                        "action_taken": row[5],
+                        "message_type": row[6],
+                        "timestamp": row[7],
+                    })
+                return result
+            finally:
+                conn.close()
+        
+        return await asyncio.to_thread(_load)
+
+    async def update_negotiation_thread_terminal(
+        self,
+        *,
+        negotiation_id: str,
+        terminal_state: str | None,
+    ) -> None:
+        """Update the terminal state of a negotiation thread."""
+        def _update() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET terminal_state = ?, updated_at = ?
+                    WHERE negotiation_id = ?
+                    """,
+                    (terminal_state, datetime.now().isoformat(), negotiation_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_update)
+
+    async def delete_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> None:
+        """Delete a negotiation thread and all its messages."""
+        def _delete() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                # Delete messages first (foreign key constraint)
+                cur.execute(
+                    "DELETE FROM negotiation_messages WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                # Delete local state
+                cur.execute(
+                    "DELETE FROM negotiation_local_state WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                # Delete thread
+                cur.execute(
+                    "DELETE FROM negotiation_threads WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        await asyncio.to_thread(_delete)
+
+    async def create_negotiation_thread(
+        self,
+        *,
+        negotiation_id: str,
+        our_order_id: str,
+        their_order_id: str,
+        our_agent_id: str,
+        their_agent_id: str,
+        owner_id: str,  # The agent creating this record
+        status: str = "active",
+        our_initial_price: int | None = None,
+        our_strategy: str | None = None,
+    ) -> None:
+        """Create a new negotiation thread with private local state.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            our_order_id: Our order ID
+            their_order_id: Their order ID
+            our_agent_id: Our agent ID (participant A)
+            their_agent_id: Their agent ID (participant B)
+            owner_id: ID of the agent owning this private state
+            status: Initial status (default: 'active')
+            our_initial_price: Private initial price
+            our_strategy: Private strategy
+        """
+        def _create() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                timestamp = datetime.now().isoformat()
+                
+                # Insert public thread info (ignore if exists, it's shared)
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO negotiation_threads(
+                        negotiation_id, our_order_id, their_order_id,
+                        our_agent_id, their_agent_id, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        negotiation_id, our_order_id, their_order_id,
+                        our_agent_id, their_agent_id, status, timestamp, timestamp
+                    ),
+                )
+                
+                # Insert private local state (upsert if needed)
+                cur.execute(
+                    """
+                    INSERT INTO negotiation_local_state(
+                        negotiation_id, owner_id, our_initial_price, our_strategy
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(negotiation_id, owner_id) DO UPDATE SET
+                        our_initial_price = excluded.our_initial_price,
+                        our_strategy = excluded.our_strategy
+                    """,
+                    (negotiation_id, owner_id, our_initial_price, our_strategy),
+                )
+                
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_create)
+
+    async def get_thread_info(
+        self,
+        *,
+        negotiation_id: str,
+        owner_id: str,
+    ) -> dict[str, Any] | None:
+        """Get negotiation thread metadata joining public thread with private local state.
+        
+        Args:
+            negotiation_id: Unique negotiation identifier
+            owner_id: ID of the agent requesting the info
+        
+        Returns:
+            Merged dictionary with public + private info, or None if thread doesn't exist.
+        """
+        def _get() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
+                           t.our_agent_id, t.their_agent_id, t.status,
+                           l.our_initial_price, l.our_strategy
+                    FROM negotiation_threads t
+                    LEFT JOIN negotiation_local_state l 
+                           ON t.negotiation_id = l.negotiation_id AND l.owner_id = ?
+                    WHERE t.negotiation_id = ?
+                    """,
+                    (owner_id, negotiation_id),
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                        # Default to None if no local state found for this owner
+                        "our_initial_price": row[6],
+                        "our_strategy": row[7],
+                    }
+                return None
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_get)
+
+    async def check_existing_negotiation(
+        self,
+        *,
+        our_order_id: str | None = None,
+        their_order_id: str | None = None,
+        our_agent_id: str | None = None,
+        their_agent_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Check if an active negotiation already exists between two orders or agents (bidirectional).
+        
+        Returns:
+            Dictionary with negotiation details if found, None otherwise
+        """
+        def _check() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                query = """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE status = 'active' AND (
+                        (our_order_id = ? AND their_order_id = ?) OR
+                        (our_order_id = ? AND their_order_id = ?) OR
+                        (our_agent_id = ? AND their_agent_id = ?) OR
+                        (our_agent_id = ? AND their_agent_id = ?)
+                    )
+                """
+                params = (
+                    our_order_id, their_order_id,
+                    their_order_id, our_order_id,
+                    our_agent_id, their_agent_id,
+                    their_agent_id, our_agent_id,
+                )
+                cur.execute(query, params)
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    }
+                return None
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_check)
+
+    async def get_active_negotiations_for_order(
+        self, *, order_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all active negotiations involving an order (as our_order_id or their_order_id)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE (our_order_id = ? OR their_order_id = ?) AND status = 'active'
+                    """,
+                    (order_id, order_id),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    })
+                return result
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def get_active_negotiations_for_agent(
+        self, *, agent_id: str
+    ) -> list[dict[str, Any]]:
+        """Get all active negotiations involving an agent (as our_agent_id or their_agent_id)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    FROM negotiation_threads
+                    WHERE (our_agent_id = ? OR their_agent_id = ?) AND status = 'active'
+                    """,
+                    (agent_id, agent_id),
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "negotiation_id": row[0],
+                        "our_order_id": row[1],
+                        "their_order_id": row[2],
+                        "our_agent_id": row[3],
+                        "their_agent_id": row[4],
+                        "status": row[5],
+                    })
+                return result
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_load)
+
+    async def cancel_negotiations_for_order(
+        self, *, order_id: str, except_negotiation_id: str | None = None
+    ) -> list[str]:
+        """Cancel all active negotiations for an order, except the specified one.
+        
+        Returns:
+            List of canceled negotiation IDs
+        """
+        def _cancel() -> list[str]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                
+                # Find all active negotiations involving this order
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id, 
+                           our_agent_id, their_agent_id
+                    FROM negotiation_threads
+                    WHERE (our_order_id = ? OR their_order_id = ?)
+                      AND (status = 'active')
+                      AND negotiation_id != COALESCE(?, '')
+                    """,
+                    (order_id, order_id, except_negotiation_id or '')
+                )
+                
+                canceled_ids = []
+                for row in cur.fetchall():
+                    neg_id = row[0]
+                    cur.execute(
+                        """
+                        UPDATE negotiation_threads
+                        SET status = 'superseded',
+                            terminal_state = 'superseded',
+                            updated_at = ?
+                        WHERE negotiation_id = ?
+                        """,
+                        (datetime.now().isoformat(), neg_id)
+                    )
+                    canceled_ids.append(neg_id)
+                
+                conn.commit()
+                return canceled_ids
+            finally:
+                conn.close()
+        
+        return await asyncio.to_thread(_cancel)
+
+    async def cancel_negotiations_for_agent(
+        self, *, agent_id: str, except_negotiation_id: str | None = None
+    ) -> None:
+        """Cancel all active negotiations for an agent, except the specified one."""
+        def _cancel() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET status = 'superseded',
+                        terminal_state = 'superseded',
+                        updated_at = ?
+                    WHERE (our_agent_id = ? OR their_agent_id = ?)
+                      AND (status = 'active')
+                      AND negotiation_id != COALESCE(?, '')
+                    """,
+                    (datetime.now().isoformat(), agent_id, agent_id, except_negotiation_id or '')
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(_cancel)
+
+
+_sqlite_client: SQLiteClient | None = None
+
+
+def get_sqlite_client() -> SQLiteClient:
+    global _sqlite_client
+    if _sqlite_client is None:
+        _sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
+    return _sqlite_client
