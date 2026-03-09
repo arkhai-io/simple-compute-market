@@ -298,13 +298,12 @@ async def execute_action(
                         order_dict = order_obj.model_dump(mode="json") if order_obj else {}
                     else:
                         order_dict = {}
-                    counterparty_ref = order_dict.get("order_taker") if order_dict else None
+                    counterparty_ref = parameters.get("counterparty_url") or (order_dict.get("order_taker") if order_dict else None)
                     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                    if not counterparty_url or not str(counterparty_url).strip():
-                        logger.warning(
-                            "[A2A] fulfill_compute_obligation: unresolved counterparty URL from order_taker=%s; parameters keys=%s",
-                            counterparty_ref,
-                            list(parameters.keys()),
+                    if not counterparty_url:
+                        raise ValueError(
+                            f"fulfill_compute_obligation: cannot notify buyer — "
+                            f"unresolved counterparty={counterparty_ref!r}"
                         )
                     try:
                         event = Event(
@@ -321,7 +320,7 @@ async def execute_action(
                             invocation_id=ctx.invocation_id,
                             branch=ctx.branch,
                         )
-                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
                     except Exception as send_err:
                         logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             else:
@@ -1003,16 +1002,14 @@ async def accept_offer(
             logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
-    counterparty_ref = order_dict.get("order_maker") or parameters.get("their_agent_id")
+    counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-    if not counterparty_url or not counterparty_url.strip():
-        logger.warning(
-            "[A2A] accept_offer: unresolved counterparty reference from order_maker/their_agent_id=%s; order_dict keys=%s",
-            counterparty_ref,
-            list(order_dict.keys()),
+    if not counterparty_url:
+        raise ValueError(
+            f"accept_offer: cannot send acceptance — unresolved counterparty={counterparty_ref!r}"
         )
     try:
-        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
         return {
             "status": "sent",
             "message": "Offer accepted and forwarded to counterparty",
@@ -1796,6 +1793,7 @@ async def fulfill_compute_obligation(
         "fulfillment_uid": fulfillment_uid,
         "connection_details": connection_details,
         "ssh_public_key": ssh_public_key,
+        "fulfilling_party_url": (order_dict or {}).get("order_maker"),
     }
 
 async def arbitrate_compute_fulfillment(

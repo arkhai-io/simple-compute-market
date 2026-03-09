@@ -232,7 +232,11 @@ async def test_execute_action_fulfill_sends_event_on_success(monkeypatch):
 
     action = Action(
         action_type=ActionType.FULFILL_COMPUTE_OBLIGATION,
-        parameters={"escrow_uid": "escrow-2", "ssh_public_key": "ssh-rsa AAA"},
+        parameters={
+            "escrow_uid": "escrow-2",
+            "ssh_public_key": "ssh-rsa AAA",
+            "counterparty_url": "http://buyer.example:8000",
+        },
         timestamp=datetime.now(),
     )
 
@@ -326,7 +330,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
         demand_resource=_compute_resource().model_dump(mode="json"),
         fulfillment_resource=None,
         duration_hours=1,
-        order_maker="buyer",
+        order_maker="http://seller.example:8001",
         order_taker=None,
         matched_offer_id=None,
         maker_attestation=None,
@@ -336,7 +340,7 @@ async def test_accept_offer_updates_buyer_order_only(monkeypatch, tmp_path):
 
     order_dict = {
         "order_id": order_id,
-        "order_maker": "buyer",
+        "order_maker": "http://seller.example:8001",
         "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
         "demand_resource": _compute_resource().model_dump(mode="json"),
         "duration_hours": 1,
@@ -525,7 +529,15 @@ def test_create_order_surplus_oracle_address_is_none(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_accept_offer_passes_oracle_address_to_escrow(monkeypatch):
-    """oracle_address on the order is forwarded to buy_compute_with_erc20."""
+    """oracle_address (from CONFIG.agent_wallet_address) is forwarded to buy_compute_with_erc20."""
+    import dataclasses
+
+    monkeypatch.setattr(
+        action_executor,
+        "CONFIG",
+        dataclasses.replace(action_executor.CONFIG, agent_wallet_address=BUYER_WALLET),
+    )
+
     captured: dict = {}
 
     async def fake_buy_compute_with_erc20(
@@ -542,7 +554,6 @@ async def test_accept_offer_passes_oracle_address_to_escrow(monkeypatch):
         "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
         "demand_resource": _compute_resource().model_dump(mode="json"),
         "duration_hours": 1,
-        "oracle_address": BUYER_WALLET,
     }
 
     await action_executor.accept_offer(
@@ -555,33 +566,16 @@ async def test_accept_offer_passes_oracle_address_to_escrow(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_accept_offer_raises_without_oracle_address(monkeypatch):
-    """accept_offer raises ValueError when oracle_address is absent from the order."""
-    async def fake_buy_compute_with_erc20(**_kwargs):
-        return {"log": {"uid": "escrow-xyz"}}
-
-    monkeypatch.setattr(action_executor, "buy_compute_with_erc20", fake_buy_compute_with_erc20)
-
-    order_dict = {
-        "order_id": "order-no-oracle",
-        "order_maker": "seller",
-        "offer_resource": _compute_resource().model_dump(mode="json"),
-        "demand_resource": _token_rate(1_000_000).model_dump(mode="json"),
-        "duration_hours": 1,
-        # oracle_address intentionally absent
-    }
-
-    with pytest.raises(ValueError, match="oracle_address is required"):
-        await action_executor.accept_offer(
-            alkahest_client=_FakeClient({}),
-            ctx=None,
-            parameters={"order": order_dict},
-        )
-
-
-@pytest.mark.asyncio
 async def test_accept_offer_persists_oracle_address_to_db(monkeypatch, tmp_path):
-    """Compute seller (taker) persists oracle_address to the local DB on acceptance."""
+    """oracle_address (from CONFIG) is persisted to the local DB on acceptance."""
+    import dataclasses
+
+    monkeypatch.setattr(
+        action_executor,
+        "CONFIG",
+        dataclasses.replace(action_executor.CONFIG, agent_wallet_address=BUYER_WALLET),
+    )
+
     db_path = str(tmp_path / "agent.db")
     sqlite_client = SQLiteClient(db_path=db_path)
 
@@ -626,7 +620,7 @@ async def test_accept_offer_persists_oracle_address_to_db(monkeypatch, tmp_path)
         demand_resource=_compute_resource().model_dump(mode="json"),
         fulfillment_resource=None,
         duration_hours=1,
-        order_maker="buyer",
+        order_maker="http://seller.example:8001",
         order_taker=None,
         matched_offer_id=None,
         maker_attestation=None,
@@ -636,11 +630,10 @@ async def test_accept_offer_persists_oracle_address_to_db(monkeypatch, tmp_path)
 
     order_dict = {
         "order_id": order_id,
-        "order_maker": "buyer",
+        "order_maker": "http://seller.example:8001",
         "offer_resource": _token_rate(1_000_000).model_dump(mode="json"),
         "demand_resource": _compute_resource().model_dump(mode="json"),
         "duration_hours": 1,
-        "oracle_address": BUYER_WALLET,
     }
 
     await action_executor.accept_offer(

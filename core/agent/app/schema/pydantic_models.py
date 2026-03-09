@@ -377,6 +377,10 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
         default=None,
         description="Connection string/details for the provisioned compute",
     )
+    fulfilling_party_url: str | None = Field(
+        default=None,
+        description="URL of the compute seller who fulfilled the obligation",
+    )
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
@@ -389,6 +393,7 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             escrow_uid=escrow_uid,
             fulfillment_uid=payload.get("fulfillment_uid"),
             connection_details=payload.get("connection_details"),
+            fulfilling_party_url=payload.get("fulfilling_party_url"),
             data=payload,
         )
 
