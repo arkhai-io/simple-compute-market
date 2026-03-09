@@ -52,6 +52,9 @@ class ComputeGpuResourceAdapter:
     discriminator_key: str = "gpu_model"
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> ComputeResource:
+        """
+        Convert a DB resource dict to a ComputeResource domain instance.
+        """
         attrs = _ensure_dict(db_resource.get("attributes"))
 
         gpu_model = attrs.get("gpu_model") or db_resource.get("resource_subtype")
@@ -83,6 +86,8 @@ class ComputeGpuResourceAdapter:
         resource_id: str,
         state: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Convert a ComputeResource domain instance to a DB resource dict."""
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
@@ -99,9 +104,15 @@ class ComputeGpuResourceAdapter:
         }
 
     def from_dict(self, data: dict[str, Any]) -> ComputeResource:
+        """
+        Convert a network dict (A2A payload) to a ComputeResource domain instance.
+        """
         return ComputeResource(**data)
 
     def to_dict(self, resource: ComputeResource) -> dict[str, Any]:
+        """
+        Convert a ComputeResource domain instance to a network dict (A2A payload).
+        """
         return {"resource_type": self.resource_type, **resource.model_dump()}
 
 
@@ -112,6 +123,9 @@ class TokenErc20ResourceAdapter:
     discriminator_key: str = "token"
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> TokenResource:
+        """
+        Convert a DB resource dict to a TokenResource domain instance.
+        """
         attrs = _ensure_dict(db_resource.get("attributes"))
         subtype = db_resource.get("resource_subtype")
         value = db_resource.get("value")
@@ -141,6 +155,9 @@ class TokenErc20ResourceAdapter:
         resource_id: str,
         state: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Convert a TokenResource domain instance to a DB resource dict.
+        """
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
@@ -156,6 +173,9 @@ class TokenErc20ResourceAdapter:
         }
 
     def from_dict(self, data: dict[str, Any]) -> TokenResource:
+        """
+        Convert a network dict (A2A payload) to a TokenResource domain instance.
+        """
         token_value = data.get("token")
         if isinstance(token_value, ERC20TokenMetadata):
             token_meta = token_value
@@ -175,6 +195,9 @@ class TokenErc20ResourceAdapter:
         return TokenResource(token=token_meta, amount=int(data["amount"]))
 
     def to_dict(self, resource: TokenResource) -> dict[str, Any]:
+        """
+        Convert a TokenResource domain instance to a network dict (A2A payload).
+        """
         return {"resource_type": self.resource_type, **resource.model_dump()}
 
 
@@ -183,15 +206,26 @@ _DOMAIN_TYPE_TO_ADAPTER: dict[type, ResourceAdapter] = {}
 
 
 def register_resource_adapter(adapter: ResourceAdapter) -> None:
+    """
+    Register a ResourceAdapter for mapping between DB rows, network dicts, and domain schemas.
+    """
     _RESOURCE_TYPE_TO_ADAPTER[adapter.resource_type] = adapter
     _DOMAIN_TYPE_TO_ADAPTER[adapter.domain_type] = adapter
 
 
 def get_resource_adapter(resource_type: str) -> ResourceAdapter | None:
+    """
+    Get the registered ResourceAdapter for a given resource_type, or None if not found.
+    """
     return _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
 
 
 def adapt_db_resource_to_domain_resource(db_resource: dict[str, Any]) -> Any:
+    """
+    Adapt a DB resource dict to the appropriate domain resource instance using the registered adapter.
+     - If no adapter is found for the resource_type, returns the original db_resource dict.
+     - Raises ValueError if resource_type is missing or if the adapter fails to convert.
+    """
     resource_type = db_resource.get("resource_type")
     if not isinstance(resource_type, str):
         raise ValueError("DB resource missing resource_type")
@@ -207,6 +241,10 @@ def adapt_domain_resource_to_db_resource(
     resource_id: str,
     state: str | None = None,
 ) -> dict[str, Any]:
+    """
+    Adapt a domain resource instance to a DB resource dict using the registered adapter.
+    Raises ValueError if no adapter is found for the resource's type or if the adapter fails to convert.
+    """
     adapter = _DOMAIN_TYPE_TO_ADAPTER.get(type(resource))
     if adapter is None:
         raise ValueError(f"Unsupported domain resource type: {type(resource).__name__}")
