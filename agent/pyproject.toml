@@ -5,6 +5,9 @@ description = ""
 authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
+#3.13 requires numpy>2 or else you have to install the gcc toolchain and compile numpy yourself.
+#pufferlib requires numpy<2. So we're stuck with python 3.12
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "google-adk>=1.17.0",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
@@ -16,15 +19,11 @@ dependencies = [
     "a2a-sdk>=0.3.9",
     "torch>=2.7.0",
     "pufferlib>=3.0.0",
-	"alkahest-py",
+    "alkahest-py",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "aiohttp>=3.12.15",
 ]
-
-#3.13 requires numpy>2 or else you have to install the gcc toolchain and compile numpy yourself.
-#pufferlib requires numpy<2. So we're stuck with python 3.12
-requires-python = ">=3.12"
 
 [dependency-groups]
 dev = [
@@ -49,11 +48,20 @@ lint = [
 [tool.uv]
 no-build-isolation-package = ["pufferlib"]
 
+# requirement for pufferlib 3.0.0
+[tool.uv.extra-build-dependencies]
+pufferlib = ["setuptools", "Cython", "numpy<2"]
+
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu" },
 ]
-alkahest-py = { path = "packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl" }
+alkahest-py = [
+    { path = "packages/alkahest_py-0.1.0-cp312-cp312-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
+    { path = "packages/alkahest_py-0.1.0-cp312-cp312-macosx_10_12_x86_64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'x86_64'" },
+    { path = "packages/alkahest_py-0.1.0-cp312-cp312-manylinux_2_36_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+    { path = "packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

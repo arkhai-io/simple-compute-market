@@ -1,0 +1,157 @@
+version: '3.8'
+
+services:
+  # 1. Local test chain (Anvil)
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: market-anvil
+    ports:
+      - "8545:8545"
+    environment:
+      - ANVIL_IP_ADDR=0.0.0.0
+    command: >
+      anvil
+
+    networks:
+      - market-network
+
+  # # 2. Deploy contracts (runs once after anvil is ready)
+  contracts-deploy:
+    build:
+      context: ./erc-8004-contracts
+      dockerfile: Dockerfile
+    container_name: market-contracts-deploy
+    depends_on:
+      anvil:
+        condition: service_started
+
+    environment:
+      - ANVIL_RPC_URL=http://anvil:8545
+      - ENV_FILE=/app/shared-env/.env
+
+    networks:
+      - market-network
+    volumes:
+      - contracts-artifacts:/app/artifacts
+      - contracts-deployments:/app/deployments
+      - shared-env:/app/shared-env
+    command: >
+      sh -lc "
+      npm run deploy:anvil
+      "
+
+  # # 3. Registry/Indexer service
+  registry:
+    image: whitewidget/arkhai-erc-8004-registry:latest
+    depends_on:
+      contracts-deploy:
+        condition: service_completed_successfully
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ./erc-8004-registry-py/.env:/app/service.env:ro
+      - shared-env:/app/shared-env
+
+    networks:
+      - market-network
+
+    command: >
+      sh -lc "set -a;
+      . /app/service.env;
+      . /app/shared-env/.env;
+      set +a;
+      exec uv run uvicorn src.main:app --host 0.0.0.0 --port 8080"
+      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # # 4. A2A Agent service
+  buy_agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    container_name: market-agent-buy
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8000:8080"
+    networks:
+      - market-network
+    volumes:
+      - ./agent/.env.a:/app/service.env:ro
+      - ./agent/app:/app/app
+      - shared-env:/app/shared-env
+    command:
+      - sh
+      - -lc
+      - |
+        set -ae
+        . /app/service.env
+        . /app/shared-env/.env
+        set +a
+        echo "Registering agent on-chain..."
+        uv run python scripts/register_onchain.py
+        echo "Starting agent server..."
+        exec uv run uvicorn app.server:app --host 0.0.0.0 --port 8080
+
+
+  # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
+  sell_agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    container_name: market-agent-sell
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8001:8080"
+    networks:
+      - market-network
+    volumes:
+      - ./agent/.env.b:/app/service.env:ro
+      - ./agent/app:/app/app
+      - shared-env:/app/shared-env
+    command:
+      - sh
+      - -lc
+      - |
+        set -ae
+        . /app/service.env
+        . /app/shared-env/.env
+        set +a
+        echo "Registering agent on-chain..."
+        uv run python scripts/register_onchain.py
+        echo "Starting agent server..."
+        exec uv run uvicorn app.server:app --host 0.0.0.0 --port 8080
+
+networks:
+  market-network:
+    driver: bridge
+    
+
+volumes:
+  contracts-artifacts:
+  contracts-deployments:
+  registry-data:
+  shared-env:
+
+
+
+# ci/cd needed for buyers and sellers 
+# 1. agent
+# 2. provisioning services
+
+# for arkhai people
+# 3. registry
+# 4. contracts
+
+
