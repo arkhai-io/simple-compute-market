@@ -7,6 +7,7 @@ BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
+INSTALL_ZEROTIER=false
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -238,6 +239,14 @@ main() {
     echo "  └──────────────────────────────────┘"
     echo ""
 
+    printf '\033[1;34m[?]\033[0m Would you like to install ZeroTier for P2P networking? [y/N] '
+    read -r zt_answer </dev/tty
+    case "$zt_answer" in
+        [yY]|[yY][eE][sS]) INSTALL_ZEROTIER=true; ok "ZeroTier will be installed" ;;
+        *) info "Skipping ZeroTier installation" ;;
+    esac
+    echo ""
+
     detect_platform
     check_command make
     check_python_version
@@ -250,9 +259,18 @@ main() {
     echo ""
     ok "Market CLI installed successfully!"
     echo ""
+
+    info "Running market install to set up service dependencies..."
+    echo ""
+    if [ "$INSTALL_ZEROTIER" = true ]; then
+        market install --zerotier
+    else
+        market install
+    fi
+
+    echo ""
     info "Get started:"
     echo "    market --help              Show all commands"
-    echo "    market install             Install service dependencies"
     echo "    market config init agent   Configure the agent"
     echo ""
 }
