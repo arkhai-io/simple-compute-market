@@ -34,16 +34,58 @@ def _cleanup_temp_file(path: Path) -> None:
         logger.warning("Failed to remove temp file %s: %s", path, exc)
 
 
+def _find_management_vars(project_root: Path) -> Path:
+    """Return the management-vars file path, accepting either .yaml or .yml extension."""
+    base = project_root / "compute-provisioning-iac/ansible/inventory/management-vars"
+    for ext in (".yaml", ".yml"):
+        candidate = base.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    # Return the .yaml path unconditionally so ansible-playbook gives a clear error
+    return base.with_suffix(".yaml")
+
+
 def _find_project_root() -> Path:
-    """Walk up the tree to locate the repo root (uses compute-provisioning-iac or .git as sentinels)."""
+    """Walk up the tree to locate the directory that contains compute-provisioning-iac.
+
+    Two-pass strategy: prefer the directory that actually contains compute-provisioning-iac
+    (even if that means walking past the market-temp .git root), then fall back to the
+    nearest .git root if no compute-provisioning-iac sibling is found.
+    """
     current = Path(__file__).resolve()
-    for parent in [current] + list(current.parents):
+    candidates = [current] + list(current.parents)
+    # First pass: find the directory that contains compute-provisioning-iac
+    for parent in candidates:
         if (parent / "compute-provisioning-iac").exists():
             return parent
+    # Second pass fallback: nearest .git root
+    for parent in candidates:
         if (parent / ".git").exists():
             return parent
-    # Fallback: go up four levels (expected repo layout)
+    # Last resort: go up four levels (expected repo layout)
     return current.parents[3]
+
+
+def validate_ansible_prerequisites() -> list[str]:
+    """Check that all files needed for ansible-mode provisioning exist.
+
+    Returns a list of human-readable error strings (empty = all good).
+    Call this at agent startup when PROVISIONING_MODE=ansible so problems are
+    surfaced immediately rather than at order-fulfillment time.
+    """
+    errors: list[str] = []
+    project_root = _find_project_root()
+
+    required = {
+        "inventory/hosts": project_root / "compute-provisioning-iac/ansible/inventory/hosts",
+        "management-vars (yaml/yml)": _find_management_vars(project_root),
+        "vm-operations playbook": project_root / "compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml",
+    }
+    for label, path in required.items():
+        if not path.exists():
+            errors.append(f"Missing {label}: {path}")
+
+    return errors
 
 
 def _extract_external_port(playbook_output: str, vm_host: str | None = None) -> Optional[str]:
@@ -158,7 +200,7 @@ async def provision_machine_async(
     vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
 
     project_root = _find_project_root()
-    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management-vars.yml"
+    management_vars_path = _find_management_vars(project_root)
 
     cmd = [
         "ansible-playbook",
@@ -273,7 +315,7 @@ async def schedule_vm_shutdown_async(
     vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
 
     project_root = _find_project_root()
-    management_vars_path = project_root / "compute-provisioning-iac/ansible/inventory/management-vars.yml"
+    management_vars_path = _find_management_vars(project_root)
 
     cmd = [
         "ansible-playbook",

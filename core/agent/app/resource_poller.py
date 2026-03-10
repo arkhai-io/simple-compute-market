@@ -114,6 +114,17 @@ async def resource_poller_loop() -> None:
         CONFIG.resource_check_interval,
         CONFIG.provisioning_mode,
     )
+    if CONFIG.provisioning_mode == "ansible":
+        from service.clients.ansible_provisioning import validate_ansible_prerequisites
+        errors = validate_ansible_prerequisites()
+        if errors:
+            for err in errors:
+                logger.error("resource_poller [ansible pre-flight]: %s", err)
+            logger.error(
+                "resource_poller [ansible pre-flight]: FAILED — provisioning will not work until the above are resolved"
+            )
+        else:
+            logger.info("resource_poller [ansible pre-flight]: all prerequisites found")
     while True:
         try:
             await asyncio.sleep(CONFIG.resource_check_interval)

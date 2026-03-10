@@ -1777,7 +1777,13 @@ async def fulfill_compute_obligation(
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
 
-        connection_details = await _do_provision(ssh_public_key)
+        provision_result = await _do_provision(ssh_public_key)
+        # Normalize to string — Alkahest, the event schema (ReceiveComputeObligationFulfillmentEvent),
+        # and the DB fulfillment_resource column all expect str, not dict.
+        if isinstance(provision_result, dict):
+            connection_details = json.dumps(provision_result)
+        else:
+            connection_details = provision_result
     except Exception as error:
         if reserved_resource_id:
             try:
