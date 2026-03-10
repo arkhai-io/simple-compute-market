@@ -13,7 +13,6 @@ try:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
@@ -27,16 +26,11 @@ except ModuleNotFoundError:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
 
-
-try:
-    from service.clients.token import ERC20TokenMetadata
-except ImportError:
-    ERC20TokenMetadata = CoreERC20TokenMetadata  # type: ignore[assignment]
+from service.clients.token import ERC20TokenMetadata
 
 
 class GPUModel(str, Enum):
