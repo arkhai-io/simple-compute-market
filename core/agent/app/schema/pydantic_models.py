@@ -13,7 +13,6 @@ try:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
@@ -27,13 +26,11 @@ except ModuleNotFoundError:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
 
-
-ERC20TokenMetadata = CoreERC20TokenMetadata
+from service.clients.token import ERC20TokenMetadata
 
 
 class GPUModel(str, Enum):
@@ -66,7 +63,7 @@ class ComputeDomainResource(CoreResource):
         if isinstance(token_value, dict):
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
-            from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+            from service.clients.token import TOKEN_REGISTRY
 
             return TOKEN_REGISTRY.require(token_value)
         raise ValueError(

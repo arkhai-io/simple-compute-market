@@ -1,11 +1,10 @@
 import json
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from core.agent.app.utils.alkahest_config import (
+from service.clients.alkahest import (
     NETWORK_ANVIL,
     NETWORK_BASE_SEPOLIA,
     NETWORK_ETHEREUM_MAINNET,
@@ -74,16 +73,10 @@ def test_get_trusted_oracle_arbiter_prefers_override(
     }
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
-    from core.agent.app.utils import alkahest_config as module
-
-    monkeypatch.setattr(
-        module,
-        "CONFIG",
-        replace(
-            module.CONFIG,
-            alkahest_network=NETWORK_BASE_SEPOLIA,
-            alkahest_address_config_path=str(path),
-        ),
-    )
+    monkeypatch.setenv("ALKAHEST_NETWORK", NETWORK_BASE_SEPOLIA)
+    monkeypatch.setenv("ALKAHEST_ADDRESS_CONFIG_PATH", str(path))
+    # Clear the lru_cache so the new path is picked up
+    from service.clients.alkahest import _load_override_config_cached
+    _load_override_config_cached.cache_clear()
     resolved = get_trusted_oracle_arbiter()
     assert resolved == override["arbiters_addresses"]["trusted_oracle_arbiter"]

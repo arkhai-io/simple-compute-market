@@ -44,9 +44,9 @@ from core.agent.app.schema.pydantic_models import (
 from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
-from core.agent.app.utils.alkahest_config import get_trusted_oracle_arbiter
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
-from core.agent.app.utils.registry_client import get_registry_client
+from service.clients.alkahest import get_trusted_oracle_arbiter
+from service.clients.token import TOKEN_REGISTRY
+from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
 from core.agent.app.policy.negotiation_thread import (
@@ -354,6 +354,7 @@ async def execute_action(
                     sqlite_client = get_sqlite_client()
                     await sqlite_client.update_order_by_escrow_uid(
                         escrow_uid=escrow_uid,
+                        status="accepted",
                         fulfillment_resource=connection_details,
                     )
             except Exception as exc:
@@ -935,11 +936,6 @@ async def accept_offer(
     their_order_id = parameters.get("their_order_id")
     negotiation_id = parameters.get("negotiation_id")
 
-    # TODO(core-refactor): Order ID ownership/shape will be revised when order schemas are refactored.
-    # For now, default to payload order_id so local status transitions still apply.
-    if not our_order_id and isinstance(order_id, str) and order_id.strip():
-        our_order_id = order_id
-
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
         await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
@@ -1368,7 +1364,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
                     # Build canonical ID from numeric agent ID
                     try:
                         numeric_agent_id = int(onchain_agent_id) if isinstance(onchain_agent_id, str) else onchain_agent_id
-                        from core.agent.app.utils.registry.blockchain_utils import (
+                        from service.clients.erc8004.blockchain import (
                             build_erc8004_canonical_id,
                         )
                         # Get chain_id - try from RPC or use default
@@ -1377,7 +1373,7 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
                             try:
                                 from web3 import Web3
                                 from web3.providers import HTTPProvider
-                                from core.agent.app.utils.registry.blockchain_utils import (
+                                from service.clients.erc8004.blockchain import (
                                     rpc_url_for_http_provider,
                                 )
                                 http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)

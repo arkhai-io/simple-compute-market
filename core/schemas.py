@@ -13,15 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
-
-class ERC20TokenMetadata(BaseModel):
-    """Describes metadata for an ERC-20 token."""
-
-    symbol: str = Field(description="Ticker symbol, e.g. USDC")
-    contract_address: str = Field(description="Checksummed ERC-20 contract address")
-    decimals: int = Field(
-        description="Number of decimal places the token uses", ge=0, le=30
-    )
+from service.clients.token import ERC20TokenMetadata  # noqa: F401
 
 
 class Resource(BaseModel):

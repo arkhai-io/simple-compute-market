@@ -8,7 +8,7 @@ from core.agent.app.schema.pydantic_models import (
     ERC20TokenMetadata,
     TokenResource,
 )
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+from service.clients.token import TOKEN_REGISTRY
 
 
 class ResourceAdapter(Protocol):

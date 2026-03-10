@@ -91,16 +91,16 @@ from core.agent.app.utils.event_ingestion import (
     start_redis_subscriber,
     stop_redis_subscriber,
 )
-from core.agent.app.utils.market_provider import create_market_provider, MarketProvider
+
 from core.agent.app.utils.action_executor import execute_action
-from core.agent.app.utils.alkahest_config import (
+from service.clients.alkahest import (
     get_alkahest_network,
     prewarm_alkahest_address_config_cache,
     resolve_alkahest_address_config,
 )
 from core.agent.app.utils.serializer import json_serializer
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
-from core.agent.app.utils.zerotier import get_zerotier_ip
+from service.clients.token import TOKEN_REGISTRY
+from service.clients.network import get_zerotier_ip
 from pydantic import PrivateAttr
 
 
@@ -456,7 +456,6 @@ class TraderAgent(BaseAgent):
     _policy_manager: PolicyManager = PrivateAttr()
     _policy_seeder: ComputePolicySeeder = PrivateAttr()
     _sqlite_client: SQLiteClient = PrivateAttr()
-    _market_provider: MarketProvider = PrivateAttr()
     _alkahest_client: Any = PrivateAttr()
     _last_action_outcomes: dict[str, dict] = PrivateAttr()
 
@@ -510,9 +509,6 @@ class TraderAgent(BaseAgent):
         )
         self._policy_manager.initialize()
         
-        # Initialize market provider
-        self._market_provider = create_market_provider()
-
         # Initialize Alkahest client (only if both keys are provided and non-empty)
         has_priv_key = AGENT_PRIV_KEY and isinstance(AGENT_PRIV_KEY, str) and AGENT_PRIV_KEY.strip()
         has_rpc_url = CHAIN_RPC_URL and isinstance(CHAIN_RPC_URL, str) and CHAIN_RPC_URL.strip()
@@ -592,8 +588,7 @@ class TraderAgent(BaseAgent):
         # Get resource portfolio
         resource_portfolio = await self.get_resource_portfolio()
         
-        # Load market state
-        market_state = await self._market_provider.get_state()
+        market_state: dict = {}
         
         # Load past experiences (recent decisions for same event type)
         past_experiences = await self._sqlite_client.load_recent_decisions(
@@ -1306,7 +1301,7 @@ a2a_app.routes.append(agent_order_close_route)
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from core.agent.app.utils.agent_card import build_erc8004_registration_file
-from core.agent.app.utils.registry.blockchain_utils import (
+from service.clients.erc8004.blockchain import (
     build_erc8004_canonical_id,
     rpc_url_for_http_provider,
 )
@@ -1384,8 +1379,15 @@ async def process_queued_events():
 async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from core.agent.app.utils.config import CONFIG
-    from core.agent.app.agent_heartbeat import start_agent_heartbeat
-    await start_agent_heartbeat(CONFIG)
+    from service.clients.erc8004.heartbeat import start_agent_heartbeat
+    await start_agent_heartbeat({
+        "indexer_url": CONFIG.indexer_url,
+        "identity_registry_address": CONFIG.identity_registry_address,
+        "agent_wallet_address": CONFIG.agent_wallet_address,
+        "onchain_agent_id": CONFIG.onchain_agent_id,
+        "chain_rpc_url": CONFIG.chain_rpc_url,
+        "agent_priv_key": CONFIG.agent_priv_key,
+    })
 
 
 # Initialize startup tasks
