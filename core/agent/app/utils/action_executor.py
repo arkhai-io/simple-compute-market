@@ -352,6 +352,20 @@ async def execute_action(
                 order=order,
             )
             if result.get("status") == "fulfilled":
+                # Update our own local order with fulfillment details.
+                # fulfill_compute_obligation uses order_dict["order_id"] (the buyer's ID) for its
+                # internal DB write, which doesn't exist in the seller's local DB.  We correct that
+                # here using matched_order_id (the seller's own order).
+                if matched_order_id:
+                    try:
+                        sqlite_client = get_sqlite_client()
+                        await sqlite_client.update_order(
+                            order_id=matched_order_id,
+                            maker_attestation=result.get("fulfillment_uid"),
+                            fulfillment_resource=result.get("connection_details"),
+                        )
+                    except Exception as exc:
+                        logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
                 # Include event_type for downstream parsing and propagate to remote agent.
                 result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
                 if ctx:
@@ -1028,14 +1042,23 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
+            registry_updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
+            # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
+            # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
             their_id = order_dict.get("order_id")
             if their_id:
-                updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
-                result = await registry_client.update_order(their_id, updates)
+                result = await registry_client.update_order(their_id, registry_updates)
                 if result:
-                    logger.info("[REGISTRY] Updated maker's order %s to accepted", their_id)
+                    logger.info("[REGISTRY] Updated order %s to accepted", their_id)
                 else:
-                    logger.warning("[REGISTRY] Failed to update maker's order %s", their_id)
+                    logger.warning("[REGISTRY] Failed to update order %s", their_id)
+            # In seller-as-maker flow, also update the seller's registry entry.
+            if matched_order_id and matched_order_id != their_id:
+                result = await registry_client.update_order(matched_order_id, registry_updates)
+                if result:
+                    logger.info("[REGISTRY] Updated seller's order %s to accepted", matched_order_id)
+                else:
+                    logger.warning("[REGISTRY] Failed to update seller's order %s", matched_order_id)
         except Exception as e:
             logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 
