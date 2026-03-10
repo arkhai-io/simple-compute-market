@@ -146,24 +146,16 @@ class Config:
     frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
 
-    @property
-    def use_mock_provisioning(self) -> bool:
-        """Deprecated: use provisioning_mode == 'mock' instead."""
-        return self.provisioning_mode == "mock"
-
-
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
 )
 
 
 def _resolve_provisioning_mode() -> str:
-    """Resolve PROVISIONING_MODE with backward-compat for USE_MOCK_PROVISIONING."""
+    """Resolve PROVISIONING_MODE: "http" | "ansible" | "mock". Defaults to "http"."""
     mode = os.getenv("PROVISIONING_MODE", "").lower()
     if mode in ("http", "ansible", "mock"):
         return mode
-    if _get_bool_env("USE_MOCK_PROVISIONING", False):
-        return "mock"
     return "http"
 
 

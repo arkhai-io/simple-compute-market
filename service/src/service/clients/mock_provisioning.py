@@ -4,7 +4,7 @@ Returns deterministic static data without spawning subprocesses, making HTTP
 calls, or touching the filesystem. Suitable for unit tests and CI runs where
 no infrastructure is available.
 
-Activate with PROVISIONING_MODE=mock (or legacy USE_MOCK_PROVISIONING=true).
+Activate with PROVISIONING_MODE=mock.
 
 Test-control hooks
 ------------------
