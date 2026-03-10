@@ -29,6 +29,39 @@ from core.agent.app.utils.action_executor import _extract_initial_price_from_ord
 logger = logging.getLogger(__name__)
 
 
+def get_compute_resource_portfolio(
+    context: DecisionContext,
+) -> ComputeResourcePortfolio | None:
+    """Build a compute-only portfolio view from generic available resources."""
+    available_resources = context.available_resources
+    if not isinstance(available_resources, dict):
+        return None
+
+    raw_resources = available_resources.get("resources")
+    if not isinstance(raw_resources, list):
+        return None
+
+    compute_resources: list[dict[str, Any]] = []
+    for resource in raw_resources:
+        if isinstance(resource, ComputeResource):
+            compute_resources.append(resource.model_dump(mode="json"))
+            continue
+        if not isinstance(resource, dict):
+            continue
+        if "gpu_model" not in resource:
+            continue
+        compute_resources.append(resource)
+
+    if not compute_resources:
+        return None
+
+    try:
+        return ComputeResourcePortfolio.model_validate({"resources": compute_resources})
+    except Exception as exc:
+        logger.warning("[COMPUTE POLICY] Failed to validate compute portfolio: %s", exc)
+        return None
+
+
 # ----- Negotiation policies -----
 
 @policy_callable("simple_negotiation_random")
@@ -553,24 +586,16 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     # Check agent capacity for demand resource if it's a ComputeResource
     if isinstance(demand_resource, ComputeResource):
         # Get portfolio from available_resources
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_resource):
-                    # Agent doesn't have capacity - reject
-                    return DomainAction(
-                        action_type=ActionType.REJECT_OFFER,
-                        parameters={
-                            "reason": "insufficient_capacity",
-                            "demand_resource": demand_resource.model_dump(mode="json"),
-                        }
-                    )
-            except Exception as e:
-                # If portfolio validation fails, log and continue
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio and not portfolio.has_capacity(demand_resource):
+            # Agent doesn't have capacity - reject
+            return DomainAction(
+                action_type=ActionType.REJECT_OFFER,
+                parameters={
+                    "reason": "insufficient_capacity",
+                    "demand_resource": demand_resource.model_dump(mode="json"),
+                }
+            )
     elif isinstance(demand_resource, TokenResource):
         # If demand is a TokenResource, accept the offer
         # Simulated assumption: we have enough tokens in our wallet

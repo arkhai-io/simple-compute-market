@@ -76,7 +76,11 @@ from core.agent.app.schema.pydantic_models import (
     OrderCreateEvent,
     OrderCloseEvent,
 )
-from core.agent.app.resources import parse_resource_from_dict
+from core.agent.app.resources import (
+    adapt_db_resource_to_domain_resource,
+    get_supported_resource_types,
+    parse_resource_from_dict,
+)
 from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
@@ -549,7 +553,29 @@ class TraderAgent(BaseAgent):
         Returns:
             A dictionary representing the current portfolio stock.
         """
-        resources = await self._sqlite_client.list_resources()
+        supported_resource_types = get_supported_resource_types()
+        db_resources = await self._sqlite_client.list_resources()
+        resources: list[dict[str, Any]] = []
+
+        for db_resource in db_resources:
+            resource_type = db_resource.get("resource_type")
+            if resource_type not in supported_resource_types:
+                continue
+
+            try:
+                resource = adapt_db_resource_to_domain_resource(db_resource)
+            except Exception as exc:
+                logger.warning(
+                    "[RESOURCE PORTFOLIO] Skipping malformed supported resource %s (%s): %s",
+                    db_resource.get("resource_id"),
+                    resource_type,
+                    exc,
+                )
+                continue
+
+            if hasattr(resource, "model_dump"):
+                resources.append(resource.model_dump(mode="json"))
+
         return {"resources": resources}
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
