@@ -162,6 +162,8 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "order": context.event.order.model_dump(mode="json"),
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
+            "oracle_address": context.event.order.oracle_address,
+            "counterparty_url": context.event.order.order_taker,
         },
     )
 
@@ -177,10 +179,7 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
             "escrow_uid": context.event.escrow_uid,
             "fulfillment_uid": context.event.fulfillment_uid,
             "connection_details": context.event.connection_details,
-            "counterparty_url": (
-                (getattr(context.event, "data", {}) or {}).get("source_url")
-                or getattr(context.event, "source", None)
-            ),
+            "counterparty_url": context.event.fulfilling_party_url,
         },
     )
 
@@ -535,6 +534,7 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "order": order,
             "offer_resource": offer_resource.model_dump(mode='json'),
             "demand_resource": demand_resource.model_dump(mode='json'),
+            "counterparty_url": order.order_maker,
         }
     )
 

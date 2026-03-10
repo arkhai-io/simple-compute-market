@@ -57,17 +57,9 @@ from core.agent.app.policy.action_builders import CounterOfferParams
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
-REMOTE_AGENT_URL_OVERRIDE = CONFIG.remote_agent_url_override
 PORT = CONFIG.port
-REMOTE_AGENT_PORT = CONFIG.remote_agent_port
 AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
-
-# TODO: Make this a lookup!
-# LOCAL ANVIL
-DEMO_ORACLE_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-# BASE SEPOLIA
-# DEMO_ORACLE_ADDRESS = "0x8C523BC3EA8AC363E0b58Fd6cefff706D7885B3e"
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +91,6 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
         return [_serialize_decision(d) for d in decisions]
     return [_serialize_decision(decisions)]
 
-
-def _resolve_oracle_address(oracle_address: str | None) -> str:
-    """Return the oracle signer address."""
-    return oracle_address or DEMO_ORACLE_ADDRESS
 
 
 def _is_http_url(value: str | None) -> bool:
@@ -247,6 +235,7 @@ async def execute_action(
                         matched_offer_id=parameters.get("matched_offer_id"),
                         maker_attestation=order.get("maker_attestation"),
                         taker_attestation=order.get("taker_attestation"),
+                        oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
                     )
                 except Exception as exc:
@@ -284,7 +273,9 @@ async def execute_action(
             escrow_uid = parameters.get("escrow_uid")
             ssh_public_key = parameters.get("ssh_public_key")
             order = parameters.get("order")
-
+            order_dict = order if isinstance(order, dict) else {}
+            oracle_address = parameters.get("oracle_address") or order_dict.get("oracle_address")
+            
             if not escrow_uid:
                 raise ValueError("escrow_uid is required for fulfill_compute_obligation")
             if not ssh_public_key:
@@ -293,7 +284,7 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
+                oracle_address=parameters.get("oracle_address") or (order if isinstance(order, dict) else {}).get("oracle_address"),
                 ssh_public_key=ssh_public_key,
                 order=order,
             )
@@ -309,13 +300,12 @@ async def execute_action(
                         order_dict = order_obj.model_dump(mode="json") if order_obj else {}
                     else:
                         order_dict = {}
-                    counterparty_ref = order_dict.get("order_taker") if order_dict else None
+                    counterparty_ref = parameters.get("counterparty_url") or (order_dict.get("order_taker") if order_dict else None)
                     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                    if not counterparty_url or not str(counterparty_url).strip():
-                        logger.warning(
-                            "[A2A] fulfill_compute_obligation: unresolved counterparty URL from order_taker=%s; parameters keys=%s",
-                            counterparty_ref,
-                            list(parameters.keys()),
+                    if not counterparty_url:
+                        raise ValueError(
+                            f"fulfill_compute_obligation: cannot notify buyer — "
+                            f"unresolved counterparty={counterparty_ref!r}"
                         )
                     try:
                         event = Event(
@@ -332,7 +322,7 @@ async def execute_action(
                             invocation_id=ctx.invocation_id,
                             branch=ctx.branch,
                         )
-                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
                     except Exception as send_err:
                         logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             else:
@@ -345,10 +335,12 @@ async def execute_action(
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
+            # The agent trusting a fulfillment is always the oracle (token buyer).
+            oracle_address = parameters.get("oracle_address") or CONFIG.agent_wallet_address
             result = await arbitrate_compute_fulfillment(
                 client=alkahest_client,
                 fulfillment_uid=parameters.get("fulfillment_uid"),
-                oracle_address=_resolve_oracle_address(parameters.get("oracle_address")),
+                oracle_address=oracle_address,
                 escrow_uid=parameters.get("escrow_uid"),
             )
             logger.info(f"[ALKAHEST]: {result}")
@@ -370,17 +362,11 @@ async def execute_action(
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
                 counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                if not counterparty_url or not str(counterparty_url).strip():
-                    logger.warning(
-                        "[A2A] trust_compute_obligation_fulfillment: unresolved counterparty reference=%s",
-                        counterparty_ref,
+                if not counterparty_url:
+                    raise ValueError(
+                        f"trust_compute_obligation_fulfillment: cannot send arbitration result — "
+                        f"unresolved counterparty reference={counterparty_ref!r}"
                     )
-                    if REMOTE_AGENT_URL_OVERRIDE:
-                        counterparty_url = REMOTE_AGENT_URL_OVERRIDE
-                        logger.warning(
-                            "[A2A] trust_compute_obligation_fulfillment: using REMOTE_AGENT_URL_OVERRIDE fallback=%s",
-                            counterparty_url,
-                        )
                 try:
                     event = Event(
                         author=AGENT_ID,
@@ -403,7 +389,7 @@ async def execute_action(
                         invocation_id=ctx.invocation_id,
                         branch=ctx.branch,
                     )
-                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
@@ -481,32 +467,11 @@ async def execute_action(
 
 
 def connect_to_remote_agent(agent_url: str | None = None):
-    """Connect to a remote agent by URL.
-
-    Args:
-        agent_url: Agent URL (defaults to REMOTE_AGENT_URL_OVERRIDE for backward compatibility)
-
-    Warning:
-        If agent_url is None, falls back to REMOTE_AGENT_URL_OVERRIDE which may misroute
-        counter-offers in staging environments.
-    """
+    """Connect to a remote agent by URL."""
     if agent_url is None:
-        logger.warning(
-            "[A2A] No agent_url provided, falling back to REMOTE_AGENT_URL_OVERRIDE. "
-            "This may misroute messages in staging environments."
-        )
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("[A2A] Fallback call stack:\n%s", "".join(traceback.format_stack(limit=8)[:-1]))
-        agent_url = REMOTE_AGENT_URL_OVERRIDE
+        raise ValueError("[A2A] send_to_remote_agent called with no agent_url")
     resolved_agent_url = _coerce_agent_reference_to_url(agent_url)
-    if not resolved_agent_url:
-        logger.warning(
-            "[A2A] Invalid agent_url reference '%s'. Falling back to REMOTE_AGENT_URL_OVERRIDE=%s",
-            agent_url,
-            REMOTE_AGENT_URL_OVERRIDE,
-        )
-        resolved_agent_url = REMOTE_AGENT_URL_OVERRIDE
-    if not _is_http_url(resolved_agent_url):
+    if not resolved_agent_url or not _is_http_url(resolved_agent_url):
         raise ValueError(f"Unable to resolve valid remote agent URL from reference '{agent_url}'")
     agent_url = resolved_agent_url
     agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
@@ -771,14 +736,10 @@ async def counter_offer(
 
         # Validate that we have a valid agent URL for the counterparty
         if not their_agent_id:
-            logger.warning(
-                f"[ACTION] Order {params.order_id} missing 'order_maker' field. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
-            )
+            logger.warning(f"[ACTION] Order {params.order_id} missing 'order_maker' field.")
         elif not their_agent_id.startswith(("http://", "https://")):
             logger.warning(
-                f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}. "
-                f"Counter-offer may be misrouted to fallback REMOTE_AGENT_URL_OVERRIDE"
+                f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}"
             )
 
         # Determine our strategy by looking up our order (for internal policy use)
@@ -876,9 +837,6 @@ async def accept_offer(
         logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
         return {"status": "error", "message": "Missing order payload for accept_offer"}
 
-    escrow_uid = None
-    escrow_receipt = None
-
     # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
     # When accepting an offer, the taker is buying compute and paying tokens.
     # The mapping depends on what the maker is offering:
@@ -886,10 +844,13 @@ async def accept_offer(
     # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
     escrow_uid = None
     escrow_receipt = None
-    
+    oracle_address = CONFIG.agent_wallet_address
+    if not oracle_address:
+        raise ValueError("Agent wallet address is required for accept_offer but not configured")
+
     if alkahest_client:
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-        
+
         # Retry logic with exponential backoff
         max_retries = 3
         base_delay = 1.0  # seconds
@@ -901,7 +862,7 @@ async def accept_offer(
                     compute_resource=compute_resource,
                     token_resource=token_resource,
                     duration_hours=order_dict.get("duration_hours", 1),
-                    oracle_address=DEMO_ORACLE_ADDRESS,
+                    oracle_address=oracle_address,
                     client=alkahest_client,
                 )
                 escrow_uid = escrow_receipt.get("log", {}).get("uid")
@@ -934,6 +895,7 @@ async def accept_offer(
     # Stamp taker metadata onto the order.
     order_dict["order_taker"] = BASE_URL_OVERRIDE
     order_dict["taker_attestation"] = escrow_uid
+    order_dict["oracle_address"] = oracle_address
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
@@ -1007,6 +969,7 @@ async def accept_offer(
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
+                oracle_address=oracle_address,
             )
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
@@ -1039,16 +1002,14 @@ async def accept_offer(
             logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
 
     # Counterparty to notify is the order maker (we are the taker accepting their offer).
-    counterparty_ref = order_dict.get("order_maker") or parameters.get("their_agent_id")
+    counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-    if not counterparty_url or not counterparty_url.strip():
-        logger.warning(
-            "[A2A] accept_offer: unresolved counterparty reference from order_maker/their_agent_id=%s; order_dict keys=%s",
-            counterparty_ref,
-            list(order_dict.keys()),
+    if not counterparty_url:
+        raise ValueError(
+            f"accept_offer: cannot send acceptance — unresolved counterparty={counterparty_ref!r}"
         )
     try:
-        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
         return {
             "status": "sent",
             "message": "Offer accepted and forwarded to counterparty",
@@ -1136,6 +1097,12 @@ def create_order(
                 amount=9 * 10**settlement_token.decimals,
             )
     
+    # The token-offering side is always the oracle/buyer.
+    offering_tokens = isinstance(offer_resource, TokenResource) or (
+        isinstance(offer_resource, dict) and "token" in offer_resource
+    )
+    oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
+
     order = MarketOrder(
         order_id=str(uuid.uuid4()),
         order_maker=BASE_URL_OVERRIDE,
@@ -1144,7 +1111,8 @@ def create_order(
         demand_resource=demand_resource,
         duration_hours=duration_hours,
         maker_attestation=None,
-        taker_attestation=None
+        taker_attestation=None,
+        oracle_address=oracle_address,
     )
 
     order_dict = order.model_dump(mode='json')
@@ -1355,7 +1323,6 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
     """Propagate an offer to the network using registry discovery.
     
     Queries the registry for matching orders and sends offers to discovered agents.
-    Falls back to REMOTE_AGENT_URL_OVERRIDE if registry discovery is disabled or fails.
     
     Args:
         ctx: Invocation context
@@ -1472,18 +1439,9 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
         elif result.get("status") == "no_delivery":
             return result
         elif result.get("status") == "error":
-            logger.warning(f"[REGISTRY] Registry discovery failed: {result.get('message')}, falling back to default")
+            raise RuntimeError(f"Registry discovery failed: {result.get('message')}")
         else:
-            logger.warning(f"[REGISTRY] Unexpected result status: {result.get('status')}, falling back to default")
-    
-    # Fallback to hard-coded remote agent URL (backward compatibility)
-    try:
-        logger.info(f"[A2A] Using fallback: sending to {REMOTE_AGENT_URL_OVERRIDE}")
-        result = await send_to_remote_agent(ctx, event)
-        return result
-    except Exception as e:
-        logger.error(f"[TOOL] Failed to make offer: {e}")
-        raise
+            raise RuntimeError(f"Registry discovery returned unexpected status: {result.get('status')}")
 
 
 def encode_compute_lease(
@@ -1661,7 +1619,6 @@ async def fulfill_compute_obligation(
     
     When the maker fulfills, this sets maker_attestation in the registry.
     """
-    oracle_address = _resolve_oracle_address(oracle_address)
     fulfillment_uid = None
     maker_attestation = None
     duration_hours = 1
@@ -1836,6 +1793,7 @@ async def fulfill_compute_obligation(
         "fulfillment_uid": fulfillment_uid,
         "connection_details": connection_details,
         "ssh_public_key": ssh_public_key,
+        "fulfilling_party_url": (order_dict or {}).get("order_maker"),
     }
 
 async def arbitrate_compute_fulfillment(
@@ -1844,7 +1802,6 @@ async def arbitrate_compute_fulfillment(
     oracle_address: str | None,
     escrow_uid: str | None = None,
 ):
-    oracle_address = _resolve_oracle_address(oracle_address)
     logger.info(f"[ALKAHEST] Oracle address: {oracle_address}")
     
     async def decision_function(attestation, demand):
