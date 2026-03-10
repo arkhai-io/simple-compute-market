@@ -139,6 +139,9 @@ class Config:
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
     use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
+    frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
+    frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
+    frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -226,6 +229,9 @@ def load_config() -> Config:
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
         use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
+        frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
+        frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
+        frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
     )
 
 
