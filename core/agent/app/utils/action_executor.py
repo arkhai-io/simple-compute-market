@@ -273,8 +273,9 @@ async def execute_action(
             escrow_uid = parameters.get("escrow_uid")
             ssh_public_key = parameters.get("ssh_public_key")
             order = parameters.get("order")
-order_dict = order if isinstance(order, dict) else {}
-oracle_address = parameters.get("oracle_address") or order_dict.get("oracle_address")
+            order_dict = order if isinstance(order, dict) else {}
+            oracle_address = parameters.get("oracle_address") or order_dict.get("oracle_address")
+            
             if not escrow_uid:
                 raise ValueError("escrow_uid is required for fulfill_compute_obligation")
             if not ssh_public_key:
