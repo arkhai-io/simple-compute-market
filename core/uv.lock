@@ -2760,6 +2760,7 @@ dependencies = [
     { name = "google-adk", extra = ["a2a"] },
     { name = "google-cloud-aiplatform", extra = ["evaluation"] },
     { name = "google-cloud-logging" },
+    { name = "market-service" },
     { name = "opentelemetry-exporter-gcp-trace" },
     { name = "psycopg2-binary" },
     { name = "pufferlib" },
@@ -2800,6 +2801,7 @@ requires-dist = [
     { name = "google-cloud-aiplatform", extras = ["evaluation"], specifier = ">=1.118.0,<2.0.0" },
     { name = "google-cloud-logging", specifier = ">=3.12.0,<4.0.0" },
     { name = "jupyter", marker = "extra == 'jupyter'", specifier = ">=1.0.0,<2.0.0" },
+    { name = "market-service", editable = "../service" },
     { name = "mypy", marker = "extra == 'lint'", specifier = ">=1.15.0,<2.0.0" },
     { name = "opentelemetry-exporter-gcp-trace", specifier = ">=1.9.0,<2.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10,<3.0.0" },
@@ -2817,6 +2819,31 @@ provides-extras = ["jupyter", "lint"]
 [package.metadata.requires-dev]
 dev = [
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
+    { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "market-service"
+version = "0.1.0"
+source = { editable = "../service" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "eth-account" },
+    { name = "pydantic" },
+    { name = "web3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.12.15" },
+    { name = "eth-account" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "web3", specifier = ">=7.14.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
