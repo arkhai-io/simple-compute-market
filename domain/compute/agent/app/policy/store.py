@@ -29,6 +29,39 @@ from core.agent.app.utils.action_executor import _extract_initial_price_from_ord
 logger = logging.getLogger(__name__)
 
 
+def get_compute_resource_portfolio(
+    context: DecisionContext,
+) -> ComputeResourcePortfolio | None:
+    """Build a compute-only portfolio view from generic available resources."""
+    available_resources = context.available_resources
+    if not isinstance(available_resources, dict):
+        return None
+
+    raw_resources = available_resources.get("resources")
+    if not isinstance(raw_resources, list):
+        return None
+
+    compute_resources: list[dict[str, Any]] = []
+    for resource in raw_resources:
+        if isinstance(resource, ComputeResource):
+            compute_resources.append(resource.model_dump(mode="json"))
+            continue
+        if not isinstance(resource, dict):
+            continue
+        if "gpu_model" not in resource:
+            continue
+        compute_resources.append(resource)
+
+    if not compute_resources:
+        return None
+
+    try:
+        return ComputeResourcePortfolio.model_validate({"resources": compute_resources})
+    except Exception as exc:
+        logger.warning("[COMPUTE POLICY] Failed to validate compute portfolio: %s", exc)
+        return None
+
+
 # ----- Negotiation policies -----
 
 @policy_callable("simple_negotiation_random")
@@ -149,21 +182,71 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
 # Accept-offer -> fulfill flow
 @policy_callable("ao.action.fulfill_after_accept")
 def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
-    """When we receive an AcceptOfferEvent, move directly to fulfill compute obligation."""
+    """Handle AcceptOfferEvent by role.
+
+    Two paths depending on who we are and what escrow state we're in:
+
+    - Compute buyer, no escrow_uid yet: the seller just signalled acceptance.
+      We create the escrow by dispatching ACCEPT_OFFER (which will send a second
+      AcceptOfferEvent back to the seller with escrow_uid).
+
+    - Compute seller, escrow_uid present: the buyer created the escrow and is
+      asking us to provision. We dispatch FULFILL_COMPUTE_OBLIGATION.
+
+    Role detection: we are the compute buyer if the maker offers compute and we
+    are the taker, OR the maker offers tokens and we are the maker (buyer-as-maker
+    dispatch where we're creating the escrow for our own buy order).
+    """
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
+    from core.agent.app.utils.config import CONFIG
+
+    order = context.event.order
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
+    matched_order_id = context.event.matched_order_id
+    # source is the URL of whoever sent us this event (set by the sender).
+    sender_url = context.event.source
 
+    maker_offers_compute = isinstance(order.offer_resource, ComputeResource)
+    our_url = (CONFIG.base_url_override or "").rstrip("/")
+    maker_url = (order.order_maker or "").rstrip("/")
+    we_are_maker = bool(our_url and maker_url and our_url == maker_url)
+
+    # We are the compute buyer if:
+    # - Maker offers compute and we're the taker (seller-as-maker, normal flow).
+    # - Maker offers tokens and we're the maker (buyer-as-maker, policy-triggered).
+    compute_buyer = (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
+
+    if compute_buyer:
+        # Escrow not yet created — create it now.
+        if escrow_uid:
+            return None  # already processed
+        return DomainAction(
+            action_type=DomainActionType.ACCEPT_OFFER,
+            parameters={
+                "order": order.model_dump(mode="json"),
+                "order_id": order.order_id,
+                "our_order_id": order.order_id,
+                "their_order_id": matched_order_id,
+                "counterparty_url": sender_url,
+                "matched_order_id": matched_order_id,
+            },
+        )
+
+    # Compute seller: fulfill once buyer has supplied escrow_uid and ssh_key.
+    if not escrow_uid or not ssh_key:
+        return None
     return DomainAction(
         action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
         parameters={
-            "order": context.event.order.model_dump(mode="json"),
+            "order": order.model_dump(mode="json"),
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
-            "oracle_address": context.event.order.oracle_address,
-            "counterparty_url": context.event.order.order_taker,
+            "oracle_address": order.oracle_address,
+            "counterparty_url": sender_url,
+            "matched_order_id": matched_order_id,
         },
     )
 
@@ -503,24 +586,16 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
     # Check agent capacity for demand resource if it's a ComputeResource
     if isinstance(demand_resource, ComputeResource):
         # Get portfolio from available_resources
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_resource):
-                    # Agent doesn't have capacity - reject
-                    return DomainAction(
-                        action_type=ActionType.REJECT_OFFER,
-                        parameters={
-                            "reason": "insufficient_capacity",
-                            "demand_resource": demand_resource.model_dump(mode="json"),
-                        }
-                    )
-            except Exception as e:
-                # If portfolio validation fails, log and continue
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"[POLICY] Failed to validate portfolio: {e}")
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio and not portfolio.has_capacity(demand_resource):
+            # Agent doesn't have capacity - reject
+            return DomainAction(
+                action_type=ActionType.REJECT_OFFER,
+                parameters={
+                    "reason": "insufficient_capacity",
+                    "demand_resource": demand_resource.model_dump(mode="json"),
+                }
+            )
     elif isinstance(demand_resource, TokenResource):
         # If demand is a TokenResource, accept the offer
         # Simulated assumption: we have enough tokens in our wallet

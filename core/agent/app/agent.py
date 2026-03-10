@@ -76,7 +76,11 @@ from core.agent.app.schema.pydantic_models import (
     OrderCreateEvent,
     OrderCloseEvent,
 )
-from core.agent.app.resources import parse_resource_from_dict
+from core.agent.app.resources import (
+    adapt_db_resource_to_domain_resource,
+    get_supported_resource_types,
+    parse_resource_from_dict,
+)
 from core.agent.app.policy.store import PolicyStore
 from core.agent.app.policy.manager import PolicyManager
 from core.agent.app.policy.negotiation_thread import get_thread_store
@@ -352,10 +356,14 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             order = MarketOrder.model_validate(offer_data)
             escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
+            matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
+            source = data.get("source") or payload.get("source")
             return AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
+                matched_order_id=matched_order_id,
+                source=source,
             )
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
@@ -545,7 +553,29 @@ class TraderAgent(BaseAgent):
         Returns:
             A dictionary representing the current portfolio stock.
         """
-        resources = await self._sqlite_client.list_resources()
+        supported_resource_types = get_supported_resource_types()
+        db_resources = await self._sqlite_client.list_resources()
+        resources: list[dict[str, Any]] = []
+
+        for db_resource in db_resources:
+            resource_type = db_resource.get("resource_type")
+            if resource_type not in supported_resource_types:
+                continue
+
+            try:
+                resource = adapt_db_resource_to_domain_resource(db_resource)
+            except Exception as exc:
+                logger.warning(
+                    "[RESOURCE PORTFOLIO] Skipping malformed supported resource %s (%s): %s",
+                    db_resource.get("resource_id"),
+                    resource_type,
+                    exc,
+                )
+                continue
+
+            if hasattr(resource, "model_dump"):
+                resources.append(resource.model_dump(mode="json"))
+
         return {"resources": resources}
 
     async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
@@ -755,19 +785,8 @@ class TraderAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        if len(ctx.session.events[-1].content.parts) > 10:
-            yield Event(
-            author=self.name,
-            content=genai_types.Content(
-                role="model",
-                parts=[genai_types.Part.from_text(text=f"Too many message parts. Aborting.")],
-            ),
-            invocation_id=ctx.invocation_id,
-            branch=ctx.branch,
-        )
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
-
         logger.info("[RUN ASYNC] CONTENT:")
 
         if last_event.content is None:

@@ -220,6 +220,11 @@ def get_resource_adapter(resource_type: str) -> ResourceAdapter | None:
     return _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
 
 
+def get_supported_resource_types() -> set[str]:
+    """Return resource types that have registered domain adapters."""
+    return set(_RESOURCE_TYPE_TO_ADAPTER)
+
+
 def adapt_db_resource_to_domain_resource(db_resource: dict[str, Any]) -> Any:
     """
     Adapt a DB resource dict to the appropriate domain resource instance using the registered adapter.
