@@ -99,7 +99,7 @@ from service.clients.alkahest import (
     resolve_alkahest_address_config,
 )
 from core.agent.app.utils.serializer import json_serializer
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+from service.clients.token import TOKEN_REGISTRY
 from service.clients.network import get_zerotier_ip
 from pydantic import PrivateAttr
 
