@@ -837,9 +837,6 @@ async def accept_offer(
         logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
         return {"status": "error", "message": "Missing order payload for accept_offer"}
 
-    escrow_uid = None
-    escrow_receipt = None
-
     # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
     # When accepting an offer, the taker is buying compute and paying tokens.
     # The mapping depends on what the maker is offering:
