@@ -388,7 +388,7 @@ oracle_address = parameters.get("oracle_address") or order_dict.get("oracle_addr
                         invocation_id=ctx.invocation_id,
                         branch=ctx.branch,
                     )
-                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url or None)
+                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
