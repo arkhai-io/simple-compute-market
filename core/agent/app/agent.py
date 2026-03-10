@@ -352,10 +352,14 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             order = MarketOrder.model_validate(offer_data)
             escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
+            matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
+            source = data.get("source") or payload.get("source")
             return AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
+                matched_order_id=matched_order_id,
+                source=source,
             )
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
@@ -755,19 +759,8 @@ class TraderAgent(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
-        if len(ctx.session.events[-1].content.parts) > 10:
-            yield Event(
-            author=self.name,
-            content=genai_types.Content(
-                role="model",
-                parts=[genai_types.Part.from_text(text=f"Too many message parts. Aborting.")],
-            ),
-            invocation_id=ctx.invocation_id,
-            branch=ctx.branch,
-        )
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
-
         logger.info("[RUN ASYNC] CONTENT:")
 
         if last_event.content is None:

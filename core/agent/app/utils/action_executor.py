@@ -101,6 +101,54 @@ def _is_http_url(value: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _normalize_agent_url(url: str | None) -> str:
+    if not url:
+        return ""
+    return url.strip().rstrip("/").lower()
+
+
+def _agent_urls_match(a: str | None, b: str | None) -> bool:
+    na, nb = _normalize_agent_url(a), _normalize_agent_url(b)
+    return bool(na and na == nb)
+
+
+def _resource_is_compute(resource: Any) -> bool:
+    """True when the resource represents compute (has gpu_model), not tokens.
+
+    Works with both Pydantic model instances and serialized dicts. ComputeResource
+    serializes with a 'gpu_model' key; TokenResource serializes with 'token'/'amount'.
+    """
+    if isinstance(resource, str):
+        try:
+            resource = json.loads(resource)
+        except Exception:
+            return False
+    if isinstance(resource, dict):
+        return "gpu_model" in resource
+    return hasattr(resource, "gpu_model")
+
+
+def _we_are_compute_buyer(order_dict: dict[str, Any]) -> bool:
+    """True when we are the compute-buying (token-paying) side of this order.
+
+    Two cases:
+    - Seller-as-maker: maker offers compute, we are the taker → we buy compute.
+    - Buyer-as-maker: maker offers tokens (us), we are the maker → we buy compute.
+    """
+    maker_offers_compute = _resource_is_compute(order_dict.get("offer_resource"))
+    we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
+    return (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
+
+
+def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | None:
+    """Return the URL of the other party in the order (the one that is not us)."""
+    maker = order_dict.get("order_maker")
+    taker = order_dict.get("order_taker")
+    if _agent_urls_match(maker, BASE_URL_OVERRIDE):
+        return taker
+    return maker
+
+
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
     """Best-effort conversion from agent ref/alias to resolvable URL."""
     if not isinstance(agent_ref, str):
@@ -275,11 +323,26 @@ async def execute_action(
             order = parameters.get("order")
             order_dict = order if isinstance(order, dict) else {}
             oracle_address = parameters.get("oracle_address") or order_dict.get("oracle_address")
-            
+            matched_order_id = parameters.get("matched_order_id")
+
             if not escrow_uid:
                 raise ValueError("escrow_uid is required for fulfill_compute_obligation")
             if not ssh_public_key:
                 raise ValueError("ssh_public_key is required for fulfill_compute_obligation")
+
+            # Update our own local order if matched_order_id was threaded through the event.
+            # This handles the seller-as-taker case where order_id in the order dict is the
+            # buyer's order_id (not present in the seller's local DB).
+            if matched_order_id:
+                try:
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.update_order(
+                        order_id=matched_order_id,
+                        status="accepted",
+                        escrow_uid=escrow_uid,
+                    )
+                except Exception as exc:
+                    logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
 
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
@@ -300,7 +363,7 @@ async def execute_action(
                         order_dict = order_obj.model_dump(mode="json") if order_obj else {}
                     else:
                         order_dict = {}
-                    counterparty_ref = parameters.get("counterparty_url") or (order_dict.get("order_taker") if order_dict else None)
+                    counterparty_ref = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
                     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
                     if not counterparty_url:
                         raise ValueError(
@@ -838,102 +901,9 @@ async def accept_offer(
         logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
         return {"status": "error", "message": "Missing order payload for accept_offer"}
 
-    # If alkahest_client provided, attempt on-chain buy to escrow tokens with retry logic.
-    # When accepting an offer, the taker is buying compute and paying tokens.
-    # The mapping depends on what the maker is offering:
-    # - If maker offers compute (surplus): taker buys compute (offer_resource) and pays tokens (demand_resource)
-    # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
-    escrow_uid = None
-    escrow_receipt = None
-    oracle_address = CONFIG.agent_wallet_address
-    if not oracle_address:
-        raise ValueError("Agent wallet address is required for accept_offer but not configured")
-
-    if alkahest_client:
-        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-
-        # Retry logic with exponential backoff
-        max_retries = 3
-        base_delay = 1.0  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"[ALKAHEST] Attempting to put tokens in escrow (attempt {attempt + 1}/{max_retries})")
-                escrow_receipt = await buy_compute_with_erc20(
-                    compute_resource=compute_resource,
-                    token_resource=token_resource,
-                    duration_hours=order_dict.get("duration_hours", 1),
-                    oracle_address=oracle_address,
-                    client=alkahest_client,
-                )
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-                if escrow_uid:
-                    logger.info("[ALKAHEST] Created escrow via buy_with_erc20; uid=%s", escrow_uid)
-                    break
-                else:
-                    logger.warning(f"[ALKAHEST] Escrow receipt missing uid on attempt {attempt + 1}")
-            except Exception as e:
-                logger.warning(f"[ALKAHEST] Failed to create escrow on attempt {attempt + 1}/{max_retries}: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.info(f"[ALKAHEST] Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error("[ALKAHEST] All retry attempts failed. Cannot create escrow.")
-                    raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
-        
-        if not escrow_uid:
-            if isinstance(escrow_receipt, dict):
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-                if escrow_uid:
-                    logger.info(f"[ALKAHEST] Got escrow_uid from receipt: {escrow_uid}")
-            
-            if not escrow_uid:
-                raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
-    else:
-        raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
-
-    # Stamp taker metadata onto the order.
-    order_dict["order_taker"] = BASE_URL_OVERRIDE
-    order_dict["taker_attestation"] = escrow_uid
-    order_dict["oracle_address"] = oracle_address
-
-    event_payload = {
-        "event_type": EventType.ACCEPT_OFFER.value,
-        "offer": order_dict,
-        "escrow_uid": escrow_uid,
-        "ssh_public_key": SSH_PUBLIC_KEY,
-    }
-
-    if ctx is None:
-        logger.warning("[TOOL] No invocation context; acceptance not sent.")
-        return {
-            **event_payload,
-            "status": "pending",
-            "message": "No invocation context available to send acceptance",
-        }
-
-    event = Event(
-        author=AGENT_ID,
-        content=genai_types.Content(
-            role="model",
-            parts=[
-                genai_types.Part.from_function_response(
-                    name="accept_offer",
-                    response=event_payload,
-                )
-            ],
-        ),
-        invocation_id=ctx.invocation_id,
-        branch=ctx.branch,
-    )
-
-    logger.info("[TOOL] Accepting offer and notifying counterparty: %s", event_payload)
-
-    # Cancel competing negotiations and mark as terminal using transaction
     order_id = order_dict.get("order_id")
     our_order_id = parameters.get("our_order_id")
-    their_order_id = parameters.get("their_order_id")
+    their_order_id = parameters.get("their_order_id") or order_id
     negotiation_id = parameters.get("negotiation_id")
 
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
@@ -953,7 +923,92 @@ async def accept_offer(
                 our_order_id = inferred.get("order_id")
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
-        
+
+    if _we_are_compute_buyer(order_dict):
+        return await _accept_as_buyer(
+            alkahest_client=alkahest_client,
+            ctx=ctx,
+            parameters=parameters,
+            order_dict=order_dict,
+            our_order_id=our_order_id,
+            their_order_id=their_order_id,
+        )
+    else:
+        return await _accept_as_seller(
+            ctx=ctx,
+            parameters=parameters,
+            order_dict=order_dict,
+            our_order_id=our_order_id,
+            their_order_id=their_order_id,
+        )
+
+
+async def _accept_as_buyer(
+    *,
+    alkahest_client: Any | None,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any],
+    order_dict: dict[str, Any],
+    our_order_id: str | None,
+    their_order_id: str | None,
+) -> dict[str, Any]:
+    """Buyer path: create on-chain escrow and send AcceptOfferEvent with escrow_uid."""
+    oracle_address = CONFIG.agent_wallet_address
+    if not oracle_address:
+        raise ValueError("Agent wallet address is required for buyer accept_offer but not configured")
+
+    escrow_uid = None
+    escrow_receipt = None
+
+    if alkahest_client:
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        max_retries = 3
+        base_delay = 1.0
+        for attempt in range(max_retries):
+            try:
+                logger.info("[ALKAHEST] Attempting to put tokens in escrow (attempt %d/%d)", attempt + 1, max_retries)
+                escrow_receipt = await buy_compute_with_erc20(
+                    compute_resource=compute_resource,
+                    token_resource=token_resource,
+                    duration_hours=order_dict.get("duration_hours", 1),
+                    oracle_address=oracle_address,
+                    client=alkahest_client,
+                )
+                escrow_uid = escrow_receipt.get("log", {}).get("uid")
+                if escrow_uid:
+                    logger.info("[ALKAHEST] Created escrow; uid=%s", escrow_uid)
+                    break
+                logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
+            except Exception as e:
+                logger.warning("[ALKAHEST] Failed to create escrow on attempt %d/%d: %s", attempt + 1, max_retries, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(base_delay * (2 ** attempt))
+                else:
+                    raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
+
+        if not escrow_uid:
+            if isinstance(escrow_receipt, dict):
+                escrow_uid = escrow_receipt.get("log", {}).get("uid")
+            if not escrow_uid:
+                raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
+    else:
+        raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
+
+    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    order_dict["taker_attestation"] = escrow_uid
+    order_dict["oracle_address"] = oracle_address
+
+    # Echo the seller's order_id back so they can update their local DB without a lookup.
+    matched_order_id = parameters.get("matched_order_id")
+
+    event_payload = {
+        "event_type": EventType.ACCEPT_OFFER.value,
+        "source": BASE_URL_OVERRIDE,
+        "offer": order_dict,
+        "escrow_uid": escrow_uid,
+        "ssh_public_key": SSH_PUBLIC_KEY,
+        "matched_order_id": matched_order_id,
+    }
 
     try:
         sqlite_client = get_sqlite_client()
@@ -970,57 +1025,118 @@ async def accept_offer(
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as accepted: %s", our_order_id, exc)
 
-    # Update registry if order exists there
-    # This updates the MAKER's order (the order we're accepting)
-    # The registry will also update the symmetric order (taker's order) automatically
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            order_id = order_dict.get("order_id")
-            if order_id:
-                updates = {
-                    "status": "accepted",
-                    "order_taker": BASE_URL_OVERRIDE,
-                    "taker_attestation": escrow_uid,
-                }
-                result = await registry_client.update_order(order_id, updates)
+            their_id = order_dict.get("order_id")
+            if their_id:
+                updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
+                result = await registry_client.update_order(their_id, updates)
                 if result:
-                    logger.info(f"[REGISTRY] Updated maker's order {order_id} status to accepted")
-                    if result.get("symmetric_order_updated"):
-                        logger.info(f"[REGISTRY] Also updated symmetric order {result.get('symmetric_order_updated')}")
-                    else:
-                        logger.warning(f"[REGISTRY] No symmetric order found/updated for order {order_id}")
+                    logger.info("[REGISTRY] Updated maker's order %s to accepted", their_id)
                 else:
-                    logger.warning(f"[REGISTRY] Failed to update maker's order {order_id} - order may not exist in registry")
+                    logger.warning("[REGISTRY] Failed to update maker's order %s", their_id)
         except Exception as e:
-            logger.warning(f"[REGISTRY] Failed to update order in registry: {e}")
-            import traceback
-            logger.debug(f"[REGISTRY] Update order traceback: {traceback.format_exc()}")
+            logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 
-    # Counterparty to notify is the order maker (we are the taker accepting their offer).
     counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
     counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
     if not counterparty_url:
-        raise ValueError(
-            f"accept_offer: cannot send acceptance — unresolved counterparty={counterparty_ref!r}"
-        )
+        raise ValueError(f"accept_offer (buyer): cannot send acceptance — unresolved counterparty={counterparty_ref!r}")
+
+    if ctx is None:
+        logger.warning("[TOOL] No invocation context; acceptance not sent.")
+        return {**event_payload, "status": "pending", "message": "No invocation context available"}
+
+    event = Event(
+        author=AGENT_ID,
+        content=genai_types.Content(
+            role="model",
+            parts=[genai_types.Part.from_function_response(name="accept_offer", response=event_payload)],
+        ),
+        invocation_id=ctx.invocation_id,
+        branch=ctx.branch,
+    )
+    logger.info("[TOOL] Buyer accepting offer, notifying seller: %s", counterparty_url)
     try:
         result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
         return {
             "status": "sent",
-            "message": "Offer accepted and forwarded to counterparty",
+            "message": "Offer matched.",
             "escrow_uid": escrow_uid,
             "offer": order_dict,
             "remote_response": getattr(result, "content", None),
         }
     except Exception as e:
         logger.error("[TOOL] Failed to send acceptance: %s", e)
+        return {"status": "error", "message": f"Failed to send acceptance: {e}", "escrow_uid": escrow_uid, "offer": order_dict}
+
+
+async def _accept_as_seller(
+    *,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any],
+    order_dict: dict[str, Any],
+    our_order_id: str | None,
+    their_order_id: str | None,
+) -> dict[str, Any]:
+    """Seller path: signal acceptance to the buyer without creating an escrow.
+
+    The buyer will receive this and create the escrow on their side, then send
+    back an AcceptOfferEvent with escrow_uid for the seller to fulfill.
+    """
+    # Include our order_id so the buyer can echo it back, letting us update our
+    # local DB directly when we receive the second AcceptOfferEvent.
+    event_payload = {
+        "event_type": EventType.ACCEPT_OFFER.value,
+        "source": BASE_URL_OVERRIDE,
+        "offer": order_dict,
+        "escrow_uid": None,
+        "ssh_public_key": None,
+        "matched_order_id": our_order_id,
+    }
+
+    try:
+        sqlite_client = get_sqlite_client()
+        if our_order_id:
+            await sqlite_client.update_order(
+                order_id=our_order_id,
+                status="matched",
+                matched_offer_id=their_order_id,
+            )
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to update order %s as matched: %s", our_order_id, exc)
+
+    counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
+    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
+    if not counterparty_url:
+        raise ValueError(f"accept_offer (seller): cannot notify buyer — unresolved counterparty={counterparty_ref!r}")
+
+    if ctx is None:
+        logger.warning("[TOOL] No invocation context; seller acceptance not sent.")
+        return {**event_payload, "status": "pending", "message": "No invocation context available"}
+
+    event = Event(
+        author=AGENT_ID,
+        content=genai_types.Content(
+            role="model",
+            parts=[genai_types.Part.from_function_response(name="accept_offer", response=event_payload)],
+        ),
+        invocation_id=ctx.invocation_id,
+        branch=ctx.branch,
+    )
+    logger.info("[TOOL] Seller signalling acceptance to buyer (no escrow yet): %s", counterparty_url)
+    try:
+        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
         return {
-            "status": "error",
-            "message": f"Failed to send acceptance: {e}",
-            "escrow_uid": escrow_uid,
+            "status": "sent",
+            "message": "Order matched.",
             "offer": order_dict,
+            "remote_response": getattr(result, "content", None),
         }
+    except Exception as e:
+        logger.error("[TOOL] Failed to send seller acceptance: %s", e)
+        return {"status": "error", "message": f"Failed to send seller acceptance: {e}", "offer": order_dict}
 
 
 def create_order(
@@ -1789,7 +1905,7 @@ async def fulfill_compute_obligation(
         "fulfillment_uid": fulfillment_uid,
         "connection_details": connection_details,
         "ssh_public_key": ssh_public_key,
-        "fulfilling_party_url": (order_dict or {}).get("order_maker"),
+        "fulfilling_party_url": BASE_URL_OVERRIDE,
     }
 
 async def arbitrate_compute_fulfillment(

@@ -328,11 +328,19 @@ class AcceptOfferEvent(DomainEvent):
     order: MarketOrder = Field(description="The accepted market order with taker info")
     escrow_uid: str | None = Field(
         default=None,
-        description="Escrow receipt UID supplied by the taker",
+        description="Escrow receipt UID supplied by the buyer; None when seller is merely signalling acceptance",
     )
     ssh_public_key: str | None = Field(
         default=None,
         description="Buyer-provided SSH public key for provisioning access",
+    )
+    matched_order_id: str | None = Field(
+        default=None,
+        description=(
+            "The sender's own local order_id, threaded through the acceptance handshake so the "
+            "receiver can update their DB without a reverse-lookup. "
+            "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
+        ),
     )
 
     @classmethod
@@ -341,14 +349,17 @@ class AcceptOfferEvent(DomainEvent):
         order: MarketOrder,
         escrow_uid: str | None = None,
         ssh_public_key: str | None = None,
+        matched_order_id: str | None = None,
+        source: str | None = None,
     ) -> "AcceptOfferEvent":
         """Create an accept-offer event from a market order and optional escrow UID."""
         return cls(
             event_id=f"acc_{order.order_id}",
-            source=order.order_taker or order.order_maker,
+            source=source or order.order_taker or order.order_maker,
             order=order,
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
+            matched_order_id=matched_order_id,
             data={
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
@@ -357,6 +368,7 @@ class AcceptOfferEvent(DomainEvent):
                 "escrow_uid": escrow_uid,
                 "ssh_public_key": ssh_public_key,
                 "oracle_address": order.oracle_address,
+                "matched_order_id": matched_order_id,
             },
         )
 

@@ -139,6 +139,11 @@ class SQLiteClient:
                 )
                 """
             )
+            # Migrate orders table: add columns that may be missing from older DBs
+            try:
+                cur.execute("ALTER TABLE orders ADD COLUMN oracle_address TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             # Orders table (local source of truth)
             cur.execute(
                 """
@@ -1026,6 +1031,69 @@ class SQLiteClient:
                 conn.close()
 
         await asyncio.to_thread(_save)
+
+    async def load_order(self, *, order_id: str) -> dict[str, Any] | None:
+        """Return a single order by order_id, or None if not found."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource,
+                           duration_hours, order_maker, order_taker,
+                           matched_offer_id, maker_attestation, taker_attestation,
+                           escrow_uid, oracle_address
+                    FROM orders WHERE order_id = ?
+                    """,
+                    (order_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                keys = [
+                    "order_id", "status", "created_at", "updated_at",
+                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "duration_hours", "order_maker", "order_taker",
+                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "escrow_uid", "oracle_address",
+                ]
+                return dict(zip(keys, row))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_orders_by_escrow_uid(self, *, escrow_uid: str) -> list[dict[str, Any]]:
+        """Return all orders that share the given escrow_uid."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource,
+                           duration_hours, order_maker, order_taker,
+                           matched_offer_id, maker_attestation, taker_attestation,
+                           escrow_uid, oracle_address
+                    FROM orders WHERE escrow_uid = ?
+                    """,
+                    (escrow_uid,),
+                )
+                keys = [
+                    "order_id", "status", "created_at", "updated_at",
+                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "duration_hours", "order_maker", "order_taker",
+                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "escrow_uid", "oracle_address",
+                ]
+                return [dict(zip(keys, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def save_policy(
         self,
