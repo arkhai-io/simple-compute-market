@@ -145,6 +145,7 @@ class Config:
     frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
     frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
+    resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
@@ -245,6 +246,7 @@ def load_config() -> Config:
         frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
         frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
+        resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
     )
 
 

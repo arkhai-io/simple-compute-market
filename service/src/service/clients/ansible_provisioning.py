@@ -332,16 +332,90 @@ async def get_vm_available_resources(
     poll_interval: int = 5,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Return stub inventory data for the given VM host.
+    """Query the VM host for available GPU slots via an Ansible ad-hoc shell command.
 
-    This is a no-op stub. The real implementation would run an Ansible check
-    playbook or query the provisioning service for live inventory.
+    Runs ``virsh list --name`` on the target host and counts the number of
+    running tenant VMs. A count of zero means the single GPU slot is free.
 
     Args:
         provisioning_service_url: Ignored; present for interface parity.
-        vm_host: The host to query for available resources.
-        timeout: Ignored; present for interface parity.
+        vm_host: Ansible inventory hostname to query (e.g. "ww1").
+        timeout: Maximum seconds to wait for the Ansible command to complete.
         poll_interval: Ignored; present for interface parity.
         agent_id: Ignored; present for interface parity.
+
+    Returns:
+        Dict with keys: status, vm_host, available, running_vms.
+
+    Raises:
+        subprocess.CalledProcessError: if the Ansible command exits non-zero.
     """
-    return {"status": "ok", "vm_host": vm_host, "available": True}
+    project_root = _find_project_root()
+    inventory_path = project_root / "compute-provisioning-iac/ansible/inventory/hosts"
+
+    cmd = [
+        "ansible",
+        vm_host,
+        "-i",
+        str(inventory_path),
+        "-m",
+        "shell",
+        "-a",
+        "virsh list --name 2>/dev/null | grep -c . || echo 0",
+    ]
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(project_root),
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=float(timeout)
+        )
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    stdout = stdout_bytes.decode(errors="replace").strip()
+    stderr = stderr_bytes.decode(errors="replace").strip()
+
+    if proc.returncode != 0:
+        logger.error(
+            "get_vm_available_resources failed (code %s) for %s. stdout:\n%s\nstderr:\n%s",
+            proc.returncode,
+            vm_host,
+            stdout,
+            stderr,
+        )
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stdout, stderr)
+
+    if stderr:
+        logger.debug("get_vm_available_resources stderr for %s:\n%s", vm_host, stderr)
+
+    # Ansible ad-hoc output includes a header line like "ww1 | SUCCESS | ..."
+    # followed by the actual command output. Extract the last non-empty line.
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    count_str = lines[-1] if lines else "0"
+    try:
+        running_count = int(count_str)
+    except ValueError:
+        logger.warning(
+            "Unexpected virsh count output for %s: %r — defaulting to 0", vm_host, count_str
+        )
+        running_count = 0
+
+    logger.info(
+        "get_vm_available_resources: vm_host=%s running_vms=%d available=%s",
+        vm_host,
+        running_count,
+        running_count == 0,
+    )
+    return {
+        "status": "ok",
+        "vm_host": vm_host,
+        "available": running_count == 0,
+        "running_vms": running_count,
+    }

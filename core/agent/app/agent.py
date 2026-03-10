@@ -1413,9 +1413,15 @@ async def _start_heartbeat():
 async def _startup_tasks():
     """Initialize background tasks."""
     from core.agent.app.utils.config import CONFIG
+    from core.agent.app.resource_poller import resource_poller_loop
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
+
+    # Start resource availability poller (all provisioning modes)
+    asyncio.create_task(resource_poller_loop())
+    logger.info("[STARTUP] Resource poller started (mode=%s, interval=%ds)",
+                CONFIG.provisioning_mode, CONFIG.resource_check_interval)
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()

@@ -1,4 +1,5 @@
 """Unit tests for service.clients.mock_provisioning (test double)."""
+import asyncio
 import pytest
 import service.clients.mock_provisioning as mp
 
@@ -55,3 +56,72 @@ async def test_resources_returns_correct_vm_host():
     assert result["vm_host"] == "ww3"
     assert result["status"] == "ok"
     assert result["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_provision_marks_slot_unavailable():
+    """provision_machine_async flips available=False so the poller sees the correct state."""
+    assert mp.RESOURCES_RESULT["available"] is True
+
+    await mp.provision_machine_async("http://ignored", {})
+
+    resources = await mp.get_vm_available_resources("http://ignored", vm_host="ww1")
+    assert resources["available"] is False
+    assert resources["running_vms"] == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_schedules_auto_free():
+    """After MOCK_RESOURCE_FREE_INTERVAL elapses the slot becomes available again."""
+    original_interval = mp.MOCK_RESOURCE_FREE_INTERVAL
+    mp.MOCK_RESOURCE_FREE_INTERVAL = 0  # instant release for test speed
+
+    await mp.provision_machine_async("http://ignored", {})
+    assert mp.RESOURCES_RESULT["available"] is False
+
+    # Allow the event loop to run the scheduled task
+    await asyncio.sleep(0.05)
+
+    assert mp.RESOURCES_RESULT["available"] is True
+    assert mp.RESOURCES_RESULT["running_vms"] == 0
+
+    mp.MOCK_RESOURCE_FREE_INTERVAL = original_interval
+
+
+@pytest.mark.asyncio
+async def test_reprovision_cancels_previous_free_task():
+    """Re-provisioning cancels any pending free task and schedules a new one."""
+    mp.MOCK_RESOURCE_FREE_INTERVAL = 100  # long enough not to fire during test
+
+    await mp.provision_machine_async("http://ignored", {})
+    first_task = mp._last_provisioned_task
+
+    await mp.provision_machine_async("http://ignored", {})
+    second_task = mp._last_provisioned_task
+
+    # Yield the event loop so the CancelledError propagates and task reaches done state.
+    await asyncio.sleep(0)
+
+    assert first_task is not None
+    assert second_task is not None
+    assert first_task is not second_task
+    assert first_task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_reset_defaults_cancels_pending_task():
+    """_reset_defaults() cancels the auto-free task and restores available=True."""
+    mp.MOCK_RESOURCE_FREE_INTERVAL = 100
+
+    await mp.provision_machine_async("http://ignored", {})
+    task = mp._last_provisioned_task
+    assert mp.RESOURCES_RESULT["available"] is False
+
+    mp._reset_defaults()
+
+    # Yield the event loop so the CancelledError propagates and task reaches done state.
+    await asyncio.sleep(0)
+
+    assert mp.RESOURCES_RESULT["available"] is True
+    assert mp._last_provisioned_task is None
+    assert task is not None and task.cancelled()
