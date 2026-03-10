@@ -417,13 +417,26 @@ async def execute_action(
             try:
                 escrow_uid = parameters.get("escrow_uid")
                 connection_details = parameters.get("connection_details")
+                tenant_credentials = parameters.get("tenant_credentials")
+                sqlite_client = get_sqlite_client()
                 if escrow_uid and connection_details:
-                    sqlite_client = get_sqlite_client()
                     await sqlite_client.update_order_by_escrow_uid(
                         escrow_uid=escrow_uid,
                         status="accepted",
                         fulfillment_resource=connection_details,
                     )
+                if tenant_credentials and escrow_uid:
+                    order_id_for_escrow = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
+                    if order_id_for_escrow:
+                        await sqlite_client.store_credential(
+                            order_id=order_id_for_escrow,
+                            role="tenant",
+                            granted_to="self",
+                            password=tenant_credentials.get("password"),
+                            key_type=tenant_credentials.get("key_type"),
+                        )
+                    else:
+                        logger.warning("[LOCAL DB] Cannot store tenant credentials: no order found for escrow_uid=%s", escrow_uid)
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
@@ -1784,9 +1797,10 @@ async def fulfill_compute_obligation(
             vm_host=reserved_vm_host,
             vm_target=vm_target,
         )
-        # Normalize to string — Alkahest, the event schema (ReceiveComputeObligationFulfillmentEvent),
-        # and the DB fulfillment_resource column all expect str, not dict.
+        # Split credentials out before serialising — passwords must never touch on-chain data.
+        authentication: dict | None = None
         if isinstance(provision_result, dict):
+            authentication = provision_result.pop("authentication", None)
             connection_details = json.dumps(provision_result)
         else:
             connection_details = provision_result
@@ -1828,6 +1842,33 @@ async def fulfill_compute_obligation(
                 reserved_resource_id,
                 lease_err,
             )
+
+    # Persist seller-side credentials (root + tenant) — off-chain only.
+    if authentication and order_id:
+        try:
+            _cred_client = get_sqlite_client()
+            root_data = authentication.get("root", {}) or {}
+            tenant_data = authentication.get("tenant", {}) or {}
+            if root_data:
+                await _cred_client.store_credential(
+                    order_id=order_id,
+                    role="root",
+                    granted_to="self",
+                    password=root_data.get("password"),
+                    ssh_commands=json.dumps(root_data.get("ssh_commands")) if root_data.get("ssh_commands") else None,
+                    ssh_key_path_host=root_data.get("ssh_key_path_host"),
+                )
+            if tenant_data:
+                await _cred_client.store_credential(
+                    order_id=order_id,
+                    role="tenant",
+                    granted_to="self",
+                    password=tenant_data.get("password"),
+                    ssh_commands=json.dumps(tenant_data.get("ssh_commands")) if tenant_data.get("ssh_commands") else None,
+                    key_type=tenant_data.get("key_type"),
+                )
+        except Exception as cred_err:
+            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", order_id, cred_err)
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
@@ -1882,6 +1923,7 @@ async def fulfill_compute_obligation(
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
 
+    tenant_auth = (authentication or {}).get("tenant", {}) or {}
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
@@ -1890,6 +1932,10 @@ async def fulfill_compute_obligation(
         "connection_details": connection_details,
         "ssh_public_key": ssh_public_key,
         "fulfilling_party_url": BASE_URL_OVERRIDE,
+        "tenant_credentials": {
+            "password": tenant_auth.get("password"),
+            "key_type": tenant_auth.get("key_type"),
+        },
     }
 
 async def arbitrate_compute_fulfillment(

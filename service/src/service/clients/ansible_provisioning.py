@@ -12,6 +12,7 @@ Use PROVISIONING_MODE=ansible to activate this path.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import subprocess
@@ -64,6 +65,29 @@ def _find_project_root() -> Path:
             return parent
     # Last resort: go up four levels (expected repo layout)
     return current.parents[3]
+
+
+def _extract_vm_creation_data(stdout: str) -> dict | None:
+    """Extract the vm_creation_data JSON block from ansible-playbook stdout."""
+    marker = '"vm_creation_data":'
+    idx = stdout.find(marker)
+    if idx == -1:
+        return None
+    brace_start = stdout.find("{", idx + len(marker))
+    if brace_start == -1:
+        return None
+    depth = 0
+    for i, ch in enumerate(stdout[brace_start:], brace_start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(stdout[brace_start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 def validate_ansible_prerequisites() -> list[str]:
@@ -272,11 +296,17 @@ async def provision_machine_async(
         ssh_command = f"ssh -i <your_private_key> -p {external_port} {tenant_user}@{vm_host_ip}"
         logger.info("SSH command: %s", ssh_command)
 
+    vm_creation_data = _extract_vm_creation_data(stdout)
+    authentication = vm_creation_data.get("authentication") if vm_creation_data else None
+    if authentication:
+        logger.info("Extracted authentication block from vm_creation_data")
+
     return {
         "ssh_command": ssh_command,
         "ssh_port": external_port,
         "tenant_user": tenant_user,
         "vm_host_ip": vm_host_ip,
+        **({"authentication": authentication} if authentication else {}),
     }
 
 

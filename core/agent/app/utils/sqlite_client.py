@@ -214,6 +214,28 @@ class SQLiteClient:
                 )
                 """
             )
+            # Credentials table (off-chain only, never exposed on-chain)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS credentials (
+                  id TEXT PRIMARY KEY,
+                  order_id TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  granted_to TEXT NOT NULL,
+                  password TEXT,
+                  ssh_commands TEXT,
+                  ssh_key_path_host TEXT,
+                  key_type TEXT,
+                  created_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_credentials_order_id ON credentials(order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_credentials_order_granted ON credentials(order_id, granted_to)"
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -1785,6 +1807,106 @@ class SQLiteClient:
             finally:
                 conn.close()
         await asyncio.to_thread(_cancel)
+
+    async def store_credential(
+        self,
+        *,
+        order_id: str,
+        role: str,
+        granted_to: str,
+        password: str | None = None,
+        ssh_commands: str | None = None,
+        ssh_key_path_host: str | None = None,
+        key_type: str | None = None,
+    ) -> None:
+        """Persist an off-chain credential. INSERT OR IGNORE (idempotent)."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO credentials(
+                      id, order_id, role, granted_to, password,
+                      ssh_commands, ssh_key_path_host, key_type, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        order_id,
+                        role,
+                        granted_to,
+                        password,
+                        ssh_commands,
+                        ssh_key_path_host,
+                        key_type,
+                        datetime.now().isoformat(),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def get_credentials(
+        self,
+        *,
+        order_id: str,
+        granted_to: str,
+    ) -> list[dict[str, Any]]:
+        """Return credential rows for a given order visible to granted_to."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, order_id, role, granted_to, password,
+                           ssh_commands, ssh_key_path_host, key_type, created_at
+                    FROM credentials
+                    WHERE order_id = ? AND granted_to = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (order_id, granted_to),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "order_id": r[1],
+                        "role": r[2],
+                        "granted_to": r[3],
+                        "password": r[4],
+                        "ssh_commands": r[5],
+                        "ssh_key_path_host": r[6],
+                        "key_type": r[7],
+                        "created_at": r[8],
+                    }
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def get_order_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
+        """Return the order_id for the given escrow_uid, or None if not found."""
+        def _load() -> str | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT order_id FROM orders WHERE escrow_uid = ? LIMIT 1",
+                    (escrow_uid,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
 
 _sqlite_client: SQLiteClient | None = None
