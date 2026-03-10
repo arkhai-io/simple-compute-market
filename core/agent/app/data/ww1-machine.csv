@@ -1,0 +1,2 @@
+resource_id,resource_type,resource_subtype,unit,value,state,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw
+compute-ww1-001,compute.gpu,rtx5080,count,1,available,RTX 5080,90.0,"California, US",ww1,,,,,,,
