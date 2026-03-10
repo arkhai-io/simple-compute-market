@@ -362,7 +362,7 @@ async def execute_action(
                     sqlite_client = get_sqlite_client()
                     await sqlite_client.update_order_by_escrow_uid(
                         escrow_uid=escrow_uid,
-                        status="closed",
+                        status="accepted",
                         fulfillment_resource=connection_details,
                     )
             except Exception as exc:
