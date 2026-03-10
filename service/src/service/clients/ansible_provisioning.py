@@ -171,7 +171,7 @@ async def provision_machine_async(
         subprocess.CalledProcessError if the playbook exits with a non-zero status.
     """
     ssh_pubkey = params.get("ssh_pubkey", "")
-    vm_host = params.get("vm_host", "vm1")
+    vm_host = params.get("vm_host", "ww1")
     vm_target = params.get("vm_target", "tenant-vm")
     frp_server_addr = params.get("frp_server_addr")
     frp_domain = params.get("frp_domain")
@@ -212,7 +212,7 @@ async def provision_machine_async(
         "--extra-vars",
         f"@{management_vars_path}",
         "--limit",
-        "kvm_hosts",
+        vm_host,
     ]
 
     try:
@@ -327,7 +327,7 @@ async def schedule_vm_shutdown_async(
         "--extra-vars",
         f"@{management_vars_path}",
         "--limit",
-        "kvm_hosts",
+        vm_host,
     ]
 
     try:

@@ -703,9 +703,9 @@ def _get_shutdown_fn():
     return None  # http mode uses provision_machine_async with vm_action=lease_end
 
 
-async def _do_provision(ssh_public_key: str) -> dict:
+async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
     """Dispatch to the configured provisioning client."""
-    params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": "ww1", "vm_target": "tenant-vm"}
+    params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
     if CONFIG.frp_server_addr:
         params["frp_server_addr"] = CONFIG.frp_server_addr
     if CONFIG.frp_domain:
@@ -721,13 +721,15 @@ async def _do_provision(ssh_public_key: str) -> dict:
     )
 
 
-async def _do_shutdown(lease_end_utc: str) -> dict:
+async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Dispatch VM shutdown to the configured provisioning client."""
     shutdown_fn = _get_shutdown_fn()
     if shutdown_fn is not None:
         return await shutdown_fn(
             CONFIG.provisioning_service_url,
             lease_end_utc,
+            vm_host,
+            vm_target,
             timeout=CONFIG.provisioning_timeout,
             poll_interval=CONFIG.provisioning_poll_interval,
             agent_id=CONFIG.onchain_agent_id,
@@ -735,7 +737,7 @@ async def _do_shutdown(lease_end_utc: str) -> dict:
     # http mode: reuse provision_machine_async with lease_end action
     return await provision_machine_async(
         CONFIG.provisioning_service_url,
-        {"vm_action": "lease_end", "vm_lease_end": lease_end_utc, "vm_host": "ww1", "vm_target": "tenant-vm"},
+        {"vm_action": "lease_end", "vm_lease_end": lease_end_utc, "vm_host": vm_host, "vm_target": vm_target},
         timeout=300,
         poll_interval=5,
         agent_id=CONFIG.onchain_agent_id,
@@ -1777,7 +1779,11 @@ async def fulfill_compute_obligation(
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
 
-        provision_result = await _do_provision(ssh_public_key)
+        provision_result = await _do_provision(
+            ssh_public_key,
+            vm_host=reserved_vm_host,
+            vm_target=vm_target,
+        )
         # Normalize to string — Alkahest, the event schema (ReceiveComputeObligationFulfillmentEvent),
         # and the DB fulfillment_resource column all expect str, not dict.
         if isinstance(provision_result, dict):
@@ -1824,7 +1830,7 @@ async def fulfill_compute_obligation(
             )
 
     lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
-    await _do_shutdown(lease_end_utc)
+    await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
