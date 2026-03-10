@@ -19,7 +19,7 @@ _DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "service" / "data
 class ERC20TokenMetadata(BaseModel):
     """Metadata for an ERC-20 token."""
     symbol: str
-    name: str
+    name: Optional[str] = None
     contract_address: str
     decimals: int
     chain_id: Optional[int] = None
