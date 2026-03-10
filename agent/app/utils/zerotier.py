@@ -43,7 +43,7 @@ def _replace_zerotier_token(base_url: str, zerotier_ip: str) -> str:
 
 def _list_zerotier_networks(timeout: float = 5.0) -> Optional[List[NetworkInfo]]:
     """List all ZeroTier networks via zerotier-cli."""
-    cmd = ["sudo", "zerotier-cli", "listnetworks", "-j"]
+    cmd = ["zerotier-cli", "listnetworks", "-j"]
     try:
         proc = subprocess.run(
             cmd,
@@ -122,7 +122,7 @@ def join_zerotier_network(network_id: str) -> bool:
     if not _check_zerotier_cli():
         return False
 
-    cmd = ["sudo", "zerotier-cli", "join", network_id]
+    cmd = [ "zerotier-cli", "join", network_id]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         logger.info("Joined ZeroTier network %s.", network_id)
@@ -154,7 +154,7 @@ def get_zerotier_node_id() -> Optional[str]:
 
     try:
         proc = subprocess.run(
-            ["sudo", "zerotier-cli", "info"],
+            [ "zerotier-cli", "info"],
             check=True,
             capture_output=True,
             text=True,

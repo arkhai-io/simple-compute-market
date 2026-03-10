@@ -3,7 +3,8 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS bui
 
 #gcc * g++ are unfortunately required to build pufferlib.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ make \
+    gcc g++ make curl gnupg \
+    && curl -s https://install.zerotier.com | bash \
     && rm -rf /var/lib/apt/lists/*
 
 #This installs the dependencies to a cache layer so they don't need to be redownloaded every docker build
@@ -28,15 +29,26 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Copy ZeroTier binaries from builder
+COPY --from=builder /usr/sbin/zerotier-one /usr/sbin/zerotier-one
+COPY --from=builder /usr/sbin/zerotier-cli /usr/sbin/zerotier-cli
+COPY --from=builder /usr/sbin/zerotier-idtool /usr/sbin/zerotier-idtool
+
+RUN mkdir -p /var/lib/zerotier-one && \
+    echo '{\n  "settings": {\n    "allowManagementFrom": [ "127.0.0.1", "::1" ]\n  }\n}' > /var/lib/zerotier-one/local.conf
+
+EXPOSE 9993/udp
+
 # Copy the application code
-COPY ./app .
+COPY ./app ./app
 COPY ./scripts ./scripts
 COPY .env.sample .
 
-EXPOSE 8080
+ARG PORT=8080
+ENV PORT=${PORT}
+EXPOSE ${PORT}
 
-# This needs to be patched to a valid cmd. I was digging through the makefile for targets but it isn't clear what I should run.
-# The contents of make serve-a2a are too complicated for a cmd.
-# I could convert it to a shell script and run that but the functionality of the target appears to me like it should be part of the Python code.
-CMD ["python", "-m", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8080"]
-# CMD ["sleep", "infinity"]
+COPY ./entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+CMD ["./entrypoint.sh"]
