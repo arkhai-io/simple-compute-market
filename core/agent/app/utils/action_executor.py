@@ -625,7 +625,7 @@ async def mock_provision_machine(ssh_public_key: str) -> str:
         String with connection details.
     """
     logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
-    return "demo-user@node-01.example.net"
+    return "ssh -i <your_private_key> -p 7021 demo-user@node-01.example.net | password: demo-password"
 
 
 def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
