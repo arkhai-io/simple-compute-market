@@ -36,16 +36,13 @@ from core.agent.app.schema.pydantic_models import (
     ActionType,
     ComputeResource,
     EventType,
-    GPUModel,
     MarketOrder,
-    Region,
     TokenResource,
 )
 from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import get_trusted_oracle_arbiter
-from service.clients.token import TOKEN_REGISTRY
 from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
 from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
@@ -251,18 +248,7 @@ async def execute_action(
                     created_order_id = order.get("order_id")
                 gpu_model = getattr(offer_resource, "gpu_model", None) or getattr(demand_resource, "gpu_model", "unknown")
             else:
-                gpu_model = parameters.get("gpu_model", "unknown")
-                imbalance_type = parameters.get("imbalance_type", "surplus")
-                logger.info(f"[ACTION] Creating order for {gpu_model} with params: {parameters}")
-                order = create_order(
-                    gpu_model_str=parameters.get("gpu_model"),
-                    sla=parameters.get("sla"),
-                    region_str=parameters.get("region"),
-                    imbalance_type=imbalance_type,
-                    duration_hours=parameters.get("duration_hours", 1),
-                )
-                if isinstance(order, dict):
-                    created_order_id = order.get("order_id")
+                raise ValueError("MAKE_OFFER requires explicit 'offer' and 'demand' parameters")
             if created_order_id:
                 outcome["order_id"] = created_order_id
             if isinstance(order, dict) and order.get("order_id"):
@@ -1163,10 +1149,6 @@ async def _accept_as_seller(
 
 
 def create_order(
-    gpu_model_str: str = None,
-    sla: float = None,
-    region_str: str = None,
-    imbalance_type: str = "surplus",
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
     demand_resource: ComputeResource | TokenResource = None,
@@ -1180,57 +1162,23 @@ def create_order(
     Not to be confused with make_offer, which propagates the order to the market.
 
     Args:
-        gpu_model_str: The GPU model, one of: {"H200", "Tesla V100", "RTX 5080"} (required for surplus)
-        sla: SLA required for the order (required for surplus)
-        region_str: Geographic region, one of: {"California, US", "New York, US, "Tokyo, JP"} (required for surplus)
-        imbalance_type: "surplus" (offer compute, demand tokens) or "deficit" (offer tokens, demand compute)
         publish_to_registry: Whether to publish order to registry (default: True)
-        offer_resource: Pre-constructed offer resource (optional, overrides gpu_model_str/sla/region_str)
-        demand_resource: Pre-constructed demand resource (optional)
+        offer_resource: Offer resource (required)
+        demand_resource: Demand resource (required)
         duration_hours: Duration of the order in hours (default: 1); 1 if seller (rate), else total if buyer
 
     Returns:
         The created order as a dictionary if the order was successfully created, or None otherwise.
         This creates a UUID identifying the new order, and the details should match the provided arguments.
     """
-    settlement_token = TOKEN_REGISTRY.require("MOCK")
-    logger.info(f"[TOOL] Creating order for resource (imbalance_type: {imbalance_type}).")
-    
-    # Determine order direction based on imbalance_type
-    if imbalance_type == "deficit":
-        # Deficit: Offer tokens, demand compute
-        if not offer_resource:
-            offer_resource = TokenResource(
-                token=settlement_token,
-                amount=9 * 10**settlement_token.decimals,
-            )
-        if not demand_resource:
-            if not gpu_model_str or sla is None or not region_str:
-                logger.error("[TOOL] gpu_model_str, sla, and region_str required for deficit orders")
-                return None
-            demand_resource = ComputeResource(
-                gpu_model=GPUModel(gpu_model_str),
-                quantity=1,
-                sla=sla,
-                region=Region(region_str),
-            )
-    else:
-        # Surplus: Offer compute, demand tokens (default/current behavior)
-        if not offer_resource:
-            if not gpu_model_str or sla is None or not region_str:
-                logger.error("[TOOL] gpu_model_str, sla, and region_str required for surplus orders")
-                return None
-            offer_resource = ComputeResource(
-                gpu_model=GPUModel(gpu_model_str),
-                quantity=1,
-                sla=sla,
-                region=Region(region_str),
-            )
-        if not demand_resource:
-            demand_resource = TokenResource(
-                token=settlement_token,
-                amount=9 * 10**settlement_token.decimals,
-            )
+    logger.info("[TOOL] Creating order.")
+
+    if not offer_resource:
+        logger.error("[TOOL] offer_resource is required")
+        return None
+    if not demand_resource:
+        logger.error("[TOOL] demand_resource is required")
+        return None
     
     # The token-offering side is always the oracle/buyer.
     offering_tokens = isinstance(offer_resource, TokenResource) or (
