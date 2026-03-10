@@ -844,9 +844,9 @@ async def accept_offer(
     # - If maker offers tokens (deficit): taker buys compute (demand_resource) and pays tokens (offer_resource)
     escrow_uid = None
     escrow_receipt = None
+    oracle_address = CONFIG.agent_wallet_address
 
     if alkahest_client:
-        oracle_address = CONFIG.agent_wallet_address
 
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
 
