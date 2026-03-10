@@ -845,9 +845,10 @@ async def accept_offer(
     escrow_uid = None
     escrow_receipt = None
     oracle_address = CONFIG.agent_wallet_address
+    if not oracle_address:
+        raise ValueError("Agent wallet address is required for accept_offer but not configured")
 
     if alkahest_client:
-
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
 
         # Retry logic with exponential backoff
