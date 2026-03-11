@@ -11,6 +11,7 @@ from .groups.registry import registry_app
 from .groups.network import network_app
 from .groups.config import config_app
 from .groups.dev import dev_app
+from .groups.portfolio import portfolio_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -131,6 +132,7 @@ app.add_typer(
 )
 app.add_typer(network_app, name="network", help="Manage ZeroTier network, mainly for market admins (see subcommands).")
 app.add_typer(registry_app, name="registry", help="As Market Admin, manage the Registry Indexer server.")
+app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
 app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
 
 

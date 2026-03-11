@@ -11,16 +11,16 @@ except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     DecisionContext,
     MakeOfferEvent,
     ComputeResource,
     TokenResource,
-    ComputeResourcePortfolio,
 )
-from app.utils.validation import extract_resources_from_make_offer_event
+from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 
@@ -134,25 +134,19 @@ def mo_action_torch_always_accept_offer(context: DecisionContext) -> DomainActio
     # Check agent capacity for demand resource if it's a ComputeResource
     # If insufficient capacity, reject immediately without running model
     if isinstance(demand_resource, ComputeResource):
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_resource):
-                    # Agent doesn't have capacity - reject with resource details
-                    logger.info("[TORCH POLICY] Insufficient capacity, rejecting offer")
-                    return DomainAction(
-                        action_type=ActionType.REJECT_OFFER,
-                        parameters={
-                            "reason": "insufficient_capacity",
-                            "order_id": order.order_id,
-                            "demand_resource": demand_resource.model_dump(mode="json"),
-                            "offer_resource": offer_resource.model_dump(mode="json"),
-                        }
-                    )
-            except Exception as e:
-                # If portfolio validation fails, log and continue to model
-                logger.warning(f"[TORCH POLICY] Failed to validate portfolio: {e}")
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio and not portfolio.has_capacity(demand_resource):
+            # Agent doesn't have capacity - reject with resource details
+            logger.info("[TORCH POLICY] Insufficient capacity, rejecting offer")
+            return DomainAction(
+                action_type=ActionType.REJECT_OFFER,
+                parameters={
+                    "reason": "insufficient_capacity",
+                    "order_id": order.order_id,
+                    "demand_resource": demand_resource.model_dump(mode="json"),
+                    "offer_resource": offer_resource.model_dump(mode="json"),
+                }
+            )
     elif isinstance(demand_resource, TokenResource):
         # If demand is a TokenResource, accept the offer immediately
         # Simulated assumption: we have enough tokens in our wallet

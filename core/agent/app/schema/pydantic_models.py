@@ -13,7 +13,6 @@ try:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
@@ -27,13 +26,11 @@ except ModuleNotFoundError:
         DecisionContext as CoreDecisionContext,
         DomainAction as CoreDomainAction,
         DomainEvent as CoreDomainEvent,
-        ERC20TokenMetadata as CoreERC20TokenMetadata,
         Resource as CoreResource,
         TokenResource as CoreTokenResource,
     )
 
-
-ERC20TokenMetadata = CoreERC20TokenMetadata
+from service.clients.token import ERC20TokenMetadata
 
 
 class GPUModel(str, Enum):
@@ -66,7 +63,7 @@ class ComputeDomainResource(CoreResource):
         if isinstance(token_value, dict):
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
-            from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+            from service.clients.token import TOKEN_REGISTRY
 
             return TOKEN_REGISTRY.require(token_value)
         raise ValueError(
@@ -123,6 +120,10 @@ class ComputeResource(ComputeDomainResource):
     Not all resources in the resource portfolio are on sale
     """
 
+    resource_id: str | None = Field(
+        default=None,
+        description="Canonical DB resource identifier for this compute resource",
+    )
     gpu_model: GPUModel = Field(
         description="The model of the GPU (H200, Tesla V100, RTX 5080)"
     )
@@ -130,6 +131,10 @@ class ComputeResource(ComputeDomainResource):
     sla: float = Field(description="The SLA of the GPU")
     region: Region = Field(
         description="The region of the GPU (California, US, Tokyo, JP, etc.)"
+    )
+    vm_host: str | None = Field(
+        default=None,
+        description="Provisioning host identifier for VM placement (e.g., vm1)",
     )
 
 
@@ -208,6 +213,10 @@ class MarketOrder(BaseModel):
         default=None,
         description="The attestation of the satisfied demand in escrow (None for open orders)",
     )
+    oracle_address: str | None = Field(
+        default=None,
+        description="The oracle wallet address used for arbitration and escrow workflows",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -262,8 +271,12 @@ class OrderCreateEvent(DomainEvent):
     """Event triggered when a local client requests order creation."""
 
     event_type: EventType = Field(default=EventType.ORDER_CREATE)
-    offer: ComputeDomainResource = Field(description="Offered resource (compute or token)")
-    demand: ComputeDomainResource = Field(description="Demanded resource (compute or token)")
+    offer: Union[ComputeResource, TokenResource] = Field(
+        description="Offered resource (compute or token)"
+    )
+    demand: Union[ComputeResource, TokenResource] = Field(
+        description="Demanded resource (compute or token)"
+    )
     duration_hours: int = Field(default=1, description="Duration of the order in hours")
 
     @model_validator(mode="before")
@@ -303,6 +316,7 @@ class MakeOfferEvent(DomainEvent):
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
                 "demand_resource": order.demand_resource.model_dump(mode="json"),
                 "duration_hours": order.duration_hours,
+                "oracle_address": order.oracle_address,
             },
         )
 
@@ -314,11 +328,19 @@ class AcceptOfferEvent(DomainEvent):
     order: MarketOrder = Field(description="The accepted market order with taker info")
     escrow_uid: str | None = Field(
         default=None,
-        description="Escrow receipt UID supplied by the taker",
+        description="Escrow receipt UID supplied by the buyer; None when seller is merely signalling acceptance",
     )
     ssh_public_key: str | None = Field(
         default=None,
         description="Buyer-provided SSH public key for provisioning access",
+    )
+    matched_order_id: str | None = Field(
+        default=None,
+        description=(
+            "The sender's own local order_id, threaded through the acceptance handshake so the "
+            "receiver can update their DB without a reverse-lookup. "
+            "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
+        ),
     )
 
     @classmethod
@@ -327,14 +349,17 @@ class AcceptOfferEvent(DomainEvent):
         order: MarketOrder,
         escrow_uid: str | None = None,
         ssh_public_key: str | None = None,
+        matched_order_id: str | None = None,
+        source: str | None = None,
     ) -> "AcceptOfferEvent":
         """Create an accept-offer event from a market order and optional escrow UID."""
         return cls(
             event_id=f"acc_{order.order_id}",
-            source=order.order_taker or order.order_maker,
+            source=source or order.order_taker or order.order_maker,
             order=order,
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
+            matched_order_id=matched_order_id,
             data={
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
@@ -342,6 +367,8 @@ class AcceptOfferEvent(DomainEvent):
                 "duration_hours": order.duration_hours,
                 "escrow_uid": escrow_uid,
                 "ssh_public_key": ssh_public_key,
+                "oracle_address": order.oracle_address,
+                "matched_order_id": matched_order_id,
             },
         )
 
@@ -359,6 +386,10 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
         default=None,
         description="Connection string/details for the provisioned compute",
     )
+    fulfilling_party_url: str | None = Field(
+        default=None,
+        description="URL of the compute seller who fulfilled the obligation",
+    )
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
@@ -371,6 +402,7 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             escrow_uid=escrow_uid,
             fulfillment_uid=payload.get("fulfillment_uid"),
             connection_details=payload.get("connection_details"),
+            fulfilling_party_url=payload.get("fulfilling_party_url"),
             data=payload,
         )
 

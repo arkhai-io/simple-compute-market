@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import Any
 
 from .config import CONFIG
+from .resource_csv_importer import upsert_resources_from_csv
 
 
 class SQLiteClient:
@@ -137,6 +139,11 @@ class SQLiteClient:
                 )
                 """
             )
+            # Migrate orders table: add columns that may be missing from older DBs
+            try:
+                cur.execute("ALTER TABLE orders ADD COLUMN oracle_address TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             # Orders table (local source of truth)
             cur.execute(
                 """
@@ -154,7 +161,56 @@ class SQLiteClient:
                   matched_offer_id TEXT,
                   maker_attestation TEXT,
                   taker_attestation TEXT,
-                  escrow_uid TEXT
+                  escrow_uid TEXT,
+                  oracle_address TEXT
+                )
+                """
+            )
+            # Resources table (local source of truth across all resource types)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resources (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  resource_id TEXT NOT NULL UNIQUE,
+                  resource_type TEXT NOT NULL,
+                  resource_subtype TEXT,
+                  unit TEXT,
+                  value NUMERIC,
+                  state TEXT,
+                  attributes TEXT,
+                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+                """
+            )
+            # Keep resources.updated_at fresh whenever rows are updated.
+            cur.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_resources_updated_at
+                AFTER UPDATE ON resources
+                FOR EACH ROW
+                WHEN NEW.updated_at = OLD.updated_at
+                BEGIN
+                  UPDATE resources
+                  SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                  WHERE pk = NEW.pk;
+                END
+                """
+            )
+            # Resource transition events (append-only, idempotent)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resource_transition_events (
+                  pk INTEGER PRIMARY KEY AUTOINCREMENT,
+                  event_id TEXT NOT NULL UNIQUE,
+                  resource_id TEXT NOT NULL,
+                  event_type TEXT NOT NULL,
+                  set_value NUMERIC,
+                  set_state TEXT,
+                  set_attribute_json TEXT,
+                  idempotency_key TEXT NOT NULL UNIQUE,
+                  occurred_at TIMESTAMPTZ NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  FOREIGN KEY(resource_id) REFERENCES resources(resource_id)
                 )
                 """
             )
@@ -202,6 +258,24 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
             )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_type_subtype ON resources(resource_type, resource_subtype)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_state ON resources(state)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resources_updated_at ON resources(updated_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_resource_time ON resource_transition_events(resource_id, occurred_at)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_type_time ON resource_transition_events(event_type, occurred_at)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -238,6 +312,492 @@ class SQLiteClient:
             return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
         except Exception:
             return False
+
+    async def upsert_resource(
+        self,
+        *,
+        resource_id: str,
+        resource_type: str,
+        resource_subtype: str | None = None,
+        unit: str | None = None,
+        value: int | float | None = None,
+        state: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> None:
+        """Create or update a generic resource snapshot row."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                now_iso = datetime.now().isoformat()
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(resource_id) DO UPDATE SET
+                      resource_type=excluded.resource_type,
+                      resource_subtype=excluded.resource_subtype,
+                      unit=excluded.unit,
+                      value=excluded.value,
+                      state=excluded.state,
+                      attributes=excluded.attributes,
+                      updated_at=excluded.updated_at
+                    """,
+                    (
+                        resource_id,
+                        resource_type,
+                        resource_subtype,
+                        unit,
+                        value,
+                        state,
+                        json.dumps(attributes) if attributes is not None else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def list_resources(
+        self,
+        *,
+        resource_type: str | None = None,
+        state: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List resource rows from local DB as generic DB-resource dicts."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                clauses: list[str] = []
+                params: list[Any] = []
+                if resource_type is not None:
+                    clauses.append("resource_type = ?")
+                    params.append(resource_type)
+                if state is not None:
+                    clauses.append("state = ?")
+                    params.append(state)
+                else:
+                    # Default listing omits soft-deleted resources.
+                    clauses.append("(state IS NULL OR state != 'deleted')")
+                where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(
+                    f"""
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    {where_clause}
+                    ORDER BY updated_at DESC
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+                result: list[dict[str, Any]] = []
+                for (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) in rows:
+                    attrs: dict[str, Any] = {}
+                    if isinstance(row_attributes, str) and row_attributes.strip():
+                        try:
+                            parsed = json.loads(row_attributes)
+                            if isinstance(parsed, dict):
+                                attrs = parsed
+                        except Exception:
+                            attrs = {}
+                    result.append(
+                        {
+                            "resource_id": row_resource_id,
+                            "resource_type": row_resource_type,
+                            "resource_subtype": row_resource_subtype,
+                            "unit": row_unit,
+                            "value": row_value,
+                            "state": row_state,
+                            "attributes": attrs,
+                            "created_at": row_created_at,
+                            "updated_at": row_updated_at,
+                        }
+                    )
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def get_resource(self, *, resource_id: str) -> dict[str, Any] | None:
+        """Fetch a single resource row by resource_id."""
+        def _load_one() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    FROM resources
+                    WHERE resource_id = ?
+                    LIMIT 1
+                    """,
+                    (resource_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+
+                (
+                    row_resource_id,
+                    row_resource_type,
+                    row_resource_subtype,
+                    row_unit,
+                    row_value,
+                    row_state,
+                    row_attributes,
+                    row_created_at,
+                    row_updated_at,
+                ) = row
+                attrs: dict[str, Any] = {}
+                if isinstance(row_attributes, str) and row_attributes.strip():
+                    try:
+                        parsed = json.loads(row_attributes)
+                        if isinstance(parsed, dict):
+                            attrs = parsed
+                    except Exception:
+                        attrs = {}
+
+                return {
+                    "resource_id": row_resource_id,
+                    "resource_type": row_resource_type,
+                    "resource_subtype": row_resource_subtype,
+                    "unit": row_unit,
+                    "value": row_value,
+                    "state": row_state,
+                    "attributes": attrs,
+                    "created_at": row_created_at,
+                    "updated_at": row_updated_at,
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load_one)
+
+    async def delete_resource(
+        self,
+        *,
+        resource_id: str,
+        idempotency_key: str | None = None,
+        event_type: str = "delete_resource",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Delete a resource by transitioning it to state='deleted'."""
+        set_attribute: dict[str, Any] | None = None
+        if reason:
+            set_attribute = {"$.deleted_reason": reason}
+        return await self.apply_resource_set_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key or f"delete_resource:{resource_id}",
+            set_state="deleted",
+            set_attribute=set_attribute,
+        )
+
+    async def upsert_resources_from_csv(
+        self,
+        *,
+        csv_path: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import resources from CSV and upsert rows into the resources table."""
+        report = await upsert_resources_from_csv(
+            csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+
+    def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
+        """Seed default resources only when the resources table is empty."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM resources")
+            count = int(cur.fetchone()[0] or 0)
+            if count > 0:
+                return
+
+            now_iso = datetime.now().isoformat()
+            for resource in resources:
+                cur.execute(
+                    """
+                    INSERT INTO resources(
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        resource.get("resource_id"),
+                        resource.get("resource_type"),
+                        resource.get("resource_subtype"),
+                        resource.get("unit"),
+                        resource.get("value"),
+                        resource.get("state"),
+                        json.dumps(resource.get("attributes"))
+                        if isinstance(resource.get("attributes"), dict)
+                        else None,
+                        now_iso,
+                        now_iso,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def apply_resource_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert one transition event and apply one resource snapshot update.
+
+        Supports direct-set semantics only: set_value, set_state, set_attribute.
+        """
+        if set_value is None and set_state is None and not set_attribute:
+            raise ValueError("Transition must include set_value, set_state, or set_attribute")
+
+        resolved_event_id = event_id or str(uuid.uuid4())
+        set_attribute_json = json.dumps(set_attribute) if set_attribute else None
+
+        def _apply() -> dict[str, Any]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO resource_transition_events(
+                      event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')))
+                    ON CONFLICT(idempotency_key) DO NOTHING
+                    """,
+                    (
+                        resolved_event_id,
+                        resource_id,
+                        event_type,
+                        set_value,
+                        set_state,
+                        set_attribute_json,
+                        idempotency_key,
+                        occurred_at,
+                    ),
+                )
+
+                # Duplicate command retry: already applied.
+                if cur.rowcount == 0:
+                    conn.rollback()
+                    return {
+                        "applied": False,
+                        "duplicate": True,
+                        "resource_id": resource_id,
+                        "event_id": resolved_event_id,
+                        "idempotency_key": idempotency_key,
+                    }
+
+                updates: list[str] = []
+                values: list[Any] = []
+
+                if set_value is not None:
+                    updates.append("value = ?")
+                    values.append(set_value)
+
+                if set_state is not None:
+                    updates.append("state = ?")
+                    values.append(set_state)
+
+                if set_attribute:
+                    attr_expr = "COALESCE(attributes, '{}')"
+                    for path, path_value in set_attribute.items():
+                        if not isinstance(path, str) or not path.startswith("$."):
+                            raise ValueError(f"Invalid JSON path for set_attribute: {path}")
+                        attr_expr = f"json_set({attr_expr}, ?, json(?))"
+                        values.append(path)
+                        values.append(json.dumps(path_value))
+                    updates.append(f"attributes = {attr_expr}")
+
+                updates.append("updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')")
+
+                cur.execute(
+                    f"UPDATE resources SET {', '.join(updates)} WHERE resource_id = ?",
+                    (*values, resource_id),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError(f"Resource not found: {resource_id}")
+
+                conn.commit()
+                return {
+                    "applied": True,
+                    "duplicate": False,
+                    "resource_id": resource_id,
+                    "event_id": resolved_event_id,
+                    "idempotency_key": idempotency_key,
+                }
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_apply)
+
+    async def apply_resource_set_transition(
+        self,
+        *,
+        resource_id: str,
+        event_type: str,
+        idempotency_key: str,
+        set_value: int | float | None = None,
+        set_state: str | None = None,
+        set_attribute: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Convenience wrapper for absolute-value transitions."""
+        return await self.apply_resource_transition(
+            resource_id=resource_id,
+            event_type=event_type,
+            idempotency_key=idempotency_key,
+            set_value=set_value,
+            set_state=set_state,
+            set_attribute=set_attribute,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
+
+    # TODO(refactor): Move compute-specific VM reservation logic to the Compute domain
+    # as part of the resource portfolio refactor.
+    async def reserve_available_compute_vm(
+        self,
+        *,
+        required_attributes: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Reserve one available compute resource.
+
+        Args:
+            required_attributes: Optional exact-match filters (for example:
+                {"region": "California, US", "gpu_model": "H200"}).
+                Keys are checked first in resource attributes, then in top-level
+                resource fields (resource_type/resource_subtype/unit/state/value).
+        """
+        def _reserve() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_subtype, unit, state, value, attributes
+                    FROM resources
+                    WHERE resource_type = 'compute.gpu'
+                      AND state = 'available'
+                    ORDER BY updated_at ASC
+                    """
+                )
+                rows = cur.fetchall()
+                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                    attrs: dict[str, Any]
+                    try:
+                        attrs = json.loads(attributes_raw) if isinstance(attributes_raw, str) else {}
+                    except Exception:
+                        attrs = {}
+
+                    if required_attributes:
+                        top_level = {
+                            "resource_type": "compute.gpu",
+                            "resource_subtype": resource_subtype,
+                            "unit": unit,
+                            "state": state,
+                            "value": value,
+                        }
+                        is_match = True
+                        for key, expected in required_attributes.items():
+                            actual = attrs.get(key, top_level.get(key))
+                            if actual != expected:
+                                is_match = False
+                                break
+                        if not is_match:
+                            continue
+
+                    vm_host = attrs.get("vm_host")
+                    if not isinstance(vm_host, str) or not vm_host.strip():
+                        continue
+
+                    now_iso = datetime.now().isoformat()
+                    cur.execute(
+                        """
+                        UPDATE resources
+                        SET state = 'reserved',
+                            updated_at = ?
+                        WHERE resource_id = ?
+                          AND state = 'available'
+                        """,
+                        (now_iso, resource_id),
+                    )
+                    if cur.rowcount != 1:
+                        continue
+
+                    cur.execute(
+                        """
+                        INSERT INTO resource_transition_events(
+                          event_id, resource_id, event_type, set_value, set_state, set_attribute_json, idempotency_key, occurred_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            resource_id,
+                            "reserve_for_provisioning",
+                            value,
+                            "reserved",
+                            None,
+                            f"reserve:{resource_id}:{uuid.uuid4()}",
+                            now_iso,
+                        ),
+                    )
+                    conn.commit()
+                    return {
+                        "resource_id": resource_id,
+                        "vm_host": vm_host,
+                        "resource_subtype": resource_subtype,
+                        "unit": unit,
+                        "state": "reserved",
+                        "value": value,
+                        "attributes": attrs,
+                    }
+
+                conn.rollback()
+                return None
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_reserve)
 
     async def find_symmetric_open_order(
         self,
@@ -302,6 +862,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -323,9 +884,10 @@ class SQLiteClient:
                       matched_offer_id,
                       maker_attestation,
                       taker_attestation,
-                      escrow_uid
+                      escrow_uid,
+                      oracle_address
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -338,7 +900,8 @@ class SQLiteClient:
                       matched_offer_id=excluded.matched_offer_id,
                       maker_attestation=excluded.maker_attestation,
                       taker_attestation=excluded.taker_attestation,
-                      escrow_uid=excluded.escrow_uid
+                      escrow_uid=excluded.escrow_uid,
+                      oracle_address=excluded.oracle_address
                     """,
                     (
                         order_id,
@@ -355,6 +918,7 @@ class SQLiteClient:
                         maker_attestation,
                         taker_attestation,
                         escrow_uid,
+                        oracle_address,
                     ),
                 )
                 conn.commit()
@@ -379,6 +943,7 @@ class SQLiteClient:
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
         escrow_uid: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -402,6 +967,7 @@ class SQLiteClient:
             add("maker_attestation", maker_attestation)
             add("taker_attestation", taker_attestation)
             add("escrow_uid", escrow_uid)
+            add("oracle_address", oracle_address)
 
             if not updates:
                 return
@@ -428,6 +994,7 @@ class SQLiteClient:
         fulfillment_resource: Any | None = None,
         maker_attestation: str | None = None,
         taker_attestation: str | None = None,
+        oracle_address: str | None = None,
     ) -> None:
         """
         Update order fields based on escrow_uid, when order_id is not available.
@@ -447,6 +1014,7 @@ class SQLiteClient:
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("maker_attestation", maker_attestation)
             add("taker_attestation", taker_attestation)
+            add("oracle_address", oracle_address)
 
             if not updates:
                 return
@@ -463,6 +1031,69 @@ class SQLiteClient:
                 conn.close()
 
         await asyncio.to_thread(_save)
+
+    async def load_order(self, *, order_id: str) -> dict[str, Any] | None:
+        """Return a single order by order_id, or None if not found."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource,
+                           duration_hours, order_maker, order_taker,
+                           matched_offer_id, maker_attestation, taker_attestation,
+                           escrow_uid, oracle_address
+                    FROM orders WHERE order_id = ?
+                    """,
+                    (order_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                keys = [
+                    "order_id", "status", "created_at", "updated_at",
+                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "duration_hours", "order_maker", "order_taker",
+                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "escrow_uid", "oracle_address",
+                ]
+                return dict(zip(keys, row))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_orders_by_escrow_uid(self, *, escrow_uid: str) -> list[dict[str, Any]]:
+        """Return all orders that share the given escrow_uid."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource,
+                           duration_hours, order_maker, order_taker,
+                           matched_offer_id, maker_attestation, taker_attestation,
+                           escrow_uid, oracle_address
+                    FROM orders WHERE escrow_uid = ?
+                    """,
+                    (escrow_uid,),
+                )
+                keys = [
+                    "order_id", "status", "created_at", "updated_at",
+                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "duration_hours", "order_maker", "order_taker",
+                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "escrow_uid", "oracle_address",
+                ]
+                return [dict(zip(keys, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def save_policy(
         self,

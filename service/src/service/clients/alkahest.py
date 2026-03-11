@@ -1,11 +1,10 @@
 import json
 import copy
+import os
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-
-from .config import CONFIG
 
 NETWORK_ANVIL = "anvil"
 NETWORK_BASE_SEPOLIA = "base_sepolia"
@@ -226,7 +225,7 @@ def _load_override_config(
 def prewarm_alkahest_address_config_cache(config_path: str | None = None) -> None:
     """Eagerly load/validate the configured address override JSON (if any)."""
     _load_override_config(
-        config_path if config_path is not None else CONFIG.alkahest_address_config_path
+        config_path if config_path is not None else os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH")
     )
 
 
@@ -252,8 +251,8 @@ def resolve_alkahest_address_config(
 
 
 def get_trusted_oracle_arbiter() -> str:
-    selected = get_alkahest_network(CONFIG.alkahest_network)
-    override = _load_override_config(CONFIG.alkahest_address_config_path)
+    selected = get_alkahest_network(os.getenv("ALKAHEST_NETWORK", "base_sepolia"))
+    override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
     if override is not None:
         return str(override["arbiters_addresses"]["trusted_oracle_arbiter"])
     if selected in NETWORK_ADDRESS_CONFIGS:

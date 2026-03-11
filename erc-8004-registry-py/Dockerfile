@@ -1,7 +1,7 @@
 # Use Docker's BuildKit syntax for advanced features
 # syntax=docker/dockerfile:1.4
 # Define build arguments for Python and uv versions, and the app port
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.10.0
 ARG PORT=8080
 
@@ -49,8 +49,8 @@ ENV HEARTBEAT_TTL_SECS=60
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev && \
   find /home/appuser/.cache -type f -delete 2>/dev/null || true && \
-  find /usr/local/lib/python${PYTHON_VERSION:-3.12} -name "*.pyc" -delete && \
-  find /usr/local/lib/python${PYTHON_VERSION:-3.12} -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+  find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "*.pyc" -delete && \
+  find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Copy application source code into the image
 COPY --chown=appuser:appuser src ./src

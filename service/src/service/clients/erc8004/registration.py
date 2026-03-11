@@ -3,6 +3,7 @@ On-chain registration logic for ERC-8004 Identity Registry.
 """
 import json
 import logging
+import os
 import re
 import urllib.request
 from typing import Optional, Tuple
@@ -21,12 +22,12 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
-from .blockchain_utils import (
+from .blockchain import (
     find_agent_id_by_owner,
     extract_agent_id_from_receipt,
     rpc_url_for_http_provider,
 )
-from core.agent.app.abi.identity_registry_abi import FULL_IDENTITY_REGISTRY_ABI
+from .abi import FULL_IDENTITY_REGISTRY_ABI
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,10 @@ def _extract_revert_reason(error: Exception) -> str:
 def build_agent_card_url(base_url: str) -> str:
     """
     Build the agent card URL consistently.
-    
+
     Args:
         base_url: Base URL of the agent (e.g., http://localhost:8000)
-    
+
     Returns:
         Agent card URL (e.g., http://localhost:8000/.well-known/agent-card.json)
     """
@@ -57,12 +58,12 @@ def build_agent_card_url(base_url: str) -> str:
 def build_registration_file_url(base_url: str) -> str:
     """
     Build the ERC-8004 registration file URL (token_uri) consistently.
-    
+
     Per ERC-8004 spec, tokenURI MUST resolve to the agent registration file.
-    
+
     Args:
         base_url: Base URL of the agent (e.g., http://localhost:8000)
-    
+
     Returns:
         Registration file URL (e.g., http://localhost:8000/.well-known/erc-8004-registration.json)
     """
@@ -77,24 +78,22 @@ async def register_onchain_from_env(
     """
     Register agent on-chain using environment variables.
     Convenience wrapper around register_onchain() that reads from env vars.
-    
+
     Args:
         base_url: Optional base URL override (defaults to BASE_URL_OVERRIDE env var)
         chain_id: Optional chain ID override (defaults to CHAIN_ID env var)
         explicit_agent_id: Optional explicit agent ID override (defaults to ONCHAIN_AGENT_ID env var)
-    
+
     Returns:
         Same as register_onchain(): Tuple of (tx_hash, agent_id, updates_dict) or None
     """
-    import os
-    
     # Read required env vars
     agent_priv_key = os.getenv("AGENT_PRIV_KEY")
     chain_rpc_url = os.getenv("CHAIN_RPC_URL")
     identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
     agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
     base_url_override = base_url or os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
-    
+
     # Validate required variables
     missing = []
     if not agent_priv_key:
@@ -105,24 +104,19 @@ async def register_onchain_from_env(
         missing.append("IDENTITY_REGISTRY_ADDRESS")
     if not agent_wallet_address:
         missing.append("AGENT_WALLET_ADDRESS")
-    
+
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
-    
+
     # Get optional values
     explicit_agent_id = explicit_agent_id or os.getenv("ONCHAIN_AGENT_ID")
-    
+
     # Get agent name (for on-chain metadata and agent card)
-    try:
-        from ...utils.config import get_agent_name
-        agent_name = get_agent_name()
-    except (ImportError, ValueError):
-        # Fallback if config not available
-        agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID")
-    
+    agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
+
     # Build agent card URL (used to build registration file URL)
     agent_card_url = build_agent_card_url(base_url_override)
-    
+
     # Call the core registration function
     # Note: register_onchain will build the registration file URL from agent_card_url
     return await register_onchain(
@@ -150,7 +144,7 @@ async def update_existing_agent(
 ) -> Tuple[Optional[str], dict]:
     """
     Update existing agent if changes detected.
-    
+
     Args:
         contract: Web3 contract instance
         account: Web3 account instance
@@ -159,7 +153,7 @@ async def update_existing_agent(
         desired_metadata: List of desired metadata dicts with 'key' and 'value' (hex-encoded)
         w3: Web3 instance
         private_key: Private key for signing transactions
-        
+
     Returns:
         Tuple of (last_tx_hash_if_updated, updates_dict) where updates_dict indicates what was updated:
         {
@@ -174,24 +168,24 @@ async def update_existing_agent(
         'no_changes': True
     }
     last_tx_hash = None
-    
+
     try:
         # Fetch current token URI from contract
         current_token_uri = contract.functions.tokenURI(agent_id).call()
-        
+
         # Normalize URIs for comparison (strip trailing slashes, handle http/https)
         def normalize_uri(uri: str) -> str:
             uri = uri.rstrip('/')
             # Normalize http/https (optional - uncomment if needed)
             # uri = uri.replace('https://', 'http://')
             return uri
-        
+
         normalized_current = normalize_uri(current_token_uri)
         normalized_desired = normalize_uri(desired_token_uri)
-        
+
         logger.debug(f"[UPDATE] Current token URI: {current_token_uri}")
         logger.debug(f"[UPDATE] Desired token URI: {desired_token_uri}")
-        
+
         # Compare normalized token URIs
         if normalized_current != normalized_desired:
             logger.info(f"[UPDATE] Token URI changed: {current_token_uri} -> {desired_token_uri}")
@@ -203,11 +197,11 @@ async def update_existing_agent(
                     "gas": 200000,
                     "gasPrice": w3.eth.gas_price,
                 })
-                
+
                 signed_tx = account.sign_transaction(tx)
                 tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
                 tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
-                
+
                 # Wait for confirmation
                 receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
                 if receipt.status == 1:
@@ -221,16 +215,16 @@ async def update_existing_agent(
                 logger.error(f"[UPDATE] Error updating token URI: {e}")
         else:
             logger.debug(f"[UPDATE] Token URI unchanged")
-        
+
         # Fetch current metadata and compare
         for desired_meta in desired_metadata:
             key = desired_meta['key']
             desired_value_hex = desired_meta['value']
-            
+
             try:
                 # Fetch current metadata value (returns bytes)
                 current_value_bytes = contract.functions.getMetadata(agent_id, key).call()
-                
+
                 # Convert desired hex string to bytes for comparison
                 # Web3.to_hex returns hex string with '0x' prefix, so we need to handle that
                 if isinstance(desired_value_hex, str):
@@ -240,7 +234,7 @@ async def update_existing_agent(
                         desired_value_bytes = bytes.fromhex(desired_value_hex)
                 else:
                     desired_value_bytes = desired_value_hex
-                
+
                 # Compare bytes
                 if current_value_bytes != desired_value_bytes:
                     logger.info(f"[UPDATE] Metadata key '{key}' changed (size: {len(desired_value_bytes)} bytes)")
@@ -251,7 +245,7 @@ async def update_existing_agent(
                             "nonce": w3.eth.get_transaction_count(account.address),
                             "gasPrice": w3.eth.gas_price,
                         })
-                        
+
                         # Estimate gas - use higher multiplier for large values like agentCard
                         try:
                             estimated_gas = contract.functions.setMetadata(agent_id, key, desired_value_bytes).estimate_gas({
@@ -267,15 +261,15 @@ async def update_existing_agent(
                             # Rough estimate: ~200 gas per byte for storage operations
                             size_based_gas = base_gas + (len(desired_value_bytes) * 200)
                             gas_limit = min(size_based_gas, 2000000)  # Cap at 2M gas
-                        
+
                         tx['gas'] = gas_limit
-                        
+
                         signed_tx = account.sign_transaction(tx)
                         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
                         tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
-                        
+
                         logger.debug(f"[UPDATE] Sending transaction for '{key}' with gas limit: {gas_limit}")
-                        
+
                         # Wait for confirmation
                         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
                         if receipt.status == 1:
@@ -309,7 +303,7 @@ async def update_existing_agent(
                             desired_value_bytes = bytes.fromhex(desired_value_hex)
                     else:
                         desired_value_bytes = desired_value_hex
-                    
+
                     # Call setMetadata
                     # Build transaction first
                     tx = contract.functions.setMetadata(agent_id, key, desired_value_bytes).build_transaction({
@@ -317,7 +311,7 @@ async def update_existing_agent(
                         "nonce": w3.eth.get_transaction_count(account.address),
                         "gasPrice": w3.eth.gas_price,
                     })
-                    
+
                     # Estimate gas - use higher multiplier for large values like agentCard
                     try:
                         estimated_gas = contract.functions.setMetadata(agent_id, key, desired_value_bytes).estimate_gas({
@@ -333,15 +327,15 @@ async def update_existing_agent(
                         # Rough estimate: ~200 gas per byte for storage operations
                         size_based_gas = base_gas + (len(desired_value_bytes) * 200)
                         gas_limit = min(size_based_gas, 2000000)  # Cap at 2M gas
-                    
+
                     tx['gas'] = gas_limit
-                    
+
                     signed_tx = account.sign_transaction(tx)
                     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
                     tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
-                    
+
                     logger.debug(f"[UPDATE] Sending transaction for '{key}' with gas limit: {gas_limit}")
-                    
+
                     # Wait for confirmation
                     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
                     if receipt.status == 1:
@@ -353,12 +347,12 @@ async def update_existing_agent(
                         logger.error(f"[UPDATE] ✗ Metadata key '{key}' set failed! TX reverted. Gas used: {receipt.gasUsed}/{gas_limit}")
                 except Exception as e2:
                     logger.error(f"[UPDATE] Error setting metadata key '{key}': {e2}")
-        
+
         if updates['no_changes']:
             logger.info(f"[UPDATE] ✓ No changes detected for agent {agent_id}")
-        
+
         return (last_tx_hash, updates)
-        
+
     except Exception as e:
         logger.error(f"[UPDATE] Error in update_existing_agent: {e}")
         return (None, updates)
@@ -372,20 +366,21 @@ async def register_onchain(
     owner_address: Optional[str] = None,
     explicit_agent_id: Optional[str] = None,
     indexer_url: Optional[str] = None,
-    agent_name: Optional[str] = None
+    agent_name: Optional[str] = None,
+    agent_card_data: dict | None = None
 ) -> Optional[Tuple[str, int, Optional[dict]]]:
     """
     Register or update agent on-chain by calling the ERC-8004 Identity Registry contract.
     Checks if agent is already registered and updates metadata instead of re-registering.
-    
+
     Priority order for finding existing agent:
     1. Explicit agent ID from environment variable (ONCHAIN_AGENT_ID)
     2. Search blockchain events (finds most recent registration by owner)
-    
+
     Note: Each agent instance registers independently. Multiple agents on different ports
     will each get their own on-chain agent ID (auto-incremented by contract).
     No local caching is used - agents always check the blockchain for existing registrations.
-    
+
     Args:
         agent_card_url: URL to the agent card (used as tokenURI)
         private_key: Private key for signing the transaction
@@ -395,7 +390,8 @@ async def register_onchain(
         explicit_agent_id: Explicit agent ID from env var (highest priority)
         indexer_url: Indexer API URL to query for existing agent
         agent_name: Optional agent name (from AGENT_NAME env var). If not provided, uses agent card name or falls back to AGENT_ID
-        
+        agent_card_data: Optional agent card data dict. If None, will attempt to fetch from agent_card_url.
+
     Returns:
         Tuple of (tx_hash, agent_id, updates_dict) if successful, None otherwise
         - For new registrations: (tx_hash, agent_id, None)
@@ -405,16 +401,16 @@ async def register_onchain(
     if not HAS_WEB3:
         logger.error("[ONCHAIN REGISTRATION] web3 package not installed. Cannot perform on-chain registration.")
         return None
-    
+
     logger.info(f"[ONCHAIN REGISTRATION] Attempting on-chain registration...")
     logger.info(f"[ONCHAIN REGISTRATION] Token URI: {agent_card_url}")
     logger.info(f"[ONCHAIN REGISTRATION] Contract: {contract_address}")
-    
+
     try:
         # Use HTTP provider for chain calls; normalize ws/wss RPC URLs if needed.
         http_url = rpc_url_for_http_provider(rpc_url)
         logger.debug(f"[REGISTRATION] Connecting to RPC: {http_url} (converted from {rpc_url})")
-        
+
         try:
             w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 10}))
             if not w3.is_connected():
@@ -429,20 +425,20 @@ async def register_onchain(
             logger.error(f"[REGISTRATION]   2. Is the RPC URL correct?")
             logger.error(f"[REGISTRATION]   3. Is the port accessible?")
             return None
-        
+
         account = w3.eth.account.from_key(private_key)
         # Official contract always mints to msg.sender (the account signing)
         # If owner_address differs, we'd need to transfer after registration
         signer_address = account.address
-        
+
         contract = w3.eth.contract(
             address=Web3.to_checksum_address(contract_address),
             abi=FULL_IDENTITY_REGISTRY_ABI
         )
-        
+
         # Check if agent is already registered (priority order)
         agent_id = None
-        
+
         # 1. Explicit agent ID from env var (highest priority - user override)
         if explicit_agent_id:
             try:
@@ -458,7 +454,7 @@ async def register_onchain(
                 else:
                     # Assume it's a numeric ID
                     agent_id = int(explicit_agent_id)
-                
+
                 logger.info(f"[REGISTRATION] Using explicit agent ID {agent_id} (searching for owner {owner_address or signer_address})")
                 # Verify it's valid
                 owner = contract.functions.ownerOf(agent_id).call()
@@ -474,7 +470,7 @@ async def register_onchain(
             except Exception as e:
                 logger.warning(f"[REGISTRATION] Invalid explicit agent ID {explicit_agent_id}: {e}")
                 agent_id = None
-        
+
         # 2. Search blockchain events (finds most recent registration by owner)
         if agent_id is None:
             logger.debug(f"[REGISTRATION] Searching blockchain for existing registration by owner...")
@@ -484,60 +480,42 @@ async def register_onchain(
             if agent_id is not None:
                 logger.info(f"[REGISTRATION] Found existing registration (ID: {agent_id}) for owner {search_address}")
                 # Continue to idempotent check below
-        
+
         # Build agent card from config (server may not be running yet)
         # Try to fetch from URL first, fallback to building from config
-        agent_card_data = None
-        try:
-            if HAS_AIOHTTP:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(agent_card_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                        if response.status == 200:
-                            agent_card_data = await response.json()
-                            logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
-            else:
-                card_req = urllib.request.Request(agent_card_url, method='GET')
-                with urllib.request.urlopen(card_req, timeout=5) as response:
-                    agent_card_data = json.loads(response.read().decode('utf-8'))
-                    logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
-        except Exception as e:
-            logger.info(f"[REGISTRATION] Could not fetch agent card from URL (server may not be running): {e}")
-            logger.info(f"[REGISTRATION] Building agent card from configuration...")
-        
-        # Build agent card from config if fetch failed
         if agent_card_data is None:
-            # Import shared function to build agent card from config
-            from ...utils.agent_card import build_agent_card_data
-            from ...utils.config import get_agent_name, DEFAULT_AGENT_ID
-            base_url = agent_card_url.replace("/.well-known/agent-card.json", "")
-            # Prioritize agent_name parameter, then AGENT_NAME env var, then AGENT_ID, then default
-            if agent_name:
-                final_agent_name = agent_name
-            else:
-                try:
-                    final_agent_name = get_agent_name()
-                except ValueError:
-                    # If validation fails, use default
-                    final_agent_name = DEFAULT_AGENT_ID
-            agent_card_data = build_agent_card_data(
-                agent_name=final_agent_name,
-                base_url=base_url
-            )
-        
+            try:
+                if HAS_AIOHTTP:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(agent_card_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                            if response.status == 200:
+                                agent_card_data = await response.json()
+                                logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
+                else:
+                    card_req = urllib.request.Request(agent_card_url, method='GET')
+                    with urllib.request.urlopen(card_req, timeout=5) as response:
+                        agent_card_data = json.loads(response.read().decode('utf-8'))
+                        logger.debug(f"[REGISTRATION] Fetched agent card from {agent_card_url}")
+            except Exception as e:
+                logger.info(f"[REGISTRATION] Could not fetch agent card from URL (server may not be running): {e}")
+                logger.info(f"[REGISTRATION] Building agent card from configuration...")
+
+        # Use empty dict as fallback if agent_card_data is still None
+        if agent_card_data is None:
+            agent_card_data = {}
+
         # Build ERC-8004 registration file URL (tokenURI per spec)
         # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
         base_url = agent_card_url.replace("/.well-known/agent-card.json", "")
         registration_file_url = build_registration_file_url(base_url)
-        
+
         # Get chain_id for registration file
         chain_id = w3.eth.chain_id
-        
+
         # Build metadata for on-chain storage
-        # Use agent_name parameter if provided, otherwise from agent card, otherwise get from config
-        from ...utils.config import get_agent_name, DEFAULT_AGENT_ID
-        final_agent_name = agent_name or agent_card_data.get("name") or get_agent_name()
+        final_agent_name = agent_name or agent_card_data.get("name") or os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
         labels = {"category": "compute", "type": "trader"}  # Default labels
-        
+
         # Official contract: register(string tokenUri, MetadataEntry[] metadata)
         # MetadataEntry is {string key, bytes value} - format matches viem's toHex output
         # Store essential metadata on-chain for composability
@@ -552,7 +530,7 @@ async def register_onchain(
             # Convert agent card dict to JSON string, then to bytes, then to hex
             {"key": "agentCard", "value": Web3.to_hex(text=json.dumps(agent_card_data, separators=(',', ':')))},
         ]
-        
+
         # If we found an existing agent ID, check for changes and update if needed (idempotent)
         # CRITICAL: Use 'is not None' instead of truthy check because agent_id 0 is valid!
         if agent_id is not None:
@@ -570,7 +548,7 @@ async def register_onchain(
                 w3=w3,
                 private_key=private_key
             )
-            
+
             if updates['no_changes']:
                 logger.info(f"[REGISTRATION] ✓ No changes detected, using existing agent ID {agent_id}")
             else:
@@ -578,15 +556,15 @@ async def register_onchain(
                     logger.info(f"[REGISTRATION] ✓ Token URI updated")
                 if updates['metadata_updated']:
                     logger.info(f"[REGISTRATION] ✓ Metadata keys updated: {', '.join(updates['metadata_updated'])}")
-            
+
             # Return (tx_hash_if_updated, agent_id, updates_dict) - tx_hash is None if no updates were made
             return (update_tx_hash, agent_id, updates)
-        
+
         # No existing registration found, register new
         logger.info(f"[ONCHAIN REGISTRATION] Registering new agent on-chain...")
         # Note: agentId is already the ERC-721 tokenId, so we don't store it as metadata
         # Description and other details are in the tokenURI registration file, not on-chain
-        
+
         # Log metadata for debugging
         logger.debug(f"[ONCHAIN REGISTRATION] Metadata to store: {json.dumps(metadata, indent=2)}")
 
@@ -609,24 +587,24 @@ async def register_onchain(
             "gas": max(int(estimated_gas * 2), 500000),
             "gasPrice": w3.eth.gas_price,
         })
-        
+
         # Sign and send transaction
         signed_tx = account.sign_transaction(tx)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-        
+
         # Handle both bytes and HexBytes types for tx_hash
         tx_hash_str = tx_hash.hex() if hasattr(tx_hash, 'hex') else str(tx_hash)
         logger.info(f"[ONCHAIN REGISTRATION] On-chain registration submitted! TX: {tx_hash_str}")
-        
+
         # Wait for confirmation
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
-        
+
         if receipt.status == 1:
             logger.info(f"[ONCHAIN REGISTRATION] On-chain registration confirmed! Block: {receipt.blockNumber}")
-            
+
             # Extract agent ID from Registered event
             onchain_id = extract_agent_id_from_receipt(contract, receipt)
-            
+
             # Fallback: query contract if event parsing failed
             if onchain_id is None:
                 logger.warning(f"[REGISTRATION] Could not extract agent ID from events, querying contract...")
@@ -678,7 +656,7 @@ async def register_onchain(
                 receipt.gasUsed,
             )
             return None
-            
+
     except Exception as e:
         logger.error(f"[REGISTRATION] On-chain registration error: {e}")
         return None

@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 import gymnasium as gym
+from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
 
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,
-    ComputeResourcePortfolio,
     DecisionContext,
     GPUModel,
     TokenResource,
@@ -316,13 +316,9 @@ def build_arkhai_observation(
         # Portfolio extraction
         totals = [0.0] * node_types
         frees = [0.0] * node_types
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                totals, frees = count_nodes_by_slot(portfolio, node_types, gpu_slot_map)
-            except Exception as exc:
-                logger.warning("[ARKHAI COMMON] Failed to validate portfolio: %s", exc)
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio is not None:
+            totals, frees = count_nodes_by_slot(portfolio, node_types, gpu_slot_map)
 
         # Cluster node totals and free amounts
         for slot in range(node_types):

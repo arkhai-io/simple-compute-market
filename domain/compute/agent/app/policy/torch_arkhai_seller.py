@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from app.policies.arkhai_common import (
+from domain.compute.agent.app.policy.arkhai_common import (
     build_action_parameters,
     build_arkhai_observation,
     detect_agent_role,
@@ -21,17 +21,17 @@ from app.policies.arkhai_common import (
     parse_node_types,
     torch,
 )
+from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
 from core.agent.app.policy.registry import policy_callable
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,
-    ComputeResourcePortfolio,
     DecisionContext,
     MakeOfferEvent,
 )
 from core.agent.app.utils.config import CONFIG
-from app.utils.validation import extract_resources_from_make_offer_event
+from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +54,17 @@ async def mo_action_torch_arkhai_seller(context: DecisionContext) -> DomainActio
         return None
 
     if isinstance(demand_resource, ComputeResource):
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_resource):
-                    return DomainAction(
-                        action_type=ActionType.REJECT_OFFER,
-                        parameters={
-                            "reason": "insufficient_capacity",
-                            "order_id": order.order_id,
-                            "demand_resource": demand_resource.model_dump(mode="json"),
-                            "offer_resource": offer_resource.model_dump(mode="json"),
-                        },
-                    )
-            except Exception as exc:
-                logger.warning("[ARKHAI SELLER POLICY] Failed to validate portfolio: %s", exc)
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio and not portfolio.has_capacity(demand_resource):
+            return DomainAction(
+                action_type=ActionType.REJECT_OFFER,
+                parameters={
+                    "reason": "insufficient_capacity",
+                    "order_id": order.order_id,
+                    "demand_resource": demand_resource.model_dump(mode="json"),
+                    "offer_resource": offer_resource.model_dump(mode="json"),
+                },
+            )
 
     node_types = parse_node_types()
     model = _get_model(obs_dim(node_types))

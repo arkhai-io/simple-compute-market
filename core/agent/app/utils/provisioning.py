@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from .config import CONFIG
+
 # TODO(refactor): Provisioning behavior here is compute-domain specific.
 # Move this logic into the compute domain package in later refactor phases.
 
@@ -63,6 +65,19 @@ def _extract_tenant_user(playbook_output: str, vm_host: str | None = None) -> Op
     return None
 
 
+def _extract_tenant_password(playbook_output: str) -> Optional[str]:
+    """Extract authentication.tenant.password from playbook stdout."""
+    patterns = [
+        r'"tenant"\s*:\s*\{[\s\S]*?"password"\s*:\s*"(?P<pwd>[^"]+)"',
+        r'"tenant_password"\s*:\s*"(?P<pwd>[^"]+)"',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, playbook_output, re.DOTALL)
+        if match:
+            return match.group("pwd").strip()
+    return None
+
+
 def _lookup_vm_host_ip(vm_host: str) -> Optional[str]:
     """Read the Ansible inventory to find the external IP for a given host."""
     project_root = _find_project_root()
@@ -103,18 +118,28 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
         subprocess.CalledProcessError if the playbook exits with a non-zero status.
     """
     nonce = uuid.uuid4().hex
+    vm_target_suffix = uuid.uuid4().hex[:5]
     vm_vars_path = Path(f"/tmp/vm_vars_{nonce}.yml")
     escaped_pubkey = ssh_pubkey.replace('"', '\\"')
 
     vm_vars_payload = (
         f"vm_host: {vm_host}\n"
-        f"vm_target: {vm_target}\n"
+        f"vm_target: {vm_target}-{vm_target_suffix}\n"
         "vm_action: create\n"
         "vm_ram: 2048\n"
         "vm_vcpus: 2\n"
         "vm_disk_size: 25G\n"
         f'vm_tenant_pubkey: "{escaped_pubkey}"\n'
+        "image_setup_type: scratch\n"
+        "vm_gpu_provisioned: true\n"
+        "vm_gpu_count: 1\n"
     )
+    if CONFIG.frp_server_addr:
+        vm_vars_payload += f'frp_server_addr: "{CONFIG.frp_server_addr}"\n'
+    if CONFIG.frp_domain:
+        vm_vars_payload += f'frp_domain: "{CONFIG.frp_domain}"\n'
+    if CONFIG.frp_dashboard_password:
+        vm_vars_payload += f'frp_dashboard_password: "{CONFIG.frp_dashboard_password}"\n'
 
     vm_vars_path.write_text(vm_vars_payload, encoding="utf-8")
 
@@ -177,12 +202,26 @@ def run_vm_provisioning_playbook(ssh_pubkey: str, vm_host: str = "vm1", vm_targe
     else:
         logger.warning("Tenant SSH user not found in playbook output.")
 
+    tenant_password = _extract_tenant_password(result.stdout)
+
     ssh_command = None
     if external_port and vm_host_ip and tenant_user:
         ssh_command = f"ssh -i <your_private_key> -p {external_port} {tenant_user}@{vm_host_ip}"
-        logger.info("SSH command: %s", ssh_command)
+        if tenant_password:
+            ssh_command += f" | password: {tenant_password}"
+            logger.info("Tenant external SSH command and password extracted.")
+        else:
+            logger.info("SSH command: %s", ssh_command)
 
-    return ssh_command
+    if ssh_command:
+        return ssh_command
+
+    if tenant_password:
+        logger.info("Tenant password extracted without external SSH command.")
+        return f"password: {tenant_password}"
+
+    logger.warning("Tenant external SSH command not found in playbook output.")
+    return None
 
 
 def schedule_vm_shutdown(lease_end_utc: str, vm_host: str = "vm1", vm_target: str = "tenant-vm") -> None:

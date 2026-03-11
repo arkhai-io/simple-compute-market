@@ -28,31 +28,32 @@ logger = logging.getLogger(__name__)
 
 # Heartbeat interval (seconds) - should be less than Indexer's heartbeat_ttl_secs
 HEARTBEAT_INTERVAL = 30  # Send heartbeat every 30 seconds
+HEARTBEAT_DELAY = 5
 
 
 async def send_heartbeat(
-    agent_id: str, 
-    indexer_url: str, 
+    agent_id: str,
+    indexer_url: str,
     private_key: Optional[str] = None,
     owner_address: Optional[str] = None
 ) -> bool:
     """
     Send heartbeat to Indexer to indicate agent is alive.
-    
+
     Signs the heartbeat with the agent's private key to authenticate the request.
-    
+
     Args:
         agent_id: Agent ID (from Indexer registration)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeat (optional if agent has no owner)
         owner_address: Owner wallet address (optional, used for logging)
-        
+
     Returns:
         True if successful, False otherwise
     """
     try:
         timestamp = int(time.time())
-        
+
         # Prepare request body with signature if private key is available
         body = {}
         if private_key:
@@ -62,22 +63,22 @@ async def send_heartbeat(
                 try:
                     # Construct message to sign
                     message = f"heartbeat:{agent_id}:{timestamp}"
-                    
+
                     # Sign message using EIP-191 personal sign format
                     message_hash = encode_defunct(text=message)
                     signed_message = Account.sign_message(message_hash, private_key)
                     signature = signed_message.signature.hex()
-                    
+
                     body = {
                         "signature": signature,
                         "timestamp": timestamp
                     }
                 except Exception as e:
                     logger.warning(f"[HEARTBEAT] Failed to sign heartbeat: {e}")
-        
+
         # URL-encode the agent_id for use in path parameter (handles canonical IDs with colons)
         encoded_agent_id = urllib.parse.quote(agent_id, safe='')
-        
+
         if HAS_AIOHTTP:
             try:
                 async with aiohttp.ClientSession() as session:
@@ -142,14 +143,14 @@ async def send_heartbeat(
 
 
 async def heartbeat_loop(
-    agent_id: Optional[str], 
+    agent_id: Optional[str],
     indexer_url: str,
     private_key: Optional[str] = None,
     owner_address: Optional[str] = None
 ):
     """
     Background task to periodically send heartbeats to Indexer.
-    
+
     Args:
         agent_id: Agent ID from registration (None if not registered)
         indexer_url: Indexer API URL
@@ -159,13 +160,13 @@ async def heartbeat_loop(
     if agent_id is None:
         logger.debug("[HEARTBEAT] No agent ID, skipping heartbeat loop")
         return
-    
+
     logger.info(f"[HEARTBEAT] Starting heartbeat loop for agent {agent_id}")
     if private_key:
         logger.debug("[HEARTBEAT] Heartbeats will be signed for authentication")
     else:
         logger.warning("[HEARTBEAT] No private key provided - heartbeats will be unsigned (may fail if Indexer requires auth)")
-    
+
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
@@ -179,3 +180,60 @@ async def heartbeat_loop(
             logger.error(f"[HEARTBEAT] Error in heartbeat loop: {e}")
             await asyncio.sleep(HEARTBEAT_INTERVAL)  # Wait before retrying
 
+
+async def start_agent_heartbeat(config: dict) -> Optional[str]:
+    """
+    Start agent heartbeat loop. Requires onchain_agent_id from config dict.
+
+    Args:
+        config: dict with keys: indexer_url, identity_registry_address,
+                agent_wallet_address, onchain_agent_id, chain_rpc_url, agent_priv_key
+    """
+    indexer_url = config.get("indexer_url")
+    identity_registry_address = config.get("identity_registry_address")
+    agent_wallet_address = config.get("agent_wallet_address")
+    onchain_agent_id = config.get("onchain_agent_id")
+    chain_rpc_url = config.get("chain_rpc_url")
+    agent_priv_key = config.get("agent_priv_key")
+
+    if not indexer_url or not identity_registry_address:
+        return None
+
+    if not agent_wallet_address:
+        logger.error("[HEARTBEAT] No wallet address configured")
+        return None
+
+    if not onchain_agent_id:
+        logger.warning("[HEARTBEAT] ONCHAIN_AGENT_ID not set. Run 'make register' first.")
+        return None
+
+    try:
+        agent_id = int(onchain_agent_id)
+    except ValueError:
+        logger.error(f"[HEARTBEAT] Invalid ONCHAIN_AGENT_ID: {onchain_agent_id}")
+        return None
+
+    await asyncio.sleep(HEARTBEAT_DELAY)
+
+    chain_id = 1337  # Default
+    try:
+        from web3 import Web3
+        from web3.providers import HTTPProvider
+        from .blockchain import rpc_url_for_http_provider, build_erc8004_canonical_id
+        if chain_rpc_url:
+            http_url = rpc_url_for_http_provider(chain_rpc_url)
+            w3 = Web3(HTTPProvider(http_url, request_kwargs={"timeout": 5}))
+            chain_id = w3.eth.chain_id
+    except Exception:
+        from .blockchain import build_erc8004_canonical_id
+
+    from .blockchain import build_erc8004_canonical_id
+    canonical_id = build_erc8004_canonical_id(
+        chain_id=chain_id,
+        identity_registry=identity_registry_address,
+        agent_id=agent_id,
+    )
+
+    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key, agent_wallet_address))
+    logger.info(f"[HEARTBEAT] Started heartbeat for {canonical_id}")
+    return agent_wallet_address
