@@ -56,7 +56,7 @@ from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
 )
-from core.agent.app.policy.action_builders import CounterOfferParams
+from core.agent.app.policy.action_builders import CounterOfferParams, make_negotiation_id
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
@@ -65,6 +65,23 @@ AGENT_ID = CONFIG.agent_id
 SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 logger = logging.getLogger(__name__)
+
+# Fix 3: Per-negotiation dispatch lock — prevent parallel fan-out when both agents
+# respond synchronously (each A2A round-trip triggers a concurrent inbound invocation).
+_negotiation_locks: dict[str, asyncio.Lock] = {}
+
+# Fix 4: Per-negotiation ADK session — we create one dedicated Session per negotiation
+# and reuse it every round. ADK's RemoteA2aAgent._construct_message_parts_from_session
+# reads a2a:context_id from session event history (not from ctx.session.id), so we must:
+# (a) reuse the same Session object each round to preserve event history, and
+# (b) append the response event to the session so the context_id is available next round.
+_negotiation_sessions: dict[str, Any] = {}  # negotiation_id → Session object
+
+
+def _release_negotiation_lock(negotiation_id: str) -> None:
+    """Release dispatch lock and session cache for a terminal negotiation."""
+    _negotiation_locks.pop(negotiation_id, None)
+    _negotiation_sessions.pop(negotiation_id, None)
 
 
 def _serialize_decision(decision: Any) -> Any:
@@ -358,6 +375,17 @@ async def execute_action(
                         )
                     except Exception as exc:
                         logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
+                # Close both orders in registry and local DB after successful fulfillment
+                buyer_order_id = order_dict.get("order_id")
+                for oid in filter(None, [matched_order_id, buyer_order_id]):
+                    try:
+                        registry_client = get_registry_client()
+                        await registry_client.update_order(oid, {"status": "closed"})
+                        sqlite_client = get_sqlite_client()
+                        await sqlite_client.update_order(order_id=oid, status="closed")
+                        logger.info(f"[FULFILL] Closed order {oid}")
+                    except Exception as e:
+                        logger.warning(f"[FULFILL] Failed to close order {oid}: {e}")
                 # Include event_type for downstream parsing and propagate to remote agent.
                 result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
                 if ctx:
@@ -535,7 +563,16 @@ async def execute_action(
             )
             outcome["result"] = result
             outcome["message"] = result.get("message", "Counter offer sent")
-            
+
+        case ActionType.EXIT_NEGOTIATION.value:
+            logger.info(f"[ACTION] Exiting negotiation with params: {parameters}")
+            result = await exit_negotiation(
+                ctx=ctx,
+                parameters=parameters,
+            )
+            outcome["result"] = result
+            outcome["message"] = result.get("message", "Negotiation exited")
+
         case ActionType.NOOP.value:
             logger.info(f"[ACTION] [SIMULATED] No operation required")
             outcome["result"] = None
@@ -627,9 +664,15 @@ async def send_to_remote_agent(
 
     await ctx.session_service.append_event(ctx.session, event)
     async for event in remote_agent.run_async(ctx):
-        #text_from_remote = _extract_text_from_content(event.content)
         if event.is_final_response():
             logger.info(f"[A2A] Received from remote agent: {event}")
+            # Append the response so ADK's _construct_message_parts_from_session
+            # can read a2a:context_id from event.custom_metadata on the next round,
+            # enabling the remote task_manager to route to the existing A2A task.
+            try:
+                await ctx.session_service.append_event(ctx.session, event)
+            except Exception as e:
+                logger.debug("[A2A] Could not append response event to session: %s", e)
             return event
 
 
@@ -809,19 +852,52 @@ async def counter_offer(
             "message": "No invocation context available for counter_offer",
         }
 
-    # Get order details to find the counterparty
+    # Per-negotiation dispatch lock — drop truly concurrent duplicate setups.
+    # The lock is held ONLY during the setup phase (DB write + event build + session
+    # lookup). It is released BEFORE the blocking A2A dispatch so that when the remote
+    # agent fires back synchronously (within the same call stack), the next legitimate
+    # round can acquire the lock and proceed without being suppressed.
+    neg_id = params.negotiation_id
+    lock = _negotiation_locks.setdefault(neg_id, asyncio.Lock())
+    if lock.locked():
+        logger.info("[COUNTER_OFFER] Negotiation %s already in setup, suppressing duplicate", neg_id)
+        return {
+            "status": "skipped",
+            "message": "Duplicate counter suppressed",
+            "negotiation_id": neg_id,
+        }
+
+    # Phase 1: setup — hold lock for DB write + event build + session lookup only
+    async with lock:
+        dispatch_args = await _prepare_counter_offer(ctx=ctx, params=params)
+
+    if dispatch_args is None:
+        return {"status": "error", "message": "counter_offer setup failed"}
+
+    # Phase 2: A2A dispatch — lock already released; remote may fire back immediately
+    return await _dispatch_counter_offer(**dispatch_args)
+
+
+async def _prepare_counter_offer(
+    *,
+    ctx: InvocationContext,
+    params: CounterOfferParams,
+) -> dict[str, Any] | None:
+    """Setup phase for counter_offer (executed under the negotiation lock).
+
+    Performs all work that must be atomic: registry lookup, DB write, event construction,
+    and ADK session lookup/creation. Returns a dict of args for _dispatch_counter_offer,
+    or None on error.
+    """
     try:
         registry_client = get_registry_client()
         order = await registry_client.get_order(params.order_id)
         if not order:
-            return {
-                "status": "error",
-                "message": f"Order {params.order_id} not found in registry",
-            }
+            logger.error("[COUNTER_OFFER] Order %s not found in registry", params.order_id)
+            return None
 
         their_agent_id = order.get("order_maker")
 
-        # Validate that we have a valid agent URL for the counterparty
         if not their_agent_id:
             logger.warning(f"[ACTION] Order {params.order_id} missing 'order_maker' field.")
         elif not their_agent_id.startswith(("http://", "https://")):
@@ -829,7 +905,6 @@ async def counter_offer(
                 f"[ACTION] Order {params.order_id} has invalid 'order_maker' URL: {their_agent_id}"
             )
 
-        # Determine our strategy by looking up our order (for internal policy use)
         strategy = None
         if params.our_order_id:
             try:
@@ -841,16 +916,15 @@ async def counter_offer(
             except Exception as e:
                 logger.warning(f"[ACTION] Failed to determine strategy from order {params.our_order_id}: {e}")
 
-        # Use transaction context manager for thread operations
         async with NegotiationThreadTransaction("COUNTER_OFFER") as txn:
             await txn.ensure_thread(
                 negotiation_id=params.negotiation_id,
                 our_order_id=params.our_order_id or "",
                 their_order_id=params.order_id,
-                our_agent_id=AGENT_ID,
+                our_agent_id=BASE_URL_OVERRIDE,
                 their_agent_id=their_agent_id or "",
-                our_initial_price=params.our_price,  # Store locally for future rounds
-                our_strategy=strategy,  # Store locally, never transmitted
+                our_initial_price=params.our_price,
+                our_strategy=strategy,
             )
             await txn.add_message(
                 negotiation_id=params.negotiation_id,
@@ -863,12 +937,16 @@ async def counter_offer(
             )
 
         event_payload = {
+            "event_id": f"neg_{uuid.uuid4()}",
             "event_type": EventType.NEGOTIATION.value,
             "negotiation_id": params.negotiation_id,
             "message_type": "counter_proposal",
             "sender": AGENT_ID,
+            "source": BASE_URL_OVERRIDE,
             "data": {
                 "proposed_price": params.proposed_price,
+                "their_order_id": params.our_order_id,  # sender's order = receiver's "their"
+                "our_order_id": params.order_id,        # receiver's order = receiver's "our"
             },
         }
 
@@ -887,9 +965,68 @@ async def counter_offer(
             branch=ctx.branch,
         )
 
-        # Send to counterparty
-        result = await send_to_remote_agent(ctx, event, agent_url=their_agent_id)
+        # Fix 4: Use a dedicated long-lived ADK session per negotiation.
+        # ADK's RemoteA2aAgent reads a2a:context_id from session event history
+        # (_construct_message_parts_from_session). Reusing the same Session object
+        # preserves that history, so each round carries the correct contextId and the
+        # remote task_manager routes to the existing task (avoids O(n²) accumulation).
+        neg_session = _negotiation_sessions.get(params.negotiation_id)
+        if neg_session is None:
+            neg_session = await ctx.session_service.create_session(
+                app_name=ctx.session.app_name,
+                user_id=ctx.session.user_id,
+            )
+            _negotiation_sessions[params.negotiation_id] = neg_session
+            logger.info(
+                "[COUNTER_OFFER] Created dedicated negotiation session %s for negotiation %s",
+                neg_session.id,
+                params.negotiation_id,
+            )
 
+        neg_ctx = ctx.model_copy(update={"session": neg_session})
+        return {
+            "neg_ctx": neg_ctx,
+            "event": event,
+            "their_agent_id": their_agent_id,
+            "params": params,
+        }
+    except Exception as e:
+        logger.error(f"[ACTION] Failed to prepare counter offer: {e}")
+        return None
+
+
+async def _dispatch_counter_offer(
+    *,
+    neg_ctx: InvocationContext,
+    event: Event,
+    their_agent_id: str | None,
+    params: CounterOfferParams,
+) -> dict[str, Any]:
+    """Dispatch phase for counter_offer: send the A2A message (no lock held)."""
+    try:
+        result = await send_to_remote_agent(neg_ctx, event, agent_url=their_agent_id)
+        # Fix 4 (Issue 1): Re-fetch the session after dispatch so _negotiation_sessions
+        # holds an up-to-date reference. InMemorySessionService.append_event may create
+        # a new Session object internally, making the stored reference stale and causing
+        # _construct_message_parts_from_session to miss the a2a:context_id on the next round.
+        try:
+            updated_session = await neg_ctx.session_service.get_session(
+                app_name=neg_ctx.session.app_name,
+                user_id=neg_ctx.session.user_id,
+                session_id=neg_ctx.session.id,
+            )
+            if updated_session:
+                _negotiation_sessions[params.negotiation_id] = updated_session
+                logger.debug(
+                    "[COUNTER_OFFER] Re-fetched session %s: %d events, authors=%s",
+                    neg_ctx.session.id,
+                    len(updated_session.events),
+                    [e.author for e in updated_session.events],
+                )
+            else:
+                logger.debug("[COUNTER_OFFER] get_session returned None for %s", neg_ctx.session.id)
+        except Exception as e:
+            logger.debug("[COUNTER_OFFER] Could not re-fetch negotiation session: %s", e)
         return {
             "status": "sent",
             "message": "Counter offer sent",
@@ -898,11 +1035,84 @@ async def counter_offer(
             "remote_response": getattr(result, "content", None),
         }
     except Exception as e:
-        logger.error(f"[ACTION] Failed to send counter offer: {e}")
+        logger.error(f"[ACTION] Failed to dispatch counter offer: {e}")
         return {
             "status": "error",
             "message": f"Failed to send counter offer: {e}",
         }
+
+
+async def exit_negotiation(
+    *,
+    ctx: InvocationContext | None,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Exit a negotiation: mark thread terminal and notify the counterparty."""
+    parameters = parameters or {}
+    negotiation_id = parameters.get("negotiation_id")
+    reason = parameters.get("reason", "unknown")
+    their_order_id = parameters.get("order_id")
+
+    # Fix 3: Prevent duplicate exit dispatches for the same negotiation.
+    if negotiation_id:
+        exit_lock = _negotiation_locks.setdefault(negotiation_id, asyncio.Lock())
+        if exit_lock.locked():
+            logger.info("[EXIT_NEGOTIATION] Negotiation %s already dispatching, suppressing duplicate exit", negotiation_id)
+            return {
+                "status": "skipped",
+                "message": "Duplicate exit suppressed",
+                "negotiation_id": negotiation_id,
+                "reason": reason,
+            }
+
+    if negotiation_id:
+        async with NegotiationThreadTransaction("EXIT_NEGOTIATION") as txn:
+            await txn.mark_terminal(negotiation_id, "failure")
+        logger.info("[ACTION] Marked negotiation %s as failed (reason: %s)", negotiation_id, reason)
+
+    if ctx and their_order_id:
+        try:
+            registry_client = get_registry_client()
+            order = await registry_client.get_order(their_order_id)
+            if order:
+                their_agent_id = order.get("order_maker")
+                if their_agent_id:
+                    exit_payload = {
+                        "event_id": f"exit_{uuid.uuid4()}",
+                        "event_type": EventType.NEGOTIATION.value,
+                        "negotiation_id": negotiation_id,
+                        "message_type": "exit",
+                        "sender": AGENT_ID,
+                        "source": BASE_URL_OVERRIDE,
+                        "data": {"reason": reason},
+                    }
+                    event = Event(
+                        author=AGENT_ID,
+                        content=genai_types.Content(
+                            role="model",
+                            parts=[genai_types.Part.from_function_response(
+                                name="exit_negotiation",
+                                response=exit_payload,
+                            )],
+                        ),
+                        invocation_id=ctx.invocation_id,
+                        branch=ctx.branch,
+                    )
+                    await send_to_remote_agent(ctx, event, agent_url=their_agent_id)
+                    logger.info("[ACTION] Notified counterparty of negotiation exit: %s", their_agent_id)
+        except Exception as e:
+            logger.warning("[ACTION] Failed to notify counterparty of exit: %s", e)
+
+    # Terminal state — release lock and context_id cache.
+    if negotiation_id:
+        _release_negotiation_lock(negotiation_id)
+
+    return {
+        "status": "exited",
+        "message": f"Negotiation exited: {reason}",
+        "negotiation_id": negotiation_id,
+        "reason": reason,
+    }
 
 
 async def accept_offer(
@@ -921,18 +1131,91 @@ async def accept_offer(
     elif isinstance(order_payload, dict):
         order_dict = order_payload
     else:
-        logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
-        return {"status": "error", "message": "Missing order payload for accept_offer"}
+        # No order in parameters — fall back to registry lookup using their_order_id.
+        # This happens when accept_offer is called from the NEGOTIATION path (price_interval_concession)
+        # where the event data only carries order IDs, not the full order payload.
+        their_order_id = parameters.get("their_order_id") or parameters.get("order_id")
+        if their_order_id:
+            try:
+                registry_client = get_registry_client()
+                order_payload = await registry_client.get_order(their_order_id)
+            except Exception as exc:
+                logger.warning("[ACCEPT OFFER] Registry lookup for order %s failed: %s", their_order_id, exc)
+        if not isinstance(order_payload, dict):
+            logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
+            return {"status": "error", "message": "Missing order payload for accept_offer"}
+        order_dict = order_payload
 
     order_id = order_dict.get("order_id")
     our_order_id = parameters.get("our_order_id")
     their_order_id = parameters.get("their_order_id") or order_id
     negotiation_id = parameters.get("negotiation_id")
+    counterparty_url = parameters.get("counterparty_url")
+    their_price = parameters.get("their_price")
+    our_price = parameters.get("our_price")
 
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
-        await txn.cancel_competing(order_id, their_order_id, negotiation_id)
+        if negotiation_id:
+            await txn.ensure_thread(
+                negotiation_id=negotiation_id,
+                our_order_id=our_order_id or "",
+                their_order_id=their_order_id or "",
+                our_agent_id=BASE_URL_OVERRIDE,
+                their_agent_id=counterparty_url or "",
+            )
+            await txn.add_message(
+                negotiation_id=negotiation_id,
+                sender=AGENT_ID,
+                our_price=our_price,
+                their_price=their_price,
+                proposed_price=their_price,
+                action_taken=ActionType.ACCEPT_OFFER.value,
+                message_type="accepted",
+            )
+        canceled = await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
+
+    # Multi-bilateral: notify each superseded counterparty so they can requeue their order.
+    if ctx and canceled:
+        for entry in canceled:
+            try:
+                their_agent_url = entry.get("their_agent_id")
+                competing_neg_id = entry.get("negotiation_id")
+                competing_their_order_id = entry.get("their_order_id")
+                if not their_agent_url or not competing_neg_id:
+                    continue
+                exit_payload = {
+                    "event_id": f"exit_{uuid.uuid4()}",
+                    "event_type": EventType.NEGOTIATION.value,
+                    "negotiation_id": competing_neg_id,
+                    "message_type": "exit",
+                    "sender": AGENT_ID,
+                    "source": BASE_URL_OVERRIDE,
+                    "data": {"reason": "order_accepted_elsewhere"},
+                }
+                exit_event = Event(
+                    author=AGENT_ID,
+                    content=genai_types.Content(
+                        role="model",
+                        parts=[genai_types.Part.from_function_response(
+                            name="exit_negotiation",
+                            response=exit_payload,
+                        )],
+                    ),
+                    invocation_id=ctx.invocation_id,
+                    branch=ctx.branch,
+                )
+                competing_url = _coerce_agent_reference_to_url(their_agent_url)
+                if competing_url:
+                    await send_to_remote_agent(ctx, exit_event, agent_url=competing_url)
+                    logger.info(
+                        "[ACCEPT_OFFER] Sent exit_negotiation to competing counterparty %s "
+                        "(negotiation=%s, their_order=%s)",
+                        competing_url, competing_neg_id, competing_their_order_id,
+                    )
+            except Exception as notify_err:
+                logger.warning("[ACCEPT_OFFER] Failed to notify competing counterparty: %s", notify_err)
 
     if not our_order_id:
         try:
@@ -984,7 +1267,15 @@ async def _accept_as_buyer(
     escrow_receipt = None
 
     if alkahest_client:
-        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        try:
+            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        except ValueError as exc:
+            logger.error(
+                "[ACCEPT OFFER] Cannot identify compute/token resources in order — skipping escrow: %s | order_dict keys=%s",
+                exc,
+                list(order_dict.keys()),
+            )
+            return {"status": "error", "message": str(exc)}
         max_retries = 3
         base_delay = 1.0
         for attempt in range(max_retries):
@@ -1284,7 +1575,11 @@ async def _find_and_send_matching_offers(
         
         # Filter out our own orders (don't match with ourselves)
         order_id = order_dict.get("order_id")
-        matching_orders = [m for m in matching_orders if m.get("order_id") != order_id]
+        matching_orders = [
+            m for m in matching_orders
+            if m.get("order_id") != order_id
+            and not _agent_urls_match(m.get("order_maker"), BASE_URL_OVERRIDE)
+        ]
 
         # Filter out orders that are already in active negotiations with us
         async with NegotiationThreadTransaction("MAKE_OFFER") as txn:
@@ -1357,7 +1652,7 @@ async def _find_and_send_matching_offers(
                                 continue
 
                             # Create thread BEFORE sending offer to track in-flight negotiations
-                            negotiation_id = f"{order_id}_{matched_order_id}_{AGENT_ID[:8]}"
+                            negotiation_id = make_negotiation_id(order_id, matched_order_id)
 
                             # Get our order to determine strategy and initial price
                             our_order_dict = await registry_client.get_order(order_id)
@@ -1371,7 +1666,7 @@ async def _find_and_send_matching_offers(
                                 negotiation_id=negotiation_id,
                                 our_order_id=order_id,
                                 their_order_id=matched_order_id,
-                                our_agent_id=AGENT_ID,
+                                our_agent_id=BASE_URL_OVERRIDE,
                                 their_agent_id=agent_url,
                                 our_initial_price=our_initial_price,
                                 our_strategy=strategy,

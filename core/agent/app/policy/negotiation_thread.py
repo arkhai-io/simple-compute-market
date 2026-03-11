@@ -6,12 +6,14 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from core.agent.app.ports.persistence import NegotiationThreadPersistencePort
+from core.agent.app.policy.action_builders import make_negotiation_id
 from core.agent.app.utils.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Agent ID for negotiation tracking
+# Agent identity constants for negotiation tracking
 AGENT_ID = CONFIG.agent_id
+AGENT_URL = CONFIG.base_url_override
 
 
 @dataclass
@@ -82,18 +84,24 @@ class NegotiationThreadTransaction:
         order_id: str | None,
         their_order_id: str | None,
         except_negotiation_id: str | None,
-    ) -> None:
+    ) -> list[dict]:
         """Cancel competing negotiations for both orders.
 
         Args:
             order_id: Our order ID
             their_order_id: Their order ID
             except_negotiation_id: Negotiation ID to exclude from cancellation
+
+        Returns:
+            List of dicts with negotiation_id, their_order_id, their_agent_id
+            for each canceled negotiation (for sending exit notifications).
         """
         if not self.thread_store:
             logger.warning(f"[{self.component}] No thread store available")
-            return
+            return []
 
+        seen: set[str] = set()
+        all_canceled: list[dict] = []
         for oid in [order_id, their_order_id]:
             if not oid:
                 continue
@@ -101,11 +109,17 @@ class NegotiationThreadTransaction:
                 order_id=oid,
                 except_negotiation_id=except_negotiation_id,
             )
+            for entry in canceled:
+                neg_id = entry["negotiation_id"]
+                if neg_id not in seen:
+                    seen.add(neg_id)
+                    all_canceled.append(entry)
             if canceled:
                 logger.info(
                     f"[{self.component}] Canceled {len(canceled)} competing "
                     f"negotiations for {oid}"
                 )
+        return all_canceled
 
     async def filter_active(self, order_id: str) -> set[str]:
         """Get set of order IDs already in active negotiations.
@@ -202,10 +216,10 @@ class NegotiationThreadTransaction:
             logger.warning(f"[{self.component}] No thread store available")
             return
 
-        # Pass owner_id=AGENT_ID to identify which agent's private state to access
+        # Pass owner_id=AGENT_URL to identify which agent's private state to access
         existing = await self.thread_store.get_thread_info(
             negotiation_id=negotiation_id,
-            owner_id=AGENT_ID
+            owner_id=AGENT_URL
         )
         if not existing:
             await self.thread_store.create_thread(
@@ -214,7 +228,7 @@ class NegotiationThreadTransaction:
                 their_order_id=their_order_id,
                 our_agent_id=our_agent_id,
                 their_agent_id=their_agent_id,
-                owner_id=AGENT_ID,  # We are the owner of this private state
+                owner_id=AGENT_URL,  # We are the owner of this private state
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
             )
@@ -467,7 +481,7 @@ class NegotiationThreadStore:
         existing = await self._sqlite.check_existing_negotiation(
             our_order_id=our_order_id or "",
             their_order_id=their_order_id,
-            our_agent_id=AGENT_ID if our_order_id else None,
+            our_agent_id=AGENT_URL if our_order_id else None,
             their_agent_id=their_agent_id,
         )
         if existing:
@@ -478,13 +492,13 @@ class NegotiationThreadStore:
             return existing["negotiation_id"]
 
         # Create new thread to track this incoming offer
-        negotiation_id = f"{our_order_id or 'no_our_order'}_{their_order_id}_{their_agent_id[:8]}"
+        negotiation_id = make_negotiation_id(our_order_id or "", their_order_id)
         try:
             await self.create_thread(
                 negotiation_id=negotiation_id,
                 our_order_id=our_order_id or "",
                 their_order_id=their_order_id,
-                our_agent_id=AGENT_ID,
+                our_agent_id=AGENT_URL,
                 their_agent_id=their_agent_id,
             )
             logger.info(
