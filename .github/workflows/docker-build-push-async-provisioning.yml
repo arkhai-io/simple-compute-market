@@ -15,8 +15,10 @@ on:
   workflow_dispatch:  # Allow manual triggers
 
 env:
-  DOCKER_REGISTRY_ORG: whitewidget
-  IMAGE_NAME: arkhai-async-provisioning-service
+  GAR_REGISTRY: us-east4-docker.pkg.dev
+  GCP_PROJECT_ID: ww-migration-arkhai
+  GAR_REPOSITORY: async-provisioning-service
+  IMAGE_NAME: async-provisioning-service
   PYTHON_VERSION: "3.13"
   UV_VERSION: "0.10.0"
 

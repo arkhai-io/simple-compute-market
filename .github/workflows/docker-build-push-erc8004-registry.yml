@@ -15,8 +15,10 @@ on:
   workflow_dispatch:  # Allow manual triggers
 
 env:
-  DOCKER_REGISTRY_ORG: whitewidget
-  IMAGE_NAME: arkhai-erc-8004-registry
+  GAR_REGISTRY: us-east4-docker.pkg.dev
+  GCP_PROJECT_ID: ww-migration-arkhai
+  GAR_REPOSITORY: erc-8004-registry
+  IMAGE_NAME: erc-8004-registry-py
   PYTHON_VERSION: "3.13"
   UV_VERSION: "0.10.0"
   APP_PORT: "8080"
