@@ -301,6 +301,23 @@ async def provision_machine_async(
     if authentication:
         logger.info("Extracted authentication block from vm_creation_data")
 
+    # When FRP is configured, vm_creation_data carries the external ssh_command with the
+    # correct FRP hostname. Prefer that over the inventory IP, which is only reachable
+    # on the ZeroTier overlay and not useful to the buyer.
+    frp_domain = params.get("frp_domain")
+    if frp_domain and authentication:
+        tenant_ssh_cmds = (authentication.get("tenant") or {}).get("ssh_commands") or {}
+        frp_external_cmd = tenant_ssh_cmds.get("external")
+        if frp_external_cmd:
+            ssh_command = frp_external_cmd
+            # Extract the FRP hostname from the external command (user@hostname part).
+            try:
+                frp_host = frp_external_cmd.split("@", 1)[1].split()[0]
+                vm_host_ip = frp_host
+            except (IndexError, AttributeError):
+                pass
+            logger.info("Using FRP external ssh_command: %s", ssh_command)
+
     return {
         "ssh_command": ssh_command,
         "ssh_port": external_port,
@@ -470,7 +487,13 @@ async def get_vm_available_resources(
     # Ansible ad-hoc output includes a header line like "ww1 | SUCCESS | ..."
     # followed by the actual command output. Extract the last non-empty line.
     lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
-    count_str = lines[-1] if lines else "0"
+    if not lines:
+        raise subprocess.CalledProcessError(
+            1, cmd,
+            output=stdout,
+            stderr=f"No output from ansible for host {vm_host!r} — host may not exist in inventory",
+        )
+    count_str = lines[-1]
     try:
         running_count = int(count_str)
     except ValueError:

@@ -102,3 +102,106 @@ async def test_get_vm_available_resources_ansible_failure():
     with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
         with pytest.raises(subprocess.CalledProcessError):
             await get_vm_available_resources("http://ignored", vm_host="ww1")
+
+
+@pytest.mark.asyncio
+async def test_get_vm_available_resources_host_not_in_inventory():
+    """Empty Ansible output (host not in inventory) raises CalledProcessError, not available=True."""
+    from service.clients.ansible_provisioning import get_vm_available_resources
+
+    proc = _make_proc("", returncode=0)
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+        with pytest.raises(subprocess.CalledProcessError):
+            await get_vm_available_resources("http://ignored", vm_host="vm1")
+
+
+# ── Bug fix: FRP external ssh_command used in connection_details ──────────────
+
+_PLAYBOOK_STDOUT_WITH_FRP = """
+PLAY [Provision VM] ***
+
+TASK [create vm] ***
+ok: [ww1]
+
+ww1 | SUCCESS => {
+    "external_ssh_port": "7002",
+    "tenant_user": "tenant3768"
+}
+
+"vm_creation_data": {
+    "action": "create",
+    "authentication": {
+        "root": {
+            "password": "rootpass",
+            "ssh_commands": {
+                "external": "ssh -i ~/.ssh/root_key -p 7002 root@abc123.arkhainet.whitewidget.tech",
+                "internal": "ssh -i ~/.ssh/root_key root@192.168.122.75"
+            },
+            "ssh_key_path_host": "~/.ssh/root_key"
+        },
+        "tenant": {
+            "key_type": "provided",
+            "password": "tenantpass",
+            "ssh_commands": {
+                "external": "ssh -i <your_private_key> -p 7002 tenant3768@abc123.arkhainet.whitewidget.tech",
+                "internal": "ssh -i <your_private_key> tenant3768@192.168.122.75"
+            }
+        }
+    }
+}
+"""
+
+
+@pytest.mark.asyncio
+async def test_provision_machine_frp_uses_external_ssh_command():
+    """When frp_domain is present, ssh_command and vm_host_ip use the FRP external address."""
+    import json
+    from pathlib import Path
+    from service.clients.ansible_provisioning import provision_machine_async
+
+    proc = _make_proc(_PLAYBOOK_STDOUT_WITH_FRP, returncode=0)
+
+    fake_root = Path("/fake/root")
+    params = {
+        "ssh_pubkey": "ssh-ed25519 AAAA test",
+        "vm_host": "ww1",
+        "vm_target": "tenant-vm",
+        "frp_server_addr": "frp.example.com",
+        "frp_domain": "arkhainet.whitewidget.tech",
+    }
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)), \
+         patch("service.clients.ansible_provisioning._find_project_root", return_value=fake_root), \
+         patch("service.clients.ansible_provisioning._lookup_vm_host_ip", return_value="10.161.42.195"), \
+         patch("service.clients.ansible_provisioning._find_management_vars", return_value=fake_root / "management-vars.yaml"):
+        result = await provision_machine_async("http://ignored", params)
+
+    assert result["ssh_command"] == "ssh -i <your_private_key> -p 7002 tenant3768@abc123.arkhainet.whitewidget.tech"
+    assert result["vm_host_ip"] == "abc123.arkhainet.whitewidget.tech"
+
+
+@pytest.mark.asyncio
+async def test_provision_machine_no_frp_uses_inventory_ip():
+    """Without frp_domain, ssh_command and vm_host_ip fall back to inventory IP."""
+    from pathlib import Path
+    from service.clients.ansible_provisioning import provision_machine_async
+
+    proc = _make_proc(_PLAYBOOK_STDOUT_WITH_FRP, returncode=0)
+
+    fake_root = Path("/fake/root")
+    params = {
+        "ssh_pubkey": "ssh-ed25519 AAAA test",
+        "vm_host": "ww1",
+        "vm_target": "tenant-vm",
+        # no frp_domain
+    }
+
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)), \
+         patch("service.clients.ansible_provisioning._find_project_root", return_value=fake_root), \
+         patch("service.clients.ansible_provisioning._lookup_vm_host_ip", return_value="10.161.42.195"), \
+         patch("service.clients.ansible_provisioning._find_management_vars", return_value=fake_root / "management-vars.yaml"):
+        result = await provision_machine_async("http://ignored", params)
+
+    assert result["vm_host_ip"] == "10.161.42.195"
+    assert "abc123.arkhainet.whitewidget.tech" not in (result["ssh_command"] or "")

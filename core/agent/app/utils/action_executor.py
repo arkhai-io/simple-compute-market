@@ -1828,6 +1828,8 @@ async def fulfill_compute_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
+
     if reserved_resource_id:
         try:
             await get_sqlite_client().apply_resource_set_transition(
@@ -1835,6 +1837,7 @@ async def fulfill_compute_obligation(
                 event_type="lease_started_after_provisioning",
                 idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
                 set_state="leased",
+                set_attribute={"$.lease_end_utc": lease_end_utc},
             )
         except Exception as lease_err:
             logger.warning(
@@ -1869,8 +1872,6 @@ async def fulfill_compute_obligation(
                 )
         except Exception as cred_err:
             logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", order_id, cred_err)
-
-    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
     await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
     if not client or not oracle_address:

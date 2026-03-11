@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
 from core.agent.app.utils.config import CONFIG
@@ -44,7 +45,41 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
         logger.debug("resource_poller: no compute.gpu resources registered — skipping poll")
         return
 
+    now = datetime.now(timezone.utc)
+
     for r in resources:
+        if r.get("state") == "leased":
+            lease_end_str: str | None = (r.get("attributes") or {}).get("lease_end_utc")
+            if lease_end_str:
+                try:
+                    lease_end = datetime.strptime(lease_end_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                    if now < lease_end:
+                        logger.debug(
+                            "resource_poller: resource %s is leased until %s — skipping poll",
+                            r.get("resource_id"),
+                            lease_end_str,
+                        )
+                        continue
+                    # Lease window has passed — poll to confirm VM is down, then free.
+                    logger.info(
+                        "resource_poller: resource %s lease ended at %s — polling to confirm VM is down",
+                        r.get("resource_id"),
+                        lease_end_str,
+                    )
+                except ValueError:
+                    logger.warning(
+                        "resource_poller: resource %s has unparseable lease_end_utc %r — skipping poll",
+                        r.get("resource_id"),
+                        lease_end_str,
+                    )
+                    continue
+            else:
+                logger.debug(
+                    "resource_poller: resource %s is leased with no lease_end_utc — skipping poll",
+                    r.get("resource_id"),
+                )
+                continue
+
         vm_host: str | None = (r.get("attributes") or {}).get("vm_host")
         if not vm_host:
             logger.debug(
@@ -77,11 +112,16 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
             f"resource-poll-{r['resource_id']}-{running_vms}-{new_state}"
         )
 
+        # When freeing a post-lease resource, clear lease_end_utc so it's clean for next use.
+        was_leased = r.get("state") == "leased"
+        clear_lease_attr = {"$.lease_end_utc": None} if (was_leased and available) else None
+
         transition = await sqlite_client.apply_resource_transition(
             resource_id=r["resource_id"],
             event_type="resource_availability_poll",
             idempotency_key=idempotency_key,
             set_state=new_state,
+            set_attribute=clear_lease_attr,
         )
 
         if transition.get("applied", True):
