@@ -263,7 +263,7 @@ main() {
     info "Running market install to set up service dependencies..."
     echo ""
     if [ "$INSTALL_ZEROTIER" = true ]; then
-        market install --zerotier
+        market install --with-zerotier
     else
         market install
     fi
