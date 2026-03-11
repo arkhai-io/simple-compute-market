@@ -147,7 +147,7 @@ class TestRespondToMakeOffer:
 
     @pytest.mark.asyncio
     async def test_minimizer_accepts_favorable_price(self, policy_store, maximizer_order):
-        """Minimizer accepts when their_price <= our_price."""
+        """Minimizer accepts when their_price <= our_price * (1 + CONVERGENCE_RATIO)."""
         minimizer_our_order = MarketOrder(
             order_id="our_order",
             order_maker="our_agent",
@@ -193,7 +193,7 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         assert result.action_type.value == "accept_offer"
-        assert result.parameters.get("reason") == "favorable_price"
+        assert result.parameters.get("reason") == "convergence"
 
     @pytest.mark.asyncio
     async def test_minimizer_counters_reasonable_price(self, policy_store):
@@ -497,9 +497,10 @@ class TestRespondToMakeOffer:
 
     @pytest.mark.asyncio
     async def test_negotiation_id_deterministic(self, policy_store, maximizer_order):
-        """Negotiation ID is deterministic regardless of which agent initiates."""
+        """Negotiation ID is canonical (sorted) when we are the responder (order sorts second)."""
+        # our order_id "order_Z" > their "order_A" → we are the responder, guard does not fire
         minimizer_our_order = MarketOrder(
-            order_id="order_A",
+            order_id="order_Z",
             order_maker="our_agent",
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
@@ -512,7 +513,7 @@ class TestRespondToMakeOffer:
         )
 
         incoming_order = MarketOrder(
-            order_id="order_B",
+            order_id="order_A",
             order_maker="agent_B",
             offer_resource=ComputeResource(
                 gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
@@ -549,7 +550,63 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         neg_id = result.parameters.get("negotiation_id")
-        assert neg_id == "order_A_order_B"
+        assert neg_id == "order_A_order_Z"
+
+    @pytest.mark.asyncio
+    async def test_canonical_initiator_guard_drops_cross_offer(self, policy_store):
+        """When our order_id sorts first, we are the initiator — incoming make_offer is dropped."""
+        # our order_id "order_A" < their "order_Z" → we are the canonical initiator, return None
+        minimizer_our_order = MarketOrder(
+            order_id="order_A",
+            order_maker="our_agent",
+            offer_resource=TokenResource(
+                token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
+                amount=100,
+            ),
+            demand_resource=ComputeResource(
+                gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
+            ),
+            duration_hours=3600,
+        )
+
+        incoming_order = MarketOrder(
+            order_id="order_Z",
+            order_maker="agent_Z",
+            offer_resource=ComputeResource(
+                gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
+            ),
+            demand_resource=TokenResource(
+                token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
+                amount=100,
+            ),
+            duration_hours=3600,
+        )
+
+        event = MakeOfferEvent(
+            event_id="evt_cross",
+            source="agent_Z",
+            order=incoming_order,
+        )
+
+        context = DecisionContext(
+            event=event,
+            agent_id="our_agent",
+            available_resources={},
+            market_state={},
+        )
+
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
+            mock_registry = AsyncMock()
+            mock_registry.query_orders = AsyncMock(return_value=[
+                minimizer_our_order.model_dump(mode="json"),
+            ])
+            mock_get_registry.return_value = mock_registry
+
+            func = policy_store._registry.get("negotiation.respond_to_make_offer")
+            result = await func(context)
+
+        # Canonical initiator guard: we already sent our make_offer, drop theirs
+        assert result is None
 
 
 class TestThreadCreationWithInitialPriceAndStrategy:
