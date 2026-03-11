@@ -23,7 +23,7 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 ## Prerequisites
 
 - make, curl, git
-- Python 3.10+ with `uv`
+- Python 3.12+ with `uv`
 - Node.js 12+ with npm
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
