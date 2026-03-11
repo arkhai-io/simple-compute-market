@@ -447,6 +447,7 @@ async def get_vm_available_resources(
         vm_host,
         "-i",
         str(inventory_path),
+        "-b",  # become (root) — required for virsh list
         "-m",
         "shell",
         "-a",
