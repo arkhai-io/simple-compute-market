@@ -8,7 +8,7 @@ from core.agent.app.schema.pydantic_models import (
     ERC20TokenMetadata,
     TokenResource,
 )
-from core.agent.app.utils.token_registry import TOKEN_REGISTRY
+from service.clients.token import TOKEN_REGISTRY
 
 
 class ResourceAdapter(Protocol):
@@ -218,6 +218,11 @@ def get_resource_adapter(resource_type: str) -> ResourceAdapter | None:
     Get the registered ResourceAdapter for a given resource_type, or None if not found.
     """
     return _RESOURCE_TYPE_TO_ADAPTER.get(resource_type)
+
+
+def get_supported_resource_types() -> set[str]:
+    """Return resource types that have registered domain adapters."""
+    return set(_RESOURCE_TYPE_TO_ADAPTER)
 
 
 def adapt_db_resource_to_domain_resource(db_resource: dict[str, Any]) -> Any:

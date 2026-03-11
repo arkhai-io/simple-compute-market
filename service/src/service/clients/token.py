@@ -1,18 +1,28 @@
-"""Simple ERC-20 token registry loader."""
+"""ERC-20 token registry and on-chain balance queries."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from threading import RLock
+from typing import Optional
 
-from core.agent.app.schema.pydantic_models import ERC20TokenMetadata
-from .config import CONFIG
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
+_DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "service" / "data" / "token_registry.json"
+
+
+class ERC20TokenMetadata(BaseModel):
+    """Metadata for an ERC-20 token."""
+    symbol: str
+    name: Optional[str] = None
+    contract_address: str
+    decimals: int
+    chain_id: Optional[int] = None
 
 
 class TokenRegistryError(RuntimeError):
@@ -23,7 +33,16 @@ class TokenRegistry:
     """Handles token metadata lookups backed by a JSON file."""
 
     def __init__(self, source_path: str | Path | None = None):
-        self._path = Path(source_path) if source_path else DEFAULT_REGISTRY_PATH
+        if source_path:
+            self._path = Path(source_path)
+        else:
+            env_path = os.getenv("TOKEN_REGISTRY_PATH")
+            if env_path:
+                self._path = Path(env_path)
+            else:
+                # Fall back to the core data directory if it exists
+                core_data = Path(__file__).resolve().parents[3] / "core" / "agent" / "app" / "data" / "token_registry.json"
+                self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
         self._lock = RLock()
         self._tokens_by_symbol: dict[str, ERC20TokenMetadata] = {}
         self._tokens_by_address: dict[str, ERC20TokenMetadata] = {}
@@ -95,13 +114,51 @@ class TokenRegistry:
         payload.sort(key=lambda entry: entry["symbol"].upper())
         self._path.write_text(json.dumps(payload, indent=2))
 
-    def __len__(self) -> int:  # pragma: no cover - trivial
+    def __len__(self) -> int:
         return len(self._tokens_by_symbol)
 
-    def __contains__(self, symbol: str) -> bool:  # pragma: no cover - convenience
+    def __contains__(self, symbol: str) -> bool:
         return self.get_by_symbol(symbol) is not None
 
 
-TOKEN_REGISTRY = TokenRegistry(CONFIG.token_registry_path)
+async def get_wallet_token_balance(
+    wallet_address: str,
+    token_address: str,
+    rpc_url: str,
+) -> int:
+    """Query ERC20 balanceOf(wallet_address) on-chain via web3.py.
 
-__all__ = ["TokenRegistry", "TokenRegistryError", "TOKEN_REGISTRY"]
+    Returns raw integer balance (not scaled by decimals).
+    Raises ValueError on RPC connection failure or invalid addresses.
+    """
+    _BALANCE_OF_ABI = [
+        {
+            "inputs": [{"type": "address"}],
+            "name": "balanceOf",
+            "outputs": [{"type": "uint256"}],
+            "stateMutability": "view",
+            "type": "function",
+        }
+    ]
+    try:
+        from web3 import AsyncWeb3
+        from web3.providers import AsyncHTTPProvider
+
+        w3 = AsyncWeb3(AsyncHTTPProvider(rpc_url))
+        contract = w3.eth.contract(
+            address=AsyncWeb3.to_checksum_address(token_address),
+            abi=_BALANCE_OF_ABI,
+        )
+        balance = await contract.functions.balanceOf(
+            AsyncWeb3.to_checksum_address(wallet_address)
+        ).call()
+        return int(balance)
+    except ImportError as exc:
+        raise ValueError("web3 package not installed") from exc
+    except Exception as exc:
+        raise ValueError(f"Failed to query token balance: {exc}") from exc
+
+
+TOKEN_REGISTRY = TokenRegistry()
+
+__all__ = ["ERC20TokenMetadata", "TokenRegistry", "TokenRegistryError", "TOKEN_REGISTRY", "get_wallet_token_balance"]

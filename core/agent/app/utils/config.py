@@ -109,8 +109,6 @@ class Config:
     base_url_override_raw: str
     base_url_override: str
     port: int
-    remote_agent_port: int
-    remote_agent_url_override: str
     chain_rpc_url: str
     agent_priv_key: str
     agent_wallet_address: str
@@ -141,6 +139,9 @@ class Config:
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
     use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
+    frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
+    frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
+    frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -193,10 +194,6 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_get_int_env("PORT", 8000),
-        remote_agent_port=_get_int_env("REMOTE_AGENT_PORT", 8000),
-        remote_agent_url_override=os.getenv(
-            "REMOTE_AGENT_URL_OVERRIDE", "http://localhost:8001"
-        ),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
@@ -232,6 +229,9 @@ def load_config() -> Config:
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
         use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
+        frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
+        frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
+        frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
     )
 
 

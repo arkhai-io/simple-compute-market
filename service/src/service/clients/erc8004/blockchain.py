@@ -42,14 +42,14 @@ def rpc_url_for_http_provider(rpc_url: str) -> str:
 def build_erc8004_canonical_id(chain_id: int, identity_registry: str, agent_id: int) -> str:
     """
     Build ERC-8004 canonical ID from components.
-    
+
     Format: eip155:{chainId}:{identityRegistry}:{agentId}
-    
+
     Args:
         chain_id: Chain ID (e.g., 1337 for Anvil)
         identity_registry: Registry contract address (will be normalized to lowercase)
         agent_id: Numeric ERC-721 tokenId
-    
+
     Returns:
         Canonical ID string with lowercase address
     """
@@ -60,12 +60,12 @@ def build_erc8004_canonical_id(chain_id: int, identity_registry: str, agent_id: 
 def find_agent_id_by_owner(w3, contract, owner_address: str) -> Optional[int]:
     """
     Find agent ID by checking balance.
-    
+
     Args:
         w3: Web3 instance
         contract: Contract instance
         owner_address: Owner wallet address
-    
+
     Returns:
         Agent ID if found, None otherwise
     """
@@ -73,7 +73,7 @@ def find_agent_id_by_owner(w3, contract, owner_address: str) -> Optional[int]:
         balance = contract.functions.balanceOf(owner_address).call()
         if balance == 0:
             return None
-        
+
         # Find the first token owned by this address
         for token_id in range(balance + 10):
             try:
@@ -90,11 +90,11 @@ def find_agent_id_by_owner(w3, contract, owner_address: str) -> Optional[int]:
 def extract_agent_id_from_receipt(contract, receipt) -> Optional[int]:
     """
     Extract agent ID from transaction receipt.
-    
+
     Args:
         contract: Contract instance
         receipt: Transaction receipt
-    
+
     Returns:
         Agent ID if found, None otherwise
     """
@@ -112,7 +112,7 @@ def extract_agent_id_from_receipt(contract, receipt) -> Optional[int]:
                     agent_id_value = event.args.get('agentId') or event.args.get('agent_id')
                 elif isinstance(event.args, (list, tuple)) and len(event.args) > 0:
                     agent_id_value = event.args[0]
-                
+
                 if agent_id_value is not None:
                     return int(agent_id_value)
         except Exception as e:

@@ -3,40 +3,39 @@
 from __future__ import annotations
 
 import logging
+import os
 import aiohttp
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
-
-from .config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 
 class RegistryClient:
     """Client for interacting with the ERC-8004 registry API."""
-    
+
     def __init__(self, base_url: str | None = None, timeout: int = 30):
         """Initialize registry client.
-        
+
         Args:
-            base_url: Base URL of the registry API (defaults to CONFIG.indexer_url)
+            base_url: Base URL of the registry API (defaults to INDEXER_URL env var)
             timeout: Request timeout in seconds
         """
-        self.base_url = (base_url or CONFIG.indexer_url).rstrip('/')
+        self.base_url = (base_url or os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080"))).rstrip('/')
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: Optional[aiohttp.ClientSession] = None
-    
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=self.timeout)
         return self._session
-    
+
     async def close(self):
         """Close the HTTP session."""
         if self._session and not self._session.closed:
             await self._session.close()
-    
+
     async def discover_agents(
         self,
         filters: Dict[str, Any] | None = None,
@@ -44,12 +43,12 @@ class RegistryClient:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Discover agents from the registry.
-        
+
         Args:
             filters: Optional filters (q, endpoint_type, trust_model)
             limit: Maximum number of results
             offset: Pagination offset
-            
+
         Returns:
             List of agent dictionaries
         """
@@ -58,7 +57,7 @@ class RegistryClient:
             params = {"limit": limit, "offset": offset}
             if filters:
                 params.update(filters)
-            
+
             async with session.get(f"{self.base_url}/agents", params=params) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -69,7 +68,7 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error discovering agents: {e}")
             return []
-    
+
     async def get_agent_orders(
         self,
         agent_id: str,
@@ -78,13 +77,13 @@ class RegistryClient:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Get orders for a specific agent.
-        
+
         Args:
             agent_id: Agent ID
             status: Optional status filter
             limit: Maximum number of results
             offset: Pagination offset
-            
+
         Returns:
             List of order dictionaries
         """
@@ -93,7 +92,7 @@ class RegistryClient:
             params = {"limit": limit, "offset": offset}
             if status:
                 params["status"] = status
-            
+
             async with session.get(f"{self.base_url}/agents/{agent_id}/orders", params=params) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -134,7 +133,7 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error getting order {order_id}: {e}")
             return None
-    
+
     async def query_orders(
         self,
         filters: Dict[str, Any] | None = None,
@@ -143,13 +142,13 @@ class RegistryClient:
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """Query orders with filters.
-        
+
         Args:
             filters: Optional filters (offer_resource_type, demand_resource_type, region, gpu_model, sla, status)
             bidirectional: Enable bidirectional matching
             limit: Maximum number of results
             offset: Pagination offset
-            
+
         Returns:
             List of order dictionaries
         """
@@ -159,7 +158,7 @@ class RegistryClient:
             params = {"limit": limit, "offset": offset, "bidirectional": str(bidirectional).lower()}
             if filters:
                 params.update(filters)
-            
+
             async with session.get(f"{self.base_url}/orders", params=params) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -170,18 +169,18 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error querying orders: {e}")
             return []
-    
+
     async def publish_order(
         self,
         agent_id: str,
         order: Dict[str, Any]
     ) -> Dict[str, Any] | None:
         """Publish an order to the registry.
-        
+
         Args:
             agent_id: Agent ID
             order: Order dictionary (must include order_id and other MarketOrder fields)
-            
+
         Returns:
             Published order data or None on error
         """
@@ -200,18 +199,18 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error publishing order: {e}")
             return None
-    
+
     async def update_order(
         self,
         order_id: str,
         updates: Dict[str, Any]
     ) -> Dict[str, Any] | None:
         """Update an order in the registry.
-        
+
         Args:
             order_id: Order ID
             updates: Dictionary of fields to update (status, order_taker, taker_attestation, etc.)
-            
+
         Returns:
             Updated order data or None on error
         """
@@ -230,16 +229,16 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error updating order: {e}")
             return None
-    
+
     async def delete_order(
         self,
         order_id: str
     ) -> bool:
         """Delete an order from the registry.
-        
+
         Args:
             order_id: Order ID
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -255,7 +254,7 @@ class RegistryClient:
         except Exception as e:
             logger.error(f"[REGISTRY] Error deleting order: {e}")
             return False
-    
+
     def _get_resource_type(self, resource: Dict[str, Any]) -> str:
         """Determine if resource is compute or token."""
         if "token" in resource:
@@ -263,7 +262,7 @@ class RegistryClient:
         elif "gpu_model" in resource:
             return "compute"
         return "unknown"
-    
+
     def match_orders(
         self,
         our_order: Dict[str, Any],
@@ -271,23 +270,23 @@ class RegistryClient:
         bidirectional: bool = True
     ) -> List[Dict[str, Any]]:
         """Find matching orders bidirectionally.
-        
+
         Args:
             our_order: Our order dictionary
             candidate_orders: List of candidate orders to match against
             bidirectional: Enable bidirectional matching
-            
+
         Returns:
             List of matching orders
         """
         matches = []
         our_offer_type = self._get_resource_type(our_order.get("offer_resource", {}))
         our_demand_type = self._get_resource_type(our_order.get("demand_resource", {}))
-        
+
         for candidate in candidate_orders:
             their_offer_type = self._get_resource_type(candidate.get("offer_resource", {}))
             their_demand_type = self._get_resource_type(candidate.get("demand_resource", {}))
-            
+
             if bidirectional:
                 # Case A: Our compute offer matches their compute demand AND our token demand matches their token offer
                 case_a = (
@@ -305,7 +304,7 @@ class RegistryClient:
                 # Direct match: our offer matches their demand and our demand matches their offer
                 if our_offer_type == their_demand_type and our_demand_type == their_offer_type:
                     matches.append(candidate)
-        
+
         return matches
 
 
@@ -317,6 +316,6 @@ def get_registry_client() -> RegistryClient:
     """Get or create global registry client instance."""
     global _registry_client
     if _registry_client is None:
-        timeout = getattr(CONFIG, 'registry_order_timeout', 30)
+        timeout = int(os.getenv("REGISTRY_ORDER_TIMEOUT", "30"))
         _registry_client = RegistryClient(timeout=timeout)
     return _registry_client

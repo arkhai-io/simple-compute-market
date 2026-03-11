@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover - environment-dependent
     torch = None
 
 from core.agent.app.policy.registry import policy_callable
+from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
 from core.agent.app.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
@@ -18,7 +19,6 @@ from core.agent.app.schema.pydantic_models import (
     MakeOfferEvent,
     ComputeResource,
     TokenResource,
-    ComputeResourcePortfolio,
 )
 from core.agent.app.utils.validation import extract_resources_from_make_offer_event
 from core.agent.app.utils.config import CONFIG
@@ -108,13 +108,7 @@ def _build_market_observation(
     
     try:
         # Get agent portfolio
-        portfolio_dict = context.available_resources
-        portfolio = None
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-            except Exception as e:
-                logger.warning(f"[MARKET SELLER POLICY] Failed to validate portfolio: {e}")
+        portfolio = get_compute_resource_portfolio(context)
         
         # Initialize observation vector (all zeros as fallback)
         obs = torch.zeros((1, 14), dtype=torch.float32)
@@ -309,23 +303,18 @@ def mo_action_torch_market_seller(context: DecisionContext) -> DomainAction | No
     
     # Check agent capacity for demand resource if it's a ComputeResource
     if isinstance(demand_resource, ComputeResource):
-        portfolio_dict = context.available_resources
-        if portfolio_dict and "resources" in portfolio_dict:
-            try:
-                portfolio = ComputeResourcePortfolio.model_validate(portfolio_dict)
-                if not portfolio.has_capacity(demand_resource):
-                    logger.info("[MARKET SELLER POLICY] Insufficient capacity, rejecting offer")
-                    return DomainAction(
-                        action_type=ActionType.REJECT_OFFER,
-                        parameters={
-                            "reason": "insufficient_capacity",
-                            "order_id": order.order_id,
-                            "demand_resource": demand_resource.model_dump(mode="json"),
-                            "offer_resource": offer_resource.model_dump(mode="json"),
-                        }
-                    )
-            except Exception as e:
-                logger.warning(f"[MARKET SELLER POLICY] Failed to validate portfolio: {e}")
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio and not portfolio.has_capacity(demand_resource):
+            logger.info("[MARKET SELLER POLICY] Insufficient capacity, rejecting offer")
+            return DomainAction(
+                action_type=ActionType.REJECT_OFFER,
+                parameters={
+                    "reason": "insufficient_capacity",
+                    "order_id": order.order_id,
+                    "demand_resource": demand_resource.model_dump(mode="json"),
+                    "offer_resource": offer_resource.model_dump(mode="json"),
+                }
+            )
     
     # Load model
     model = _get_model()
