@@ -180,9 +180,6 @@ infra/*/*.tfstate.backup
 infra/*/.terraform*
 infra/*/*.plan
 *.db
-agent/resources
-agent/app/environment/resources
-agent/app/environment/seller/resources
 # PufferRL Experiments
 experiments/
 wandb/
@@ -191,3 +188,7 @@ wandb/
 
 # Cloud Function
 node_modules
+
+# Puffer artifacts — ignore any resources/ dir or symlink at any depth
+**/resources
+pr-message-puffer.md
