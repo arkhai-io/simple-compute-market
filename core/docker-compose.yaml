@@ -1,6 +1,6 @@
 services:
   agent:
-    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/agent:v0.0.8
+    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.2
     image: test-agent
     # build: .
     platform: linux/amd64
@@ -14,6 +14,7 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - zerotier-state:/var/lib/zerotier-one
+      - ./agent/.env.c:/app/.env:rw
 
 volumes:
   zerotier-state:

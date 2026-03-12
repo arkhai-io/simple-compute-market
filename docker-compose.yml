@@ -47,7 +47,7 @@ services:
       contracts-deploy:
         condition: service_completed_successfully
     ports:
-      - "${PORT:-8080}:8080"
+      - "8080:8080"
     volumes:
       - ./erc-8004-registry-py/.env:/app/service.env:ro
       - shared-env:/app/shared-env
@@ -70,78 +70,71 @@ services:
       retries: 3
       start_period: 10s
 
-  # # 4. A2A Agent service
-  # buy_agent:
-  #   build:
-  #     context: ./agent
-  #     dockerfile: Dockerfile
-  #   platform: linux/amd64
-  #   container_name: market-agent-buy
-  #   depends_on:
-  #     registry:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8000:8080"
-  #   cap_add:
-  #     - NET_ADMIN
-  #     - SYS_MODULE
-  #   devices:
-  #     - /dev/net/tun:/dev/net/tun
-  #   networks:
-  #     - market-network
-  #   volumes:
-  #     - ./agent/.env.a:/app/service.env:ro
-  #     - ./agent/app:/app/app
-  #     - shared-env:/app/shared-env
-  #   command:
-  #     - sh
-  #     - -lc
-  #     - |
-  #       set -ae
-  #       . /app/service.env
-  #       . /app/shared-env/.env
-  #       set +a
-  #       echo "Registering agent on-chain..."
-  #       uv run python scripts/register_onchain.py
-  #       echo "Starting agent server..."
-  #       exec uv run uvicorn app.server:app --host 0.0.0.0 --port 8080
+  # 4. A2A Agent service
+  buy_agent:
+    # build:
+    #   context: ./core
+    #   dockerfile: Dockerfile
+    image: test-agent
+    platform: linux/amd64
+    container_name: market-agent-buy
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8000:8080"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - market-network
+    volumes:
+      - ./core/agent/.env.a:/app/service.env:rw
+      - shared-env:/app/shared-env
+    command:
+      - sh
+      - -lc
+      - |
+        set -ae
+        . /app/service.env
+        . /app/shared-env/.env
+        set +a
+        exec ./entrypoint.sh
 
-
-  # # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
-  # sell_agent:
-  #   build:
-  #     context: ./agent
-  #     dockerfile: Dockerfile
-  #   platform: linux/amd64
-  #   container_name: market-agent-sell
-  #   depends_on:
-  #     registry:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8001:8080"
-  #   cap_add:
-  #     - NET_ADMIN
-  #     - SYS_MODULE
-  #   devices:
-  #     - /dev/net/tun:/dev/net/tun
-  #   networks:
-  #     - market-network
-  #   volumes:
-  #     - ./agent/.env.b:/app/service.env:ro
-  #     - ./agent/app:/app/app
-  #     - shared-env:/app/shared-env
-  #   command:
-  #     - sh
-  #     - -lc
-  #     - |
-  #       set -ae
-  #       . /app/service.env
-  #       . /app/shared-env/.env
-  #       set +a
-  #       echo "Registering agent on-chain..."
-  #       uv run python scripts/register_onchain.py
-  #       echo "Starting agent server..."
-  #       exec uv run uvicorn app.server:app --host 0.0.0.0 --port 8080
+  # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
+  sell_agent:
+    # build:
+    #   context: ./core
+    #   dockerfile: Dockerfile
+    image: test-agent
+    platform: linux/amd64
+    container_name: market-agent-sell
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8001:8080"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - market-network
+    volumes:
+      - ./core/agent/.env.b:/app/service.env:rw
+      - shared-env:/app/shared-env
+    command:
+      - sh
+      - -lc
+      - |
+        set -ae
+        . /app/service.env
+        . /app/shared-env/.env
+        set +a
+        exec ./entrypoint.sh
 
 networks:
   market-network:
