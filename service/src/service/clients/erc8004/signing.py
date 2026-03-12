@@ -28,6 +28,19 @@ def sign_eip191(private_key: str, message: str) -> Optional[str]:
         return None
 
 
+def verify_eip191(message: str, signature: str, expected_address: str) -> bool:
+    """Verify an EIP-191 signature. Returns True if the signer matches expected_address."""
+    if not HAS_ETH_ACCOUNT:
+        return False
+    try:
+        message_hash = encode_defunct(text=message)
+        recovered = Account.recover_message(message_hash, signature=signature)
+        return recovered.lower() == expected_address.lower()
+    except Exception as e:
+        logger.error(f"[SIGNING] Failed to verify signature: {e}")
+        return False
+
+
 def build_order_auth(private_key: str, operation: str, resource_id: str) -> dict:
     """Build auth fields for an order mutation request.
 

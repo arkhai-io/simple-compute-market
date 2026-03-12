@@ -998,6 +998,45 @@ alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 AGENT_REST_API_APP_NAME = "agent-rest-api"
 AGENT_REST_API_USER_ID = "agent-rest-api"
 
+_MAX_TIMESTAMP_SKEW = 300  # seconds
+
+
+def _check_agent_request_auth(request: Request, operation: str, resource_id: str) -> JSONResponse | None:
+    """Verify X-Signature / X-Timestamp headers against the agent's own wallet address.
+
+    Returns a JSONResponse (403) if auth fails, or None to allow the request through.
+    If AGENT_WALLET_ADDRESS is not configured the check is skipped (backward compat).
+    """
+    owner = CONFIG.agent_wallet_address
+    if not owner:
+        return None
+
+    from service.clients.erc8004.signing import verify_eip191
+
+    sig = request.headers.get("X-Signature")
+    ts_raw = request.headers.get("X-Timestamp")
+
+    if not sig or not ts_raw:
+        logger.warning("[AUTH] Missing X-Signature or X-Timestamp on %s request", operation)
+        return JSONResponse({"error": "Missing auth headers"}, status_code=403)
+
+    try:
+        ts = int(ts_raw)
+    except ValueError:
+        return JSONResponse({"error": "Invalid X-Timestamp"}, status_code=403)
+
+    import time as _time
+    if abs(_time.time() - ts) > _MAX_TIMESTAMP_SKEW:
+        logger.warning("[AUTH] Timestamp too old/future for %s", operation)
+        return JSONResponse({"error": "Timestamp out of range"}, status_code=403)
+
+    message = f"{operation}:{resource_id}:{ts}"
+    if not verify_eip191(message, sig, owner):
+        logger.warning("[AUTH] Invalid signature for %s resource=%s", operation, resource_id)
+        return JSONResponse({"error": "Invalid signature"}, status_code=403)
+
+    return None
+
 async def _run_create_order_flow(request: Request) -> dict:
     """
     Internal helper to run the create order flow.
@@ -1262,6 +1301,9 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to create market orders via the root agent.
     """
+    auth_error = _check_agent_request_auth(request, "create_order", BASE_URL_OVERRIDE)
+    if auth_error:
+        return auth_error
 
     try:
         response = await _run_create_order_flow(request)
@@ -1289,6 +1331,15 @@ async def close_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to close market orders via the root agent.
     """
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "close_order", order_id)
+    if auth_error:
+        return auth_error
+
     try:
         response = await _run_close_order_flow(request)
         return JSONResponse(response)
