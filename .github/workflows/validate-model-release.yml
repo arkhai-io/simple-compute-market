@@ -18,9 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ github.event.inputs.release_tag || github.ref_name }}
-    defaults:
-      run:
-        working-directory: agent
+      # Staging dir for downloaded .pt files — not a source path, just for CI
+      MODELS_STAGING: /tmp/model-release-staging
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +30,10 @@ jobs:
           cache-dependency-glob: ""
 
       - name: Install validation dependencies
+        # Run from core/ so uv picks up the project's Python version pin.
+        # Models live in domain/compute/agent/app/policy/models/ at runtime,
+        # but for CI we download release assets to a neutral staging dir.
+        working-directory: core
         run: |
           uv venv .venv
           uv pip install "setuptools>=80"
@@ -45,17 +48,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p app/policies/models
+          mkdir -p "$MODELS_STAGING"
           gh release download "${{ env.RELEASE_TAG }}" \
             --pattern "*.pt" \
-            --dir app/policies/models/ \
+            --dir "$MODELS_STAGING" \
             --clobber
 
       - name: Validate models
         if: steps.download.outcome == 'success'
+        working-directory: core
         run: |
           .venv/bin/python -c "
-          import sys, torch
+          import sys, torch, os
           from pathlib import Path
           import gymnasium as gym
           import pufferlib.models
@@ -72,7 +76,7 @@ jobs:
           OBS_DIM = 12 + 3 * NODE_TYPES  # upstream layout: 1+2N+5+N+5 = 21
           print(f'Config: node_types={NODE_TYPES}, obs_dim={OBS_DIM}')
 
-          models_dir = Path('app/policies/models')
+          models_dir = Path(os.environ['MODELS_STAGING'])
           pt_files = list(models_dir.glob('*.pt'))
           if not pt_files:
               print('ERROR: No .pt files found in release')
