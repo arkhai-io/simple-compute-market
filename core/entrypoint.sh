@@ -12,10 +12,10 @@ done
 
 if [ -z "${ONCHAIN_AGENT_ID:-}" ] || [ -z "${ZEROTIER_IP:-}" ]; then
   echo "Registering agent on-chain..."
-  uv run python core/agent/scripts/register_onchain.py
+  PYTHONPATH="/:/app:/app/core/agent${PYTHONPATH:+:${PYTHONPATH}}" uv run python core/agent/scripts/register_onchain.py --env_file="${ENV_FILE:-.env}"
 else
   echo "Skipping on-chain registration (ONCHAIN_AGENT_ID and ZEROTIER_IP already set)."
 fi
 
 echo "Starting agent server..."
-exec uv run uvicorn core.agent.app.server:app --host 0.0.0.0 --port "${PORT:-8080}"
+exec env PYTHONPATH="/:/app:/app/core/agent${PYTHONPATH:+:${PYTHONPATH}}" uv run uvicorn core.agent.app.server:app --host 0.0.0.0 --port "${PORT:-8080}"
