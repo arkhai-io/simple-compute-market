@@ -69,7 +69,7 @@ explicit = true
 
 [[tool.uv.index]]
 name = "alkahest-gar"
-url = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/alkahest-py/0.1.0"
+url = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/"
 explicit = true
 
 [tool.ruff]
