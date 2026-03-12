@@ -23,13 +23,6 @@ COPY service/ ../service/
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
 ARG GAR_STG_READER_KEY=""
-RUN echo ">>> GAR_STG_READER_KEY length: ${#GAR_STG_READER_KEY}" && \
-    echo ">>> GAR_STG_READER_KEY first 20 chars: $(echo "${GAR_STG_READER_KEY}" | cut -c1-20)" && \
-    if [ -n "${GAR_STG_READER_KEY}" ]; then \
-    echo ">>> GAR_STG_READER_KEY is SET"; \
-    else \
-    echo ">>> GAR_STG_READER_KEY is EMPTY — uv sync will run unauthenticated"; \
-    fi
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
