@@ -78,6 +78,12 @@ ENV FRP_SERVER_ADDR=""
 ENV FRP_DOMAIN=""
 ENV FRP_DASHBOARD_PASSWORD=""
 
+# SSH private key (base64-encoded or raw PEM). Written to ~/.ssh/id_ed25519 at startup.
+ENV SSH_PRIVATE_KEY=""
+
+# Ansible inventory management vars (base64-encoded or raw YAML). Written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml at startup.
+ENV MANAGEMENT_VARS_YAML=""
+
 # Authentication
 ENV ENABLE_AUTH=false
 ENV REGISTRY_URL=""

@@ -6,7 +6,7 @@ with our_initial_price and our_strategy.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.schema.pydantic_models import (
+from core.agent.app.schema.pydantic_models import (
     DecisionContext,
     MakeOfferEvent,
     MarketOrder,
@@ -17,10 +17,11 @@ from app.schema.pydantic_models import (
     GPUModel,
     Region,
 )
-from app.policies.store import PolicyStore, negotiation_respond_to_make_offer
-from app.utils.sqlite_client import SQLiteClient
-from app.utils.action_executor import _extract_initial_price_from_order
-from app.utils.validation import determine_strategy_from_order
+from core.agent.app.policy.store import PolicyStore
+from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
+from core.agent.app.utils.sqlite_client import SQLiteClient
+from core.agent.app.utils.action_executor import _extract_initial_price_from_order
+from core.agent.app.utils.validation import determine_strategy_from_order
 import tempfile
 import os
 
@@ -128,11 +129,11 @@ class TestRespondToMakeOffer:
 
     @pytest.fixture
     def policy_store(self, temp_db):
-        from app.policies.registry import CALLABLE_REGISTRY
+        from core.agent.app.policy.registry import CALLABLE_REGISTRY
 
         CALLABLE_REGISTRY.clear()
 
-        from app.policies.store import negotiation_respond_to_make_offer
+        from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 
         sqlite_client = SQLiteClient(db_path=temp_db)
         store = PolicyStore(sqlite_client=sqlite_client)
@@ -180,7 +181,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 minimizer_our_order.model_dump(mode="json"),
@@ -252,7 +253,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 minimizer_our_order.model_dump(mode="json"),
@@ -323,7 +324,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 minimizer_our_order.model_dump(mode="json"),
@@ -372,7 +373,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 maximizer_our_order.model_dump(mode="json"),
@@ -427,7 +428,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 maximizer_our_order.model_dump(mode="json"),
@@ -457,7 +458,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[])
             mock_get_registry.return_value = mock_registry
@@ -472,7 +473,7 @@ class TestRespondToMakeOffer:
     @pytest.mark.asyncio
     async def test_non_make_offer_event_returns_none(self, policy_store):
         """Policy returns None for non-make_offer events."""
-        from app.schema.pydantic_models import NegotiationEvent
+        from core.agent.app.schema.pydantic_models import NegotiationEvent
 
         event = NegotiationEvent.create(
             event_id="evt_negotiation",
@@ -536,7 +537,7 @@ class TestRespondToMakeOffer:
             market_state={},
         )
 
-        with patch("app.policies.store.get_registry_client") as mock_get_registry:
+        with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
             mock_registry.query_orders = AsyncMock(return_value=[
                 minimizer_our_order.model_dump(mode="json"),
@@ -556,7 +557,7 @@ class TestThreadCreationWithInitialPriceAndStrategy:
 
     @pytest.fixture
     def thread_store(self, temp_db):
-        from app.policies.negotiation_thread import NegotiationThreadStore
+        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
         sqlite_client = SQLiteClient(db_path=temp_db)
         return NegotiationThreadStore(sqlite_client=sqlite_client)
 

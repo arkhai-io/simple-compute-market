@@ -1,0 +1,26 @@
+[
+  {
+    "symbol": "USDC",
+    "name": "USD Coin",
+    "contract_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "decimals": 6
+  },
+  {
+    "symbol": "USDT",
+    "name": "Tether USD",
+    "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+    "decimals": 6
+  },
+  {
+    "symbol": "MOCK",
+    "name": "Mock Token",
+    "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+    "decimals": 2
+  },
+  {
+    "symbol": "WETH",
+    "name": "Wrapped Ether",
+    "contract_address": "0x4200000000000000000000000000000000000006",
+    "decimals": 18
+  }
+]

@@ -88,7 +88,7 @@ fields:
   # Token catalog and SSH access
   TOKEN_REGISTRY_PATH:
     required: true
-    default: "./app/data/token_registry.json"
+    default: "../core/agent/app/data/token_registry.json"
     secret: false
     description: "Path to token registry JSON. This is the catalog of all known and supported tokens for trade."
   SSH_PUBLIC_KEY:

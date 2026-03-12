@@ -39,6 +39,12 @@ def order_create(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file used to read BASE_URL_OVERRIDE.",
+    ),
     duration_hours: int | None = typer.Option(
         None,
         "--duration-hours",
@@ -47,7 +53,8 @@ def order_create(
     ),
 ) -> None:
     """Create a new order via the Agent endpoint."""
-    base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    env_base_url = _read_env_value(Path(env), "BASE_URL_OVERRIDE") if env else None
+    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     duration = duration_hours if duration_hours is not None else 1
     if duration < 1:
@@ -138,11 +145,11 @@ def order_history(
         None,
         "--env",
         "-e",
-        help="Path to env file (default: agent/.env).",
+        help="Path to env file (default: core/agent/.env).",
     ),
 ) -> None:
     """Show order history from local SQLite."""
-    env_path = Path(env) if env else REPO_ROOT / "agent" / ".env"
+    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
     db_path = _read_env_value(env_path, "AGENT_DB_PATH")
     if not db_path:
         typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
@@ -182,7 +189,7 @@ def order_history(
     table.add_column("Status")
     table.add_column("Offer")
     table.add_column("Demand")
-    table.add_column("Fulfillment")
+    table.add_column("Fulfillment", overflow="fold")
     table.add_column("Created", justify="right")
     table.add_column("Updated", justify="right")
 
@@ -429,6 +436,18 @@ def _format_resource_full(resource: dict | str | None) -> str:
         return str(resource)
 
 
+def _get_cli_http_timeout() -> float:
+    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
+    default_value = 120.0
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return default_value
+    if timeout <= 0:
+        return default_value
+    return timeout
+
+
 def _fetch_json(url: str) -> dict:
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -452,7 +471,7 @@ def _post_json(url: str, payload: dict) -> dict:
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=_get_cli_http_timeout()) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8") if exc.fp else str(exc)

@@ -168,14 +168,14 @@ def config_init(
     if component is None:
         typer.secho(
             "Missing COMPONENT. Valid targets: agent, provisioning, registry, zerotier.\n"
-            "Usage example: 'market config init agent' to create agent/.env",
+            "Usage example: 'market config init agent' to create core/agent/.env",
             fg=typer.colors.RED,
         )
         raise typer.Exit(code=1)
 
     component_key = component.strip().lower()
     if component_key == "agent":
-        target_dir = REPO_ROOT / "agent"
+        target_dir = REPO_ROOT / "core" / "agent"
         schema_path = REPO_ROOT / "cli" / "config" / "agent.schema.yaml"
     elif component_key == "provisioning":
         target_dir = REPO_ROOT / "async-provisioning-service"

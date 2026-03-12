@@ -1,0 +1,21 @@
+{
+  "name": "download-market-cli",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "gcp-build": "tsc",
+    "build": "tsc",
+    "start": "npx functions-framework --target=downloadMarketCli",
+    "serve": "tsc --watch & npx functions-framework --target=downloadMarketCli"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.0.0",
+    "@google-cloud/storage": "^7.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -11,7 +11,7 @@ def dev_test_env() -> None:
     run_step(
         "Start Anvil test env (make test-env)",
         ["make", "test-env"],
-        REPO_ROOT / "agent",
+        REPO_ROOT / "core" / "agent",
     )
 
 

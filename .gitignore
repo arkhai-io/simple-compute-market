@@ -188,4 +188,6 @@ experiments/
 wandb/
 !.env.sample
 .cursor/
-*/uv.lock
+
+# Cloud Function
+node_modules

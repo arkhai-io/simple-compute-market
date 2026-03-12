@@ -1,6 +1,17 @@
-# Simple Market Service
+# Simple Market Service (SMS)
 
-End-to-end example of an ERC-8004-powered agent market. Includes smart contracts, a FastAPI registry/indexer, ZeroTier overlay network, and an A2A agent that auto-registers and responds to requests.
+Simple Market Service (SMS) is a reference implementation of Arkhai's vision for generalized agent-driven marketplaces. The goal is to support open markets for assets and services such as compute, storage, bandwidth, energy, information, real-world assets, and, in practice, almost anything that can be described, negotiated, and exchanged by autonomous buyers and sellers over open network infrastructure instead of a centralized marketplace.
+
+More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, an A2A-capable market agent, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
+
+## Technology Stack
+
+- [Alkahest](https://github.com/arkhai-io/alkahest) for programmable peer-to-peer agreements and escrow-backed settlement flows used by the market agent.
+- [Compositional Game Theory (CGT)](https://github.com/arkhai-io/cgt) as design inspiration for the marketplace, negotiation, and distributed-systems patterns in this repo; the docs and implementation are CGT-inspired rather than strict formalizations.
+- [ZeroTier](https://www.zerotier.com/) for optional overlay networking between agents and supporting services.
+- [A2A](https://a2a-protocol.org/latest/) for agent-to-agent communication in the market agent runtime.
+- [FastAPI](https://fastapi.tiangolo.com/) for the registry/indexer and async provisioning HTTP services.
+- [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) for on-chain agent identity, metadata, and discovery.
 
 ## Repository Layout
 
@@ -12,7 +23,7 @@ End-to-end example of an ERC-8004-powered agent market. Includes smart contracts
 ## Prerequisites
 
 - make, curl, git
-- Python 3.10+ with `uv`
+- Python 3.12+ with `uv`
 - Node.js 12+ with npm
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
@@ -46,6 +57,31 @@ Optional flags:
 - `--agent-url` (or `AGENT_URL`/`BASE_URL_OVERRIDE`) to target a specific agent
 - `--duration-hours` to set duration (defaults to `1`)
 - `token` may be a known symbol or contract address; amount is a float and converted using token decimals
+
+## Portfolio Import (CLI)
+
+Seed/update the local resource portfolio from CSV:
+
+```bash
+market portfolio import-csv path/to/resources.csv
+```
+
+Try the bundled sample:
+
+```bash
+market portfolio import-csv core/agent/app/data/resources.sample.csv --dry-run
+```
+
+Optional flags:
+
+- `--dry-run` validate and report without writing to DB
+- `--env` path to env file used by core agent import script (defaults to `core/agent/.env`)
+- `--db-path` override target SQLite DB path (otherwise uses `AGENT_DB_PATH` from env)
+
+CSV columns:
+
+- Core columns: `resource_id` (optional, UUID auto-generated if blank), `resource_type` (required), `resource_subtype`, `unit`, `value`, `state`
+- Attribute columns: any `attribute.*` column maps into `attributes` JSON (e.g., `attribute.region`, `attribute.vm_host`)
 
 ## Quick Start
 

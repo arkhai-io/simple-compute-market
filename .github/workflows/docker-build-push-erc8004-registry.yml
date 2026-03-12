@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - develop
-      - feature/registry-containerization
     paths:
       - 'erc-8004-registry-py/**'
       - '.github/workflows/docker-build-push-erc8004-registry.yml'
@@ -16,8 +15,10 @@ on:
   workflow_dispatch:  # Allow manual triggers
 
 env:
-  DOCKER_REGISTRY_ORG: whitewidget
-  IMAGE_NAME: arkhai-erc-8004-registry
+  GAR_REGISTRY: us-east4-docker.pkg.dev
+  GCP_PROJECT_ID: ww-migration-arkhai
+  GAR_REPOSITORY: erc-8004-registry
+  IMAGE_NAME: erc-8004-registry-py
   PYTHON_VERSION: "3.13"
   UV_VERSION: "0.10.0"
   APP_PORT: "8080"
@@ -28,7 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     
     steps:
       - name: Checkout code
@@ -37,18 +37,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Log in to GCP Artifact Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ env.GAR_REGISTRY }}
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}
+            ${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}
           tags: |
             # Branch pushes: use git SHA
             type=sha,format=short,enable=${{ github.ref_type == 'branch' }}
@@ -83,9 +89,9 @@ jobs:
         run: |
           echo "### Docker Image Build Summary :rocket:" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Registry:** Docker Hub" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** GCP Artifact Registry" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -94,7 +100,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Pull command:**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.DOCKER_REGISTRY_ORG }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.GAR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Event:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
