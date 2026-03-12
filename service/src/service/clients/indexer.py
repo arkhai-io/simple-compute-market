@@ -6,7 +6,8 @@ import logging
 import os
 import aiohttp
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
+
+from service.clients.erc8004.signing import build_order_auth
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +15,26 @@ logger = logging.getLogger(__name__)
 class RegistryClient:
     """Client for interacting with the ERC-8004 registry API."""
 
-    def __init__(self, base_url: str | None = None, timeout: int = 30):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: int = 30,
+        private_key: str | None = None,
+        agent_id: str | None = None,
+    ):
         """Initialize registry client.
 
         Args:
             base_url: Base URL of the registry API (defaults to INDEXER_URL env var)
             timeout: Request timeout in seconds
+            private_key: Agent private key for signing mutations (optional)
+            agent_id: Canonical agent ID used as signer_agent_id on updates (optional)
         """
         self.base_url = (base_url or os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080"))).rstrip('/')
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: Optional[aiohttp.ClientSession] = None
+        self._private_key = private_key or os.getenv("AGENT_PRIV_KEY")
+        self._agent_id = agent_id or os.getenv("AGENT_ID")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -186,9 +197,12 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
+            payload = dict(order)
+            if self._private_key:
+                payload.update(build_order_auth(self._private_key, "create_order", agent_id))
             async with session.post(
                 f"{self.base_url}/agents/{agent_id}/orders",
-                json=order
+                json=payload
             ) as response:
                 if response.status == 201:
                     return await response.json()
@@ -216,9 +230,13 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
+            payload = dict(updates)
+            if self._private_key and self._agent_id:
+                payload.update(build_order_auth(self._private_key, "update_order", order_id))
+                payload["signer_agent_id"] = self._agent_id
             async with session.put(
                 f"{self.base_url}/orders/{order_id}",
-                json=updates
+                json=payload
             ) as response:
                 if response.status == 200:
                     return await response.json()
@@ -244,7 +262,14 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
-            async with session.delete(f"{self.base_url}/orders/{order_id}") as response:
+            params = {}
+            if self._private_key:
+                auth = build_order_auth(self._private_key, "delete_order", order_id)
+                params = {"signature": auth["signature"], "timestamp": auth["timestamp"]} if auth else {}
+            async with session.delete(
+                f"{self.base_url}/orders/{order_id}",
+                params=params
+            ) as response:
                 if response.status == 204:
                     return True
                 else:
@@ -317,5 +342,9 @@ def get_registry_client() -> RegistryClient:
     global _registry_client
     if _registry_client is None:
         timeout = int(os.getenv("REGISTRY_ORDER_TIMEOUT", "30"))
-        _registry_client = RegistryClient(timeout=timeout)
+        _registry_client = RegistryClient(
+            timeout=timeout,
+            private_key=os.getenv("AGENT_PRIV_KEY"),
+            agent_id=os.getenv("AGENT_ID"),
+        )
     return _registry_client
