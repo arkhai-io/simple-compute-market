@@ -58,18 +58,18 @@ market-service = { path = "../service", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
-
-# @TODO: Replace this with wheel in Artifact Registry once deployed
 alkahest-py = [
-    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
-    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-macosx_10_12_x86_64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'x86_64'" },
-    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-manylinux_2_36_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "alkahest-gar" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "alkahest-gar"
+url = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/alkahest-py/0.1.0"
 explicit = true
 
 [tool.ruff]
