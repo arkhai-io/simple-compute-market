@@ -231,13 +231,17 @@ def _extract_content_payload(
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
+            # Tool names that carry event_type inside their payload — not EventType values themselves.
+            # _parse_domain_event already recovers the correct event_type via nested data fallback.
+            _TOOL_NAME_ALIASES = {"counter_offer", "exit_negotiation", "make_offer", "accept_offer"}
             try:
                 EventType(tool_name)
             except ValueError:
-                logger.warning(
-                    f"Unknown event_type from tool '{tool_name}'. "
-                    f"Known types: {[e.value for e in EventType]}"
-                )
+                if tool_name not in _TOOL_NAME_ALIASES:
+                    logger.warning(
+                        f"Unknown event_type from tool '{tool_name}'. "
+                        f"Known types: {[e.value for e in EventType]}"
+                    )
             response_dict = {
                 "source": agent_str,
                 "source_url": payload_dict.get("source")
@@ -280,10 +284,18 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     if not event_type_str:
         raise ValueError("Missing required field: event_type")
     
+    # Tool names that carry the real event_type inside payload["data"] — not EventType values.
+    _TOOL_NAME_ALIASES = {"counter_offer", "exit_negotiation", "make_offer", "accept_offer"}
+
     try:
         event_type = EventType(event_type_str)
     except ValueError:
-        # Unknown event type - log warning and create basic DomainEvent
+        # Unknown event type — check if the actual domain event is nested inside payload["data"].
+        nested = payload.get("data")
+        if isinstance(nested, dict) and nested.get("event_type") and nested.get("event_type") != event_type_str:
+            if event_type_str not in _TOOL_NAME_ALIASES:
+                logger.warning(f"[PARSE DOMAIN EVENT] Unknown event_type '{event_type_str}', retrying with nested data event_type '{nested.get('event_type')}'")
+            return _parse_domain_event(nested)
         logger.warning(f"[PARSE DOMAIN EVENT] Unknown event_type: {event_type_str}, creating basic DomainEvent")
         return DomainEvent.model_validate(payload)
     
@@ -392,11 +404,11 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             return ArbitrationCompleteEvent.from_payload(arb_payload)
             
         elif event_type == EventType.NEGOTIATION:
-            # Validate NegotiationEvent with required fields
+            # Validate NegotiationEvent with required fields (these are top-level, not in data)
             required_fields = ["negotiation_id", "message_type", "sender"]
-            missing = [f for f in required_fields if f not in data]
+            missing = [f for f in required_fields if f not in payload]
             if missing:
-                raise ValueError(f"NegotiationEvent missing required fields in data: {missing}")
+                raise ValueError(f"NegotiationEvent missing required fields: {missing}")
             
             return NegotiationEvent.model_validate(payload)
             
@@ -640,11 +652,36 @@ class TraderAgent(BaseAgent):
             thread_store = get_thread_store()
             negotiation_id = domain_event.negotiation_id
             if negotiation_id:
-                negotiation_history = await thread_store.get_thread(negotiation_id)
+                # Fetch thread_info first so our_initial_price is available when recording
+                # the incoming message below (avoids NULL our_price in audit log).
                 thread_info = await thread_store.get_thread_info(
                     negotiation_id=negotiation_id,
-                    owner_id=self.name
+                    owner_id=BASE_URL_OVERRIDE,
                 ) or {}
+
+                # Record the incoming message so the thread_store has bilateral history.
+                # Our own outgoing messages are recorded inside action_executor (counter_offer).
+                # Recording what we receive here completes the audit log for both sides.
+                msg_type = domain_event.message_type
+                sender = domain_event.sender
+                proposed_price = (domain_event.data or {}).get("proposed_price")
+                if (sender and sender != self.name
+                        and proposed_price is not None
+                        and msg_type in ("counter_proposal", "initial_proposal")):
+                    try:
+                        await thread_store.add_message(
+                            negotiation_id=negotiation_id,
+                            sender=sender,
+                            our_price=thread_info.get("our_initial_price"),
+                            their_price=proposed_price,
+                            proposed_price=proposed_price,
+                            action_taken=ActionType.COUNTER_OFFER.value,
+                            message_type=msg_type,
+                        )
+                    except Exception as exc:
+                        logger.debug("[NEGOTIATION] Could not record incoming message: %s", exc)
+
+                negotiation_history = await thread_store.get_thread(negotiation_id)
         
         market_state_with_thread = {**market_state, "thread_info": thread_info}
         

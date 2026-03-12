@@ -81,8 +81,8 @@ class SQLiteClient:
                   our_agent_id TEXT,
                   their_agent_id TEXT,
                   status TEXT DEFAULT 'active',
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   terminal_state TEXT
                 )
                 """
@@ -106,6 +106,18 @@ class SQLiteClient:
                 pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN terminal_state TEXT")
             except sqlite3.OperationalError:
                 pass
             cur.execute(
@@ -1746,21 +1758,22 @@ class SQLiteClient:
 
     async def cancel_negotiations_for_order(
         self, *, order_id: str, except_negotiation_id: str | None = None
-    ) -> list[str]:
+    ) -> list[dict]:
         """Cancel all active negotiations for an order, except the specified one.
-        
+
         Returns:
-            List of canceled negotiation IDs
+            List of dicts with keys: negotiation_id, our_order_id, their_order_id,
+            our_agent_id, their_agent_id — one entry per canceled negotiation.
         """
-        def _cancel() -> list[str]:
+        def _cancel() -> list[dict]:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                
+
                 # Find all active negotiations involving this order
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id, 
+                    SELECT negotiation_id, our_order_id, their_order_id,
                            our_agent_id, their_agent_id
                     FROM negotiation_threads
                     WHERE (our_order_id = ? OR their_order_id = ?)
@@ -1769,10 +1782,11 @@ class SQLiteClient:
                     """,
                     (order_id, order_id, except_negotiation_id or '')
                 )
-                
-                canceled_ids = []
-                for row in cur.fetchall():
-                    neg_id = row[0]
+
+                rows = cur.fetchall()
+                canceled = []
+                for row in rows:
+                    neg_id, our_oid, their_oid, our_aid, their_aid = row
                     cur.execute(
                         """
                         UPDATE negotiation_threads
@@ -1783,13 +1797,19 @@ class SQLiteClient:
                         """,
                         (datetime.now().isoformat(), neg_id)
                     )
-                    canceled_ids.append(neg_id)
-                
+                    canceled.append({
+                        "negotiation_id": neg_id,
+                        "our_order_id": our_oid,
+                        "their_order_id": their_oid,
+                        "our_agent_id": our_aid,
+                        "their_agent_id": their_aid,
+                    })
+
                 conn.commit()
-                return canceled_ids
+                return canceled
             finally:
                 conn.close()
-        
+
         return await asyncio.to_thread(_cancel)
 
     async def cancel_negotiations_for_agent(

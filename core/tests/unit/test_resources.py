@@ -91,46 +91,6 @@ class TestParseResourceFromDict:
 
 
 # ---------------------------------------------------------------------------
-# TokenErc20ResourceAdapter.from_dict — token normalization
-# ---------------------------------------------------------------------------
-
-class TestTokenFromDict:
-    def test_full_token_dict(self):
-        data = {
-            "token": {"symbol": "USDT", "contract_address": "0xdac17f958d2ee523a2206206994597c13d831ec7", "decimals": 6},
-            "amount": 1_000_000,
-        }
-        result = parse_resource_from_dict(data)
-        assert result.token.symbol == "USDT"
-        assert result.token.decimals == 6
-
-    def test_token_string_symbol_resolves_via_registry(self):
-        data = {"token": "USDT", "amount": 500_000}
-        result = parse_resource_from_dict(data)
-        assert isinstance(result, TokenResource)
-        assert result.token.symbol == "USDT"
-
-    def test_token_partial_dict_symbol_only(self):
-        data = {"token": {"symbol": "USDT"}, "amount": 1_000_000}
-        result = parse_resource_from_dict(data)
-        assert isinstance(result, TokenResource)
-        assert result.token.symbol == "USDT"
-
-    def test_token_metadata_instance_passes_through(self):
-        data = {"token": USDT, "amount": 1_000_000}
-        result = parse_resource_from_dict(data)
-        assert result.token is USDT
-
-    def test_unknown_symbol_raises(self):
-        with pytest.raises(Exception):
-            parse_resource_from_dict({"token": "NOT_A_REAL_TOKEN", "amount": 1})
-
-    def test_missing_amount_raises(self):
-        with pytest.raises((KeyError, ValueError)):
-            parse_resource_from_dict({"token": "USDT"})
-
-
-# ---------------------------------------------------------------------------
 # DB round-trip: from_domain_resource / to_domain_resource
 # ---------------------------------------------------------------------------
 

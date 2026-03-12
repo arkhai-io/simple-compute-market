@@ -15,26 +15,25 @@ from core.agent.app.schema.pydantic_models import Action as DomainAction, Action
 logger = logging.getLogger(__name__)
 
 
-def _generate_negotiation_id(our_order_id: str | None, their_order_id: str | None) -> str:
-    """Generate a deterministic negotiation ID from order IDs.
+def make_negotiation_id(order_a: str, order_b: str) -> str:
+    """Generate a canonical, deterministic negotiation ID from two order IDs.
 
-    This ensures that the same pair of orders always results in the same
-    negotiation ID, preventing duplicate negotiations.
+    Sorts the IDs so both sides of a bilateral negotiation always produce
+    the same string regardless of which agent calls this first.
 
     Args:
-        our_order_id: Our order ID (may be None for incoming offers)
-        their_order_id: Their order ID
+        order_a: First order ID
+        order_b: Second order ID
 
     Returns:
         A deterministic negotiation ID
     """
-    # Sort order IDs to ensure bidirectional consistency
-    # (agent A and agent B should generate the same ID for the same pair of orders)
-    orders = sorted([
-        our_order_id or "no_our_order",
-        their_order_id or "no_their_order"
-    ])
+    orders = sorted([order_a or "", order_b or ""])
     return f"{orders[0]}_{orders[1]}"
+
+
+# Keep private alias so internal helpers that reference it still work
+_generate_negotiation_id = lambda our, their: make_negotiation_id(our or "", their or "")
 
 
 @dataclass
@@ -93,6 +92,10 @@ class NegotiationActionBuilder:
                 "reason": reason,
                 "our_order_id": self.data.get("our_order_id"),
                 "their_order_id": self.data.get("their_order_id"),
+                "order": self.data.get("order"),
+                "counterparty_url": self.data.get("counterparty_url"),
+                "their_price": self.data.get("their_price"),
+                "our_price": self.data.get("our_price"),
             },
         )
 

@@ -632,8 +632,9 @@ class TestMultipleBilateralNegotiations:
             except_negotiation_id="order_A_order_B",
         )
 
-        # Verify A↔C was canceled
-        assert "order_A_order_C" in canceled
+        # Verify A↔C was canceled (cancel_negotiations_for_order returns list of dicts)
+        canceled_ids = [entry["negotiation_id"] for entry in canceled]
+        assert "order_A_order_C" in canceled_ids
 
         # Verify A↔B is still active (not canceled)
         thread_B = await thread_store.get_thread("order_A_order_B")
@@ -847,7 +848,8 @@ class TestMultipleBilateralNegotiations:
             except_negotiation_id="A_B",
         )
 
-        assert "A_C" in canceled
+        canceled_ids = [entry["negotiation_id"] for entry in canceled]
+        assert "A_C" in canceled_ids
 
     @pytest.mark.asyncio
     async def test_maximizer_negotiates_with_multiple_minimizers(self, policy_store, thread_store):

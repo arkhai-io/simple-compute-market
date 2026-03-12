@@ -91,9 +91,7 @@ class ComputePolicySeeder:
                 policy_name="make_offer.default.v1",
                 components=[
                     "mo.guard.trigger_is_make_offer",
-                    "mo.action.torch_arkhai_seller",
-                    "mo.action.torch_arkhai_buyer",
-                    "mo.action.accept_offer",
+                    "negotiation.respond_to_make_offer",
                 ],
             )
         except Exception as e:
@@ -131,11 +129,23 @@ class ComputePolicySeeder:
 
     async def ensure_negotiation_policy(self) -> None:
         try:
+            policy_name = "negotiation_default_v1"
+            trigger_type = EventType.NEGOTIATION.value
             await self._policy_store.save_policy(
                 agent_id=self._agent_id,
-                policy_name="simple_negotiation_random",
-                trigger_type=EventType.NEGOTIATION.value,
-                callable_ref="simple_negotiation_random",
+                policy_name=policy_name,
+                trigger_type=trigger_type,
+                callable_ref=policy_name,
+            )
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name=policy_name,
+                components=[
+                    "negotiation.guard.always_negotiate_on_price_diff",
+                    "negotiation.guard.bounded_rounds_and_timeout",
+                    "negotiation.action.price_interval_concession",
+                    "negotiation.action.safe_default_reject",
+                ],
             )
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save negotiation policy: {e}")

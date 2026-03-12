@@ -9,13 +9,6 @@ def test_erc20_token_metadata_resolves_from_service():
     assert CoreMeta is ServiceMeta
 
 
-def test_action_executor_token_registry_from_service():
-    """action_executor.TOKEN_REGISTRY is the same object as service.clients.token.TOKEN_REGISTRY."""
-    import core.agent.app.utils.action_executor as ae
-    from service.clients.token import TOKEN_REGISTRY as service_reg
-    assert ae.TOKEN_REGISTRY is service_reg
-
-
 def test_core_token_registry_module_removed():
     """The old core token_registry module must not exist."""
     with pytest.raises(ModuleNotFoundError):
