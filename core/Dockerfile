@@ -1,3 +1,6 @@
+# @TODO: remove platform specific flags once puffer wheel is built
+# Puffer wheel is having build issues if flag is not set
+
 # Stage 1: Dependency Downloading and building the wheel
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
@@ -14,8 +17,9 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY packages/ ./packages/
-COPY pyproject.toml uv.lock ./
+COPY core/agent/packages/ ./agent/packages/
+COPY core/pyproject.toml core/uv.lock ./
+COPY service/ ../service/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
@@ -39,16 +43,18 @@ RUN mkdir -p /var/lib/zerotier-one && \
 
 EXPOSE 9993/udp
 
-# Copy the application code
-COPY ./app ./app
-COPY ./scripts ./scripts
-COPY .env.sample .
+# Copy the application code preserving the import path (from core.agent.app.*)
+COPY core/agent/app ./core/agent/app
+COPY core/agent/scripts ./core/agent/scripts
+COPY core/agent/.env.sample .
+COPY core/schemas.py ./core/schemas.py
+COPY service/ ../service/
 
 ARG PORT=8080
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-COPY ./entrypoint.sh ./entrypoint.sh
+COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 ARG MODEL_VERSION=""

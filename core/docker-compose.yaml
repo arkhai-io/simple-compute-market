@@ -1,0 +1,19 @@
+services:
+  agent:
+    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/agent:v0.0.8
+    image: test-agent
+    # build: .
+    platform: linux/amd64
+    network_mode: host
+    env_file:
+      - ./agent/.env.c
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - zerotier-state:/var/lib/zerotier-one
+
+volumes:
+  zerotier-state:

@@ -153,15 +153,3 @@ volumes:
   contracts-deployments:
   registry-data:
   shared-env:
-
-
-
-# ci/cd needed for buyers and sellers 
-# 1. agent
-# 2. provisioning services
-
-# for arkhai people
-# 3. registry
-# 4. contracts
-
-
