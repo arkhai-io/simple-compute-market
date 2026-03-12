@@ -24,7 +24,7 @@ COPY service/ ../service/
 # against GCP Artifact Registry for the alkahest-py private Python package.
 ARG GAR_STG_READER_KEY=""
 RUN echo ">>> GAR_STG_READER_KEY length: ${#GAR_STG_READER_KEY}" && \
-    echo ">>> GAR_STG_READER_KEY first char: $(echo "${GAR_STG_READER_KEY}" | cut -c1)" && \
+    echo ">>> GAR_STG_READER_KEY first 20 chars: $(echo "${GAR_STG_READER_KEY}" | cut -c1-20)" && \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
         echo ">>> GAR_STG_READER_KEY is SET"; \
     else \
