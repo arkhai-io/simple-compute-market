@@ -1,11 +1,6 @@
 import { Storage } from "@google-cloud/storage";
 import { http, type HttpFunction } from "@google-cloud/functions-framework";
-
-const GCS_BUCKET = "ww-migration-arkhai-installer-files";
-const TARBALL_NAME = "market-cli.tar.gz";
-const SIGNED_URL_EXPIRY_MS = 15 * 60 * 1000; // 15 minutes
-
-const REQUEST_TIMEOUT_MS = 60 * 1000; // 60 seconds
+import { GCS_BUCKET, TARBALL_NAME, SIGNED_URL_EXPIRY_MS, REQUEST_TIMEOUT_MS } from "./constants";
 
 const downloadMarketCli: HttpFunction = async (req, res) => {
   req.setTimeout(REQUEST_TIMEOUT_MS);

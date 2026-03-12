@@ -8,6 +8,9 @@ MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
 INSTALL_ZEROTIER=false
+GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getServiceAccountKey"
+DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
+GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -45,8 +48,6 @@ check_python_version() {
         error "Python >= ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR} is required, but found $version."
         exit 1
     fi
-
-    ok "Python $version found ($python_cmd)"
 }
 
 detect_platform() {
@@ -71,15 +72,12 @@ detect_platform() {
             exit 1
             ;;
     esac
-
-    ok "Platform: $OS/$ARCH"
 }
 
 # ── Install uv ────────────────────────────────────────────────
 
 install_uv() {
     if command -v uv &>/dev/null; then
-        ok "uv is already installed ($(uv --version))"
         return
     fi
 
@@ -146,8 +144,6 @@ install_repo() {
         done < <(find "$env_backup_dir" -name '.env' -print0 2>/dev/null || true)
         rm -rf "$env_backup_dir"
     fi
-
-    ok "Files installed to $INSTALL_DIR"
 }
 
 # ── Set up venv and install CLI ───────────────────────────────
@@ -158,7 +154,7 @@ install_cli() {
     info "Setting up Python environment..."
     cd "$cli_dir"
     uv venv
-    uv pip install -e .
+    uv pip install -q -e .
 
     ok "CLI installed in $cli_dir/.venv"
 }
@@ -235,7 +231,7 @@ verify() {
 main() {
     echo ""
     echo "  ┌──────────────────────────────────┐"
-    echo "  │      Market CLI Installer         │"
+    echo "  │      Market CLI Installer        │"
     echo "  └──────────────────────────────────┘"
     echo ""
 
@@ -248,6 +244,8 @@ main() {
     echo ""
 
     detect_platform
+    check_command docker
+    check_command gcloud
     check_command make
     check_python_version
     install_uv
@@ -267,6 +265,26 @@ main() {
     else
         market install
     fi
+
+    # ── Pull Docker image ──────────
+    local gcp_sa_key_file
+    gcp_sa_key_file="$(mktemp)"
+
+    info "Pulling Agent Docker Image..."
+    curl -sSfL "$GCP_SA_KEY_URL" -o "$gcp_sa_key_file"
+
+    gcloud auth activate-service-account --key-file="$gcp_sa_key_file"
+    gcloud auth configure-docker "$GCP_DOCKER_REGISTRY" --quiet
+
+    docker pull "$DOCKER_IMAGE"
+
+    info "Cleaning up..."
+    local sa_email
+    sa_email="$(python3 -c "import json; print(json.load(open('$gcp_sa_key_file'))['client_email'])")"
+    gcloud auth revoke "$sa_email" --quiet 2>/dev/null || true
+    rm -f "$gcp_sa_key_file"
+
+    ok "Installation complete"
 
     echo ""
     info "Get started:"

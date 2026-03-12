@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "getServiceAccountKey.ts", "downloadMarketCli.ts", "constants.ts"]
 }
