@@ -128,6 +128,13 @@ class ComputePolicySeeder:
             logger.warning(f"[POLICY SEED] Failed to save arbitration_complete policy: {e}")
 
     async def ensure_negotiation_policy(self) -> None:
+        from core.agent.app.utils.config import CONFIG
+
+        if CONFIG.negotiation_policy_mode == "rl":
+            action_callable = "negotiation.action.torch_arkhai_negotiator"
+        else:
+            action_callable = "negotiation.action.price_interval_concession"
+
         try:
             policy_name = "negotiation_default_v1"
             trigger_type = EventType.NEGOTIATION.value
@@ -141,11 +148,18 @@ class ComputePolicySeeder:
                 agent_id=self._agent_id,
                 policy_name=policy_name,
                 components=[
+                    "negotiation.action.handle_exit",
                     "negotiation.guard.always_negotiate_on_price_diff",
                     "negotiation.guard.bounded_rounds_and_timeout",
-                    "negotiation.action.price_interval_concession",
+                    action_callable,
                     "negotiation.action.safe_default_reject",
                 ],
+            )
+            logger.info(
+                "[POLICY SEED] Negotiation policy seeded with action_callable=%s "
+                "(mode=%s)",
+                action_callable,
+                CONFIG.negotiation_policy_mode,
             )
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save negotiation policy: {e}")
