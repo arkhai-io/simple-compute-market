@@ -107,7 +107,12 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
 
         available: bool = bool(result.get("available", False))
         running_vms = result.get("running_vms", "?")
-        new_state = "available" if available else "reserved"
+        allocated_count = running_vms if isinstance(running_vms, (int, float)) else 0
+        # Only mark reserved if there is positive evidence of GPU allocation.
+        # When available=False but allocated_count=0, the GPU inventory check
+        # likely failed to detect capacity (e.g. libvirt/pynvml not returning
+        # data) — fall back to available so fulfillment is not blocked.
+        new_state = "available" if (available or allocated_count == 0) else "reserved"
         idempotency_key = (
             f"resource-poll-{r['resource_id']}-{running_vms}-{new_state}"
         )

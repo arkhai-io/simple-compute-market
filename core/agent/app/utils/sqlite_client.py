@@ -331,7 +331,16 @@ class SQLiteClient:
         if a_dict is None or b_dict is None:
             return False
         try:
-            return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
+            # Strip None-valued fields so that a buyer's sparse demand
+            # (resource_id=None, vm_host=None) can match a seller's enriched
+            # offer that has those fields populated.  Every non-null field in
+            # `a` must be present and equal in `b`; extra fields in `b` are
+            # ignored.
+            a_clean = {k: v for k, v in a_dict.items() if v is not None}
+            b_clean = {k: v for k, v in b_dict.items() if v is not None}
+            if not a_clean:
+                return False
+            return all(b_clean.get(k) == v for k, v in a_clean.items())
         except Exception:
             return False
 

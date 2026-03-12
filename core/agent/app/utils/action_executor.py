@@ -754,8 +754,8 @@ def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     offer_resource = order.get("offer_resource", {})
     demand_resource = order.get("demand_resource", {})
 
-    offer_is_compute = "gpu_model" in offer_resource
-    demand_is_compute = "gpu_model" in demand_resource
+    offer_is_compute = _resource_is_compute(offer_resource)
+    demand_is_compute = _resource_is_compute(demand_resource)
 
     if offer_is_compute:
         compute_resource = offer_resource
@@ -1379,7 +1379,30 @@ async def _find_and_send_matching_offers(
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
-                    result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
+                    # Build a per-agent event that includes buyer_order_id so the
+                    # buyer can update their local record without a fuzzy DB lookup.
+                    if matched_order_id:
+                        offer_with_ref = {**order_dict, "buyer_order_id": matched_order_id}
+                        per_agent_event = Event(
+                            author=AGENT_ID,
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part.from_function_response(
+                                        name="make_offer",
+                                        response={
+                                            "event_type": EventType.MAKE_OFFER.value,
+                                            "offer": offer_with_ref,
+                                        },
+                                    )
+                                ],
+                            ),
+                            invocation_id=ctx.invocation_id,
+                            branch=ctx.branch,
+                        )
+                    else:
+                        per_agent_event = event
+                    result = await send_to_remote_agent(ctx, per_agent_event, agent_url=agent_url)
                     if result:
                         results.append({"agent_url": agent_url, "result": result})
                 except Exception as e:

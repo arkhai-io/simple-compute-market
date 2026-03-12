@@ -346,7 +346,13 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             
             # Validate MarketOrder (which will validate resources via model_validator)
             order = MarketOrder.model_validate(offer_data)
-            return MakeOfferEvent.from_order(order)
+            event = MakeOfferEvent.from_order(order)
+            # Preserve buyer_order_id echoed back by the seller so the buyer can
+            # find and update their own local order record without a fuzzy lookup.
+            buyer_order_id = offer_data.get("buyer_order_id")
+            if buyer_order_id:
+                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            return event
             
         elif event_type == EventType.ACCEPT_OFFER:
             offer_data = data.get("offer", data)
