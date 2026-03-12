@@ -13,11 +13,17 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY core/agent/packages/ ./agent/packages/
 COPY core/pyproject.toml core/uv.lock ./
 COPY service/ ../service/
 
+# Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
+# against GCP Artifact Registry for the alkahest-py private Python package.
+ARG GAR_STG_READER_KEY=""
 RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ -n "${GAR_STG_READER_KEY}" ]; then \
+        export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
+        export UV_INDEX_ALKAHEST_GAR_PASSWORD="${GAR_STG_READER_KEY}"; \
+    fi && \
     uv sync --frozen --no-dev --no-install-project
 
 # Stage 2: Lean runtime image

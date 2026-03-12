@@ -85,6 +85,7 @@ jobs:
             UV_VERSION=${{ env.UV_VERSION }}
             PORT=${{ env.APP_PORT }}
             COMMIT_SHA=${{ github.sha }}
+            GAR_STG_READER_KEY=${{ secrets.GAR_STG_READER_KEY }}
 
       - name: Generate build summary
         run: |
