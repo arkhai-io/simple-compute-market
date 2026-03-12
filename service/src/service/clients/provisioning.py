@@ -10,6 +10,39 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+_VM_CREATE_FIELDS = ("ssh_command", "ssh_port", "tenant_user", "vm_host_ip")
+
+
+def _normalize_vm_create_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip verbose ansible/frp/gpu fields from a VM create result.
+
+    Returns a compact dict matching the ansible_provisioning shape:
+      ssh_command, ssh_port, tenant_user, vm_host_ip [, authentication, status, vm_name]
+
+    Falls back to the full dict if none of the expected connection fields are
+    present — this covers check/lease_end results that have a different structure.
+    """
+    if not any(result.get(k) for k in _VM_CREATE_FIELDS):
+        return result
+
+    compact: dict[str, Any] = {k: result.get(k) for k in _VM_CREATE_FIELDS}
+
+    # Prefer FRP hostname as vm_host_ip — public tunnel reachable by the buyer.
+    frp = result.get("frp") or {}
+    if isinstance(frp, dict) and frp.get("domain"):
+        compact["vm_host_ip"] = frp["domain"]
+
+    # authentication must survive so action_executor can pop it as credentials.
+    if result.get("authentication") is not None:
+        compact["authentication"] = result["authentication"]
+
+    # Lightweight context fields.
+    for key in ("status", "vm_name"):
+        if result.get(key):
+            compact[key] = result[key]
+
+    return {k: v for k, v in compact.items() if v is not None}
+
 
 class ProvisioningError(Exception):
     """Base class for provisioning errors."""
@@ -101,7 +134,7 @@ async def provision_machine_async(
             agent_id=agent_id,
         )
     logger.info("[PROVISIONING] Job %s completed successfully", job_id)
-    return result
+    return _normalize_vm_create_result(result)
 
 
 async def schedule_vm_shutdown_async(

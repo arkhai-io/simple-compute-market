@@ -303,6 +303,10 @@ class MakeOfferEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
+    buyer_order_id: str | None = Field(
+        default=None,
+        description="The buyer's local order_id, echoed back by the seller so the buyer can update their record without a fuzzy DB lookup.",
+    )
 
     @classmethod
     def from_order(cls, order: MarketOrder) -> "MakeOfferEvent":
@@ -390,6 +394,10 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
         default=None,
         description="URL of the compute seller who fulfilled the obligation",
     )
+    tenant_credentials: dict | None = Field(
+        default=None,
+        description="Tenant credentials (password, key_type) for the provisioned VM",
+    )
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
@@ -403,6 +411,7 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             fulfillment_uid=payload.get("fulfillment_uid"),
             connection_details=payload.get("connection_details"),
             fulfilling_party_url=payload.get("fulfilling_party_url"),
+            tenant_credentials=payload.get("tenant_credentials"),
             data=payload,
         )
 
