@@ -108,7 +108,7 @@ wheels = [
 [[package]]
 name = "alkahest-py"
 version = "0.1.0"
-source = { registry = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/alkahest-py/" }
+source = { registry = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/alkahest-py/0.1.0" }
 wheels = [
     { url = "https://us-east4-python.pkg.dev/ww-migration-arkhai/alkahest-wheel-repo/alkahest-py/0.1.0/alkahest-py/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl", hash = "sha256:24cd51ac354fe09c37968d6f5c0f483f6ea725b121819a8d3b2410beeb819c4d" },
 ]
