@@ -138,15 +138,35 @@ async def get_vm_available_resources(
     poll_interval: int = 5,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
-    """POST /api/v1/jobs with vm_action=check and poll for inventory result."""
+    """POST /api/v1/jobs with vm_action=check and poll for inventory result.
+
+    Normalises the nested Ansible check_data response to the flat shape that
+    resource_poller._poll_once expects:
+      - ``available`` (bool): True if any GPU slots are free
+      - ``running_vms`` (int): number of allocated GPUs (proxy for active VMs)
+    Additional keys (available_gpus, available_vcpus, available_ram_mb) are
+    included for callers that want richer inventory data.
+    """
     params = {
         "vm_host": vm_host,
         "vm_action": "check",
     }
-    return await provision_machine_async(
+    result = await provision_machine_async(
         provisioning_service_url,
         params,
         timeout=timeout,
         poll_interval=poll_interval,
         agent_id=agent_id,
     )
+    available = result.get("available", {})
+    allocated = result.get("allocated", {})
+    if not isinstance(available, dict):
+        # Already normalised (e.g. from a future API change or test stub)
+        return result
+    return {
+        "available": available.get("gpus", 0) > 0,
+        "running_vms": allocated.get("gpus", 0),
+        "available_gpus": available.get("gpus", 0),
+        "available_vcpus": available.get("vcpus", 0),
+        "available_ram_mb": available.get("ram_mb", 0),
+    }
