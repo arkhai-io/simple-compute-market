@@ -30,7 +30,6 @@ async def send_heartbeat(
     agent_id: str,
     indexer_url: str,
     private_key: Optional[str] = None,
-    owner_address: Optional[str] = None
 ) -> bool:
     """
     Send heartbeat to Indexer to indicate agent is alive.
@@ -41,7 +40,6 @@ async def send_heartbeat(
         agent_id: Agent ID (from Indexer registration)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeat (optional if agent has no owner)
-        owner_address: Owner wallet address (optional, used for logging)
 
     Returns:
         True if successful, False otherwise
@@ -129,7 +127,6 @@ async def heartbeat_loop(
     agent_id: Optional[str],
     indexer_url: str,
     private_key: Optional[str] = None,
-    owner_address: Optional[str] = None
 ):
     """
     Background task to periodically send heartbeats to Indexer.
@@ -138,7 +135,6 @@ async def heartbeat_loop(
         agent_id: Agent ID from registration (None if not registered)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeats (optional)
-        owner_address: Owner wallet address (optional, for logging)
     """
     if agent_id is None:
         logger.debug("[HEARTBEAT] No agent ID, skipping heartbeat loop")
@@ -153,7 +149,7 @@ async def heartbeat_loop(
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
-            success = await send_heartbeat(agent_id, indexer_url, private_key, owner_address)
+            success = await send_heartbeat(agent_id, indexer_url, private_key)
             if success:
                 logger.debug(f"[HEARTBEAT] Heartbeat sent successfully")
         except asyncio.CancelledError:
@@ -217,6 +213,6 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
         agent_id=agent_id,
     )
 
-    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key, agent_wallet_address))
+    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key))
     logger.info(f"[HEARTBEAT] Started heartbeat for {canonical_id}")
     return agent_wallet_address
