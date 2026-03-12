@@ -8,6 +8,9 @@ MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
 INSTALL_ZEROTIER=false
+GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getServiceAccountKey"
+DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
+GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
 
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
@@ -248,6 +251,8 @@ main() {
     echo ""
 
     detect_platform
+    check_command docker
+    check_command gcloud
     check_command make
     check_python_version
     install_uv
@@ -267,6 +272,30 @@ main() {
     else
         market install
     fi
+
+    # ── Pull Docker image ──────────
+    local gcp_sa_key_file
+    gcp_sa_key_file="$(mktemp)"
+
+    info "Downloading service account key..."
+    curl -sSfL "$GCP_SA_KEY_URL" -o "$gcp_sa_key_file"
+    ok "Service account key downloaded"
+
+    info "Authenticating..."
+    gcloud auth activate-service-account --key-file="$gcp_sa_key_file"
+    gcloud auth configure-docker "$GCP_DOCKER_REGISTRY" --quiet
+    ok "Docker registry authenticated"
+
+    info "Pulling Docker image..."
+    docker pull "$DOCKER_IMAGE"
+    ok "Docker image pulled"
+
+    info "Cleaning up..."
+    local sa_email
+    sa_email="$(python3 -c "import json; print(json.load(open('$gcp_sa_key_file'))['client_email'])")"
+    gcloud auth revoke "$sa_email" --quiet 2>/dev/null || true
+    rm -f "$gcp_sa_key_file"
+    ok "Finished cleanup"
 
     echo ""
     info "Get started:"
