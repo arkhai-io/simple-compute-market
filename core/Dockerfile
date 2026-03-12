@@ -20,9 +20,15 @@ COPY service/ ../service/
 # against GCP Artifact Registry for the alkahest-py private Python package.
 ARG GAR_STG_READER_KEY=""
 RUN --mount=type=cache,target=/root/.cache/uv \
+    echo ">>> GAR_STG_READER_KEY length: ${#GAR_STG_READER_KEY}" && \
+    echo ">>> GAR_STG_READER_KEY first char: $(echo "${GAR_STG_READER_KEY}" | cut -c1)" && \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
+        echo ">>> GAR_STG_READER_KEY is SET, configuring uv auth..." && \
         export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
-        export UV_INDEX_ALKAHEST_GAR_PASSWORD="${GAR_STG_READER_KEY}"; \
+        # Compact the JSON to a single line to handle Docker build-arg newline stripping
+        export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
+    else \
+        echo ">>> GAR_STG_READER_KEY is EMPTY — uv sync will run unauthenticated"; \
     fi && \
     uv sync --frozen --no-dev --no-install-project
 
