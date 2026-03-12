@@ -47,6 +47,7 @@ from service.clients.indexer import get_registry_client
 from service.clients.token import TOKEN_REGISTRY
 from core.agent.app.utils.sqlite_client import get_sqlite_client
 from service.clients.provisioning import provision_machine_async, ProvisioningError
+from service.clients.provisioning import schedule_vm_shutdown_async as http_schedule_vm_shutdown_async
 from service.clients.mock_provisioning import provision_machine_async as mock_provision_machine_async
 from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
 from service.clients.ansible_provisioning import provision_machine_async as ansible_provision_machine_async
@@ -714,7 +715,7 @@ def _get_shutdown_fn():
         return mock_schedule_vm_shutdown_async
     if mode == "ansible":
         return ansible_schedule_vm_shutdown_async
-    return None  # http mode uses provision_machine_async with vm_action=lease_end
+    return http_schedule_vm_shutdown_async
 
 
 async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
@@ -738,22 +739,13 @@ async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) ->
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Dispatch VM shutdown to the configured provisioning client."""
     shutdown_fn = _get_shutdown_fn()
-    if shutdown_fn is not None:
-        return await shutdown_fn(
-            CONFIG.provisioning_service_url,
-            lease_end_utc,
-            vm_host,
-            vm_target,
-            timeout=CONFIG.provisioning_timeout,
-            poll_interval=CONFIG.provisioning_poll_interval,
-            agent_id=CONFIG.onchain_agent_id,
-        )
-    # http mode: reuse provision_machine_async with lease_end action
-    return await provision_machine_async(
+    return await shutdown_fn(
         CONFIG.provisioning_service_url,
-        {"vm_action": "lease_end", "vm_lease_end": lease_end_utc, "vm_host": vm_host, "vm_target": vm_target},
-        timeout=300,
-        poll_interval=5,
+        lease_end_utc,
+        vm_host,
+        vm_target,
+        timeout=CONFIG.provisioning_timeout,
+        poll_interval=CONFIG.provisioning_poll_interval,
         agent_id=CONFIG.onchain_agent_id,
     )
 
