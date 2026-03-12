@@ -65,3 +65,31 @@ def test_build_order_auth_no_eth_account(monkeypatch):
     monkeypatch.setattr(mod, "HAS_ETH_ACCOUNT", False)
     from service.clients.erc8004.signing import build_order_auth
     assert build_order_auth(PRIVATE_KEY, "create_order", "agent-id") == {}
+
+
+def test_verify_eip191_valid():
+    pytest.importorskip("eth_account")
+    from service.clients.erc8004.signing import sign_eip191, verify_eip191
+    sig = sign_eip191(PRIVATE_KEY, "hello")
+    assert verify_eip191("hello", sig, OWNER_ADDRESS) is True
+
+
+def test_verify_eip191_wrong_address():
+    pytest.importorskip("eth_account")
+    from service.clients.erc8004.signing import sign_eip191, verify_eip191
+    sig = sign_eip191(PRIVATE_KEY, "hello")
+    assert verify_eip191("hello", sig, "0x000000000000000000000000000000000000dead") is False
+
+
+def test_verify_eip191_wrong_message():
+    pytest.importorskip("eth_account")
+    from service.clients.erc8004.signing import sign_eip191, verify_eip191
+    sig = sign_eip191(PRIVATE_KEY, "hello")
+    assert verify_eip191("wrong message", sig, OWNER_ADDRESS) is False
+
+
+def test_verify_eip191_no_eth_account(monkeypatch):
+    import service.clients.erc8004.signing as mod
+    monkeypatch.setattr(mod, "HAS_ETH_ACCOUNT", False)
+    from service.clients.erc8004.signing import verify_eip191
+    assert verify_eip191("hello", "0xdeadbeef", OWNER_ADDRESS) is False
