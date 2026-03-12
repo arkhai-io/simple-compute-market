@@ -337,6 +337,78 @@ class RegistryClient:
 _registry_client: Optional[RegistryClient] = None
 
 
+_ALKAHEST_NETWORK_CHAIN_IDS: dict[str, int] = {
+    "anvil": 31337,
+    "base_sepolia": 84532,
+    "ethereum_sepolia": 11155111,
+    "ethereum_mainnet": 1,
+}
+
+
+def _resolve_canonical_agent_id() -> str | None:
+    """Resolve the full canonical agent ID (eip155:...) for registry signing.
+
+    Resolution order:
+    1. ONCHAIN_AGENT_ID already in canonical format → use as-is.
+    2. Build from ONCHAIN_AGENT_ID + IDENTITY_REGISTRY_ADDRESS + chain ID
+       (chain ID sourced from: CHAIN_ID env → ALKAHEST_NETWORK map → web3 call).
+    3. Fall back to AGENT_ID.
+    """
+    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
+    if not onchain_agent_id:
+        return os.getenv("AGENT_ID")
+
+    if onchain_agent_id.startswith("eip155:"):
+        return onchain_agent_id
+
+    identity_registry = os.getenv("IDENTITY_REGISTRY_ADDRESS")
+    if not identity_registry:
+        logger.warning(
+            "[REGISTRY] IDENTITY_REGISTRY_ADDRESS not set; using raw ONCHAIN_AGENT_ID=%s as signer_agent_id",
+            onchain_agent_id,
+        )
+        return onchain_agent_id
+
+    try:
+        numeric_id = int(onchain_agent_id)
+    except ValueError:
+        return onchain_agent_id
+
+    # Resolve chain ID.
+    chain_id: int | None = None
+    chain_id_env = os.getenv("CHAIN_ID")
+    if chain_id_env:
+        try:
+            chain_id = int(chain_id_env)
+        except ValueError:
+            pass
+    if chain_id is None:
+        chain_id = _ALKAHEST_NETWORK_CHAIN_IDS.get(os.getenv("ALKAHEST_NETWORK", "").lower())
+    if chain_id is None:
+        chain_rpc_url = os.getenv("CHAIN_RPC_URL")
+        if chain_rpc_url:
+            try:
+                from web3 import Web3
+                from web3.providers import HTTPProvider
+                from service.clients.erc8004.blockchain import rpc_url_for_http_provider
+                w3 = Web3(HTTPProvider(rpc_url_for_http_provider(chain_rpc_url), request_kwargs={"timeout": 5}))
+                chain_id = w3.eth.chain_id
+            except Exception as exc:
+                logger.warning("[REGISTRY] Could not resolve chain ID from RPC: %s", exc)
+    if chain_id is None:
+        logger.warning("[REGISTRY] Cannot resolve chain ID; using raw ONCHAIN_AGENT_ID=%s", onchain_agent_id)
+        return onchain_agent_id
+
+    try:
+        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
+        canonical = build_erc8004_canonical_id(chain_id, identity_registry, numeric_id)
+        logger.debug("[REGISTRY] Resolved canonical agent ID: %s", canonical)
+        return canonical
+    except Exception as exc:
+        logger.warning("[REGISTRY] Failed to build canonical ID: %s", exc)
+        return onchain_agent_id
+
+
 def get_registry_client() -> RegistryClient:
     """Get or create global registry client instance."""
     global _registry_client
@@ -345,6 +417,6 @@ def get_registry_client() -> RegistryClient:
         _registry_client = RegistryClient(
             timeout=timeout,
             private_key=os.getenv("AGENT_PRIV_KEY"),
-            agent_id=os.getenv("AGENT_ID"),
+            agent_id=_resolve_canonical_agent_id(),
         )
     return _registry_client
