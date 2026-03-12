@@ -386,6 +386,19 @@ async def execute_action(
                         logger.info(f"[FULFILL] Closed order {oid}")
                     except Exception as e:
                         logger.warning(f"[FULFILL] Failed to close order {oid}: {e}")
+                # Close the negotiation thread — covers equal-price direct-accept where the
+                # buyer never entered a negotiation round and their ACCEPT_OFFER had no
+                # negotiation_id, leaving the seller's thread open indefinitely.
+                if matched_order_id and buyer_order_id:
+                    try:
+                        neg_id = make_negotiation_id(matched_order_id, buyer_order_id)
+                        async with NegotiationThreadTransaction("FULFILL_COMPUTE_OBLIGATION") as txn:
+                            await txn.mark_terminal(neg_id, "success")
+                    except Exception as _term_err:
+                        logger.warning(
+                            "[ACTION] Could not mark negotiation thread terminal after fulfillment: %s",
+                            _term_err,
+                        )
                 # Include event_type for downstream parsing and propagate to remote agent.
                 result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
                 if ctx:
