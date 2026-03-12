@@ -44,8 +44,14 @@ from core.agent.app.resources import parse_resource_from_dict
 from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import get_trusted_oracle_arbiter
 from service.clients.indexer import get_registry_client
+from service.clients.token import TOKEN_REGISTRY
 from core.agent.app.utils.sqlite_client import get_sqlite_client
-from .provisioning import run_vm_provisioning_playbook, schedule_vm_shutdown
+from service.clients.provisioning import provision_machine_async, ProvisioningError
+from service.clients.provisioning import schedule_vm_shutdown_async as http_schedule_vm_shutdown_async
+from service.clients.mock_provisioning import provision_machine_async as mock_provision_machine_async
+from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
+from service.clients.ansible_provisioning import provision_machine_async as ansible_provision_machine_async
+from service.clients.ansible_provisioning import schedule_vm_shutdown_async as ansible_schedule_vm_shutdown_async
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
@@ -413,13 +419,26 @@ async def execute_action(
             try:
                 escrow_uid = parameters.get("escrow_uid")
                 connection_details = parameters.get("connection_details")
+                tenant_credentials = parameters.get("tenant_credentials")
+                sqlite_client = get_sqlite_client()
                 if escrow_uid and connection_details:
-                    sqlite_client = get_sqlite_client()
                     await sqlite_client.update_order_by_escrow_uid(
                         escrow_uid=escrow_uid,
                         status="accepted",
                         fulfillment_resource=connection_details,
                     )
+                if tenant_credentials and escrow_uid:
+                    order_id_for_escrow = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
+                    if order_id_for_escrow:
+                        await sqlite_client.store_credential(
+                            order_id=order_id_for_escrow,
+                            role="tenant",
+                            granted_to="self",
+                            password=tenant_credentials.get("password"),
+                            key_type=tenant_credentials.get("key_type"),
+                        )
+                    else:
+                        logger.warning("[LOCAL DB] Cannot store tenant credentials: no order found for escrow_uid=%s", escrow_uid)
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
             if ctx:
@@ -681,58 +700,62 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-async def mock_provision_machine(ssh_public_key: str) -> str:
-    """Mock stand-in for provisioning a machine.
-
-    Return:
-        String with connection details.
-    """
-    logger.info(f"[TOOL] (Simulated) Machine provisioned with SSH key for pubkey: {ssh_public_key}.")
-    return "ssh -i <your_private_key> -p 7021 demo-user@node-01.example.net | password: demo-password"
-
-
-def mock_schedule_vm_shutdown(lease_end_utc: str) -> None:
-    """Mock stand-in for scheduling VM shutdown."""
-    logger.info("[TOOL] (Simulated) Scheduled VM shutdown at %s UTC.", lease_end_utc)
+def _get_provision_fn():
+    mode = CONFIG.provisioning_mode
+    if mode == "mock":
+        return mock_provision_machine_async
+    if mode == "ansible":
+        return ansible_provision_machine_async
+    return provision_machine_async
 
 
-async def provision_machine(
-    ssh_public_key: str,
-    *,
-    vm_host: str = "vm1",
-    vm_target: str = "tenant-vm",
-) -> str:
-    """Provision a machine using the provided SSH public key.
+def _get_shutdown_fn():
+    mode = CONFIG.provisioning_mode
+    if mode == "mock":
+        return mock_schedule_vm_shutdown_async
+    if mode == "ansible":
+        return ansible_schedule_vm_shutdown_async
+    return http_schedule_vm_shutdown_async
 
-    Args:
-        ssh_public_key: SSH public key to install on the provisioned machine.
 
-    Returns:
-        String with connection details.
-    """
-    logger.info(f"[TOOL] Provisioning machine with provided SSH public key.")
-    try:
-        connection_info = run_vm_provisioning_playbook(
-            ssh_public_key,
-            vm_host=vm_host,
-            vm_target=vm_target,
-        )
-        if connection_info:
-            logger.info(f"[TOOL] Machine provisioned: {connection_info}")
-            return connection_info
-        logger.warning("[TOOL] Provisioning completed but connection info was not available.")
-        raise RuntimeError("Provisioning completed, but SSH connection info unavailable.")
-    except Exception as exc:
-        logger.error("[TOOL] Provisioning failed: %s", exc)
-        raise RuntimeError(f"Provisioning failed: {exc}") from exc
+async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
+    """Dispatch to the configured provisioning client."""
+    params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
+    if CONFIG.frp_server_addr:
+        params["frp_server_addr"] = CONFIG.frp_server_addr
+    if CONFIG.frp_domain:
+        params["frp_domain"] = CONFIG.frp_domain
+    if CONFIG.frp_dashboard_password:
+        params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+    return await _get_provision_fn()(
+        CONFIG.provisioning_service_url,
+        params,
+        timeout=CONFIG.provisioning_timeout,
+        poll_interval=CONFIG.provisioning_poll_interval,
+        agent_id=CONFIG.onchain_agent_id,
+    )
+
+
+async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
+    """Dispatch VM shutdown to the configured provisioning client."""
+    shutdown_fn = _get_shutdown_fn()
+    return await shutdown_fn(
+        CONFIG.provisioning_service_url,
+        lease_end_utc,
+        vm_host,
+        vm_target,
+        timeout=CONFIG.provisioning_timeout,
+        poll_interval=CONFIG.provisioning_poll_interval,
+        agent_id=CONFIG.onchain_agent_id,
+    )
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""
     offer_resource = order.get("offer_resource", {})
     demand_resource = order.get("demand_resource", {})
 
-    offer_is_compute = "gpu_model" in offer_resource
-    demand_is_compute = "gpu_model" in demand_resource
+    offer_is_compute = _resource_is_compute(offer_resource)
+    demand_is_compute = _resource_is_compute(demand_resource)
 
     if offer_is_compute:
         compute_resource = offer_resource
@@ -1356,7 +1379,30 @@ async def _find_and_send_matching_offers(
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
-                    result = await send_to_remote_agent(ctx, event, agent_url=agent_url)
+                    # Build a per-agent event that includes buyer_order_id so the
+                    # buyer can update their local record without a fuzzy DB lookup.
+                    if matched_order_id:
+                        offer_with_ref = {**order_dict, "buyer_order_id": matched_order_id}
+                        per_agent_event = Event(
+                            author=AGENT_ID,
+                            content=genai_types.Content(
+                                role="model",
+                                parts=[
+                                    genai_types.Part.from_function_response(
+                                        name="make_offer",
+                                        response={
+                                            "event_type": EventType.MAKE_OFFER.value,
+                                            "offer": offer_with_ref,
+                                        },
+                                    )
+                                ],
+                            ),
+                            invocation_id=ctx.invocation_id,
+                            branch=ctx.branch,
+                        )
+                    else:
+                        per_agent_event = event
+                    result = await send_to_remote_agent(ctx, per_agent_event, agent_url=agent_url)
                     if result:
                         results.append({"agent_url": agent_url, "result": result})
                 except Exception as e:
@@ -1762,14 +1808,18 @@ async def fulfill_compute_obligation(
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
 
-        if CONFIG.use_mock_provisioning:
-            connection_details = await mock_provision_machine(ssh_public_key)
+        provision_result = await _do_provision(
+            ssh_public_key,
+            vm_host=reserved_vm_host,
+            vm_target=vm_target,
+        )
+        # Split credentials out before serialising — passwords must never touch on-chain data.
+        authentication: dict | None = None
+        if isinstance(provision_result, dict):
+            authentication = provision_result.pop("authentication", None)
+            connection_details = json.dumps(provision_result)
         else:
-            connection_details = await provision_machine(
-                ssh_public_key,
-                vm_host=reserved_vm_host,
-                vm_target=vm_target,
-            )
+            connection_details = provision_result
     except Exception as error:
         if reserved_resource_id:
             try:
@@ -1794,6 +1844,8 @@ async def fulfill_compute_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
+
     if reserved_resource_id:
         try:
             await get_sqlite_client().apply_resource_set_transition(
@@ -1801,6 +1853,7 @@ async def fulfill_compute_obligation(
                 event_type="lease_started_after_provisioning",
                 idempotency_key=f"lease:{escrow_uid}:{reserved_resource_id}",
                 set_state="leased",
+                set_attribute={"$.lease_end_utc": lease_end_utc},
             )
         except Exception as lease_err:
             logger.warning(
@@ -1809,15 +1862,33 @@ async def fulfill_compute_obligation(
                 lease_err,
             )
 
-    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
-    if CONFIG.use_mock_provisioning:
-        mock_schedule_vm_shutdown(lease_end_utc)
-    else:
-        schedule_vm_shutdown(
-            lease_end_utc,
-            vm_host=reserved_vm_host or "vm1",
-            vm_target=vm_target,
-        )
+    # Persist seller-side credentials (root + tenant) — off-chain only.
+    if authentication and order_id:
+        try:
+            _cred_client = get_sqlite_client()
+            root_data = authentication.get("root", {}) or {}
+            tenant_data = authentication.get("tenant", {}) or {}
+            if root_data:
+                await _cred_client.store_credential(
+                    order_id=order_id,
+                    role="root",
+                    granted_to="self",
+                    password=root_data.get("password"),
+                    ssh_commands=json.dumps(root_data.get("ssh_commands")) if root_data.get("ssh_commands") else None,
+                    ssh_key_path_host=root_data.get("ssh_key_path_host"),
+                )
+            if tenant_data:
+                await _cred_client.store_credential(
+                    order_id=order_id,
+                    role="tenant",
+                    granted_to="self",
+                    password=tenant_data.get("password"),
+                    ssh_commands=json.dumps(tenant_data.get("ssh_commands")) if tenant_data.get("ssh_commands") else None,
+                    key_type=tenant_data.get("key_type"),
+                )
+        except Exception as cred_err:
+            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", order_id, cred_err)
+    await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
@@ -1869,6 +1940,7 @@ async def fulfill_compute_obligation(
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
 
+    tenant_auth = (authentication or {}).get("tenant", {}) or {}
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
@@ -1877,6 +1949,10 @@ async def fulfill_compute_obligation(
         "connection_details": connection_details,
         "ssh_public_key": ssh_public_key,
         "fulfilling_party_url": BASE_URL_OVERRIDE,
+        "tenant_credentials": {
+            "password": tenant_auth.get("password"),
+            "key_type": tenant_auth.get("key_type"),
+        },
     }
 
 async def arbitrate_compute_fulfillment(

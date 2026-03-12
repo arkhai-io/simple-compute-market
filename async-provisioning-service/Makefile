@@ -40,6 +40,6 @@ docker-run-dev: ## Run with host IaC + SSH keys mounted
 	docker run --rm --env-file $(ENV_FILE) -p 8081:8081 \
 		--add-host=host.docker.internal:host-gateway \
 		-e REDIS_URL=redis://host.docker.internal:6379/0 \
-		-v $$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac \
-		-v $$HOME/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro \
+		-v "$$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac" \
+		-v "$$HOME/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro" \
 		$(IMAGE_NAME):$(IMAGE_TAG)

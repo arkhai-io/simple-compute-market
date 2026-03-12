@@ -68,7 +68,7 @@ def _should_retry_error(error_message: str) -> bool:
 def _build_params(params: dict) -> ProvisioningParams:
     """Convert a job params dict to a ProvisioningParams dataclass."""
     return ProvisioningParams(
-        vm_host=params.get("vm_host", "ww1"),
+        vm_host=params.get("vm_host", settings.default_vm_host),
         vm_target=params.get("vm_target"),
         vm_action=params.get("vm_action", "create"),
         image_setup_type=params.get("image_setup_type", "scratch"),

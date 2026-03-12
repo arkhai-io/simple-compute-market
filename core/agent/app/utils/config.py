@@ -138,15 +138,27 @@ class Config:
     enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
-    use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
+    provisioning_mode: str  # PROVISIONING_MODE - "http" | "ansible" | "mock"
+    provisioning_service_url: str  # PROVISIONING_SERVICE_URL
+    provisioning_timeout: int  # PROVISIONING_TIMEOUT
+    provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL
     frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
     frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
-
+    resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
+    default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
 )
+
+
+def _resolve_provisioning_mode() -> str:
+    """Resolve PROVISIONING_MODE: "http" | "ansible" | "mock". Defaults to "http"."""
+    mode = os.getenv("PROVISIONING_MODE", "").lower()
+    if mode in ("http", "ansible", "mock"):
+        return mode
+    return "http"
 
 
 def load_config() -> Config:
@@ -228,10 +240,15 @@ def load_config() -> Config:
         enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
-        use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
+        provisioning_mode=_resolve_provisioning_mode(),
+        provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8085"),
+        provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),
+        provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),
         frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
         frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
+        resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
+        default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
     )
 
 

@@ -136,6 +136,21 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
     demand = context.event.demand
     duration_hours = context.event.duration_hours
 
+    # Enrich a bare ComputeResource offer (no resource_id) with the actual registered
+    # portfolio resource so that resource_id and vm_host are populated in the outgoing order.
+    if isinstance(offer, ComputeResource) and offer.resource_id is None:
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio:
+            for resource in portfolio.resources:
+                if (
+                    resource.gpu_model == offer.gpu_model
+                    and resource.region == offer.region
+                    and resource.sla >= offer.sla
+                    and resource.quantity >= offer.quantity
+                ):
+                    offer = resource
+                    break
+
     offer_payload = offer.model_dump(mode="json") if hasattr(offer, "model_dump") else offer
     demand_payload = demand.model_dump(mode="json") if hasattr(demand, "model_dump") else demand
 
@@ -263,6 +278,7 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
             "fulfillment_uid": context.event.fulfillment_uid,
             "connection_details": context.event.connection_details,
             "counterparty_url": context.event.fulfilling_party_url,
+            "tenant_credentials": context.event.tenant_credentials,
         },
     )
 
@@ -602,6 +618,9 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
         pass
     
     # Accept offer with resource details
+    # buyer_order_id is echoed back by the seller so the buyer can update their
+    # local order record directly without a fuzzy symmetric DB lookup.
+    buyer_order_id = getattr(context.event, "buyer_order_id", None)
     return DomainAction(
         action_type=ActionType.ACCEPT_OFFER,
         parameters={
@@ -610,6 +629,7 @@ def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
             "offer_resource": offer_resource.model_dump(mode='json'),
             "demand_resource": demand_resource.model_dump(mode='json'),
             "counterparty_url": order.order_maker,
+            "our_order_id": buyer_order_id,
         }
     )
 

@@ -111,16 +111,16 @@ fields:
     description: "ZeroTier-assigned IP for the agent (optional; is assigned upon registration)."
 
   # Provisioning
-  USE_MOCK_PROVISIONING:
-    required: false
-    default: true
+  PROVISIONING_MODE:
+    required: true
+    default: "mock"
     secret: false
-    description: "For developer use. Use mock provisioning service instead of provisioning an actual VM."
+    description: "Provisioning client mode: \"http\" (default, calls provisioning-service on :8085), \"ansible\" (runs ansible-playbook locally), or \"mock\" (test double, no I/O)."
   PROVISIONING_SERVICE_URL:
     required: false
     default: "http://localhost:8085"
     secret: false
-    description: "Provisioning service base URL when USE_MOCK_PROVISIONING=false (supports {ZEROTIER_IP})."
+    description: "Provisioning service base URL (http mode only, supports {ZEROTIER_IP})."
   PROVISIONING_TIMEOUT:
     required: false
     default: 3600
