@@ -27,7 +27,7 @@ ARG GAR_STG_READER_KEY=""
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
     export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
-    export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
+    export UV_INDEX_ALKAHEST_GAR_PASSWORD="${GAR_STG_READER_KEY}" ; \
     fi && \
     uv sync --frozen --no-dev --no-install-project
 
