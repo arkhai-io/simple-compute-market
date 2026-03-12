@@ -1,3 +1,6 @@
+# @TODO: remove platform specific flags once puffer wheel is built
+# Puffer wheel is having build issues if flag is not set
+
 # Stage 1: Dependency Downloading and building the wheel
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
@@ -10,8 +13,9 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY packages/ ./packages/
-COPY pyproject.toml uv.lock ./
+COPY core/agent/packages/ ./agent/packages/
+COPY core/pyproject.toml core/uv.lock ./
+COPY service/ ../service/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
@@ -25,11 +29,38 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
+<<<<<<< HEAD:core/agent/Dockerfile
 # Copy the application code
 COPY ./app .
 COPY ./scripts ./scripts
 COPY .env.sample .
 
+=======
+# Copy ZeroTier binaries from builder
+COPY --from=builder /usr/sbin/zerotier-one /usr/sbin/zerotier-one
+COPY --from=builder /usr/sbin/zerotier-cli /usr/sbin/zerotier-cli
+COPY --from=builder /usr/sbin/zerotier-idtool /usr/sbin/zerotier-idtool
+
+RUN mkdir -p /var/lib/zerotier-one && \
+    echo '{\n  "settings": {\n    "allowManagementFrom": [ "127.0.0.1", "::1" ]\n  }\n}' > /var/lib/zerotier-one/local.conf
+
+EXPOSE 9993/udp
+
+# Copy the application code preserving the import path (from core.agent.app.*)
+COPY core/agent/app ./core/agent/app
+COPY core/agent/scripts ./core/agent/scripts
+COPY core/agent/.env.sample .
+COPY core/schemas.py ./core/schemas.py
+COPY service/ ../service/
+
+ARG PORT=8080
+ENV PORT=${PORT}
+EXPOSE ${PORT}
+
+COPY core/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+>>>>>>> 8f186b7 (feat(agent): update dockerfile to new file structure):core/Dockerfile
 ARG MODEL_VERSION=""
 ENV MODEL_VERSION=${MODEL_VERSION}
 
