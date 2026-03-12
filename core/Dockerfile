@@ -26,15 +26,15 @@ ARG GAR_STG_READER_KEY=""
 RUN echo ">>> GAR_STG_READER_KEY length: ${#GAR_STG_READER_KEY}" && \
     echo ">>> GAR_STG_READER_KEY first 20 chars: $(echo "${GAR_STG_READER_KEY}" | cut -c1-20)" && \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
-        echo ">>> GAR_STG_READER_KEY is SET"; \
+    echo ">>> GAR_STG_READER_KEY is SET"; \
     else \
-        echo ">>> GAR_STG_READER_KEY is EMPTY — uv sync will run unauthenticated"; \
+    echo ">>> GAR_STG_READER_KEY is EMPTY — uv sync will run unauthenticated"; \
     fi
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
-        export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
-        export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
+    export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
+    export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
     uv sync --frozen --no-dev --no-install-project
 
@@ -63,6 +63,8 @@ COPY core/agent/scripts ./core/agent/scripts
 COPY core/agent/.env.sample .
 COPY core/schemas.py ./core/schemas.py
 COPY service/ ../service/
+COPY domain/ ../domain/
+COPY core/agent/app/data ./app/data
 
 ARG PORT=8080
 ENV PORT=${PORT}
@@ -70,8 +72,5 @@ EXPOSE ${PORT}
 
 COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
-
-ARG MODEL_VERSION=""
-ENV MODEL_VERSION=${MODEL_VERSION}
 
 CMD ["./entrypoint.sh"]
