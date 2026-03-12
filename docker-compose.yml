@@ -91,7 +91,7 @@ services:
     networks:
       - market-network
     volumes:
-      - ./core/agent/.env.a:/app/service.env:rw
+      - ./core/agent/.env.a:/app/.env:rw
       - shared-env:/app/shared-env
     command:
       - sh
@@ -124,7 +124,7 @@ services:
     networks:
       - market-network
     volumes:
-      - ./core/agent/.env.b:/app/service.env:rw
+      - ./core/agent/.env.b:/app/.env:rw
       - shared-env:/app/shared-env
     command:
       - sh
