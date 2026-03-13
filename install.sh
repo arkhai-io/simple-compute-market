@@ -41,6 +41,13 @@ check_command() {
     fi
 }
 
+check_docker_running() {
+    if ! docker info &>/dev/null; then
+        error "Docker daemon is not running. Please start Docker and try again."
+        exit 1
+    fi
+}
+
 check_python_version() {
     local python_cmd=""
     if command -v python3 &>/dev/null; then
@@ -486,6 +493,7 @@ main() {
 
     detect_platform
     check_and_install_dependencies
+    check_docker_running
     check_python_version
     install_uv
     install_repo
