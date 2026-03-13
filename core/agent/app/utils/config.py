@@ -121,7 +121,6 @@ class Config:
     redis_url: str
     redis_channels: str  # comma-separated
     enable_event_queue: bool
-    market_provider: str  # "static" or "redis"
     log_file_path: str | None  # Path to log file, None for default
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
@@ -218,7 +217,6 @@ def load_config() -> Config:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
         redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
         enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
-        market_provider=os.getenv("MARKET_PROVIDER", "static"),
         log_file_path=os.getenv("LOG_FILE_PATH"),  # None if not set
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
