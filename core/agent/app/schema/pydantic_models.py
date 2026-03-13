@@ -39,6 +39,8 @@ class GPUModel(str, Enum):
     H200 = "H200"
     TESLA_V100 = "Tesla V100"
     RTX_5080 = "RTX 5080"
+    RTX_A5000 = "RTX A5000"
+    RTX_4090 = "RTX 4090"
 
 
 class Region(str, Enum):
@@ -125,7 +127,7 @@ class ComputeResource(ComputeDomainResource):
         description="Canonical DB resource identifier for this compute resource",
     )
     gpu_model: GPUModel = Field(
-        description="The model of the GPU (H200, Tesla V100, RTX 5080)"
+        description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
     )
     quantity: int = Field(description="The quantity of the GPU")
     sla: float = Field(description="The SLA of the GPU")
@@ -303,6 +305,10 @@ class MakeOfferEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
+    buyer_order_id: str | None = Field(
+        default=None,
+        description="The buyer's local order_id, echoed back by the seller so the buyer can update their record without a fuzzy DB lookup.",
+    )
 
     @classmethod
     def from_order(cls, order: MarketOrder) -> "MakeOfferEvent":
@@ -390,6 +396,10 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
         default=None,
         description="URL of the compute seller who fulfilled the obligation",
     )
+    tenant_credentials: dict | None = Field(
+        default=None,
+        description="Tenant credentials (password, key_type) for the provisioned VM",
+    )
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
@@ -403,6 +413,7 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             fulfillment_uid=payload.get("fulfillment_uid"),
             connection_details=payload.get("connection_details"),
             fulfilling_party_url=payload.get("fulfilling_party_url"),
+            tenant_credentials=payload.get("tenant_credentials"),
             data=payload,
         )
 

@@ -6,7 +6,8 @@ import logging
 import os
 import aiohttp
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
+
+from service.clients.erc8004.signing import build_order_auth
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +15,26 @@ logger = logging.getLogger(__name__)
 class RegistryClient:
     """Client for interacting with the ERC-8004 registry API."""
 
-    def __init__(self, base_url: str | None = None, timeout: int = 30):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: int = 30,
+        private_key: str | None = None,
+        agent_id: str | None = None,
+    ):
         """Initialize registry client.
 
         Args:
             base_url: Base URL of the registry API (defaults to INDEXER_URL env var)
             timeout: Request timeout in seconds
+            private_key: Agent private key for signing mutations (optional)
+            agent_id: Canonical agent ID used as signer_agent_id on updates (optional)
         """
         self.base_url = (base_url or os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080"))).rstrip('/')
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: Optional[aiohttp.ClientSession] = None
+        self._private_key = private_key or os.getenv("AGENT_PRIV_KEY")
+        self._agent_id = agent_id or os.getenv("AGENT_ID")
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -186,9 +197,12 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
+            payload = dict(order)
+            if self._private_key:
+                payload.update(build_order_auth(self._private_key, "create_order", agent_id))
             async with session.post(
                 f"{self.base_url}/agents/{agent_id}/orders",
-                json=order
+                json=payload
             ) as response:
                 if response.status == 201:
                     return await response.json()
@@ -216,9 +230,13 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
+            payload = dict(updates)
+            if self._private_key and self._agent_id:
+                payload.update(build_order_auth(self._private_key, "update_order", order_id))
+                payload["signer_agent_id"] = self._agent_id
             async with session.put(
                 f"{self.base_url}/orders/{order_id}",
-                json=updates
+                json=payload
             ) as response:
                 if response.status == 200:
                     return await response.json()
@@ -244,7 +262,14 @@ class RegistryClient:
         """
         try:
             session = await self._get_session()
-            async with session.delete(f"{self.base_url}/orders/{order_id}") as response:
+            params = {}
+            if self._private_key:
+                auth = build_order_auth(self._private_key, "delete_order", order_id)
+                params = {"signature": auth["signature"], "timestamp": auth["timestamp"]} if auth else {}
+            async with session.delete(
+                f"{self.base_url}/orders/{order_id}",
+                params=params
+            ) as response:
                 if response.status == 204:
                     return True
                 else:
@@ -312,10 +337,86 @@ class RegistryClient:
 _registry_client: Optional[RegistryClient] = None
 
 
+_ALKAHEST_NETWORK_CHAIN_IDS: dict[str, int] = {
+    "anvil": 31337,
+    "base_sepolia": 84532,
+    "ethereum_sepolia": 11155111,
+    "ethereum_mainnet": 1,
+}
+
+
+def _resolve_canonical_agent_id() -> str | None:
+    """Resolve the full canonical agent ID (eip155:...) for registry signing.
+
+    Resolution order:
+    1. ONCHAIN_AGENT_ID already in canonical format → use as-is.
+    2. Build from ONCHAIN_AGENT_ID + IDENTITY_REGISTRY_ADDRESS + chain ID
+       (chain ID sourced from: CHAIN_ID env → ALKAHEST_NETWORK map → web3 call).
+    3. Fall back to AGENT_ID.
+    """
+    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
+    if not onchain_agent_id:
+        return os.getenv("AGENT_ID")
+
+    if onchain_agent_id.startswith("eip155:"):
+        return onchain_agent_id
+
+    identity_registry = os.getenv("IDENTITY_REGISTRY_ADDRESS")
+    if not identity_registry:
+        logger.warning(
+            "[REGISTRY] IDENTITY_REGISTRY_ADDRESS not set; using raw ONCHAIN_AGENT_ID=%s as signer_agent_id",
+            onchain_agent_id,
+        )
+        return onchain_agent_id
+
+    try:
+        numeric_id = int(onchain_agent_id)
+    except ValueError:
+        return onchain_agent_id
+
+    # Resolve chain ID.
+    chain_id: int | None = None
+    chain_id_env = os.getenv("CHAIN_ID")
+    if chain_id_env:
+        try:
+            chain_id = int(chain_id_env)
+        except ValueError:
+            pass
+    if chain_id is None:
+        chain_id = _ALKAHEST_NETWORK_CHAIN_IDS.get(os.getenv("ALKAHEST_NETWORK", "").lower())
+    if chain_id is None:
+        chain_rpc_url = os.getenv("CHAIN_RPC_URL")
+        if chain_rpc_url:
+            try:
+                from web3 import Web3
+                from web3.providers import HTTPProvider
+                from service.clients.erc8004.blockchain import rpc_url_for_http_provider
+                w3 = Web3(HTTPProvider(rpc_url_for_http_provider(chain_rpc_url), request_kwargs={"timeout": 5}))
+                chain_id = w3.eth.chain_id
+            except Exception as exc:
+                logger.warning("[REGISTRY] Could not resolve chain ID from RPC: %s", exc)
+    if chain_id is None:
+        logger.warning("[REGISTRY] Cannot resolve chain ID; using raw ONCHAIN_AGENT_ID=%s", onchain_agent_id)
+        return onchain_agent_id
+
+    try:
+        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
+        canonical = build_erc8004_canonical_id(chain_id, identity_registry, numeric_id)
+        logger.debug("[REGISTRY] Resolved canonical agent ID: %s", canonical)
+        return canonical
+    except Exception as exc:
+        logger.warning("[REGISTRY] Failed to build canonical ID: %s", exc)
+        return onchain_agent_id
+
+
 def get_registry_client() -> RegistryClient:
     """Get or create global registry client instance."""
     global _registry_client
     if _registry_client is None:
         timeout = int(os.getenv("REGISTRY_ORDER_TIMEOUT", "30"))
-        _registry_client = RegistryClient(timeout=timeout)
+        _registry_client = RegistryClient(
+            timeout=timeout,
+            private_key=os.getenv("AGENT_PRIV_KEY"),
+            agent_id=_resolve_canonical_agent_id(),
+        )
     return _registry_client

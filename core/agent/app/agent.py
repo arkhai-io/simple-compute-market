@@ -125,7 +125,7 @@ configure_default_ingestion(
     is_known_event_type=_is_known_event_type,
 )
 
-ALKAHEST_NETWORK = get_alkahest_network(CONFIG.alkahest_network)
+ALKAHEST_NETWORK = get_alkahest_network(CONFIG.chain_name)
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
@@ -231,13 +231,17 @@ def _extract_content_payload(
             logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
             logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
+            # Tool names that carry event_type inside their payload — not EventType values themselves.
+            # _parse_domain_event already recovers the correct event_type via nested data fallback.
+            _TOOL_NAME_ALIASES = {"counter_offer", "exit_negotiation", "make_offer", "accept_offer"}
             try:
                 EventType(tool_name)
             except ValueError:
-                logger.warning(
-                    f"Unknown event_type from tool '{tool_name}'. "
-                    f"Known types: {[e.value for e in EventType]}"
-                )
+                if tool_name not in _TOOL_NAME_ALIASES:
+                    logger.warning(
+                        f"Unknown event_type from tool '{tool_name}'. "
+                        f"Known types: {[e.value for e in EventType]}"
+                    )
             response_dict = {
                 "source": agent_str,
                 "source_url": payload_dict.get("source")
@@ -280,10 +284,18 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     if not event_type_str:
         raise ValueError("Missing required field: event_type")
     
+    # Tool names that carry the real event_type inside payload["data"] — not EventType values.
+    _TOOL_NAME_ALIASES = {"counter_offer", "exit_negotiation", "make_offer", "accept_offer"}
+
     try:
         event_type = EventType(event_type_str)
     except ValueError:
-        # Unknown event type - log warning and create basic DomainEvent
+        # Unknown event type — check if the actual domain event is nested inside payload["data"].
+        nested = payload.get("data")
+        if isinstance(nested, dict) and nested.get("event_type") and nested.get("event_type") != event_type_str:
+            if event_type_str not in _TOOL_NAME_ALIASES:
+                logger.warning(f"[PARSE DOMAIN EVENT] Unknown event_type '{event_type_str}', retrying with nested data event_type '{nested.get('event_type')}'")
+            return _parse_domain_event(nested)
         logger.warning(f"[PARSE DOMAIN EVENT] Unknown event_type: {event_type_str}, creating basic DomainEvent")
         return DomainEvent.model_validate(payload)
     
@@ -346,7 +358,13 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             
             # Validate MarketOrder (which will validate resources via model_validator)
             order = MarketOrder.model_validate(offer_data)
-            return MakeOfferEvent.from_order(order)
+            event = MakeOfferEvent.from_order(order)
+            # Preserve buyer_order_id echoed back by the seller so the buyer can
+            # find and update their own local order record without a fuzzy lookup.
+            buyer_order_id = offer_data.get("buyer_order_id")
+            if buyer_order_id:
+                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            return event
             
         elif event_type == EventType.ACCEPT_OFFER:
             offer_data = data.get("offer", data)
@@ -386,11 +404,11 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             return ArbitrationCompleteEvent.from_payload(arb_payload)
             
         elif event_type == EventType.NEGOTIATION:
-            # Validate NegotiationEvent with required fields
+            # Validate NegotiationEvent with required fields (these are top-level, not in data)
             required_fields = ["negotiation_id", "message_type", "sender"]
-            missing = [f for f in required_fields if f not in data]
+            missing = [f for f in required_fields if f not in payload]
             if missing:
-                raise ValueError(f"NegotiationEvent missing required fields in data: {missing}")
+                raise ValueError(f"NegotiationEvent missing required fields: {missing}")
             
             return NegotiationEvent.model_validate(payload)
             
@@ -634,11 +652,36 @@ class TraderAgent(BaseAgent):
             thread_store = get_thread_store()
             negotiation_id = domain_event.negotiation_id
             if negotiation_id:
-                negotiation_history = await thread_store.get_thread(negotiation_id)
+                # Fetch thread_info first so our_initial_price is available when recording
+                # the incoming message below (avoids NULL our_price in audit log).
                 thread_info = await thread_store.get_thread_info(
                     negotiation_id=negotiation_id,
-                    owner_id=self.name
+                    owner_id=BASE_URL_OVERRIDE,
                 ) or {}
+
+                # Record the incoming message so the thread_store has bilateral history.
+                # Our own outgoing messages are recorded inside action_executor (counter_offer).
+                # Recording what we receive here completes the audit log for both sides.
+                msg_type = domain_event.message_type
+                sender = domain_event.sender
+                proposed_price = (domain_event.data or {}).get("proposed_price")
+                if (sender and sender != self.name
+                        and proposed_price is not None
+                        and msg_type in ("counter_proposal", "initial_proposal")):
+                    try:
+                        await thread_store.add_message(
+                            negotiation_id=negotiation_id,
+                            sender=sender,
+                            our_price=thread_info.get("our_initial_price"),
+                            their_price=proposed_price,
+                            proposed_price=proposed_price,
+                            action_taken=ActionType.COUNTER_OFFER.value,
+                            message_type=msg_type,
+                        )
+                    except Exception as exc:
+                        logger.debug("[NEGOTIATION] Could not record incoming message: %s", exc)
+
+                negotiation_history = await thread_store.get_thread(negotiation_id)
         
         market_state_with_thread = {**market_state, "thread_info": thread_info}
         
@@ -992,6 +1035,45 @@ alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
 AGENT_REST_API_APP_NAME = "agent-rest-api"
 AGENT_REST_API_USER_ID = "agent-rest-api"
 
+_MAX_TIMESTAMP_SKEW = 300  # seconds
+
+
+def _check_agent_request_auth(request: Request, operation: str, resource_id: str) -> JSONResponse | None:
+    """Verify X-Signature / X-Timestamp headers against the agent's own wallet address.
+
+    Returns a JSONResponse (403) if auth fails, or None to allow the request through.
+    If AGENT_WALLET_ADDRESS is not configured the check is skipped (backward compat).
+    """
+    owner = CONFIG.agent_wallet_address
+    if not owner:
+        return None
+
+    from service.clients.erc8004.signing import verify_eip191
+
+    sig = request.headers.get("X-Signature")
+    ts_raw = request.headers.get("X-Timestamp")
+
+    if not sig or not ts_raw:
+        logger.warning("[AUTH] Missing X-Signature or X-Timestamp on %s request", operation)
+        return JSONResponse({"error": "Missing auth headers"}, status_code=403)
+
+    try:
+        ts = int(ts_raw)
+    except ValueError:
+        return JSONResponse({"error": "Invalid X-Timestamp"}, status_code=403)
+
+    import time as _time
+    if abs(_time.time() - ts) > _MAX_TIMESTAMP_SKEW:
+        logger.warning("[AUTH] Timestamp too old/future for %s", operation)
+        return JSONResponse({"error": "Timestamp out of range"}, status_code=403)
+
+    message = f"{operation}:{resource_id}:{ts}"
+    if not verify_eip191(message, sig, owner):
+        logger.warning("[AUTH] Invalid signature for %s resource=%s", operation, resource_id)
+        return JSONResponse({"error": "Invalid signature"}, status_code=403)
+
+    return None
+
 async def _run_create_order_flow(request: Request) -> dict:
     """
     Internal helper to run the create order flow.
@@ -1256,6 +1338,9 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to create market orders via the root agent.
     """
+    auth_error = _check_agent_request_auth(request, "create_order", BASE_URL_OVERRIDE)
+    if auth_error:
+        return auth_error
 
     try:
         response = await _run_create_order_flow(request)
@@ -1283,6 +1368,15 @@ async def close_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to close market orders via the root agent.
     """
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "close_order", order_id)
+    if auth_error:
+        return auth_error
+
     try:
         response = await _run_close_order_flow(request)
         return JSONResponse(response)
@@ -1413,9 +1507,15 @@ async def _start_heartbeat():
 async def _startup_tasks():
     """Initialize background tasks."""
     from core.agent.app.utils.config import CONFIG
+    from core.agent.app.resource_poller import resource_poller_loop
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
+
+    # Start resource availability poller (all provisioning modes)
+    asyncio.create_task(resource_poller_loop())
+    logger.info("[STARTUP] Resource poller started (mode=%s, interval=%ds)",
+                CONFIG.provisioning_mode, CONFIG.resource_check_interval)
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()

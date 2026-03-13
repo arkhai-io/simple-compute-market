@@ -80,13 +80,6 @@ main() {
         version_label="$CLI_VERSION"
     fi
 
-    echo ""
-    echo "  ┌──────────────────────────────────┐"
-    echo "  │   Market CLI Remote Installer     │"
-    echo "  │   Version: $(printf '%-23s' "$version_label")│"
-    echo "  └──────────────────────────────────┘"
-    echo ""
-
     check_curl_or_wget
 
     # Create temp directory for download and extraction
@@ -106,9 +99,7 @@ main() {
         error "Check that the URL is accessible and try again."
         exit 1
     fi
-    ok "Download complete"
 
-    info "Verifying checksum..."
     local checksum_url="${CF_URL}?version=${version_param}&file=checksum"
     local checksum_path="${TMPDIR_INSTALL}/checksum.sha256"
     if download "$checksum_url" "$checksum_path"; then
@@ -129,12 +120,10 @@ main() {
             error "Got:      $actual_hash"
             exit 1
         fi
-        ok "Checksum verified"
     else
         warn "Checksum file not available — skipping verification"
     fi
 
-    info "Extracting..."
     tar xzf "$tarball_path" -C "$TMPDIR_INSTALL" --no-same-owner --no-same-permissions
 
     # Find the extracted directory
@@ -145,10 +134,8 @@ main() {
         error "Extraction failed or install.sh not found in archive."
         exit 1
     fi
-    ok "Extracted to ${extracted}"
 
     # Run the bundled installer
-    info "Running installer..."
     cd "$extracted"
     bash install.sh "$@"
 }

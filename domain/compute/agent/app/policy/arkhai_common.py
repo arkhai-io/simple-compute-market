@@ -59,9 +59,9 @@ class PolicyEnvStub:
 
 def parse_node_types() -> int:
     try:
-        return max(1, int(os.getenv("ARKHAI_NODE_TYPES", "3")))
+        return max(1, int(os.getenv("ARKHAI_NODE_TYPES", "5")))
     except ValueError:
-        return 3
+        return 5
 
 
 def parse_job_nodes(node_types: int) -> list[float]:
@@ -108,6 +108,8 @@ def parse_gpu_slot_map(node_types: int) -> dict[str, int]:
         GPUModel.H200.value: 0,
         GPUModel.TESLA_V100.value: 1,
         GPUModel.RTX_5080.value: 2,
+        GPUModel.RTX_A5000.value: 3,
+        GPUModel.RTX_4090.value: 4,
     }
     raw = os.getenv("ARKHAI_GPU_SLOT_MAP", "").strip()
     if not raw:
@@ -231,7 +233,12 @@ def get_model(
         return _cache[cache_key]
 
     env_path = os.getenv(env_var_name, "").strip()
-    model_file = Path(env_path) if env_path else default_model_path
+    if env_path:
+        p = Path(env_path)
+        # Resolve relative paths against this module's directory, not CWD
+        model_file = p if p.is_absolute() else Path(__file__).resolve().parent / p
+    else:
+        model_file = default_model_path
     if not model_file.exists():
         logger.warning(
             "[ARKHAI COMMON] Model checkpoint not found at %s. "
@@ -373,6 +380,131 @@ def build_arkhai_observation(
         return obs
     except Exception as exc:
         logger.error("[ARKHAI COMMON] Failed to build observation: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Negotiation observation builder
+# ---------------------------------------------------------------------------
+
+MAX_GPU = 10.0
+_EPISODE_LENGTH = 100.0
+_REQUEST_TIMEOUT = 10.0  # matches negotiation guard max_rounds
+
+
+def build_negotiation_observation(
+    context: DecisionContext,
+    node_types: int = 5,
+) -> Optional[Any]:
+    """Build Arkhai-aligned observation for bilateral negotiation events.
+
+    Maps DecisionContext → (1, 12 + 3*node_types) float32 tensor.
+    Layout mirrors upstream Arkhai compute_observations for the negotiation-
+    specific features; unused cluster/energy dims are zeroed consistently.
+
+    Feature mapping (27 features for node_types=5):
+      0  time_frac               datetime.now().hour / 24.0
+      1  gpu0_total_norm         slot-0 GPU total / MAX_GPU
+      2  gpu0_free_norm          slot-0 GPU free / MAX_GPU (50% estimate)
+      3  gpu1_total_norm         slot-1 GPU total / MAX_GPU
+      4  gpu1_free_norm          slot-1 GPU free / MAX_GPU
+      5  gpu2_total_norm         slot-2 GPU total / MAX_GPU
+      6  gpu2_free_norm          slot-2 GPU free / MAX_GPU
+      7  gpu3_total_norm         slot-3 GPU total / MAX_GPU
+      8  gpu3_free_norm          slot-3 GPU free / MAX_GPU
+      9  gpu4_total_norm         slot-4 GPU total / MAX_GPU
+     10  gpu4_free_norm          slot-4 GPU free / MAX_GPU
+     11  tb_usage_norm           0.0 (not tracked)
+     12  tb_capacity_norm        0.0
+     13  kwh_storage_norm        0.0
+     14  kwh_capacity_norm       0.0
+     15  kw_generation_norm      0.0
+     16  request_gpu0_nodes_norm demand GPU qty / MAX_GPU (slot 0 only)
+     17  request_gpu1_nodes_norm 0.0
+     18  request_gpu2_nodes_norm 0.0
+     19  request_gpu3_nodes_norm 0.0
+     20  request_gpu4_nodes_norm 0.0
+     21  request_tb_norm         0.0
+     22  request_start_norm      round_num / episode_length
+     23  request_duration_norm   order.duration_hours / 168.0 (1 week)
+     24  negotiation_count_norm  round_num / request_timeout (10)
+     25  price_ratio             their_price / our_initial_price, clipped [0, 2]
+     26  prev_reward             0.0
+    """
+    if torch is None:
+        return None
+
+    dim = obs_dim(node_types)
+    observation = torch.zeros((1, dim), dtype=torch.float32)
+    gpu_slot_map = parse_gpu_slot_map(node_types)
+
+    try:
+        # 0: time of day
+        observation[0, 0] = (time.localtime().tm_hour % 24) / 24.0
+
+        # 1-6: cluster GPU totals and free counts per slot
+        totals = [0.0] * node_types
+        frees = [0.0] * node_types
+        from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
+        portfolio = get_compute_resource_portfolio(context)
+        if portfolio is not None:
+            totals, frees = count_nodes_by_slot(portfolio, node_types, gpu_slot_map)
+        for slot in range(node_types):
+            observation[0, 1 + slot * 2] = min(1.0, totals[slot] / MAX_GPU)
+            observation[0, 2 + slot * 2] = min(1.0, frees[slot] / MAX_GPU)
+
+        # 7-11: TB / energy — zeroed (not tracked in negotiation context)
+
+        base = 12  # start of request features
+
+        # 12-14: request GPU nodes by slot (slot 0 from demand resource in thread_info order)
+        thread_info = context.market_state.get("thread_info", {}) if context.market_state else {}
+        order_dict = thread_info.get("order") if thread_info else None
+        request_gpu_qty = 0.0
+        request_gpu_slot = 0
+        if isinstance(order_dict, dict):
+            for res_key in ("offer_resource", "demand_resource"):
+                res = order_dict.get(res_key) or {}
+                if isinstance(res, dict) and "gpu_model" in res:
+                    gpu_name = res.get("gpu_model", "")
+                    slot = gpu_slot_map.get(gpu_name)
+                    if slot is not None:
+                        request_gpu_qty = float(res.get("quantity", 0))
+                        request_gpu_slot = slot
+                    break
+        observation[0, base + request_gpu_slot] = min(1.0, request_gpu_qty / MAX_GPU)
+
+        # 15: request_tb — zeroed
+
+        # 16: request_start_norm — round_num / episode_length
+        negotiation_history = context.negotiation_history or []
+        agent_id = context.agent_id or ""
+        round_num = float(sum(1 for m in negotiation_history if m.get("sender") == agent_id))
+        observation[0, base + node_types + 1] = min(1.0, round_num / _EPISODE_LENGTH)
+
+        # 17: request_duration_norm
+        duration_hours = 0.0
+        if isinstance(order_dict, dict):
+            duration_hours = float(order_dict.get("duration_hours") or 0)
+        observation[0, base + node_types + 2] = min(1.0, duration_hours / 168.0)
+
+        # 18: negotiation_count_norm
+        observation[0, base + node_types + 3] = min(1.0, round_num / _REQUEST_TIMEOUT)
+
+        # 19: price_ratio
+        event_data = context.event.data or {} if context.event else {}
+        their_price = event_data.get("proposed_price")
+        our_initial_price = thread_info.get("our_initial_price") if thread_info else None
+        if their_price is not None and our_initial_price and float(our_initial_price) > 0:
+            price_ratio = float(their_price) / float(our_initial_price)
+            observation[0, base + node_types + 4] = min(2.0, max(0.0, price_ratio))
+
+        # 20: prev_reward — zeroed
+
+        return observation
+
+    except Exception as exc:
+        logger.error("[ARKHAI COMMON] Failed to build negotiation observation: %s", exc)
         return None
 
 

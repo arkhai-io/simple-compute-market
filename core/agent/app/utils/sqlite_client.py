@@ -81,8 +81,8 @@ class SQLiteClient:
                   our_agent_id TEXT,
                   their_agent_id TEXT,
                   status TEXT DEFAULT 'active',
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
+                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   terminal_state TEXT
                 )
                 """
@@ -106,6 +106,18 @@ class SQLiteClient:
                 pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN terminal_state TEXT")
             except sqlite3.OperationalError:
                 pass
             cur.execute(
@@ -214,6 +226,28 @@ class SQLiteClient:
                 )
                 """
             )
+            # Credentials table (off-chain only, never exposed on-chain)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS credentials (
+                  id TEXT PRIMARY KEY,
+                  order_id TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  granted_to TEXT NOT NULL,
+                  password TEXT,
+                  ssh_commands TEXT,
+                  ssh_key_path_host TEXT,
+                  key_type TEXT,
+                  created_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_credentials_order_id ON credentials(order_id)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_credentials_order_granted ON credentials(order_id, granted_to)"
+            )
             # Create indexes
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decisions_event_id ON decisions(event_id)"
@@ -309,7 +343,16 @@ class SQLiteClient:
         if a_dict is None or b_dict is None:
             return False
         try:
-            return json.dumps(a_dict, sort_keys=True) == json.dumps(b_dict, sort_keys=True)
+            # Strip None-valued fields so that a buyer's sparse demand
+            # (resource_id=None, vm_host=None) can match a seller's enriched
+            # offer that has those fields populated.  Every non-null field in
+            # `a` must be present and equal in `b`; extra fields in `b` are
+            # ignored.
+            a_clean = {k: v for k, v in a_dict.items() if v is not None}
+            b_clean = {k: v for k, v in b_dict.items() if v is not None}
+            if not a_clean:
+                return False
+            return all(b_clean.get(k) == v for k, v in a_clean.items())
         except Exception:
             return False
 
@@ -1443,7 +1486,7 @@ class SQLiteClient:
                 cur.execute(
                     """
                     UPDATE negotiation_threads
-                    SET terminal_state = ?, updated_at = ?
+                    SET terminal_state = ?, status = 'terminated', updated_at = ?
                     WHERE negotiation_id = ?
                     """,
                     (terminal_state, datetime.now().isoformat(), negotiation_id),
@@ -1715,21 +1758,22 @@ class SQLiteClient:
 
     async def cancel_negotiations_for_order(
         self, *, order_id: str, except_negotiation_id: str | None = None
-    ) -> list[str]:
+    ) -> list[dict]:
         """Cancel all active negotiations for an order, except the specified one.
-        
+
         Returns:
-            List of canceled negotiation IDs
+            List of dicts with keys: negotiation_id, our_order_id, their_order_id,
+            our_agent_id, their_agent_id — one entry per canceled negotiation.
         """
-        def _cancel() -> list[str]:
+        def _cancel() -> list[dict]:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                
+
                 # Find all active negotiations involving this order
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id, 
+                    SELECT negotiation_id, our_order_id, their_order_id,
                            our_agent_id, their_agent_id
                     FROM negotiation_threads
                     WHERE (our_order_id = ? OR their_order_id = ?)
@@ -1738,10 +1782,11 @@ class SQLiteClient:
                     """,
                     (order_id, order_id, except_negotiation_id or '')
                 )
-                
-                canceled_ids = []
-                for row in cur.fetchall():
-                    neg_id = row[0]
+
+                rows = cur.fetchall()
+                canceled = []
+                for row in rows:
+                    neg_id, our_oid, their_oid, our_aid, their_aid = row
                     cur.execute(
                         """
                         UPDATE negotiation_threads
@@ -1752,13 +1797,19 @@ class SQLiteClient:
                         """,
                         (datetime.now().isoformat(), neg_id)
                     )
-                    canceled_ids.append(neg_id)
-                
+                    canceled.append({
+                        "negotiation_id": neg_id,
+                        "our_order_id": our_oid,
+                        "their_order_id": their_oid,
+                        "our_agent_id": our_aid,
+                        "their_agent_id": their_aid,
+                    })
+
                 conn.commit()
-                return canceled_ids
+                return canceled
             finally:
                 conn.close()
-        
+
         return await asyncio.to_thread(_cancel)
 
     async def cancel_negotiations_for_agent(
@@ -1785,6 +1836,106 @@ class SQLiteClient:
             finally:
                 conn.close()
         await asyncio.to_thread(_cancel)
+
+    async def store_credential(
+        self,
+        *,
+        order_id: str,
+        role: str,
+        granted_to: str,
+        password: str | None = None,
+        ssh_commands: str | None = None,
+        ssh_key_path_host: str | None = None,
+        key_type: str | None = None,
+    ) -> None:
+        """Persist an off-chain credential. INSERT OR IGNORE (idempotent)."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO credentials(
+                      id, order_id, role, granted_to, password,
+                      ssh_commands, ssh_key_path_host, key_type, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        order_id,
+                        role,
+                        granted_to,
+                        password,
+                        ssh_commands,
+                        ssh_key_path_host,
+                        key_type,
+                        datetime.now().isoformat(),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def get_credentials(
+        self,
+        *,
+        order_id: str,
+        granted_to: str,
+    ) -> list[dict[str, Any]]:
+        """Return credential rows for a given order visible to granted_to."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT id, order_id, role, granted_to, password,
+                           ssh_commands, ssh_key_path_host, key_type, created_at
+                    FROM credentials
+                    WHERE order_id = ? AND granted_to = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (order_id, granted_to),
+                )
+                rows = cur.fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "order_id": r[1],
+                        "role": r[2],
+                        "granted_to": r[3],
+                        "password": r[4],
+                        "ssh_commands": r[5],
+                        "ssh_key_path_host": r[6],
+                        "key_type": r[7],
+                        "created_at": r[8],
+                    }
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def get_order_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
+        """Return the order_id for the given escrow_uid, or None if not found."""
+        def _load() -> str | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT order_id FROM orders WHERE escrow_uid = ? LIMIT 1",
+                    (escrow_uid,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
 
 _sqlite_client: SQLiteClient | None = None

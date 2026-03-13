@@ -109,10 +109,10 @@ class Config:
     base_url_override_raw: str
     base_url_override: str
     port: int
+    chain_name: str  # anvil, ethereum_sepolia, base_sepolia, ethereum_mainnet
     chain_rpc_url: str
     agent_priv_key: str
     agent_wallet_address: str
-    alkahest_network: str  # anvil, base_sepolia, ethereum_mainnet
     alkahest_address_config_path: str | None
     use_vertex_ai: bool
     agent_db_path: str
@@ -121,7 +121,6 @@ class Config:
     redis_url: str
     redis_channels: str  # comma-separated
     enable_event_queue: bool
-    market_provider: str  # "static" or "redis"
     log_file_path: str | None  # Path to log file, None for default
     log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     token_registry_path: str
@@ -138,15 +137,31 @@ class Config:
     enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
-    use_mock_provisioning: bool  # USE_MOCK_PROVISIONING - use mock provisioning/scheduling
+    provisioning_mode: str  # PROVISIONING_MODE - "http" | "ansible" | "mock"
+    provisioning_service_url: str  # PROVISIONING_SERVICE_URL
+    provisioning_timeout: int  # PROVISIONING_TIMEOUT
+    provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL
     frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
     frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
-
+    resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
+    default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
+    # Negotiation policy settings
+    negotiation_policy_mode: str  # NEGOTIATION_POLICY_MODE - "bisection" | "rl"
+    arkhai_negotiator_seller_model_path: str  # ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH
+    arkhai_negotiator_buyer_model_path: str  # ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
 )
+
+
+def _resolve_provisioning_mode() -> str:
+    """Resolve PROVISIONING_MODE: "http" | "ansible" | "mock". Defaults to "http"."""
+    mode = os.getenv("PROVISIONING_MODE", "").lower()
+    if mode in ("http", "ansible", "mock"):
+        return mode
+    return "http"
 
 
 def load_config() -> Config:
@@ -194,10 +209,10 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_get_int_env("PORT", 8000),
+        chain_name=os.getenv("CHAIN_NAME", "ethereum_sepolia"),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
-        alkahest_network=os.getenv("ALKAHEST_NETWORK", "base_sepolia"),
         alkahest_address_config_path=os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         agent_db_path=os.getenv("AGENT_DB_PATH", "/tmp/agent.db"),
@@ -206,7 +221,6 @@ def load_config() -> Config:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
         redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
         enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
-        market_provider=os.getenv("MARKET_PROVIDER", "static"),
         log_file_path=os.getenv("LOG_FILE_PATH"),  # None if not set
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
@@ -228,10 +242,25 @@ def load_config() -> Config:
         enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
-        use_mock_provisioning=_get_bool_env("USE_MOCK_PROVISIONING", False),
+        provisioning_mode=_resolve_provisioning_mode(),
+        provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8085"),
+        provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),
+        provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),
         frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
         frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
+        resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
+        default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
+        # Negotiation policy settings
+        negotiation_policy_mode=os.getenv("NEGOTIATION_POLICY_MODE", "bisection").lower(),
+        arkhai_negotiator_seller_model_path=os.getenv(
+            "ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH",
+            "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt",
+        ),
+        arkhai_negotiator_buyer_model_path=os.getenv(
+            "ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH",
+            "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
+        ),
     )
 
 

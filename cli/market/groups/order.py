@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import json
 import textwrap
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -53,7 +54,8 @@ def order_create(
     ),
 ) -> None:
     """Create a new order via the Agent endpoint."""
-    env_base_url = _read_env_value(Path(env), "BASE_URL_OVERRIDE") if env else None
+    env_path = Path(env) if env else None
+    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
     base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     duration = duration_hours if duration_hours is not None else 1
@@ -69,13 +71,17 @@ def order_create(
     if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
         raise typer.BadParameter("Offer and demand must be JSON objects")
 
+    private_key = (
+        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        or os.getenv("AGENT_PRIV_KEY")
+    )
     payload = {
         "offer": offer_data,
         "demand": demand_data,
         "duration_hours": duration,
     }
     url = f"{base_url}/orders/create"
-    response = _post_json(url, payload)
+    response = _post_json(url, payload, _get_auth_headers("create_order", base_url, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -114,16 +120,28 @@ def order_close(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
+    ),
 ) -> None:
     """Close an order via the Agent endpoint."""
-    base_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    env_path = Path(env) if env else None
+    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     if not order_id.strip():
         raise typer.BadParameter("order-id must be a non-empty string")
 
+    private_key = (
+        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        or os.getenv("AGENT_PRIV_KEY")
+    )
     payload = {"order_id": order_id}
     url = f"{base_url}/orders/close"
-    response = _post_json(url, payload)
+    response = _post_json(url, payload, _get_auth_headers("close_order", order_id, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -248,6 +266,12 @@ def order_match(
         "-t",
         help="Order duration in hours (default: from target order or 1).",
     ),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
+    ),
 ) -> None:
     """Match an existing order by flipping offer/demand and creating a new order."""
     if not order_id.strip():
@@ -281,10 +305,16 @@ def order_match(
         "duration_hours": duration,
     }
 
-    base_agent_url = agent_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    env_path = Path(env) if env else None
+    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    base_agent_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_agent_url = _normalize_registry_url(base_agent_url)
+    private_key = (
+        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        or os.getenv("AGENT_PRIV_KEY")
+    )
     create_url = f"{base_agent_url}/orders/create"
-    response = _post_json(create_url, payload)
+    response = _post_json(create_url, payload, _get_auth_headers("create_order", base_agent_url, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -436,6 +466,27 @@ def _format_resource_full(resource: dict | str | None) -> str:
         return str(resource)
 
 
+def _get_auth_headers(operation: str, resource_id: str, private_key: str | None) -> dict[str, str]:
+    """Build X-Signature / X-Timestamp headers for a CLI→agent request.
+
+    Returns an empty dict if no private_key is provided or if eth_account is
+    not installed (request is sent unsigned; the agent will reject it if it
+    requires auth).
+    """
+    if not private_key:
+        return {}
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_defunct
+    except ImportError:
+        return {}
+    ts = int(time.time())
+    message = f"{operation}:{resource_id}:{ts}"
+    msg_hash = encode_defunct(text=message)
+    sig = Account.sign_message(msg_hash, private_key).signature.hex()
+    return {"X-Signature": sig, "X-Timestamp": str(ts)}
+
+
 def _get_cli_http_timeout() -> float:
     raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
     default_value = 120.0
@@ -462,13 +513,16 @@ def _fetch_json(url: str) -> dict:
         raise typer.Exit(code=1)
 
 
-def _post_json(url: str, payload: dict) -> dict:
+def _post_json(url: str, payload: dict, extra_headers: dict[str, str] | None = None) -> dict:
     try:
         data = json.dumps(payload).encode("utf-8")
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
         request = urllib.request.Request(
             url,
             data=data,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=_get_cli_http_timeout()) as response:
