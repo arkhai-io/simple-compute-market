@@ -116,46 +116,7 @@ resolve_command() {
 install_gcloud() {
     info "Installing Google Cloud SDK..."
 
-    local file_name checksum
-    case "${OS}-${ARCH}" in
-        macos-x86_64)
-            file_name="google-cloud-cli-darwin-x86_64.tar.gz"
-            checksum="46d255163f034666940549aace9452d300fce11ca41b6c8a953d50af4301f5fb"
-            ;;
-        macos-arm64)
-            file_name="google-cloud-cli-darwin-arm.tar.gz"
-            checksum="7aec01fcba56ae6d0590ac0ee135401a2f679136d4e11cc6137415e69aa7536a"
-            ;;
-        *)
-            error "No Google Cloud SDK package available for ${OS}-${ARCH}."
-            error "Please install it manually: https://cloud.google.com/sdk/docs/install"
-            exit 1
-            ;;
-    esac
-
-    local tmp_dir
-    tmp_dir="$(mktemp -d)"
-    local archive="$tmp_dir/$file_name"
-
-    curl -#fL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$file_name" -o "$archive"
-
-    # Verify checksum
-    local actual_checksum
-    actual_checksum="$(shasum -a 256 "$archive" | awk '{print $1}')"
-    if [ "$actual_checksum" != "$checksum" ]; then
-        error "Checksum verification failed for $file_name"
-        error "Expected: $checksum"
-        error "Got:      $actual_checksum"
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-    ok "Checksum verified"
-
-    tar -xzf "$archive" -C "$HOME"
-    rm -rf "$tmp_dir"
-
-    # Run the SDK install script (non-interactive)
-    "$HOME/google-cloud-sdk/install.sh" --quiet --path-update=true
+    curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir="$HOME"
 
     export PATH="$HOME/google-cloud-sdk/bin:$PATH"
 
