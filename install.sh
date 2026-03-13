@@ -11,6 +11,21 @@ GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getSe
 DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
 GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
 
+# ── System dependency mapping ─────────────────────────────────
+# Format: "command:apt-package"
+LINUX_SYSTEM_DEPS=(
+    "curl:curl"
+    "rsync:rsync"
+    "git:git"
+    "gcc:build-essential"
+    "g++:build-essential"
+    "make:build-essential"
+    "npm:npm"
+    "docker:docker.io"
+    "python3.12:python3.12"
+)
+LINUX_PYTHON_DEV_PKGS=("python3.12-dev" "software-properties-common")
+
 # ── Color helpers ──────────────────────────────────────────────
 info()  { printf '\033[1;34m[info]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
@@ -73,7 +88,7 @@ detect_platform() {
     esac
 }
 
-# ── Dependency resolution (gcloud & zerotier) ────────────────
+# ── Dependency detection & installation ───────────────────────
 
 # Known install locations to check when a command is not on PATH
 GCLOUD_SEARCH_PATHS=(
@@ -139,30 +154,125 @@ install_zerotier() {
 }
 
 check_and_install_dependencies() {
-    local missing=()
+    # ── Collect everything that's missing ──
+    local display_items=()        # human-readable list for the prompt
+    local missing_apt_cmds=()     # commands to verify after apt install
+    local missing_apt_pkgs=()     # deduplicated apt packages
+    local need_python312=false
+    local need_gcloud=false
+    local need_zerotier=false
+    local has_apt=false
     ZEROTIER_ALREADY_INSTALLED=true
 
+    # -- System packages (Linux only) --
+    if [ "$OS" = "linux" ]; then
+        if command -v apt-get &>/dev/null; then
+            has_apt=true
+        else
+            warn "apt-get not found -- cannot auto-install system packages on this distro."
+        fi
+
+        if [ "$has_apt" = true ]; then
+            for entry in "${LINUX_SYSTEM_DEPS[@]}"; do
+                local cmd="${entry%%:*}"
+                local pkg="${entry##*:}"
+
+                if ! command -v "$cmd" &>/dev/null; then
+                    missing_apt_cmds+=("$cmd")
+                    # Deduplicate packages
+                    local already=false
+                    for p in "${missing_apt_pkgs[@]+"${missing_apt_pkgs[@]}"}"; do
+                        [ "$p" = "$pkg" ] && already=true && break
+                    done
+                    if [ "$already" = false ]; then
+                        missing_apt_pkgs+=("$pkg")
+                        display_items+=("$pkg (apt)")
+                    fi
+                    [ "$cmd" = "python3.12" ] && need_python312=true
+                fi
+            done
+
+            # Extra packages for python3.12
+            if [ "$need_python312" = true ]; then
+                for extra in "${LINUX_PYTHON_DEV_PKGS[@]}"; do
+                    local already=false
+                    for p in "${missing_apt_pkgs[@]+"${missing_apt_pkgs[@]}"}"; do
+                        [ "$p" = "$extra" ] && already=true && break
+                    done
+                    if [ "$already" = false ]; then
+                        missing_apt_pkgs+=("$extra")
+                        display_items+=("$extra (apt)")
+                    fi
+                done
+            fi
+        fi
+
+    elif [ "$OS" = "macos" ]; then
+        local mac_missing=()
+        for entry in "${LINUX_SYSTEM_DEPS[@]}"; do
+            local cmd="${entry%%:*}"
+            if ! command -v "$cmd" &>/dev/null; then
+                mac_missing+=("$cmd")
+            fi
+        done
+
+        if [ ${#mac_missing[@]} -gt 0 ]; then
+            echo ""
+            error "The following required commands are missing:"
+            for cmd in "${mac_missing[@]}"; do
+                echo "  - $cmd"
+            done
+            echo ""
+            if command -v brew &>/dev/null; then
+                info "You can install them with Homebrew, e.g.:"
+                echo "    brew install ${mac_missing[*]}"
+            else
+                info "Install Homebrew (https://brew.sh) and then install the missing commands."
+            fi
+            exit 1
+        fi
+    fi
+
+    # -- gcloud --
     if ! resolve_command gcloud "${GCLOUD_SEARCH_PATHS[@]}"; then
-        missing+=("Google Cloud SDK (gcloud)")
+        need_gcloud=true
+        display_items+=("Google Cloud SDK (gcloud)")
     else
         ok "gcloud found ($(command -v gcloud))"
     fi
 
+    # -- zerotier --
     if ! resolve_command zerotier-cli "${ZEROTIER_SEARCH_PATHS[@]}"; then
-        missing+=("ZeroTier (zerotier-cli)")
+        need_zerotier=true
         ZEROTIER_ALREADY_INSTALLED=false
+        display_items+=("ZeroTier (zerotier-cli)")
     else
         ok "zerotier-cli found ($(command -v zerotier-cli))"
     fi
 
-    if [ ${#missing[@]} -eq 0 ]; then
+    # ── Nothing missing → done ──
+    if [ ${#display_items[@]} -eq 0 ]; then
+        ok "All dependencies are present."
         return
     fi
 
+    # ── Sudo check (Linux, before prompting) ──
+    if [ "$OS" = "linux" ] && [ ${#missing_apt_pkgs[@]} -gt 0 ]; then
+        if ! command -v sudo &>/dev/null; then
+            if [ "$(id -u)" -ne 0 ]; then
+                error "'sudo' is not installed and you are not root."
+                error "Please run this script as root or install sudo first: apt-get install sudo"
+                exit 1
+            fi
+            sudo() { "$@"; }
+        fi
+    fi
+
+    # ── Single prompt for everything ──
     echo ""
-    warn "The following required dependencies are not found:"
-    for dep in "${missing[@]}"; do
-        echo "  - $dep"
+    warn "The following dependencies need to be installed:"
+    for item in "${display_items[@]}"; do
+        echo "  - $item"
     done
     echo ""
 
@@ -176,12 +286,41 @@ check_and_install_dependencies() {
     esac
     echo ""
 
-    for dep in "${missing[@]}"; do
-        case "$dep" in
-            *gcloud*)    install_gcloud ;;
-            *zerotier*)  install_zerotier ;;
-        esac
-    done
+    # ── Install system packages via apt ──
+    if [ ${#missing_apt_pkgs[@]} -gt 0 ]; then
+        info "Updating package lists..."
+        sudo apt-get update -y
+
+        if [ "$need_python312" = true ]; then
+            if ! command -v add-apt-repository &>/dev/null; then
+                info "Installing software-properties-common for PPA support..."
+                sudo apt-get install -y software-properties-common
+            fi
+            info "Adding deadsnakes PPA for Python 3.12..."
+            sudo add-apt-repository -y ppa:deadsnakes/ppa
+            sudo apt-get update -y
+        fi
+
+        info "Installing packages: ${missing_apt_pkgs[*]}"
+        sudo apt-get install -y "${missing_apt_pkgs[@]}"
+
+        # Verify
+        local still_missing=()
+        for cmd in "${missing_apt_cmds[@]}"; do
+            if ! command -v "$cmd" &>/dev/null; then
+                still_missing+=("$cmd")
+            fi
+        done
+        if [ ${#still_missing[@]} -gt 0 ]; then
+            error "The following commands are still not available after installation: ${still_missing[*]}"
+            exit 1
+        fi
+        ok "System packages installed successfully."
+    fi
+
+    # ── Install gcloud & zerotier ──
+    [ "$need_gcloud" = true ]   && install_gcloud
+    [ "$need_zerotier" = true ] && install_zerotier
 }
 
 # ── Install uv ────────────────────────────────────────────────
@@ -346,8 +485,6 @@ main() {
     echo ""
 
     detect_platform
-    check_command docker
-    check_command make
     check_and_install_dependencies
     check_python_version
     install_uv
