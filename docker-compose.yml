@@ -71,70 +71,70 @@ services:
       start_period: 10s
 
   # 4. A2A Agent service
-  buy_agent:
-    # build:
-    #   context: ./core
-    #   dockerfile: Dockerfile
-    image: test-agent
-    platform: linux/amd64
-    container_name: market-agent-buy
-    depends_on:
-      registry:
-        condition: service_healthy
-    ports:
-      - "8000:8080"
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    networks:
-      - market-network
-    volumes:
-      - ./core/agent/.env.a:/app/.env:rw
-      - shared-env:/app/shared-env
-    command:
-      - sh
-      - -lc
-      - |
-        set -ae
-        . /app/service.env
-        . /app/shared-env/.env
-        set +a
-        exec ./entrypoint.sh
+  # buy_agent:
+  #   # build:
+  #   #   context: ./core
+  #   #   dockerfile: Dockerfile
+  #   image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:latest
+  #   platform: linux/amd64
+  #   container_name: market-agent-buy
+  #   depends_on:
+  #     registry:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8000:8080"
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - SYS_MODULE
+  #   devices:
+  #     - /dev/net/tun:/dev/net/tun
+  #   networks:
+  #     - market-network
+  #   volumes:
+  #     - ./core/agent/.env.a:/app/.env:rw
+  #     - shared-env:/app/shared-env
+  #   command:
+  #     - sh
+  #     - -lc
+  #     - |
+  #       set -ae
+  #       . /app/service.env
+  #       . /app/shared-env/.env
+  #       set +a
+  #       exec ./entrypoint.sh
 
-  # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
-  sell_agent:
+  # # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
+  # sell_agent:
     # build:
     #   context: ./core
     #   dockerfile: Dockerfile
-    image: test-agent
-    platform: linux/amd64
-    container_name: market-agent-sell
-    depends_on:
-      registry:
-        condition: service_healthy
-    ports:
-      - "8001:8080"
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    networks:
-      - market-network
-    volumes:
-      - ./core/agent/.env.b:/app/.env:rw
-      - shared-env:/app/shared-env
-    command:
-      - sh
-      - -lc
-      - |
-        set -ae
-        . /app/service.env
-        . /app/shared-env/.env
-        set +a
-        exec ./entrypoint.sh
+    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:latest
+    # platform: linux/amd64
+    # container_name: market-agent-sell
+    # depends_on:
+    #   registry:
+    #     condition: service_healthy
+    # ports:
+    #   - "8001:8080"
+    # cap_add:
+    #   - NET_ADMIN
+    #   - SYS_MODULE
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
+    # networks:
+    #   - market-network
+    # volumes:
+    #   - ./core/agent/.env.b:/app/.env:rw
+    #   - shared-env:/app/shared-env
+    # command:
+    #   - sh
+    #   - -lc
+    #   - |
+    #     set -ae
+    #     . /app/service.env
+    #     . /app/shared-env/.env
+    #     set +a
+    #     exec ./entrypoint.sh
 
 networks:
   market-network:
