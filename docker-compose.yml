@@ -36,28 +36,34 @@ services:
       - contracts-deployments:/app/deployments
       - shared-env:/app/shared-env
     command: >
-      sh -lc "
-      npm run deploy:anvil
+      sh -c "
+      mkdir -p /app/shared-env &&
+      npm run deploy:anvil 2>&1 | tee /tmp/deploy.log &&
+      IDENTITY_ADDR=$$(grep 'IdentityRegistry deployed to:' /tmp/deploy.log | awk '{print $$NF}') &&
+      echo IDENTITY_REGISTRY_ADDRESS=$$IDENTITY_ADDR > $$ENV_FILE &&
+      echo REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF >> $$ENV_FILE &&
+      echo VALIDATION_REGISTRY_ADDRESS=0x8004C269D0A5647E51E121FeB226200ECE932d55 >> $$ENV_FILE &&
+      echo Wrote contract addresses to $$ENV_FILE &&
+      cat $$ENV_FILE
       "
 
   # # 3. Registry/Indexer service
   registry:
-    image: whitewidget/arkhai-erc-8004-registry:latest
+    image: us-east4-docker.pkg.dev/ww-migration-arkhai/erc-8004-registry/erc-8004-registry-py:latest
     depends_on:
       contracts-deploy:
         condition: service_completed_successfully
     ports:
       - "8080:8080"
+    env_file:
+      - ./erc-8004-registry-py/.env
     volumes:
-      - ./erc-8004-registry-py/.env:/app/service.env:ro
       - shared-env:/app/shared-env
-
     networks:
       - market-network
 
     command: >
       sh -lc "set -a;
-      . /app/service.env;
       . /app/shared-env/.env;
       set +a;
       exec uv run uvicorn src.main:app --host 0.0.0.0 --port 8080"
@@ -70,79 +76,137 @@ services:
       retries: 3
       start_period: 10s
 
-  # 4. A2A Agent service
-  # buy_agent:
-  #   # build:
-  #   #   context: ./core
-  #   #   dockerfile: Dockerfile
-  #   image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:latest
-  #   platform: linux/amd64
-  #   container_name: market-agent-buy
-  #   depends_on:
-  #     registry:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8000:8080"
-  #   cap_add:
-  #     - NET_ADMIN
-  #     - SYS_MODULE
-  #   devices:
-  #     - /dev/net/tun:/dev/net/tun
-  #   networks:
-  #     - market-network
-  #   volumes:
-  #     - ./core/agent/.env.a:/app/.env:rw
-  #     - shared-env:/app/shared-env
-  #   command:
-  #     - sh
-  #     - -lc
-  #     - |
-  #       set -ae
-  #       . /app/service.env
-  #       . /app/shared-env/.env
-  #       set +a
-  #       exec ./entrypoint.sh
+  # 4. Buyer agent (Alice)
+  buy_agent:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    platform: linux/amd64
+    container_name: market-agent-buy
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8000:8080"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ./core/agent/.env.alice.local
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs from env file
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+      # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
+      - INDEXER_URL=http://host.docker.internal:8080
+      - CHAIN_RPC_URL=ws://anvil:8545
+    volumes:
+      - shared-env:/app/shared-env
+      - zerotier-buy:/var/lib/zerotier-one
+    networks:
+      - market-network
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        exec ./entrypoint.sh
 
-  # # # 5. A2A Agent service for sellers (optional, can be similar to buy_agent with different env)
-  # sell_agent:
-    # build:
-    #   context: ./core
-    #   dockerfile: Dockerfile
-    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:latest
-    # platform: linux/amd64
-    # container_name: market-agent-sell
-    # depends_on:
-    #   registry:
-    #     condition: service_healthy
-    # ports:
-    #   - "8001:8080"
-    # cap_add:
-    #   - NET_ADMIN
-    #   - SYS_MODULE
-    # devices:
-    #   - /dev/net/tun:/dev/net/tun
-    # networks:
-    #   - market-network
-    # volumes:
-    #   - ./core/agent/.env.b:/app/.env:rw
-    #   - shared-env:/app/shared-env
-    # command:
-    #   - sh
-    #   - -lc
-    #   - |
-    #     set -ae
-    #     . /app/service.env
-    #     . /app/shared-env/.env
-    #     set +a
-    #     exec ./entrypoint.sh
+  # 5. Seller agent (Bob)
+  sell_agent:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    platform: linux/amd64
+    container_name: market-agent-sell
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8001:8080"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ./core/agent/.env.bob.local
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs from env file
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+      # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
+      - INDEXER_URL=http://host.docker.internal:8080
+      - CHAIN_RPC_URL=ws://anvil:8545
+    volumes:
+      - shared-env:/app/shared-env
+      - zerotier-sell:/var/lib/zerotier-one
+    networks:
+      - market-network
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        echo "Importing seller resources..."
+        PYTHONPATH="/:/app:/app/core/agent" uv run python core/agent/scripts/import_resources_csv.py \
+          --csv core/agent/app/data/ww1-machine.csv \
+          --db-path "${AGENT_DB_PATH:-/app/agent.db}"
+        exec ./entrypoint.sh
+
+  # 6. Redis (job queue for provisioning service)
+  redis:
+    image: redis:7-alpine
+    container_name: market-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - market-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # 7. Async provisioning service
+  provisioning:
+    build:
+      context: .
+      dockerfile: async-provisioning-service/Dockerfile
+    container_name: market-provisioning
+    depends_on:
+      redis:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    env_file:
+      - ./async-provisioning-service/.env.sample
+    environment:
+      - DATABASE_URL=sqlite:///provisioning.db
+      - REDIS_URL=redis://redis:6379/0
+      - REGISTRY_URL=http://registry:8080
+      - ENABLE_AUTH=false
+    networks:
+      - market-network
+    restart: unless-stopped
 
 networks:
   market-network:
     driver: bridge
-    
+
 
 volumes:
   contracts-artifacts:
   contracts-deployments:
   registry-data:
   shared-env:
+  zerotier-buy:
+  zerotier-sell:

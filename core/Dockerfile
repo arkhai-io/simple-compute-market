@@ -1,19 +1,18 @@
 # @TODO: remove platform specific flags once puffer wheel is built
 # Puffer wheel is having build issues if flag is not set
 
-# Stage 1: Dependency Downloading and building the wheel
+# Stage 1: Install Python dependencies using uv
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
-FROM python:3.12-slim
-
-#This installs the dependencies to a cache layer so they don't need to be redownloaded every docker build
-#The output is a cache of the .venv folder
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+
+RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY core/pyproject.toml core/uv.lock ./
+COPY core/agent/packages/ ./agent/packages/
 COPY service/ ../service/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
@@ -43,20 +42,17 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-<<<<<<< HEAD:core/agent/Dockerfile
-# Copy the application code
-COPY ./app .
-COPY ./scripts ./scripts
-COPY .env.sample .
-
-=======
-# Copy ZeroTier binaries from builder
-COPY --from=builder /usr/sbin/zerotier-one /usr/sbin/zerotier-one
-COPY --from=builder /usr/sbin/zerotier-cli /usr/sbin/zerotier-cli
-COPY --from=builder /usr/sbin/zerotier-idtool /usr/sbin/zerotier-idtool
+# Install ZeroTier
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod && \
+    curl -s https://install.zerotier.com | bash && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/lib/zerotier-one && \
-    echo '{\n  "settings": {\n    "allowManagementFrom": [ "127.0.0.1", "::1" ]\n  }\n}' > /var/lib/zerotier-one/local.conf
+    printf '{\n  "settings": {\n    "allowManagementFrom": [ "127.0.0.1", "::1" ]\n  }\n}\n' \
+      > /var/lib/zerotier-one/local.conf && \
+    # Remove any identity generated during install so each container gets a unique node ID
+    rm -f /var/lib/zerotier-one/identity.public /var/lib/zerotier-one/identity.secret
 
 EXPOSE 9993/udp
 
@@ -65,6 +61,7 @@ COPY core/agent/app ./core/agent/app
 COPY core/agent/scripts ./core/agent/scripts
 COPY core/agent/.env.sample .
 COPY core/schemas.py ./core/schemas.py
+COPY domain/ ./domain/
 COPY service/ ../service/
 
 ARG PORT=8080
@@ -74,18 +71,7 @@ EXPOSE ${PORT}
 COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
->>>>>>> 8f186b7 (feat(agent): update dockerfile to new file structure):core/Dockerfile
 ARG MODEL_VERSION=""
 ENV MODEL_VERSION=${MODEL_VERSION}
 
-EXPOSE 8080
-
-<<<<<<< HEAD:core/agent/Dockerfile
-CMD ["uv", "run", "uvicorn", "core.agent.app.server:app", "--host", "0.0.0.0", "--port", "8080"]
-=======
-# This needs to be patched to a valid cmd. I was digging through the makefile for targets but it isn't clear what I should run.
-# The contents of make serve-a2a are too complicated for a cmd.
-# I could convert it to a shell script and run that but the functionality of the target appears to me like it should be part of the Python code.
-CMD ["python", "-m", "uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8080"]
-# CMD ["sleep", "infinity"]
->>>>>>> 7e79935 (feat(docker): update agent dockerfile and create docker-compose):agent/Dockerfile
+CMD ["./entrypoint.sh"]
