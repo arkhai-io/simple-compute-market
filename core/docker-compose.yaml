@@ -1,7 +1,6 @@
 services:
   agent:
-    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.2
-    image: test-agent
+    # image: us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:latest
     # build: .
     platform: linux/amd64
     network_mode: host
