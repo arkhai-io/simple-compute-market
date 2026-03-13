@@ -392,13 +392,16 @@ install_repo() {
 
 install_cli() {
     local cli_dir="$INSTALL_DIR/cli"
+    local core_dir="$INSTALL_DIR/core"
+    local core_venv="$core_dir/.venv"
 
-    info "Setting up Python environment..."
-    cd "$cli_dir"
-    uv venv
-    uv pip install -q -e .
+    info "Installing CLI into core venv..."
+    if [ ! -d "$core_venv" ]; then
+        uv --project "$core_dir" sync --no-dev -q
+    fi
+    uv pip install -q --python "$core_venv/bin/python" -e "$cli_dir"
 
-    ok "CLI installed in $cli_dir/.venv"
+    ok "CLI installed into $core_venv"
 }
 
 # ── Create symlink and set up PATH ────────────────────────────
