@@ -13,6 +13,10 @@ def test_rpc_url_wss_to_https():
     assert rpc_url_for_http_provider("wss://mainnet.infura.io/ws/v3/abc") == "https://mainnet.infura.io/v3/abc"
 
 
+def test_rpc_url_wss_no_path():
+    assert rpc_url_for_http_provider("wss://ethereum-sepolia-rpc.publicnode.com") == "https://ethereum-sepolia-rpc.publicnode.com"
+
+
 def test_rpc_url_http_unchanged():
     assert rpc_url_for_http_provider("http://localhost:8545") == "http://localhost:8545"
 

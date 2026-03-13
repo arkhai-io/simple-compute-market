@@ -125,7 +125,7 @@ configure_default_ingestion(
     is_known_event_type=_is_known_event_type,
 )
 
-ALKAHEST_NETWORK = get_alkahest_network(CONFIG.alkahest_network)
+ALKAHEST_NETWORK = get_alkahest_network(CONFIG.chain_name)
 
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
