@@ -10,12 +10,7 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 
-try:
-    from eth_account import Account
-    from eth_account.messages import encode_defunct
-    HAS_ETH_ACCOUNT = True
-except ImportError:
-    HAS_ETH_ACCOUNT = False
+from .signing import sign_eip191
 
 # Try to use aiohttp for async HTTP, fallback to urllib
 try:
@@ -35,7 +30,6 @@ async def send_heartbeat(
     agent_id: str,
     indexer_url: str,
     private_key: Optional[str] = None,
-    owner_address: Optional[str] = None
 ) -> bool:
     """
     Send heartbeat to Indexer to indicate agent is alive.
@@ -46,7 +40,6 @@ async def send_heartbeat(
         agent_id: Agent ID (from Indexer registration)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeat (optional if agent has no owner)
-        owner_address: Owner wallet address (optional, used for logging)
 
     Returns:
         True if successful, False otherwise
@@ -57,24 +50,12 @@ async def send_heartbeat(
         # Prepare request body with signature if private key is available
         body = {}
         if private_key:
-            if not HAS_ETH_ACCOUNT:
-                logger.warning("[HEARTBEAT] eth_account not available, sending heartbeat without signature")
+            message = f"heartbeat:{agent_id}:{timestamp}"
+            signature = sign_eip191(private_key, message)
+            if signature:
+                body = {"signature": signature, "timestamp": timestamp}
             else:
-                try:
-                    # Construct message to sign
-                    message = f"heartbeat:{agent_id}:{timestamp}"
-
-                    # Sign message using EIP-191 personal sign format
-                    message_hash = encode_defunct(text=message)
-                    signed_message = Account.sign_message(message_hash, private_key)
-                    signature = signed_message.signature.hex()
-
-                    body = {
-                        "signature": signature,
-                        "timestamp": timestamp
-                    }
-                except Exception as e:
-                    logger.warning(f"[HEARTBEAT] Failed to sign heartbeat: {e}")
+                logger.warning("[HEARTBEAT] Signing unavailable, sending heartbeat without signature")
 
         # URL-encode the agent_id for use in path parameter (handles canonical IDs with colons)
         encoded_agent_id = urllib.parse.quote(agent_id, safe='')
@@ -146,7 +127,6 @@ async def heartbeat_loop(
     agent_id: Optional[str],
     indexer_url: str,
     private_key: Optional[str] = None,
-    owner_address: Optional[str] = None
 ):
     """
     Background task to periodically send heartbeats to Indexer.
@@ -155,7 +135,6 @@ async def heartbeat_loop(
         agent_id: Agent ID from registration (None if not registered)
         indexer_url: Indexer API URL
         private_key: Private key for signing heartbeats (optional)
-        owner_address: Owner wallet address (optional, for logging)
     """
     if agent_id is None:
         logger.debug("[HEARTBEAT] No agent ID, skipping heartbeat loop")
@@ -170,7 +149,7 @@ async def heartbeat_loop(
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)
-            success = await send_heartbeat(agent_id, indexer_url, private_key, owner_address)
+            success = await send_heartbeat(agent_id, indexer_url, private_key)
             if success:
                 logger.debug(f"[HEARTBEAT] Heartbeat sent successfully")
         except asyncio.CancelledError:
@@ -234,6 +213,6 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
         agent_id=agent_id,
     )
 
-    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key, agent_wallet_address))
+    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key))
     logger.info(f"[HEARTBEAT] Started heartbeat for {canonical_id}")
     return agent_wallet_address

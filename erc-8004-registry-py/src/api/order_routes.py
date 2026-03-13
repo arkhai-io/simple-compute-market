@@ -1,6 +1,7 @@
 """Market order-related API routes."""
 
 import logging
+import time
 from typing import Optional
 from datetime import datetime
 
@@ -16,7 +17,15 @@ from src.api.utils import (
     validate_order_status,
     matches_resource_filters,
     find_symmetric_order,
+    verify_order_signature,
 )
+
+_MAX_TIMESTAMP_SKEW = 300  # 5 minutes
+
+
+def _check_timestamp(timestamp: int) -> None:
+    if abs(int(time.time()) - timestamp) > _MAX_TIMESTAMP_SKEW:
+        raise HTTPException(status_code=401, detail="Timestamp too old or too far in future (max 5 minutes)")
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,10 +41,20 @@ async def publish_order(
     agent = find_agent_by_id(db, agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    
+
+    # Verify signature if agent has an owner
+    signature = order_data.pop("signature", None)
+    timestamp = order_data.pop("timestamp", None)
+    if agent.owner:
+        if not signature or timestamp is None:
+            raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated agents")
+        _check_timestamp(timestamp)
+        if not verify_order_signature("create_order", agent.agent_id, timestamp, signature, agent.owner):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
     # Use canonical agent_id for FK in MarketOrder
     agent_id_for_order = agent.agent_id
-    
+
     # Extract order fields
     order_id = order_data.get("order_id")
     if not order_id:
@@ -173,10 +192,36 @@ async def update_order(
 ):
     """Update an order (e.g., mark as accepted). Also updates the corresponding symmetric order."""
     order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
-    
+
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
+    # Verify signature if the maker agent has an owner
+    signature = updates.pop("signature", None)
+    timestamp = updates.pop("timestamp", None)
+    signer_agent_id = updates.pop("signer_agent_id", None)
+
+    maker_agent = find_agent_by_id(db, order.agent_id)
+    if maker_agent and maker_agent.owner:
+        if not signature or timestamp is None or not signer_agent_id:
+            raise HTTPException(
+                status_code=401,
+                detail="signature, timestamp, and signer_agent_id required for authenticated orders"
+            )
+        _check_timestamp(timestamp)
+
+        signer_agent = find_agent_by_id(db, signer_agent_id)
+        if not signer_agent or not signer_agent.owner:
+            raise HTTPException(status_code=403, detail="Signer agent not registered or has no owner")
+
+        is_maker = (signer_agent.agent_id == order.agent_id)
+        # A new taker can claim an unmatched order; once a taker is set only the maker can update
+        if not is_maker and order.order_taker is not None:
+            raise HTTPException(status_code=403, detail="Only the order maker can update after a taker is assigned")
+
+        if not verify_order_signature("update_order", order_id, timestamp, signature, signer_agent.owner):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
     original_order_maker = order.order_maker
     original_offer_resource = order.offer_resource
     original_demand_resource = order.demand_resource
@@ -251,15 +296,25 @@ async def get_order(
 @router.delete("/orders/{order_id}", status_code=204)
 async def delete_order(
     order_id: str = Path(..., description="Order ID"),
+    signature: Optional[str] = Query(None, description="EIP-191 signature"),
+    timestamp: Optional[int] = Query(None, description="Unix timestamp of signature"),
     db: Session = Depends(get_db),
 ):
-    """Remove an order from the registry"""
+    """Remove an order from the registry. Requires signature from the order maker's owner."""
     order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
-    
+
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
+    maker_agent = find_agent_by_id(db, order.agent_id)
+    if maker_agent and maker_agent.owner:
+        if not signature or timestamp is None:
+            raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated orders")
+        _check_timestamp(timestamp)
+        if not verify_order_signature("delete_order", order_id, timestamp, signature, maker_agent.owner):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
     db.delete(order)
     db.commit()
-    
+
     return None
