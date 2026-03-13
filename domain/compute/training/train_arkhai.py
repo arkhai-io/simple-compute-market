@@ -32,6 +32,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,6 +68,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Number of vec envs (default: from puffer arkhai config)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to .ini config file to layer over pufferlib defaults.",
     )
     parser.add_argument(
         "--wandb",
@@ -118,6 +125,24 @@ def main() -> None:
         puffer_args = load_config("puffer_arkhai")
     finally:
         sys.argv = saved_argv
+    
+    # Layer our .ini on top of pufferlib package defaults
+    if args.config:
+        import configparser
+        ini = configparser.ConfigParser()
+        ini.read(args.config)
+        for section in ("env", "vec"):
+            if ini.has_section(section):
+                for key, raw in ini.items(section):
+                    val: Any = raw
+                    try:
+                        val = int(raw)
+                    except ValueError:
+                        try:
+                            val = float(raw)
+                        except ValueError:
+                            pass
+                    puffer_args.setdefault(section, {})[key] = val
 
     # Single-agent mode: ai_sellers=1, scripted_buyers=1 (ini defaults).
     # Bilateral (ai_buyers=1) is intentionally disabled: pufferlib's C env

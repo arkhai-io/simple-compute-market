@@ -67,6 +67,11 @@ def policy_train(
         "--wandb-group",
         help="W&B run group.",
     ),
+    config: Optional[str] = typer.Option(
+        None,
+        "--config",
+        help="Path to .ini config file. Defaults to bilateral.ini in domain/compute/training/config/.",
+    ),
 ) -> None:
     """Train bilateral Arkhai negotiation models (seller + buyer).
 
@@ -78,6 +83,8 @@ def policy_train(
     Requires the core venv (pufferlib installed there):
       cd core && uv sync --dev
     """
+    config_path = Path(config).resolve() if config else _CONFIG_DIR / "bilateral.ini"
+
     cmd = [
         "python",
         str(_TRAIN_SCRIPT),
@@ -89,6 +96,8 @@ def policy_train(
         cmd += ["--device", device]
     if wandb:
         cmd += ["--wandb", "--wandb-project", wandb_project, "--wandb-group", wandb_group]
+    if config_path.exists():
+        cmd += ["--config", str(config_path)]
 
     run_step(
         f"Train bilateral Arkhai negotiation models ({total_timesteps:,} steps)",
