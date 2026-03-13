@@ -14,12 +14,12 @@ def test_get_alkahest_network_default(monkeypatch):
 
 def test_get_alkahest_network_invalid():
     from service.clients.alkahest import get_alkahest_network
-    with pytest.raises(ValueError, match="Unsupported ALKAHEST_NETWORK"):
+    with pytest.raises(ValueError, match="Unsupported CHAIN_NAME"):
         get_alkahest_network("unknown_network")
 
 
 def test_get_trusted_oracle_arbiter_base_sepolia(monkeypatch):
-    monkeypatch.setenv("ALKAHEST_NETWORK", "base_sepolia")
+    monkeypatch.setenv("CHAIN_NAME","base_sepolia")
     monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
     from service.clients.alkahest import get_trusted_oracle_arbiter
     import importlib, service.clients.alkahest as alc
@@ -30,7 +30,7 @@ def test_get_trusted_oracle_arbiter_base_sepolia(monkeypatch):
 
 
 def test_get_trusted_oracle_arbiter_ethereum_mainnet(monkeypatch):
-    monkeypatch.setenv("ALKAHEST_NETWORK", "ethereum_mainnet")
+    monkeypatch.setenv("CHAIN_NAME","ethereum_mainnet")
     monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
     from service.clients.alkahest import get_trusted_oracle_arbiter
     import service.clients.alkahest as alc

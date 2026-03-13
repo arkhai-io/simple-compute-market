@@ -109,10 +109,10 @@ class Config:
     base_url_override_raw: str
     base_url_override: str
     port: int
+    chain_name: str  # anvil, ethereum_sepolia, base_sepolia, ethereum_mainnet
     chain_rpc_url: str
     agent_priv_key: str
     agent_wallet_address: str
-    alkahest_network: str  # anvil, base_sepolia, ethereum_mainnet
     alkahest_address_config_path: str | None
     use_vertex_ai: bool
     agent_db_path: str
@@ -205,10 +205,10 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_get_int_env("PORT", 8000),
+        chain_name=os.getenv("CHAIN_NAME", "ethereum_sepolia"),
         chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
-        alkahest_network=os.getenv("ALKAHEST_NETWORK", "base_sepolia"),
         alkahest_address_config_path=os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"),
         use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         agent_db_path=os.getenv("AGENT_DB_PATH", "/tmp/agent.db"),

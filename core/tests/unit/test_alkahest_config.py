@@ -19,7 +19,7 @@ def test_get_alkahest_network_defaults_to_base_sepolia() -> None:
 
 
 def test_get_alkahest_network_rejects_unknown() -> None:
-    with pytest.raises(ValueError, match="Unsupported ALKAHEST_NETWORK"):
+    with pytest.raises(ValueError, match="Unsupported CHAIN_NAME"):
         get_alkahest_network("devnet")
 
 
@@ -35,7 +35,7 @@ def test_resolve_config_ethereum_mainnet_returns_explicit_config() -> None:
 
 
 def test_resolve_config_anvil_requires_override() -> None:
-    with pytest.raises(ValueError, match="ALKAHEST_NETWORK=anvil requires"):
+    with pytest.raises(ValueError, match="CHAIN_NAME=anvil requires"):
         resolve_alkahest_address_config(NETWORK_ANVIL)
 
 
@@ -73,7 +73,7 @@ def test_get_trusted_oracle_arbiter_prefers_override(
     }
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
-    monkeypatch.setenv("ALKAHEST_NETWORK", NETWORK_BASE_SEPOLIA)
+    monkeypatch.setenv("CHAIN_NAME", NETWORK_BASE_SEPOLIA)
     monkeypatch.setenv("ALKAHEST_ADDRESS_CONFIG_PATH", str(path))
     # Clear the lru_cache so the new path is picked up
     from service.clients.alkahest import _load_override_config_cached

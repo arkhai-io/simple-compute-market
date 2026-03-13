@@ -197,7 +197,7 @@ def get_alkahest_network(value: str | None) -> str:
     network = (value or NETWORK_BASE_SEPOLIA).strip().lower()
     if network not in SUPPORTED_NETWORKS:
         raise ValueError(
-            f"Unsupported ALKAHEST_NETWORK '{network}'. "
+            f"Unsupported CHAIN_NAME '{network}'. "
             f"Supported values: {sorted(SUPPORTED_NETWORKS)}"
         )
     return network
@@ -245,13 +245,13 @@ def resolve_alkahest_address_config(
         return _dict_to_namespace(ETHEREUM_MAINNET_ADDRESSES)
 
     raise ValueError(
-        "ALKAHEST_NETWORK=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
+        "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
         "with deployed local addresses."
     )
 
 
 def get_trusted_oracle_arbiter() -> str:
-    selected = get_alkahest_network(os.getenv("ALKAHEST_NETWORK", "base_sepolia"))
+    selected = get_alkahest_network(os.getenv("CHAIN_NAME", "ethereum_sepolia"))
     override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
     if override is not None:
         return str(override["arbiters_addresses"]["trusted_oracle_arbiter"])
@@ -263,6 +263,6 @@ def get_trusted_oracle_arbiter() -> str:
         )
 
     raise ValueError(
-        "ALKAHEST_NETWORK=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
+        "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
         "with deployed local addresses."
     )
