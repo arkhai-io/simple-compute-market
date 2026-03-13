@@ -150,16 +150,6 @@ install_gcloud() {
     ok "Google Cloud SDK installed ($(gcloud --version 2>&1 | head -1))"
 }
 
-install_zerotier() {
-    info "Installing ZeroTier..."
-    curl -s https://install.zerotier.com | sudo bash
-    if ! command -v zerotier-cli &>/dev/null; then
-        error "ZeroTier installation failed. Please install manually."
-        exit 1
-    fi
-    ok "ZeroTier installed"
-}
-
 check_and_install_dependencies() {
     # ── Collect everything that's missing ──
     local display_items=()        # human-readable list for the prompt
@@ -167,7 +157,6 @@ check_and_install_dependencies() {
     local missing_apt_pkgs=()     # deduplicated apt packages
     local need_python312=false
     local need_gcloud=false
-    local need_zerotier=false
     local has_apt=false
     ZEROTIER_ALREADY_INSTALLED=true
 
@@ -248,11 +237,9 @@ check_and_install_dependencies() {
         ok "gcloud found ($(command -v gcloud))"
     fi
 
-    # -- zerotier --
+    # -- zerotier (detection only; market install --with-zerotier handles installation) --
     if ! resolve_command zerotier-cli "${ZEROTIER_SEARCH_PATHS[@]}"; then
-        need_zerotier=true
         ZEROTIER_ALREADY_INSTALLED=false
-        display_items+=("ZeroTier (zerotier-cli)")
     else
         ok "zerotier-cli found ($(command -v zerotier-cli))"
     fi
@@ -325,9 +312,8 @@ check_and_install_dependencies() {
         ok "System packages installed successfully."
     fi
 
-    # ── Install gcloud & zerotier ──
-    [ "$need_gcloud" = true ]   && install_gcloud
-    [ "$need_zerotier" = true ] && install_zerotier
+    # ── Install gcloud ──
+    [ "$need_gcloud" = true ] && install_gcloud
 }
 
 # ── Install uv ────────────────────────────────────────────────
@@ -492,8 +478,8 @@ main() {
     echo ""
 
     detect_platform
-    check_and_install_dependencies
     check_docker_running
+    check_and_install_dependencies
     check_python_version
     install_uv
     install_repo
