@@ -7,6 +7,7 @@ import pytest
 from service.clients.alkahest import (
     NETWORK_ANVIL,
     NETWORK_BASE_SEPOLIA,
+    NETWORK_ETHEREUM_SEPOLIA,
     NETWORK_ETHEREUM_MAINNET,
     get_alkahest_network,
     get_trusted_oracle_arbiter,
@@ -32,6 +33,13 @@ def test_resolve_config_ethereum_mainnet_returns_explicit_config() -> None:
     assert config is not None
     assert isinstance(config, SimpleNamespace)
     assert config.erc20_addresses.eas == "0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587"
+
+
+def test_resolve_config_ethereum_sepolia_returns_explicit_config() -> None:
+    config = resolve_alkahest_address_config(NETWORK_ETHEREUM_SEPOLIA)
+    assert config is not None
+    assert isinstance(config, SimpleNamespace)
+    assert config.erc20_addresses.eas == "0xC2679fBD37d54388Ce493F1DB75320D236e1815e"
 
 
 def test_resolve_config_anvil_requires_override() -> None:
