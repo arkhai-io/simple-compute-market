@@ -7,7 +7,6 @@ BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
-INSTALL_ZEROTIER=false
 GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getServiceAccountKey"
 DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
 GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
@@ -72,6 +71,156 @@ detect_platform() {
             exit 1
             ;;
     esac
+}
+
+# ── Dependency resolution (gcloud & zerotier) ────────────────
+
+# Known install locations to check when a command is not on PATH
+GCLOUD_SEARCH_PATHS=(
+    "$HOME/google-cloud-sdk/bin"
+    "/usr/local/google-cloud-sdk/bin"
+    "/opt/google-cloud-sdk/bin"
+    "/snap/google-cloud-cli/current/bin"
+)
+
+ZEROTIER_SEARCH_PATHS=(
+    "/usr/sbin"
+    "/usr/local/bin"
+    "/Library/Application Support/ZeroTier/One"
+    "/opt/zerotier/bin"
+)
+
+# Try to find a command either on PATH or in known locations.
+# If found off-PATH, exports the directory to PATH.
+# Returns 0 if found, 1 if not.
+resolve_command() {
+    local cmd="$1"
+    shift
+    local search_paths=("$@")
+
+    if command -v "$cmd" &>/dev/null; then
+        return 0
+    fi
+
+    for dir in "${search_paths[@]}"; do
+        if [ -x "$dir/$cmd" ]; then
+            info "Found '$cmd' at $dir (adding to PATH)"
+            export PATH="$dir:$PATH"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+install_gcloud() {
+    info "Installing Google Cloud SDK..."
+
+    local file_name checksum
+    case "${OS}-${ARCH}" in
+        macos-x86_64)
+            file_name="google-cloud-cli-darwin-x86_64.tar.gz"
+            checksum="46d255163f034666940549aace9452d300fce11ca41b6c8a953d50af4301f5fb"
+            ;;
+        macos-arm64)
+            file_name="google-cloud-cli-darwin-arm.tar.gz"
+            checksum="7aec01fcba56ae6d0590ac0ee135401a2f679136d4e11cc6137415e69aa7536a"
+            ;;
+        *)
+            error "No Google Cloud SDK package available for ${OS}-${ARCH}."
+            error "Please install it manually: https://cloud.google.com/sdk/docs/install"
+            exit 1
+            ;;
+    esac
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local archive="$tmp_dir/$file_name"
+
+    curl -#fL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/$file_name" -o "$archive"
+
+    # Verify checksum
+    local actual_checksum
+    actual_checksum="$(shasum -a 256 "$archive" | awk '{print $1}')"
+    if [ "$actual_checksum" != "$checksum" ]; then
+        error "Checksum verification failed for $file_name"
+        error "Expected: $checksum"
+        error "Got:      $actual_checksum"
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+    ok "Checksum verified"
+
+    tar -xzf "$archive" -C "$HOME"
+    rm -rf "$tmp_dir"
+
+    # Run the SDK install script (non-interactive)
+    "$HOME/google-cloud-sdk/install.sh" --quiet --path-update=true
+
+    export PATH="$HOME/google-cloud-sdk/bin:$PATH"
+
+    if ! command -v gcloud &>/dev/null; then
+        error "Google Cloud SDK installation failed. Please install manually."
+        exit 1
+    fi
+
+    ok "Google Cloud SDK installed ($(gcloud --version 2>&1 | head -1))"
+}
+
+install_zerotier() {
+    info "Installing ZeroTier..."
+    curl -s https://install.zerotier.com | sudo bash
+    if ! command -v zerotier-cli &>/dev/null; then
+        error "ZeroTier installation failed. Please install manually."
+        exit 1
+    fi
+    ok "ZeroTier installed"
+}
+
+check_and_install_dependencies() {
+    local missing=()
+    ZEROTIER_ALREADY_INSTALLED=true
+
+    if ! resolve_command gcloud "${GCLOUD_SEARCH_PATHS[@]}"; then
+        missing+=("Google Cloud SDK (gcloud)")
+    else
+        ok "gcloud found ($(command -v gcloud))"
+    fi
+
+    if ! resolve_command zerotier-cli "${ZEROTIER_SEARCH_PATHS[@]}"; then
+        missing+=("ZeroTier (zerotier-cli)")
+        ZEROTIER_ALREADY_INSTALLED=false
+    else
+        ok "zerotier-cli found ($(command -v zerotier-cli))"
+    fi
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        return
+    fi
+
+    echo ""
+    warn "The following required dependencies are not found:"
+    for dep in "${missing[@]}"; do
+        echo "  - $dep"
+    done
+    echo ""
+
+    printf '\033[1;34m[?]\033[0m Would you like to install them? [Y/n] '
+    read -r answer </dev/tty
+    case "$answer" in
+        [nN]|[nN][oO])
+            error "Cannot proceed without required dependencies."
+            exit 1
+            ;;
+    esac
+    echo ""
+
+    for dep in "${missing[@]}"; do
+        case "$dep" in
+            *gcloud*)    install_gcloud ;;
+            *zerotier*)  install_zerotier ;;
+        esac
+    done
 }
 
 # ── Install uv ────────────────────────────────────────────────
@@ -235,18 +384,10 @@ main() {
     echo "  └──────────────────────────────────┘"
     echo ""
 
-    printf '\033[1;34m[?]\033[0m Would you like to install ZeroTier for P2P networking? [y/N] '
-    read -r zt_answer </dev/tty
-    case "$zt_answer" in
-        [yY]|[yY][eE][sS]) INSTALL_ZEROTIER=true; ok "ZeroTier will be installed" ;;
-        *) info "Skipping ZeroTier installation" ;;
-    esac
-    echo ""
-
     detect_platform
     check_command docker
-    check_command gcloud
     check_command make
+    check_and_install_dependencies
     check_python_version
     install_uv
     install_repo
@@ -260,10 +401,10 @@ main() {
 
     info "Running market install to set up service dependencies..."
     echo ""
-    if [ "$INSTALL_ZEROTIER" = true ]; then
-        market install --with-zerotier
-    else
+    if [ "$ZEROTIER_ALREADY_INSTALLED" = true ]; then
         market install
+    else
+        market install --with-zerotier
     fi
 
     # ── Pull Docker image ──────────
