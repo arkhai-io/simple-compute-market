@@ -147,6 +147,10 @@ class Config:
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
     resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
     default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
+    # Negotiation policy settings
+    negotiation_policy_mode: str  # NEGOTIATION_POLICY_MODE - "bisection" | "rl"
+    arkhai_negotiator_seller_model_path: str  # ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH
+    arkhai_negotiator_buyer_model_path: str  # ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
@@ -249,6 +253,16 @@ def load_config() -> Config:
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
         resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
         default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
+        # Negotiation policy settings
+        negotiation_policy_mode=os.getenv("NEGOTIATION_POLICY_MODE", "bisection").lower(),
+        arkhai_negotiator_seller_model_path=os.getenv(
+            "ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH",
+            "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt",
+        ),
+        arkhai_negotiator_buyer_model_path=os.getenv(
+            "ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH",
+            "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
+        ),
     )
 
 

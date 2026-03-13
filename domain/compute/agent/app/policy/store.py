@@ -19,6 +19,7 @@ from core.agent.app.schema.pydantic_models import (
 )
 from core.agent.app.policy.registry import policy_callable
 from core.agent.app.policy.action_builders import NegotiationActionBuilder, make_negotiation_id
+from core.agent.app.policy.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from core.agent.app.utils.validation import (
     extract_resources_from_make_offer_event,
     determine_strategy_from_order,
@@ -60,50 +61,6 @@ def get_compute_resource_portfolio(
     except Exception as exc:
         logger.warning("[COMPUTE POLICY] Failed to validate compute portfolio: %s", exc)
         return None
-
-
-# ----- Negotiation policies -----
-
-@policy_callable("simple_negotiation_random")
-def simple_negotiation_random(context: DecisionContext) -> DomainAction | None:
-    """50/50 accept/reject for negotiation offers."""
-    import random
-    from core.agent.app.schema.pydantic_models import ActionType
-
-    et = context.event.event_type
-    trigger = et.value if hasattr(et, "value") else str(et)
-    if trigger != "negotiation":
-        return None
-    
-    # Check message_type - could be on event attribute or in data
-    msg_type = getattr(context.event, "message_type", None) or context.event.data.get("message_type")
-    if msg_type != "offer":
-        return None
-    
-    choice = random.choice([ActionType.ACCEPT_OFFER, ActionType.REJECT_OFFER])
-    return DomainAction(action_type=choice, parameters={})
-
-
-@policy_callable("simple_negotiation_callable")
-def simple_negotiation_callable(context: DecisionContext) -> DomainAction | None:
-    """Accept offer if GPU threshold is met, otherwise reject."""
-    from core.agent.app.schema.pydantic_models import ActionType
-
-    et = context.event.event_type
-    trigger = et.value if hasattr(et, "value") else str(et)
-    if trigger != "negotiation":
-        return None
-    
-    # Check message_type - could be on event attribute or in data
-    msg_type = getattr(context.event, "message_type", None) or context.event.data.get("message_type")
-    if msg_type != "offer":
-        return None
-    
-    total_gpus = int(context.available_resources.get("total_gpus", 0))
-    gpu_threshold = 1  # Default threshold
-    if total_gpus < gpu_threshold:
-        return DomainAction(action_type=ActionType.REJECT_OFFER, parameters={})
-    return DomainAction(action_type=ActionType.ACCEPT_OFFER, parameters={})
 
 
 # ----- Named guard/action callables for versioned composites -----
@@ -559,8 +516,12 @@ def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAc
     if not isinstance(context.event, NegotiationEvent):
         return None
 
+    # Terminal events (exit, accept) have no proposed_price — nothing to reject
+    if context.event.message_type in ("exit", "accept"):
+        return None
+
     data = context.event.data or {}
-    
+
     their_price = data.get("proposed_price")
     
     thread_info = context.market_state.get("thread_info", {})
@@ -587,6 +548,53 @@ def negotiation_action_safe_default_reject(context: DecisionContext) -> DomainAc
 
     # Price data looks valid - pass to next policy (shouldn't reach here in normal flow)
     return None
+
+
+@policy_callable("negotiation.action.handle_exit")
+def negotiation_action_handle_exit(context: DecisionContext) -> DomainAction | None:
+    """Mark the local negotiation thread as terminal when the counterparty sends an exit.
+
+    Without this, agent_8000's thread stays status='active' in SQLite forever when
+    agent_8001 exits — blocking future negotiations for the same order.
+    """
+    et = context.event.event_type
+    trigger = et.value if hasattr(et, "value") else str(et)
+    if trigger != "negotiation":
+        return None
+
+    if not isinstance(context.event, NegotiationEvent):
+        return None
+
+    if context.event.message_type != "exit":
+        return None
+
+    negotiation_id = context.event.negotiation_id
+    if not negotiation_id:
+        return None
+
+    import asyncio
+
+    async def _mark() -> None:
+        async with NegotiationThreadTransaction("HANDLE_EXIT") as txn:
+            await txn.mark_terminal(negotiation_id, "failure")
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_mark())
+        else:
+            loop.run_until_complete(_mark())
+    except Exception as exc:
+        logger.warning("[NEGOTIATION] Failed to mark thread terminal on received exit: %s", exc)
+
+    data = context.event.data or {}
+    reason = data.get("reason", "counterparty_exited")
+    logger.info(
+        "[NEGOTIATION] Counterparty exited negotiation %s (reason: %s) — thread marked terminal",
+        negotiation_id,
+        reason,
+    )
+    return None  # No action to send back
 
 
 @policy_callable("mo.action.accept_offer")
@@ -712,17 +720,31 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
     # Canonical initiator guard: make_negotiation_id sorts the two order IDs, so both
     # agents produce the same negotiation_id. When both agents independently call
     # make_offer on each other's orders, this creates two competing threads.
-    # Rule: the agent whose order_id sorts FIRST is the initiator — they already sent
-    # their own make_offer outbound. When they receive the counterparty's make_offer,
-    # they drop it; the counterparty (order sorts second) responds to theirs instead.
+    # Rule: the agent whose order_id sorts FIRST is the initiator — IF they already sent
+    # their own make_offer outbound (i.e. an active thread exists). When they receive the
+    # counterparty's make_offer, they drop it; the counterparty responds to theirs.
+    # Exception: if no thread exists yet (e.g. we published first but got no_match because
+    # the counterparty hadn't published yet), fall through and respond to their offer.
     canonical_first = min(our_order_id, their_order_id)
     if our_order_id == canonical_first:
+        from core.agent.app.utils.config import CONFIG
+        thread_store = get_thread_store()
+        existing_thread = await thread_store.get_thread_info(
+            negotiation_id=negotiation_id,
+            owner_id=(CONFIG.base_url_override or ""),
+        )
+        if existing_thread is not None:
+            logger.info(
+                "[NEGOTIATION] Canonical initiator guard: our order (%s) sorts first and "
+                "thread exists — dropping cross-initiated make_offer; counterparty will respond to ours.",
+                our_order_id,
+            )
+            return None
         logger.info(
-            "[NEGOTIATION] Canonical initiator guard: our order (%s) sorts first — "
-            "dropping cross-initiated make_offer; counterparty will respond to ours.",
+            "[NEGOTIATION] Canonical initiator guard: our order (%s) sorts first but no "
+            "active thread found (we got no_match earlier) — responding to their offer.",
             our_order_id,
         )
-        return None
 
     actions = NegotiationActionBuilder({
         "negotiation_id": negotiation_id,

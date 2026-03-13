@@ -1658,16 +1658,16 @@ async def _find_and_send_matching_offers(
                     negotiation_id = None
                     if matched_order_id:
                         async with NegotiationThreadTransaction("MAKE_OFFER") as txn:
-                            if await txn.check_duplicate(order_id, matched_order_id):
-                                logger.info(
-                                    f"[REGISTRY] Skipping duplicate negotiation with order {matched_order_id}"
-                                )
-                                continue
+                            is_duplicate = await txn.check_duplicate(order_id, matched_order_id)
 
-                            # Create thread BEFORE sending offer to track in-flight negotiations
+                            # Always derive our local state — even when a duplicate thread
+                            # exists (created by the counterparty).  check_duplicate is
+                            # bidirectional, so the responding agent (e.g. buyer replying to
+                            # seller's MAKE_OFFER) sees the thread as a duplicate and would
+                            # skip ensure_thread, leaving our_initial_price NULL in
+                            # negotiation_local_state.  That causes safe_default_reject to
+                            # fire with "missing price data" on the very next counter.
                             negotiation_id = make_negotiation_id(order_id, matched_order_id)
-
-                            # Get our order to determine strategy and initial price
                             our_order_dict = await registry_client.get_order(order_id)
                             if not our_order_dict:
                                 raise ValueError(f"Order {order_id} not found in registry")
@@ -1684,6 +1684,13 @@ async def _find_and_send_matching_offers(
                                 our_initial_price=our_initial_price,
                                 our_strategy=strategy,
                             )
+
+                            if is_duplicate:
+                                logger.info(
+                                    f"[REGISTRY] Skipping duplicate negotiation with order {matched_order_id}"
+                                )
+                                continue
+
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")

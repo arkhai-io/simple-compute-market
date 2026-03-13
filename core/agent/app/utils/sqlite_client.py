@@ -1486,7 +1486,7 @@ class SQLiteClient:
                 cur.execute(
                     """
                     UPDATE negotiation_threads
-                    SET terminal_state = ?, updated_at = ?
+                    SET terminal_state = ?, status = 'terminated', updated_at = ?
                     WHERE negotiation_id = ?
                     """,
                     (terminal_state, datetime.now().isoformat(), negotiation_id),
