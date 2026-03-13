@@ -55,6 +55,8 @@ jobs:
             --exclude='docker-compose*.yml' \
             --exclude='market-installer.sh' \
             --exclude='.DS_Store' \
+            --exclude='*.pt' \
+            --exclude='experiments' \
             .
           mv "/tmp/$TARBALL_NAME" .
           ls -lh "$TARBALL_NAME"

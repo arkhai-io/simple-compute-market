@@ -39,6 +39,8 @@ class GPUModel(str, Enum):
     H200 = "H200"
     TESLA_V100 = "Tesla V100"
     RTX_5080 = "RTX 5080"
+    RTX_A5000 = "RTX A5000"
+    RTX_4090 = "RTX 4090"
 
 
 class Region(str, Enum):
@@ -125,7 +127,7 @@ class ComputeResource(ComputeDomainResource):
         description="Canonical DB resource identifier for this compute resource",
     )
     gpu_model: GPUModel = Field(
-        description="The model of the GPU (H200, Tesla V100, RTX 5080)"
+        description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
     )
     quantity: int = Field(description="The quantity of the GPU")
     sla: float = Field(description="The SLA of the GPU")

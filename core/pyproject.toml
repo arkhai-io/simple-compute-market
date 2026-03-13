@@ -16,7 +16,7 @@ dependencies = [
     "psycopg2-binary>=2.9.10,<3.0.0",
     "a2a-sdk>=0.3.9",
     "torch>=2.7.0",
-    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@ef59f84c989ddc6a30d0590c807507c4e09b65c7",
+    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
     "alkahest-py @ git+https://github.com/arkhai-io/alkahest@main#subdirectory=sdks/py",
     "web3>=7.14.0",
     "websockets>=15.0.1",
@@ -31,6 +31,7 @@ dev = [
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
     "nest-asyncio>=1.6.0,<2.0.0",
+    "wandb>=0.23.0",
 ]
 
 [project.optional-dependencies]

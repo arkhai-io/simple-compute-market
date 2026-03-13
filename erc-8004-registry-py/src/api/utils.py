@@ -135,34 +135,46 @@ def convert_agent_card_to_registration_file(
     )
 
 
+def _verify_eip191_signature(message: str, signature: str, expected_owner: str) -> bool:
+    """Low-level EIP-191 signature verification. Recovers signer and checks against expected_owner."""
+    if not HAS_ETH_ACCOUNT:
+        return False
+    try:
+        message_hash = encode_defunct(text=message)
+        recovered = Account.recover_message(message_hash, signature=signature)
+        return recovered.lower() == expected_owner.lower()
+    except Exception as e:
+        logger.error(f"[VERIFY] EIP-191 verification error: {e}")
+        return False
+
+
 def verify_heartbeat_signature(agent_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
-    """Verify heartbeat signature using EIP-191 personal sign format"""
+    """Verify heartbeat signature. Message format: 'heartbeat:{agent_id}:{timestamp}'"""
     if not HAS_ETH_ACCOUNT:
         logger.warning("[Heartbeat] eth_account not available, signature verification disabled")
         return False
+    message = f"heartbeat:{agent_id}:{timestamp}"
+    logger.info(f"[Heartbeat] Verifying for agent={agent_id} owner={owner_address}")
+    is_valid = _verify_eip191_signature(message, signature, owner_address)
+    logger.info(f"[Heartbeat] Signature valid: {is_valid}")
+    return is_valid
 
-    try:
-        # Construct the message that should have been signed
-        message = f"heartbeat:{agent_id}:{timestamp}"
-        logger.info(f"[Heartbeat] Verifying signature for agent: {agent_id}")
-        logger.info(f"[Heartbeat] Expected message: {message}")
-        logger.info(f"[Heartbeat] Expected owner: {owner_address}")
-        logger.info(f"[Heartbeat] Received signature: {signature}")
 
-        # Encode message in EIP-191 format
-        message_hash = encode_defunct(text=message)
+def verify_order_signature(operation: str, resource_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
+    """Verify an order mutation signature.
 
-        # Recover the signer address from the signature
-        recovered_address = Account.recover_message(message_hash, signature=signature)
-        logger.info(f"[Heartbeat] Recovered address: {recovered_address}")
-
-        # Verify it matches the agent's owner address
-        is_valid = recovered_address.lower() == owner_address.lower()
-        logger.info(f"[Heartbeat] Signature valid: {is_valid}")
-        return is_valid
-    except Exception as e:
-        logger.error(f"[Heartbeat] Signature verification error: {e}")
+    Message format: '{operation}:{resource_id}:{timestamp}'
+    operation: 'create_order', 'update_order', or 'delete_order'
+    resource_id: agent_id for create_order, order_id for update/delete
+    """
+    if not HAS_ETH_ACCOUNT:
+        logger.warning("[Order] eth_account not available, signature verification disabled")
         return False
+    message = f"{operation}:{resource_id}:{timestamp}"
+    logger.info(f"[Order] Verifying {operation} for resource={resource_id} owner={owner_address}")
+    is_valid = _verify_eip191_signature(message, signature, owner_address)
+    logger.info(f"[Order] Signature valid: {is_valid}")
+    return is_valid
 
 
 def verify_registration_signature(
@@ -186,8 +198,6 @@ def verify_registration_signature(
         True if signature is valid, False otherwise
     """
     try:
-        from eth_account import Account
-        from eth_account.messages import encode_defunct
         import hashlib
         import json
 
@@ -221,27 +231,21 @@ def verify_registration_signature(
         data_str = json.dumps(serializable_data, sort_keys=True, separators=(',', ':'))
         data_hash = hashlib.sha256(data_str.encode()).hexdigest()[:16]
 
-        # Verify signature
         message = f"register:{owner}:{timestamp}:{data_hash}"
-        message_hash = encode_defunct(text=message)
 
-        # Ensure signature has 0x prefix and is proper format
+        # Ensure signature has 0x prefix
         if not signature.startswith('0x'):
             signature = '0x' + signature
-
-        recovered_address = Account.recover_message(message_hash, signature=signature)
-        logger.info(f"[Registration] Signature format check: original={len(signature)} chars, with prefix={signature[:10]}...")
 
         logger.info(f"[Registration] Verifying signature for owner {owner}")
         logger.info(f"[Registration] Expected message: {message}")
         logger.info(f"[Registration] Data to hash: {data_str}")
         logger.info(f"[Registration] Data hash: {data_hash}")
         logger.info(f"[Registration] Received signature: {signature}")
-        logger.info(f"[Registration] Recovered address: {recovered_address}")
-        logger.info(f"[Registration] Expected owner: {owner}")
-        logger.info(f"[Registration] Address match: {recovered_address.lower() == owner.lower()}")
 
-        return recovered_address.lower() == owner.lower()
+        is_valid = _verify_eip191_signature(message, signature, owner)
+        logger.info(f"[Registration] Address match: {is_valid}")
+        return is_valid
     except Exception as e:
         logger.error(f"[Registration] Signature verification error: {e}")
         return False

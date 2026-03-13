@@ -318,18 +318,18 @@ release-models:
 	@if [ -z "$${VERSION:-}" ]; then echo "ERROR: VERSION is required. Usage: make release-models VERSION=model-v0.1.0"; exit 1; fi; \
 	MODELS_DIR="$(MODELS_DIR)"; \
 	ASSETS=""; \
-	if [ -f "$$MODELS_DIR/arkhai_seller.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_seller.pt"; fi; \
-	if [ -f "$$MODELS_DIR/arkhai_buyer.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_buyer.pt"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_negotiator_seller.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_negotiator_seller.pt"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_negotiator_buyer.pt" ]; then ASSETS="$$ASSETS $$MODELS_DIR/arkhai_negotiator_buyer.pt"; fi; \
 	if [ -z "$$ASSETS" ]; then echo "ERROR: No .pt model files found in $$MODELS_DIR"; exit 1; fi; \
 	echo "Creating release $$VERSION with:$$ASSETS"; \
 	git tag "$$VERSION" || true; \
 	git push origin "$$VERSION" || true; \
 	NOTES="Model Release $$VERSION"; \
 	NOTES="$$NOTES\n\nPufferLib commit: ef59f84c"; \
-	NOTES="$$NOTES\nEnvironment: puffer_arkhai (node_types=3, episode_length=100)"; \
+	NOTES="$$NOTES\nEnvironment: puffer_arkhai (node_types=3, episode_length=100, bilateral)"; \
 	NOTES="$$NOTES\n\nArtifacts:"; \
-	if [ -f "$$MODELS_DIR/arkhai_seller.pt" ]; then NOTES="$$NOTES\n- arkhai_seller.pt: Single-agent seller (1 AI seller vs 3 scripted buyers)"; fi; \
-	if [ -f "$$MODELS_DIR/arkhai_buyer.pt" ]; then NOTES="$$NOTES\n- arkhai_buyer.pt: Single-agent buyer (1 AI buyer vs 3 scripted sellers)"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_negotiator_seller.pt" ]; then NOTES="$$NOTES\n- arkhai_negotiator_seller.pt: Bilateral negotiation seller (10M steps)"; fi; \
+	if [ -f "$$MODELS_DIR/arkhai_negotiator_buyer.pt" ]; then NOTES="$$NOTES\n- arkhai_negotiator_buyer.pt: Bilateral negotiation buyer (10M steps)"; fi; \
 	gh release create "$$VERSION" \
 		--repo $(REPO) \
 		--title "Model Release $$VERSION" \

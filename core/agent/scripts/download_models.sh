@@ -61,7 +61,7 @@ print(url)
 }
 
 # Download both models; failures are non-fatal (graceful degradation at runtime)
-download_asset "arkhai_seller.pt" || echo "  (seller model not available; will use fallback policy at runtime)"
-download_asset "arkhai_buyer.pt" || echo "  (buyer model not available; will use fallback policy at runtime)"
+download_asset "arkhai_negotiator_seller.pt" || echo "  (seller model not available; will use fallback policy at runtime)"
+download_asset "arkhai_negotiator_buyer.pt" || echo "  (buyer model not available; will use fallback policy at runtime)"
 
 echo "Done. Models available in ${DEST_DIR}/"
