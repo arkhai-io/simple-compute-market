@@ -36,6 +36,7 @@ services:
     command: >
       sh -c "
       mkdir -p /app/shared-env &&
+      python3 /app/deploy_alkahest.py &&
       npm run deploy:anvil 2>&1 | tee /tmp/deploy.log &&
       IDENTITY_ADDR=$$(grep 'IdentityRegistry deployed to:' /tmp/deploy.log | awk '{print $$NF}') &&
       echo IDENTITY_REGISTRY_ADDRESS=$$IDENTITY_ADDR > $$ENV_FILE &&
