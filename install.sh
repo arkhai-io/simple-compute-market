@@ -407,7 +407,7 @@ install_cli() {
 # ── Create symlink and set up PATH ────────────────────────────
 
 setup_path() {
-    local market_bin="$INSTALL_DIR/cli/.venv/bin/market"
+    local market_bin="$INSTALL_DIR/core/.venv/bin/market"
 
     mkdir -p "$BIN_DIR"
 
