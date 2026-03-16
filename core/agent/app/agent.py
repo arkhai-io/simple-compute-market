@@ -104,7 +104,7 @@ from service.clients.alkahest import (
 )
 from core.agent.app.utils.serializer import json_serializer
 from service.clients.token import TOKEN_REGISTRY
-from service.clients.network import get_zerotier_ip
+from core.agent.app.utils.zerotier import get_zerotier_ip
 from pydantic import PrivateAttr
 
 
