@@ -155,8 +155,7 @@ services:
         set +a
         echo "Importing seller resources..."
         PYTHONPATH="/:/app:/app/core/agent" uv run python core/agent/scripts/import_resources_csv.py \
-          --csv core/agent/app/data/ww1-machine.csv \
-          --db-path "${AGENT_DB_PATH:-/app/agent.db}"
+          --csv core/agent/app/data/ww1-machine.csv
         exec ./entrypoint.sh
 
   # 6. Redis (job queue for provisioning service)
