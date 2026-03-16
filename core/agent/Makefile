@@ -56,6 +56,7 @@ endif
 
 serve-a2a:
 	@bash -c 'set -e; \
+	trap "stty echo" EXIT; \
 	PORT="$(or $(PORT),8000)"; \
 	ZT_NETWORK="$(ZEROTIER_NETWORK)"; \
 	ENV_ARG="$(ENV_ARG)"; \
@@ -85,7 +86,7 @@ serve-a2a:
 	fi; \
 	echo "==============================================================================="; \
 	if [ -n "$$ZT_NETWORK" ]; then \
-		trap "echo Leaving ZeroTier network $$ZT_NETWORK; sudo zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
+		trap "stty echo; echo Leaving ZeroTier network $$ZT_NETWORK; sudo zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
 		echo Connecting to ZeroTier network $$ZT_NETWORK; \
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo zerotier-cli join $$ZT_NETWORK; \
