@@ -67,6 +67,9 @@ serve-a2a:
 			exit 1; \
 		fi; \
 		sudo -v || { echo "Error: sudo authentication failed" >&2; exit 1; }; \
+		( while true; do sleep 300; sudo -n -v 2>/dev/null || true; done ) & \
+		SUDO_KEEPALIVE=$$!; \
+		trap "kill $$SUDO_KEEPALIVE 2>/dev/null; stty echo" EXIT; \
 		if ! NODE_ID=$$(sudo -n zerotier-cli info 2>/dev/null | cut -d " " -f3) || [ -z "$$NODE_ID" ]; then \
 			echo "Error: sudo access required for zerotier-cli. Run: sudo zerotier-cli info" >&2; \
 			exit 1; \
@@ -90,7 +93,7 @@ serve-a2a:
 	fi; \
 	echo "==============================================================================="; \
 	if [ -n "$$ZT_NETWORK" ]; then \
-		trap "stty echo; echo Leaving ZeroTier network $$ZT_NETWORK; sudo -n zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
+		trap "kill $$SUDO_KEEPALIVE 2>/dev/null; stty echo; echo Leaving ZeroTier network $$ZT_NETWORK; sudo -n zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
 		echo Connecting to ZeroTier network $$ZT_NETWORK; \
 		echo ZeroTier node ID: $$NODE_ID; \
 		sudo -n zerotier-cli join $$ZT_NETWORK; \
