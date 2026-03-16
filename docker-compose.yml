@@ -194,6 +194,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - REGISTRY_URL=http://registry:8080
       - ENABLE_AUTH=false
+    volumes:
+      - ./compute-provisioning-iac:/app/compute-provisioning-iac
+      - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
     networks:
       - market-network
     restart: unless-stopped

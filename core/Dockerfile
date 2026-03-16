@@ -44,7 +44,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 # Install ZeroTier
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod && \
+    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo && \
     curl -s https://install.zerotier.com | bash && \
     rm -rf /var/lib/apt/lists/*
 
