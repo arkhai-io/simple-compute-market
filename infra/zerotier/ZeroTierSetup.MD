@@ -29,6 +29,21 @@ echo "Your node ID: $NODE_ID"
 
 Use the create_ztnetwork.sh script to create a ZeroTier network.
 
+> **MTU note:** `create_ztnetwork.sh` sets `mtu: 1300` on new networks. This is required to avoid
+> IP fragmentation when routing A2A traffic (HTTP POST bodies ~2KB) over ZeroTier's UDP overlay on
+> internet paths with physical MTU 1500. The default ZeroTier MTU of 2800 causes large payloads to
+> be silently dropped.
+>
+> For changing this value on the network, patch the MTU manually:
+> ```bash
+> AUTH=$(sudo cat /var/lib/zerotier-one/authtoken.secret)
+> curl -X POST "$CONTROLLER_URL/controller/network/<NETWORK_ID>" \
+>   -H "X-ZT1-Auth: $AUTH" \
+>   -H "Content-Type: application/json" \
+>   -d '{"mtu": 1300}'
+> ```
+> Nodes pick up the new MTU within ~60 seconds. Verify with `ip link show | grep zt`.
+
 Modify NETWORK_NAME IP_RANGE_START IP_RANGE_END NETWORK_CIDR script variables as appropriate
 
 join the network from the client:
