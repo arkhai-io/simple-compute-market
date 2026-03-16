@@ -66,7 +66,11 @@ serve-a2a:
 			echo "Error: ZeroTier CLI not found. Install with: cd infra && make install" >&2; \
 			exit 1; \
 		fi; \
-		NODE_ID=$$(sudo zerotier-cli info | cut -d " " -f3); \
+		sudo -v || { echo "Error: sudo authentication failed" >&2; exit 1; }; \
+		if ! NODE_ID=$$(sudo -n zerotier-cli info 2>/dev/null | cut -d " " -f3) || [ -z "$$NODE_ID" ]; then \
+			echo "Error: sudo access required for zerotier-cli. Run: sudo zerotier-cli info" >&2; \
+			exit 1; \
+		fi; \
 	fi; \
 	echo "==============================================================================="; \
 	echo "| 🚀 Starting A2A agent server...                                             |"; \
@@ -86,10 +90,10 @@ serve-a2a:
 	fi; \
 	echo "==============================================================================="; \
 	if [ -n "$$ZT_NETWORK" ]; then \
-		trap "stty echo; echo Leaving ZeroTier network $$ZT_NETWORK; sudo zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
+		trap "stty echo; echo Leaving ZeroTier network $$ZT_NETWORK; sudo -n zerotier-cli leave $$ZT_NETWORK" INT EXIT; \
 		echo Connecting to ZeroTier network $$ZT_NETWORK; \
 		echo ZeroTier node ID: $$NODE_ID; \
-		sudo zerotier-cli join $$ZT_NETWORK; \
+		sudo -n zerotier-cli join $$ZT_NETWORK; \
 	fi; \
 	GOOGLE_GENAI_USE_VERTEXAI=False uv --project .. run uvicorn core.agent.app.server:app --host 0.0.0.0 --port $$PORT --reload $$ENV_ARG'
 
