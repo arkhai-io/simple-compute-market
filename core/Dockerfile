@@ -35,49 +35,41 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
 
-WORKDIR /app
-
-# Copy the cached venv from builder
-COPY --from=builder /app/.venv ./.venv
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Install ZeroTier
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo && \
     curl -s https://install.zerotier.com | bash && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /var/lib/zerotier-one && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /var/lib/zerotier-one && \
     printf '{\n  "settings": {\n    "allowManagementFrom": [ "127.0.0.1", "::1" ]\n  }\n}\n' \
       > /var/lib/zerotier-one/local.conf && \
-    # Remove any identity generated during install so each container gets a unique node ID
-    rm -f /var/lib/zerotier-one/identity.public /var/lib/zerotier-one/identity.secret
+    rm -f /var/lib/zerotier-one/identity.public /var/lib/zerotier-one/identity.secret && \
+    useradd -m -s /bin/sh appuser && \
+    echo 'appuser ALL=(root) NOPASSWD: /usr/sbin/zerotier-one, /usr/sbin/zerotier-cli' \
+      > /etc/sudoers.d/appuser && \
+    chmod 0440 /etc/sudoers.d/appuser && \
+    mkdir -p /app
+
+WORKDIR /app
 
 EXPOSE 9993/udp
 
-# Copy the application code preserving the import path (from core.agent.app.*)
-COPY core/agent/app ./core/agent/app
-COPY core/agent/scripts ./core/agent/scripts
-COPY core/agent/.env.sample .
-COPY core/schemas.py ./core/schemas.py
-COPY domain/ ./domain/
-COPY service/ ../service/
+COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Copy application code preserving the import path (from core.agent.app.*)
+COPY --chown=appuser:appuser core/agent/app ./core/agent/app
+COPY --chown=appuser:appuser core/agent/scripts ./core/agent/scripts
+COPY --chown=appuser:appuser core/agent/.env.sample .
+COPY --chown=appuser:appuser core/schemas.py ./core/schemas.py
+COPY --chown=appuser:appuser domain/ ./domain/
+COPY --chown=appuser:appuser service/ ../service/
 
 ARG PORT=8080
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-COPY core/entrypoint.sh ./entrypoint.sh
+COPY --chown=appuser:appuser core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
-
-# Run as non-root; zerotier-one and zerotier-cli require root to manage TUN
-# interfaces and talk to the daemon socket, so grant appuser passwordless sudo
-# for those two binaries only.
-RUN useradd -m -s /bin/sh appuser && \
-    echo 'appuser ALL=(root) NOPASSWD: /usr/sbin/zerotier-one, /usr/sbin/zerotier-cli' \
-      > /etc/sudoers.d/appuser && \
-    chmod 0440 /etc/sudoers.d/appuser && \
-    chown -R appuser:appuser /app
 
 USER appuser
 
