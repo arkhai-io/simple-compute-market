@@ -3,7 +3,7 @@
 # Start ZeroTier daemon in the background
 echo "Starting ZeroTier daemon..."
 
-zerotier-one -d
+sudo zerotier-one -d
 # Wait for the daemon to be ready (port file created)
 for i in $(seq 1 10); do
   [ -f /var/lib/zerotier-one/zerotier-one.port ] && break
@@ -13,7 +13,7 @@ done
 # Always join the ZeroTier network if configured, regardless of registration state
 if [ -n "${ZEROTIER_NETWORK:-}" ]; then
   echo "Joining ZeroTier network ${ZEROTIER_NETWORK}..."
-  zerotier-cli join "${ZEROTIER_NETWORK}" || echo "Warning: zerotier-cli join failed (may already be joined)"
+  sudo zerotier-cli join "${ZEROTIER_NETWORK}" || echo "Warning: zerotier-cli join failed (may already be joined)"
 fi
 
 if [ -z "${ONCHAIN_AGENT_ID:-}" ] || [ -z "${ZEROTIER_IP:-}" ]; then

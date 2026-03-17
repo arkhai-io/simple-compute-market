@@ -70,12 +70,13 @@ EXPOSE ${PORT}
 COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-# Run as non-root; grant NET_ADMIN directly to zerotier-one binary via setcap
-# so it can create TUN interfaces without root. zerotier-cli talks to the daemon
-# via the socket in /var/lib/zerotier-one, which appuser owns.
+# Run as non-root; zerotier-one and zerotier-cli require root to manage TUN
+# interfaces and talk to the daemon socket, so grant appuser passwordless sudo
+# for those two binaries only.
 RUN useradd -m -s /bin/sh appuser && \
-    setcap cap_net_admin+ep /usr/sbin/zerotier-one && \
-    chown -R appuser:appuser /var/lib/zerotier-one && \
+    echo 'appuser ALL=(root) NOPASSWD: /usr/sbin/zerotier-one, /usr/sbin/zerotier-cli' \
+      > /etc/sudoers.d/appuser && \
+    chmod 0440 /etc/sudoers.d/appuser && \
     chown -R appuser:appuser /app
 
 USER appuser
