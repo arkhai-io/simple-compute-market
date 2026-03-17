@@ -84,6 +84,8 @@ services:
     build:
       context: .
       dockerfile: core/Dockerfile
+      args:
+        INSTALL_RL_DEPS: "true"
     platform: linux/amd64
     container_name: market-agent-buy
     depends_on:
@@ -128,6 +130,8 @@ services:
     build:
       context: .
       dockerfile: core/Dockerfile
+      args:
+        INSTALL_RL_DEPS: "true"
     platform: linux/amd64
     container_name: market-agent-sell
     depends_on:
