@@ -70,6 +70,16 @@ EXPOSE ${PORT}
 COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
+# Run as non-root; grant NET_ADMIN directly to zerotier-one binary via setcap
+# so it can create TUN interfaces without root. zerotier-cli talks to the daemon
+# via the socket in /var/lib/zerotier-one, which appuser owns.
+RUN useradd -m -s /bin/sh appuser && \
+    setcap cap_net_admin+ep /usr/sbin/zerotier-one && \
+    chown -R appuser:appuser /var/lib/zerotier-one && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
 ARG MODEL_VERSION=""
 ENV MODEL_VERSION=${MODEL_VERSION}
 
