@@ -48,7 +48,9 @@ services:
 
   # # 3. Registry/Indexer service
   registry:
-    image: us-east4-docker.pkg.dev/ww-migration-arkhai/erc-8004-registry/erc-8004-registry-py:latest
+    build:
+      context: ./erc-8004-registry-py
+      dockerfile: Dockerfile
     depends_on:
       contracts-deploy:
         condition: service_completed_successfully
@@ -62,11 +64,11 @@ services:
       - market-network
 
     command: >
-      sh -lc "set -a;
+      sh -c "set -a;
       . /app/shared-env/.env;
       set +a;
-      exec uv run uvicorn src.main:app --host 0.0.0.0 --port 8080"
-      
+      exec uvicorn src.main:app --host 0.0.0.0 --port 8080"
+
     restart: unless-stopped
     deploy:
       resources:

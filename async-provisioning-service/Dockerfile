@@ -30,6 +30,7 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 WORKDIR /app
 RUN chown appuser:appuser /app
 
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
