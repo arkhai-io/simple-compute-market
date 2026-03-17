@@ -1,53 +1,45 @@
-# syntax=docker/dockerfile:1.4
 ARG PYTHON_VERSION=3.13
-ARG UV_VERSION=0.10.0
 
-FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+# Stage 1: Install Python deps and Ansible collections
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
-# TODO: Pin with SHA256 digest for production: FROM python:3.13-slim@sha256:...
-FROM python:${PYTHON_VERSION}-slim
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
-# System dependencies (SSH for Ansible)
+RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
+WORKDIR /app
+RUN chown appuser:appuser /app
+USER appuser
+
+COPY --chown=appuser:appuser async-provisioning-service/pyproject.toml async-provisioning-service/uv.lock ./
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
+    uv sync --frozen --no-dev --no-install-project
+
+COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
+RUN uv pip install ansible-core && \
+    uv run ansible-galaxy collection install -r /tmp/requirements.yml
+
+# Stage 2: Runtime
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends openssh-client sshpass && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/* /tmp/* /var/tmp/*
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=uv /uv /uvx /bin/
-
-# Create non-root user for security
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
-
 WORKDIR /app
 RUN chown appuser:appuser /app
 
-USER appuser
+COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
+COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
-# Python dependencies
-COPY --chown=appuser:appuser async-provisioning-service/pyproject.toml async-provisioning-service/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-# Ansible collections
-COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
-RUN uv pip install ansible-core && \
-    uv run ansible-galaxy collection install -r /tmp/requirements.yml && \
-    rm -rf /tmp/* /home/appuser/.cache && \
-    find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "*.pyc" -delete && \
-    find /usr/local/lib/python${PYTHON_VERSION:-3.13} -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-
-# Application code
 COPY --chown=appuser:appuser async-provisioning-service/src ./src
 COPY --chown=appuser:appuser async-provisioning-service/start.sh ./
-
-# IaC submodule (can be overridden at runtime)
 COPY --chown=appuser:appuser compute-provisioning-iac ./compute-provisioning-iac
 
-# Environment variables
+ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH=/app/src
 ENV ANSIBLE_CONFIG=/app/compute-provisioning-iac/ansible/ansible.cfg
-
-# Runtime configuration (set via -e or docker-compose)
-# Do not hardcode credentials here or commit secrets to version control.
 
 # Service configuration
 ENV HOST=0.0.0.0
@@ -93,9 +85,8 @@ ENV REGISTRY_CACHE_MAX_SIZE=256
 # Admin
 ENV ADMIN_SECRET=""
 
+USER appuser
 EXPOSE 8081
-
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
-
 CMD ["sh", "start.sh"]

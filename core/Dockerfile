@@ -1,5 +1,5 @@
-# @TODO: remove platform specific flags once puffer wheel is built
-# Puffer wheel is having build issues if flag is not set
+# --platform=linux/amd64 is intentional: production targets Linux x86_64.
+# Keep this pin in all FROM lines.
 
 # Stage 1: Install Python dependencies using uv
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
@@ -18,20 +18,18 @@ COPY service/ ../service/
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.
 ARG GAR_STG_READER_KEY=""
-RUN echo ">>> GAR_STG_READER_KEY length: ${#GAR_STG_READER_KEY}" && \
-    echo ">>> GAR_STG_READER_KEY first 20 chars: $(echo "${GAR_STG_READER_KEY}" | cut -c1-20)" && \
-    if [ -n "${GAR_STG_READER_KEY}" ]; then \
-        echo ">>> GAR_STG_READER_KEY is SET"; \
-    else \
-        echo ">>> GAR_STG_READER_KEY is EMPTY — uv sync will run unauthenticated"; \
-    fi
+ARG INSTALL_RL_DEPS=false
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${GAR_STG_READER_KEY}" ]; then \
         export UV_INDEX_ALKAHEST_GAR_USERNAME="_json_key" && \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
-    uv sync --frozen --no-dev --no-install-project
+    if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
+        uv sync --frozen --no-dev --no-install-project --extra rl; \
+    else \
+        uv sync --frozen --no-dev --no-install-project; \
+    fi
 
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime

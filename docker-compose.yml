@@ -68,6 +68,10 @@ services:
       exec uv run uvicorn src.main:app --host 0.0.0.0 --port 8080"
       
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
@@ -106,6 +110,10 @@ services:
       - zerotier-buy:/var/lib/zerotier-one
     networks:
       - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     command:
       - sh
       - -c
@@ -146,6 +154,10 @@ services:
       - zerotier-sell:/var/lib/zerotier-one
     networks:
       - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
     command:
       - sh
       - -c
@@ -198,6 +210,10 @@ services:
     networks:
       - market-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
 
 networks:
   market-network:

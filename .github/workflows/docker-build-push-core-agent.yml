@@ -38,6 +38,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -86,6 +97,7 @@ jobs:
             PORT=${{ env.APP_PORT }}
             COMMIT_SHA=${{ github.sha }}
             GAR_STG_READER_KEY=${{ secrets.GAR_STG_READER_KEY }}
+            INSTALL_RL_DEPS=true
 
       - name: Generate build summary
         run: |
