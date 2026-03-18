@@ -350,6 +350,7 @@ async def execute_action(
                         order_id=matched_order_id,
                         status="accepted",
                         escrow_uid=escrow_uid,
+                        order_taker=parameters.get("counterparty_url"),
                     )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
@@ -1488,7 +1489,9 @@ async def _accept_as_buyer(
     else:
         raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
 
-    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    # The counterparty (seller) is the taker of Alice's buy order.
+    counterparty_url = parameters.get("counterparty_url")
+    order_dict["order_taker"] = counterparty_url
     order_dict["taker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
 
@@ -1516,7 +1519,7 @@ async def _accept_as_buyer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=BASE_URL_OVERRIDE,
+                order_taker=counterparty_url,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1528,7 +1531,7 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
+            registry_updates = {"status": "accepted", "order_taker": counterparty_url, "taker_attestation": escrow_uid}
             # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
             # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
             their_id = order_dict.get("order_id")
