@@ -1448,6 +1448,7 @@ async def _accept_as_seller(
         "escrow_uid": None,
         "ssh_public_key": None,
         "matched_order_id": our_order_id,
+        "buyer_order_id": their_order_id,
     }
 
     try:

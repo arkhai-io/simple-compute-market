@@ -177,12 +177,15 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             return None
         neg_id = make_negotiation_id(order.order_id, matched_order_id) if matched_order_id else None
         our_initial_price = _extract_initial_price_from_order(order)
+        # buyer_order_id is set by the seller so the buyer can link escrow_uid to their local
+        # order record. Fall back to order.order_id for backwards-compat (older seller agents).
+        our_order_id = getattr(context.event, "buyer_order_id", None) or order.order_id
         return DomainAction(
             action_type=DomainActionType.ACCEPT_OFFER,
             parameters={
                 "order": order.model_dump(mode="json"),
                 "order_id": order.order_id,
-                "our_order_id": order.order_id,
+                "our_order_id": our_order_id,
                 "their_order_id": matched_order_id,
                 "counterparty_url": sender_url,
                 "matched_order_id": matched_order_id,

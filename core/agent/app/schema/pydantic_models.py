@@ -348,6 +348,13 @@ class AcceptOfferEvent(DomainEvent):
             "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
         ),
     )
+    buyer_order_id: str | None = Field(
+        default=None,
+        description=(
+            "The buyer's own demand order_id, set by the seller on the first (no-escrow) "
+            "acceptance so the buyer can link the escrow_uid to their local order record."
+        ),
+    )
 
     @classmethod
     def from_order(
