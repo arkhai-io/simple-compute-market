@@ -382,9 +382,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MINIMIZE] Converged: their_price {their_price} <= last_our_proposal {last_our_proposal} * {1 + CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price <= our_price * REASONABLE_MULTIPLIER:
-            # Above last bid but reasonable — counter with midpoint
-            proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            # Above last bid but reasonable — counter with midpoint, clamped to reservation price
+            proposed_price = min(our_price, (last_our_proposal + their_price) // 2)
+            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price}, clamped to ceiling {our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far above ceiling
@@ -406,9 +406,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MAXIMIZE] Converged: their_price {their_price} >= last_our_proposal {last_our_proposal} * {1 - CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price >= our_price / REASONABLE_MULTIPLIER:
-            # Below last ask but reasonable — counter with midpoint
-            proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            # Below last ask but reasonable — counter with midpoint, clamped to reservation price
+            proposed_price = max(our_price, (last_our_proposal + their_price) // 2)
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price}, clamped to floor {our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far below floor
@@ -731,7 +731,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         if their_proposed_price <= our_price * (1 + CONVERGENCE_RATIO):
             return actions.accept("convergence")
         if their_proposed_price <= our_price * 1.5:
-            proposed_price = (our_price + their_proposed_price) // 2
+            proposed_price = min(our_price, (our_price + their_proposed_price) // 2)
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")
 
@@ -739,7 +739,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         if their_proposed_price >= our_price * (1 - CONVERGENCE_RATIO):
             return actions.accept("convergence")
         if their_proposed_price >= our_price / 1.5:
-            proposed_price = (our_price + their_proposed_price) // 2
+            proposed_price = max(our_price, (our_price + their_proposed_price) // 2)
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")
 

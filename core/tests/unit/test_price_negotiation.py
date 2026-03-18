@@ -194,10 +194,10 @@ class TestMinimizerStrategy:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should counter with midpoint: (100 + 140) // 2 = 120
+        # With clamping: min(100, (100 + 140) // 2) = min(100, 120) = 100
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        assert result.parameters.get("proposed_price") == 120
+        assert result.parameters.get("proposed_price") == 100
 
 
 class TestMaximizerStrategy:
@@ -252,10 +252,10 @@ class TestMaximizerStrategy:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should counter with midpoint: (100 + 70) // 2 = 85
+        # With clamping: max(100, (100 + 70) // 2) = max(100, 85) = 100
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        assert result.parameters.get("proposed_price") == 85
+        assert result.parameters.get("proposed_price") == 100
 
 
 class TestNegotiationScenarios:
@@ -336,9 +336,9 @@ class TestNegotiationScenarios:
 
         Initial: Minimizer at 100, Maximizer at 100
         Offer: 140 (above minimizer's ceiling)
-        Expected: Minimizer counters to 120, Maximizer accepts (120 >= 100)
+        Expected: Minimizer counters to 100 (clamped to ceiling), Maximizer accepts (100 >= 100)
         """
-        # Minimizer sees 140 → counters to 120
+        # Minimizer sees 140 → counters to 100 (clamped: min(100, (100+140)//2) = 100)
         minimizer_context = create_test_context(
             our_price=100,
             their_price=140,
@@ -352,14 +352,14 @@ class TestNegotiationScenarios:
         ce = CallableEvaluator(func)
         minimizer_result = await ce.evaluate(minimizer_context)
 
-        # Minimizer should counter to 120
+        # Minimizer should counter to 100 (clamped to ceiling)
         assert minimizer_result.action_type.value == "counter_offer"
-        assert minimizer_result.parameters.get("proposed_price") == 120
+        assert minimizer_result.parameters.get("proposed_price") == 100
 
-        # Maximizer sees 120 (from minimizer counter) → should accept (>= floor)
+        # Maximizer sees 100 (from minimizer counter, clamped) → should accept (>= floor)
         maximizer_context = create_test_context(
             our_price=100,
-            their_price=120,
+            their_price=100,
             strategy="maximize",
             agent_id="maximizer_agent",
             negotiation_id="test_conv",
@@ -368,7 +368,7 @@ class TestNegotiationScenarios:
 
         maximizer_result = await ce.evaluate(maximizer_context)
 
-        # Maximizer should accept at 120 (>= floor of 100)
+        # Maximizer should accept at 100 (>= floor of 100)
         assert maximizer_result.action_type.value == "accept_offer"
 
     @pytest.mark.asyncio
@@ -470,7 +470,7 @@ class TestMultipleBilateralNegotiations:
         - Agent A is a minimizer with order_A (ceiling=100)
         - Agent B is a maximizer with order_B (asking 150)
         - Agent C is a maximizer with order_C (asking 130)
-        - A should counter both B and C independently
+        - A should counter both B and C, clamped to ceiling
         """
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
@@ -521,13 +521,13 @@ class TestMultipleBilateralNegotiations:
         result_B = await ce.evaluate(context_B)
         result_C = await ce.evaluate(context_C)
 
-        # Both should counter (150 and 130 are above 120% of 100)
+        # Both should counter (150 and 130 are above ceiling of 100 but <= 1.5x)
         assert result_B.action_type.value == "counter_offer"
         assert result_C.action_type.value == "counter_offer"
 
-        # Counter prices should be different (midpoints)
-        assert result_B.parameters.get("proposed_price") == 125  # (100 + 150) // 2
-        assert result_C.parameters.get("proposed_price") == 115  # (100 + 130) // 2
+        # Counter prices clamped to ceiling (our_price=100)
+        assert result_B.parameters.get("proposed_price") == 100  # min(100, (100 + 150) // 2)
+        assert result_C.parameters.get("proposed_price") == 100  # min(100, (100 + 130) // 2)
 
         # Record messages to threads
         await thread_store.add_message(
@@ -535,7 +535,7 @@ class TestMultipleBilateralNegotiations:
             sender="agent_A",
             our_price=100,
             their_price=150,
-            proposed_price=125,
+            proposed_price=100,
             action_taken="COUNTER_OFFER",
             message_type="counter_proposal",
         )
@@ -544,7 +544,7 @@ class TestMultipleBilateralNegotiations:
             sender="agent_A",
             our_price=100,
             their_price=130,
-            proposed_price=115,
+            proposed_price=100,
             action_taken="COUNTER_OFFER",
             message_type="counter_proposal",
         )
@@ -555,8 +555,8 @@ class TestMultipleBilateralNegotiations:
 
         assert len(thread_B) == 1
         assert len(thread_C) == 1
-        assert thread_B[0]["proposed_price"] == 125
-        assert thread_C[0]["proposed_price"] == 115
+        assert thread_B[0]["proposed_price"] == 100
+        assert thread_C[0]["proposed_price"] == 100
 
     @pytest.mark.asyncio
     async def test_accept_cancels_competing_negotiations(self, policy_store, thread_store):
@@ -889,7 +889,7 @@ class TestMultipleBilateralNegotiations:
 
         # B's offer of 70 is below floor (100), but >= 0.67x (67), so maximizer should counter
         assert result_B.action_type.value == "counter_offer"
-        assert result_B.parameters.get("proposed_price") == 85  # (100 + 70) // 2
+        assert result_B.parameters.get("proposed_price") == 100  # max(100, (100 + 70) // 2)
 
         # C's offer of 90 is below floor (100), but >= 0.67x (67), so maximizer should counter
         # Wait, 90 < 100, so maximizer should counter (not accept)
