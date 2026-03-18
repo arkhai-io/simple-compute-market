@@ -109,6 +109,7 @@ services:
       # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
       - INDEXER_URL=http://host.docker.internal:8080
       - CHAIN_RPC_URL=ws://anvil:8545
+      - TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_docker_compose.json
     volumes:
       - shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
@@ -155,6 +156,7 @@ services:
       # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
       - INDEXER_URL=http://host.docker.internal:8080
       - CHAIN_RPC_URL=ws://anvil:8545
+      - TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_docker_compose.json
     volumes:
       - shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one

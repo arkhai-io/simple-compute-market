@@ -10,11 +10,5 @@
     "name": "Wrapped Ether (WETH9)",
     "contract_address": "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
     "decimals": 18
-  },
-  {
-    "symbol": "MOCK",
-    "name": "Mock ERC-20 (Alkahest local)",
-    "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
-    "decimals": 0
   }
 ]

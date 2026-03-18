@@ -152,7 +152,7 @@ class Config:
     arkhai_negotiator_buyer_model_path: str  # ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
-    Path(__file__).resolve().parents[1] / "data" / "token_registry.json"
+    Path(__file__).resolve().parents[1] / "data" / "token_registry_docker_compose.json"
 )
 
 
