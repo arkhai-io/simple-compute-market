@@ -65,9 +65,8 @@ class TestAcceptOfferSerialization:
 
         captured_events = []
 
-        async def mock_send(ctx, event, *, agent_url):
+        def mock_fire_and_forget(ctx, event, *, agent_url):
             captured_events.append(event)
-            return MagicMock(content=MagicMock(parts=[MagicMock(text="Offer received")]))
 
         # seller-as-maker: order_maker == BASE_URL_OVERRIDE and offer_resource is compute
         # → _we_are_compute_buyer returns False → goes through _accept_as_seller (no alkahest)
@@ -97,7 +96,7 @@ class TestAcceptOfferSerialization:
             patch("core.agent.app.utils.action_executor.NegotiationThreadTransaction", return_value=mock_txn),
             patch("core.agent.app.utils.action_executor.get_sqlite_client", return_value=AsyncMock()),
             patch("core.agent.app.utils.action_executor.get_registry_client", return_value=AsyncMock()),
-            patch("core.agent.app.utils.action_executor.send_to_remote_agent", side_effect=mock_send),
+            patch("core.agent.app.utils.action_executor._background_send", side_effect=mock_fire_and_forget),
             patch("core.agent.app.utils.action_executor.BASE_URL_OVERRIDE", our_url),
             patch("core.agent.app.utils.action_executor.AGENT_ID", "arkhai_seller_agent"),
             patch("core.agent.app.utils.action_executor.SSH_PUBLIC_KEY", None),
@@ -131,9 +130,8 @@ class TestAcceptOfferSerialization:
 
         captured_events = []
 
-        async def mock_send(ctx, event, *, agent_url):
+        def mock_fire_and_forget(ctx, event, *, agent_url):
             captured_events.append(event)
-            return MagicMock(content=MagicMock(parts=[MagicMock(text="ok")]))
 
         our_url = "http://seller:8001"
         parameters = {
@@ -160,7 +158,7 @@ class TestAcceptOfferSerialization:
             patch("core.agent.app.utils.action_executor.NegotiationThreadTransaction", return_value=mock_txn),
             patch("core.agent.app.utils.action_executor.get_sqlite_client", return_value=AsyncMock()),
             patch("core.agent.app.utils.action_executor.get_registry_client", return_value=AsyncMock()),
-            patch("core.agent.app.utils.action_executor.send_to_remote_agent", side_effect=mock_send),
+            patch("core.agent.app.utils.action_executor._background_send", side_effect=mock_fire_and_forget),
             patch("core.agent.app.utils.action_executor.BASE_URL_OVERRIDE", our_url),
             patch("core.agent.app.utils.action_executor.AGENT_ID", "arkhai_seller_agent"),
             patch("core.agent.app.utils.action_executor.SSH_PUBLIC_KEY", None),

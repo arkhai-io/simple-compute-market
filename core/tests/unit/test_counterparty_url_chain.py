@@ -11,6 +11,9 @@ The chain being tested:
      counterparty_url = event.fulfilling_party_url (Bob's URL)
 """
 
+import pytest
+from unittest.mock import AsyncMock, patch
+
 from core.agent.app.schema.pydantic_models import (
     AcceptOfferEvent,
     ComputeResource,
@@ -24,7 +27,7 @@ from core.agent.app.schema.pydantic_models import (
 )
 from domain.compute.agent.app.policy.store import (
     ao_action_fulfill_after_accept,
-    mo_action_accept_offer,
+    negotiation_respond_to_make_offer,
     rcf_action_trust_fulfillment,
 )
 
@@ -77,11 +80,17 @@ def _bob_order() -> MarketOrder:
 
 
 # ---------------------------------------------------------------------------
-# Step 1: Bob receives Alice's offer → ACCEPT_OFFER action carries Alice's URL
+# Step 1: Bob receives Alice's offer → action carries Alice's URL as counterparty
 # ---------------------------------------------------------------------------
 
-def test_mo_action_accept_offer_sets_counterparty_to_order_maker():
-    """mo_action_accept_offer wires counterparty_url from order.order_maker (Alice's URL)."""
+@pytest.mark.asyncio
+async def test_negotiation_respond_to_make_offer_sets_counterparty_to_order_maker():
+    """negotiation_respond_to_make_offer wires counterparty_url from order.order_maker (Alice's URL).
+
+    Replaces the removed mo_action_accept_offer — same invariant: the policy that
+    handles an incoming make_offer must propagate the sender's URL as counterparty_url
+    so subsequent actions (counter, accept, fulfill) know where to send their messages.
+    """
     from core.agent.app.schema.pydantic_models import MakeOfferEvent
 
     event = MakeOfferEvent(
@@ -90,7 +99,19 @@ def test_mo_action_accept_offer_sets_counterparty_to_order_maker():
         order=_alice_order(),
     )
     ctx = DecisionContext(event=event, agent_id="bob-agent")
-    action = mo_action_accept_offer(ctx)
+
+    mock_registry = AsyncMock()
+    mock_registry.query_orders = AsyncMock(return_value=[_bob_order().model_dump(mode="json")])
+
+    mock_thread_store = AsyncMock()
+    mock_thread_store.get_thread_info = AsyncMock(return_value=None)
+    mock_thread_store.get_thread = AsyncMock(return_value=[])
+
+    with (
+        patch("domain.compute.agent.app.policy.store.get_registry_client", return_value=mock_registry),
+        patch("domain.compute.agent.app.policy.store.get_thread_store", return_value=mock_thread_store),
+    ):
+        action = await negotiation_respond_to_make_offer(ctx)
 
     assert action is not None
     assert action.parameters["counterparty_url"] == ALICE_URL

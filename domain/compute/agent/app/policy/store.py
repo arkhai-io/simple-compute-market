@@ -193,6 +193,8 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
                 "our_initial_price": our_initial_price,
                 "our_price": our_initial_price,
                 "their_price": our_initial_price,
+                # compute_buyer = True means we minimize (token payer wants lowest price)
+                "our_strategy": "minimize",
             },
         )
 
@@ -207,6 +209,12 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "oracle_address": order.oracle_address,
             "counterparty_url": sender_url,
             "matched_order_id": matched_order_id,
+            # buyer_order_id is echoed by the buyer in their AcceptOfferEvent so the seller
+            # can reconstruct make_negotiation_id(seller_order, buyer_order) regardless of
+            # who initiated the MakeOfferEvent.
+            # Case A (buyer initiates): offer field = buyer's order → order.order_id = buyer's ✓
+            # Case B (seller initiates): offer field = seller's order → need the echo ✓
+            "buyer_order_id": getattr(context.event, "buyer_order_id", None) or order.order_id,
         },
     )
 

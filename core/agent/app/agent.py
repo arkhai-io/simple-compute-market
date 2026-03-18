@@ -376,13 +376,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
             matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
             source = data.get("source") or payload.get("source")
-            return AcceptOfferEvent.from_order(
+            buyer_order_id = data.get("buyer_order_id") or payload.get("buyer_order_id")
+            event = AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
                 matched_order_id=matched_order_id,
                 source=source,
             )
+            if buyer_order_id:
+                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            return event
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
