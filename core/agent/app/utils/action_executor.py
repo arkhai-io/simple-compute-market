@@ -1142,7 +1142,13 @@ async def accept_offer(
     if isinstance(order_payload, MarketOrder):
         order_dict = order_payload.model_dump(mode="json")
     elif isinstance(order_payload, dict):
-        order_dict = order_payload
+        # Serialize any nested Pydantic objects (ComputeResource, TokenResource, enums)
+        # so the dict contains only JSON-primitive types. This prevents Python reprs like
+        # "ComputeResource(...)" from appearing in A2A text payloads and breaking parsing.
+        try:
+            order_dict = MarketOrder(**order_payload).model_dump(mode="json")
+        except Exception:
+            order_dict = order_payload
     else:
         # No order in parameters — fall back to registry lookup using their_order_id.
         # This happens when accept_offer is called from the NEGOTIATION path (price_interval_concession)
