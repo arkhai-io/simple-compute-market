@@ -128,7 +128,13 @@ class TestRespondToMakeOffer:
     """Test negotiation.respond_to_make_offer policy."""
 
     @pytest.fixture
-    def policy_store(self, temp_db):
+    def thread_store(self, temp_db):
+        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        return NegotiationThreadStore(sqlite_client=SQLiteClient(db_path=temp_db))
+
+    @pytest.fixture
+    def policy_store(self, temp_db, thread_store):
+        from unittest.mock import patch
         from core.agent.app.policy.registry import CALLABLE_REGISTRY
 
         CALLABLE_REGISTRY.clear()
@@ -141,9 +147,9 @@ class TestRespondToMakeOffer:
             "negotiation.respond_to_make_offer": negotiation_respond_to_make_offer,
         })
 
-        yield store
-
-        CALLABLE_REGISTRY.clear()
+        with patch("domain.compute.agent.app.policy.store.get_thread_store", return_value=thread_store):
+            yield store
+            CALLABLE_REGISTRY.clear()
 
     @pytest.mark.asyncio
     async def test_minimizer_accepts_favorable_price(self, policy_store, maximizer_order):
@@ -265,8 +271,8 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        # proposed_price = (100 + 120) // 2 = 110
-        assert result.parameters.get("proposed_price") == 110
+        # proposed_price = min(100, (100 + 120) // 2) = min(100, 110) = 100  (clamped to ceiling)
+        assert result.parameters.get("proposed_price") == 100
 
     @pytest.mark.asyncio
     async def test_minimizer_exits_unreasonable_price(self, policy_store):
@@ -440,7 +446,8 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        assert result.parameters.get("proposed_price") == 85
+        # proposed_price = max(100, (100 + 70) // 2) = max(100, 85) = 100  (clamped to floor)
+        assert result.parameters.get("proposed_price") == 100
 
     @pytest.mark.asyncio
     async def test_no_matching_order_returns_reject(self, policy_store, maximizer_order):
@@ -553,11 +560,15 @@ class TestRespondToMakeOffer:
         assert neg_id == "order_A_order_Z"
 
     @pytest.mark.asyncio
-    async def test_canonical_initiator_guard_drops_cross_offer(self, policy_store):
-        """When our order_id sorts first, we are the initiator — incoming make_offer is dropped."""
-        # our order_id "order_A" < their "order_Z" → we are the canonical initiator, return None
+    async def test_canonical_initiator_guard_drops_cross_offer(self, policy_store, thread_store):
+        """When our order_id sorts first and a thread already exists, we are the initiator — incoming make_offer is dropped."""
+        # our order_id "order_A" < their "order_Z" → we are the canonical initiator
+        our_order_id = "order_A"
+        their_order_id = "order_Z"
+        neg_id = f"{our_order_id}_{their_order_id}"
+
         minimizer_our_order = MarketOrder(
-            order_id="order_A",
+            order_id=our_order_id,
             order_maker="our_agent",
             offer_resource=TokenResource(
                 token=ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6),
@@ -570,7 +581,7 @@ class TestRespondToMakeOffer:
         )
 
         incoming_order = MarketOrder(
-            order_id="order_Z",
+            order_id=their_order_id,
             order_maker="agent_Z",
             offer_resource=ComputeResource(
                 gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
@@ -580,6 +591,19 @@ class TestRespondToMakeOffer:
                 amount=100,
             ),
             duration_hours=3600,
+        )
+
+        # Seed an existing thread: guard only fires when we already have an active thread,
+        # proving we already sent our own make_offer outbound.
+        await thread_store.create_thread(
+            negotiation_id=neg_id,
+            our_order_id=our_order_id,
+            their_order_id=their_order_id,
+            our_agent_id="our_agent",
+            their_agent_id="agent_Z",
+            owner_id="",   # matches CONFIG.base_url_override default in tests
+            our_initial_price=100,
+            our_strategy="minimize",
         )
 
         event = MakeOfferEvent(
@@ -605,7 +629,7 @@ class TestRespondToMakeOffer:
             func = policy_store._registry.get("negotiation.respond_to_make_offer")
             result = await func(context)
 
-        # Canonical initiator guard: we already sent our make_offer, drop theirs
+        # Canonical initiator guard: active thread exists, drop counterparty's cross-offer
         assert result is None
 
 
