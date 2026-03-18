@@ -18,7 +18,7 @@ init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
 
 init-submodules:
-	git submodule update --init
+	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
 
 init-dependencies: init-zero-tier init-registry init-cli
 
@@ -42,11 +42,15 @@ init-cli:
 init-images:
 	echo "NYI"
 
+deploy-local:
+	docker compose up
+	docker compose ps
+
 #Ideally a helm chart eventually replaces 3 different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
 deploy: deploy-registry
-
-#Again this eats the window. Same suggestions as test-env apply here.
-deploy-registry:
-	cd erc-8004-registry-py && make serve
+	echo "NYI"
 
 #We're also going to want some targets built to idempotently smoke test a deployment
+stop-local:
+	docker compose down
+	docker compose rm
