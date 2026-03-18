@@ -618,6 +618,35 @@ def order_show(
         "-r",
         help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
     ),
+    env: str | None = typer.Option(
+        None,
+        "--env",
+        "-e",
+        help="Path to env file (reads AGENT_DB_PATH for local DB queries).",
+    ),
+    db: str | None = typer.Option(
+        None,
+        "--db",
+        help="Explicit path to the agent SQLite DB.",
+    ),
+    negotiation: bool = typer.Option(
+        False,
+        "--negotiation",
+        "-n",
+        help="Show negotiation message history for this order.",
+    ),
+    credentials: bool = typer.Option(
+        False,
+        "--credentials",
+        "-c",
+        help="Show credentials associated with this order.",
+    ),
+    show_password: bool = typer.Option(
+        False,
+        "--show-password",
+        "-p",
+        help="Reveal credential passwords in plain text (implies --credentials).",
+    ),
 ) -> None:
     """Show a single order by ID."""
     base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
@@ -642,3 +671,164 @@ def order_show(
     table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
 
     console.print(Panel(table, title="Market Order", border_style="blue"))
+
+    if show_password:
+        credentials = True
+
+    if not (negotiation or credentials):
+        return
+
+    db_path = _resolve_db_path(db, env)
+    if not db_path:
+        typer.secho(
+            "Local DB not found. Pass --db <path> or --env <envfile> with AGENT_DB_PATH set.",
+            err=True,
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    import sqlite3
+
+    if negotiation:
+        _print_negotiation_table(console, db_path, order_id)
+
+    if credentials:
+        _print_credentials_table(console, db_path, order_id, show_password=show_password)
+
+
+def _resolve_db_path(db: str | None, env: str | None) -> str | None:
+    """Return the SQLite DB path from explicit arg, env file, or env var."""
+    if db:
+        return db
+    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
+    value = _read_env_value(env_path, "AGENT_DB_PATH")
+    if value and Path(value).exists():
+        return value
+    # Fallback: check env var directly
+    from_env = os.getenv("AGENT_DB_PATH")
+    if from_env and Path(from_env).exists():
+        return from_env
+    return None
+
+
+def _print_negotiation_table(console: Console, db_path: str, order_id: str) -> None:
+    """Query negotiation_messages for this order and print as a table."""
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            # negotiation_id is sorted(order_a, order_b) joined by '_'.
+            # UUIDs don't contain '_', so LIKE matching is unambiguous.
+            cur.execute(
+                """
+                SELECT negotiation_id, round, sender, our_price, their_price,
+                       proposed_price, action_taken, message_type, timestamp
+                FROM negotiation_messages
+                WHERE negotiation_id LIKE ? OR negotiation_id LIKE ?
+                ORDER BY negotiation_id, round ASC
+                """,
+                (f"{order_id}_%", f"%_{order_id}"),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        typer.secho(f"Failed to read negotiation history: {exc}", err=True, fg=typer.colors.RED)
+        return
+
+    if not rows:
+        console.print("\n[dim]No negotiation history found for this order.[/dim]")
+        return
+
+    table = Table(title="Negotiation History", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Round", justify="right", style="bold", no_wrap=True)
+    table.add_column("Sender", overflow="fold")
+    table.add_column("Our Price", justify="right")
+    table.add_column("Their Price", justify="right")
+    table.add_column("Proposed", justify="right")
+    table.add_column("Action")
+    table.add_column("Type")
+    table.add_column("Timestamp", justify="right")
+
+    prev_neg_id = None
+    for neg_id, rnd, sender, our_price, their_price, proposed, action, msg_type, ts in rows:
+        if prev_neg_id and neg_id != prev_neg_id:
+            table.add_section()
+        prev_neg_id = neg_id
+        # Shorten sender URL to last component (agent hostname or port)
+        sender_short = sender.rstrip("/").rsplit("/", 1)[-1] if "/" in sender else sender
+        table.add_row(
+            str(rnd),
+            sender_short,
+            str(our_price) if our_price is not None else "-",
+            str(their_price) if their_price is not None else "-",
+            str(proposed) if proposed is not None else "-",
+            str(action or "-"),
+            str(msg_type or "-"),
+            _short_ts(ts),
+        )
+
+    console.print(table)
+
+
+def _print_credentials_table(console: Console, db_path: str, order_id: str, *, show_password: bool = False) -> None:
+    """Query credentials for this order and print as a table."""
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT role, granted_to, password, ssh_commands, ssh_key_path_host, key_type
+                FROM credentials
+                WHERE order_id = ?
+                ORDER BY role
+                """,
+                (order_id,),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        typer.secho(f"Failed to read credentials: {exc}", err=True, fg=typer.colors.RED)
+        return
+
+    if not rows:
+        console.print("\n[dim]No credentials found for this order.[/dim]")
+        return
+
+    table = Table(title="Credentials", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Role", style="bold", no_wrap=True)
+    table.add_column("Granted To", no_wrap=True)
+    table.add_column("Password")
+    table.add_column("SSH Commands", overflow="fold")
+    table.add_column("Key Path", overflow="fold")
+    table.add_column("Key Type", no_wrap=True)
+
+    for role, granted_to, password, ssh_commands, ssh_key_path_host, key_type in rows:
+        # Parse ssh_commands JSON if present, show as newline-separated values
+        ssh_display = "-"
+        if ssh_commands:
+            try:
+                cmds = json.loads(ssh_commands)
+                if isinstance(cmds, dict):
+                    ssh_display = "\n".join(f"{k}: {v}" for k, v in cmds.items())
+                else:
+                    ssh_display = str(cmds)
+            except Exception:
+                ssh_display = ssh_commands
+
+        table.add_row(
+            str(role or "-"),
+            str(granted_to or "-"),
+            (str(password) if show_password else "••••••••") if password else "-",
+            ssh_display,
+            str(ssh_key_path_host or "-"),
+            str(key_type or "-"),
+        )
+
+    console.print(table)
