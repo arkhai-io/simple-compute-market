@@ -184,6 +184,10 @@ infra/*/*.plan
 experiments/
 wandb/
 !.env.sample
+!.env.docker-compose
+!.env.*.docker-compose
+!.env.*.docker-compose
+!.env.docker-compose
 .cursor/
 
 # Cloud Function

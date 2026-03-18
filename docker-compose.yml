@@ -57,7 +57,7 @@ services:
     ports:
       - "8080:8080"
     env_file:
-      - ./erc-8004-registry-py/.env
+      - ./erc-8004-registry-py/.env.docker-compose
     volumes:
       - shared-env:/app/shared-env
     networks:
@@ -101,15 +101,11 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     env_file:
-      - ./core/agent/.env.alice.local
+      - ./core/agent/.env.alice.docker-compose
     environment:
       # Force re-registration on every fresh Anvil — clear stale IDs from env file
       - ONCHAIN_AGENT_ID=
       - ZEROTIER_IP=
-      # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
-      - INDEXER_URL=http://host.docker.internal:8080
-      - CHAIN_RPC_URL=ws://anvil:8545
-      - TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_docker_compose.json
     volumes:
       - shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
@@ -148,15 +144,11 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     env_file:
-      - ./core/agent/.env.bob.local
+      - ./core/agent/.env.bob.docker-compose
     environment:
       # Force re-registration on every fresh Anvil — clear stale IDs from env file
       - ONCHAIN_AGENT_ID=
       - ZEROTIER_IP=
-      # Registry is reachable via host ZeroTier IP (port-mapped to host :8080)
-      - INDEXER_URL=http://host.docker.internal:8080
-      - CHAIN_RPC_URL=ws://anvil:8545
-      - TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_docker_compose.json
     volumes:
       - shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one
@@ -206,12 +198,7 @@ services:
     ports:
       - "8081:8081"
     env_file:
-      - ./async-provisioning-service/.env.sample
-    environment:
-      - DATABASE_URL=sqlite:///provisioning.db
-      - REDIS_URL=redis://redis:6379/0
-      - REGISTRY_URL=http://registry:8080
-      - ENABLE_AUTH=false
+      - ./async-provisioning-service/.env.docker-compose
     volumes:
       - ./compute-provisioning-iac:/app/compute-provisioning-iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
