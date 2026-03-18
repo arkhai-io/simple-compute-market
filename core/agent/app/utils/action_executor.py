@@ -1344,7 +1344,9 @@ async def _accept_as_buyer(
     order_dict["oracle_address"] = oracle_address
 
     # Echo the seller's order_id back so they can update their local DB without a lookup.
-    matched_order_id = parameters.get("matched_order_id")
+    # Fall back to their_order_id when matched_order_id is absent (direct-match path where
+    # the policy passes their_order_id but not matched_order_id explicitly).
+    matched_order_id = parameters.get("matched_order_id") or their_order_id
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
