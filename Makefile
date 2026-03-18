@@ -1,14 +1,25 @@
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+
 .PHONY: build
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli
+build: build-cli build-contracts build-market-contract-deployer build-registry 
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build
 
+build-contracts:
+	cd erc-8004-contracts && docker build -t arkhai:contracts-$(GIT_SUFFIX) .
+
+build-market-contract-deployer:
+	cd market-contract-deployer && make build
+
 build-registry:
 	cd erc-8004-registry-py && make build
+
+#build-agent:
+#	cd core && make build
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
@@ -41,6 +52,10 @@ init-cli:
 # This will eventually download the docker images
 init-images:
 	echo "NYI"
+
+#deploy-test-env:
+#	docker run -d --rm --name market-anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 ghcr.io/foundry-rs/foundry:latest anvil
+#	docker run -it --rm --name market-contracts-deploy -e ANVIL_RPC_URL=http://anvil:8545 -e ENV_FILE=/app/shared-env/.env simple-market-service-contracts-deploy:latest /bin/bash
 
 deploy-local:
 	docker compose up
