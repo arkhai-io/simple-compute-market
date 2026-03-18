@@ -1172,6 +1172,7 @@ async def accept_offer(
     counterparty_url = parameters.get("counterparty_url")
     their_price = parameters.get("their_price")
     our_price = parameters.get("our_price")
+    our_initial_price = parameters.get("our_initial_price") or our_price
 
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
         if negotiation_id:
@@ -1181,6 +1182,7 @@ async def accept_offer(
                 their_order_id=their_order_id or "",
                 our_agent_id=BASE_URL_OVERRIDE,
                 their_agent_id=counterparty_url or "",
+                our_initial_price=our_initial_price,
             )
             await txn.add_message(
                 negotiation_id=negotiation_id,
@@ -1250,7 +1252,7 @@ async def accept_offer(
             logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
 
     if _we_are_compute_buyer(order_dict):
-        return await _accept_as_buyer(
+        result = await _accept_as_buyer(
             alkahest_client=alkahest_client,
             ctx=ctx,
             parameters=parameters,
@@ -1259,13 +1261,23 @@ async def accept_offer(
             their_order_id=their_order_id,
         )
     else:
-        return await _accept_as_seller(
+        result = await _accept_as_seller(
             ctx=ctx,
             parameters=parameters,
             order_dict=order_dict,
             our_order_id=our_order_id,
             their_order_id=their_order_id,
         )
+    if negotiation_id:
+        result["artifact"] = {
+            "negotiation_id": negotiation_id,
+            "agreed_price": their_price,
+            "escrow_uid": result.get("escrow_uid"),
+            "our_initial_price": our_initial_price,
+            "our_order_id": our_order_id,
+            "their_order_id": their_order_id,
+        }
+    return result
 
 
 async def _accept_as_buyer(

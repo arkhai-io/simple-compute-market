@@ -824,6 +824,57 @@ class TraderAgent(BaseAgent):
         logger.info(f"{outcome} {outcome_message}")
         return outcome_message or fallback_message
 
+    async def _check_orphan(
+        self, domain_event: Any, ctx: InvocationContext
+    ) -> str | None:
+        """Return a message string if the event is an orphaned negotiation round
+        (agent restarted, lost in-memory session). Returns None otherwise."""
+        from core.agent.app.utils.action_executor import (
+            _negotiation_sessions,
+            _negotiation_locks,
+            exit_negotiation,
+        )
+        from core.agent.app.policy.negotiation_thread import get_thread_store
+
+        event_data = getattr(domain_event, "data", None) or {}
+        msg_type = event_data.get("message_type") or getattr(domain_event, "message_type", None)
+        if msg_type not in ("counter_proposal", "initial_proposal"):
+            return None
+
+        neg_id = event_data.get("negotiation_id") or getattr(domain_event, "negotiation_id", None)
+        if not neg_id:
+            return None
+
+        # Not orphaned if we have an active session or lock for this negotiation
+        if neg_id in _negotiation_sessions or neg_id in _negotiation_locks:
+            return None
+
+        # Confirm orphan: thread must have prior messages (rules out genuine round-0 arrivals)
+        try:
+            ts = get_thread_store()
+            history = await ts.get_thread(neg_id)
+        except Exception:
+            history = []
+
+        if len(history) == 0:
+            return None  # First-round arrival with no session yet — not an orphan
+
+        logger.warning(
+            "[AGENT] Orphaned negotiation %s detected after restart "
+            "(%d prior messages, no ADK session). Sending exit.",
+            neg_id, len(history),
+        )
+        their_order_id = event_data.get("their_order_id") or event_data.get("order_id")
+        await exit_negotiation(
+            ctx=ctx,
+            parameters={
+                "negotiation_id": neg_id,
+                "order_id": their_order_id,
+                "reason": "agent_restarted",
+            },
+        )
+        return f"Orphaned negotiation {neg_id} terminated: agent_restarted."
+
     @override
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -842,15 +893,40 @@ class TraderAgent(BaseAgent):
                 invocation_id=ctx.invocation_id,
                 branch=ctx.branch,
             )
+            return
 
         name, content = _extract_content_payload(last_event.content)
         logger.info(f"{name}: {content}")
 
         # Process through full reactive pipeline
         domain_event = _parse_domain_event(content)
-        policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
+
+        # Orphan guard: detect counter/initial proposals for negotiations whose ADK session
+        # was lost on restart. Respond with exit so the counterparty can requeue.
+        _orphan_msg = await self._check_orphan(domain_event, ctx)
+        if _orphan_msg is not None:
+            policy_recommendation = _orphan_msg
+        else:
+            policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
+
+        # Emit A2A artifact if action executor attached one (e.g. accept_offer settlement)
+        _outcome = self._last_action_outcomes.get(domain_event.event_id, {})
+        _artifact = _outcome.get("artifact") if isinstance(_outcome, dict) else None
+        if _artifact:
+            yield Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_function_response(
+                        name="negotiation_outcome",
+                        response=_artifact,
+                    )],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
 
         yield Event(
             author=self.name,
