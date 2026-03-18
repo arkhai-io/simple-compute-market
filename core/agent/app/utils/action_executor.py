@@ -7,6 +7,7 @@ Move domain-specific execution into the domain package as refactor continues.
 from __future__ import annotations
 
 import asyncio
+import functools
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -402,7 +403,7 @@ async def execute_action(
                             their_price = _extract_initial_price_from_order(order_dict) if order_dict else None
                             await txn.add_message(
                                 negotiation_id=neg_id,
-                                sender=AGENT_ID,
+                                sender=_sender_id(),
                                 our_price=our_price,
                                 their_price=their_price,
                                 proposed_price=our_price,
@@ -860,6 +861,7 @@ def _get_shutdown_fn():
     return http_schedule_vm_shutdown_async
 
 
+@functools.lru_cache(maxsize=1)
 def _canonical_agent_id() -> str | None:
     """Return the full ERC-8004 canonical ID for this agent (eip155:<chain>:0x<contract>:<id>).
 
@@ -893,6 +895,15 @@ def _canonical_agent_id() -> str | None:
     except Exception as exc:
         logger.warning("[PROVISIONING] Could not build canonical agent ID from %r: %s", raw, exc)
         return str(raw)
+
+
+def _sender_id() -> str:
+    """Return the canonical ERC-8004 agent ID for use as negotiation message sender.
+
+    Falls back to the local AGENT_ID (e.g. 'agent_8000') when the on-chain
+    identity is not configured.
+    """
+    return _canonical_agent_id() or AGENT_ID
 
 
 async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
@@ -1079,7 +1090,7 @@ async def _prepare_counter_offer(
             )
             await txn.add_message(
                 negotiation_id=params.negotiation_id,
-                sender=AGENT_ID,
+                sender=_sender_id(),
                 our_price=params.our_price,
                 their_price=params.their_price,
                 proposed_price=params.proposed_price,
@@ -1324,7 +1335,7 @@ async def accept_offer(
             )
             await txn.add_message(
                 negotiation_id=negotiation_id,
-                sender=AGENT_ID,
+                sender=_sender_id(),
                 our_price=our_price,
                 their_price=their_price,
                 proposed_price=their_price,
@@ -1848,7 +1859,7 @@ async def _find_and_send_matching_offers(
                             their_initial_price = _extract_initial_price_from_order(matched_order) if matched_order else None
                             await txn.add_message(
                                 negotiation_id=negotiation_id,
-                                sender=AGENT_ID,
+                                sender=_sender_id(),
                                 our_price=our_initial_price,
                                 their_price=their_initial_price,
                                 proposed_price=our_initial_price,
