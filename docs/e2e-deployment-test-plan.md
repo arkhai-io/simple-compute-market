@@ -9,13 +9,35 @@ This plan assumes the production-style path:
 - real seller inventory
 - no `mock` provisioning
 
+## Local Config Strategy
+
+Use local gitignored env files for deployed testing. Do not store real canary
+secrets in the committed sample env files.
+
+Minimum local bundle layout:
+
+- seller agent env: `core/agent/.env.seller.local`
+- buyer agent env: `core/agent/.env.buyer.local`
+- provisioning env: `async-provisioning-service/.env.local`
+- registry env: `erc-8004-registry-py/.env.local`
+- provisioning secrets: `compute-provisioning-iac/ansible/inventory/management-vars.yaml`
+
+The canary is built around seven logical roles:
+
+1. identity preflight validator
+2. coordinator
+3. seller actor
+4. buyer actor
+5. registry probe
+6. provisioning probe
+7. network probe
+
 ## Gate 0: Repo Consistency Checks
 
 Run these before touching deployed systems:
 
 ```bash
-cd core
-uv run pytest tests/unit/test_repo_consistency.py -q
+python scripts/run_deployment_gate_checks.py --skip-smoke-help
 ```
 
 What these checks cover:
@@ -24,6 +46,8 @@ What these checks cover:
 - the default VM host values in the samples exist in the tracked provisioning inventory
 - the provisioning inventory contains the expected `dev` / `staging` / `production` host aliases
 - the canary runbook and smoke script CLI stay in sync
+- the actor orchestration tests pass and keep the refactor honest
+- the CLI package tests and smoke-harness tests pass
 - Base Sepolia Alkahest addresses in this repo stay in sync with the sibling `alkahest` repo when it is present
 
 If Gate 0 fails, fix the repo drift first. Do not start a canary from an inconsistent tree.
@@ -39,6 +63,7 @@ Preflight assertions:
 - `DEFAULT_VM_HOST` exists in `compute-provisioning-iac/ansible/inventory/hosts`
 - `ENABLE_AUTH=true` and `AUTH_FAIL_OPEN=false` for provisioning
 - chain RPC, chain ID, and ERC-8004 addresses all target the same network
+- seller and buyer agent env bundles are distinct and do not reuse the same URL, private key, or agent ID
 - seller and buyer agent IDs are canonical `eip155:` IDs after registration
 
 Run the preflight validator from the repo root:
@@ -46,7 +71,8 @@ Run the preflight validator from the repo root:
 ```bash
 python scripts/validate_deployment_bundle.py \
   --environment dev \
-  --agent-env /path/to/dev/agent.env \
+  --seller-agent-env /path/to/dev/seller.env \
+  --buyer-agent-env /path/to/dev/buyer.env \
   --provisioning-env /path/to/dev/provisioning.env \
   --registry-env /path/to/dev/registry.env \
   --seller-agent-url http://<seller-zerotier-ip>:8001 \
@@ -78,16 +104,15 @@ Use `dev` first. Treat the deployed canary as the next failing test.
 
 Expected order:
 
-1. registry health
-2. provisioning health
-3. seller agent card over ZeroTier
-4. buyer agent card over ZeroTier
-5. on-chain registration
-6. matching order creation
-7. provisioning job success
-8. buyer credential retrieval
-9. buyer SSH success
-10. both orders transition to `closed`
+1. identity preflight validates the two actor bundles
+2. network probe checks registry and provisioning health
+3. network probe fetches seller and buyer agent cards over ZeroTier
+4. seller actor captures its registry baseline and creates a sell order
+5. buyer actor captures its registry baseline and creates a buy order
+6. provisioning probe waits for a new succeeded job
+7. provisioning probe fetches buyer credentials
+8. provisioning probe verifies SSH access if a tenant private key is provided
+9. registry probe confirms both orders transition to `closed`
 
 If any step fails:
 
@@ -134,16 +159,10 @@ Rollback remains the same as `docs/production-canary.md`.
 At minimum, re-run:
 
 ```bash
-cd core
-uv run pytest tests/unit/test_repo_consistency.py tests/unit/test_alkahest_config.py -q
-
-cd ../service
-uv run pytest tests/unit/test_alkahest.py -q
-
-cd ..
-python scripts/validate_deployment_bundle.py \
+python scripts/run_deployment_gate_checks.py \
   --environment dev \
-  --agent-env /path/to/dev/agent.env \
+  --seller-agent-env /path/to/dev/seller.env \
+  --buyer-agent-env /path/to/dev/buyer.env \
   --provisioning-env /path/to/dev/provisioning.env \
   --registry-env /path/to/dev/registry.env
 ```
@@ -152,7 +171,7 @@ Then run the deployed canary:
 
 ```bash
 cd ../cli
-uv run python ../scripts/prod_canary_smoke.py --help
+uv --no-config run python ../scripts/prod_canary_smoke.py --help
 ```
 
 When real env values are loaded, replace `--help` with the actual canary invocation from `docs/production-canary.md`.

@@ -55,6 +55,10 @@ to be recovered or created before a real ZeroTier-backed canary run.
 
 ## Agent Inputs
 
+Use two separate local agent env files for deployed canaries: one seller bundle
+and one buyer bundle. Do not reuse the same URL, private key, or `ONCHAIN_AGENT_ID`
+across both actors.
+
 | Variable | Status | Current source | If missing, do this ourselves |
 | --- | --- | --- | --- |
 | `BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8000/` | Available pattern only | production sample + runbook | Resolve on the deployed host after ZeroTier join |

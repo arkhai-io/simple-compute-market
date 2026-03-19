@@ -230,9 +230,10 @@ def _compare_equal(left: str, left_label: str, right: str, right_label: str, err
         )
 
 
-def _validate_bundle(
+def _validate_agent_env(
     *,
     agent_env: dict[str, str],
+    label: str,
     provisioning_env: dict[str, str],
     registry_env: dict[str, str],
     inventory_hosts: set[str],
@@ -248,7 +249,100 @@ def _validate_bundle(
 ) -> list[str]:
     errors: list[str] = []
 
-    _validate_required_keys(agent_env, AGENT_REQUIRED_KEYS, "agent env", errors)
+    _validate_required_keys(agent_env, AGENT_REQUIRED_KEYS, label, errors)
+    if errors:
+        return errors
+
+    inventory_hosts = set(inventory_hosts)
+
+    _validate_non_empty_secret(agent_env["GEMINI_API_KEY"], f"{label}:GEMINI_API_KEY", errors)
+    _validate_url(
+        value=agent_env["BASE_URL_OVERRIDE"],
+        label=f"{label}:BASE_URL_OVERRIDE",
+        errors=errors,
+        allow_zerotier_ip=True,
+    )
+    _validate_url(
+        value=agent_env["REGISTRY_URL"],
+        label=f"{label}:REGISTRY_URL",
+        errors=errors,
+    )
+    _validate_url(
+        value=agent_env["PROVISIONING_SERVICE_URL"],
+        label=f"{label}:PROVISIONING_SERVICE_URL",
+        errors=errors,
+    )
+    _validate_url(
+        value=agent_env["CHAIN_RPC_URL"],
+        label=f"{label}:CHAIN_RPC_URL",
+        errors=errors,
+        allow_local_host=True,
+    )
+    _validate_private_key(agent_env["AGENT_PRIV_KEY"], f"{label}:AGENT_PRIV_KEY", errors)
+    _validate_evm_address(
+        agent_env["AGENT_WALLET_ADDRESS"], f"{label}:AGENT_WALLET_ADDRESS", errors
+    )
+    _validate_ssh_public_key(agent_env["SSH_PUBLIC_KEY"], f"{label}:SSH_PUBLIC_KEY", errors)
+    _validate_zerotier_network(
+        agent_env["ZEROTIER_NETWORK"], f"{label}:ZEROTIER_NETWORK", errors
+    )
+    if _normalize_env_value(agent_env["CHAIN_NAME"]) != expected_chain_name:
+        errors.append(
+            f"{label}:CHAIN_NAME must be {expected_chain_name}, got {agent_env['CHAIN_NAME']}"
+        )
+    if _normalize_env_value(agent_env["PROVISIONING_MODE"]) != "http":
+        errors.append(
+            f"{label}:PROVISIONING_MODE must be http, got {agent_env['PROVISIONING_MODE']}"
+        )
+    if _normalize_env_value(agent_env["AUTO_REGISTER"]).lower() != "true":
+        errors.append(f"{label}:AUTO_REGISTER must be true for deployed canaries")
+
+    for key in (
+        "IDENTITY_REGISTRY_ADDRESS",
+        "REPUTATION_REGISTRY_ADDRESS",
+        "VALIDATION_REGISTRY_ADDRESS",
+    ):
+        _validate_evm_address(agent_env[key], f"{label}:{key}", errors)
+        _validate_evm_address(registry_env[key], f"registry env:{key}", errors)
+        _compare_equal(agent_env[key], f"{label}:{key}", registry_env[key], f"registry env:{key}", errors)
+
+    default_vm_host = _normalize_env_value(agent_env["DEFAULT_VM_HOST"])
+    if default_vm_host not in inventory_hosts:
+        errors.append(f"{label}:DEFAULT_VM_HOST is not in inventory: {default_vm_host}")
+    _compare_equal(
+        agent_env["ZEROTIER_NETWORK"],
+        f"{label}:ZEROTIER_NETWORK",
+        provisioning_env["ZEROTIER_NETWORK"],
+        "provisioning env:ZEROTIER_NETWORK",
+        errors,
+    )
+    _compare_equal(
+        agent_env["ZEROTIER_NETWORK"],
+        f"{label}:ZEROTIER_NETWORK",
+        registry_env["ZEROTIER_NETWORK"],
+        "registry env:ZEROTIER_NETWORK",
+        errors,
+    )
+    _compare_equal(
+        agent_env["REGISTRY_URL"],
+        f"{label}:REGISTRY_URL",
+        provisioning_env["REGISTRY_URL"],
+        "provisioning env:REGISTRY_URL",
+        errors,
+    )
+
+    return errors
+
+
+def _validate_shared_infra_envs(
+    *,
+    provisioning_env: dict[str, str],
+    registry_env: dict[str, str],
+    inventory_hosts: set[str],
+    expected_chain_id: int,
+) -> list[str]:
+    errors: list[str] = []
+
     _validate_required_keys(
         provisioning_env, PROVISIONING_REQUIRED_KEYS, "provisioning env", errors
     )
@@ -258,57 +352,6 @@ def _validate_bundle(
         return errors
 
     inventory_hosts = set(inventory_hosts)
-
-    _validate_non_empty_secret(agent_env["GEMINI_API_KEY"], "agent env:GEMINI_API_KEY", errors)
-    _validate_url(
-        value=agent_env["BASE_URL_OVERRIDE"],
-        label="agent env:BASE_URL_OVERRIDE",
-        errors=errors,
-        allow_zerotier_ip=True,
-    )
-    _validate_url(
-        value=agent_env["REGISTRY_URL"],
-        label="agent env:REGISTRY_URL",
-        errors=errors,
-    )
-    _validate_url(
-        value=agent_env["PROVISIONING_SERVICE_URL"],
-        label="agent env:PROVISIONING_SERVICE_URL",
-        errors=errors,
-    )
-    _validate_url(
-        value=agent_env["CHAIN_RPC_URL"],
-        label="agent env:CHAIN_RPC_URL",
-        errors=errors,
-        allow_local_host=True,
-    )
-    _validate_private_key(agent_env["AGENT_PRIV_KEY"], "agent env:AGENT_PRIV_KEY", errors)
-    _validate_evm_address(
-        agent_env["AGENT_WALLET_ADDRESS"], "agent env:AGENT_WALLET_ADDRESS", errors
-    )
-    _validate_ssh_public_key(agent_env["SSH_PUBLIC_KEY"], "agent env:SSH_PUBLIC_KEY", errors)
-    _validate_zerotier_network(
-        agent_env["ZEROTIER_NETWORK"], "agent env:ZEROTIER_NETWORK", errors
-    )
-    if _normalize_env_value(agent_env["CHAIN_NAME"]) != expected_chain_name:
-        errors.append(
-            f"agent env:CHAIN_NAME must be {expected_chain_name}, got {agent_env['CHAIN_NAME']}"
-        )
-    if _normalize_env_value(agent_env["PROVISIONING_MODE"]) != "http":
-        errors.append(
-            f"agent env:PROVISIONING_MODE must be http, got {agent_env['PROVISIONING_MODE']}"
-        )
-    if _normalize_env_value(agent_env["AUTO_REGISTER"]).lower() != "true":
-        errors.append("agent env:AUTO_REGISTER must be true for deployed canaries")
-
-    for key in (
-        "IDENTITY_REGISTRY_ADDRESS",
-        "REPUTATION_REGISTRY_ADDRESS",
-        "VALIDATION_REGISTRY_ADDRESS",
-    ):
-        _validate_evm_address(agent_env[key], f"agent env:{key}", errors)
-        _validate_evm_address(registry_env[key], f"registry env:{key}", errors)
-        _compare_equal(agent_env[key], f"agent env:{key}", registry_env[key], f"registry env:{key}", errors)
 
     _validate_database_url(
         provisioning_env["DATABASE_URL"], "provisioning env:DATABASE_URL", errors
@@ -369,41 +412,99 @@ def _validate_bundle(
                 f"registry env:CHAIN_ID must be {expected_chain_id}, got {registry_env['CHAIN_ID']}"
             )
 
-    default_vm_host = _normalize_env_value(agent_env["DEFAULT_VM_HOST"])
-    if default_vm_host not in inventory_hosts:
-        errors.append(f"agent env:DEFAULT_VM_HOST is not in inventory: {default_vm_host}")
     if _normalize_env_value(provisioning_env["DEFAULT_VM_HOST"]) not in inventory_hosts:
         errors.append(
             "provisioning env:DEFAULT_VM_HOST is not in inventory: "
             f"{provisioning_env['DEFAULT_VM_HOST']}"
         )
+
+    return errors
+
+
+def _validate_actor_relationships(
+    *,
+    seller_agent_env: dict[str, str],
+    buyer_agent_env: dict[str, str],
+    provisioning_env: dict[str, str],
+    errors: list[str],
+) -> None:
+    distinct_keys = (
+        "AGENT_ID",
+        "AGENT_PRIV_KEY",
+        "AGENT_WALLET_ADDRESS",
+        "BASE_URL_OVERRIDE",
+    )
+    for key in distinct_keys:
+        if _normalize_env_value(seller_agent_env[key]) == _normalize_env_value(buyer_agent_env[key]):
+            errors.append(f"seller agent env and buyer agent env must not share {key}")
+
+    shared_keys = (
+        "CHAIN_NAME",
+        "CHAIN_RPC_URL",
+        "IDENTITY_REGISTRY_ADDRESS",
+        "REPUTATION_REGISTRY_ADDRESS",
+        "VALIDATION_REGISTRY_ADDRESS",
+        "REGISTRY_URL",
+        "ZEROTIER_NETWORK",
+        "PROVISIONING_MODE",
+        "PROVISIONING_SERVICE_URL",
+    )
+    for key in shared_keys:
+        _compare_equal(
+            seller_agent_env[key],
+            f"seller agent env:{key}",
+            buyer_agent_env[key],
+            f"buyer agent env:{key}",
+            errors,
+        )
     _compare_equal(
-        agent_env["DEFAULT_VM_HOST"],
-        "agent env:DEFAULT_VM_HOST",
+        seller_agent_env["DEFAULT_VM_HOST"],
+        "seller agent env:DEFAULT_VM_HOST",
         provisioning_env["DEFAULT_VM_HOST"],
         "provisioning env:DEFAULT_VM_HOST",
         errors,
     )
-    _compare_equal(
-        agent_env["ZEROTIER_NETWORK"],
-        "agent env:ZEROTIER_NETWORK",
-        provisioning_env["ZEROTIER_NETWORK"],
-        "provisioning env:ZEROTIER_NETWORK",
-        errors,
+
+
+def _validate_bundle(
+    *,
+    agent_env: dict[str, str],
+    provisioning_env: dict[str, str],
+    registry_env: dict[str, str],
+    inventory_hosts: set[str],
+    expected_chain_name: str,
+    expected_chain_id: int,
+    seller_agent_url: str | None,
+    buyer_agent_url: str | None,
+    seller_agent_id: str | None,
+    buyer_agent_id: str | None,
+    seller_private_key: str | None,
+    buyer_private_key: str | None,
+    ssh_private_key_path: str | None,
+) -> list[str]:
+    errors = _validate_shared_infra_envs(
+        provisioning_env=provisioning_env,
+        registry_env=registry_env,
+        inventory_hosts=inventory_hosts,
+        expected_chain_id=expected_chain_id,
     )
-    _compare_equal(
-        agent_env["ZEROTIER_NETWORK"],
-        "agent env:ZEROTIER_NETWORK",
-        registry_env["ZEROTIER_NETWORK"],
-        "registry env:ZEROTIER_NETWORK",
-        errors,
-    )
-    _compare_equal(
-        agent_env["REGISTRY_URL"],
-        "agent env:REGISTRY_URL",
-        provisioning_env["REGISTRY_URL"],
-        "provisioning env:REGISTRY_URL",
-        errors,
+    errors.extend(
+        _validate_agent_env(
+            agent_env=agent_env,
+            label="agent env",
+            provisioning_env=provisioning_env,
+            registry_env=registry_env,
+            inventory_hosts=inventory_hosts,
+            expected_chain_name=expected_chain_name,
+            expected_chain_id=expected_chain_id,
+            seller_agent_url=seller_agent_url,
+            buyer_agent_url=buyer_agent_url,
+            seller_agent_id=seller_agent_id,
+            buyer_agent_id=buyer_agent_id,
+            seller_private_key=seller_private_key,
+            buyer_private_key=buyer_private_key,
+            ssh_private_key_path=ssh_private_key_path,
+        )
     )
 
     for label, value in (
@@ -476,10 +577,104 @@ def validate_bundle(
     )
 
 
+def validate_actor_bundle(
+    *,
+    seller_agent_env_path: Path,
+    buyer_agent_env_path: Path,
+    provisioning_env_path: Path,
+    registry_env_path: Path,
+    inventory_path: Path = DEFAULT_INVENTORY_PATH,
+    expected_chain_name: str = "base-sepolia",
+    expected_chain_id: int = 84532,
+    seller_agent_url: str | None = None,
+    buyer_agent_url: str | None = None,
+    seller_agent_id: str | None = None,
+    buyer_agent_id: str | None = None,
+    seller_private_key: str | None = None,
+    buyer_private_key: str | None = None,
+    ssh_private_key_path: str | None = None,
+) -> list[str]:
+    for path in (
+        seller_agent_env_path,
+        buyer_agent_env_path,
+        provisioning_env_path,
+        registry_env_path,
+        inventory_path,
+    ):
+        if not path.exists():
+            return [f"Missing required file: {path}"]
+
+    seller_agent_env = _parse_env_file(seller_agent_env_path)
+    buyer_agent_env = _parse_env_file(buyer_agent_env_path)
+    provisioning_env = _parse_env_file(provisioning_env_path)
+    registry_env = _parse_env_file(registry_env_path)
+    inventory_hosts = _parse_inventory_hosts(inventory_path)
+
+    errors = _validate_shared_infra_envs(
+        provisioning_env=provisioning_env,
+        registry_env=registry_env,
+        inventory_hosts=inventory_hosts,
+        expected_chain_id=expected_chain_id,
+    )
+    errors.extend(
+        _validate_agent_env(
+            agent_env=seller_agent_env,
+            label="seller agent env",
+            provisioning_env=provisioning_env,
+            registry_env=registry_env,
+            inventory_hosts=inventory_hosts,
+            expected_chain_name=expected_chain_name,
+            expected_chain_id=expected_chain_id,
+            seller_agent_url=seller_agent_url,
+            buyer_agent_url=buyer_agent_url,
+            seller_agent_id=seller_agent_id,
+            buyer_agent_id=buyer_agent_id,
+            seller_private_key=seller_private_key,
+            buyer_private_key=buyer_private_key,
+            ssh_private_key_path=ssh_private_key_path,
+        )
+    )
+    errors.extend(
+        _validate_agent_env(
+            agent_env=buyer_agent_env,
+            label="buyer agent env",
+            provisioning_env=provisioning_env,
+            registry_env=registry_env,
+            inventory_hosts=inventory_hosts,
+            expected_chain_name=expected_chain_name,
+            expected_chain_id=expected_chain_id,
+            seller_agent_url=seller_agent_url,
+            buyer_agent_url=buyer_agent_url,
+            seller_agent_id=seller_agent_id,
+            buyer_agent_id=buyer_agent_id,
+            seller_private_key=seller_private_key,
+            buyer_private_key=buyer_private_key,
+            ssh_private_key_path=ssh_private_key_path,
+        )
+    )
+    _validate_actor_relationships(
+        seller_agent_env=seller_agent_env,
+        buyer_agent_env=buyer_agent_env,
+        provisioning_env=provisioning_env,
+        errors=errors,
+    )
+
+    for label, value, registry in (
+        ("seller-agent-id", seller_agent_id, seller_agent_env["IDENTITY_REGISTRY_ADDRESS"]),
+        ("buyer-agent-id", buyer_agent_id, buyer_agent_env["IDENTITY_REGISTRY_ADDRESS"]),
+    ):
+        if value:
+            _validate_agent_id(value, label, expected_chain_id, registry, errors)
+
+    return errors
+
+
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", help="Label for the env bundle under test")
-    parser.add_argument("--agent-env", required=True, type=Path)
+    parser.add_argument("--agent-env", type=Path)
+    parser.add_argument("--seller-agent-env", type=Path)
+    parser.add_argument("--buyer-agent-env", type=Path)
     parser.add_argument("--provisioning-env", required=True, type=Path)
     parser.add_argument("--registry-env", required=True, type=Path)
     parser.add_argument("--inventory-path", type=Path, default=DEFAULT_INVENTORY_PATH)
@@ -497,21 +692,57 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parse_args(argv)
-    errors = validate_bundle(
-        agent_env_path=args.agent_env,
-        provisioning_env_path=args.provisioning_env,
-        registry_env_path=args.registry_env,
-        inventory_path=args.inventory_path,
-        expected_chain_name=args.expected_chain_name,
-        expected_chain_id=args.expected_chain_id,
-        seller_agent_url=args.seller_agent_url,
-        buyer_agent_url=args.buyer_agent_url,
-        seller_agent_id=args.seller_agent_id,
-        buyer_agent_id=args.buyer_agent_id,
-        seller_private_key=args.seller_private_key,
-        buyer_private_key=args.buyer_private_key,
-        ssh_private_key_path=args.ssh_private_key_path,
-    )
+    if args.agent_env and (args.seller_agent_env or args.buyer_agent_env):
+        print(
+            "Specify either --agent-env or both --seller-agent-env and --buyer-agent-env, not both.",
+            file=sys.stderr,
+        )
+        return 2
+    if args.seller_agent_env or args.buyer_agent_env:
+        if not (args.seller_agent_env and args.buyer_agent_env):
+            print(
+                "Provide both --seller-agent-env and --buyer-agent-env when validating a dual-agent bundle.",
+                file=sys.stderr,
+            )
+            return 2
+        errors = validate_actor_bundle(
+            seller_agent_env_path=args.seller_agent_env,
+            buyer_agent_env_path=args.buyer_agent_env,
+            provisioning_env_path=args.provisioning_env,
+            registry_env_path=args.registry_env,
+            inventory_path=args.inventory_path,
+            expected_chain_name=args.expected_chain_name,
+            expected_chain_id=args.expected_chain_id,
+            seller_agent_url=args.seller_agent_url,
+            buyer_agent_url=args.buyer_agent_url,
+            seller_agent_id=args.seller_agent_id,
+            buyer_agent_id=args.buyer_agent_id,
+            seller_private_key=args.seller_private_key,
+            buyer_private_key=args.buyer_private_key,
+            ssh_private_key_path=args.ssh_private_key_path,
+        )
+    else:
+        if not args.agent_env:
+            print(
+                "Provide either --agent-env or both --seller-agent-env and --buyer-agent-env.",
+                file=sys.stderr,
+            )
+            return 2
+        errors = validate_bundle(
+            agent_env_path=args.agent_env,
+            provisioning_env_path=args.provisioning_env,
+            registry_env_path=args.registry_env,
+            inventory_path=args.inventory_path,
+            expected_chain_name=args.expected_chain_name,
+            expected_chain_id=args.expected_chain_id,
+            seller_agent_url=args.seller_agent_url,
+            buyer_agent_url=args.buyer_agent_url,
+            seller_agent_id=args.seller_agent_id,
+            buyer_agent_id=args.buyer_agent_id,
+            seller_private_key=args.seller_private_key,
+            buyer_private_key=args.buyer_private_key,
+            ssh_private_key_path=args.ssh_private_key_path,
+        )
     if errors:
         label = f" for {args.environment}" if args.environment else ""
         print(f"Deployment bundle validation failed{label}:", file=sys.stderr)

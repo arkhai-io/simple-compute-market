@@ -14,6 +14,34 @@ See also:
 - `docs/deployment-input-checklist.md`
 - `docs/e2e-deployment-test-plan.md`
 
+## Local config
+
+Use local gitignored env files for deployed testing. The production samples are
+templates, not the live canary bundle.
+
+Recommended local files:
+
+- seller agent env: `core/agent/.env.seller.local`
+- buyer agent env: `core/agent/.env.buyer.local`
+- provisioning env: `async-provisioning-service/.env.local`
+- registry env: `erc-8004-registry-py/.env.local`
+- provisioning host secrets: `compute-provisioning-iac/ansible/inventory/management-vars.yaml`
+
+Keep private keys, DB URLs, Redis URLs, ZeroTier IDs, FRP credentials, and real
+service URLs out of Git.
+
+## Actor model
+
+The canary runtime is organized into seven logical roles:
+
+1. identity preflight validator
+2. coordinator
+3. seller actor
+4. buyer actor
+5. registry probe
+6. provisioning probe
+7. network probe
+
 ## Required config
 
 Start from these templates:
@@ -45,12 +73,25 @@ If the provisioning service must be reachable directly on the host ZeroTier IP, 
 
 ## Preflight checks
 
+- Buyer and seller use distinct local agent env files and distinct identities.
 - The env bundle passes `scripts/validate_deployment_bundle.py`.
+- The repo-side readiness gates pass via `scripts/run_deployment_gate_checks.py`.
 - Registry health endpoint returns healthy.
 - Provisioning health endpoint returns ok.
 - Buyer and seller agent cards resolve over their deployed URLs.
 - Seller inventory contains one quarantined canary resource.
 - Buyer and seller wallets are funded for the target chain.
+
+Run the repo-side gates with the dual-agent bundle before the live canary:
+
+```bash
+python scripts/run_deployment_gate_checks.py \
+  --environment production \
+  --seller-agent-env /path/to/production/seller.env \
+  --buyer-agent-env /path/to/production/buyer.env \
+  --provisioning-env /path/to/production/provisioning.env \
+  --registry-env /path/to/production/registry.env
+```
 
 ## Canary smoke run
 
@@ -58,7 +99,7 @@ Run the smoke script from the repo with the CLI environment so `eth-account` is 
 
 ```bash
 cd cli
-uv run python ../scripts/prod_canary_smoke.py \
+uv --no-config run python ../scripts/prod_canary_smoke.py \
   --registry-url http://<registry-zerotier-ip>:8080 \
   --provisioning-url http://<provisioner-zerotier-ip>:8081 \
   --seller-agent-url http://<seller-zerotier-ip>:8001 \

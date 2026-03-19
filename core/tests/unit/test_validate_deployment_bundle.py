@@ -55,6 +55,23 @@ def _valid_agent_env() -> str:
     """
 
 
+def _valid_buyer_agent_env() -> str:
+    return (
+        _valid_agent_env()
+        .replace("BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8000/", "BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8001/")
+        .replace("PORT=8000", "PORT=8001")
+        .replace("AGENT_ID=agent_prod_canary", "AGENT_ID=buyer_prod_canary")
+        .replace(
+            "AGENT_PRIV_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "AGENT_PRIV_KEY=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        )
+        .replace(
+            "AGENT_WALLET_ADDRESS=0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "AGENT_WALLET_ADDRESS=0xcccccccccccccccccccccccccccccccccccccccc",
+        )
+    )
+
+
 def _valid_provisioning_env() -> str:
     return """
     HOST=0.0.0.0
@@ -257,3 +274,52 @@ def test_validator_rejects_invalid_canary_inputs(tmp_path: Path) -> None:
     assert "buyer-agent-id: expected canonical agent id, got: not-an-agent-id" in errors
     assert "seller-private-key: invalid hex private key" in errors
     assert any("ssh-private-key-path does not exist" in error for error in errors)
+
+
+def test_validate_actor_bundle_accepts_distinct_buyer_and_seller_envs(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    seller_env = _write(tmp_path / "seller.env", _valid_agent_env())
+    buyer_env = _write(tmp_path / "buyer.env", _valid_buyer_agent_env())
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+    ssh_key = _write(tmp_path / "id_ed25519", "not-a-real-key")
+
+    errors = module.validate_actor_bundle(
+        seller_agent_env_path=seller_env,
+        buyer_agent_env_path=buyer_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+        seller_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:101",
+        buyer_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:202",
+        ssh_private_key_path=str(ssh_key),
+    )
+
+    assert errors == []
+
+
+def test_validate_actor_bundle_rejects_reused_buyer_and_seller_identity(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    seller_env = _write(tmp_path / "seller.env", _valid_agent_env())
+    buyer_env = _write(tmp_path / "buyer.env", _valid_agent_env())
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_actor_bundle(
+        seller_agent_env_path=seller_env,
+        buyer_agent_env_path=buyer_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert "seller agent env and buyer agent env must not share AGENT_ID" in errors
+    assert "seller agent env and buyer agent env must not share AGENT_PRIV_KEY" in errors
+    assert "seller agent env and buyer agent env must not share AGENT_WALLET_ADDRESS" in errors
+    assert "seller agent env and buyer agent env must not share BASE_URL_OVERRIDE" in errors

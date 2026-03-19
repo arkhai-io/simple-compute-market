@@ -16,7 +16,7 @@ INVENTORY_PATH = ROOT / "compute-provisioning-iac/ansible/inventory/hosts"
 ASYNC_DOCKERFILE = ROOT / "async-provisioning-service/Dockerfile"
 ASYNC_README = ROOT / "async-provisioning-service/README.md"
 RUNBOOK_PATH = ROOT / "docs/production-canary.md"
-SMOKE_SCRIPT_PATH = ROOT / "scripts/prod_canary_smoke.py"
+CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
     ALKAHEST_REPO / "contracts/deployments/deployment_base_sepolia.json"
@@ -59,7 +59,19 @@ def _parse_script_args(path: Path) -> set[str]:
 
 def _parse_runbook_args(path: Path) -> set[str]:
     text = path.read_text(encoding="utf-8")
-    return set(re.findall(r"(--[a-z0-9-]+)", text))
+    section_match = re.search(
+        r"## Canary smoke run\s+(?P<section>.*?)(?:\n## |\Z)",
+        text,
+        re.DOTALL,
+    )
+    if section_match:
+        text = section_match.group("section")
+    ignored = {"--no-config"}
+    return {
+        arg
+        for arg in re.findall(r"(--[a-z0-9-]+)", text)
+        if arg not in ignored
+    }
 
 
 def test_async_provisioning_production_sample_includes_required_runtime_vars() -> None:
@@ -143,7 +155,7 @@ def test_inventory_contains_environment_host_aliases() -> None:
 
 
 def test_production_canary_runbook_matches_smoke_script_cli() -> None:
-    script_args = _parse_script_args(SMOKE_SCRIPT_PATH)
+    script_args = _parse_script_args(CANARY_MODULE_PATH)
     runbook_args = _parse_runbook_args(RUNBOOK_PATH)
     documented_required_args = {
         "--registry-url",
