@@ -52,6 +52,7 @@ from service.clients.mock_provisioning import provision_machine_async as mock_pr
 from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
 from service.clients.ansible_provisioning import provision_machine_async as ansible_provision_machine_async
 from service.clients.ansible_provisioning import schedule_vm_shutdown_async as ansible_schedule_vm_shutdown_async
+from core.agent.app.utils.serializer import json_serializer
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
@@ -110,6 +111,31 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
     if isinstance(decisions, list):
         return [_serialize_decision(d) for d in decisions]
     return [_serialize_decision(decisions)]
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Recursively normalize nested models/enums into JSON-safe primitives."""
+    return json.loads(json.dumps(value, default=json_serializer))
+
+
+def _registry_safe_resource(resource: Any) -> Any:
+    """Strip local-only compute fields before publishing resources to the registry."""
+    if not isinstance(resource, dict):
+        return resource
+
+    cleaned = _json_safe_value(resource)
+    if _resource_is_compute(cleaned):
+        cleaned.pop("resource_id", None)
+        cleaned.pop("vm_host", None)
+    return {key: value for key, value in cleaned.items() if value is not None}
+
+
+def _registry_safe_order(order_dict: dict[str, Any]) -> dict[str, Any]:
+    """Publish a market-matchable copy of the order without local-only fields."""
+    registry_order = _json_safe_value(order_dict)
+    registry_order["offer_resource"] = _registry_safe_resource(registry_order.get("offer_resource"))
+    registry_order["demand_resource"] = _registry_safe_resource(registry_order.get("demand_resource"))
+    return registry_order
 
 
 
@@ -339,53 +365,16 @@ async def execute_action(
             if not ssh_public_key:
                 raise ValueError("ssh_public_key is required for fulfill_compute_obligation")
 
-            # Update our own local order if matched_order_id was threaded through the event.
-            # This handles the seller-as-taker case where order_id in the order dict is the
-            # buyer's order_id (not present in the seller's local DB).
-            if matched_order_id:
-                try:
-                    sqlite_client = get_sqlite_client()
-                    await sqlite_client.update_order(
-                        order_id=matched_order_id,
-                        status="accepted",
-                        escrow_uid=escrow_uid,
-                    )
-                except Exception as exc:
-                    logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
-
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
                 oracle_address=parameters.get("oracle_address") or (order if isinstance(order, dict) else {}).get("oracle_address"),
                 ssh_public_key=ssh_public_key,
                 order=order,
+                local_order_id=matched_order_id,
             )
             if result.get("status") == "fulfilled":
-                # Update our own local order with fulfillment details.
-                # fulfill_compute_obligation uses order_dict["order_id"] (the buyer's ID) for its
-                # internal DB write, which doesn't exist in the seller's local DB.  We correct that
-                # here using matched_order_id (the seller's own order).
-                if matched_order_id:
-                    try:
-                        sqlite_client = get_sqlite_client()
-                        await sqlite_client.update_order(
-                            order_id=matched_order_id,
-                            maker_attestation=result.get("fulfillment_uid"),
-                            fulfillment_resource=result.get("connection_details"),
-                        )
-                    except Exception as exc:
-                        logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
-                # Close both orders in registry and local DB after successful fulfillment
                 buyer_order_id = order_dict.get("order_id")
-                for oid in filter(None, [matched_order_id, buyer_order_id]):
-                    try:
-                        registry_client = get_registry_client()
-                        await registry_client.update_order(oid, {"status": "closed"})
-                        sqlite_client = get_sqlite_client()
-                        await sqlite_client.update_order(order_id=oid, status="closed")
-                        logger.info(f"[FULFILL] Closed order {oid}")
-                    except Exception as e:
-                        logger.warning(f"[FULFILL] Failed to close order {oid}: {e}")
                 # Close the negotiation thread — covers equal-price direct-accept where the
                 # buyer never entered a negotiation round and their ACCEPT_OFFER had no
                 # negotiation_id, leaving the seller's thread open indefinitely.
@@ -516,6 +505,17 @@ async def execute_action(
                     await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
+            if result.get("status") == "trusted" and result.get("message") != "Arbitration failed":
+                try:
+                    close_result = await _close_local_order_for_escrow_uid(parameters.get("escrow_uid"))
+                    if close_result:
+                        result["close_order_result"] = close_result
+                except Exception as close_err:
+                    logger.warning(
+                        "[ACTION] Failed to close local buyer order for escrow %s: %s",
+                        parameters.get("escrow_uid"),
+                        close_err,
+                    )
             outcome["result"] = result
             outcome["message"] = "Fulfillment trusted; arbitration completed"
 
@@ -549,6 +549,16 @@ async def execute_action(
                         "escrow_collection_uid": result,
                         "fulfillment_uid": fulfillment_uid,
                     }
+                    try:
+                        close_result = await _close_local_order_for_escrow_uid(escrow_uid)
+                        if close_result:
+                            outcome["result"]["close_order_result"] = close_result
+                    except Exception as close_err:
+                        logger.warning(
+                            "[ACTION] Failed to close local seller order for escrow %s: %s",
+                            escrow_uid,
+                            close_err,
+                        )
                 else:
                     outcome["result"] = {
                         "status": "collected",
@@ -754,6 +764,27 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             "message": f"Registry update failed for order {order_id}: {exc}",
             "order_id": order_id,
         }
+
+
+async def _close_local_order_for_escrow_uid(escrow_uid: str | None) -> dict[str, Any] | None:
+    """Resolve a local order by escrow UID and close it if present."""
+    if not isinstance(escrow_uid, str) or not escrow_uid.strip():
+        return None
+
+    try:
+        sqlite_client = get_sqlite_client()
+        order_id = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
+    except Exception as exc:
+        logger.warning("[LOCAL DB] Failed to resolve order for escrow_uid %s: %s", escrow_uid, exc)
+        return None
+
+    if not order_id:
+        logger.info("[ORDER] No local order found for escrow_uid=%s; skipping close", escrow_uid)
+        return None
+
+    result = await close_order({"order_id": order_id})
+    logger.info("[ORDER] Close result for escrow_uid=%s order_id=%s: %s", escrow_uid, order_id, result)
+    return result
 
 
 def _get_provision_fn():
@@ -1142,7 +1173,7 @@ async def accept_offer(
     if isinstance(order_payload, MarketOrder):
         order_dict = order_payload.model_dump(mode="json")
     elif isinstance(order_payload, dict):
-        order_dict = order_payload
+        order_dict = _json_safe_value(order_payload)
     else:
         # No order in parameters — fall back to registry lookup using their_order_id.
         # This happens when accept_offer is called from the NEGOTIATION path (price_interval_concession)
@@ -1157,7 +1188,7 @@ async def accept_offer(
         if not isinstance(order_payload, dict):
             logger.warning("[TOOL] Cannot accept offer: no order payload provided.")
             return {"status": "error", "message": "Missing order payload for accept_offer"}
-        order_dict = order_payload
+        order_dict = _json_safe_value(order_payload)
 
     order_id = order_dict.get("order_id")
     our_order_id = parameters.get("our_order_id")
@@ -1275,6 +1306,9 @@ async def _accept_as_buyer(
     oracle_address = CONFIG.agent_wallet_address
     if not oracle_address:
         raise ValueError("Agent wallet address is required for buyer accept_offer but not configured")
+    counterparty_ref = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
+    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
+    we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
 
     escrow_uid = None
     escrow_receipt = None
@@ -1321,9 +1355,12 @@ async def _accept_as_buyer(
     else:
         raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
 
-    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    # buyer-as-maker: seller takes our order; seller-as-maker: we take theirs.
+    order_taker = counterparty_url if we_are_maker and counterparty_url else BASE_URL_OVERRIDE
+    order_dict["order_taker"] = order_taker
     order_dict["taker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
+    order_payload = _json_safe_value(order_dict)
 
     # Echo the seller's order_id back so they can update their local DB without a lookup.
     matched_order_id = parameters.get("matched_order_id")
@@ -1331,7 +1368,7 @@ async def _accept_as_buyer(
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
         "source": BASE_URL_OVERRIDE,
-        "offer": order_dict,
+        "offer": order_payload,
         "escrow_uid": escrow_uid,
         "ssh_public_key": SSH_PUBLIC_KEY,
         "matched_order_id": matched_order_id,
@@ -1343,7 +1380,7 @@ async def _accept_as_buyer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=BASE_URL_OVERRIDE,
+                order_taker=order_taker,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1355,9 +1392,9 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
-            # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
-            # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
+            registry_updates = {"status": "accepted", "order_taker": order_taker, "taker_attestation": escrow_uid}
+            # Update the order represented by order_dict. The registry mirrors the symmetric
+            # order automatically when order_taker is included, so we avoid a second cross-party update.
             their_id = order_dict.get("order_id")
             if their_id:
                 result = await registry_client.update_order(their_id, registry_updates)
@@ -1365,18 +1402,9 @@ async def _accept_as_buyer(
                     logger.info("[REGISTRY] Updated order %s to accepted", their_id)
                 else:
                     logger.warning("[REGISTRY] Failed to update order %s", their_id)
-            # In seller-as-maker flow, also update the seller's registry entry.
-            if matched_order_id and matched_order_id != their_id:
-                result = await registry_client.update_order(matched_order_id, registry_updates)
-                if result:
-                    logger.info("[REGISTRY] Updated seller's order %s to accepted", matched_order_id)
-                else:
-                    logger.warning("[REGISTRY] Failed to update seller's order %s", matched_order_id)
         except Exception as e:
             logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 
-    counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
-    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
     if not counterparty_url:
         raise ValueError(f"accept_offer (buyer): cannot send acceptance — unresolved counterparty={counterparty_ref!r}")
 
@@ -1400,12 +1428,12 @@ async def _accept_as_buyer(
             "status": "sent",
             "message": "Offer matched.",
             "escrow_uid": escrow_uid,
-            "offer": order_dict,
+            "offer": order_payload,
             "remote_response": getattr(result, "content", None),
         }
     except Exception as e:
         logger.error("[TOOL] Failed to send acceptance: %s", e)
-        return {"status": "error", "message": f"Failed to send acceptance: {e}", "escrow_uid": escrow_uid, "offer": order_dict}
+        return {"status": "error", "message": f"Failed to send acceptance: {e}", "escrow_uid": escrow_uid, "offer": order_payload}
 
 
 async def _accept_as_seller(
@@ -1421,12 +1449,14 @@ async def _accept_as_seller(
     The buyer will receive this and create the escrow on their side, then send
     back an AcceptOfferEvent with escrow_uid for the seller to fulfill.
     """
+    order_payload = _json_safe_value(order_dict)
+
     # Include our order_id so the buyer can echo it back, letting us update our
     # local DB directly when we receive the second AcceptOfferEvent.
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
         "source": BASE_URL_OVERRIDE,
-        "offer": order_dict,
+        "offer": order_payload,
         "escrow_uid": None,
         "ssh_public_key": None,
         "matched_order_id": our_order_id,
@@ -1467,12 +1497,12 @@ async def _accept_as_seller(
         return {
             "status": "sent",
             "message": "Order matched.",
-            "offer": order_dict,
+            "offer": order_payload,
             "remote_response": getattr(result, "content", None),
         }
     except Exception as e:
         logger.error("[TOOL] Failed to send seller acceptance: %s", e)
-        return {"status": "error", "message": f"Failed to send seller acceptance: {e}", "offer": order_dict}
+        return {"status": "error", "message": f"Failed to send seller acceptance: {e}", "offer": order_payload}
 
 
 def create_order(
@@ -1792,6 +1822,7 @@ async def make_offer(ctx: InvocationContext | None, order: MarketOrder | dict, a
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
+            registry_order_dict = _registry_safe_order(order_dict)
             
             # Get canonical agent ID for registry (required format)
             # Use ONCHAIN_AGENT_ID from .env directly
@@ -1843,7 +1874,7 @@ async def make_offer(ctx: InvocationContext | None, order: MarketOrder | dict, a
                 else:
                     logger.warning(f"[REGISTRY] IDENTITY_REGISTRY_ADDRESS not set, cannot build canonical ID. Using CONFIG.agent_id={CONFIG.agent_id}")
             
-            result = await registry_client.publish_order(agent_id_for_registry, order_dict)
+            result = await registry_client.publish_order(agent_id_for_registry, registry_order_dict)
             if result:
                 logger.info(f"[REGISTRY] Published order {order_id} to registry before making offer")
             else:
@@ -2060,10 +2091,11 @@ async def fulfill_compute_obligation(
     ssh_public_key: str,
     oracle_address: str | None = None,
     order: str | dict | None = None,
+    local_order_id: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
     
-    When the maker fulfills, this sets maker_attestation in the registry.
+    When the local seller fulfills, maker_attestation is written onto the local order they own.
     """
     fulfillment_uid = None
     maker_attestation = None
@@ -2092,6 +2124,8 @@ async def fulfill_compute_obligation(
     if order_dict:
         order_id = order_dict.get("order_id")
         duration_hours = order_dict.get("duration_hours", 1)
+        if local_order_id is None and _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE):
+            local_order_id = order_id
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("region", "gpu_model"):
@@ -2102,16 +2136,20 @@ async def fulfill_compute_obligation(
             token_resource=token_resource,
             duration_hours=duration_hours,
         )
-        if order_id:
+        if local_order_id:
             try:
                 sqlite_client = get_sqlite_client()
                 await sqlite_client.update_order(
-                    order_id=order_id,
+                    order_id=local_order_id,
                     status="accepted",
                     escrow_uid=escrow_uid,
                 )
             except Exception as exc:
-                logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
+                logger.warning(
+                    "[LOCAL DB] Failed to mark local fulfillment order %s accepted at start: %s",
+                    local_order_id,
+                    exc,
+                )
 
     try:
         sqlite_client = get_sqlite_client()
@@ -2180,14 +2218,14 @@ async def fulfill_compute_obligation(
             )
 
     # Persist seller-side credentials (root + tenant) — off-chain only.
-    if authentication and order_id:
+    if authentication and local_order_id:
         try:
             _cred_client = get_sqlite_client()
             root_data = authentication.get("root", {}) or {}
             tenant_data = authentication.get("tenant", {}) or {}
             if root_data:
                 await _cred_client.store_credential(
-                    order_id=order_id,
+                    order_id=local_order_id,
                     role="root",
                     granted_to="self",
                     password=root_data.get("password"),
@@ -2196,7 +2234,7 @@ async def fulfill_compute_obligation(
                 )
             if tenant_data:
                 await _cred_client.store_credential(
-                    order_id=order_id,
+                    order_id=local_order_id,
                     role="tenant",
                     granted_to="self",
                     password=tenant_data.get("password"),
@@ -2204,7 +2242,7 @@ async def fulfill_compute_obligation(
                     key_type=tenant_data.get("key_type"),
                 )
         except Exception as cred_err:
-            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", order_id, cred_err)
+            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", local_order_id, cred_err)
     await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
     if not client or not oracle_address:
@@ -2230,32 +2268,33 @@ async def fulfill_compute_obligation(
         except Exception as error:
             logger.error(f"[ALKAHEST] Fulfillment error: {error}")
     
-    # Update registry with maker_attestation when maker fulfills
-    if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
+    # Update the local seller-owned registry order with maker_attestation. In buyer-as-maker
+    # flows the A2A payload carries the buyer's order ID, so we must use local_order_id here.
+    if order and maker_attestation and CONFIG.enable_registry_discovery and local_order_id:
         try:
             registry_client = get_registry_client()
             updates = {
                 "maker_attestation": maker_attestation,
             }
-            result = await registry_client.update_order(order_id, updates)
+            result = await registry_client.update_order(local_order_id, updates)
             if result:
-                logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
+                logger.info(f"[REGISTRY] Updated order {local_order_id} with maker_attestation: {maker_attestation}")
             else:
-                logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
+                logger.warning(f"[REGISTRY] Failed to update order {local_order_id} with maker_attestation")
         except Exception as e:
-            logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
+            logger.warning(f"[REGISTRY] Error updating order {local_order_id} with maker_attestation: {e}")
 
-    if order_id:
+    if local_order_id:
         try:
             sqlite_client = get_sqlite_client()
             await sqlite_client.update_order(
-                order_id=order_id,
+                order_id=local_order_id,
                 maker_attestation=maker_attestation,
                 fulfillment_resource=connection_details,
                 escrow_uid=escrow_uid,
             )
         except Exception as exc:
-            logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+            logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", local_order_id, exc)
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
     return {
