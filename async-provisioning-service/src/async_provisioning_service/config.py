@@ -68,6 +68,7 @@ class Settings(BaseSettings):
 
     # Authentication settings
     enable_auth: bool = False  # Set to True to enable agent authentication
+    auth_fail_open: bool = False  # When auth is enabled, allow registry outages to bypass checks
     registry_url: str | None = None  # URL of agent registry API for verification
     registry_cache_ttl_seconds: int = 300  # TTL for registry lookup cache (5 min)
     registry_cache_max_size: int = 256  # Max entries in registry cache

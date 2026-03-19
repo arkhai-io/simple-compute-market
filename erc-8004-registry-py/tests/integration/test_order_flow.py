@@ -7,6 +7,9 @@ from src.main import app
 from src.db.database import get_db
 from src.db.models import Agent, MarketOrder, OrderStatusEnum
 
+AGENT_A_PRIVATE_KEY = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+AGENT_B_PRIVATE_KEY = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+
 
 @pytest.fixture
 def client(db_session):
@@ -60,7 +63,7 @@ def agent_b(db_session):
     return agent
 
 
-def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
+def test_complete_order_lifecycle(client, agent_a, agent_b, db_session, sign_order_auth):
     """Test complete order lifecycle."""
     # 1. Create order A: offer GPU, demand token
     response_a = client.post(
@@ -72,6 +75,7 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
             "demand_resource": {"token": "USDC"},
             "duration_hours": 3600,
             "status": "open",
+            **sign_order_auth(AGENT_A_PRIVATE_KEY, "create_order", agent_a.agent_id),
         },
     )
     assert response_a.status_code == 201
@@ -87,6 +91,7 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
             "demand_resource": {"gpu_model": "A100", "region": "us-west"},
             "duration_hours": 3600,
             "status": "open",
+            **sign_order_auth(AGENT_B_PRIVATE_KEY, "create_order", agent_b.agent_id),
         },
     )
     assert response_b.status_code == 201
@@ -107,7 +112,12 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
     # 5. Update order A to accepted
     response = client.put(
         f"/orders/{order_a_id}",
-        json={"status": "accepted", "order_taker": agent_b.token_uri},
+        json={
+            "status": "accepted",
+            "order_taker": agent_b.token_uri,
+            "signer_agent_id": agent_a.agent_id,
+            **sign_order_auth(AGENT_A_PRIVATE_KEY, "update_order", order_a_id),
+        },
     )
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
@@ -124,7 +134,10 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
     assert order_b_data["order_taker"] == agent_a.token_uri
     
     # 7. Delete order A
-    response = client.delete(f"/orders/{order_a_id}")
+    response = client.delete(
+        f"/orders/{order_a_id}",
+        params=sign_order_auth(AGENT_A_PRIVATE_KEY, "delete_order", order_a_id),
+    )
     assert response.status_code == 204
     
     # 8. Verify order A is removed
@@ -133,7 +146,7 @@ def test_complete_order_lifecycle(client, agent_a, agent_b, db_session):
     assert order_a_id not in order_ids
 
 
-def test_agent_id_resolution_canonical_only(client, agent_a, db_session):
+def test_agent_id_resolution_canonical_only(client, agent_a, db_session, sign_order_auth):
     """Test agent ID resolution using only canonical agent ID (no PK support)."""
     # 1. Register agent (already done via fixture)
     
@@ -146,6 +159,7 @@ def test_agent_id_resolution_canonical_only(client, agent_a, db_session):
             "offer_resource": {"gpu_model": "A100"},
             "demand_resource": {"token": "USDC"},
             "duration_hours": 3600,
+            **sign_order_auth(AGENT_A_PRIVATE_KEY, "create_order", agent_a.agent_id),
         },
     )
     assert response_canonical.status_code == 201
@@ -155,4 +169,3 @@ def test_agent_id_resolution_canonical_only(client, agent_a, db_session):
     assert response.status_code == 200
     order_ids = [item["order_id"] for item in response.json()["items"]]
     assert "test-canonical-order" in order_ids
-

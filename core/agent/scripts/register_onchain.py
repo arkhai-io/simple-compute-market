@@ -147,6 +147,17 @@ def update_env_file_base_url_override(env_file: Path, base_url: str) -> bool:
     return updated
 
 
+def _maybe_persist_env_update(
+    enabled: bool,
+    updater,
+    *args,
+) -> bool:
+    """Run an env-file updater only when automatic env mutation is enabled."""
+    if not enabled:
+        return False
+    return updater(*args)
+
+
 async def main():
     """Register agent on-chain and output the agent ID."""
     import argparse
@@ -165,6 +176,7 @@ async def main():
 
     # Path to the env file we will read/update
     env_file = Path(args.env_file)
+    persist_env_updates = not args.no_update_env
 
     # Read config for display
     base_url_override_env = os.getenv("BASE_URL_OVERRIDE")
@@ -223,18 +235,32 @@ async def main():
         parsed = urlparse(resolved_base_url)
         zerotier_ip = parsed.hostname
         if zerotier_ip:
-            ip_updated = update_env_file_zerotier_ip(env_file, zerotier_ip)
+            ip_updated = _maybe_persist_env_update(
+                persist_env_updates,
+                update_env_file_zerotier_ip,
+                env_file,
+                zerotier_ip,
+            )
             if ip_updated:
                 print(f"✅ Saved ZeroTier IP to {env_file}: ZEROTIER_IP={zerotier_ip}")
+            elif not persist_env_updates:
+                print("ℹ️  Skipped ZEROTIER_IP env update (--no-update-env flag set)")
             else:
                 print(f"✓ .env already has ZEROTIER_IP={zerotier_ip}")
         else:
             print("⚠️  Could not extract ZeroTier IP from resolved URL; skipping ZEROTIER_IP env update.")
 
         # Persist the resolved BASE_URL_OVERRIDE (no placeholder) back into .env
-        base_url_updated = update_env_file_base_url_override(env_file, resolved_base_url)
+        base_url_updated = _maybe_persist_env_update(
+            persist_env_updates,
+            update_env_file_base_url_override,
+            env_file,
+            resolved_base_url,
+        )
         if base_url_updated:
             print(f"✅ Saved BASE_URL_OVERRIDE to {env_file}: {resolved_base_url}")
+        elif not persist_env_updates:
+            print("ℹ️  Skipped BASE_URL_OVERRIDE env update (--no-update-env flag set)")
         else:
             print(f"✓ .env already has BASE_URL_OVERRIDE={resolved_base_url}")
     else:

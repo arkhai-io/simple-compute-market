@@ -18,9 +18,12 @@ from core.agent.app.schema.pydantic_models import (
     Region,
 )
 from core.agent.app.policy.store import PolicyStore
+from core.agent.app.policy.action_builders import make_negotiation_id
+from core.agent.app.policy.negotiation_thread import get_thread_store
 from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.utils.action_executor import _extract_initial_price_from_order
+from core.agent.app.utils.config import CONFIG
 from core.agent.app.utils.validation import determine_strategy_from_order
 import tempfile
 import os
@@ -130,12 +133,16 @@ class TestRespondToMakeOffer:
     @pytest.fixture
     def policy_store(self, temp_db):
         from core.agent.app.policy.registry import CALLABLE_REGISTRY
+        from core.agent.app.policy import negotiation_thread as negotiation_thread_module
 
         CALLABLE_REGISTRY.clear()
 
         from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 
         sqlite_client = SQLiteClient(db_path=temp_db)
+        negotiation_thread_module._thread_store = negotiation_thread_module.NegotiationThreadStore(
+            sqlite_client=sqlite_client
+        )
         store = PolicyStore(sqlite_client=sqlite_client)
         store.register_callables({
             "negotiation.respond_to_make_offer": negotiation_respond_to_make_offer,
@@ -143,6 +150,7 @@ class TestRespondToMakeOffer:
 
         yield store
 
+        negotiation_thread_module._thread_store = None
         CALLABLE_REGISTRY.clear()
 
     @pytest.mark.asyncio
@@ -179,6 +187,14 @@ class TestRespondToMakeOffer:
             agent_id="our_agent",
             available_resources={},
             market_state={},
+        )
+        await get_thread_store().create_thread(
+            negotiation_id=make_negotiation_id("order_A", "order_Z"),
+            our_order_id="order_A",
+            their_order_id="order_Z",
+            our_agent_id="our_agent",
+            their_agent_id="agent_Z",
+            owner_id=CONFIG.base_url_override or "",
         )
 
         with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
@@ -252,6 +268,14 @@ class TestRespondToMakeOffer:
             available_resources={},
             market_state={},
         )
+        await get_thread_store().create_thread(
+            negotiation_id=make_negotiation_id("order_A", "order_Z"),
+            our_order_id="order_A",
+            their_order_id="order_Z",
+            our_agent_id="our_agent",
+            their_agent_id="agent_Z",
+            owner_id=CONFIG.base_url_override or "",
+        )
 
         with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
             mock_registry = AsyncMock()
@@ -322,6 +346,14 @@ class TestRespondToMakeOffer:
             agent_id="our_agent",
             available_resources={},
             market_state={},
+        )
+        await get_thread_store().create_thread(
+            negotiation_id=make_negotiation_id("order_A", "order_Z"),
+            our_order_id="order_A",
+            their_order_id="order_Z",
+            our_agent_id="our_agent",
+            their_agent_id="agent_Z",
+            owner_id=CONFIG.base_url_override or "",
         )
 
         with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:
@@ -593,6 +625,14 @@ class TestRespondToMakeOffer:
             agent_id="our_agent",
             available_resources={},
             market_state={},
+        )
+        await get_thread_store().create_thread(
+            negotiation_id=make_negotiation_id("order_A", "order_Z"),
+            our_order_id="order_A",
+            their_order_id="order_Z",
+            our_agent_id="our_agent",
+            their_agent_id="agent_Z",
+            owner_id=CONFIG.base_url_override or "",
         )
 
         with patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_get_registry:

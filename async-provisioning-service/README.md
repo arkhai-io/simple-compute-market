@@ -94,4 +94,9 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `PLAYBOOK_PATH` | *(auto-resolved)* | Override playbook path |
 | `INVENTORY_PATH` | *(auto-resolved)* | Override inventory path |
 | `ENABLE_AUTH` | `false` | Enable agent authentication |
+| `AUTH_FAIL_OPEN` | `false` | When auth is enabled, allow registry outages to bypass agent verification |
 | `ENABLE_RATE_LIMITING` | `false` | Enable per-agent rate limiting |
+
+For deployed environments, do not start from `.env.sample` directly. Use
+`.env.production.sample` and keep `ENABLE_AUTH=true`, `AUTH_FAIL_OPEN=false`,
+and a real `REGISTRY_URL`.

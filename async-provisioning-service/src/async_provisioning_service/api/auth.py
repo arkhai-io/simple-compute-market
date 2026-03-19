@@ -30,8 +30,20 @@ def validate_erc8004_agent_id(agent_id: str) -> bool:
     return bool(ERC8004_PATTERN.match(agent_id))
 
 
-async def verify_agent_with_registry(registry_url: str, agent_id: str) -> bool:
-    """Verify agent against the registry API. Fails open on errors."""
+async def verify_agent_with_registry(
+    registry_url: str,
+    agent_id: str,
+    *,
+    fail_open: bool | None = None,
+) -> bool:
+    """Verify agent against the registry API.
+
+    By default, auth follows settings.auth_fail_open. Successful and explicit 404
+    lookups are cached; transient failures are not cached so callers can retry.
+    """
+    if fail_open is None:
+        fail_open = settings.auth_fail_open
+
     cached = _registry_cache.get(agent_id)
     if cached is not None:
         return cached
@@ -52,15 +64,21 @@ async def verify_agent_with_registry(registry_url: str, agent_id: str) -> bool:
             return False
         else:
             logger.warning(
-                "Registry returned unexpected status %d for agent %s, failing open",
+                "Registry returned unexpected status %d for agent %s (%s)",
                 response.status_code,
                 agent_id,
+                "failing open" if fail_open else "failing closed",
             )
-            return True
+            return fail_open
 
     except Exception as exc:
-        logger.warning("Registry verification failed for %s (failing open): %s", agent_id, exc)
-        return True
+        logger.warning(
+            "Registry verification failed for %s (%s): %s",
+            agent_id,
+            "failing open" if fail_open else "failing closed",
+            exc,
+        )
+        return fail_open
 
 
 class AgentAuthMiddleware(BaseHTTPMiddleware):

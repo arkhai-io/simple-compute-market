@@ -220,3 +220,13 @@ Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `ZEROTIER_NETWORK`
 
 - Agent playground: `make playground` in `agent`
 - ZeroTier network info: `sudo zerotier-cli listnetworks`
+
+## Production Canary
+
+Production deployment templates and the canary smoke workflow live in:
+
+- `core/agent/.env.production.sample`
+- `async-provisioning-service/.env.production.sample`
+- `erc-8004-registry-py/.env.production.sample`
+- `docs/production-canary.md`
+- `scripts/prod_canary_smoke.py`
