@@ -9,6 +9,11 @@ This runbook is for the full-stack deployed flow:
 - no `mock` provisioning
 - no `host.docker.internal`
 
+See also:
+
+- `docs/deployment-input-checklist.md`
+- `docs/e2e-deployment-test-plan.md`
+
 ## Required config
 
 Start from these templates:
@@ -40,6 +45,7 @@ If the provisioning service must be reachable directly on the host ZeroTier IP, 
 
 ## Preflight checks
 
+- The env bundle passes `scripts/validate_deployment_bundle.py`.
 - Registry health endpoint returns healthy.
 - Provisioning health endpoint returns ok.
 - Buyer and seller agent cards resolve over their deployed URLs.

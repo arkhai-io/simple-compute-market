@@ -89,6 +89,7 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `DATABASE_URL` | `postgresql+psycopg2://...` | Database connection string |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection for job queue |
 | `ANSIBLE_TIMEOUT_SECONDS` | `1800` | Max seconds per Ansible run |
+| `ANSIBLE_BECOME_PASS` | *(required in deployed envs)* | `become` password for the target KVM host |
 | `DEFAULT_VM_HOST` | `ww1` | Default KVM host target |
 | `PROVISIONING_REPO_ROOT` | *(auto-detected)* | Override project root path |
 | `PLAYBOOK_PATH` | *(auto-resolved)* | Override playbook path |
@@ -96,6 +97,11 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `ENABLE_AUTH` | `false` | Enable agent authentication |
 | `AUTH_FAIL_OPEN` | `false` | When auth is enabled, allow registry outages to bypass agent verification |
 | `ENABLE_RATE_LIMITING` | `false` | Enable per-agent rate limiting |
+| `FRP_SERVER_ADDR` | *(required in deployed envs)* | FRP server hostname or IP |
+| `FRP_DOMAIN` | *(required in deployed envs)* | FRP routing domain |
+| `FRP_DASHBOARD_PASSWORD` | *(required in deployed envs)* | FRP dashboard API password |
+| `SSH_PRIVATE_KEY` | *(required in deployed envs)* | Base64 or raw provisioner SSH private key |
+| `MANAGEMENT_VARS_YAML` | *(required in deployed envs)* | Base64 or raw `management-vars.yaml` contents |
 
 For deployed environments, do not start from `.env.sample` directly. Use
 `.env.production.sample` and keep `ENABLE_AUTH=true`, `AUTH_FAIL_OPEN=false`,
