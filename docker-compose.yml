@@ -35,6 +35,11 @@ services:
       - shared-env:/app/shared-env
     command: >
       sh -c "
+      if [ -s $$ENV_FILE ] && grep -q '^IDENTITY_REGISTRY_ADDRESS=' $$ENV_FILE; then
+        echo Reusing existing contract addresses from $$ENV_FILE;
+        cat $$ENV_FILE;
+        exit 0;
+      fi &&
       mkdir -p /app/shared-env &&
       python3 /app/deploy_alkahest.py &&
       npm run deploy:anvil 2>&1 | tee /tmp/deploy.log &&
@@ -55,7 +60,7 @@ services:
       contracts-deploy:
         condition: service_completed_successfully
     ports:
-      - "8080:8080"
+      - "18080:8080"
     env_file:
       - ./erc-8004-registry-py/.env.docker-compose
     volumes:
@@ -87,14 +92,14 @@ services:
       context: .
       dockerfile: core/Dockerfile
       args:
-        INSTALL_RL_DEPS: "true"
+        INSTALL_RL_DEPS: "false"
     platform: linux/amd64
     container_name: market-agent-buy
     depends_on:
       registry:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "18000:8000"
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -130,14 +135,14 @@ services:
       context: .
       dockerfile: core/Dockerfile
       args:
-        INSTALL_RL_DEPS: "true"
+        INSTALL_RL_DEPS: "false"
     platform: linux/amd64
     container_name: market-agent-sell
     depends_on:
       registry:
         condition: service_healthy
     ports:
-      - "8001:8001"
+      - "18001:8001"
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
@@ -175,7 +180,7 @@ services:
     image: redis:7-alpine
     container_name: market-redis
     ports:
-      - "6379:6379"
+      - "16379:6379"
     networks:
       - market-network
     healthcheck:
@@ -196,7 +201,7 @@ services:
       registry:
         condition: service_healthy
     ports:
-      - "8081:8081"
+      - "18081:8081"
     env_file:
       - ./async-provisioning-service/.env.docker-compose
     volumes:

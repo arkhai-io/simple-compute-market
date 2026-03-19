@@ -1763,7 +1763,7 @@ async def _find_and_send_matching_offers(
         }
 
 
-async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest_client: Any | None = None):
+async def make_offer(ctx: InvocationContext | None, order: MarketOrder | dict, alkahest_client: Any | None = None):
     """Propagate an offer to the network using registry discovery.
     
     Queries the registry for matching orders and sends offers to discovered agents.
@@ -1852,22 +1852,24 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
             logger.warning(f"[REGISTRY] Failed to publish order to registry: {e}")
     
     # Create the event
-    event = Event(
-        author=AGENT_ID,
-        content=genai_types.Content(
-            role="model",
-            parts=[
-                genai_types.Part.from_function_response(
-                    name="make_offer",
-                    response={
-                        "event_type": EventType.MAKE_OFFER.value,
-                        "offer": order_dict
-                    })
-            ],
-        ),
-        invocation_id=ctx.invocation_id,
-        branch=ctx.branch,
-    )
+    event = None
+    if ctx is not None:
+        event = Event(
+            author=AGENT_ID,
+            content=genai_types.Content(
+                role="model",
+                parts=[
+                    genai_types.Part.from_function_response(
+                        name="make_offer",
+                        response={
+                            "event_type": EventType.MAKE_OFFER.value,
+                            "offer": order_dict
+                        })
+                ],
+            ),
+            invocation_id=ctx.invocation_id,
+            branch=ctx.branch,
+        )
     
     # Try registry discovery if enabled
     if CONFIG.enable_registry_discovery:

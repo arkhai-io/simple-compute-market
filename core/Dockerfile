@@ -47,7 +47,8 @@ RUN apt-get update && \
     echo 'appuser ALL=(root) NOPASSWD: /usr/sbin/zerotier-one, /usr/sbin/zerotier-cli' \
       > /etc/sudoers.d/appuser && \
     chmod 0440 /etc/sudoers.d/appuser && \
-    mkdir -p /app
+    mkdir -p /app && \
+    chown appuser:appuser /app
 
 WORKDIR /app
 
