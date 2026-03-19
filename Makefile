@@ -82,7 +82,7 @@ deploy-test-env:
 	cd test-env && make deploy
 
 deploy-registry:
-	echo "NYI"
+	cd erc-8004-registry-py && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:

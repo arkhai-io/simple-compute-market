@@ -1,56 +1,18 @@
 services:
   # 1. Local test chain (Anvil)
   anvil:
-    image: ghcr.io/foundry-rs/foundry:latest
-    container_name: market-anvil
+    image: arkhai:test-env
+    container_name: anvil
     ports:
       - "8545:8545"
     environment:
       - ANVIL_IP_ADDR=0.0.0.0
-    command: >
-      anvil
-
     networks:
       - market-network
 
-  # # 2. Deploy contracts (runs once after anvil is ready)
-  contracts-deploy:
-    build:
-      context: ./erc-8004-contracts
-      dockerfile: Dockerfile
-    container_name: market-contracts-deploy
-    depends_on:
-      anvil:
-        condition: service_started
-
-    environment:
-      - ANVIL_RPC_URL=http://anvil:8545
-      - ENV_FILE=/app/shared-env/.env
-
-    networks:
-      - market-network
-    volumes:
-      - contracts-artifacts:/app/artifacts
-      - contracts-deployments:/app/deployments
-      - shared-env:/app/shared-env
-    command: >
-      sh -c "
-      mkdir -p /app/shared-env &&
-      python3 /app/deploy_alkahest.py &&
-      npm run deploy:anvil 2>&1 | tee /tmp/deploy.log &&
-      IDENTITY_ADDR=$$(grep 'IdentityRegistry deployed to:' /tmp/deploy.log | awk '{print $$NF}') &&
-      echo IDENTITY_REGISTRY_ADDRESS=$$IDENTITY_ADDR > $$ENV_FILE &&
-      echo REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF >> $$ENV_FILE &&
-      echo VALIDATION_REGISTRY_ADDRESS=0x8004C269D0A5647E51E121FeB226200ECE932d55 >> $$ENV_FILE &&
-      echo Wrote contract addresses to $$ENV_FILE &&
-      cat $$ENV_FILE
-      "
-
-  # # 3. Registry/Indexer service
+  # # 2. Registry/Indexer service
   registry:
-    build:
-      context: ./erc-8004-registry-py
-      dockerfile: Dockerfile
+    image: arkhai:registry
     depends_on:
       contracts-deploy:
         condition: service_completed_successfully
@@ -58,17 +20,11 @@ services:
       - "8080:8080"
     env_file:
       - ./erc-8004-registry-py/.env.docker-compose
+      - ./shared-env/.env
     volumes:
       - shared-env:/app/shared-env
     networks:
       - market-network
-
-    command: >
-      sh -c "set -a;
-      . /app/shared-env/.env;
-      set +a;
-      exec uvicorn src.main:app --host 0.0.0.0 --port 8080"
-
     restart: unless-stopped
     deploy:
       resources:
@@ -81,7 +37,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # 4. Buyer agent (Alice)
+  # 3. Buyer agent (Alice)
   buy_agent:
     build:
       context: .
@@ -124,7 +80,7 @@ services:
         set +a
         exec ./entrypoint.sh
 
-  # 5. Seller agent (Bob)
+  # 4. Seller agent (Bob)
   sell_agent:
     build:
       context: .
@@ -170,7 +126,7 @@ services:
           --csv core/agent/app/data/ww1-machine.csv
         exec ./entrypoint.sh
 
-  # 6. Redis (job queue for provisioning service)
+  # 5. Redis (job queue for provisioning service)
   redis:
     image: redis:7-alpine
     container_name: market-redis
@@ -184,7 +140,7 @@ services:
       timeout: 3s
       retries: 3
 
-  # 7. Async provisioning service
+  # 6. Async provisioning service
   provisioning:
     build:
       context: .
@@ -209,11 +165,9 @@ services:
       resources:
         limits:
           memory: 384m
-
 networks:
   market-network:
     driver: bridge
-
 
 volumes:
   contracts-artifacts:
