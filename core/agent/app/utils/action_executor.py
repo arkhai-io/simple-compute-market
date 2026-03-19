@@ -401,13 +401,20 @@ async def execute_action(
                         async with NegotiationThreadTransaction("FULFILL_COMPUTE_OBLIGATION") as txn:
                             thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
                             our_price = (thread_info or {}).get("our_initial_price")
-                            their_price = _extract_initial_price_from_order(order_dict) if order_dict else None
+                            # Derive agreed price from last non-terminal message's their_price
+                            # (the counterparty's final proposal), rather than reading the raw
+                            # order amount which reflects the original ask, not the agreed price.
+                            messages = await txn.thread_store.get_thread(neg_id)
+                            agreed_price = next(
+                                (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
+                                None,
+                            )
                             await txn.add_message(
                                 negotiation_id=neg_id,
                                 sender=_sender_id(),
                                 our_price=our_price,
-                                their_price=their_price,
-                                proposed_price=our_price,
+                                their_price=agreed_price,
+                                proposed_price=agreed_price,
                                 action_taken=ActionType.FULFILL_COMPUTE_OBLIGATION.value,
                                 message_type="fulfilled",
                             )
@@ -1104,7 +1111,7 @@ async def _prepare_counter_offer(
             "event_type": EventType.NEGOTIATION.value,
             "negotiation_id": params.negotiation_id,
             "message_type": "counter_proposal",
-            "sender": AGENT_ID,
+            "sender": _sender_id(),
             "source": BASE_URL_OVERRIDE,
             "data": {
                 "proposed_price": params.proposed_price,
@@ -1243,7 +1250,7 @@ async def exit_negotiation(
                         "event_type": EventType.NEGOTIATION.value,
                         "negotiation_id": negotiation_id,
                         "message_type": "exit",
-                        "sender": AGENT_ID,
+                        "sender": _sender_id(),
                         "source": BASE_URL_OVERRIDE,
                         "data": {"reason": reason},
                     }
@@ -1361,7 +1368,7 @@ async def accept_offer(
                     "event_type": EventType.NEGOTIATION.value,
                     "negotiation_id": competing_neg_id,
                     "message_type": "exit",
-                    "sender": AGENT_ID,
+                    "sender": _sender_id(),
                     "source": BASE_URL_OVERRIDE,
                     "data": {"reason": "order_accepted_elsewhere"},
                 }

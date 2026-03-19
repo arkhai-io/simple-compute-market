@@ -312,7 +312,13 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
 
     if last_our_proposal is not None and their_price is not None and last_our_proposal == their_price:
         logger.info(f"[NEGOTIATION] Prices equal ({last_our_proposal}), accepting directly")
-        data = {**data, "counterparty_url": thread_info.get("their_agent_id")}
+        data = {
+            **data,
+            "counterparty_url": thread_info.get("their_agent_id"),
+            "our_price": thread_info.get("our_initial_price"),
+            "their_price": their_price,
+            "our_strategy": thread_info.get("our_strategy"),
+        }
         actions = NegotiationActionBuilder(data)
         return actions.accept("price_equal")
 
@@ -393,9 +399,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MINIMIZE] Converged: their_price {their_price} <= last_our_proposal {last_our_proposal} * {1 + CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price <= our_price * REASONABLE_MULTIPLIER:
-            # Above last bid but reasonable — counter with midpoint, clamped to reservation price
-            proposed_price = min(our_price, (last_our_proposal + their_price) // 2)
-            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price}, clamped to ceiling {our_price})")
+            # Above last bid but reasonable — counter with midpoint, converging toward their price
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (midpoint of {last_our_proposal} and {their_price}, ceiling={our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far above ceiling
@@ -417,9 +423,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MAXIMIZE] Converged: their_price {their_price} >= last_our_proposal {last_our_proposal} * {1 - CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price >= our_price / REASONABLE_MULTIPLIER:
-            # Below last ask but reasonable — counter with midpoint, clamped to reservation price
-            proposed_price = max(our_price, (last_our_proposal + their_price) // 2)
-            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price}, clamped to floor {our_price})")
+            # Below last ask but reasonable — counter with midpoint, converging toward their price
+            proposed_price = (last_our_proposal + their_price) // 2
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (midpoint of {last_our_proposal} and {their_price}, floor={our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far below floor
@@ -742,7 +748,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         if their_proposed_price <= our_price * (1 + CONVERGENCE_RATIO):
             return actions.accept("convergence")
         if their_proposed_price <= our_price * 1.5:
-            proposed_price = min(our_price, (our_price + their_proposed_price) // 2)
+            proposed_price = (our_price + their_proposed_price) // 2
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")
 
@@ -750,7 +756,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         if their_proposed_price >= our_price * (1 - CONVERGENCE_RATIO):
             return actions.accept("convergence")
         if their_proposed_price >= our_price / 1.5:
-            proposed_price = max(our_price, (our_price + their_proposed_price) // 2)
+            proposed_price = (our_price + their_proposed_price) // 2
             return actions.counter(proposed_price)
         return actions.exit("price_unreasonable")
 

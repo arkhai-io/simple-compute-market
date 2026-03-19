@@ -87,6 +87,7 @@ from core.agent.app.policy.negotiation_thread import get_thread_store
 from core.agent.app.policy.seeding import ComputePolicySeeder
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.schema.pydantic_models import DecisionContext, Action, Decision
+from core.agent.app.utils.action_executor import _sender_id as _get_sender_id
 from core.agent.app.utils.event_ingestion import (
     configure_default_ingestion,
     queue_event,
@@ -709,7 +710,7 @@ class TraderAgent(BaseAgent):
 
         decision_context = DecisionContext(
             event=domain_event,
-            agent_id=self.name,
+            agent_id=_get_sender_id(),
             available_resources=context_data.get("resource_portfolio", {}),
             market_state=context_data.get("market_state", {}),
             negotiation_history=context_data.get("negotiation_history", []),
@@ -768,7 +769,7 @@ class TraderAgent(BaseAgent):
             agent_id=self.name,
             context=DecisionContext(
                 event=domain_event,
-                agent_id=self.name,
+                agent_id=_get_sender_id(),
                 available_resources=context_data.get("resource_portfolio", {}),
                 market_state=context_data.get("market_state", {}),
                 negotiation_history=context_data.get("negotiation_history", []),
@@ -860,13 +861,16 @@ class TraderAgent(BaseAgent):
         except Exception:
             history = []
 
-        if len(history) == 0:
-            return None  # First-round arrival with no session yet — not an orphan
+        # make_offer writes a round-0 "offer" record to the DB before any ADK session
+        # is created. Filter those out — they don't indicate a prior active session.
+        session_history = [m for m in history if m.get("message_type") not in ("offer",)]
+        if len(session_history) == 0:
+            return None  # Only make_offer round-0 record — session was never created, not an orphan
 
         logger.warning(
             "[AGENT] Orphaned negotiation %s detected after restart "
             "(%d prior messages, no ADK session). Sending exit.",
-            neg_id, len(history),
+            neg_id, len(session_history),
         )
         their_order_id = event_data.get("their_order_id") or event_data.get("order_id")
         await exit_negotiation(
