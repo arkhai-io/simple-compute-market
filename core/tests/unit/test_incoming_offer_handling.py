@@ -271,8 +271,8 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        # proposed_price = min(100, (100 + 120) // 2) = min(100, 110) = 100  (clamped to ceiling)
-        assert result.parameters.get("proposed_price") == 100
+        # proposed_price = (100 + 120) // 2 = 110  (midpoint, no clamp)
+        assert result.parameters.get("proposed_price") == 110
 
     @pytest.mark.asyncio
     async def test_minimizer_exits_unreasonable_price(self, policy_store):
@@ -446,8 +446,8 @@ class TestRespondToMakeOffer:
 
         assert result is not None
         assert result.action_type.value == "counter_offer"
-        # proposed_price = max(100, (100 + 70) // 2) = max(100, 85) = 100  (clamped to floor)
-        assert result.parameters.get("proposed_price") == 100
+        # proposed_price = (100 + 70) // 2 = 85  (midpoint, no clamp)
+        assert result.parameters.get("proposed_price") == 85
 
     @pytest.mark.asyncio
     async def test_no_matching_order_returns_reject(self, policy_store, maximizer_order):
