@@ -35,6 +35,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Lean runtime image
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
 
+USER root
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo && \
     curl -s https://install.zerotier.com | bash && \
@@ -53,25 +55,23 @@ WORKDIR /app
 
 EXPOSE 9993/udp
 
-COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
+COPY --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application code preserving the import path (from core.agent.app.*)
-COPY --chown=appuser:appuser core/agent/app ./core/agent/app
-COPY --chown=appuser:appuser core/agent/scripts ./core/agent/scripts
-COPY --chown=appuser:appuser core/agent/.env.sample .
-COPY --chown=appuser:appuser core/schemas.py ./core/schemas.py
-COPY --chown=appuser:appuser domain/ ./domain/
-COPY --chown=appuser:appuser service/ ../service/
+COPY core/agent/app ./core/agent/app
+COPY core/agent/scripts ./core/agent/scripts
+COPY core/agent/.env.sample .
+COPY core/schemas.py ./core/schemas.py
+COPY domain/ ./domain/
+COPY service/ ../service/
 
 ARG PORT=8080
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-COPY --chown=appuser:appuser core/entrypoint.sh ./entrypoint.sh
+COPY core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
-
-USER appuser
 
 ARG MODEL_VERSION=""
 ENV MODEL_VERSION=${MODEL_VERSION}
