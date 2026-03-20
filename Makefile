@@ -39,6 +39,9 @@ build-core:
 	docker build -f ./core/Dockerfile --build-arg INSTALL_RL_DEPS=true -t arkhai:core .
 	docker tag arkhai:core arkhai:core-$(GIT_SUFFIX)
 
+build-provisioning:
+	cd async-provisioning-service && make build
+
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
 init: init-submodules init-cli init-images
@@ -88,8 +91,8 @@ deploy-registry:
 deploy-agents:
 	cd core && make deploy
 
-#deploy-provisioning-service:
-#	cd aync-provisioning-service && make deploy
+deploy-provisioning:
+	cd aync-provisioning-service && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:

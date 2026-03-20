@@ -2,8 +2,6 @@
 
 .DEFAULT_GOAL := help
 
-ENV_FILE ?= .env.local
-
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -23,23 +21,35 @@ clean: ## Remove generated files
 
 # ── Docker ───────────────────────────────────────────────────────────
 
-IMAGE_NAME ?= async-provisioning-service
-IMAGE_TAG  ?= latest
+IMAGE_NAME ?= arkhai
+IMAGE_TAG  ?= provisioning
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+ENV_FILE ?= .env.docker-compose
 
-docker-build: ## Build Docker image (from repo root)
+build: build-images
+
+build-images:
 	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile ..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
-docker-run: ## Run with baked-in IaC
-	docker run --rm --env-file $(ENV_FILE) -p 8081:8081 \
-		--add-host=host.docker.internal:host-gateway \
-		-e REDIS_URL=redis://host.docker.internal:6379/0 \
-		-e DATABASE_URL=postgresql+psycopg2://postgres:postgres@host.docker.internal:5432/provisioning \
-		$(IMAGE_NAME):$(IMAGE_TAG)
+deploy: deploy-redis deploy-provisioning
+
+deploy-redis:
+	docker run -d --rm --name redis \
+	--network market -p 6379:6379 \
+	--health-cmd "redis-cli ping" --health-interval 10s --health-timeout 3s --health-retries 3 \
+	redis:7-alpine
+
+deploy-provisioning:
+	docker run -d --rm --name provisioning \
+	--env-file $(ENV_FILE) \
+	--network market -p 8081:8081 \
+	$(IMAGE_NAME):$(IMAGE_TAG)
 
 docker-run-dev: ## Run with host IaC + SSH keys mounted
 	docker run --rm --env-file $(ENV_FILE) -p 8081:8081 \
-		--add-host=host.docker.internal:host-gateway \
-		-e REDIS_URL=redis://host.docker.internal:6379/0 \
-		-v "$$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac" \
-		-v "$$HOME/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro" \
-		$(IMAGE_NAME):$(IMAGE_TAG)
+	--add-host=host.docker.internal:host-gateway \
+	-e REDIS_URL=redis://host.docker.internal:6379/0 \
+	-v "$$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac" \
+	-v "$$HOME/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro" \
+	$(IMAGE_NAME):$(IMAGE_TAG)
