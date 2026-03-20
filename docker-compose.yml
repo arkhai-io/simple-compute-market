@@ -39,11 +39,7 @@ services:
 
   # 3. Buyer agent (Alice)
   buy_agent:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
-      args:
-        INSTALL_RL_DEPS: "true"
+    image: arkhai:core
     platform: linux/amd64
     container_name: market-agent-buy
     depends_on:
@@ -82,11 +78,7 @@ services:
 
   # 4. Seller agent (Bob)
   sell_agent:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
-      args:
-        INSTALL_RL_DEPS: "true"
+    image: arkhai:core
     platform: linux/amd64
     container_name: market-agent-sell
     depends_on:
