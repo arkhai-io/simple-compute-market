@@ -103,10 +103,10 @@ If the provisioning service must be reachable directly on the host ZeroTier IP, 
 
 ## Deployment order
 
-1. Deploy / verify the registry.
-2. Deploy / verify Redis and the async provisioning API + worker.
-3. Deploy / verify the seller agent.
-4. Deploy / verify the buyer agent.
+1. Deploy / verify the registry via `docs/standup/registry.md`.
+2. Deploy / verify Redis and the async provisioning API + worker via `docs/standup/provisioning.md`.
+3. Deploy / verify the seller agent via `docs/standup/agent-seller.md`.
+4. Deploy / verify the buyer agent via `docs/standup/agent-buyer.md`.
 5. Authorize all nodes on the target ZeroTier network.
 6. Confirm each service is reachable over its ZeroTier address.
 

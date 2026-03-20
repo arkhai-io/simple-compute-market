@@ -302,6 +302,101 @@ def test_compute_provisioning_iac_readme_uses_current_repo_paths() -> None:
 
 
 @pytest.mark.parametrize(
+    ("path", "env_path", "container_name"),
+    [
+        (
+            STANDUP_AGENT_SELLER_PATH,
+            "/etc/simple-market-service/seller-agent.env",
+            "sms-seller-agent",
+        ),
+        (
+            STANDUP_AGENT_BUYER_PATH,
+            "/etc/simple-market-service/buyer-agent.env",
+            "sms-buyer-agent",
+        ),
+    ],
+)
+def test_agent_standup_docs_cover_container_runtime_contract(
+    path: Path,
+    env_path: str,
+    container_name: str,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+    required = {
+        env_path,
+        f"ENV_FILE={env_path}",
+        "docker pull",
+        "docker run -d",
+        container_name,
+        "--cap-add NET_ADMIN",
+        "--cap-add SYS_MODULE",
+        "--device /dev/net/tun:/dev/net/tun",
+        "/var/lib/zerotier-one",
+        "grep '^ONCHAIN_AGENT_ID='",
+        "/.well-known/agent-card.json",
+        "/.well-known/erc-8004-registration.json",
+    }
+
+    missing = sorted(token for token in required if token not in text)
+    assert not missing, (
+        f"{path.name} is missing executable deployment runtime coverage: {missing}"
+    )
+
+
+def test_seller_agent_standup_doc_covers_portfolio_verification() -> None:
+    text = STANDUP_AGENT_SELLER_PATH.read_text(encoding="utf-8")
+
+    assert "/resources/portfolio" in text
+    assert "resource-seeding.md" in text
+
+
+@pytest.mark.parametrize(
+    ("path", "env_path"),
+    [
+        (STANDUP_AGENT_SELLER_PATH, "/etc/simple-market-service/seller-agent.env"),
+        (STANDUP_AGENT_BUYER_PATH, "/etc/simple-market-service/buyer-agent.env"),
+    ],
+)
+def test_agent_deployment_docs_are_executable_runbooks(
+    path: Path,
+    env_path: str,
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## Image",
+        "## Host Preparation",
+        "## Container Launch",
+        "## Registration And Identity Capture",
+        "## Verification",
+    ):
+        assert required_heading in text, f"{path.name} is missing section: {required_heading}"
+
+    for required_token in (
+        env_path,
+        "docker pull",
+        "docker run",
+        "ENV_FILE=",
+        "/var/lib/market",
+        "/var/lib/zerotier-one",
+        "ONCHAIN_AGENT_ID",
+        "BASE_URL_OVERRIDE",
+        "ZEROTIER_IP",
+        "/.well-known/agent-card.json",
+        "/.well-known/erc-8004-registration.json",
+    ):
+        assert required_token in text, f"{path.name} is missing deployment detail: {required_token}"
+
+
+def test_seller_deployment_doc_references_resource_seeding_and_portfolio_verification() -> None:
+    text = STANDUP_AGENT_SELLER_PATH.read_text(encoding="utf-8")
+
+    assert "docs/standup/resource-seeding.md" in text
+    assert "/resources/portfolio" in text
+
+
+@pytest.mark.parametrize(
     ("path", "forbidden", "required"),
     [
         (
