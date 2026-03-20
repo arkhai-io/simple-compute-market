@@ -76,7 +76,7 @@ deploy-local:
 	docker compose ps
 
 #Ideally a helm chart eventually replaces 3 different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-test-env deploy-registry
+deploy: deploy-test-env deploy-registry deploy-agents
 
 #docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
 deploy-test-env:
@@ -87,6 +87,9 @@ deploy-registry:
 
 deploy-agents:
 	cd core && make deploy
+
+#deploy-provisioning-service:
+#	cd aync-provisioning-service && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:
