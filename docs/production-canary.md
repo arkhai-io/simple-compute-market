@@ -9,13 +9,19 @@ This runbook is for the full-stack deployed flow:
 - no `mock` provisioning
 - no `host.docker.internal`
 
-Use a dedicated GCP project for the canary environment. Do not reuse a shared
-deployment project for the first full-stack production-style run.
+Use a dedicated deployment namespace for the canary environment. On GCP, that
+means a dedicated GCP project rather than a shared project.
 
 See also:
 
+- `docs/standup/overview.md`
+- `docs/e2e-runbook.md`
 - `docs/deployment-input-checklist.md`
 - `docs/e2e-deployment-test-plan.md`
+
+Use `docs/standup/overview.md` for the full stand-up sequence and
+`docs/e2e-runbook.md` for the operator-neutral validation flow. This document
+focuses on the live canary execution step once the environment already exists.
 
 ## Local config
 

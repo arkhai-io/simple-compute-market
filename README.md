@@ -228,5 +228,7 @@ Production deployment templates and the canary smoke workflow live in:
 - `core/agent/.env.production.sample`
 - `async-provisioning-service/.env.production.sample`
 - `erc-8004-registry-py/.env.production.sample`
+- `docs/standup/overview.md`
+- `docs/standup/canary.md`
 - `docs/production-canary.md`
 - `scripts/prod_canary_smoke.py`

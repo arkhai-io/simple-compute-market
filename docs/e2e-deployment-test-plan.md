@@ -9,8 +9,13 @@ This plan assumes the production-style path:
 - real seller inventory
 - no `mock` provisioning
 
-Stand the canary up in a dedicated GCP project. Keep the first production-style
-test isolated from any shared deployment project until the full path is green.
+Stand the canary up in a dedicated deployment namespace. On GCP, that means a
+dedicated GCP project. Keep the first production-style test isolated from any
+shared deployment project until the full path is green.
+
+For the step-by-step operator workflow, start with `docs/standup/overview.md`
+and then `docs/e2e-runbook.md`. This document defines the test progression and
+exit criteria around that workflow.
 
 ## Local Config Strategy
 

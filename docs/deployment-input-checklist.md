@@ -3,9 +3,13 @@
 This checklist tracks what is already available in repo state and what still has
 to be recovered or created before a real ZeroTier-backed canary run.
 
-Use a fresh GCP project for the canary build-out. Treat project creation,
-billing attachment, and API enablement as explicit checklist items rather than
-reusing an existing shared deployment project.
+Use a fresh deployment namespace for the canary build-out. On GCP, that means a
+fresh GCP project. Treat project creation, billing attachment, and API enablement
+as explicit checklist items rather than reusing an existing shared deployment
+project.
+
+See `docs/standup/overview.md` for the canonical stand-up sequence and
+`docs/e2e-runbook.md` for the validation sequence that uses these inputs.
 
 ## Private File Layout
 
@@ -28,7 +32,7 @@ Keep deployed bundles outside Git. Recommended host-local files:
 
 ## Shared Inputs
 
-| Input | Status | Current source | If missing, do this ourselves |
+| Input | Status | Current source | If missing, obtain it this way |
 | --- | --- | --- | --- |
 | `CHAIN_NAME=base_sepolia` | Available | `core/agent/.env.production.sample` | Keep unless the target chain changes |
 | `CHAIN_ID=84532` | Available | `erc-8004-registry-py/.env.production.sample` | Keep unless the target chain changes |
@@ -45,7 +49,7 @@ Keep deployed bundles outside Git. Recommended host-local files:
 
 ## Registry Inputs
 
-| Variable | Status | Current source | If missing, do this ourselves |
+| Variable | Status | Current source | If missing, obtain it this way |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | Missing | production sample uses placeholder | Provision Postgres and create a registry database/user |
 | `HOST`, `PORT`, health-check vars | Available | `erc-8004-registry-py/.env.production.sample` | Keep unless deployment topology changes |
@@ -53,7 +57,7 @@ Keep deployed bundles outside Git. Recommended host-local files:
 
 ## Provisioning Inputs
 
-| Variable | Status | Current source | If missing, do this ourselves |
+| Variable | Status | Current source | If missing, obtain it this way |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | Missing | production sample uses placeholder | Provision Postgres and create a provisioning database/user |
 | `REDIS_URL` | Missing until infra exists | Terraform defines outputs but repo has no state | Run Terraform or recover the live Redis endpoint |
@@ -93,7 +97,7 @@ If those remote agent hosts run `ufw` or another host firewall, allow inbound
 its ZeroTier URL so peers can fetch `/.well-known/agent-card.json` and
 `/.well-known/erc-8004-registration.json`.
 
-| Variable | Status | Current source | If missing, do this ourselves |
+| Variable | Status | Current source | If missing, obtain it this way |
 | --- | --- | --- | --- |
 | `BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8000/` | Available pattern only | production sample + runbook | Resolve on the deployed host after ZeroTier join |
 | `GEMINI_API_KEY` | Missing | production sample placeholder | Create a deployment-scoped API key if this runtime path still needs it |
@@ -107,7 +111,7 @@ its ZeroTier URL so peers can fetch `/.well-known/agent-card.json` and
 
 ## Smoke Harness Inputs
 
-| Input | Status | Current source | If missing, do this ourselves |
+| Input | Status | Current source | If missing, obtain it this way |
 | --- | --- | --- | --- |
 | `SELLER_AGENT_ID` / `BUYER_AGENT_ID` | Missing until registration | `prod_canary_smoke.py` CLI args | Capture canonical `eip155:` IDs after agent registration |
 | `SELLER_PRIVATE_KEY` / `BUYER_PRIVATE_KEY` | Missing | `prod_canary_smoke.py` CLI args | Use the canary wallets created for deployment |

@@ -19,6 +19,15 @@ ASYNC_START_SCRIPT = ROOT / "async-provisioning-service/start.sh"
 RUNBOOK_PATH = ROOT / "docs/production-canary.md"
 E2E_PLAN_PATH = ROOT / "docs/e2e-deployment-test-plan.md"
 CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
+STANDUP_DIR = ROOT / "docs/standup"
+STANDUP_OVERVIEW_PATH = STANDUP_DIR / "overview.md"
+STANDUP_ZEROTIER_FRP_PATH = STANDUP_DIR / "zerotier-frp.md"
+STANDUP_REGISTRY_PATH = STANDUP_DIR / "registry.md"
+STANDUP_PROVISIONING_PATH = STANDUP_DIR / "provisioning.md"
+STANDUP_AGENT_SELLER_PATH = STANDUP_DIR / "agent-seller.md"
+STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
+STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
+STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
@@ -39,6 +48,7 @@ REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
 REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
+ROOT_README = ROOT / "README.md"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -218,6 +228,43 @@ def test_production_canary_runbook_matches_smoke_script_cli() -> None:
     unknown = sorted(runbook_args - script_args)
     assert not undocumented, f"Runbook is missing documented required args: {undocumented}"
     assert not unknown, f"Runbook references args not supported by smoke script: {unknown}"
+
+
+def test_canonical_standup_docs_exist() -> None:
+    required_paths = [
+        STANDUP_OVERVIEW_PATH,
+        STANDUP_ZEROTIER_FRP_PATH,
+        STANDUP_REGISTRY_PATH,
+        STANDUP_PROVISIONING_PATH,
+        STANDUP_AGENT_SELLER_PATH,
+        STANDUP_AGENT_BUYER_PATH,
+        STANDUP_RESOURCE_SEEDING_PATH,
+        STANDUP_CANARY_PATH,
+    ]
+
+    missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
+    assert not missing, f"Missing canonical stand-up docs: {missing}"
+
+
+def test_root_readme_points_to_canonical_standup_docs() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+
+    assert "docs/standup/overview.md" in text
+    assert "docs/standup/canary.md" in text
+
+
+def test_deployment_docs_reference_canonical_standup_overview() -> None:
+    required_paths = [RUNBOOK_PATH, E2E_PLAN_PATH, CHECKLIST_PATH]
+
+    missing: list[str] = []
+    for path in required_paths:
+        text = path.read_text(encoding="utf-8")
+        if "docs/standup/overview.md" not in text:
+            missing.append(path.name)
+    assert not missing, (
+        "Deployment docs must point to the canonical stand-up overview: "
+        f"{missing}"
+    )
 
 
 @pytest.mark.parametrize(
