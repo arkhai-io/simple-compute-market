@@ -74,7 +74,7 @@ pip install -e .
 3. Set up environment variables:
 
 ```bash
-cp .env.example .env
+cp .env.sample .env
 ```
 
 Edit `.env` with your configuration:
@@ -554,7 +554,7 @@ alembic upgrade head
 
 ## Configuration
 
-All configuration is done via environment variables. See `.env.example` for available options.
+All configuration is done via environment variables. See `.env.sample` for local development defaults and `.env.production.sample` for deployed-service settings.
 
 ### Base Sepolia Contract Addresses
 

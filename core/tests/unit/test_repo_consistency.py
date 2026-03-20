@@ -49,6 +49,7 @@ REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
+AGENT_README = ROOT / "core/agent/README.md"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -265,6 +266,39 @@ def test_deployment_docs_reference_canonical_standup_overview() -> None:
         "Deployment docs must point to the canonical stand-up overview: "
         f"{missing}"
     )
+
+
+def test_root_readme_uses_current_core_agent_paths() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+
+    assert "`agent/`" not in text
+    assert "cd agent" not in text
+    assert re.search(r"(?<!core/)agent/\.env", text) is None
+    assert "`core/agent/`" in text
+    assert "cd core/agent" in text
+
+
+def test_core_agent_readme_does_not_reference_missing_deployment_readme() -> None:
+    text = AGENT_README.read_text(encoding="utf-8")
+
+    assert "deployment/README.md" not in text
+    assert "docs/standup/agent-seller.md" in text
+    assert "docs/standup/agent-buyer.md" in text
+
+
+def test_registry_readme_uses_tracked_env_sample_names() -> None:
+    text = REGISTRY_README.read_text(encoding="utf-8")
+
+    assert ".env.example" not in text
+    assert ".env.sample" in text
+    assert ".env.production.sample" in text
+
+
+def test_compute_provisioning_iac_readme_uses_current_repo_paths() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+
+    assert "image-and-ssh-provisioning-iac/ansible" not in text
+    assert "compute-provisioning-iac/ansible" in text
 
 
 @pytest.mark.parametrize(

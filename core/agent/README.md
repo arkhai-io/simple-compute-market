@@ -10,7 +10,7 @@ This project is organized as follows:
 ```
 core/agent/
 ├── app/                 # Core Python package modules
-├── deployment/          # Infrastructure and deployment scripts
+├── packages/            # Shared agent packages and integrations
 ├── scripts/             # Operational scripts
 ├── Makefile             # Make targets for core-agent workflows
 └── README.md            # This file
@@ -139,12 +139,19 @@ make backend
 ```
 
 
-The repository includes a Terraform configuration for the setup of the Dev Google Cloud project.
-See [deployment/README.md](deployment/README.md) for instructions.
+The generic `make backend` workflow comes from the upstream agent-starter-pack scaffold. For the repo-specific production stand-up path, start with:
+
+- `docs/standup/overview.md`
+- `docs/standup/agent-seller.md`
+- `docs/standup/agent-buyer.md`
 
 ### Production Deployment
 
-The repository includes a Terraform configuration for the setup of a production Google Cloud project. Refer to [deployment/README.md](deployment/README.md) for detailed instructions on how to deploy the infrastructure and application.
+Use the repo's canonical production runbooks rather than the missing scaffold docs:
+
+- `docs/standup/overview.md` for the full stack deployment order
+- `docs/standup/agent-seller.md` for the seller agent deployment path
+- `docs/standup/agent-buyer.md` for the buyer agent deployment path
 
 
 ## Monitoring and Observability

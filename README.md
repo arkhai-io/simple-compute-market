@@ -15,7 +15,7 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 
 ## Repository Layout
 
-- `agent/` — A2A agent server and local test-chain helper
+- `core/agent/` — A2A agent server and local test-chain helper
 - `erc-8004-contracts/` — ERC-8004 Identity/Reputation/Validation registries (Hardhat)
 - `erc-8004-registry-py/` — Registry/indexer API (FastAPI) for on-chain/off-chain sync
 - `infra/zerotier/` — ZeroTier controller scripts
@@ -88,7 +88,7 @@ CSV columns:
 ### 1. Start Local Chain
 
 ```bash
-cd agent
+cd core/agent
 make test-env
 ```
 
@@ -123,7 +123,7 @@ The registry runs on `http://localhost:8080` by default.
 In a new terminal:
 
 ```bash
-cd agent
+cd core/agent
 make install
 cp .env.sample .env
 ```
@@ -159,7 +159,7 @@ For ZeroTier overlay network:
    Add `ZEROTIER_NETWORK=<network-id>` to `erc-8004-registry-py/.env`
 
 3. **Configure Agent**:
-   Add `ZEROTIER_NETWORK=<network-id>` to `agent/.env`
+   Add `ZEROTIER_NETWORK=<network-id>` to `core/agent/.env`
 
 4. **Authorize Nodes**:
 
@@ -218,7 +218,7 @@ Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `ZEROTIER_NETWORK`
 
 ## Useful Commands
 
-- Agent playground: `make playground` in `agent`
+- Agent playground: `make playground` in `core/agent`
 - ZeroTier network info: `sudo zerotier-cli listnetworks`
 
 ## Production Canary
