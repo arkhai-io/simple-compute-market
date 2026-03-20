@@ -13,7 +13,14 @@ init-uv:
 build: build-images
 
 build-images:
-	docker build -f Dockerfile -t arkhai:registry-$(GIT_SUFFIX) .
+	docker build -f Dockerfile -t arkhai:registry .
+	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
+
+deploy:
+	docker run --rm -d --network market --name registry --env-file ./.env.docker --env-file ../shared-env/.env -p 8080:8080 arkhai:registry
+
+smoke:
+	curl localhost:8080/health
 
 # ==============================================================================
 # Server Targets

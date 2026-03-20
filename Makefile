@@ -1,10 +1,11 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+FOUNDRY_VERSION := v1.5.1
 
 .PHONY: build
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli build-contracts build-market-contract-deployer build-registry 
+build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build
@@ -15,11 +16,28 @@ build-contracts:
 build-market-contract-deployer:
 	cd market-contract-deployer && make build
 
+#The anvil rpc url is hard coded inside of deploy_alkhahest.py. Don't change the network name or anvil container name.
+#For whatever reason the --dump-state and --state-interval flags on anvil were not working so I created a script to pull the state via rpc for now and dump it.
+#The Anvil container doesn't have the dependencies so I'm just calling it from the os until I containerize that step or figure out what's wrong with the --dump-state
+build-anvil-state:
+	-docker network create anvil
+	-mkdir shared-env
+	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
+	docker run -it --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:market-contract-deployer-$(GIT_SUFFIX) sh -c ./deploy-local.sh
+	echo "Todo: add a step here to verify contract deployment"
+	docker stop anvil
+	-docker network rm anvil
+
+#Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
+build-test-env: build-anvil-state
+	cd test-env && make build
+
 build-registry:
 	cd erc-8004-registry-py && make build
 
-#build-agent:
-#	cd core && make build
+build-core:
+	docker build -f ./core/Dockerfile --build-arg INSTALL_RL_DEPS=true -t arkhai:core .
+	docker tag arkhai:core arkhai:core-$(GIT_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
@@ -53,17 +71,22 @@ init-cli:
 init-images:
 	echo "NYI"
 
-#deploy-test-env:
-#	docker run -d --rm --name market-anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 ghcr.io/foundry-rs/foundry:latest anvil
-#	docker run -it --rm --name market-contracts-deploy -e ANVIL_RPC_URL=http://anvil:8545 -e ENV_FILE=/app/shared-env/.env simple-market-service-contracts-deploy:latest /bin/bash
-
 deploy-local:
 	docker compose up
 	docker compose ps
 
 #Ideally a helm chart eventually replaces 3 different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-registry
-	echo "NYI"
+deploy: deploy-test-env deploy-registry
+
+#docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
+deploy-test-env:
+	cd test-env && make deploy
+
+deploy-registry:
+	cd erc-8004-registry-py && make deploy
+
+deploy-agents:
+	cd core && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:
