@@ -1,4 +1,4 @@
-deploy: deploy-buyer-agent
+deploy: deploy-buyer-agent deploy-seller-agent
 
 # Todo, figure out what this volume was doing in the compose file: #      - zerotier-buy:/var/lib/zerotier-one
 deploy-buyer-agent:
