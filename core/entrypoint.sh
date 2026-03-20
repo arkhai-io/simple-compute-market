@@ -19,6 +19,7 @@ fi
 if [ -z "${ONCHAIN_AGENT_ID:-}" ] || [ -z "${ZEROTIER_IP:-}" ]; then
   echo "Registering agent on-chain..."
   # Resolve env file to absolute path so POSIX sh (dash) can source it
+  echo "ZeroTier Env file:"${ENV_FILE}
   case "${ENV_FILE:-.env}" in
     /*) _env_file="${ENV_FILE:-.env}" ;;
     *)  _env_file="$(pwd)/${ENV_FILE:-.env}" ;;
