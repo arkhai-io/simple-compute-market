@@ -134,9 +134,7 @@ services:
 
   # 6. Async provisioning service
   provisioning:
-    build:
-      context: .
-      dockerfile: async-provisioning-service/Dockerfile
+    image: arkhai:provisioning
     container_name: market-provisioning
     depends_on:
       redis:
