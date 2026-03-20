@@ -5,7 +5,7 @@ FOUNDRY_VERSION := v1.5.1
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry 
+build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build
@@ -35,8 +35,9 @@ build-test-env: build-anvil-state
 build-registry:
 	cd erc-8004-registry-py && make build
 
-#build-agent:
-#	cd core && make build
+build-core:
+	docker build -f ./core/Dockerfile --build-arg INSTALL_RL_DEPS=true -t arkhai:core .
+	docker tag arkhai:core arkhai:core-$(GIT_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
@@ -83,6 +84,9 @@ deploy-test-env:
 
 deploy-registry:
 	cd erc-8004-registry-py && make deploy
+
+deploy-agents:
+	cd core && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:
