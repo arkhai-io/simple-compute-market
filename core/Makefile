@@ -6,3 +6,9 @@ deploy-buyer-agent:
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	--env-file ./agent/.env.alice.docker-compose --env-file ../shared-env/.env \
 	arkhai:core
+
+deploy-seller-agent:
+	docker run --rm -d --network market --name market-agent-sell -p 8001:8001 \
+	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
+	--env-file ./agent/.env.bob.docker-compose --env-file ../shared-env/.env \
+	arkhai:core
