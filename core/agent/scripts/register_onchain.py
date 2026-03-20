@@ -36,13 +36,15 @@ from core.agent.app.utils.zerotier import (
 )
 
 
-def update_env_file(env_file: Path, agent_id: int) -> bool:
+def update_env_file(env_file: Path, agent_id: str | int) -> bool:
     """
     Update .env file with ONCHAIN_AGENT_ID.
     
     Returns:
         True if file was updated, False otherwise
     """
+    canonical_agent_id = str(agent_id)
+
     if not env_file.exists():
         return False
     
@@ -55,14 +57,14 @@ def update_env_file(env_file: Path, agent_id: int) -> bool:
     for i, line in enumerate(lines):
         if line.startswith('ONCHAIN_AGENT_ID='):
             current_agent_id = line.split('=', 1)[1].strip()
-            if current_agent_id != str(agent_id):
-                lines[i] = f'ONCHAIN_AGENT_ID={agent_id}'
+            if current_agent_id != canonical_agent_id:
+                lines[i] = f'ONCHAIN_AGENT_ID={canonical_agent_id}'
                 updated = True
             break
     
     # Add if missing
     if current_agent_id is None:
-        lines.append(f'ONCHAIN_AGENT_ID={agent_id}')
+        lines.append(f'ONCHAIN_AGENT_ID={canonical_agent_id}')
         updated = True
     
     # Write back if changed
@@ -351,14 +353,14 @@ async def main():
             
             # Auto-update .env file (unless --no-update-env flag is set)
             if not args.no_update_env:
-                updated = update_env_file(env_file, numeric_agent_id)
+                updated = update_env_file(env_file, canonical_id)
                 if updated:
-                    print(f"✅ Auto-updated .env with ONCHAIN_AGENT_ID={numeric_agent_id}")
+                    print(f"✅ Auto-updated .env with ONCHAIN_AGENT_ID={canonical_id}")
                 elif env_file.exists():
-                    print(f"✓ .env already has ONCHAIN_AGENT_ID={numeric_agent_id}")
+                    print(f"✓ .env already has ONCHAIN_AGENT_ID={canonical_id}")
                 else:
                     print(f"💡 Tip: Add this to your .env file:")
-                    print(f"   ONCHAIN_AGENT_ID={numeric_agent_id}")
+                    print(f"   ONCHAIN_AGENT_ID={canonical_id}")
             else:
                 print("ℹ️  Skipped .env update (--no-update-env flag set)")
             

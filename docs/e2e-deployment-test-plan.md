@@ -9,18 +9,26 @@ This plan assumes the production-style path:
 - real seller inventory
 - no `mock` provisioning
 
+Stand the canary up in a dedicated GCP project. Keep the first production-style
+test isolated from any shared deployment project until the full path is green.
+
 ## Local Config Strategy
 
-Use local gitignored env files for deployed testing. Do not store real canary
+Use host-local env files for deployed testing. Do not store real canary
 secrets in the committed sample env files.
 
-Minimum local bundle layout:
+Minimum private bundle layout:
 
-- seller agent env: `core/agent/.env.seller.local`
-- buyer agent env: `core/agent/.env.buyer.local`
-- provisioning env: `async-provisioning-service/.env.local`
-- registry env: `erc-8004-registry-py/.env.local`
-- provisioning secrets: `compute-provisioning-iac/ansible/inventory/management-vars.yaml`
+- seller agent env: `/etc/simple-market-service/seller-agent.env`
+- buyer agent env: `/etc/simple-market-service/buyer-agent.env`
+- provisioning env: `/etc/simple-market-service/provisioning.env`
+- registry env: `/etc/simple-market-service/registry.env`
+- canary runner env: `/etc/simple-market-service/prod-canary.env`
+- provisioning secrets: `/etc/simple-market-service/management-vars.yaml`
+
+The buyer and seller agent env files must remain writable if `AUTO_REGISTER=true`,
+because startup resolves ZeroTier state and persists `ZEROTIER_IP`,
+`BASE_URL_OVERRIDE`, and `ONCHAIN_AGENT_ID` back into the configured `ENV_FILE`.
 
 The canary is built around seven logical roles:
 
@@ -60,9 +68,14 @@ Preflight assertions:
 
 - required env vars are present
 - URLs are real and do not contain `<...>` placeholders
+- deployed agent `CHAIN_RPC_URL` values use `ws://` or `wss://` so Alkahest escrow can initialize
+- deployed agent `TOKEN_REGISTRY_PATH` values point at a real in-image registry file
+- deployed agent `ENABLE_EVENT_QUEUE=false` so the canary uses inline order processing instead of the queued worker path
 - `DEFAULT_VM_HOST` exists in `compute-provisioning-iac/ansible/inventory/hosts`
 - `ENABLE_AUTH=true` and `AUTH_FAIL_OPEN=false` for provisioning
 - chain RPC, chain ID, and ERC-8004 addresses all target the same network
+- if the canary uses `WETH`, the buyer wallet keeps enough native gas for
+  `approve + escrow.create` even when wrapped balance is already prefunded
 - seller and buyer agent env bundles are distinct and do not reuse the same URL, private key, or agent ID
 - seller and buyer agent IDs are canonical `eip155:` IDs after registration
 
@@ -75,7 +88,7 @@ python scripts/validate_deployment_bundle.py \
   --buyer-agent-env /path/to/dev/buyer.env \
   --provisioning-env /path/to/dev/provisioning.env \
   --registry-env /path/to/dev/registry.env \
-  --seller-agent-url http://<seller-zerotier-ip>:8001 \
+  --seller-agent-url http://<seller-zerotier-ip>:8000 \
   --buyer-agent-url http://<buyer-zerotier-ip>:8000 \
   --seller-agent-id eip155:84532:0x<identity-registry>:<seller-token-id> \
   --buyer-agent-id eip155:84532:0x<identity-registry>:<buyer-token-id> \
@@ -107,12 +120,20 @@ Expected order:
 1. identity preflight validates the two actor bundles
 2. network probe checks registry and provisioning health
 3. network probe fetches seller and buyer agent cards over ZeroTier
-4. seller actor captures its registry baseline and creates a sell order
-5. buyer actor captures its registry baseline and creates a buy order
-6. provisioning probe waits for a new succeeded job
-7. provisioning probe fetches buyer credentials
-8. provisioning probe verifies SSH access if a tenant private key is provided
-9. registry probe confirms both orders transition to `closed`
+   - buyer and seller hosts must allow inbound `8000/tcp` over ZeroTier,
+     including any `ufw` or equivalent host-firewall rules
+4. network probe checks the seller agent's `/resources/portfolio` endpoint and
+   fails immediately unless the seller advertises a matching available compute
+   resource for the canary request
+5. provisioning probe submits `vm_action=check` jobs for the configured
+   `CANARY_VM_HOSTS` candidates and fails immediately if no host reports enough
+   total and available GPUs
+6. seller actor captures its registry baseline and creates a sell order
+7. buyer actor captures its registry baseline and creates a buy order
+8. provisioning probe waits for a new succeeded job
+9. provisioning probe fetches buyer credentials
+10. provisioning probe verifies SSH access if a tenant private key is provided
+10. registry probe confirms both orders transition to `closed`
 
 If any step fails:
 

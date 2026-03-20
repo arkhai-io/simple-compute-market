@@ -51,6 +51,60 @@ def test_verify_agent_with_registry_can_fail_open_when_configured():
     assert result is True
 
 
+def test_verify_agent_with_registry_accepts_registry_agent_payload():
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json.return_value = {
+        "id": 37,
+        "agentId": VALID_AGENT_ID,
+        "healthStatus": "stale",
+    }
+
+    fake_client = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.get = AsyncMock(return_value=fake_response)
+
+    with patch.object(auth_module.httpx, "AsyncClient", return_value=fake_client):
+        result = asyncio.run(
+            auth_module.verify_agent_with_registry(
+                "http://registry.test",
+                VALID_AGENT_ID,
+                fail_open=False,
+            )
+        )
+
+    assert result is True
+
+
+def test_verify_agent_with_registry_normalizes_trailing_registry_slash():
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json.return_value = {
+        "agentId": VALID_AGENT_ID,
+        "healthStatus": "stale",
+    }
+
+    fake_client = MagicMock()
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+    fake_client.get = AsyncMock(return_value=fake_response)
+
+    with patch.object(auth_module.httpx, "AsyncClient", return_value=fake_client):
+        result = asyncio.run(
+            auth_module.verify_agent_with_registry(
+                "http://registry.test/",
+                VALID_AGENT_ID,
+                fail_open=False,
+            )
+        )
+
+    assert result is True
+    fake_client.get.assert_awaited_once_with(
+        "http://registry.test/agents/eip155%3A84532%3A0x1111111111111111111111111111111111111111%3A7"
+    )
+
+
 def test_post_requires_x_agent_id_when_auth_enabled(client_factory):
     with client_factory(auth_enabled=True) as client:
         response = client.post("/api/v1/jobs", json={"vm_host": "ww1", "vm_action": "check"})

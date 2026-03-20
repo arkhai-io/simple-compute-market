@@ -66,8 +66,8 @@ class EventSyncService:
         try:
             current_block = self.identity_registry.w3.eth.block_number
             
-            # Start from a reasonable block (e.g., 1000 blocks before current)
-            start_block = max(0, current_block - 1000)
+            # Start from a configurable lookback window so canaries can stay within RPC limits.
+            start_block = max(0, current_block - settings.event_sync_initial_lookback_blocks)
             
             await self.sync_block_range(start_block, current_block)
             self.last_synced_block = current_block
@@ -100,11 +100,11 @@ class EventSyncService:
         try:
             # Process in smaller chunks to avoid RPC limits and filter expiration
             # Many RPC providers have limits on block range queries
-            chunk_size = 500  # Reduced from 1000 to avoid filter/query limits
+            chunk_size = settings.event_sync_chunk_size
             current_from = from_block
 
             while current_from <= to_block:
-                current_to = min(current_from + chunk_size, to_block)
+                current_to = min(current_from + chunk_size - 1, to_block)
 
                 try:
                     # Get Registered events (official ERC-8004 event name)
@@ -458,4 +458,3 @@ class EventSyncService:
     async def sync(self):
         """Manually trigger a sync"""
         await self.sync_latest()
-

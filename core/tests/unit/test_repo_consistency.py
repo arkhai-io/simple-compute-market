@@ -15,12 +15,30 @@ AGENT_PROD_ENV = ROOT / "core/agent/.env.production.sample"
 INVENTORY_PATH = ROOT / "compute-provisioning-iac/ansible/inventory/hosts"
 ASYNC_DOCKERFILE = ROOT / "async-provisioning-service/Dockerfile"
 ASYNC_README = ROOT / "async-provisioning-service/README.md"
+ASYNC_START_SCRIPT = ROOT / "async-provisioning-service/start.sh"
 RUNBOOK_PATH = ROOT / "docs/production-canary.md"
+E2E_PLAN_PATH = ROOT / "docs/e2e-deployment-test-plan.md"
+CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
     ALKAHEST_REPO / "contracts/deployments/deployment_base_sepolia.json"
 )
+PROVISIONING_IAC_GITIGNORE = ROOT / "compute-provisioning-iac/.gitignore"
+PROVISIONING_IAC_README = ROOT / "compute-provisioning-iac/README.md"
+FRP_SETUP_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/frp-setup/tasks/main.yml"
+VM_SETUP_SYSTEM_PACKAGES = (
+    ROOT / "compute-provisioning-iac/ansible/roles/vm-setup/tasks/system-packages.yml"
+)
+VM_CREATE_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/vm-management/tasks/vm-create.yml"
+VM_PREREQUISITES_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/vm-management/tasks/prerequisites.yml"
+VM_UNDEFINE_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/vm-management/tasks/vm-undefine.yml"
+GROUP_VARS_ALL = ROOT / "compute-provisioning-iac/ansible/group_vars/all.yml"
+AGENT_DATA_DIR = ROOT / "core/agent/app/data"
+REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
+REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
+REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
+ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -114,6 +132,13 @@ def test_async_provisioning_contract_does_not_reference_admin_secret() -> None:
     assert "ADMIN_SECRET" not in sample_text
 
 
+def test_async_provisioning_startup_regenerates_matching_public_ssh_key() -> None:
+    text = ASYNC_START_SCRIPT.read_text(encoding="utf-8")
+
+    assert "ssh-keygen -y -f ~/.ssh/id_ed25519" in text
+    assert "~/.ssh/id_ed25519.pub" in text
+
+
 def test_production_default_vm_hosts_exist_in_inventory() -> None:
     inventory = _parse_inventory(INVENTORY_PATH)
     kvm_hosts = inventory.get("kvm_hosts", set())
@@ -154,6 +179,22 @@ def test_inventory_contains_environment_host_aliases() -> None:
     assert not missing, f"Missing inventory aliases: {missing}"
 
 
+def test_vm_create_role_uses_stable_current_ubuntu_image_url() -> None:
+    vm_create = VM_CREATE_TASKS.read_text(encoding="utf-8")
+
+    assert "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img" in vm_create
+    assert re.search(r"cloud-images\\.ubuntu\\.com/noble/\\d{8}/", vm_create) is None
+    assert "packer_variables.iso_url" not in vm_create
+
+
+def test_vm_management_defaults_to_supported_lts_os_variant() -> None:
+    group_vars = GROUP_VARS_ALL.read_text(encoding="utf-8")
+    prerequisites = VM_PREREQUISITES_TASKS.read_text(encoding="utf-8")
+
+    assert "os_variant: ubuntu-lts-latest" in group_vars
+    assert "ubuntu24.04" not in prerequisites
+
+
 def test_production_canary_runbook_matches_smoke_script_cli() -> None:
     script_args = _parse_script_args(CANARY_MODULE_PATH)
     runbook_args = _parse_runbook_args(RUNBOOK_PATH)
@@ -177,6 +218,276 @@ def test_production_canary_runbook_matches_smoke_script_cli() -> None:
     unknown = sorted(runbook_args - script_args)
     assert not undocumented, f"Runbook is missing documented required args: {undocumented}"
     assert not unknown, f"Runbook references args not supported by smoke script: {unknown}"
+
+
+@pytest.mark.parametrize(
+    ("path", "forbidden", "required"),
+    [
+        (
+            RUNBOOK_PATH,
+            {
+                "core/agent/.env.seller.local",
+                "core/agent/.env.buyer.local",
+                "async-provisioning-service/.env.local",
+                "erc-8004-registry-py/.env.local",
+            },
+            {
+                "/etc/simple-market-service/seller-agent.env",
+                "/etc/simple-market-service/buyer-agent.env",
+                "/etc/simple-market-service/provisioning.env",
+                "/etc/simple-market-service/registry.env",
+                "/etc/simple-market-service/prod-canary.env",
+            },
+        ),
+        (
+            E2E_PLAN_PATH,
+            {
+                "core/agent/.env.seller.local",
+                "core/agent/.env.buyer.local",
+                "async-provisioning-service/.env.local",
+                "erc-8004-registry-py/.env.local",
+            },
+            {
+                "/etc/simple-market-service/seller-agent.env",
+                "/etc/simple-market-service/buyer-agent.env",
+                "/etc/simple-market-service/provisioning.env",
+                "/etc/simple-market-service/registry.env",
+                "/etc/simple-market-service/prod-canary.env",
+            },
+        ),
+        (
+            CHECKLIST_PATH,
+            set(),
+            {
+                "/etc/simple-market-service/seller-agent.env",
+                "/etc/simple-market-service/buyer-agent.env",
+                "/etc/simple-market-service/provisioning.env",
+                "/etc/simple-market-service/registry.env",
+                "/etc/simple-market-service/prod-canary.env",
+            },
+        ),
+    ],
+)
+def test_deployment_docs_use_host_local_env_strategy(
+    path: Path,
+    forbidden: set[str],
+    required: set[str],
+) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    present_forbidden = sorted(token for token in forbidden if token in text)
+    missing_required = sorted(token for token in required if token not in text)
+
+    assert not present_forbidden, (
+        f"{path.name} still recommends repo-local deployed env paths: {present_forbidden}"
+    )
+    assert not missing_required, (
+        f"{path.name} is missing required host-local env paths: {missing_required}"
+    )
+
+
+def test_compute_provisioning_iac_ignores_generated_frp_credentials() -> None:
+    text = PROVISIONING_IAC_GITIGNORE.read_text(encoding="utf-8")
+    assert "credentials/" in text or "credentials/*.json" in text
+
+    tasks_text = FRP_SETUP_TASKS.read_text(encoding="utf-8")
+    assert "../../credentials/" in tasks_text or "credentials/frp-server-credentials-" in tasks_text
+
+
+def test_compute_provisioning_iac_documents_actual_frp_credentials_path() -> None:
+    readme_text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+    tasks_text = FRP_SETUP_TASKS.read_text(encoding="utf-8")
+
+    assert "ansible/credentials/frp-server-credentials-" not in readme_text
+    assert "ansible/credentials/frp-server-credentials-" not in tasks_text
+
+    assert "credentials/frp-server-credentials-" in readme_text
+    assert "credentials/frp-server-credentials-" in tasks_text
+
+
+def test_compute_provisioning_iac_readme_uses_authenticated_provisioning_examples() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+    assert 'ENABLE_AUTH":"false"' not in text
+    assert "ADMIN_SECRET" not in text
+
+
+def test_compute_provisioning_iac_frp_port_allocator_consults_host_config() -> None:
+    text = VM_CREATE_TASKS.read_text(encoding="utf-8")
+
+    assert "/etc/frp/frpc.toml" in text
+    assert 'remotePort\\s*=\\s*\\K[0-9]+' in text
+
+
+def test_compute_provisioning_iac_waits_for_frp_proxy_online_before_success() -> None:
+    text = VM_CREATE_TASKS.read_text(encoding="utf-8")
+
+    restart_idx = text.index("Restart FRP client to apply new proxy configuration")
+    wait_idx = text.index("Wait for FRP proxy to appear online in dashboard")
+    success_idx = text.index("Create JSON data structure for VM creation (generated tenant key)")
+
+    assert restart_idx < wait_idx < success_idx
+    assert "/api/proxy/tcp" in text
+    assert 'proxy.get("status") == "online"' in text
+
+
+def test_compute_provisioning_iac_handles_compressed_frp_dashboard_responses() -> None:
+    text = VM_CREATE_TASKS.read_text(encoding="utf-8")
+    frp_dashboard_curls = re.findall(r'curl [^\n]*/api/proxy/tcp[^\n]*', text)
+
+    assert frp_dashboard_curls, "Expected FRP dashboard API curls in vm-create.yml"
+    assert all("--compressed" in command for command in frp_dashboard_curls)
+
+
+def test_compute_provisioning_iac_wait_task_does_not_consume_frp_json_via_python_heredoc_stdin() -> None:
+    text = VM_CREATE_TASKS.read_text(encoding="utf-8")
+
+    wait_idx = text.index("Wait for FRP proxy to appear online in dashboard")
+    success_idx = text.index("Create JSON data structure for VM creation (generated tenant key)")
+    wait_block = text[wait_idx:success_idx]
+
+    assert 'json.load(sys.stdin)' not in wait_block
+    assert 'json.loads(os.environ["FRP_DASHBOARD_RESPONSE"])' in wait_block
+
+
+def test_compute_provisioning_iac_undefine_allows_cleanup_without_vm_ip() -> None:
+    text = VM_UNDEFINE_TASKS.read_text(encoding="utf-8")
+
+    assert "Fail if VM IP cannot be determined" not in text
+    assert "Warn if VM IP cannot be determined before cleanup" in text
+    assert "Continuing with best-effort cleanup and undefine" in text
+
+
+def test_agent_production_sample_uses_supported_chain_name() -> None:
+    env = _parse_env_file(AGENT_PROD_ENV)
+    assert env["CHAIN_NAME"] == "base_sepolia"
+
+
+def test_agent_production_sample_uses_websocket_rpc_for_alkahest() -> None:
+    env = _parse_env_file(AGENT_PROD_ENV)
+    assert env["CHAIN_RPC_URL"].startswith("wss://")
+
+
+def test_agent_production_sample_token_registry_path_points_to_existing_file() -> None:
+    env = _parse_env_file(AGENT_PROD_ENV)
+    registry_path = Path(env["TOKEN_REGISTRY_PATH"])
+    expected_file = AGENT_DATA_DIR / registry_path.name
+    assert expected_file.exists(), f"Missing token registry file referenced by sample: {expected_file}"
+
+
+def test_agent_production_sample_disables_event_queue_for_deployed_canaries() -> None:
+    env = _parse_env_file(AGENT_PROD_ENV)
+    assert env["ENABLE_EVENT_QUEUE"] == "false"
+
+
+def test_frp_gateway_role_opens_registry_port_for_colocated_registry() -> None:
+    tasks_text = FRP_SETUP_TASKS.read_text(encoding="utf-8")
+    assert "port: '18080'" in tasks_text
+
+    readme_text = PROVISIONING_IAC_README.read_text(encoding="utf-8").lower()
+    assert "18080" in readme_text
+    assert "colocat" in readme_text and "registry" in readme_text and "ufw" in readme_text
+
+
+def test_registry_runtime_does_not_default_to_public_base_sepolia_rpc() -> None:
+    text = REGISTRY_CONFIG.read_text(encoding="utf-8")
+    assert "https://sepolia.base.org" not in text
+    assert 'rpc_url: str = "http://localhost:8545"' in text
+
+
+def test_registry_readme_uses_authenticated_rpc_examples() -> None:
+    text = REGISTRY_README.read_text(encoding="utf-8")
+    assert "RPC_URL=https://sepolia.base.org" not in text
+    assert "RPC_URL=https://base-sepolia.infura.io/v3/YOUR_API_KEY" in text
+
+
+def test_registry_dockerfile_uses_runtime_port_configuration() -> None:
+    text = REGISTRY_DOCKERFILE.read_text(encoding="utf-8")
+    assert "localhost:8080/health" not in text
+
+
+def test_agent_entrypoint_re_registers_when_onchain_agent_id_is_noncanonical() -> None:
+    text = ENTRYPOINT_PATH.read_text(encoding="utf-8")
+    assert 'case "${ONCHAIN_AGENT_ID:-}" in' in text
+    assert 'eip155:*) ;;' in text
+    assert 'needs_registration=true' in text
+    assert 'set -a\n  . "${_env_file}"\n  set +a' in text
+    assert text.index('. "${_env_file}"') < text.index("needs_registration=false")
+    assert 'CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]' not in text
+    assert "/app/.venv/bin/uvicorn" in text
+    assert "${PORT:-8080}" in text or "os.environ.get('PORT'" in text or 'os.environ.get("PORT"' in text
+
+
+def test_compute_provisioning_iac_vm_setup_avoids_missing_debian_packages() -> None:
+    text = VM_SETUP_SYSTEM_PACKAGES.read_text(encoding="utf-8")
+    assert "virt-top" not in text
+
+    readme_text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+    assert "virt-top" not in readme_text
+
+
+def test_kvm_host_reboot_guidance_requires_guest_shutdown_first() -> None:
+    readme_text = PROVISIONING_IAC_README.read_text(encoding="utf-8").lower()
+    assert "shut down running vms before rebooting the host" in readme_text
+    assert "libvirtd" in readme_text
+
+    checklist_text = CHECKLIST_PATH.read_text(encoding="utf-8").lower()
+    assert "shut down running vms before rebooting a kvm host" in checklist_text
+
+
+@pytest.mark.parametrize("path", [RUNBOOK_PATH, E2E_PLAN_PATH, CHECKLIST_PATH])
+def test_deployment_docs_require_a_dedicated_canary_project(path: Path) -> None:
+    text = path.read_text(encoding="utf-8").lower()
+    assert "dedicated gcp project" in text or "fresh gcp project" in text
+
+
+def test_deployment_docs_call_out_artifact_registry_auth_on_remote_agent_hosts() -> None:
+    runbook_text = RUNBOOK_PATH.read_text(encoding="utf-8").lower()
+    checklist_text = CHECKLIST_PATH.read_text(encoding="utf-8").lower()
+
+    combined = runbook_text + "\n" + checklist_text
+    assert "artifact registry" in combined
+    assert "docker login" in combined or "configure-docker" in combined
+    assert "remote agent host" in combined or "buyer agent host" in combined or "seller agent host" in combined
+
+
+def test_deployment_docs_call_out_vertex_ai_agent_host_permissions() -> None:
+    runbook_text = RUNBOOK_PATH.read_text(encoding="utf-8").lower()
+    checklist_text = CHECKLIST_PATH.read_text(encoding="utf-8").lower()
+
+    combined = runbook_text + "\n" + checklist_text
+    assert "vertex ai" in combined
+    assert "cloud-platform" in combined
+    assert "storage admin" in combined or "roles/storage.admin" in combined
+
+
+def test_deployment_docs_call_out_zerotier_agent_firewall_requirements() -> None:
+    runbook_text = RUNBOOK_PATH.read_text(encoding="utf-8").lower()
+    checklist_text = CHECKLIST_PATH.read_text(encoding="utf-8").lower()
+    plan_text = E2E_PLAN_PATH.read_text(encoding="utf-8").lower()
+
+    combined = runbook_text + "\n" + checklist_text + "\n" + plan_text
+    assert "8000/tcp" in combined
+    assert "ufw" in combined or "firewall" in combined
+    assert "zerotier" in combined
+
+
+def test_deployment_docs_call_out_inline_order_processing_for_canaries() -> None:
+    combined = "\n".join(
+        path.read_text(encoding="utf-8").lower()
+        for path in (RUNBOOK_PATH, CHECKLIST_PATH, E2E_PLAN_PATH)
+    )
+    assert "enable_event_queue=false" in combined
+    assert "inline" in combined or "queued order processing" in combined
+
+
+def test_deployed_canary_docs_use_port_8000_for_remote_agent_urls() -> None:
+    runbook_text = RUNBOOK_PATH.read_text(encoding="utf-8")
+    plan_text = E2E_PLAN_PATH.read_text(encoding="utf-8")
+
+    assert "--seller-agent-url http://<seller-zerotier-ip>:8000" in runbook_text
+    assert "--seller-agent-url http://<seller-zerotier-ip>:8000" in plan_text
+    assert "--buyer-agent-url http://<buyer-zerotier-ip>:8000" in runbook_text
+    assert "--buyer-agent-url http://<buyer-zerotier-ip>:8000" in plan_text
 
 
 def test_base_sepolia_service_addresses_match_alkahest_deployment_when_available() -> None:

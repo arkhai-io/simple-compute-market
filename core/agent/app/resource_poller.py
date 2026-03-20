@@ -48,24 +48,21 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
     now = datetime.now(timezone.utc)
 
     for r in resources:
+        lease_window_active = False
         if r.get("state") == "leased":
             lease_end_str: str | None = (r.get("attributes") or {}).get("lease_end_utc")
             if lease_end_str:
                 try:
                     lease_end = datetime.strptime(lease_end_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
                     if now < lease_end:
-                        logger.debug(
-                            "resource_poller: resource %s is leased until %s — skipping poll",
+                        lease_window_active = True
+                    else:
+                        # Lease window has passed — poll to confirm VM is down, then free.
+                        logger.info(
+                            "resource_poller: resource %s lease ended at %s — polling to confirm VM is down",
                             r.get("resource_id"),
                             lease_end_str,
                         )
-                        continue
-                    # Lease window has passed — poll to confirm VM is down, then free.
-                    logger.info(
-                        "resource_poller: resource %s lease ended at %s — polling to confirm VM is down",
-                        r.get("resource_id"),
-                        lease_end_str,
-                    )
                 except ValueError:
                     logger.warning(
                         "resource_poller: resource %s has unparseable lease_end_utc %r — skipping poll",
@@ -108,18 +105,27 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
         available: bool = bool(result.get("available", False))
         running_vms = result.get("running_vms", "?")
         allocated_count = running_vms if isinstance(running_vms, (int, float)) else 0
+        if lease_window_active and allocated_count > 0:
+            logger.debug(
+                "resource_poller: resource %s is still leased until %s (running_vms=%s) — keeping leased state",
+                r.get("resource_id"),
+                (r.get("attributes") or {}).get("lease_end_utc"),
+                running_vms,
+            )
+            continue
         # Only mark reserved if there is positive evidence of GPU allocation.
         # When available=False but allocated_count=0, the GPU inventory check
         # likely failed to detect capacity (e.g. libvirt/pynvml not returning
         # data) — fall back to available so fulfillment is not blocked.
         new_state = "available" if (available or allocated_count == 0) else "reserved"
+        previous_state = r.get("state") or "unknown"
         idempotency_key = (
-            f"resource-poll-{r['resource_id']}-{running_vms}-{new_state}"
+            f"resource-poll-{r['resource_id']}-{previous_state}-{running_vms}-{new_state}"
         )
 
         # When freeing a post-lease resource, clear lease_end_utc so it's clean for next use.
         was_leased = r.get("state") == "leased"
-        clear_lease_attr = {"$.lease_end_utc": None} if (was_leased and available) else None
+        clear_lease_attr = {"$.lease_end_utc": None} if (was_leased and new_state == "available") else None
 
         transition = await sqlite_client.apply_resource_transition(
             resource_id=r["resource_id"],

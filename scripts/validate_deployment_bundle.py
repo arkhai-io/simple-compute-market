@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import re
 import sys
 from pathlib import Path
@@ -13,11 +14,14 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INVENTORY_PATH = ROOT / "compute-provisioning-iac/ansible/inventory/hosts"
+AGENT_DATA_DIR = ROOT / "core/agent/app/data"
 LOCAL_ONLY_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"}
+PUBLIC_RPC_HOSTS = {"sepolia.base.org"}
 PLACEHOLDER_RE = re.compile(r"<[^>]+>")
 EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 PRIVATE_KEY_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 AGENT_ID_RE = re.compile(r"^eip155:(?P<chain_id>\d+):(?P<registry>0x[0-9a-fA-F]{40}):(?P<token_id>\d+)$")
+SPACE_SENSITIVE_AGENT_KEYS = {"AGENT_NAME", "SSH_PUBLIC_KEY"}
 
 AGENT_REQUIRED_KEYS = {
     "GEMINI_API_KEY",
@@ -25,6 +29,7 @@ AGENT_REQUIRED_KEYS = {
     "PORT",
     "AGENT_ID",
     "AUTO_REGISTER",
+    "ENABLE_EVENT_QUEUE",
     "IDENTITY_REGISTRY_ADDRESS",
     "REPUTATION_REGISTRY_ADDRESS",
     "VALIDATION_REGISTRY_ADDRESS",
@@ -33,8 +38,8 @@ AGENT_REQUIRED_KEYS = {
     "AGENT_PRIV_KEY",
     "AGENT_WALLET_ADDRESS",
     "CHAIN_NAME",
+    "TOKEN_REGISTRY_PATH",
     "SSH_PUBLIC_KEY",
-    "ZEROTIER_NETWORK",
     "PROVISIONING_MODE",
     "PROVISIONING_SERVICE_URL",
     "DEFAULT_VM_HOST",
@@ -87,6 +92,29 @@ def _parse_env_file(path: Path) -> dict[str, str]:
         key, value = stripped.split("=", 1)
         env[key.strip()] = value.strip()
     return env
+
+
+def _validate_quoted_space_sensitive_values(
+    path: Path,
+    *,
+    label: str,
+    keys: set[str],
+    errors: list[str],
+) -> None:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        key = key.strip()
+        if key not in keys:
+            continue
+        raw_value = raw_value.strip()
+        if " " not in raw_value:
+            continue
+        if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+            continue
+        errors.append(f"{label}:{key} must quote values containing spaces")
 
 
 def _parse_inventory_hosts(path: Path) -> set[str]:
@@ -157,6 +185,44 @@ def _validate_url(
         errors.append(f"{label}: local-only host is not allowed: {value}")
 
 
+def _validate_rpc_url(value: str, label: str, errors: list[str]) -> None:
+    _validate_url(
+        value=value,
+        label=label,
+        errors=errors,
+        allow_local_host=True,
+    )
+    normalized = _normalize_env_value(value)
+    if _is_placeholder(normalized):
+        return
+    hostname = urlparse(normalized).hostname
+    if hostname in PUBLIC_RPC_HOSTS:
+        errors.append(
+            f"{label}: public Base Sepolia RPC endpoint is not allowed for deployed canaries; "
+            "use an authenticated provider or private RPC"
+        )
+
+
+def _validate_agent_rpc_url(value: str, label: str, errors: list[str]) -> None:
+    normalized = _normalize_env_value(value)
+    if _is_placeholder(normalized):
+        errors.append(f"{label}: placeholder value is not allowed: {value}")
+        return
+
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"ws", "wss"} or not parsed.hostname:
+        errors.append(f"{label}: expected a WebSocket RPC URL (ws:// or wss://), got: {value}")
+        return
+    if parsed.hostname in LOCAL_ONLY_HOSTS:
+        errors.append(f"{label}: local-only host is not allowed: {value}")
+        return
+    if parsed.hostname in PUBLIC_RPC_HOSTS:
+        errors.append(
+            f"{label}: public Base Sepolia RPC endpoint is not allowed for deployed canaries; "
+            "use an authenticated provider or private RPC"
+        )
+
+
 def _validate_database_url(value: str, label: str, errors: list[str]) -> None:
     normalized = _normalize_env_value(value)
     if _is_placeholder(normalized):
@@ -173,6 +239,17 @@ def _validate_zerotier_network(value: str, label: str, errors: list[str]) -> Non
         return
     if not re.fullmatch(r"[0-9a-fA-F]{16}", normalized):
         errors.append(f"{label}: expected a 16-hex ZeroTier network id, got: {value}")
+
+
+def _validate_ip_address(value: str, label: str, errors: list[str]) -> None:
+    normalized = _normalize_env_value(value)
+    if _is_placeholder(normalized):
+        errors.append(f"{label}: placeholder value is not allowed: {value}")
+        return
+    try:
+        ipaddress.ip_address(normalized)
+    except ValueError:
+        errors.append(f"{label}: invalid IP address: {value}")
 
 
 def _validate_evm_address(value: str, label: str, errors: list[str]) -> None:
@@ -223,6 +300,19 @@ def _validate_non_empty_secret(value: str, label: str, errors: list[str]) -> Non
         errors.append(f"{label}: placeholder or empty value is not allowed")
 
 
+def _validate_token_registry_path(value: str, label: str, errors: list[str]) -> None:
+    normalized = _normalize_env_value(value)
+    if _is_placeholder(normalized):
+        errors.append(f"{label}: placeholder value is not allowed: {value}")
+        return
+
+    candidate = AGENT_DATA_DIR / Path(normalized).name
+    if not candidate.exists():
+        errors.append(
+            f"{label}: token registry file is not present in core/agent/app/data: {Path(normalized).name}"
+        )
+
+
 def _compare_equal(left: str, left_label: str, right: str, right_label: str, errors: list[str]) -> None:
     if _normalize_env_value(left) != _normalize_env_value(right):
         errors.append(
@@ -243,6 +333,7 @@ def _validate_agent_env(
     buyer_agent_url: str | None,
     seller_agent_id: str | None,
     buyer_agent_id: str | None,
+    expected_registered_agent_id: str | None,
     seller_private_key: str | None,
     buyer_private_key: str | None,
     ssh_private_key_path: str | None,
@@ -272,20 +363,19 @@ def _validate_agent_env(
         label=f"{label}:PROVISIONING_SERVICE_URL",
         errors=errors,
     )
-    _validate_url(
-        value=agent_env["CHAIN_RPC_URL"],
-        label=f"{label}:CHAIN_RPC_URL",
-        errors=errors,
-        allow_local_host=True,
+    _validate_agent_rpc_url(
+        agent_env["CHAIN_RPC_URL"],
+        f"{label}:CHAIN_RPC_URL",
+        errors,
     )
     _validate_private_key(agent_env["AGENT_PRIV_KEY"], f"{label}:AGENT_PRIV_KEY", errors)
     _validate_evm_address(
         agent_env["AGENT_WALLET_ADDRESS"], f"{label}:AGENT_WALLET_ADDRESS", errors
     )
-    _validate_ssh_public_key(agent_env["SSH_PUBLIC_KEY"], f"{label}:SSH_PUBLIC_KEY", errors)
-    _validate_zerotier_network(
-        agent_env["ZEROTIER_NETWORK"], f"{label}:ZEROTIER_NETWORK", errors
+    _validate_token_registry_path(
+        agent_env["TOKEN_REGISTRY_PATH"], f"{label}:TOKEN_REGISTRY_PATH", errors
     )
+    _validate_ssh_public_key(agent_env["SSH_PUBLIC_KEY"], f"{label}:SSH_PUBLIC_KEY", errors)
     if _normalize_env_value(agent_env["CHAIN_NAME"]) != expected_chain_name:
         errors.append(
             f"{label}:CHAIN_NAME must be {expected_chain_name}, got {agent_env['CHAIN_NAME']}"
@@ -296,6 +386,8 @@ def _validate_agent_env(
         )
     if _normalize_env_value(agent_env["AUTO_REGISTER"]).lower() != "true":
         errors.append(f"{label}:AUTO_REGISTER must be true for deployed canaries")
+    if _normalize_env_value(agent_env["ENABLE_EVENT_QUEUE"]).lower() != "false":
+        errors.append(f"{label}:ENABLE_EVENT_QUEUE must be false for deployed canaries")
 
     for key in (
         "IDENTITY_REGISTRY_ADDRESS",
@@ -306,23 +398,68 @@ def _validate_agent_env(
         _validate_evm_address(registry_env[key], f"registry env:{key}", errors)
         _compare_equal(agent_env[key], f"{label}:{key}", registry_env[key], f"registry env:{key}", errors)
 
+    persisted_onchain_agent_id = _normalize_env_value(agent_env.get("ONCHAIN_AGENT_ID", ""))
+    if persisted_onchain_agent_id:
+        _validate_agent_id(
+            persisted_onchain_agent_id,
+            f"{label}:ONCHAIN_AGENT_ID",
+            expected_chain_id,
+            agent_env["IDENTITY_REGISTRY_ADDRESS"],
+            errors,
+        )
+        if expected_registered_agent_id:
+            _compare_equal(
+                agent_env["ONCHAIN_AGENT_ID"],
+                f"{label}:ONCHAIN_AGENT_ID",
+                expected_registered_agent_id,
+                "expected canary agent id",
+                errors,
+            )
+
     default_vm_host = _normalize_env_value(agent_env["DEFAULT_VM_HOST"])
     if default_vm_host not in inventory_hosts:
         errors.append(f"{label}:DEFAULT_VM_HOST is not in inventory: {default_vm_host}")
-    _compare_equal(
-        agent_env["ZEROTIER_NETWORK"],
-        f"{label}:ZEROTIER_NETWORK",
-        provisioning_env["ZEROTIER_NETWORK"],
-        "provisioning env:ZEROTIER_NETWORK",
-        errors,
-    )
-    _compare_equal(
-        agent_env["ZEROTIER_NETWORK"],
-        f"{label}:ZEROTIER_NETWORK",
-        registry_env["ZEROTIER_NETWORK"],
-        "registry env:ZEROTIER_NETWORK",
-        errors,
-    )
+    base_url = _normalize_env_value(agent_env["BASE_URL_OVERRIDE"])
+    zerotier_network = _normalize_env_value(agent_env.get("ZEROTIER_NETWORK", ""))
+    zerotier_ip = _normalize_env_value(agent_env.get("ZEROTIER_IP", ""))
+
+    if zerotier_network:
+        _validate_zerotier_network(
+            agent_env["ZEROTIER_NETWORK"], f"{label}:ZEROTIER_NETWORK", errors
+        )
+        _compare_equal(
+            agent_env["ZEROTIER_NETWORK"],
+            f"{label}:ZEROTIER_NETWORK",
+            provisioning_env["ZEROTIER_NETWORK"],
+            "provisioning env:ZEROTIER_NETWORK",
+            errors,
+        )
+        _compare_equal(
+            agent_env["ZEROTIER_NETWORK"],
+            f"{label}:ZEROTIER_NETWORK",
+            registry_env["ZEROTIER_NETWORK"],
+            "registry env:ZEROTIER_NETWORK",
+            errors,
+        )
+        if zerotier_ip:
+            _validate_ip_address(zerotier_ip, f"{label}:ZEROTIER_IP", errors)
+    else:
+        if "{ZEROTIER_IP}" in base_url:
+            errors.append(
+                f"{label}:ZEROTIER_NETWORK is required when BASE_URL_OVERRIDE uses {{ZEROTIER_IP}}"
+            )
+        if not zerotier_ip:
+            errors.append(
+                f"{label}: provide ZEROTIER_NETWORK or ZEROTIER_IP for deployed canaries"
+            )
+        else:
+            _validate_ip_address(zerotier_ip, f"{label}:ZEROTIER_IP", errors)
+            parsed_base_url = urlparse(base_url)
+            if parsed_base_url.hostname and parsed_base_url.hostname != zerotier_ip:
+                errors.append(
+                    f"{label}:BASE_URL_OVERRIDE hostname must match {label}:ZEROTIER_IP: "
+                    f"{parsed_base_url.hostname!r} != {zerotier_ip!r}"
+                )
     _compare_equal(
         agent_env["REGISTRY_URL"],
         f"{label}:REGISTRY_URL",
@@ -393,11 +530,10 @@ def _validate_shared_infra_envs(
         errors.append("provisioning env:AUTH_FAIL_OPEN must be false")
 
     _validate_database_url(registry_env["DATABASE_URL"], "registry env:DATABASE_URL", errors)
-    _validate_url(
-        value=registry_env["RPC_URL"],
-        label="registry env:RPC_URL",
-        errors=errors,
-        allow_local_host=True,
+    _validate_rpc_url(
+        registry_env["RPC_URL"],
+        "registry env:RPC_URL",
+        errors,
     )
     _validate_zerotier_network(
         registry_env["ZEROTIER_NETWORK"], "registry env:ZEROTIER_NETWORK", errors
@@ -435,8 +571,18 @@ def _validate_actor_relationships(
         "BASE_URL_OVERRIDE",
     )
     for key in distinct_keys:
-        if _normalize_env_value(seller_agent_env[key]) == _normalize_env_value(buyer_agent_env[key]):
+        seller_value = _normalize_env_value(seller_agent_env[key])
+        buyer_value = _normalize_env_value(buyer_agent_env[key])
+        if key == "BASE_URL_OVERRIDE" and seller_value == buyer_value and "{ZEROTIER_IP}" in seller_value:
+            continue
+        if seller_value == buyer_value:
             errors.append(f"seller agent env and buyer agent env must not share {key}")
+
+    if "ZEROTIER_IP" in seller_agent_env and "ZEROTIER_IP" in buyer_agent_env:
+        seller_zerotier_ip = _normalize_env_value(seller_agent_env["ZEROTIER_IP"])
+        buyer_zerotier_ip = _normalize_env_value(buyer_agent_env["ZEROTIER_IP"])
+        if seller_zerotier_ip == buyer_zerotier_ip:
+            errors.append("seller agent env and buyer agent env must not share ZEROTIER_IP")
 
     shared_keys = (
         "CHAIN_NAME",
@@ -445,7 +591,6 @@ def _validate_actor_relationships(
         "REPUTATION_REGISTRY_ADDRESS",
         "VALIDATION_REGISTRY_ADDRESS",
         "REGISTRY_URL",
-        "ZEROTIER_NETWORK",
         "PROVISIONING_MODE",
         "PROVISIONING_SERVICE_URL",
     )
@@ -455,6 +600,15 @@ def _validate_actor_relationships(
             f"seller agent env:{key}",
             buyer_agent_env[key],
             f"buyer agent env:{key}",
+            errors,
+        )
+
+    if "ZEROTIER_NETWORK" in seller_agent_env and "ZEROTIER_NETWORK" in buyer_agent_env:
+        _compare_equal(
+            seller_agent_env["ZEROTIER_NETWORK"],
+            "seller agent env:ZEROTIER_NETWORK",
+            buyer_agent_env["ZEROTIER_NETWORK"],
+            "buyer agent env:ZEROTIER_NETWORK",
             errors,
         )
     _compare_equal(
@@ -501,6 +655,7 @@ def _validate_bundle(
             buyer_agent_url=buyer_agent_url,
             seller_agent_id=seller_agent_id,
             buyer_agent_id=buyer_agent_id,
+            expected_registered_agent_id=seller_agent_id or buyer_agent_id,
             seller_private_key=seller_private_key,
             buyer_private_key=buyer_private_key,
             ssh_private_key_path=ssh_private_key_path,
@@ -542,7 +697,7 @@ def validate_bundle(
     provisioning_env_path: Path,
     registry_env_path: Path,
     inventory_path: Path = DEFAULT_INVENTORY_PATH,
-    expected_chain_name: str = "base-sepolia",
+    expected_chain_name: str = "base_sepolia",
     expected_chain_id: int = 84532,
     seller_agent_url: str | None = None,
     buyer_agent_url: str | None = None,
@@ -560,7 +715,7 @@ def validate_bundle(
     provisioning_env = _parse_env_file(provisioning_env_path)
     registry_env = _parse_env_file(registry_env_path)
     inventory_hosts = _parse_inventory_hosts(inventory_path)
-    return _validate_bundle(
+    errors = _validate_bundle(
         agent_env=agent_env,
         provisioning_env=provisioning_env,
         registry_env=registry_env,
@@ -575,6 +730,13 @@ def validate_bundle(
         buyer_private_key=buyer_private_key,
         ssh_private_key_path=ssh_private_key_path,
     )
+    _validate_quoted_space_sensitive_values(
+        agent_env_path,
+        label="agent env",
+        keys=SPACE_SENSITIVE_AGENT_KEYS,
+        errors=errors,
+    )
+    return errors
 
 
 def validate_actor_bundle(
@@ -584,7 +746,7 @@ def validate_actor_bundle(
     provisioning_env_path: Path,
     registry_env_path: Path,
     inventory_path: Path = DEFAULT_INVENTORY_PATH,
-    expected_chain_name: str = "base-sepolia",
+    expected_chain_name: str = "base_sepolia",
     expected_chain_id: int = 84532,
     seller_agent_url: str | None = None,
     buyer_agent_url: str | None = None,
@@ -629,6 +791,7 @@ def validate_actor_bundle(
             buyer_agent_url=buyer_agent_url,
             seller_agent_id=seller_agent_id,
             buyer_agent_id=buyer_agent_id,
+            expected_registered_agent_id=seller_agent_id,
             seller_private_key=seller_private_key,
             buyer_private_key=buyer_private_key,
             ssh_private_key_path=ssh_private_key_path,
@@ -647,6 +810,7 @@ def validate_actor_bundle(
             buyer_agent_url=buyer_agent_url,
             seller_agent_id=seller_agent_id,
             buyer_agent_id=buyer_agent_id,
+            expected_registered_agent_id=buyer_agent_id,
             seller_private_key=seller_private_key,
             buyer_private_key=buyer_private_key,
             ssh_private_key_path=ssh_private_key_path,
@@ -656,6 +820,18 @@ def validate_actor_bundle(
         seller_agent_env=seller_agent_env,
         buyer_agent_env=buyer_agent_env,
         provisioning_env=provisioning_env,
+        errors=errors,
+    )
+    _validate_quoted_space_sensitive_values(
+        seller_agent_env_path,
+        label="seller agent env",
+        keys=SPACE_SENSITIVE_AGENT_KEYS,
+        errors=errors,
+    )
+    _validate_quoted_space_sensitive_values(
+        buyer_agent_env_path,
+        label="buyer agent env",
+        keys=SPACE_SENSITIVE_AGENT_KEYS,
         errors=errors,
     )
 
@@ -678,7 +854,7 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--provisioning-env", required=True, type=Path)
     parser.add_argument("--registry-env", required=True, type=Path)
     parser.add_argument("--inventory-path", type=Path, default=DEFAULT_INVENTORY_PATH)
-    parser.add_argument("--expected-chain-name", default="base-sepolia")
+    parser.add_argument("--expected-chain-name", default="base_sepolia")
     parser.add_argument("--expected-chain-id", type=int, default=84532)
     parser.add_argument("--seller-agent-url")
     parser.add_argument("--buyer-agent-url")

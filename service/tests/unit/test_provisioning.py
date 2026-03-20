@@ -118,3 +118,81 @@ async def test_provision_machine_x_agent_id_header():
             agent_id="eip155:1:0xabcd:42",
         )
     assert captured_headers.get("X-Agent-ID") == "eip155:1:0xabcd:42"
+
+
+@pytest.mark.asyncio
+async def test_provision_machine_numeric_agent_id_is_canonicalized(monkeypatch):
+    """Numeric agent IDs should be promoted to ERC-8004 canonical IDs when env supports it."""
+    from service.clients.provisioning import provision_machine_async
+
+    captured_headers = {}
+
+    def capture_post(url, json=None, headers=None):
+        captured_headers.update(headers or {})
+        return _make_cm(_make_mock_response(201, {"job_id": "job790"}))
+
+    def capture_get(url, headers=None):
+        return _make_cm(_make_mock_response(200, {"status": "succeeded", "result": {}}))
+
+    monkeypatch.setenv("CHAIN_ID", "84532")
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb")
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.post = MagicMock(side_effect=capture_post)
+        session.get = MagicMock(side_effect=capture_get)
+        mock_session_cls.return_value = session
+
+        await provision_machine_async(
+            "http://provisioner:8085",
+            {},
+            timeout=60,
+            poll_interval=0,
+            agent_id="42",
+        )
+
+    assert (
+        captured_headers.get("X-Agent-ID")
+        == "eip155:84532:0x8004aa63c570c570ebf15376c0db199918bfe9fb:42"
+    )
+
+
+@pytest.mark.asyncio
+async def test_provision_machine_includes_canonical_buyer_agent_id(monkeypatch):
+    """buyer_agent_id should be forwarded in the job payload using canonical format."""
+    from service.clients.provisioning import provision_machine_async
+
+    captured_json = {}
+
+    def capture_post(url, json=None, headers=None):
+        captured_json.update(json or {})
+        return _make_cm(_make_mock_response(201, {"job_id": "job791"}))
+
+    def capture_get(url, headers=None):
+        return _make_cm(_make_mock_response(200, {"status": "succeeded", "result": {}}))
+
+    monkeypatch.setenv("CHAIN_ID", "84532")
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb")
+
+    with patch("aiohttp.ClientSession") as mock_session_cls:
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.post = MagicMock(side_effect=capture_post)
+        session.get = MagicMock(side_effect=capture_get)
+        mock_session_cls.return_value = session
+
+        await provision_machine_async(
+            "http://provisioner:8085",
+            {"vm_host": "ww1", "buyer_agent_id": "202"},
+            timeout=60,
+            poll_interval=0,
+            agent_id="101",
+        )
+
+    assert (
+        captured_json.get("buyer_agent_id")
+        == "eip155:84532:0x8004aa63c570c570ebf15376c0db199918bfe9fb:202"
+    )

@@ -34,7 +34,17 @@ def test_gate_runner_runs_repo_checks_and_smoke_help_by_default(
     assert exit_code == 0
     assert commands == [
         (
-            ["uv", "--no-config", "run", "pytest", "tests/unit/test_repo_consistency.py", "tests/unit/test_alkahest_config.py", "-q"],
+            [
+                "uv",
+                "--no-config",
+                "run",
+                "pytest",
+                "tests/unit/test_repo_consistency.py",
+                "tests/unit/test_validate_deployment_bundle.py",
+                "tests/unit/test_deployment_gate_checks.py",
+                "tests/unit/test_alkahest_config.py",
+                "-q",
+            ],
             module.ROOT / "core",
         ),
         (

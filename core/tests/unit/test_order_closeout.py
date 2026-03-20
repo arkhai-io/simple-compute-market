@@ -1,6 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -200,6 +200,41 @@ async def test_collect_escrow_closes_local_order_by_escrow(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_arbitrate_compute_fulfillment_prefers_direct_oracle_path(monkeypatch):
+    oracle = SimpleNamespace(
+        get_escrow_and_demand=AsyncMock(
+            return_value=(object(), SimpleNamespace(data=b"direct-demand"))
+        ),
+        arbitrate=AsyncMock(return_value="0xarb"),
+        arbitrate_many=AsyncMock(side_effect=AssertionError("unexpected log scan")),
+    )
+    client = SimpleNamespace(oracle=oracle)
+    oracle_attestation = MagicMock(return_value="fulfillment-attestation")
+    wait_for_receipt = AsyncMock()
+
+    monkeypatch.setattr(ae, "OracleAttestation", oracle_attestation)
+    monkeypatch.setattr(ae, "_wait_for_transaction_receipt", wait_for_receipt)
+
+    result = await ae.arbitrate_compute_fulfillment(
+        client=client,
+        fulfillment_uid="ful-123",
+        oracle_address="0xAliceWallet",
+        escrow_uid="escrow-123",
+    )
+
+    oracle_attestation.assert_called_once()
+    oracle.get_escrow_and_demand.assert_awaited_once_with("fulfillment-attestation")
+    oracle.arbitrate.assert_awaited_once_with("ful-123", b"direct-demand", True)
+    wait_for_receipt.assert_awaited_once_with("0xarb")
+    oracle.arbitrate_many.assert_not_called()
+
+    assert result["status"] == "trusted"
+    assert result["message"] == "Arbitration completed"
+    assert result["decisions"] == [True]
+    assert result["transaction_hash"] == "0xarb"
+
+
+@pytest.mark.asyncio
 async def test_fulfill_compute_obligation_updates_local_registry_order(monkeypatch):
     sqlite_client = SimpleNamespace(
         update_order=AsyncMock(),
@@ -251,4 +286,97 @@ async def test_fulfill_compute_obligation_updates_local_registry_order(monkeypat
     assert all(
         call.kwargs["order_id"] == "bob-order-1"
         for call in sqlite_client.update_order.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_fulfill_compute_obligation_passes_buyer_agent_id_to_provisioning(monkeypatch):
+    sqlite_client = SimpleNamespace(
+        update_order=AsyncMock(),
+        reserve_available_compute_vm=AsyncMock(
+            return_value={"resource_id": "gpu-1", "vm_host": "host-a"}
+        ),
+        apply_resource_set_transition=AsyncMock(),
+    )
+
+    do_provision = AsyncMock(return_value={"host": "203.0.113.8", "port": 22})
+
+    monkeypatch.setattr(ae, "BASE_URL_OVERRIDE", BOB_URL)
+    monkeypatch.setattr(ae, "get_sqlite_client", lambda: sqlite_client)
+    monkeypatch.setattr(ae, "_do_provision", do_provision)
+    monkeypatch.setattr(ae, "_do_shutdown", AsyncMock(return_value={"status": "scheduled"}))
+
+    buyer_order = {
+        "order_id": "alice-order-1",
+        "agent_id": "eip155:84532:0x8004aa63c570c570ebf15376c0db199918bfe9fb:202",
+        "order_maker": ALICE_URL,
+        "offer_resource": _tokens(18).model_dump(mode="json"),
+        "demand_resource": _compute().model_dump(mode="json"),
+        "duration_hours": 1,
+        "oracle_address": "0xAliceWallet",
+    }
+
+    await ae.fulfill_compute_obligation(
+        client=None,
+        escrow_uid="escrow-123",
+        ssh_public_key="ssh-rsa AAA",
+        order=buyer_order,
+        local_order_id="bob-order-1",
+    )
+
+    assert do_provision.await_args.kwargs["buyer_agent_id"] == buyer_order["agent_id"]
+
+
+@pytest.mark.asyncio
+async def test_fulfill_compute_obligation_resolves_buyer_agent_id_from_registry(monkeypatch):
+    sqlite_client = SimpleNamespace(
+        update_order=AsyncMock(),
+        reserve_available_compute_vm=AsyncMock(
+            return_value={"resource_id": "gpu-1", "vm_host": "host-a"}
+        ),
+        apply_resource_set_transition=AsyncMock(),
+    )
+    registry_client = SimpleNamespace(
+        get_order=AsyncMock(
+            return_value={
+                "order_id": "alice-order-1",
+                "agent_id": "eip155:84532:0x8004aa63c570c570ebf15376c0db199918bfe9fb:202",
+            }
+        ),
+        update_order=AsyncMock(return_value={"status": "accepted"}),
+    )
+    do_provision = AsyncMock(return_value={"host": "203.0.113.8", "port": 22})
+
+    monkeypatch.setattr(ae, "BASE_URL_OVERRIDE", BOB_URL)
+    monkeypatch.setattr(
+        ae,
+        "CONFIG",
+        replace(ae.CONFIG, enable_registry_discovery=True),
+    )
+    monkeypatch.setattr(ae, "get_sqlite_client", lambda: sqlite_client)
+    monkeypatch.setattr(ae, "get_registry_client", lambda: registry_client)
+    monkeypatch.setattr(ae, "_do_provision", do_provision)
+    monkeypatch.setattr(ae, "_do_shutdown", AsyncMock(return_value={"status": "scheduled"}))
+
+    buyer_order = {
+        "order_id": "alice-order-1",
+        "order_maker": ALICE_URL,
+        "offer_resource": _tokens(18).model_dump(mode="json"),
+        "demand_resource": _compute().model_dump(mode="json"),
+        "duration_hours": 1,
+        "oracle_address": "0xAliceWallet",
+    }
+
+    await ae.fulfill_compute_obligation(
+        client=None,
+        escrow_uid="escrow-123",
+        ssh_public_key="ssh-rsa AAA",
+        order=buyer_order,
+        local_order_id="bob-order-1",
+    )
+
+    registry_client.get_order.assert_awaited_once_with("alice-order-1")
+    assert (
+        do_provision.await_args.kwargs["buyer_agent_id"]
+        == "eip155:84532:0x8004aa63c570c570ebf15376c0db199918bfe9fb:202"
     )

@@ -25,6 +25,7 @@ from google.adk.agents.remote_a2a_agent import (
 from alkahest_py import (
     AlkahestClient,
     ArbitrationMode,
+    OracleAttestation,
     TrustedOracleArbiterDemandData,
 )
 import json
@@ -116,6 +117,31 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
 def _json_safe_value(value: Any) -> Any:
     """Recursively normalize nested models/enums into JSON-safe primitives."""
     return json.loads(json.dumps(value, default=json_serializer))
+
+
+async def _wait_for_transaction_receipt(tx_hash: str, *, timeout: int = 60) -> Any | None:
+    if not CONFIG.chain_rpc_url:
+        logger.warning(
+            "[ALKAHEST] CHAIN_RPC_URL not configured; skipping receipt wait for %s",
+            tx_hash,
+        )
+        return None
+
+    from web3 import Web3
+    from web3.providers import HTTPProvider
+    from service.clients.erc8004.blockchain import rpc_url_for_http_provider
+
+    http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
+
+    def _wait() -> Any:
+        w3 = Web3(HTTPProvider(http_url, request_kwargs={"timeout": 10}))
+        return w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+
+    receipt = await asyncio.to_thread(_wait)
+    status = getattr(receipt, "status", None)
+    if status == 0:
+        raise RuntimeError(f"Transaction reverted while awaiting receipt: {tx_hash}")
+    return receipt
 
 
 def _registry_safe_resource(resource: Any) -> Any:
@@ -805,9 +831,17 @@ def _get_shutdown_fn():
     return http_schedule_vm_shutdown_async
 
 
-async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
+async def _do_provision(
+    ssh_public_key: str,
+    *,
+    vm_host: str,
+    vm_target: str,
+    buyer_agent_id: str | None = None,
+) -> dict:
     """Dispatch to the configured provisioning client."""
     params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
+    if buyer_agent_id:
+        params["buyer_agent_id"] = buyer_agent_id
     if CONFIG.frp_server_addr:
         params["frp_server_addr"] = CONFIG.frp_server_addr
     if CONFIG.frp_domain:
@@ -2151,6 +2185,19 @@ async def fulfill_compute_obligation(
                     exc,
                 )
 
+    buyer_agent_id = order_dict.get("agent_id") if isinstance(order_dict, dict) else None
+    if not buyer_agent_id and order_id and CONFIG.enable_registry_discovery:
+        try:
+            registry_order = await get_registry_client().get_order(order_id)
+            if isinstance(registry_order, dict):
+                buyer_agent_id = registry_order.get("agent_id")
+        except Exception as exc:
+            logger.warning(
+                "[REGISTRY] Failed to resolve buyer agent_id for order %s before provisioning: %s",
+                order_id,
+                exc,
+            )
+
     try:
         sqlite_client = get_sqlite_client()
         reserved = await sqlite_client.reserve_available_compute_vm(
@@ -2167,6 +2214,7 @@ async def fulfill_compute_obligation(
             ssh_public_key,
             vm_host=reserved_vm_host,
             vm_target=vm_target,
+            buyer_agent_id=buyer_agent_id,
         )
         # Split credentials out before serialising — passwords must never touch on-chain data.
         authentication: dict | None = None
@@ -2346,6 +2394,38 @@ async def arbitrate_compute_fulfillment(
             "escrow_uid": escrow_uid,
             "decisions": decisions,
         }
+
+    if escrow_uid:
+        try:
+            fulfillment_attestation = OracleAttestation(
+                uid=fulfillment_uid,
+                schema="0x" + ("00" * 32),
+                ref_uid=escrow_uid,
+                time=0,
+                expiration_time=0,
+                revocation_time=0,
+                recipient="0x" + ("00" * 20),
+                attester="0x" + ("00" * 20),
+                revocable=True,
+                data="0x",
+            )
+            _, demand_data = await client.oracle.get_escrow_and_demand(fulfillment_attestation)
+            demand_bytes = bytes(demand_data.data)
+            tx_hash = await client.oracle.arbitrate(fulfillment_uid, demand_bytes, True)
+            await _wait_for_transaction_receipt(tx_hash)
+            decisions = [True]
+            logger.info("[ALKAHEST] Direct arbitration succeeded: %s", tx_hash)
+            return {
+                "status": "trusted",
+                "message": "Arbitration completed",
+                "fulfillment_uid": fulfillment_uid,
+                "escrow_uid": escrow_uid,
+                "oracle_address": oracle_address,
+                "decisions": decisions,
+                "transaction_hash": tx_hash,
+            }
+        except Exception as error:
+            logger.info(f"[ALKAHEST] Direct arbitration error: {error}")
 
     mode = ArbitrationMode.PastUnarbitrated
 

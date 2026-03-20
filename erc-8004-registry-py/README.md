@@ -85,7 +85,7 @@ DATABASE_URL=sqlite:///./registry.db
 
 # Blockchain Configuration - Base Sepolia
 CHAIN_ID=84532
-RPC_URL=https://sepolia.base.org
+RPC_URL=https://base-sepolia.infura.io/v3/YOUR_API_KEY
 
 # ERC-8004 Contract Addresses (Base Sepolia)
 IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
@@ -101,6 +101,10 @@ ENABLE_HEALTH_CHECKS=false
 HEALTH_CHECK_INTERVAL=60
 ENDPOINT_CHECK_TIMEOUT=10
 HEARTBEAT_TTL_SECS=60
+
+# Event sync (lower these for RPC providers with strict eth_getLogs limits)
+EVENT_SYNC_INITIAL_LOOKBACK_BLOCKS=1000
+EVENT_SYNC_CHUNK_SIZE=500
 
 # Logging
 LOG_LEVEL=info
@@ -641,6 +645,8 @@ The Dockerfile has been configured with **empty values** for sensitive environme
 - `HEALTH_CHECK_INTERVAL` - Default: 60
 - `ENDPOINT_CHECK_TIMEOUT` - Default: 10
 - `HEARTBEAT_TTL_SECS` - Default: 60
+- `EVENT_SYNC_INITIAL_LOOKBACK_BLOCKS` - Default: 1000
+- `EVENT_SYNC_CHUNK_SIZE` - Default: 500
 - `LOG_LEVEL` - Default: info
 
 #### Secure Deployment Methods

@@ -35,6 +35,6 @@ ENV RPC_URL="" IDENTITY_REGISTRY_ADDRESS="" REPUTATION_REGISTRY_ADDRESS="" VALID
 ENV ENABLE_HEALTH_CHECKS=false HEALTH_CHECK_INTERVAL=60 ENDPOINT_CHECK_TIMEOUT=10 HEARTBEAT_TTL_SECS=60
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+  CMD python -c "import os, urllib.request; urllib.request.urlopen(f\"http://localhost:{os.environ.get('PORT', '8080')}/health\")"
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-lc", "/app/.venv/bin/uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

@@ -31,12 +31,15 @@ def test_update_env_file_helpers_round_trip(tmp_path):
         env_file,
         "http://100.64.0.9:8000/",
     ) is True
-    assert register_onchain.update_env_file(env_file, 7) is True
+    assert register_onchain.update_env_file(
+        env_file,
+        "eip155:84532:0x0000000000000000000000000000000000000001:7",
+    ) is True
 
     content = env_file.read_text()
     assert "ZEROTIER_IP=100.64.0.9" in content
     assert "BASE_URL_OVERRIDE=http://100.64.0.9:8000/" in content
-    assert "ONCHAIN_AGENT_ID=7" in content
+    assert "ONCHAIN_AGENT_ID=eip155:84532:0x0000000000000000000000000000000000000001:7" in content
 
 
 def test_main_returns_error_when_zerotier_join_fails(monkeypatch, tmp_path):
@@ -79,7 +82,10 @@ def test_main_persists_resolved_zerotier_fields(monkeypatch, tmp_path):
     content = env_file.read_text()
     assert "ZEROTIER_IP=100.64.0.9" in content
     assert "BASE_URL_OVERRIDE=http://100.64.0.9:8000/" in content
-    assert "ONCHAIN_AGENT_ID=7" in content
+    assert (
+        "ONCHAIN_AGENT_ID=eip155:84532:0x0000000000000000000000000000000000000001:7"
+        in content
+    )
 
 
 def test_main_no_update_env_leaves_env_file_untouched(monkeypatch, tmp_path):

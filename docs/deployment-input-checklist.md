@@ -3,6 +3,21 @@
 This checklist tracks what is already available in repo state and what still has
 to be recovered or created before a real ZeroTier-backed canary run.
 
+Use a fresh GCP project for the canary build-out. Treat project creation,
+billing attachment, and API enablement as explicit checklist items rather than
+reusing an existing shared deployment project.
+
+## Private File Layout
+
+Keep deployed bundles outside Git. Recommended host-local files:
+
+- seller agent env: `/etc/simple-market-service/seller-agent.env`
+- buyer agent env: `/etc/simple-market-service/buyer-agent.env`
+- provisioning env: `/etc/simple-market-service/provisioning.env`
+- registry env: `/etc/simple-market-service/registry.env`
+- canary runner env: `/etc/simple-market-service/prod-canary.env`
+- provisioning secrets: `/etc/simple-market-service/management-vars.yaml`
+
 ## Environment Targets
 
 | Environment | FRP host alias | Provisioning host alias | Candidate KVM host(s) | Source |
@@ -15,13 +30,13 @@ to be recovered or created before a real ZeroTier-backed canary run.
 
 | Input | Status | Current source | If missing, do this ourselves |
 | --- | --- | --- | --- |
-| `CHAIN_NAME=base-sepolia` | Available | `core/agent/.env.production.sample` | Keep unless the target chain changes |
+| `CHAIN_NAME=base_sepolia` | Available | `core/agent/.env.production.sample` | Keep unless the target chain changes |
 | `CHAIN_ID=84532` | Available | `erc-8004-registry-py/.env.production.sample` | Keep unless the target chain changes |
 | `IDENTITY_REGISTRY_ADDRESS` | Available but verify | `erc-8004-registry-py/.env.sample`, `erc-8004-registry-py/README.md` | Verify against explorer before use |
 | `REPUTATION_REGISTRY_ADDRESS` | Available but verify | `erc-8004-registry-py/.env.sample`, `erc-8004-registry-py/README.md` | Verify against explorer before use |
 | `VALIDATION_REGISTRY_ADDRESS` | Available but verify | `erc-8004-registry-py/.env.sample`, `erc-8004-registry-py/README.md` | Verify against explorer before use |
 | Alkahest Base Sepolia addresses | Available | `../alkahest/contracts/deployments/deployment_base_sepolia.json` | If the target deployment changes, export a fresh JSON and sync `service/src/service/clients/alkahest.py` |
-| `CHAIN_RPC_URL` / `RPC_URL` | Missing | samples only | Create at Infura, Alchemy, or another authenticated RPC provider |
+| Agent `CHAIN_RPC_URL` / registry `RPC_URL` | Missing | samples only | Use an authenticated provider. For deployed agents, prefer `wss://...` so the Alkahest escrow client can initialize; registry can keep `https://...` |
 | `ZEROTIER_NETWORK` | Missing | `infra/zerotier/.env.sample` only | Recover from the live controller or create a new network and authorize all nodes |
 | Registry ZeroTier URL | Missing | none | Deploy registry, confirm reachability over ZeroTier, then set `REGISTRY_URL` |
 | Provisioning ZeroTier URL | Missing | none | Deploy async provisioning, confirm reachability over ZeroTier, then set `PROVISIONING_SERVICE_URL` |
@@ -44,6 +59,7 @@ to be recovered or created before a real ZeroTier-backed canary run.
 | `REDIS_URL` | Missing until infra exists | Terraform defines outputs but repo has no state | Run Terraform or recover the live Redis endpoint |
 | `DEFAULT_VM_HOST` | Available | production sample + inventory | Keep `ww1` or switch deliberately to another tracked KVM host |
 | `ANSIBLE_BECOME_PASS` | Missing | sample now exposes it, no value committed | Recover the host sudo password or rotate one for the chosen KVM host |
+| KVM host reboot procedure | Missing | operator knowledge only | Shut down running VMs before rebooting a KVM host, or `libvirtd` can block systemd shutdown while it waits for guest processes to stop |
 | `SSH_PRIVATE_KEY` | Missing | documented in `compute-provisioning-iac/README.md` | Generate `~/.ssh/provisioner_ed25519`, then base64-encode it |
 | `MANAGEMENT_VARS_YAML` | Missing | repo only has `vm-vars-example.yaml` | Create `ansible/inventory/management-vars.yaml`, then base64-encode it |
 | `FRP_SERVER_ADDR` | Partially available | likely the chosen `proxy-*` host IP | Confirm that the selected proxy host is the FRP server |
@@ -51,13 +67,31 @@ to be recovered or created before a real ZeroTier-backed canary run.
 | `FRP_DASHBOARD_PASSWORD` | Missing | not committed | Recover from existing FRP setup or generate a new one |
 | `ENABLE_AUTH=true` | Available | production sample + runbook | Keep enabled in deployed environments |
 | `AUTH_FAIL_OPEN=false` | Available | production sample + runbook | Keep disabled for canary/prod validation |
-| `ADMIN_SECRET` | Not used by current runtime | Stale submodule docs only | Ignore it for deployment bundles until the IaC docs are updated |
 
 ## Agent Inputs
 
 Use two separate local agent env files for deployed canaries: one seller bundle
 and one buyer bundle. Do not reuse the same URL, private key, or `ONCHAIN_AGENT_ID`
 across both actors.
+
+If buyer and seller containers pull directly from GCP Artifact Registry on the
+remote agent hosts, authenticate Docker on each remote agent host before the
+first pull:
+
+```bash
+gcloud auth print-access-token \
+  | sudo docker login -u oauth2accesstoken --password-stdin https://<region>-docker.pkg.dev
+```
+
+If those remote agent hosts use Vertex AI mode, grant the attached service
+account `roles/storage.admin` on the canary project and make sure the VM access
+scope includes `cloud-platform`; otherwise the agent cannot create the GCS log
+bucket during startup.
+
+If those remote agent hosts run `ufw` or another host firewall, allow inbound
+`8000/tcp` on the ZeroTier interface. The deployed agent must be reachable over
+its ZeroTier URL so peers can fetch `/.well-known/agent-card.json` and
+`/.well-known/erc-8004-registration.json`.
 
 | Variable | Status | Current source | If missing, do this ourselves |
 | --- | --- | --- | --- |
@@ -67,7 +101,8 @@ across both actors.
 | `AGENT_WALLET_ADDRESS` | Missing | production sample placeholder | Derive from each generated private key |
 | `ONCHAIN_AGENT_ID` | Missing until registration | runtime output | Register each agent on-chain after ZeroTier URL resolution |
 | `SSH_PUBLIC_KEY` | Missing | production sample placeholder | Generate a canary tenant keypair and publish the public key |
-| `TOKEN_REGISTRY_PATH` | Available | production sample | Keep unless token registry file moves |
+| `TOKEN_REGISTRY_PATH` | Available | production sample | Keep it pointed at a real in-image file such as `/app/core/agent/app/data/token_registry_base_sepolia.json`; do not leave it on a nonexistent placeholder path |
+| `ENABLE_EVENT_QUEUE=false` | Required for canary | deployed agent envs | Keep deployed canaries on inline order processing until the queued worker path is proven healthy in the remote environment |
 | `DEFAULT_VM_HOST` | Available | production sample + inventory | Keep `ww1` unless the seller environment changes |
 
 ## Smoke Harness Inputs
@@ -76,7 +111,10 @@ across both actors.
 | --- | --- | --- | --- |
 | `SELLER_AGENT_ID` / `BUYER_AGENT_ID` | Missing until registration | `prod_canary_smoke.py` CLI args | Capture canonical `eip155:` IDs after agent registration |
 | `SELLER_PRIVATE_KEY` / `BUYER_PRIVATE_KEY` | Missing | `prod_canary_smoke.py` CLI args | Use the canary wallets created for deployment |
+| Buyer native gas reserve | Missing until funded | buyer wallet on target chain | If the canary uses `WETH`, keep enough native balance for `approve + escrow.create` even when the buyer already holds enough wrapped principal |
 | `SSH_PRIVATE_KEY_PATH` | Missing | `prod_canary_smoke.py` CLI args | Point it at the tenant private key that matches `SSH_PUBLIC_KEY` |
+| `CANARY_VM_HOSTS` | Missing | `prod_canary_smoke.py` / runner env | Set one or more inventory host aliases so the canary can run provisioning `check` jobs before creating orders |
+| Seller available inventory | Missing until seller bootstraps cleanly | seller agent `/resources/portfolio` | Confirm the seller advertises at least one available compute resource with the requested `gpu_model`, `region`, and quantity before the canary starts |
 | `CANARY_GPU_MODEL`, `CANARY_REGION`, `CANARY_TOKEN_SYMBOL`, `CANARY_TOKEN_AMOUNT` | Defaults exist | `prod_canary_smoke.py` | Set explicitly for the target environment to avoid accidental mismatches |
 
 ## Immediate Blockers

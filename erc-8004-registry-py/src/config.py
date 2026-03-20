@@ -14,9 +14,9 @@ class Settings(BaseSettings):
     
     database_url: str = "sqlite:///./indexer.db"
     
-    # Blockchain Configuration - Base Sepolia
+    # Blockchain Configuration - local Anvil by default; deployed canaries must override RPC_URL
     chain_id: int = Field(default=1337, env="CHAIN_ID")
-    rpc_url: str = "https://sepolia.base.org"
+    rpc_url: str = "http://localhost:8545"
     
     # ERC-8004 Contract Addresses (Base Sepolia)
     identity_registry_address: str = "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb"
@@ -46,6 +46,10 @@ class Settings(BaseSettings):
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")
+
+    # Event sync configuration
+    event_sync_initial_lookback_blocks: int = 1000
+    event_sync_chunk_size: int = 500
     
     # Health Check Configuration
     enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)
@@ -66,4 +70,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

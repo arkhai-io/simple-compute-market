@@ -579,6 +579,8 @@ class TraderAgent(BaseAgent):
             resource_type = db_resource.get("resource_type")
             if resource_type not in supported_resource_types:
                 continue
+            if db_resource.get("state") not in (None, "available"):
+                continue
 
             try:
                 resource = adapt_db_resource_to_domain_resource(db_resource)
@@ -1404,13 +1406,6 @@ agent_order_close_route = Route("/orders/close", close_market_order_endpoint, me
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
-# Add the alert route to the A2A app
-a2a_app.routes.append(alert_route)
-# Add the order creation route to the A2A app
-a2a_app.routes.append(agent_order_creation_route)
-# Add the order close route to the A2A app
-a2a_app.routes.append(agent_order_close_route)
-
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from core.agent.app.utils.agent_card import build_erc8004_registration_file
@@ -1418,6 +1413,16 @@ from service.clients.erc8004.blockchain import (
     build_erc8004_canonical_id,
     rpc_url_for_http_provider,
 )
+
+async def serve_agent_card_file(request: Request) -> JSONResponse:
+    """Serve the public agent card at the ERC-8004 well-known path."""
+    return JSONResponse(agent_card_data)
+
+
+async def get_resource_portfolio_endpoint(request: Request) -> JSONResponse:
+    """Expose the currently available local resource portfolio."""
+    return JSONResponse(await root_agent.get_resource_portfolio())
+
 
 async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     """
@@ -1441,28 +1446,65 @@ async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
         except Exception:
             pass  # Use default
     
-    # Get on-chain agent ID if available
+    # Get on-chain agent identity if available. Persisted host-local env files now
+    # store canonical ERC-8004 IDs, so accept either canonical or legacy numeric values.
     agent_id = None
+    identity_registry = CONFIG.identity_registry_address
     if CONFIG.onchain_agent_id:
-        try:
-            agent_id = int(CONFIG.onchain_agent_id)
-        except ValueError:
-            pass
-    
+        raw_onchain_agent_id = str(CONFIG.onchain_agent_id).strip()
+        if raw_onchain_agent_id.startswith("eip155:"):
+            parts = raw_onchain_agent_id.split(":")
+            if len(parts) == 4:
+                _, parsed_chain_id, parsed_registry, parsed_agent_id = parts
+                try:
+                    chain_id = int(parsed_chain_id)
+                    agent_id = int(parsed_agent_id)
+                    identity_registry = parsed_registry
+                except ValueError:
+                    pass
+        elif raw_onchain_agent_id:
+            try:
+                agent_id = int(raw_onchain_agent_id)
+            except ValueError:
+                pass
+
     # Build registration file
     registration_file = build_erc8004_registration_file(
         agent_card_data=agent_card_data,
         agent_id=agent_id,
         chain_id=chain_id,
-        identity_registry=CONFIG.identity_registry_address,
+        identity_registry=identity_registry,
         supported_trust=[]
     )
     
     return JSONResponse(registration_file)
 
+agent_card_route = Route("/.well-known/agent-card.json", serve_agent_card_file, methods=["GET"])
+resource_portfolio_route = Route("/resources/portfolio", get_resource_portfolio_endpoint, methods=["GET"])
 # Add registration file route
 registration_file_route = Route("/.well-known/erc-8004-registration.json", serve_erc8004_registration_file, methods=["GET"])
-a2a_app.routes.append(registration_file_route)
+
+
+MARKET_ROUTES = (
+    alert_route,
+    agent_order_creation_route,
+    agent_order_close_route,
+    resource_portfolio_route,
+    agent_card_route,
+    registration_file_route,
+)
+
+
+def attach_market_routes(app) -> None:
+    """Attach the explicit market/registration routes to an A2A FastAPI app."""
+    existing_paths = {getattr(route, "path", None) for route in app.routes}
+    for route in MARKET_ROUTES:
+        if route.path not in existing_paths:
+            app.routes.append(route)
+            existing_paths.add(route.path)
+
+
+attach_market_routes(a2a_app)
 
 
 # Background task to process queued events

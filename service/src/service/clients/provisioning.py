@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import aiohttp
+from service.clients.erc8004.blockchain import build_erc8004_canonical_id
 
 logger = logging.getLogger(__name__)
 
 _VM_CREATE_FIELDS = ("ssh_command", "ssh_port", "tenant_user", "vm_host_ip")
+_CHAIN_IDS = {
+    "anvil": 31337,
+    "base_sepolia": 84532,
+    "ethereum_sepolia": 11155111,
+    "ethereum_mainnet": 1,
+}
 
 
 def _normalize_vm_create_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -44,6 +52,35 @@ def _normalize_vm_create_result(result: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in compact.items() if v is not None}
 
 
+def _canonicalize_agent_id(agent_id: str | None) -> str | None:
+    if not agent_id or agent_id.startswith("eip155:"):
+        return agent_id
+
+    identity_registry = os.getenv("IDENTITY_REGISTRY_ADDRESS")
+    if not identity_registry:
+        return agent_id
+
+    try:
+        numeric_id = int(agent_id)
+    except ValueError:
+        return agent_id
+
+    chain_id: int | None = None
+    chain_id_env = os.getenv("CHAIN_ID")
+    if chain_id_env:
+        try:
+            chain_id = int(chain_id_env)
+        except ValueError:
+            chain_id = None
+    if chain_id is None:
+        chain_name = os.getenv("CHAIN_NAME", "").lower() or os.getenv("ALKAHEST_NETWORK", "").lower()
+        chain_id = _CHAIN_IDS.get(chain_name)
+    if chain_id is None:
+        return agent_id
+
+    return build_erc8004_canonical_id(chain_id, identity_registry, numeric_id)
+
+
 class ProvisioningError(Exception):
     """Base class for provisioning errors."""
 
@@ -64,10 +101,15 @@ async def _submit_job(
 ) -> str:
     """POST /api/v1/jobs and return the job_id."""
     headers = {}
-    if agent_id:
-        headers["X-Agent-ID"] = agent_id
+    resolved_agent_id = _canonicalize_agent_id(agent_id)
+    if resolved_agent_id:
+        headers["X-Agent-ID"] = resolved_agent_id
+    payload = dict(params)
+    buyer_agent_id = payload.get("buyer_agent_id")
+    if isinstance(buyer_agent_id, str):
+        payload["buyer_agent_id"] = _canonicalize_agent_id(buyer_agent_id)
     url = f"{service_url.rstrip('/')}/api/v1/jobs"
-    async with session.post(url, json=params, headers=headers) as resp:
+    async with session.post(url, json=payload, headers=headers) as resp:
         resp.raise_for_status()
         data = await resp.json()
         job_id = data.get("job_id") or data.get("id")
@@ -87,8 +129,9 @@ async def _poll_job(
 ) -> dict[str, Any]:
     """Poll GET /api/v1/jobs/{job_id} until terminal state. Returns result dict."""
     headers = {}
-    if agent_id:
-        headers["X-Agent-ID"] = agent_id
+    resolved_agent_id = _canonicalize_agent_id(agent_id)
+    if resolved_agent_id:
+        headers["X-Agent-ID"] = resolved_agent_id
     url = f"{service_url.rstrip('/')}/api/v1/jobs/{job_id}"
     deadline = asyncio.get_event_loop().time() + timeout
     while True:

@@ -50,12 +50,17 @@ async def verify_agent_with_registry(
 
     try:
         encoded_id = quote(agent_id, safe="")
+        normalized_registry_url = registry_url.rstrip("/")
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{registry_url}/agents/{encoded_id}")
+            response = await client.get(f"{normalized_registry_url}/agents/{encoded_id}")
 
         if response.status_code == 200:
             data = response.json()
-            is_valid = data.get("status") == "healthy" or data.get("exists", False)
+            is_valid = (
+                data.get("status") == "healthy"
+                or data.get("exists", False)
+                or bool(data.get("agentId"))
+            )
             _registry_cache[agent_id] = is_valid
             return is_valid
         elif response.status_code == 404:

@@ -1,6 +1,9 @@
 """Unit tests for the resource adapter registry (resources.py)."""
 
+from types import SimpleNamespace
+
 import pytest
+from unittest.mock import AsyncMock
 
 from core.agent.app.schema.pydantic_models import (
     ComputeResource,
@@ -131,6 +134,62 @@ class TestDbRoundTrip:
     def test_missing_resource_type_raises(self):
         with pytest.raises(ValueError, match="missing resource_type"):
             adapt_db_resource_to_domain_resource({"value": 1})
+
+
+@pytest.mark.asyncio
+async def test_trader_agent_resource_portfolio_excludes_non_available_resources():
+    from core.agent.app.agent import TraderAgent
+
+    agent = object.__new__(TraderAgent)
+    agent._sqlite_client = SimpleNamespace(
+        list_resources=AsyncMock(
+            return_value=[
+                {
+                    "resource_id": "gpu-available",
+                    "resource_type": "compute.gpu",
+                    "resource_subtype": "h200",
+                    "unit": "count",
+                    "value": 1,
+                    "state": "available",
+                    "attributes": {
+                        "gpu_model": "H200",
+                        "sla": 90.0,
+                        "region": "California, US",
+                        "vm_host": "ww1",
+                    },
+                },
+                {
+                    "resource_id": "gpu-leased",
+                    "resource_type": "compute.gpu",
+                    "resource_subtype": "h200",
+                    "unit": "count",
+                    "value": 1,
+                    "state": "leased",
+                    "attributes": {
+                        "gpu_model": "H200",
+                        "sla": 90.0,
+                        "region": "California, US",
+                        "vm_host": "ww1",
+                    },
+                },
+            ]
+        )
+    )
+
+    portfolio = await TraderAgent.get_resource_portfolio(agent)
+
+    assert portfolio == {
+        "resources": [
+            {
+                "resource_id": "gpu-available",
+                "gpu_model": "H200",
+                "quantity": 1,
+                "sla": 90.0,
+                "region": "California, US",
+                "vm_host": "ww1",
+            }
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------

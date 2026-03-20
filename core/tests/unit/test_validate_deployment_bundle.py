@@ -31,16 +31,17 @@ def _valid_agent_env() -> str:
     AGENT_ID=agent_prod_canary
     LOG_FILE_PATH=/var/log/market/agent.log
     AUTO_REGISTER=true
+    ENABLE_EVENT_QUEUE=false
     IDENTITY_REGISTRY_ADDRESS=0x1111111111111111111111111111111111111111
     REPUTATION_REGISTRY_ADDRESS=0x2222222222222222222222222222222222222222
     VALIDATION_REGISTRY_ADDRESS=0x3333333333333333333333333333333333333333
     REGISTRY_URL=http://100.64.0.10:8080/
-    CHAIN_RPC_URL=https://base-sepolia.example-rpc.invalid
+    CHAIN_RPC_URL=wss://base-sepolia.example-rpc.invalid/ws
     AGENT_PRIV_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     AGENT_WALLET_ADDRESS=0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-    CHAIN_NAME=base-sepolia
-    TOKEN_REGISTRY_PATH=../core/agent/app/data/token_registry.json
-    SSH_PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGp1c3QtYS10ZXN0LWtleQ== canary@test
+    CHAIN_NAME=base_sepolia
+    TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_base_sepolia.json
+    SSH_PUBLIC_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGp1c3QtYS10ZXN0LWtleQ== canary@test"
     ZEROTIER_NETWORK=8056c2e21c000001
     PROVISIONING_MODE=http
     PROVISIONING_SERVICE_URL=http://100.64.0.11:8081
@@ -70,6 +71,15 @@ def _valid_buyer_agent_env() -> str:
             "AGENT_WALLET_ADDRESS=0xcccccccccccccccccccccccccccccccccccccccc",
         )
     )
+
+
+def _valid_host_managed_agent_env(ip: str, *, agent_id: str = "agent_prod_canary") -> str:
+    return (
+        _valid_agent_env()
+        .replace("BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8000/", f"BASE_URL_OVERRIDE=http://{ip}:8000/")
+        .replace("ZEROTIER_NETWORK=8056c2e21c000001\n", "")
+        + f"ZEROTIER_IP={ip}\n"
+    ).replace("AGENT_ID=agent_prod_canary", f"AGENT_ID={agent_id}")
 
 
 def _valid_provisioning_env() -> str:
@@ -160,6 +170,37 @@ def test_validator_accepts_valid_bundle(tmp_path: Path) -> None:
     assert errors == []
 
 
+def test_validator_allows_dual_agent_zerotier_placeholder_urls(tmp_path: Path) -> None:
+    module = _load_script_module()
+    seller_env = _write(tmp_path / "seller.env", _valid_agent_env())
+    buyer_env = _write(
+        tmp_path / "buyer.env",
+        _valid_agent_env()
+        .replace("AGENT_ID=agent_prod_canary", "AGENT_ID=buyer_prod_canary")
+        .replace(
+            "AGENT_PRIV_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "AGENT_PRIV_KEY=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        )
+        .replace(
+            "AGENT_WALLET_ADDRESS=0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "AGENT_WALLET_ADDRESS=0xcccccccccccccccccccccccccccccccccccccccc",
+        ),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_actor_bundle(
+        seller_agent_env_path=seller_env,
+        buyer_agent_env_path=buyer_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert errors == []
+
+
 def test_validator_rejects_placeholder_urls_and_local_hosts(tmp_path: Path) -> None:
     module = _load_script_module()
     agent_env = _write(
@@ -215,12 +256,32 @@ def test_validator_rejects_auth_and_inventory_drift(tmp_path: Path) -> None:
     assert "provisioning env:AUTH_FAIL_OPEN must be false" in errors
 
 
+def test_validator_rejects_event_queue_for_deployed_canary_agents(tmp_path: Path) -> None:
+    module = _load_script_module()
+    agent_env = _write(
+        tmp_path / "agent.env",
+        _valid_agent_env().replace("ENABLE_EVENT_QUEUE=false", "ENABLE_EVENT_QUEUE=true"),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_bundle(
+        agent_env_path=agent_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert "agent env:ENABLE_EVENT_QUEUE must be false for deployed canaries" in errors
+
+
 def test_validator_rejects_chain_and_identity_mismatches(tmp_path: Path) -> None:
     module = _load_script_module()
     agent_env = _write(
         tmp_path / "agent.env",
         _valid_agent_env()
-        .replace("CHAIN_NAME=base-sepolia", "CHAIN_NAME=ethereum-sepolia")
+        .replace("CHAIN_NAME=base_sepolia", "CHAIN_NAME=ethereum_sepolia")
         .replace(
             "IDENTITY_REGISTRY_ADDRESS=0x1111111111111111111111111111111111111111",
             "IDENTITY_REGISTRY_ADDRESS=0x4444444444444444444444444444444444444444",
@@ -241,7 +302,7 @@ def test_validator_rejects_chain_and_identity_mismatches(tmp_path: Path) -> None
         seller_agent_id="eip155:11155111:0x1111111111111111111111111111111111111111:101",
     )
 
-    assert "agent env:CHAIN_NAME must be base-sepolia, got ethereum-sepolia" in errors
+    assert "agent env:CHAIN_NAME must be base_sepolia, got ethereum_sepolia" in errors
     assert "registry env:CHAIN_ID must be 84532, got 11155111" in errors
     assert any(
         error.startswith(
@@ -276,6 +337,68 @@ def test_validator_rejects_invalid_canary_inputs(tmp_path: Path) -> None:
     assert any("ssh-private-key-path does not exist" in error for error in errors)
 
 
+def test_validator_rejects_public_base_sepolia_rpc_endpoint(tmp_path: Path) -> None:
+    module = _load_script_module()
+    agent_env = _write(
+        tmp_path / "agent.env",
+        _valid_agent_env().replace(
+            "CHAIN_RPC_URL=wss://base-sepolia.example-rpc.invalid/ws",
+            "CHAIN_RPC_URL=wss://sepolia.base.org/ws",
+        ),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(
+        tmp_path / "registry.env",
+        _valid_registry_env().replace(
+            "RPC_URL=https://base-sepolia.example-rpc.invalid",
+            "RPC_URL=https://sepolia.base.org",
+        ),
+    )
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_bundle(
+        agent_env_path=agent_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert any(
+        "agent env:CHAIN_RPC_URL: public Base Sepolia RPC endpoint is not allowed" in error
+        for error in errors
+    )
+    assert any(
+        "registry env:RPC_URL: public Base Sepolia RPC endpoint is not allowed" in error
+        for error in errors
+    )
+
+
+def test_validator_rejects_http_rpc_for_agent_env(tmp_path: Path) -> None:
+    module = _load_script_module()
+    agent_env = _write(
+        tmp_path / "agent.env",
+        _valid_agent_env().replace(
+            "CHAIN_RPC_URL=wss://base-sepolia.example-rpc.invalid/ws",
+            "CHAIN_RPC_URL=https://base-sepolia.example-rpc.invalid",
+        ),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_bundle(
+        agent_env_path=agent_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert any(
+        "agent env:CHAIN_RPC_URL: expected a WebSocket RPC URL" in error
+        for error in errors
+    )
+
+
 def test_validate_actor_bundle_accepts_distinct_buyer_and_seller_envs(
     tmp_path: Path,
 ) -> None:
@@ -296,6 +419,41 @@ def test_validate_actor_bundle_accepts_distinct_buyer_and_seller_envs(
         seller_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:101",
         buyer_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:202",
         ssh_private_key_path=str(ssh_key),
+    )
+
+    assert errors == []
+
+
+def test_validate_actor_bundle_accepts_host_managed_zerotier_agents(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    seller_env = _write(
+        tmp_path / "seller.env",
+        _valid_host_managed_agent_env("10.243.0.68", agent_id="seller_prod_canary"),
+    )
+    buyer_env = _write(
+        tmp_path / "buyer.env",
+        _valid_host_managed_agent_env("10.243.0.117", agent_id="buyer_prod_canary")
+        .replace(
+            "AGENT_PRIV_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "AGENT_PRIV_KEY=0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        )
+        .replace(
+            "AGENT_WALLET_ADDRESS=0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "AGENT_WALLET_ADDRESS=0xcccccccccccccccccccccccccccccccccccccccc",
+        ),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_actor_bundle(
+        seller_agent_env_path=seller_env,
+        buyer_agent_env_path=buyer_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
     )
 
     assert errors == []
@@ -322,4 +480,54 @@ def test_validate_actor_bundle_rejects_reused_buyer_and_seller_identity(
     assert "seller agent env and buyer agent env must not share AGENT_ID" in errors
     assert "seller agent env and buyer agent env must not share AGENT_PRIV_KEY" in errors
     assert "seller agent env and buyer agent env must not share AGENT_WALLET_ADDRESS" in errors
-    assert "seller agent env and buyer agent env must not share BASE_URL_OVERRIDE" in errors
+
+
+def test_validate_actor_bundle_rejects_numeric_persisted_onchain_agent_id(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    seller_env = _write(
+        tmp_path / "seller.env",
+        _valid_agent_env() + "ONCHAIN_AGENT_ID=2517\n",
+    )
+    buyer_env = _write(tmp_path / "buyer.env", _valid_buyer_agent_env())
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_actor_bundle(
+        seller_agent_env_path=seller_env,
+        buyer_agent_env_path=buyer_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+        seller_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:2517",
+        buyer_agent_id="eip155:84532:0x1111111111111111111111111111111111111111:202",
+    )
+
+    assert "seller agent env:ONCHAIN_AGENT_ID: expected canonical agent id, got: 2517" in errors
+
+
+def test_validator_rejects_unquoted_space_containing_agent_values(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    agent_env = _write(
+        tmp_path / "agent.env",
+        _valid_agent_env()
+        .replace('SSH_PUBLIC_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGp1c3QtYS10ZXN0LWtleQ== canary@test"', "SSH_PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGp1c3QtYS10ZXN0LWtleQ== canary@test")
+        + "AGENT_NAME=SMS Canary Buyer\n",
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_bundle(
+        agent_env_path=agent_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert "agent env:AGENT_NAME must quote values containing spaces" in errors
+    assert "agent env:SSH_PUBLIC_KEY must quote values containing spaces" in errors

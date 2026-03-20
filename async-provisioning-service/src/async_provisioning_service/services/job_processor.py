@@ -2,7 +2,8 @@ import asyncio
 import copy
 import logging
 import re
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from typing import Set
 
 from sqlalchemy.orm import Session
@@ -26,6 +27,18 @@ running_tasks: Set[asyncio.Task] = set()
 
 
 _UNSET = object()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 def _update_job(
     db: Session,
@@ -284,6 +297,40 @@ def _build_result_payload(result: ProvisioningResult) -> dict:
     return payload
 
 
+def _should_cleanup_stale_vm(params: ProvisioningParams, logs: str) -> bool:
+    if params.vm_action != "create" or not params.vm_target:
+        return False
+    stale_vm_pattern = rf"VM '{re.escape(params.vm_target)}' already exists"
+    return re.search(stale_vm_pattern, logs) is not None
+
+
+async def _cleanup_stale_vm_before_retry(params: ProvisioningParams, logs: str) -> None:
+    if not _should_cleanup_stale_vm(params, logs):
+        return
+
+    destroy_params = replace(params, vm_action="destroy")
+    cleanup_params = replace(params, vm_action="undefine")
+    logger.warning(
+        "Retrying create for %s after stopping and cleaning up stale VM target %s",
+        params.vm_host,
+        params.vm_target,
+    )
+
+    try:
+        destroy_running = await start_playbook(destroy_params)
+        await wait_for_playbook(destroy_running)
+    except PlaybookError as exc:
+        logger.warning(
+            "Destroy step for stale VM target %s on %s did not complete cleanly: %s",
+            params.vm_target,
+            params.vm_host,
+            exc,
+        )
+
+    cleanup_running = await start_playbook(cleanup_params)
+    await wait_for_playbook(cleanup_running)
+
+
 async def _process_job(job_id: str) -> None:
     """Process a single provisioning job: start playbook, track PID, handle retries."""
     db = SessionLocal()
@@ -293,7 +340,8 @@ async def _process_job(job_id: str) -> None:
             logger.warning("Job %s not found", job_id)
             return
 
-        if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
+        next_retry_at = _normalize_utc_datetime(job.next_retry_at)
+        if next_retry_at and _utc_now() < next_retry_at:
             await asyncio.sleep(1)
             await enqueue_job(job_id)
             return
@@ -303,6 +351,15 @@ async def _process_job(job_id: str) -> None:
         _update_job(db, job, status=JobStatus.running.value)
 
         params = _build_params(job.params)
+        if job.retry_count > 0:
+            try:
+                await _cleanup_stale_vm_before_retry(params, job.logs or "")
+            except PlaybookError as cleanup_exc:
+                logger.warning(
+                    "Pre-attempt cleanup of stale VM target %s failed: %s",
+                    params.vm_target,
+                    cleanup_exc,
+                )
 
         running = await start_playbook(params)
 
@@ -359,8 +416,16 @@ async def _process_job(job_id: str) -> None:
             )
 
             if should_retry:
+                try:
+                    await _cleanup_stale_vm_before_retry(params, logs)
+                except PlaybookError as cleanup_exc:
+                    logger.warning(
+                        "Cleanup of stale VM target %s before retry failed: %s",
+                        params.vm_target,
+                        cleanup_exc,
+                    )
                 retry_delay = _calculate_retry_delay(job.retry_count)
-                next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
+                next_retry_at = _utc_now() + timedelta(seconds=retry_delay)
 
                 job.retry_count += 1
                 job.next_retry_at = next_retry_at

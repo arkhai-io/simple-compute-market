@@ -120,7 +120,17 @@ def main(argv: Iterable[str] | None = None) -> int:
     has_env_bundle = _env_bundle_supplied(args)
 
     _run_command(
-        ["uv", "--no-config", "run", "pytest", "tests/unit/test_repo_consistency.py", "tests/unit/test_alkahest_config.py", "-q"],
+        [
+            "uv",
+            "--no-config",
+            "run",
+            "pytest",
+            "tests/unit/test_repo_consistency.py",
+            "tests/unit/test_validate_deployment_bundle.py",
+            "tests/unit/test_deployment_gate_checks.py",
+            "tests/unit/test_alkahest_config.py",
+            "-q",
+        ],
         cwd=ROOT / "core",
     )
     _run_command(
