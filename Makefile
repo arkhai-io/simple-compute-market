@@ -1,34 +1,33 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
+CONTRACTS_IMAGE := arkhai:contracts
 
 .PHONY: build
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core
+build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core build-provisioning
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build
 
 build-contracts:
-	cd erc-8004-contracts && docker build -t arkhai:contracts-$(GIT_SUFFIX) .
+	cd erc-8004-contracts && docker build -t ${CONTRACTS_IMAGE}-${GIT_SUFFIX} .
 
 build-market-contract-deployer:
-	cd market-contract-deployer && make build
+	cd market-contract-deployer && make build CONTRACTS_IMAGE=${CONTRACTS_IMAGE}
 
 #The anvil rpc url is hard coded inside of deploy_alkhahest.py. Don't change the network name or anvil container name.
-#For whatever reason the --dump-state and --state-interval flags on anvil were not working so I created a script to pull the state via rpc for now and dump it.
-#The Anvil container doesn't have the dependencies so I'm just calling it from the os until I containerize that step or figure out what's wrong with the --dump-state
+#Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
 build-anvil-state:
 	-docker network create anvil
 	-mkdir shared-env
 	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run -it --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:market-contract-deployer-$(GIT_SUFFIX) sh -c ./deploy-local.sh
+	docker run -it --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer sh -c ./deploy-local.sh
 	echo "Todo: add a step here to verify contract deployment"
 	docker stop anvil
 	-docker network rm anvil
 
-#Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
 build-test-env: build-anvil-state
 	cd test-env && make build
 
@@ -36,8 +35,7 @@ build-registry:
 	cd erc-8004-registry-py && make build
 
 build-core:
-	docker build -f ./core/Dockerfile --build-arg INSTALL_RL_DEPS=true -t arkhai:core .
-	docker tag arkhai:core arkhai:core-$(GIT_SUFFIX)
+	cd core && make build
 
 build-provisioning:
 	cd async-provisioning-service && make build
@@ -52,19 +50,11 @@ init-prerequisites:
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
 
-init-dependencies: init-zero-tier init-registry init-cli
+init-dependencies: init-zero-tier init-cli
 
 #requires sudo
 init-zero-tier:
 	cd infra && make install
-
-#In this branch the erc-8004-contracts folder is a submodule that isn't downloaded. I'm fine with inter-repo composition but the lower level things should be put into an artifactory and downloaded by whatever comes next.
-#As a result while I have Anvil set up, I can't npm install and deploy the contracts.
-init-contracts:
-	npm install ./erc-8004-contracts
-
-init-registry:
-	cd erc-8004-registry-py && init
 
 # Initializing the cli should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
 init-cli:
@@ -74,12 +64,12 @@ init-cli:
 init-images:
 	echo "NYI"
 
-deploy-local:
+deploy-compose:
 	docker compose up
 	docker compose ps
 
-#Ideally a helm chart eventually replaces 3 different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-test-env deploy-registry deploy-agents
+#Ideally a helm chart eventually replaces the different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
+deploy: deploy-test-env deploy-registry deploy-agents deploy-provisioning
 
 #docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
 deploy-test-env:
@@ -92,9 +82,9 @@ deploy-agents:
 	cd core && make deploy
 
 deploy-provisioning:
-	cd aync-provisioning-service && make deploy
+	cd async-provisioning-service && make deploy
 
 #We're also going to want some targets built to idempotently smoke test a deployment
-stop-local:
+stop-compose:
 	docker compose down
 	docker compose rm
