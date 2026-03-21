@@ -2,6 +2,10 @@
 
 This document covers the deployed async provisioning API and worker path.
 
+Before you edit `/etc/simple-market-service/provisioning.env` directly, define
+the local source-of-truth in `docs/standup/local-secrets.md` and render the
+host-local bundle with `python scripts/materialize_host_envs.py --local-secrets-dir ~/.config/simple-market-service --output-dir /etc/simple-market-service`.
+
 ## Inputs
 
 - `async-provisioning-service/.env.production.sample`
@@ -43,6 +47,16 @@ Prepare the host-local env and secret files:
 sudo install -d -m 0755 /etc/simple-market-service
 sudo cp async-provisioning-service/.env.production.sample /etc/simple-market-service/provisioning.env
 sudo install -m 0600 /path/to/management-vars.yaml /etc/simple-market-service/management-vars.yaml
+```
+
+If you are using the canonical local secret layout under
+`~/.config/simple-market-service`, prefer the renderer instead of hand-editing
+these files:
+
+```bash
+python scripts/materialize_host_envs.py \
+  --local-secrets-dir ~/.config/simple-market-service \
+  --output-dir /etc/simple-market-service
 ```
 
 Edit `/etc/simple-market-service/provisioning.env` so the deployed env includes

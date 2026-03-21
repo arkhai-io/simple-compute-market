@@ -25,6 +25,7 @@ E2E_PLAN_PATH = ROOT / "docs/e2e-deployment-test-plan.md"
 CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
 STANDUP_DIR = ROOT / "docs/standup"
 STANDUP_OVERVIEW_PATH = STANDUP_DIR / "overview.md"
+STANDUP_LOCAL_SECRETS_PATH = STANDUP_DIR / "local-secrets.md"
 STANDUP_IMAGE_SELECTION_PATH = STANDUP_DIR / "image-selection.md"
 STANDUP_CONTRACTS_PATH = STANDUP_DIR / "contracts.md"
 STANDUP_ZEROTIER_FRP_PATH = STANDUP_DIR / "zerotier-frp.md"
@@ -85,6 +86,7 @@ LOCAL_DUAL_AGENT_E2E_TEST = ROOT / "tests/e2e/test_local_dual_agent_stack.py"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
+MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -264,6 +266,29 @@ def test_repo_exposes_release_gate_entrypoint() -> None:
 
     args = _parse_script_args(RELEASE_GATE_SCRIPT)
     assert "--deployed-canary-log" in args
+
+
+def test_repo_exposes_local_secret_materialization_entrypoint() -> None:
+    assert MATERIALIZE_HOST_ENVS_SCRIPT.exists(), (
+        "scripts/materialize_host_envs.py must exist as the canonical "
+        "host-local env materialization entrypoint"
+    )
+
+    text = MATERIALIZE_HOST_ENVS_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "~/.config/simple-market-service",
+        "/etc/simple-market-service",
+        "alchemy.env",
+        "wallets.env",
+        "shared.env",
+        "contracts.env",
+        "prod-canary.env",
+        "management-vars.yaml",
+    ):
+        assert required_token in text, (
+            "materialize_host_envs.py is missing required local-secret contract token: "
+            f"{required_token}"
+        )
 
 
 def test_compute_provisioning_iac_exposes_validation_entrypoints() -> None:
@@ -644,6 +669,7 @@ def test_production_canary_runbook_matches_smoke_script_cli() -> None:
 def test_canonical_standup_docs_exist() -> None:
     required_paths = [
         STANDUP_OVERVIEW_PATH,
+        STANDUP_LOCAL_SECRETS_PATH,
         STANDUP_IMAGE_SELECTION_PATH,
         STANDUP_ZEROTIER_FRP_PATH,
         STANDUP_REGISTRY_PATH,
@@ -656,6 +682,51 @@ def test_canonical_standup_docs_exist() -> None:
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
     assert not missing, f"Missing canonical stand-up docs: {missing}"
+
+
+def test_standup_overview_includes_local_secret_materialization_step() -> None:
+    text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Local Secret Layout](local-secrets.md)" in text
+
+
+def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> None:
+    text = STANDUP_LOCAL_SECRETS_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "~/.config/simple-market-service",
+        "alchemy.env",
+        "wallets.env",
+        "shared.env",
+        "contracts.env",
+        "registry.env",
+        "provisioning.env",
+        "seller-agent.env",
+        "buyer-agent.env",
+        "prod-canary.env",
+        "management-vars.yaml",
+        "scripts/materialize_host_envs.py",
+        "/etc/simple-market-service",
+        "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
+        "ALCHEMY_BASE_SEPOLIA_WSS_URL",
+        "PROVISIONER_SSH_PRIVATE_KEY_PATH",
+        "CANARY_TENANT_SSH_PRIVATE_KEY_PATH",
+    ):
+        assert required_token in text, (
+            "local-secrets.md is missing required secret-layout token: "
+            f"{required_token}"
+        )
+
+
+def test_canary_and_provisioning_docs_reference_local_secret_materialization() -> None:
+    for path in (STANDUP_CANARY_PATH, STANDUP_PROVISIONING_PATH):
+        text = path.read_text(encoding="utf-8")
+        for required_token in (
+            "docs/standup/local-secrets.md",
+            "scripts/materialize_host_envs.py",
+            "~/.config/simple-market-service",
+        ):
+            assert required_token in text, (
+                f"{path.name} is missing local secret materialization guidance: {required_token}"
+            )
 
 
 def test_clean_room_acceptance_checklist_exists_and_is_linked() -> None:

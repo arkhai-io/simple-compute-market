@@ -43,6 +43,15 @@ defaults is:
 - `CANARY_DURATION_HOURS=1`
 - `CANARY_MATCH_SALT=<fixed-integer-when-repeatability-matters>`
 
+If you keep the operator source-of-truth in `~/.config/simple-market-service`,
+follow `docs/standup/local-secrets.md` and render the host-local bundle first:
+
+```bash
+python scripts/materialize_host_envs.py \
+  --local-secrets-dir ~/.config/simple-market-service \
+  --output-dir /etc/simple-market-service
+```
+
 Before creating orders, confirm that:
 
 - the seller inventory was seeded via `docs/standup/resource-seeding.md`
