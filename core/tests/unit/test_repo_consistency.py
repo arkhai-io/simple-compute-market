@@ -21,6 +21,7 @@ E2E_PLAN_PATH = ROOT / "docs/e2e-deployment-test-plan.md"
 CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
 STANDUP_DIR = ROOT / "docs/standup"
 STANDUP_OVERVIEW_PATH = STANDUP_DIR / "overview.md"
+STANDUP_IMAGE_SELECTION_PATH = STANDUP_DIR / "image-selection.md"
 STANDUP_ZEROTIER_FRP_PATH = STANDUP_DIR / "zerotier-frp.md"
 STANDUP_REGISTRY_PATH = STANDUP_DIR / "registry.md"
 STANDUP_PROVISIONING_PATH = STANDUP_DIR / "provisioning.md"
@@ -261,6 +262,7 @@ def test_production_canary_runbook_matches_smoke_script_cli() -> None:
 def test_canonical_standup_docs_exist() -> None:
     required_paths = [
         STANDUP_OVERVIEW_PATH,
+        STANDUP_IMAGE_SELECTION_PATH,
         STANDUP_ZEROTIER_FRP_PATH,
         STANDUP_REGISTRY_PATH,
         STANDUP_PROVISIONING_PATH,
@@ -279,6 +281,52 @@ def test_root_readme_points_to_canonical_standup_docs() -> None:
 
     assert "docs/standup/overview.md" in text
     assert "docs/standup/canary.md" in text
+
+
+def test_image_selection_doc_defines_deployable_manifest_contract() -> None:
+    text = STANDUP_IMAGE_SELECTION_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## Output Manifest",
+        "## Publish Paths",
+        "## Verification",
+    ):
+        assert required_heading in text, (
+            f"image-selection.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "/etc/simple-market-service/image-manifest.env",
+        "REGISTRY_IMAGE=",
+        "PROVISIONING_IMAGE=",
+        "SELLER_AGENT_IMAGE=",
+        "BUYER_AGENT_IMAGE=",
+        "@sha256:",
+        ".github/workflows/docker-build-push-erc8004-registry.yml",
+        ".github/workflows/docker-build-push-async-provisioning.yml",
+        ".github/workflows/docker-build-push-core-agent.yml",
+        "git rev-parse HEAD",
+    ):
+        assert required_token in text, (
+            f"image-selection.md is missing image-manifest detail: {required_token}"
+        )
+
+
+def test_deployed_service_runbooks_reference_image_manifest() -> None:
+    for path in (
+        STANDUP_REGISTRY_PATH,
+        STANDUP_PROVISIONING_PATH,
+        STANDUP_AGENT_SELLER_PATH,
+        STANDUP_AGENT_BUYER_PATH,
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert "docs/standup/image-selection.md" in text, (
+            f"{path.name} must point to the canonical image-selection doc"
+        )
+        assert "/etc/simple-market-service/image-manifest.env" in text, (
+            f"{path.name} must document the shared image manifest"
+        )
 
 
 def test_deployment_docs_reference_canonical_standup_overview() -> None:

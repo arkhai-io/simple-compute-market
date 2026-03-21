@@ -17,11 +17,15 @@ The agent image is built from `core/Dockerfile`. The repo's default CI publish
 path is defined in `.github/workflows/docker-build-push-core-agent.yml` and
 publishes `a2a-agent` images to Artifact Registry.
 
+Prefer the shared image manifest from
+`docs/standup/image-selection.md` at `/etc/simple-market-service/image-manifest.env`.
 Choose the exact tag or digest you want to run before deployment. If you use the
 repo's default workflow, a working pattern is:
 
 ```bash
-export SELLER_AGENT_IMAGE="us-east4-docker.pkg.dev/<gcp-project>/a2a-agent/a2a-agent:<tag-or-digest>"
+set -a
+. /etc/simple-market-service/image-manifest.env
+set +a
 sudo docker pull "${SELLER_AGENT_IMAGE}"
 ```
 

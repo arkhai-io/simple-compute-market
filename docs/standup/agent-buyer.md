@@ -16,10 +16,14 @@ This document covers the deployed buyer agent path for the production canary.
 The buyer uses the same image build and publish path as the seller agent:
 `core/Dockerfile` plus `.github/workflows/docker-build-push-core-agent.yml`.
 
+Prefer the shared image manifest from
+`docs/standup/image-selection.md` at `/etc/simple-market-service/image-manifest.env`.
 Choose the exact immutable image tag or digest before deployment:
 
 ```bash
-export BUYER_AGENT_IMAGE="us-east4-docker.pkg.dev/<gcp-project>/a2a-agent/a2a-agent:<tag-or-digest>"
+set -a
+. /etc/simple-market-service/image-manifest.env
+set +a
 sudo docker pull "${BUYER_AGENT_IMAGE}"
 ```
 

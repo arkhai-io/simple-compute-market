@@ -20,10 +20,14 @@ The async provisioning image is built from
 `async-provisioning-service/Dockerfile`. The repo's default CI publish path is
 defined in `.github/workflows/docker-build-push-async-provisioning.yml`.
 
+Prefer the shared image manifest from
+`docs/standup/image-selection.md` at `/etc/simple-market-service/image-manifest.env`.
 Choose the exact immutable image tag or digest before deployment:
 
 ```bash
-export PROVISIONING_IMAGE="us-east4-docker.pkg.dev/<gcp-project>/async-provisioning-service/async-provisioning-service:<tag-or-digest>"
+set -a
+. /etc/simple-market-service/image-manifest.env
+set +a
 gcloud auth print-access-token \
   | sudo docker login -u oauth2accesstoken --password-stdin https://<region>-docker.pkg.dev
 sudo docker pull "${PROVISIONING_IMAGE}"
