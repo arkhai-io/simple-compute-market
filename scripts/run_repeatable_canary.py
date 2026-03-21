@@ -89,6 +89,17 @@ def _rendered_env_paths(output_dir: Path) -> dict[str, Path]:
     }
 
 
+def _load_chain_name(local_secrets_dir: Path) -> str:
+    shared_env_path = local_secrets_dir / "shared.env"
+    if not shared_env_path.exists():
+        raise SystemExit(f"Missing shared.env: {shared_env_path}")
+    shared = _parse_env_file(shared_env_path)
+    chain_name = shared.get("CHAIN_NAME")
+    if not chain_name:
+        raise SystemExit(f"shared.env is missing CHAIN_NAME: {shared_env_path}")
+    return chain_name
+
+
 def _ensure_rendered_bundle(paths: dict[str, Path]) -> None:
     missing = sorted(str(path) for path in paths.values() if not path.exists())
     if missing:
@@ -170,6 +181,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     parser.add_argument("--inventory-path", type=Path, default=DEFAULT_INVENTORY_PATH)
     parser.add_argument("--apply-funding", action="store_true")
+    parser.add_argument(
+        "--allow-mainnet",
+        action="store_true",
+        help="Explicitly allow a Base mainnet run. Required for mainnet funding or canary execution.",
+    )
     parser.add_argument("--skip-deployment-gates", action="store_true")
     parser.add_argument("--skip-bundle-validation", action="store_true")
     return parser
@@ -184,6 +200,9 @@ def main(argv: list[str] | None = None) -> int:
     artifacts_dir = args.artifacts_dir.expanduser()
     inventory_path = args.inventory_path.expanduser()
     rendered_paths = _rendered_env_paths(output_dir)
+    chain_name = _load_chain_name(local_secrets_dir)
+    if chain_name == "base" and not args.allow_mainnet:
+        raise SystemExit("Refusing to run base mainnet canary without --allow-mainnet")
 
     _run_command(
         [
@@ -206,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if args.apply_funding:
         funding_command.append("--apply")
+    if args.allow_mainnet:
+        funding_command.append("--allow-mainnet")
     _run_command(funding_command, cwd=ROOT)
 
     canary_env = _parse_env_file(rendered_paths["canary"])

@@ -101,6 +101,8 @@ For repeatable canary funding, add these keys to `prod-canary.env`:
 BUYER_NATIVE_FLOOR_WEI=20000000000000
 SELLER_NATIVE_FLOOR_WEI=10000000000000
 BUYER_TOKEN_BUFFER_BASE_UNITS=0
+CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI=200000000000000
+CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS=2000000
 # Required for Base mainnet ERC20 funding when the token is not in the checked-in registry:
 # CANARY_FUNDING_TOKEN_ADDRESS=0x...
 # CANARY_FUNDING_TOKEN_DECIMALS=6
@@ -146,7 +148,10 @@ python scripts/pre_canary_fund.py \
 
 When you are ready to broadcast the top-up transactions from
 `SEPOLIA_FUNDER_PRIVATE_KEY` or `MAINNET_FUNDER_PRIVATE_KEY`, rerun with
-`--apply`.
+`--apply`. For Base mainnet, also pass `--allow-mainnet`; the apply step refuses
+to proceed without that acknowledgement and the configured
+`CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI` /
+`CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS` caps.
 
 ## One-Shot Repeatable Run
 
@@ -167,6 +172,9 @@ That wrapper runs `scripts/materialize_host_envs.py`,
 `scripts/pre_canary_fund.py`, `scripts/run_deployment_gate_checks.py`,
 `scripts/validate_deployment_bundle.py`, `scripts/prod_canary_smoke.py`, and
 `scripts/prod_canary_rollback.py` in the correct order.
+
+For a Base mainnet lane, add `--allow-mainnet` and keep the mainnet caps in
+`prod-canary.env` set to the smallest values that still support the canary.
 
 ## Verification
 

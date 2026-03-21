@@ -308,3 +308,26 @@ def test_repeatable_canary_runner_attempts_rollback_on_failure(
             artifacts_dir / "prod-canary-rollback.log",
         ),
     ]
+
+
+def test_repeatable_canary_runner_refuses_mainnet_without_explicit_flag(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    local_secrets_dir = tmp_path / "local-secrets"
+    local_secrets_dir.mkdir()
+    _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "base"})
+
+    with pytest.raises(SystemExit, match="Refusing to run base mainnet canary without --allow-mainnet"):
+        module.main(
+            [
+                "--environment",
+                "isolated-base-mainnet",
+                "--local-secrets-dir",
+                str(local_secrets_dir),
+                "--output-dir",
+                str(tmp_path / "rendered"),
+                "--skip-deployment-gates",
+                "--skip-bundle-validation",
+            ]
+        )

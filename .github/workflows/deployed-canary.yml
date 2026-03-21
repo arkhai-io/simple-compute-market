@@ -26,6 +26,11 @@ on:
         required: true
         default: true
         type: boolean
+      mainnet_ack:
+        description: 'Type "base-mainnet" to permit a Base mainnet funding/run path.'
+        required: false
+        default: ""
+        type: string
       run_release_gates:
         description: "Run repo-side deployment gates before the live canary."
         required: true
@@ -126,6 +131,10 @@ jobs:
 
           if [[ "${{ inputs.run_release_gates }}" != "true" ]]; then
             args+=(--skip-deployment-gates)
+          fi
+
+          if [[ "${{ inputs.mainnet_ack }}" == "base-mainnet" ]]; then
+            args+=(--allow-mainnet)
           fi
 
           python scripts/run_repeatable_canary.py "${args[@]}"

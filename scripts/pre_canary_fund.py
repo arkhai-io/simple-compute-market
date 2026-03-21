@@ -70,6 +70,8 @@ class FundingContext(NamedTuple):
     buyer_token_buffer_base_units: int
     token_address_override: str | None
     token_decimals_override: int | None
+    mainnet_max_native_topup_wei: int | None
+    mainnet_max_erc20_topup_base_units: int | None
 
 
 class TokenMetadata(NamedTuple):
@@ -162,6 +164,16 @@ def load_funding_context(local_secrets_dir: Path) -> FundingContext:
         buyer_token_buffer_base_units=int(canary.get("BUYER_TOKEN_BUFFER_BASE_UNITS", "0")),
         token_address_override=canary.get("CANARY_FUNDING_TOKEN_ADDRESS") or None,
         token_decimals_override=int(token_decimals_override) if token_decimals_override else None,
+        mainnet_max_native_topup_wei=(
+            int(canary["CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI"])
+            if canary.get("CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI")
+            else None
+        ),
+        mainnet_max_erc20_topup_base_units=(
+            int(canary["CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS"])
+            if canary.get("CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS")
+            else None
+        ),
     )
 
 
@@ -382,6 +394,36 @@ def _plan_to_json(plan: list[FundingTransfer]) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _enforce_mainnet_apply_guard(
+    *,
+    context: FundingContext,
+    plan: list[FundingTransfer],
+    allow_mainnet: bool,
+) -> None:
+    if context.chain_name != "base":
+        return
+
+    if not allow_mainnet:
+        raise SystemExit("Refusing to apply base mainnet funding without --allow-mainnet")
+
+    if (
+        context.mainnet_max_native_topup_wei is None
+        or context.mainnet_max_erc20_topup_base_units is None
+    ):
+        raise SystemExit(
+            "Base mainnet funding requires CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI "
+            "and CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS"
+        )
+
+    native_total = sum(transfer.amount for transfer in plan if transfer.asset_kind == "native")
+    erc20_total = sum(transfer.amount for transfer in plan if transfer.asset_kind == "erc20")
+    if (
+        native_total > context.mainnet_max_native_topup_wei
+        or erc20_total > context.mainnet_max_erc20_topup_base_units
+    ):
+        raise SystemExit("Base mainnet funding plan exceeds configured caps")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -399,6 +441,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--apply",
         action="store_true",
         help="Broadcast the planned top-up transactions instead of only printing the plan.",
+    )
+    parser.add_argument(
+        "--allow-mainnet",
+        action="store_true",
+        help=(
+            "Explicitly allow Base mainnet funding when applying a plan. "
+            "Requires CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI and "
+            "CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS."
+        ),
     )
     return parser
 
@@ -419,6 +470,11 @@ def main(argv: list[str] | None = None) -> int:
     print(_plan_to_json(plan))
 
     if args.apply and plan:
+        _enforce_mainnet_apply_guard(
+            context=context,
+            plan=plan,
+            allow_mainnet=args.allow_mainnet,
+        )
         tx_hashes = apply_funding_plan(context=context, token_metadata=token_metadata, plan=plan)
         print(json.dumps({"applied": tx_hashes}, indent=2, sort_keys=True))
     return 0

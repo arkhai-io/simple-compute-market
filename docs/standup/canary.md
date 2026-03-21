@@ -73,9 +73,13 @@ The script reads threshold keys from `prod-canary.env`, including:
 - `BUYER_NATIVE_FLOOR_WEI`
 - `SELLER_NATIVE_FLOOR_WEI`
 - `BUYER_TOKEN_BUFFER_BASE_UNITS`
+- `CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI`
+- `CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS`
 
 When the printed plan looks correct, rerun with `--apply` to broadcast the
-top-up transactions from the configured funder wallet.
+top-up transactions from the configured funder wallet. For Base mainnet,
+include `--allow-mainnet`; the script refuses to apply without that explicit
+acknowledgement and the configured caps.
 
 For repeatable isolated runs, prefer the single wrapper instead of hand-running
 each step:
@@ -89,6 +93,9 @@ python scripts/run_repeatable_canary.py \
   --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
   --apply-funding
 ```
+
+For a Base mainnet lane, append `--allow-mainnet` only after verifying the
+funding caps and intended spend.
 
 ## Gate Sequence
 

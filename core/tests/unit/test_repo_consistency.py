@@ -241,12 +241,14 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
         "self-hosted",
         "isolated environment",
         "~/.config/simple-market-service",
+        "mainnet_ack",
         "/etc/simple-market-service/prod-canary.env",
         "scripts/run_repeatable_canary.py",
         "scripts/materialize_host_envs.py",
         "scripts/pre_canary_fund.py",
         "scripts/run_release_gate_checks.py",
         "--deployed-canary-log",
+        "--allow-mainnet",
         "artifacts/prod-canary.log",
         "scripts/prod_canary_smoke.py",
         "scripts/prod_canary_rollback.py",
@@ -311,8 +313,11 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
         "SEPOLIA_FUNDER_PRIVATE_KEY",
         "MAINNET_FUNDER_PRIVATE_KEY",
         "--apply",
+        "--allow-mainnet",
         "CANARY_FUNDING_TOKEN_ADDRESS",
         "CANARY_FUNDING_TOKEN_DECIMALS",
+        "CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI",
+        "CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS",
     ):
         assert required_token in text, (
             "pre_canary_fund.py is missing required funding contract token: "
@@ -336,6 +341,7 @@ def test_repo_exposes_repeatable_canary_runner_entrypoint() -> None:
         "scripts/prod_canary_rollback.py",
         "artifacts/prod-canary.log",
         "--apply-funding",
+        "--allow-mainnet",
         "--skip-deployment-gates",
         "--skip-bundle-validation",
     ):
@@ -763,9 +769,12 @@ def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> No
         "ALCHEMY_BASE_SEPOLIA_WSS_URL",
         "SEPOLIA_FUNDER_PRIVATE_KEY",
         "MAINNET_FUNDER_PRIVATE_KEY",
+        "CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI",
+        "CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS",
         "PROVISIONER_SSH_PRIVATE_KEY_PATH",
         "CANARY_TENANT_SSH_PRIVATE_KEY_PATH",
         "scripts/pre_canary_fund.py",
+        "scripts/run_repeatable_canary.py",
     ):
         assert required_token in text, (
             "local-secrets.md is missing required secret-layout token: "
@@ -790,9 +799,13 @@ def test_canary_docs_reference_pre_run_funding_step() -> None:
     text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/pre_canary_fund.py",
+        "scripts/run_repeatable_canary.py",
         "BUYER_NATIVE_FLOOR_WEI",
         "SELLER_NATIVE_FLOOR_WEI",
         "BUYER_TOKEN_BUFFER_BASE_UNITS",
+        "CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI",
+        "CANARY_MAINNET_MAX_ERC20_TOPUP_BASE_UNITS",
+        "--allow-mainnet",
         "--apply",
     ):
         assert required_token in text, (
