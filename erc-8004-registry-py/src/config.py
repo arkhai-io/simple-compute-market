@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     # Event sync configuration
     event_sync_initial_lookback_blocks: int = 1000
     event_sync_chunk_size: int = 500
+    event_sync_startup_attempts: int = 10
+    event_sync_startup_delay_secs: float = 1.0
     
     # Health Check Configuration
     enable_health_checks: bool = False  # Opt-in: Registry-initiated health checks (disabled by default)

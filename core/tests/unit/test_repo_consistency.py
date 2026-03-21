@@ -70,6 +70,9 @@ REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
 REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
 REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
+REGISTRY_CONTAINER_SMOKE_TEST = (
+    ROOT / "erc-8004-registry-py/tests/integration/test_container_smoke.py"
+)
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
@@ -619,6 +622,53 @@ def test_registry_readme_uses_tracked_env_sample_names() -> None:
     assert ".env.example" not in text
     assert ".env.sample" in text
     assert ".env.production.sample" in text
+
+
+def test_registry_makefile_exposes_container_smoke_target() -> None:
+    text = REGISTRY_MAKEFILE.read_text(encoding="utf-8")
+
+    for required_token in (
+        "test-container-smoke:",
+        "uv run pytest tests/integration/test_container_smoke.py -q",
+    ):
+        assert required_token in text, (
+            "erc-8004-registry-py/Makefile must expose the container smoke "
+            f"target via '{required_token}'"
+        )
+
+
+def test_registry_container_smoke_test_exists_and_covers_runtime_stack() -> None:
+    text = REGISTRY_CONTAINER_SMOKE_TEST.read_text(encoding="utf-8")
+
+    for required_token in (
+        "docker compose",
+        "postgres:16-alpine",
+        "ghcr.io/foundry-rs/foundry",
+        "/health",
+        "/agents",
+        "/orders",
+        "Event sync service started",
+    ):
+        assert required_token in text, (
+            "erc-8004-registry-py container smoke coverage is missing "
+            f"'{required_token}'"
+        )
+
+
+def test_registry_readme_documents_container_smoke_path() -> None:
+    text = REGISTRY_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make test-container-smoke",
+        "Docker",
+        "Postgres",
+        "Anvil",
+        "/health",
+    ):
+        assert required_token in text, (
+            "erc-8004-registry-py/README.md must document the container smoke "
+            f"path including '{required_token}'"
+        )
 
 
 def test_compute_provisioning_iac_readme_uses_current_repo_paths() -> None:

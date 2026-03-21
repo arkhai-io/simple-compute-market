@@ -22,6 +22,32 @@ event_sync: EventSyncService | None = None
 health_check: HealthCheckService | None = None
 
 
+async def start_event_sync_with_retries(
+    event_sync_service: EventSyncService,
+    sync_interval_ms: int = 60000,
+) -> None:
+    """Start event sync with bounded retries for transient RPC unavailability."""
+    attempts = max(1, settings.event_sync_startup_attempts)
+    delay_secs = max(0.0, settings.event_sync_startup_delay_secs)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            await event_sync_service.start(sync_interval_ms)
+            logger.info("Event sync service started")
+            return
+        except Exception:
+            logger.warning(
+                "Event sync startup attempt %s/%s failed",
+                attempt,
+                attempts,
+                exc_info=True,
+            )
+            if attempt == attempts:
+                raise
+            if delay_secs:
+                await asyncio.sleep(delay_secs)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown"""
@@ -45,8 +71,7 @@ async def lifespan(app: FastAPI):
     
     # Start event sync service
     event_sync = EventSyncService(network_config)
-    await event_sync.start(60000)  # Sync every minute
-    logger.info("Event sync service started")
+    await start_event_sync_with_retries(event_sync, 60000)
     
     # Start health check service (opt-in)
     health_check = HealthCheckService()
@@ -97,4 +122,3 @@ if __name__ == "__main__":
         port=settings.port,
         reload=True,
     )
-

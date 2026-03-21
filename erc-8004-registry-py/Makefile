@@ -98,6 +98,9 @@ create-migration:
 test:
 	uv run pytest
 
+test-container-smoke:
+	uv run pytest tests/integration/test_container_smoke.py -q
+
 # Run code quality checks
 lint:
 	uv run ruff check .

@@ -33,3 +33,7 @@ dev = [
     "ruff>=0.1.6",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: boots real container dependencies for registry smoke coverage",
+]

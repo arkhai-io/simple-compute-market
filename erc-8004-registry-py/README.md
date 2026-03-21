@@ -382,6 +382,24 @@ Ensure PostgreSQL is running and the database exists:
 createdb registry
 ```
 
+## Container Smoke Test
+
+Use Docker to boot a local smoke stack with Postgres, Anvil, and the registry
+container built from the checked-in Dockerfile:
+
+```bash
+make test-container-smoke
+```
+
+This smoke test verifies that:
+
+- the registry container starts against a real Postgres database
+- the registry can reach a live JSON-RPC endpoint from Anvil
+- `/health`, `/agents`, and `/orders` respond successfully
+- the startup logs show `Event sync service started`
+
+The test tears the Docker project down automatically when it finishes.
+
 ## Event Synchronization
 
 The Indexer automatically syncs on-chain events to keep its database up-to-date:
