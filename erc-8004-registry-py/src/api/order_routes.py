@@ -3,7 +3,6 @@
 import logging
 import time
 from typing import Optional
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from sqlalchemy.orm import Session
@@ -19,6 +18,7 @@ from src.api.utils import (
     find_symmetric_order,
     verify_order_signature,
 )
+from src.utils.time import utcnow
 
 _MAX_TIMESTAMP_SKEW = 300  # 5 minutes
 
@@ -80,7 +80,7 @@ async def publish_order(
         if "status" in order_data:
             existing_order.status = validate_order_status(order_data["status"])
         
-        existing_order.updated_at = datetime.utcnow()
+        existing_order.updated_at = utcnow()
         order = existing_order
     else:
         # Create new order
@@ -246,7 +246,7 @@ async def update_order(
         order.taker_attestation = updates["taker_attestation"]
     if "maker_attestation" in updates:
         order.maker_attestation = updates["maker_attestation"]
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utcnow()
     
     if symmetric_order:
         if "status" in updates:
@@ -257,7 +257,7 @@ async def update_order(
             symmetric_order.taker_attestation = order.maker_attestation
         if "taker_attestation" in updates and order.taker_attestation:
             symmetric_order.maker_attestation = order.taker_attestation
-        symmetric_order.updated_at = datetime.utcnow()
+        symmetric_order.updated_at = utcnow()
     
     try:
         db.commit()

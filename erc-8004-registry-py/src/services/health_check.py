@@ -8,6 +8,7 @@ from src.db.models import Agent, HealthCheck
 from src.db.database import SessionLocal
 from src.config import settings
 from src.db.models import AgentStatusEnum
+from src.utils.time import utcnow
 import aiohttp
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class HealthCheckService:
             agents = db.query(Agent).all()
             logger.info(f"[HealthCheck] Checking {len(agents)} agents...")
 
-            now = datetime.utcnow()
+            now = utcnow()
             checks = await asyncio.gather(
                 *[self._check_agent(agent, now, db) for agent in agents],
                 return_exceptions=True
@@ -164,19 +165,19 @@ class HealthCheckService:
         if not url or not url.startswith("http"):
             return {"reachable": False, "error": "Invalid URL"}
 
-        start_time = datetime.utcnow()
+        start_time = utcnow()
 
         try:
             timeout = aiohttp.ClientTimeout(total=settings.endpoint_check_timeout)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, headers={"User-Agent": "ERC-8004-Registry-HealthCheck/1.0"}) as response:
-                    response_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                    response_time = int((utcnow() - start_time).total_seconds() * 1000)
                     return {
                         "reachable": response.status < 500,
                         "response_time": response_time,
                     }
         except Exception as e:
-            response_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            response_time = int((utcnow() - start_time).total_seconds() * 1000)
             return {
                 "reachable": False,
                 "response_time": response_time,
@@ -202,12 +203,12 @@ class HealthCheckService:
             if not agent.last_heartbeat:
                 status = AgentStatusEnum.stale if endpoint_status["reachable"] else AgentStatusEnum.unreachable
             else:
-                heartbeat_age = (datetime.utcnow() - agent.last_heartbeat).total_seconds()
+                heartbeat_age = (utcnow() - agent.last_heartbeat).total_seconds()
                 if heartbeat_age > settings.heartbeat_ttl_secs:
                     status = AgentStatusEnum.stale if endpoint_status["reachable"] else AgentStatusEnum.unreachable
 
             agent.health_status = status
-            agent.updated_at = datetime.utcnow()
+            agent.updated_at = utcnow()
             db.commit()
 
             health_check = HealthCheck(
@@ -228,4 +229,3 @@ class HealthCheckService:
             }
         finally:
             db.close()
-

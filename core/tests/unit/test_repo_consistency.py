@@ -71,6 +71,7 @@ VM_UNDEFINE_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/vm-management
 GROUP_VARS_ALL = ROOT / "compute-provisioning-iac/ansible/group_vars/all.yml"
 AGENT_DATA_DIR = ROOT / "core/agent/app/data"
 REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
+REGISTRY_SRC_DIR = ROOT / "erc-8004-registry-py/src"
 REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
 REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
@@ -1073,6 +1074,18 @@ def test_async_provisioning_pyproject_has_single_pytest_dev_declaration() -> Non
     )
     assert "[dependency-groups]" in text, (
         "async-provisioning-service should keep dependency-groups as the authoritative dev dependency declaration"
+    )
+
+
+def test_registry_source_avoids_datetime_utcnow() -> None:
+    offenders: list[str] = []
+    for path in sorted(REGISTRY_SRC_DIR.rglob("*.py")):
+        if "datetime.utcnow" in path.read_text(encoding="utf-8"):
+            offenders.append(path.relative_to(ROOT).as_posix())
+
+    assert not offenders, (
+        "erc-8004-registry-py should use timezone-aware timestamp helpers instead of datetime.utcnow(): "
+        + ", ".join(offenders)
     )
 
 

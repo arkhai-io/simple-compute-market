@@ -4,7 +4,6 @@ import logging
 import time
 import urllib.parse
 from typing import Optional
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from sqlalchemy.orm import Session
@@ -23,6 +22,7 @@ from src.api.utils import (
     verify_heartbeat_signature,
     find_agent_by_id,
 )
+from src.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -221,7 +221,7 @@ async def register_agent(
             existing_agent.metadata_json = metadata_json
             existing_agent.owner = owner  # Update owner if changed
             existing_agent.health_status = "healthy"
-            existing_agent.updated_at = datetime.utcnow()
+            existing_agent.updated_at = utcnow()
 
             # Delete existing metadata entries and recreate them
             db.query(AgentMetadataEntry).filter(AgentMetadataEntry.agent_id == agent_canonical_id).delete()
@@ -496,10 +496,9 @@ async def heartbeat(
         # Signature provided but agent has no owner - warn but allow
         logger.warning(f"[Heartbeat] Agent {agent_id} has no owner but signature provided")
 
-    agent.last_heartbeat = datetime.utcnow()
+    agent.last_heartbeat = utcnow()
     agent.health_status = "healthy"
-    agent.updated_at = datetime.utcnow()
+    agent.updated_at = utcnow()
     db.commit()
 
     return {"ok": True, "status": "healthy"}
-

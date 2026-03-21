@@ -1,9 +1,10 @@
-from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, JSON, Enum as SQLEnum, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 import enum
+
+from src.utils.time import utcnow
 
 
 class AgentStatusEnum(str, enum.Enum):
@@ -38,8 +39,8 @@ class Agent(Base):
     metadata_json = Column("metadata", JSON, default=dict)  # Database column is "metadata", Python attr is "metadata_json" to avoid SQLAlchemy conflict
     health_status = Column(SQLEnum(AgentStatusEnum), nullable=False, default=AgentStatusEnum.healthy)
     last_heartbeat = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     
     # Relationships
     metadata_entries = relationship("AgentMetadataEntry", back_populates="agent", cascade="all, delete-orphan")
@@ -63,7 +64,7 @@ class AgentMetadataEntry(Base):
     agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
     key = Column(String, nullable=False)
     value = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     
     # Relationships
     agent = relationship("Agent", back_populates="metadata_entries")
@@ -79,7 +80,7 @@ class HealthCheck(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
     status = Column(String, nullable=False)
-    checked_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    checked_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
     response_time = Column(Integer, nullable=True)  # milliseconds
     error = Column(Text, nullable=True)
     
@@ -112,8 +113,8 @@ class MarketOrder(Base):
     maker_attestation = Column(Text, nullable=True)
     taker_attestation = Column(Text, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum), nullable=False, default=OrderStatusEnum.open)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     
     # Relationships
     agent = relationship("Agent")
@@ -123,4 +124,3 @@ class MarketOrder(Base):
         Index("idx_market_orders_status", "status"),
         Index("idx_market_orders_created_at", "created_at"),
     )
-
