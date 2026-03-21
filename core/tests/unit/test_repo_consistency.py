@@ -16,6 +16,7 @@ INVENTORY_PATH = ROOT / "compute-provisioning-iac/ansible/inventory/hosts"
 ASYNC_DOCKERFILE = ROOT / "async-provisioning-service/Dockerfile"
 ASYNC_README = ROOT / "async-provisioning-service/README.md"
 ASYNC_START_SCRIPT = ROOT / "async-provisioning-service/start.sh"
+ASYNC_PYPROJECT = ROOT / "async-provisioning-service/pyproject.toml"
 ASYNC_CONTAINER_SMOKE_TEST = (
     ROOT / "async-provisioning-service/tests/integration/test_container_smoke.py"
 )
@@ -1061,6 +1062,17 @@ def test_contracts_package_declares_node_runtime_metadata() -> None:
     assert nvmrc_version == "22.12.0"
     assert "22.12.0" in node_range, (
         "erc-8004-contracts engines.node should align with the pinned .nvmrc version"
+    )
+
+
+def test_async_provisioning_pyproject_has_single_pytest_dev_declaration() -> None:
+    text = ASYNC_PYPROJECT.read_text(encoding="utf-8")
+
+    assert text.count("pytest>=") == 1, (
+        "async-provisioning-service/pyproject.toml should declare pytest in only one dev dependency location"
+    )
+    assert "[dependency-groups]" in text, (
+        "async-provisioning-service should keep dependency-groups as the authoritative dev dependency declaration"
     )
 
 
