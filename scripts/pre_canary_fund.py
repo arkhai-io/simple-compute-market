@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Plan or apply buyer/seller funding before a live canary.
 
-The script reads the local secret source-of-truth from
-~/.config/simple-market-service, inspects prod-canary.env plus wallets.env and
-alchemy.env, then computes the top-ups needed before a live canary starts.
+The script reads project-local canary inputs from
+~/.config/simple-market-service plus shared credentials from ~/.config/web3-ops,
+then computes the top-ups needed before a live canary starts.
 
 For Base Sepolia it can resolve USDC/WETH from the checked-in token registry.
 For Base mainnet, provide CANARY_FUNDING_TOKEN_ADDRESS and
@@ -20,6 +20,7 @@ from typing import NamedTuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
 BASE_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_base_sepolia.json"
 CHAIN_CONFIG = {
@@ -104,6 +105,24 @@ def _strip_matching_quotes(value: str) -> str:
     return value
 
 
+def _optional_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    return _parse_env_file(path)
+
+
+def _load_merged_env_file(
+    filename: str,
+    *,
+    shared_secrets_dir: Path,
+    local_secrets_dir: Path,
+) -> dict[str, str]:
+    return {
+        **_optional_env_file(shared_secrets_dir / filename),
+        **_optional_env_file(local_secrets_dir / filename),
+    }
+
+
 def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...]) -> None:
     missing = sorted(key for key in keys if not values.get(key))
     if missing:
@@ -115,10 +134,22 @@ def _to_base_units(amount: Decimal, decimals: int) -> int:
     return int((amount * scale).to_integral_value(rounding=ROUND_CEILING))
 
 
-def load_funding_context(local_secrets_dir: Path) -> FundingContext:
+def load_funding_context(
+    local_secrets_dir: Path,
+    *,
+    shared_secrets_dir: Path = SHARED_SECRETS_DIR,
+) -> FundingContext:
     shared = _parse_env_file(local_secrets_dir / "shared.env")
-    alchemy = _parse_env_file(local_secrets_dir / "alchemy.env")
-    wallets = _parse_env_file(local_secrets_dir / "wallets.env")
+    alchemy = _load_merged_env_file(
+        "alchemy.env",
+        shared_secrets_dir=shared_secrets_dir,
+        local_secrets_dir=local_secrets_dir,
+    )
+    wallets = _load_merged_env_file(
+        "wallets.env",
+        shared_secrets_dir=shared_secrets_dir,
+        local_secrets_dir=local_secrets_dir,
+    )
     canary = _parse_env_file(local_secrets_dir / "prod-canary.env")
 
     _require_keys(shared, label="shared.env", keys=("CHAIN_NAME",))
@@ -427,15 +458,22 @@ def _enforce_mainnet_apply_guard(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Plan or apply canary funding from ~/.config/simple-market-service "
-            "using prod-canary.env, wallets.env, and alchemy.env."
+            "Plan or apply canary funding from project-local "
+            "~/.config/simple-market-service inputs plus shared "
+            "~/.config/web3-ops credentials."
         )
+    )
+    parser.add_argument(
+        "--shared-secrets-dir",
+        type=Path,
+        default=SHARED_SECRETS_DIR,
+        help="Directory containing shared alchemy.env and wallets.env credentials.",
     )
     parser.add_argument(
         "--local-secrets-dir",
         type=Path,
         default=LOCAL_SECRETS_DIR,
-        help="Directory containing prod-canary.env, wallets.env, shared.env, and alchemy.env.",
+        help="Directory containing project-local prod-canary.env, shared.env, and overlays.",
     )
     parser.add_argument(
         "--apply",
@@ -458,7 +496,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    context = load_funding_context(args.local_secrets_dir.expanduser())
+    context = load_funding_context(
+        args.local_secrets_dir.expanduser(),
+        shared_secrets_dir=args.shared_secrets_dir.expanduser(),
+    )
     token_metadata = resolve_token_metadata(context)
     native_balances, erc20_balances = fetch_live_balances(context=context, token_metadata=token_metadata)
     plan = build_funding_plan(

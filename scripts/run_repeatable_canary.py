@@ -22,6 +22,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 DEFAULT_LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
 DEFAULT_OUTPUT_DIR = Path("/etc/simple-market-service")
 DEFAULT_ARTIFACTS_DIR = ROOT / "artifacts"
@@ -176,6 +177,7 @@ def _build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--environment", required=True)
+    parser.add_argument("--shared-secrets-dir", type=Path, default=DEFAULT_SHARED_SECRETS_DIR)
     parser.add_argument("--local-secrets-dir", type=Path, default=DEFAULT_LOCAL_SECRETS_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
@@ -195,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    shared_secrets_dir = args.shared_secrets_dir.expanduser()
     local_secrets_dir = args.local_secrets_dir.expanduser()
     output_dir = args.output_dir.expanduser()
     artifacts_dir = args.artifacts_dir.expanduser()
@@ -208,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
         [
             "python",
             "scripts/materialize_host_envs.py",
+            "--shared-secrets-dir",
+            str(shared_secrets_dir),
             "--local-secrets-dir",
             str(local_secrets_dir),
             "--output-dir",
@@ -220,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     funding_command = [
         "python",
         "scripts/pre_canary_fund.py",
+        "--shared-secrets-dir",
+        str(shared_secrets_dir),
         "--local-secrets-dir",
         str(local_secrets_dir),
     ]

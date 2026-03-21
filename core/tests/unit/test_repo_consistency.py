@@ -240,7 +240,9 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
         "workflow_dispatch:",
         "self-hosted",
         "isolated environment",
+        "~/.config/web3-ops",
         "~/.config/simple-market-service",
+        "shared_secrets_dir",
         "mainnet_ack",
         "/etc/simple-market-service/prod-canary.env",
         "scripts/run_repeatable_canary.py",
@@ -283,7 +285,9 @@ def test_repo_exposes_local_secret_materialization_entrypoint() -> None:
 
     text = MATERIALIZE_HOST_ENVS_SCRIPT.read_text(encoding="utf-8")
     for required_token in (
+        "~/.config/web3-ops",
         "~/.config/simple-market-service",
+        "--shared-secrets-dir",
         "/etc/simple-market-service",
         "alchemy.env",
         "wallets.env",
@@ -306,7 +310,9 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
 
     text = PRE_CANARY_FUND_SCRIPT.read_text(encoding="utf-8")
     for required_token in (
+        "~/.config/web3-ops",
         "~/.config/simple-market-service",
+        "--shared-secrets-dir",
         "prod-canary.env",
         "wallets.env",
         "alchemy.env",
@@ -333,6 +339,7 @@ def test_repo_exposes_repeatable_canary_runner_entrypoint() -> None:
 
     text = REPEATABLE_CANARY_RUNNER_SCRIPT.read_text(encoding="utf-8")
     for required_token in (
+        "~/.config/web3-ops",
         "scripts/materialize_host_envs.py",
         "scripts/pre_canary_fund.py",
         "scripts/run_deployment_gate_checks.py",
@@ -752,6 +759,7 @@ def test_standup_overview_includes_local_secret_materialization_step() -> None:
 def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> None:
     text = STANDUP_LOCAL_SECRETS_PATH.read_text(encoding="utf-8")
     for required_token in (
+        "~/.config/web3-ops",
         "~/.config/simple-market-service",
         "alchemy.env",
         "wallets.env",
@@ -765,6 +773,7 @@ def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> No
         "management-vars.yaml",
         "scripts/materialize_host_envs.py",
         "/etc/simple-market-service",
+        "--shared-secrets-dir",
         "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
         "ALCHEMY_BASE_SEPOLIA_WSS_URL",
         "SEPOLIA_FUNDER_PRIVATE_KEY",
@@ -788,6 +797,7 @@ def test_canary_and_provisioning_docs_reference_local_secret_materialization() -
         for required_token in (
             "docs/standup/local-secrets.md",
             "scripts/materialize_host_envs.py",
+            "~/.config/web3-ops",
             "~/.config/simple-market-service",
         ):
             assert required_token in text, (

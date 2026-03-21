@@ -12,9 +12,14 @@ on:
         required: true
         type: string
       local_secrets_dir:
-        description: "Local secret source-of-truth on the self-hosted runner."
+        description: "Project-local secret overlay on the self-hosted runner."
         required: true
         default: "~/.config/simple-market-service"
+        type: string
+      shared_secrets_dir:
+        description: "Shared runner credentials reused across projects."
+        required: true
+        default: "~/.config/web3-ops"
         type: string
       render_output_dir:
         description: "Host-local rendered env directory."
@@ -90,8 +95,15 @@ jobs:
         shell: bash
         run: |
           for path in \
-            "${{ inputs.local_secrets_dir }}/alchemy.env" \
-            "${{ inputs.local_secrets_dir }}/wallets.env" \
+            "${{ inputs.shared_secrets_dir }}/alchemy.env" \
+            "${{ inputs.shared_secrets_dir }}/wallets.env"; do
+            if [[ ! -f "$path" ]]; then
+              echo "Required shared secret file not found: $path" >&2
+              exit 1
+            fi
+          done
+
+          for path in \
             "${{ inputs.local_secrets_dir }}/shared.env" \
             "${{ inputs.local_secrets_dir }}/contracts.env" \
             "${{ inputs.local_secrets_dir }}/registry.env" \
@@ -119,6 +131,7 @@ jobs:
 
           args=(
             --environment "${{ inputs.isolated_environment }}"
+            --shared-secrets-dir "${{ inputs.shared_secrets_dir }}"
             --local-secrets-dir "${{ inputs.local_secrets_dir }}"
             --output-dir "${{ inputs.render_output_dir }}"
             --artifacts-dir artifacts

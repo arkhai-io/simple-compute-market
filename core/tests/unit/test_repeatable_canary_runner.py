@@ -74,11 +74,15 @@ def test_repeatable_canary_runner_executes_render_fund_gates_validate_then_smoke
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
     local_secrets_dir = tmp_path / "local-secrets"
     output_dir = tmp_path / "rendered"
     artifacts_dir = tmp_path / "artifacts"
     commands: list[tuple[list[str], Path]] = []
     logged_commands: list[tuple[list[str], Path, Path, dict[str, str] | None]] = []
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+    _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "base_sepolia"})
 
     def fake_run(
         command: list[str],
@@ -109,6 +113,8 @@ def test_repeatable_canary_runner_executes_render_fund_gates_validate_then_smoke
         [
             "--environment",
             "isolated-base-sepolia",
+            "--shared-secrets-dir",
+            str(shared_secrets_dir),
             "--local-secrets-dir",
             str(local_secrets_dir),
             "--output-dir",
@@ -127,6 +133,8 @@ def test_repeatable_canary_runner_executes_render_fund_gates_validate_then_smoke
             [
                 "python",
                 "scripts/materialize_host_envs.py",
+                "--shared-secrets-dir",
+                str(shared_secrets_dir),
                 "--local-secrets-dir",
                 str(local_secrets_dir),
                 "--output-dir",
@@ -138,6 +146,8 @@ def test_repeatable_canary_runner_executes_render_fund_gates_validate_then_smoke
             [
                 "python",
                 "scripts/pre_canary_fund.py",
+                "--shared-secrets-dir",
+                str(shared_secrets_dir),
                 "--local-secrets-dir",
                 str(local_secrets_dir),
                 "--apply",
@@ -217,11 +227,15 @@ def test_repeatable_canary_runner_attempts_rollback_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
     local_secrets_dir = tmp_path / "local-secrets"
     output_dir = tmp_path / "rendered"
     artifacts_dir = tmp_path / "artifacts"
     commands: list[tuple[list[str], Path]] = []
     logged_commands: list[tuple[list[str], Path, Path]] = []
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+    _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "base_sepolia"})
 
     def fake_run(
         command: list[str],
@@ -254,6 +268,8 @@ def test_repeatable_canary_runner_attempts_rollback_on_failure(
         [
             "--environment",
             "isolated-base-sepolia",
+            "--shared-secrets-dir",
+            str(shared_secrets_dir),
             "--local-secrets-dir",
             str(local_secrets_dir),
             "--output-dir",
@@ -271,6 +287,8 @@ def test_repeatable_canary_runner_attempts_rollback_on_failure(
             [
                 "python",
                 "scripts/materialize_host_envs.py",
+                "--shared-secrets-dir",
+                str(shared_secrets_dir),
                 "--local-secrets-dir",
                 str(local_secrets_dir),
                 "--output-dir",
@@ -282,6 +300,8 @@ def test_repeatable_canary_runner_attempts_rollback_on_failure(
             [
                 "python",
                 "scripts/pre_canary_fund.py",
+                "--shared-secrets-dir",
+                str(shared_secrets_dir),
                 "--local-secrets-dir",
                 str(local_secrets_dir),
             ],

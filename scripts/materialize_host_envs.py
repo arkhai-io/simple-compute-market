@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Materialize host-local env bundles from ~/.config/simple-market-service.
+"""Materialize host-local env bundles from shared and project-local secrets.
 
 This script keeps the source-of-truth local and out of Git, then renders the
 runtime files under /etc/simple-market-service with the derived values that are
-easy to drift:
+easy to drift.
 
-- Alchemy HTTP/WSS RPC endpoints
-- host-local contracts.env
+By default, shared credentials live under ~/.config/web3-ops and project-
+specific overlays live under ~/.config/simple-market-service:
+
+- shared Alchemy HTTP/WSS RPC endpoints
+- shared wallet and SSH credentials
+- project-local contracts/env overrides
 - provisioning SSH_PRIVATE_KEY and MANAGEMENT_VARS_YAML base64 payloads
 - seller/buyer wallet injection for agent and canary env files
 """
@@ -20,13 +24,17 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
 OUTPUT_DIR = Path("/etc/simple-market-service")
 AGENT_TEMPLATE = ROOT / "core/agent/.env.production.sample"
 PROVISIONING_TEMPLATE = ROOT / "async-provisioning-service/.env.production.sample"
 REGISTRY_TEMPLATE = ROOT / "erc-8004-registry-py/.env.sample"
-REQUIRED_LOCAL_FILES = (
+REQUIRED_SHARED_OR_LOCAL_FILES = (
     "alchemy.env",
+    "wallets.env",
+)
+REQUIRED_LOCAL_FILES = (
     "buyer-agent.env",
     "contracts.env",
     "prod-canary.env",
@@ -34,7 +42,6 @@ REQUIRED_LOCAL_FILES = (
     "registry.env",
     "seller-agent.env",
     "shared.env",
-    "wallets.env",
 )
 CHAIN_CONFIG = {
     "base_sepolia": {
@@ -85,12 +92,43 @@ def _write_text_file(path: Path, content: str) -> None:
     os.chmod(path, 0o600)
 
 
-def _ensure_required_files(local_secrets_dir: Path) -> None:
-    missing = sorted(
+def _optional_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    return _parse_env_file(path)
+
+
+def _load_merged_env_file(
+    filename: str,
+    *,
+    shared_secrets_dir: Path,
+    local_secrets_dir: Path,
+) -> dict[str, str]:
+    return {
+        **_optional_env_file(shared_secrets_dir / filename),
+        **_optional_env_file(local_secrets_dir / filename),
+    }
+
+
+def _ensure_required_files(*, local_secrets_dir: Path, shared_secrets_dir: Path) -> None:
+    missing_local = sorted(
         filename for filename in REQUIRED_LOCAL_FILES if not (local_secrets_dir / filename).exists()
     )
-    if missing:
-        raise SystemExit(f"Missing required local secret files: {', '.join(missing)}")
+    missing_shared_or_local = sorted(
+        filename
+        for filename in REQUIRED_SHARED_OR_LOCAL_FILES
+        if not (shared_secrets_dir / filename).exists() and not (local_secrets_dir / filename).exists()
+    )
+    if missing_local or missing_shared_or_local:
+        messages: list[str] = []
+        if missing_local:
+            messages.append(f"Missing required local secret files: {', '.join(missing_local)}")
+        if missing_shared_or_local:
+            messages.append(
+                "Missing required shared or local secret files: "
+                + ", ".join(missing_shared_or_local)
+            )
+        raise SystemExit("; ".join(messages))
 
 
 def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...]) -> None:
@@ -130,13 +168,26 @@ def _base64_file(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def materialize_host_envs(*, local_secrets_dir: Path, output_dir: Path) -> list[Path]:
-    _ensure_required_files(local_secrets_dir)
+def materialize_host_envs(
+    *,
+    shared_secrets_dir: Path = SHARED_SECRETS_DIR,
+    local_secrets_dir: Path,
+    output_dir: Path,
+) -> list[Path]:
+    _ensure_required_files(local_secrets_dir=local_secrets_dir, shared_secrets_dir=shared_secrets_dir)
 
     shared = _parse_env_file(local_secrets_dir / "shared.env")
-    alchemy = _parse_env_file(local_secrets_dir / "alchemy.env")
+    alchemy = _load_merged_env_file(
+        "alchemy.env",
+        shared_secrets_dir=shared_secrets_dir,
+        local_secrets_dir=local_secrets_dir,
+    )
     contracts = _parse_env_file(local_secrets_dir / "contracts.env")
-    wallets = _parse_env_file(local_secrets_dir / "wallets.env")
+    wallets = _load_merged_env_file(
+        "wallets.env",
+        shared_secrets_dir=shared_secrets_dir,
+        local_secrets_dir=local_secrets_dir,
+    )
     registry_overrides = _parse_env_file(local_secrets_dir / "registry.env")
     provisioning_overrides = _parse_env_file(local_secrets_dir / "provisioning.env")
     seller_overrides = _parse_env_file(local_secrets_dir / "seller-agent.env")
@@ -305,15 +356,22 @@ def materialize_host_envs(*, local_secrets_dir: Path, output_dir: Path) -> list[
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Render /etc/simple-market-service env bundles from "
-            "~/.config/simple-market-service"
+            "Render /etc/simple-market-service env bundles from shared "
+            "~/.config/web3-ops credentials plus project-local "
+            "~/.config/simple-market-service overlays"
         )
+    )
+    parser.add_argument(
+        "--shared-secrets-dir",
+        type=Path,
+        default=SHARED_SECRETS_DIR,
+        help="Directory containing shared alchemy.env and wallets.env credentials.",
     )
     parser.add_argument(
         "--local-secrets-dir",
         type=Path,
         default=LOCAL_SECRETS_DIR,
-        help="Directory containing alchemy.env, wallets.env, shared.env, and related fragments.",
+        help="Directory containing project-local shared.env and role-specific overlay fragments.",
     )
     parser.add_argument(
         "--output-dir",
@@ -328,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     written = materialize_host_envs(
+        shared_secrets_dir=args.shared_secrets_dir.expanduser(),
         local_secrets_dir=args.local_secrets_dir.expanduser(),
         output_dir=args.output_dir.expanduser(),
     )

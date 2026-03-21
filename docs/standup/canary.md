@@ -43,11 +43,13 @@ defaults is:
 - `CANARY_DURATION_HOURS=1`
 - `CANARY_MATCH_SALT=<fixed-integer-when-repeatability-matters>`
 
-If you keep the operator source-of-truth in `~/.config/simple-market-service`,
-follow `docs/standup/local-secrets.md` and render the host-local bundle first:
+If you keep reusable credentials in `~/.config/web3-ops` and the
+simple-market-service overlay in `~/.config/simple-market-service`, follow
+`docs/standup/local-secrets.md` and render the host-local bundle first:
 
 ```bash
 python scripts/materialize_host_envs.py \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service \
   --output-dir /etc/simple-market-service
 ```
@@ -65,6 +67,7 @@ meet the configured thresholds:
 
 ```bash
 python scripts/pre_canary_fund.py \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service
 ```
 
@@ -87,6 +90,7 @@ each step:
 ```bash
 python scripts/run_repeatable_canary.py \
   --environment isolated-base-sepolia \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service \
   --output-dir /etc/simple-market-service \
   --artifacts-dir artifacts \

@@ -1,25 +1,28 @@
 # Local Secret Layout
 
-Keep the deployment source-of-truth outside Git in
-`~/.config/simple-market-service`, then materialize the host-local runtime files
-under `/etc/simple-market-service`.
+Keep credentials outside Git in two local layers, then materialize the
+host-local runtime files under `/etc/simple-market-service`.
 
 This is the canonical layout for operator-managed credentials, including the
 Alchemy-backed RPC endpoints and the SSH keys used by provisioning and canary
 validation.
 
-## Local Directory Contract
+## Directory Contract
 
-Create a local directory with mode `0700`:
+Create both local directories with mode `0700`:
 
 ```bash
+install -d -m 0700 ~/.config/web3-ops
 install -d -m 0700 ~/.config/simple-market-service
 ```
 
-Then store these files with mode `0600`:
+Keep shared cross-project credentials in `~/.config/web3-ops` with mode `0600`:
 
-- `~/.config/simple-market-service/alchemy.env`
-- `~/.config/simple-market-service/wallets.env`
+- `~/.config/web3-ops/alchemy.env`
+- `~/.config/web3-ops/wallets.env`
+
+Keep project-specific overlays in `~/.config/simple-market-service` with mode `0600`:
+
 - `~/.config/simple-market-service/shared.env`
 - `~/.config/simple-market-service/contracts.env`
 - `~/.config/simple-market-service/registry.env`
@@ -36,7 +39,7 @@ Recommended key files that stay outside this directory but remain local:
 
 ## Required Fragments
 
-`alchemy.env` should include at least:
+`~/.config/web3-ops/alchemy.env` should include at least:
 
 ```dotenv
 ALCHEMY_BASE_SEPOLIA_HTTP_URL=https://base-sepolia.g.alchemy.com/v2/<key>
@@ -45,7 +48,8 @@ ALCHEMY_BASE_MAINNET_HTTP_URL=https://base-mainnet.g.alchemy.com/v2/<key>
 ALCHEMY_BASE_MAINNET_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
 ```
 
-`wallets.env` should include the local credential paths and agent wallets:
+`~/.config/web3-ops/wallets.env` should include the reusable credential paths
+and wallet keys:
 
 ```dotenv
 SEPOLIA_FUNDER_PRIVATE_KEY=0x<sepolia-funder-private-key>
@@ -59,8 +63,9 @@ PROVISIONER_SSH_PRIVATE_KEY_PATH=~/.ssh/provisioner_ed25519
 CANARY_TENANT_SSH_PRIVATE_KEY_PATH=~/.ssh/sms_canary_tenant_ed25519
 ```
 
-`shared.env` should include the deployment-wide values that stay aligned across
-registry, agents, provisioning, and the canary runner:
+`~/.config/simple-market-service/shared.env` should include the deployment-wide
+values that stay aligned across registry, agents, provisioning, and the canary
+runner:
 
 ```dotenv
 CHAIN_NAME=base_sepolia
@@ -74,7 +79,8 @@ REGISTRY_URL=http://<registry-zerotier-ip>:8080
 PROVISIONING_SERVICE_URL=http://<provisioner-zerotier-ip>:8081
 ```
 
-`contracts.env` should contain the deployed ERC-8004 addresses:
+`~/.config/simple-market-service/contracts.env` should contain the deployed
+ERC-8004 addresses:
 
 ```dotenv
 IDENTITY_REGISTRY_ADDRESS=0x...
@@ -82,8 +88,8 @@ REPUTATION_REGISTRY_ADDRESS=0x...
 VALIDATION_REGISTRY_ADDRESS=0x...
 ```
 
-`provisioning.env` should hold the host-specific runtime values and point at the
-local `management-vars.yaml` file:
+`~/.config/simple-market-service/provisioning.env` should hold the host-specific
+runtime values and point at the local `management-vars.yaml` file:
 
 ```dotenv
 DATABASE_URL=postgresql+psycopg2://...
@@ -93,9 +99,11 @@ ANSIBLE_BECOME_PASS=<sudo-password>
 MANAGEMENT_VARS_PATH=~/.config/simple-market-service/management-vars.yaml
 ```
 
-`seller-agent.env`, `buyer-agent.env`, and `prod-canary.env` should each hold
-their role-specific overrides such as agent IDs, URLs, and canary defaults.
-For repeatable canary funding, add these keys to `prod-canary.env`:
+`~/.config/simple-market-service/seller-agent.env`,
+`~/.config/simple-market-service/buyer-agent.env`, and
+`~/.config/simple-market-service/prod-canary.env` should each hold their
+role-specific overrides such as agent IDs, URLs, and canary defaults. For
+repeatable canary funding, add these keys to `prod-canary.env`:
 
 ```dotenv
 BUYER_NATIVE_FLOOR_WEI=20000000000000
@@ -114,6 +122,7 @@ Render the host-local bundle with:
 
 ```bash
 python scripts/materialize_host_envs.py \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service \
   --output-dir /etc/simple-market-service
 ```
@@ -143,6 +152,7 @@ Before a live run, compute the top-ups from the same local secret bundle:
 
 ```bash
 python scripts/pre_canary_fund.py \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service
 ```
 
@@ -161,6 +171,7 @@ entrypoint after the local secret bundle is ready:
 ```bash
 python scripts/run_repeatable_canary.py \
   --environment isolated-base-sepolia \
+  --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service \
   --output-dir /etc/simple-market-service \
   --artifacts-dir artifacts \
@@ -189,5 +200,8 @@ grep '^SSH_PRIVATE_KEY=' /etc/simple-market-service/provisioning.env
 grep '^SSH_PRIVATE_KEY_PATH=' /etc/simple-market-service/prod-canary.env
 ```
 
-Do not commit anything from `~/.config/simple-market-service` or
-`/etc/simple-market-service`.
+`~/.config/web3-ops` is the reusable cross-project credential store. Keep
+project-specific overrides in `~/.config/simple-market-service`.
+
+Do not commit anything from `~/.config/web3-ops`,
+`~/.config/simple-market-service`, or `/etc/simple-market-service`.

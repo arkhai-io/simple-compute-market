@@ -31,8 +31,10 @@ def test_materialize_host_envs_renders_consistent_host_local_bundle(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
     local_secrets_dir = tmp_path / "local-secrets"
     output_dir = tmp_path / "rendered"
+    shared_secrets_dir.mkdir()
     local_secrets_dir.mkdir()
 
     _write_env(
@@ -148,6 +150,7 @@ def test_materialize_host_envs_renders_consistent_host_local_bundle(
     )
 
     written = module.materialize_host_envs(
+        shared_secrets_dir=shared_secrets_dir,
         local_secrets_dir=local_secrets_dir,
         output_dir=output_dir,
     )
@@ -213,17 +216,170 @@ def test_materialize_host_envs_renders_consistent_host_local_bundle(
 
 def test_materialize_host_envs_requires_expected_local_secret_bundle(tmp_path: Path) -> None:
     module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
     local_secrets_dir = tmp_path / "local-secrets"
     output_dir = tmp_path / "rendered"
+    shared_secrets_dir.mkdir()
     local_secrets_dir.mkdir()
 
     _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "base_sepolia"})
 
     with pytest.raises(
         SystemExit,
-        match="Missing required local secret files: alchemy.env, buyer-agent.env, contracts.env, prod-canary.env, provisioning.env, registry.env, seller-agent.env, wallets.env",
+        match=(
+            "Missing required local secret files: buyer-agent.env, contracts.env, "
+            "prod-canary.env, provisioning.env, registry.env, seller-agent.env; "
+            "Missing required shared or local secret files: alchemy.env, wallets.env"
+        ),
+    ):
+        module.materialize_host_envs(
+            shared_secrets_dir=shared_secrets_dir,
+            local_secrets_dir=local_secrets_dir,
+            output_dir=output_dir,
+        )
+
+
+def test_materialize_host_envs_merges_shared_credentials_with_local_overrides(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    output_dir = tmp_path / "rendered"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        shared_secrets_dir / "alchemy.env",
+        {
+            "ALCHEMY_BASE_SEPOLIA_HTTP_URL": "https://alchemy.example/shared-http",
+            "ALCHEMY_BASE_SEPOLIA_WSS_URL": "wss://alchemy.example/shared-wss",
+        },
+    )
+    _write_env(
+        shared_secrets_dir / "wallets.env",
+        {
+            "SELLER_PRIVATE_KEY": "0xshared-seller-private-key",
+            "SELLER_WALLET_ADDRESS": "0x1111111111111111111111111111111111111111",
+            "BUYER_PRIVATE_KEY": "0xshared-buyer-private-key",
+            "BUYER_WALLET_ADDRESS": "0x2222222222222222222222222222222222222222",
+            "SSH_PUBLIC_KEY": "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQDshared shared@example",
+            "PROVISIONER_SSH_PRIVATE_KEY_PATH": str(local_secrets_dir / "provisioner_ed25519"),
+            "CANARY_TENANT_SSH_PRIVATE_KEY_PATH": str(local_secrets_dir / "tenant_ed25519"),
+        },
+    )
+    _write_env(
+        local_secrets_dir / "wallets.env",
+        {
+            "BUYER_PRIVATE_KEY": "0xlocal-buyer-private-key",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "base_sepolia",
+            "ZEROTIER_NETWORK": "zt-network",
+            "FRP_SERVER_ADDR": "frp.example.internal",
+            "FRP_DOMAIN": "example.internal",
+            "FRP_DASHBOARD_PASSWORD": "frp-password",
+            "DEFAULT_VM_HOST": "btc1",
+            "REGISTRY_URL": "http://10.0.0.11:8080",
+            "PROVISIONING_SERVICE_URL": "http://10.0.0.12:8081",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "contracts.env",
+        {
+            "IDENTITY_REGISTRY_ADDRESS": "0x3333333333333333333333333333333333333333",
+            "REPUTATION_REGISTRY_ADDRESS": "0x4444444444444444444444444444444444444444",
+            "VALIDATION_REGISTRY_ADDRESS": "0x5555555555555555555555555555555555555555",
+        },
+    )
+    _write_env(local_secrets_dir / "registry.env", {"DATABASE_URL": "postgresql://registry"})
+    _write_env(
+        local_secrets_dir / "provisioning.env",
+        {
+            "DATABASE_URL": "postgresql+psycopg2://prov",
+            "REDIS_URL": "redis://redis.internal:6379/0",
+            "REDIS_QUEUE_NAME": "provisioning_jobs",
+            "ANSIBLE_BECOME_PASS": "sudo-password",
+            "MANAGEMENT_VARS_PATH": str(local_secrets_dir / "management-vars.yaml"),
+        },
+    )
+    _write_env(
+        local_secrets_dir / "seller-agent.env",
+        {"AGENT_ID": "seller-prod", "GEMINI_API_KEY": "seller-gemini-key"},
+    )
+    _write_env(
+        local_secrets_dir / "buyer-agent.env",
+        {"AGENT_ID": "buyer-prod", "GEMINI_API_KEY": "buyer-gemini-key"},
+    )
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "SELLER_AGENT_URL": "http://10.0.0.21:8000",
+            "BUYER_AGENT_URL": "http://10.0.0.22:8000",
+            "SELLER_AGENT_ID": "seller-agent-id",
+            "BUYER_AGENT_ID": "buyer-agent-id",
+        },
+    )
+    (local_secrets_dir / "management-vars.yaml").write_text("ansible_user: ubuntu\n", encoding="utf-8")
+    (local_secrets_dir / "provisioner_ed25519").write_text("provisioner\n", encoding="utf-8")
+    (local_secrets_dir / "tenant_ed25519").write_text("tenant\n", encoding="utf-8")
+
+    module.materialize_host_envs(
+        local_secrets_dir=local_secrets_dir,
+        output_dir=output_dir,
+        shared_secrets_dir=shared_secrets_dir,
+    )
+
+    seller_text = (output_dir / "seller-agent.env").read_text(encoding="utf-8")
+    buyer_text = (output_dir / "buyer-agent.env").read_text(encoding="utf-8")
+    assert "CHAIN_RPC_URL=wss://alchemy.example/shared-wss" in seller_text
+    assert "AGENT_PRIV_KEY=0xshared-seller-private-key" in seller_text
+    assert "AGENT_PRIV_KEY=0xlocal-buyer-private-key" in buyer_text
+
+
+def test_materialize_host_envs_requires_shared_credentials_when_not_overridden(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    output_dir = tmp_path / "rendered"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "base_sepolia"})
+    _write_env(local_secrets_dir / "contracts.env", {"IDENTITY_REGISTRY_ADDRESS": "0x1"})
+    _write_env(local_secrets_dir / "registry.env", {"DATABASE_URL": "postgresql://registry"})
+    _write_env(
+        local_secrets_dir / "provisioning.env",
+        {
+            "DATABASE_URL": "postgresql+psycopg2://prov",
+            "REDIS_URL": "redis://redis.internal:6379/0",
+            "REDIS_QUEUE_NAME": "provisioning_jobs",
+            "ANSIBLE_BECOME_PASS": "sudo-password",
+        },
+    )
+    _write_env(local_secrets_dir / "seller-agent.env", {"AGENT_ID": "seller", "GEMINI_API_KEY": "key"})
+    _write_env(local_secrets_dir / "buyer-agent.env", {"AGENT_ID": "buyer", "GEMINI_API_KEY": "key"})
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "SELLER_AGENT_URL": "http://seller",
+            "BUYER_AGENT_URL": "http://buyer",
+            "SELLER_AGENT_ID": "seller-agent-id",
+            "BUYER_AGENT_ID": "buyer-agent-id",
+        },
+    )
+
+    with pytest.raises(
+        SystemExit,
+        match="Missing required shared or local secret files: alchemy.env, wallets.env",
     ):
         module.materialize_host_envs(
             local_secrets_dir=local_secrets_dir,
             output_dir=output_dir,
+            shared_secrets_dir=shared_secrets_dir,
         )
