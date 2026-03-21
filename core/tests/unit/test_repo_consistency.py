@@ -54,6 +54,9 @@ PROVISIONING_IAC_MAKEFILE = ROOT / "compute-provisioning-iac/Makefile"
 PROVISIONING_IAC_VM_CONTRACT_TESTS = (
     ROOT / "compute-provisioning-iac/tests/test_vm_management_contracts.py"
 )
+PROVISIONING_IAC_ACCEPTANCE_SCRIPT = (
+    ROOT / "compute-provisioning-iac/scripts/run_acceptance_validation.sh"
+)
 FRP_SETUP_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/frp-setup/tasks/main.yml"
 VM_SETUP_SYSTEM_PACKAGES = (
     ROOT / "compute-provisioning-iac/ansible/roles/vm-setup/tasks/system-packages.yml"
@@ -296,6 +299,53 @@ def test_compute_provisioning_iac_readme_documents_vm_contract_test_entrypoint()
         assert required_token in text, (
             "compute-provisioning-iac/README.md must document the VM "
             f"contract test path including '{required_token}'"
+        )
+
+
+def test_compute_provisioning_iac_exposes_acceptance_validation_entrypoint() -> None:
+    makefile_text = PROVISIONING_IAC_MAKEFILE.read_text(encoding="utf-8")
+    script_text = PROVISIONING_IAC_ACCEPTANCE_SCRIPT.read_text(encoding="utf-8")
+
+    for required_token in (
+        "validate-acceptance:",
+        "./scripts/run_acceptance_validation.sh",
+    ):
+        assert required_token in makefile_text, (
+            "compute-provisioning-iac/Makefile must expose the heavier IaC "
+            f"acceptance path via '{required_token}'"
+        )
+
+    for required_token in (
+        "ansible/playbooks/host-kit/vm-setup.yaml",
+        "ansible/playbooks/single-tenant/vm-operations.yaml",
+        "vm_action=create",
+        "vm_action=check",
+        "vm_action=destroy",
+        "vm_action=undefine",
+        "--limit",
+        "KVM_HOST",
+    ):
+        assert required_token in script_text, (
+            "compute-provisioning-iac/scripts/run_acceptance_validation.sh "
+            f"is missing acceptance token '{required_token}'"
+        )
+
+
+def test_compute_provisioning_iac_readme_documents_optional_acceptance_path() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make validate-acceptance",
+        "run_acceptance_validation.sh",
+        "not part of the default CI",
+        "KVM_HOST=ww1",
+        "host-kit",
+        "vm_action=create",
+        "vm_action=undefine",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac/README.md must document the heavier IaC "
+            f"acceptance path including '{required_token}'"
         )
 
 
