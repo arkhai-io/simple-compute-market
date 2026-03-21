@@ -1,0 +1,166 @@
+name: Deployed Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      isolated_environment:
+        description: "Target isolated environment identifier. This workflow must never target shared production."
+        required: true
+        type: string
+      isolation_ack:
+        description: 'Type "isolated" to confirm this run targets an isolated environment.'
+        required: true
+        type: string
+      canary_env_file:
+        description: "Host-local canary env file on the self-hosted runner."
+        required: true
+        default: "/etc/simple-market-service/prod-canary.env"
+        type: string
+      seller_agent_env:
+        description: "Host-local deployed seller env file."
+        required: true
+        default: "/etc/simple-market-service/seller-agent.env"
+        type: string
+      buyer_agent_env:
+        description: "Host-local deployed buyer env file."
+        required: true
+        default: "/etc/simple-market-service/buyer-agent.env"
+        type: string
+      provisioning_env:
+        description: "Host-local deployed provisioning env file."
+        required: true
+        default: "/etc/simple-market-service/provisioning.env"
+        type: string
+      registry_env:
+        description: "Host-local deployed registry env file."
+        required: true
+        default: "/etc/simple-market-service/registry.env"
+        type: string
+      run_release_gates:
+        description: "Run release gates before the live canary."
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  deployed-canary:
+    name: Deployed canary (isolated environment)
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.8.13"
+          enable-cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: erc-8004-contracts/package-lock.json
+
+      - name: Enforce isolated environment
+        shell: bash
+        run: |
+          if [[ "${{ inputs.isolation_ack }}" != "isolated" ]]; then
+            echo 'Refusing to run: set isolation_ack to "isolated".' >&2
+            exit 1
+          fi
+
+          case "${{ inputs.isolated_environment }}" in
+            production|prod|shared-production|shared-prod)
+              echo "Refusing to run against shared production. Use an isolated environment identifier." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Validate host-local env contract
+        shell: bash
+        run: |
+          for path in \
+            "${{ inputs.canary_env_file }}" \
+            "${{ inputs.seller_agent_env }}" \
+            "${{ inputs.buyer_agent_env }}" \
+            "${{ inputs.provisioning_env }}" \
+            "${{ inputs.registry_env }}"; do
+            if [[ ! -f "$path" ]]; then
+              echo "Required env file not found: $path" >&2
+              exit 1
+            fi
+          done
+
+      - name: Run release gates
+        if: ${{ inputs.run_release_gates }}
+        shell: bash
+        run: |
+          python scripts/run_release_gate_checks.py \
+            --environment "${{ inputs.isolated_environment }}" \
+            --seller-agent-env "${{ inputs.seller_agent_env }}" \
+            --buyer-agent-env "${{ inputs.buyer_agent_env }}" \
+            --provisioning-env "${{ inputs.provisioning_env }}" \
+            --registry-env "${{ inputs.registry_env }}" \
+            --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+            --skip-smoke-help
+
+      - name: Run deployed canary
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          set -a
+          . "${{ inputs.canary_env_file }}"
+          set +a
+
+          set +e
+          (
+            cd cli
+            uv --no-config run python ../scripts/prod_canary_smoke.py
+          ) 2>&1 | tee artifacts/prod-canary.log
+          canary_exit_code=${PIPESTATUS[0]}
+          set -e
+
+          echo "canary_exit_code=${canary_exit_code}" >> "$GITHUB_ENV"
+
+      - name: Roll back failed canary
+        if: ${{ env.canary_exit_code != '0' }}
+        shell: bash
+        run: |
+          set -a
+          . "${{ inputs.canary_env_file }}"
+          set +a
+
+          (
+            cd cli
+            uv --no-config run python ../scripts/prod_canary_rollback.py \
+              --log-path ../artifacts/prod-canary.log
+          ) 2>&1 | tee artifacts/prod-canary-rollback.log || true
+
+      - name: Upload deployed canary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-canary-${{ inputs.isolated_environment }}
+          path: artifacts/
+
+      - name: Fail if deployed canary did not pass
+        if: ${{ env.canary_exit_code != '0' }}
+        shell: bash
+        run: |
+          echo "Live canary failed. Rollback was attempted; inspect uploaded artifacts." >&2
+          exit 1

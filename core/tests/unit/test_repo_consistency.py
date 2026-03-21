@@ -86,6 +86,7 @@ CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
+DEPLOYED_CANARY_WORKFLOW = ROOT / ".github/workflows/deployed-canary.yml"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
 AGENT_README = ROOT / "core/agent/README.md"
@@ -220,6 +221,29 @@ def test_repo_exposes_ci_test_matrix_workflow() -> None:
     text = TEST_MATRIX_WORKFLOW.read_text(encoding="utf-8")
     assert "scripts/run_full_repo_validation.py" in text
     assert "node-version: 22.12.0" in text or "node-version: '22.12.0'" in text
+
+
+def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
+    assert DEPLOYED_CANARY_WORKFLOW.exists(), (
+        ".github/workflows/deployed-canary.yml must exist for the isolated "
+        "deployed-canary runner"
+    )
+
+    text = DEPLOYED_CANARY_WORKFLOW.read_text(encoding="utf-8")
+    for required_token in (
+        "workflow_dispatch:",
+        "self-hosted",
+        "isolated environment",
+        "/etc/simple-market-service/prod-canary.env",
+        "scripts/run_release_gate_checks.py",
+        "scripts/prod_canary_smoke.py",
+        "scripts/prod_canary_rollback.py",
+        "upload-artifact",
+    ):
+        assert required_token in text, (
+            "deployed-canary workflow is missing required runner contract token: "
+            f"{required_token}"
+        )
 
 
 def test_repo_exposes_release_gate_entrypoint() -> None:
@@ -1348,6 +1372,22 @@ def test_standup_canary_doc_points_to_actionable_rollback_runbook() -> None:
     text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
 
     assert "../production-canary.md#rollback" in text
+
+
+def test_standup_canary_doc_references_isolated_deployed_runner() -> None:
+    text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        ".github/workflows/deployed-canary.yml",
+        "workflow_dispatch",
+        "isolated environment",
+        "/etc/simple-market-service/prod-canary.env",
+        "scripts/prod_canary_rollback.py",
+    ):
+        assert required_token in text, (
+            "canary.md is missing the documented deployed-canary runner entrypoint: "
+            f"{required_token}"
+        )
 
 
 def test_production_canary_doc_matches_runner_contract() -> None:

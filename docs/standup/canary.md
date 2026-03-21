@@ -85,6 +85,23 @@ python scripts/validate_deployment_bundle.py \
   --ssh-private-key-path ~/.ssh/id_ed25519
 ```
 
+## Automated Runner
+
+If a self-hosted GitHub runner already sits inside the isolated environment,
+you can trigger `.github/workflows/deployed-canary.yml` with
+`workflow_dispatch` instead of running the smoke commands manually.
+
+That runner contract is intentionally narrow:
+
+- it expects host-local env files such as `/etc/simple-market-service/prod-canary.env`
+- it refuses shared production style targets and requires an explicit isolated environment acknowledgement
+- it runs `scripts/run_release_gate_checks.py` before the live smoke path when enabled
+- it runs `scripts/prod_canary_smoke.py` from the repo checkout
+- if the canary fails, it attempts `scripts/prod_canary_rollback.py` against the captured canary log before surfacing the failure
+
+Use that workflow only for an isolated environment with the same host-local env
+bundle contract documented in this runbook.
+
 ## Live Verification
 
 Verify the deployed services from the same machine that will run the canary:
