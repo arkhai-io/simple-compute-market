@@ -51,6 +51,9 @@ ALKAHEST_BASE_DEPLOYMENT = (
 PROVISIONING_IAC_GITIGNORE = ROOT / "compute-provisioning-iac/.gitignore"
 PROVISIONING_IAC_README = ROOT / "compute-provisioning-iac/README.md"
 PROVISIONING_IAC_MAKEFILE = ROOT / "compute-provisioning-iac/Makefile"
+PROVISIONING_IAC_VM_CONTRACT_TESTS = (
+    ROOT / "compute-provisioning-iac/tests/test_vm_management_contracts.py"
+)
 FRP_SETUP_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/frp-setup/tasks/main.yml"
 VM_SETUP_SYSTEM_PACKAGES = (
     ROOT / "compute-provisioning-iac/ansible/roles/vm-setup/tasks/system-packages.yml"
@@ -247,6 +250,52 @@ def test_compute_provisioning_iac_readme_documents_validation_entrypoints() -> N
         assert required_token in text, (
             "compute-provisioning-iac/README.md must document the validation "
             f"entrypoints: {required_token}"
+        )
+
+
+def test_compute_provisioning_iac_makefile_exposes_vm_contract_tests() -> None:
+    text = PROVISIONING_IAC_MAKEFILE.read_text(encoding="utf-8")
+
+    for required_token in (
+        "validate-tests:",
+        "validate: validate-inventory validate-playbooks validate-tests",
+        "python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac/Makefile must expose the VM lifecycle "
+            f"contract tests via '{required_token}'"
+        )
+
+
+def test_compute_provisioning_iac_role_contract_tests_exist_and_cover_vm_lifecycle() -> None:
+    text = PROVISIONING_IAC_VM_CONTRACT_TESTS.read_text(encoding="utf-8")
+
+    for required_token in (
+        "VmManagementContractTests",
+        "test_main_orchestrates_prerequisites_actions_and_json_output",
+        "test_prerequisites_fail_fast_if_vm_already_exists",
+        "test_vm_create_reads_frp_dashboard_from_compressed_response_env",
+        "test_vm_destroy_emits_force_destroy_json_contract",
+        "test_vm_undefine_requires_stopped_vm_and_cleans_up_access_artifacts",
+        "test_json_output_exports_create_destroy_and_undefine_payloads",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac VM lifecycle contract tests are "
+            f"missing '{required_token}'"
+        )
+
+
+def test_compute_provisioning_iac_readme_documents_vm_contract_test_entrypoint() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make validate-tests",
+        "VM lifecycle contract tests",
+        "tests/test_vm_management_contracts.py",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac/README.md must document the VM "
+            f"contract test path including '{required_token}'"
         )
 
 
