@@ -359,6 +359,8 @@ def test_root_readme_documents_full_local_compose_stack() -> None:
     for required_token in (
         "Docker",
         "Docker Compose",
+        "/dev/net/tun",
+        "Linux host",
         "make init-submodules",
         "make build",
         "make deploy-local",

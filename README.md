@@ -158,6 +158,8 @@ single-agent quick start above. This brings up:
 
 Before the first compose run:
 
+- use a Linux host that exposes `/dev/net/tun`, because the buyer and seller
+  agent containers mount that device directly
 - initialize submodules with `make init-submodules`
 - build the local images with `make build`
 - ensure `~/.ssh/id_ed25519` exists, because the local provisioning container
