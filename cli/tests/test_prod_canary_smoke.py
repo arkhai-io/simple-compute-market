@@ -600,13 +600,13 @@ def test_main_uses_match_salt_to_isolate_each_canary_run(
             "--token-amount",
             "0.0001",
             "--match-salt",
-            "42",
+            "100",
         ]
     )
 
     assert exit_code == 0
-    assert created_orders[0]["demand"]["amount"] == 0.00010042
-    assert created_orders[1]["offer"]["amount"] == 0.00010042
+    assert created_orders[0]["demand"]["amount"] == 0.000101
+    assert created_orders[1]["offer"]["amount"] == 0.000101
 
 
 def test_main_passes_configured_timeout_to_order_creation(

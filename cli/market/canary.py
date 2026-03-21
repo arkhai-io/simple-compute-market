@@ -12,13 +12,17 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterable
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 
 _KNOWN_WRAPPED_NATIVE_TOKENS: dict[str, tuple[str, int]] = {
     "base": ("0x4200000000000000000000000000000000000006", 18),
     "base_sepolia": ("0x4200000000000000000000000000000000000006", 18),
     "base-sepolia": ("0x4200000000000000000000000000000000000006", 18),
+}
+_KNOWN_TOKEN_DECIMALS: dict[str, int] = {
+    "USDC": 6,
+    "WETH": 18,
 }
 _WRAP_NATIVE_CALLDATA = "0xd0e30db0"
 _WRAP_GAS_LIMIT = 120000
@@ -722,7 +726,9 @@ class CanaryConfig:
     def effective_token_amount(self) -> float:
         base = Decimal(str(self.token_amount))
         offset = Decimal(self.match_salt % 1000) / Decimal("100000000")
-        return float(base + offset)
+        precision = _KNOWN_TOKEN_DECIMALS.get(self.token_symbol.upper(), 6)
+        quantizer = Decimal(1).scaleb(-precision)
+        return float((base + offset).quantize(quantizer, rounding=ROUND_DOWN))
 
     @property
     def token_resource(self) -> dict:

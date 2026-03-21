@@ -36,6 +36,18 @@ def _config(**overrides):
     return CanaryConfig(**values)
 
 
+def test_effective_token_amount_truncates_to_supported_usdc_precision() -> None:
+    config = _config(match_salt=963, token_symbol="USDC", token_amount=2.5)
+
+    assert config.effective_token_amount == 2.500009
+
+
+def test_effective_token_amount_preserves_weth_precision() -> None:
+    config = _config(match_salt=42, token_symbol="WETH", token_amount=0.0001)
+
+    assert config.effective_token_amount == 0.00010042
+
+
 def test_identity_preflight_validator_rejects_reused_actor_identity() -> None:
     from market.canary import IdentityPreflightValidator
 
