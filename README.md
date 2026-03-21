@@ -25,6 +25,8 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 - make, curl, git
 - Python 3.12+ with `uv`
 - Node.js 12+ with npm
+- Docker
+- Docker Compose
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
 
@@ -139,6 +141,47 @@ Start the agent:
 
 ```bash
 make serve-a2a
+```
+
+## Full Local Stack (Docker Compose)
+
+Use this path when you want the full local stack instead of the manual
+single-agent quick start above. This brings up:
+
+- Anvil
+- ERC-8004 contract deployment
+- registry
+- buyer agent
+- seller agent
+- Redis
+- async provisioning service
+
+Before the first compose run:
+
+- build the local images with `make build`
+- ensure `~/.ssh/id_ed25519` exists, because the local provisioning container
+  mounts that key path for Ansible access
+
+Bring the full stack up:
+
+```bash
+make build
+make deploy-local
+```
+
+Verify the local services:
+
+```bash
+curl http://localhost:18080/health
+curl http://localhost:18081/health
+curl http://localhost:18000/.well-known/agent-card.json
+curl http://localhost:18001/.well-known/agent-card.json
+```
+
+Stop and clean up the compose stack:
+
+```bash
+make stop-local
 ```
 
 ## ZeroTier Setup (Optional)

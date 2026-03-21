@@ -305,6 +305,26 @@ def test_root_readme_uses_current_core_agent_paths() -> None:
     assert "cd core/agent" in text
 
 
+def test_root_readme_documents_full_local_compose_stack() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "Docker",
+        "Docker Compose",
+        "make build",
+        "make deploy-local",
+        "make stop-local",
+        "~/.ssh/id_ed25519",
+        "http://localhost:18080/health",
+        "http://localhost:18081/health",
+        "http://localhost:18000/.well-known/agent-card.json",
+        "http://localhost:18001/.well-known/agent-card.json",
+    ):
+        assert required_token in text, (
+            f"README.md is missing local compose stack guidance: {required_token}"
+        )
+
+
 def test_core_agent_readme_does_not_reference_missing_deployment_readme() -> None:
     text = AGENT_README.read_text(encoding="utf-8")
 
