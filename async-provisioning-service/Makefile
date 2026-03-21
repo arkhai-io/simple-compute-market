@@ -1,4 +1,4 @@
-.PHONY: help install serve worker clean docker-build docker-run docker-run-dev
+.PHONY: help install serve worker clean docker-build docker-run docker-run-dev test-container-smoke
 
 .DEFAULT_GOAL := help
 
@@ -16,6 +16,9 @@ serve: ## Start the API server
 
 worker: ## Start the background worker
 	PYTHONPATH=src uv run python -m async_provisioning_service.worker
+
+test-container-smoke: ## Run container smoke coverage with Redis/Postgres and worker pickup
+	PYTHONPATH=src uv run pytest tests/integration/test_container_smoke.py -q
 
 clean: ## Remove generated files
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

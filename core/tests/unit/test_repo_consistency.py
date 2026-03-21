@@ -16,6 +16,9 @@ INVENTORY_PATH = ROOT / "compute-provisioning-iac/ansible/inventory/hosts"
 ASYNC_DOCKERFILE = ROOT / "async-provisioning-service/Dockerfile"
 ASYNC_README = ROOT / "async-provisioning-service/README.md"
 ASYNC_START_SCRIPT = ROOT / "async-provisioning-service/start.sh"
+ASYNC_CONTAINER_SMOKE_TEST = (
+    ROOT / "async-provisioning-service/tests/integration/test_container_smoke.py"
+)
 RUNBOOK_PATH = ROOT / "docs/production-canary.md"
 E2E_PLAN_PATH = ROOT / "docs/e2e-deployment-test-plan.md"
 CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
@@ -357,6 +360,53 @@ def test_async_provisioning_startup_regenerates_matching_public_ssh_key() -> Non
 
     assert "ssh-keygen -y -f ~/.ssh/id_ed25519" in text
     assert "~/.ssh/id_ed25519.pub" in text
+
+
+def test_async_provisioning_makefile_exposes_container_smoke_target() -> None:
+    text = (ROOT / "async-provisioning-service/Makefile").read_text(encoding="utf-8")
+
+    for required_token in (
+        "test-container-smoke:",
+        "uv run pytest tests/integration/test_container_smoke.py -q",
+    ):
+        assert required_token in text, (
+            "async-provisioning-service/Makefile must expose the container "
+            f"smoke target via '{required_token}'"
+        )
+
+
+def test_async_provisioning_container_smoke_test_exists_and_covers_runtime_stack() -> None:
+    text = ASYNC_CONTAINER_SMOKE_TEST.read_text(encoding="utf-8")
+
+    for required_token in (
+        "docker compose",
+        "redis:7-alpine",
+        "postgres:16-alpine",
+        "/api/v1/jobs",
+        "/health",
+        "credentials",
+        "Processing job",
+    ):
+        assert required_token in text, (
+            "async-provisioning-service container smoke coverage is missing "
+            f"'{required_token}'"
+        )
+
+
+def test_async_provisioning_readme_documents_container_smoke_path() -> None:
+    text = ASYNC_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make test-container-smoke",
+        "Redis",
+        "Postgres",
+        "worker",
+        "/api/v1/jobs",
+    ):
+        assert required_token in text, (
+            "async-provisioning-service/README.md must document the container "
+            f"smoke path including '{required_token}'"
+        )
 
 
 def test_production_default_vm_hosts_exist_in_inventory() -> None:

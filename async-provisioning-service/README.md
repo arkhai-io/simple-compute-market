@@ -83,6 +83,26 @@ docker run --rm --env-file .env.local -p 8081:8081 \
 | `/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml` | Management variables |
 | `/app/compute-provisioning-iac/ansible/keys/` | SSH private keys |
 
+## Container Smoke Test
+
+Use Docker to boot the async provisioning service with Redis, Postgres, a
+registry mock for auth, and the real worker process from `start.sh`:
+
+```bash
+make test-container-smoke
+```
+
+This smoke test verifies that:
+
+- `/health` reports healthy Redis and Postgres dependencies
+- `POST /api/v1/jobs` enforces auth when `ENABLE_AUTH=true`
+- a queued job is picked up by the worker and reaches `succeeded`
+- credentials are scoped correctly between seller and buyer views
+
+The smoke stack uses a local stub playbook instead of real VM operations, so it
+exercises API, queue, worker, persistence, and credential scoping without
+requiring libvirt access.
+
 ### Environment variables
 
 | Variable | Default | Description |

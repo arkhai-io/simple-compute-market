@@ -32,3 +32,8 @@ where = ["src"]
 dev = [
     "pytest>=9.0.2",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: boots Redis, Postgres, and worker-backed smoke coverage",
+]
