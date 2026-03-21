@@ -252,6 +252,9 @@ def test_repo_exposes_release_gate_entrypoint() -> None:
         "expanded release gate entrypoint"
     )
 
+    args = _parse_script_args(RELEASE_GATE_SCRIPT)
+    assert "--deployed-canary-log" in args
+
 
 def test_compute_provisioning_iac_exposes_validation_entrypoints() -> None:
     assert PROVISIONING_IAC_MAKEFILE.exists(), (
@@ -613,7 +616,17 @@ def test_production_canary_runbook_matches_smoke_script_cli() -> None:
     }
 
     undocumented = sorted(documented_required_args - runbook_args)
-    unknown = sorted(runbook_args - script_args)
+    release_gate_args = {
+        "--deployed-canary-log",
+        "--environment",
+        "--seller-agent-env",
+        "--buyer-agent-env",
+        "--provisioning-env",
+        "--registry-env",
+        "--inventory-path",
+        "--skip-smoke-help",
+    }
+    unknown = sorted(runbook_args - script_args - release_gate_args)
     assert not undocumented, f"Runbook is missing documented required args: {undocumented}"
     assert not unknown, f"Runbook references args not supported by smoke script: {unknown}"
 
@@ -1449,6 +1462,20 @@ def test_production_canary_rollback_is_self_contained() -> None:
         assert required_token in text, (
             f"production-canary.md is missing rollback detail: {required_token}"
         )
+
+
+def test_release_docs_require_deployed_canary_proof_for_signoff() -> None:
+    for path in (RUNBOOK_PATH, E2E_PLAN_PATH):
+        text = path.read_text(encoding="utf-8")
+        for required_token in (
+            ".github/workflows/deployed-canary.yml",
+            "prod-canary.log",
+            "--deployed-canary-log",
+            "scripts/run_release_gate_checks.py",
+        ):
+            assert required_token in text, (
+                f"{path.name} is missing release-signoff proof token: {required_token}"
+            )
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,7 @@ def _load_script_module():
 
 
 def test_release_gate_runner_executes_deployment_gate_then_full_matrix(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script_module()
@@ -29,7 +30,19 @@ def test_release_gate_runner_executes_deployment_gate_then_full_matrix(
 
     monkeypatch.setattr(module, "_run_command", fake_run)
 
-    exit_code = module.main([])
+    canary_log = tmp_path / "prod-canary.log"
+    canary_log.write_text(
+        "[success] canary completed\n"
+        '{\n'
+        '  "status": "succeeded",\n'
+        '  "seller_order_id": "seller-order",\n'
+        '  "buyer_order_id": "buyer-order",\n'
+        '  "provisioning_job_id": "job-1"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(["--deployed-canary-log", str(canary_log)])
 
     assert exit_code == 0
     assert commands == [
@@ -45,6 +58,7 @@ def test_release_gate_runner_executes_deployment_gate_then_full_matrix(
 
 
 def test_release_gate_runner_forwards_gate_arguments_to_deployment_checks(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script_module()
@@ -55,8 +69,22 @@ def test_release_gate_runner_forwards_gate_arguments_to_deployment_checks(
 
     monkeypatch.setattr(module, "_run_command", fake_run)
 
+    canary_log = tmp_path / "prod-canary.log"
+    canary_log.write_text(
+        "[success] canary completed\n"
+        '{\n'
+        '  "status": "succeeded",\n'
+        '  "seller_order_id": "seller-order",\n'
+        '  "buyer_order_id": "buyer-order",\n'
+        '  "provisioning_job_id": "job-1"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
     exit_code = module.main(
         [
+            "--deployed-canary-log",
+            str(canary_log),
             "--environment",
             "production",
             "--seller-agent-env",
@@ -98,3 +126,26 @@ def test_release_gate_runner_forwards_gate_arguments_to_deployment_checks(
         ["python", "scripts/run_full_repo_validation.py"],
         module.ROOT,
     )
+
+
+def test_release_gate_runner_requires_deployed_canary_log() -> None:
+    module = _load_script_module()
+
+    with pytest.raises(SystemExit, match="Provide --deployed-canary-log"):
+        module.main([])
+
+
+def test_release_gate_runner_rejects_unsuccessful_canary_log(tmp_path: Path) -> None:
+    module = _load_script_module()
+    canary_log = tmp_path / "prod-canary.log"
+    canary_log.write_text(
+        "[success] canary completed\n"
+        '{\n'
+        '  "status": "failed",\n'
+        '  "seller_order_id": "seller-order"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="does not prove a successful deployed canary"):
+        module.main(["--deployed-canary-log", str(canary_log)])

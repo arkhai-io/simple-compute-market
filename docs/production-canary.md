@@ -224,6 +224,22 @@ grep '^\[order\] buyer order:' /tmp/prod-canary.log
 grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log
 ```
 
+Keep `prod-canary.log` as release-signoff proof. A successful isolated run can
+be captured from `.github/workflows/deployed-canary.yml` artifacts or passed
+directly to:
+
+```bash
+python scripts/run_release_gate_checks.py \
+  --deployed-canary-log /tmp/prod-canary.log \
+  --environment <environment> \
+  --seller-agent-env /etc/simple-market-service/seller-agent.env \
+  --buyer-agent-env /etc/simple-market-service/buyer-agent.env \
+  --provisioning-env /etc/simple-market-service/provisioning.env \
+  --registry-env /etc/simple-market-service/registry.env \
+  --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+  --skip-smoke-help
+```
+
 ## Success criteria
 
 - Both agent order-creation calls succeed.

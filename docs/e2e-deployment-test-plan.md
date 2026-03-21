@@ -202,6 +202,22 @@ uv --no-config run python ../scripts/prod_canary_smoke.py --help
 
 When real env values are loaded, replace `--help` with the actual canary invocation from `docs/production-canary.md`.
 
+Treat the successful isolated canary log as release-signoff proof. Preserve
+`prod-canary.log` from `.github/workflows/deployed-canary.yml` or from the
+manual runner, then feed it back into the release gate:
+
+```bash
+python scripts/run_release_gate_checks.py \
+  --deployed-canary-log /path/to/prod-canary.log \
+  --environment <environment> \
+  --seller-agent-env /etc/simple-market-service/seller-agent.env \
+  --buyer-agent-env /etc/simple-market-service/buyer-agent.env \
+  --provisioning-env /etc/simple-market-service/provisioning.env \
+  --registry-env /etc/simple-market-service/registry.env \
+  --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+  --skip-smoke-help
+```
+
 ## Known High-Risk Areas
 
 1. Alkahest address drift across repos.
