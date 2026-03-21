@@ -752,15 +752,58 @@ def test_standup_canary_doc_covers_prerequisite_sequence() -> None:
     for required_token in (
         "python scripts/run_deployment_gate_checks.py --skip-smoke-help",
         "python scripts/validate_deployment_bundle.py",
+        ". /etc/simple-market-service/prod-canary.env",
+        "set -a",
+        "set +a",
         "curl http://<registry-host>:<registry-port>/health",
         "curl http://<seller-host>:<seller-port>/resources/portfolio",
         "--vm-host",
         "CANARY_VM_HOSTS",
+        "CANARY_GPU_QUANTITY",
+        "CANARY_DURATION_HOURS",
+        "CANARY_MATCH_SALT",
+        "`--vm-host` flags override `CANARY_VM_HOSTS`",
+        "`--frp-dashboard-url` and `--frp-dashboard-password` must be provided together",
         "--ssh-private-key-path",
     ):
         assert required_token in text, (
             "canary.md is missing executable canary prerequisite coverage: "
             f"{required_token}"
+        )
+
+
+def test_production_canary_doc_matches_runner_contract() -> None:
+    text = RUNBOOK_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "/etc/simple-market-service/prod-canary.env",
+        "SELLER_AGENT_URL=",
+        "BUYER_AGENT_URL=",
+        "SELLER_AGENT_ID=",
+        "BUYER_AGENT_ID=",
+        "SELLER_PRIVATE_KEY=",
+        "BUYER_PRIVATE_KEY=",
+        "SSH_PRIVATE_KEY_PATH=",
+        "CANARY_VM_HOSTS=",
+        "CANARY_GPU_QUANTITY=",
+        "CANARY_DURATION_HOURS=",
+        "CANARY_MATCH_SALT=",
+        "--seller-agent-url",
+        "--buyer-agent-url",
+        "--seller-agent-id",
+        "--buyer-agent-id",
+        "--seller-private-key",
+        "--buyer-private-key",
+        "--ssh-private-key-path",
+        "--frp-dashboard-url",
+        "--frp-dashboard-password",
+        "`--vm-host` flags override `CANARY_VM_HOSTS`",
+        "[order] seller order:",
+        "[order] buyer order:",
+        "[provisioning] succeeded job:",
+    ):
+        assert required_token in text, (
+            f"production-canary.md is missing runner-contract detail: {required_token}"
         )
 
 

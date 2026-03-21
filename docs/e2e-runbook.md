@@ -128,6 +128,14 @@ Confirm all of the following before running the smoke test:
 
 ## 4. Live Canary Execution
 
+Source the runner env before the live smoke run:
+
+```bash
+set -a
+. /etc/simple-market-service/prod-canary.env
+set +a
+```
+
 Run the smoke test from the repo with the CLI environment:
 
 ```bash
@@ -162,6 +170,10 @@ Optional flags:
 The runner also accepts defaults from environment variables such as
 `FRP_DASHBOARD_URL`, `CANARY_TOKEN_AMOUNT`, `CANARY_MATCH_SALT`, and
 `CANARY_VM_HOSTS`.
+
+Repeated `--vm-host` flags override `CANARY_VM_HOSTS` from the sourced runner
+env file. `--frp-dashboard-url` and `--frp-dashboard-password` must be
+provided together when FRP verification is enabled.
 
 If `--ssh-private-key-path` is provided, the canary verifies tenant SSH access
 after provisioning succeeds. If it is omitted, the canary still validates order

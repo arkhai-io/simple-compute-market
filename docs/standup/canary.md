@@ -25,6 +25,13 @@ Keep the runner-only defaults outside Git in
 `/etc/simple-market-service/prod-canary.env`. A practical place for optional
 defaults is:
 
+- `SELLER_AGENT_URL=http://<seller-host>:<seller-port>`
+- `BUYER_AGENT_URL=http://<buyer-host>:<buyer-port>`
+- `SELLER_AGENT_ID=eip155:<chain_id>:<identity_registry>:<seller_token_id>`
+- `BUYER_AGENT_ID=eip155:<chain_id>:<identity_registry>:<buyer_token_id>`
+- `SELLER_PRIVATE_KEY=0x<seller-private-key>`
+- `BUYER_PRIVATE_KEY=0x<buyer-private-key>`
+- `SSH_PRIVATE_KEY_PATH=~/.ssh/id_ed25519`
 - `CANARY_VM_HOSTS=ww1`
 - `FRP_DASHBOARD_URL=http://<frp-host>:7500`
 - `FRP_DASHBOARD_PASSWORD=<password>`
@@ -32,6 +39,9 @@ defaults is:
 - `CANARY_REGION=<region>`
 - `CANARY_TOKEN_SYMBOL=<token-symbol>`
 - `CANARY_TOKEN_AMOUNT=<token-amount>`
+- `CANARY_GPU_QUANTITY=1`
+- `CANARY_DURATION_HOURS=1`
+- `CANARY_MATCH_SALT=<fixed-integer-when-repeatability-matters>`
 
 Before creating orders, confirm that:
 
@@ -42,6 +52,14 @@ Before creating orders, confirm that:
   `compute-provisioning-iac/ansible/inventory/hosts`
 
 ## Gate Sequence
+
+Source the runner env before executing the live checks and smoke run:
+
+```bash
+set -a
+. /etc/simple-market-service/prod-canary.env
+set +a
+```
 
 Run the repo-only readiness gates first:
 
@@ -100,12 +118,16 @@ uv --no-config run python ../scripts/prod_canary_smoke.py \
   --region "<region>" \
   --token-symbol <token-symbol> \
   --token-amount <token-amount> \
+  --quantity <quantity> \
+  --duration-hours <duration-hours> \
+  --match-salt <match-salt> \
   --vm-host <candidate-host> \
   --ssh-private-key-path ~/.ssh/id_ed25519
 ```
 
 If `/etc/simple-market-service/prod-canary.env` sets `CANARY_VM_HOSTS`, the
 runner can preflight multiple candidate hosts before orders are created.
+Repeated `--vm-host` flags override `CANARY_VM_HOSTS` from the sourced runner env file. `--frp-dashboard-url` and `--frp-dashboard-password` must be provided together when FRP proxy-registration verification is enabled.
 
 ## Success Criteria
 

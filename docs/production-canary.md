@@ -37,6 +37,23 @@ Recommended private files:
 - canary runner env: `/etc/simple-market-service/prod-canary.env`
 - provisioning host secrets: `/etc/simple-market-service/management-vars.yaml`
 
+The canary runner env at `/etc/simple-market-service/prod-canary.env` should
+carry the live actor and runner defaults, for example:
+
+```bash
+SELLER_AGENT_URL=http://<seller-zerotier-ip>:8000
+BUYER_AGENT_URL=http://<buyer-zerotier-ip>:8000
+SELLER_AGENT_ID=eip155:<chain_id>:<identity_registry>:<seller_token_id>
+BUYER_AGENT_ID=eip155:<chain_id>:<identity_registry>:<buyer_token_id>
+SELLER_PRIVATE_KEY=0x<seller-private-key>
+BUYER_PRIVATE_KEY=0x<buyer-private-key>
+SSH_PRIVATE_KEY_PATH=~/.ssh/id_ed25519
+CANARY_VM_HOSTS=ww1,piknik1
+CANARY_GPU_QUANTITY=1
+CANARY_DURATION_HOURS=1
+CANARY_MATCH_SALT=<fixed-integer-when-repeatability-matters>
+```
+
 Keep private keys, DB URLs, Redis URLs, ZeroTier IDs, FRP credentials, and real
 service URLs out of Git.
 
@@ -142,10 +159,25 @@ python scripts/run_deployment_gate_checks.py \
   --seller-agent-env /path/to/production/seller.env \
   --buyer-agent-env /path/to/production/buyer.env \
   --provisioning-env /path/to/production/provisioning.env \
-  --registry-env /path/to/production/registry.env
+  --registry-env /path/to/production/registry.env \
+  --seller-agent-url http://<seller-zerotier-ip>:8000 \
+  --buyer-agent-url http://<buyer-zerotier-ip>:8000 \
+  --seller-agent-id eip155:<chain_id>:<identity_registry>:<seller_token_id> \
+  --buyer-agent-id eip155:<chain_id>:<identity_registry>:<buyer_token_id> \
+  --seller-private-key 0x<seller-private-key> \
+  --buyer-private-key 0x<buyer-private-key> \
+  --ssh-private-key-path ~/.ssh/id_ed25519
 ```
 
 ## Canary smoke run
+
+Source the runner env before the live smoke run:
+
+```bash
+set -a
+. /etc/simple-market-service/prod-canary.env
+set +a
+```
 
 Run the smoke script from the repo with the CLI environment so `eth-account` is available:
 
@@ -164,14 +196,33 @@ uv --no-config run python ../scripts/prod_canary_smoke.py \
   --region "<region>" \
   --token-symbol <token-symbol> \
   --token-amount 1.0 \
+  --quantity <quantity> \
+  --duration-hours <duration-hours> \
+  --match-salt <match-salt> \
   --vm-host <kvm-host-alias> \
-  --ssh-private-key-path ~/.ssh/id_ed25519
+  --ssh-private-key-path ~/.ssh/id_ed25519 \
+  | tee /tmp/prod-canary.log
 ```
 
 The runner also accepts `CANARY_VM_HOSTS=ww1,piknik1,...` in
 `/etc/simple-market-service/prod-canary.env`. If configured, the canary will
 submit provisioning `check` jobs up front and fail early when the selected host
 cannot satisfy the requested GPU quantity.
+
+Repeated `--vm-host` flags override `CANARY_VM_HOSTS`. If you enable FRP
+dashboard verification, `--frp-dashboard-url` and `--frp-dashboard-password`
+must be provided together.
+
+After the run, preserve the emitted IDs before cleanup:
+
+Look for `[order] seller order:`, `[order] buyer order:`, and
+`[provisioning] succeeded job:` in the captured log.
+
+```bash
+grep '^\[order\] seller order:' /tmp/prod-canary.log
+grep '^\[order\] buyer order:' /tmp/prod-canary.log
+grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log
+```
 
 ## Success criteria
 
