@@ -50,6 +50,7 @@ ALKAHEST_BASE_DEPLOYMENT = (
 )
 PROVISIONING_IAC_GITIGNORE = ROOT / "compute-provisioning-iac/.gitignore"
 PROVISIONING_IAC_README = ROOT / "compute-provisioning-iac/README.md"
+PROVISIONING_IAC_MAKEFILE = ROOT / "compute-provisioning-iac/Makefile"
 FRP_SETUP_TASKS = ROOT / "compute-provisioning-iac/ansible/roles/frp-setup/tasks/main.yml"
 VM_SETUP_SYSTEM_PACKAGES = (
     ROOT / "compute-provisioning-iac/ansible/roles/vm-setup/tasks/system-packages.yml"
@@ -209,6 +210,44 @@ def test_repo_exposes_release_gate_entrypoint() -> None:
         "scripts/run_release_gate_checks.py must exist as the canonical "
         "expanded release gate entrypoint"
     )
+
+
+def test_compute_provisioning_iac_exposes_validation_entrypoints() -> None:
+    assert PROVISIONING_IAC_MAKEFILE.exists(), (
+        "compute-provisioning-iac/Makefile must exist with runnable IaC "
+        "validation entrypoints"
+    )
+
+    text = PROVISIONING_IAC_MAKEFILE.read_text(encoding="utf-8")
+    for required_token in (
+        "validate:",
+        "validate-inventory:",
+        "validate-playbooks:",
+        "ansible/inventory/hosts --list",
+        "playbooks/frp/frp-server-setup.yaml --syntax-check",
+        "playbooks/frp/docker-app-setup.yaml --syntax-check",
+        "playbooks/host-kit/vm-setup.yaml --syntax-check",
+        "playbooks/single-tenant/vm-operations.yaml --syntax-check",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac/Makefile is missing a validation contract "
+            f"token: {required_token}"
+        )
+
+
+def test_compute_provisioning_iac_readme_documents_validation_entrypoints() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "## Validation",
+        "make validate",
+        "make validate-inventory",
+        "make validate-playbooks",
+    ):
+        assert required_token in text, (
+            "compute-provisioning-iac/README.md must document the validation "
+            f"entrypoints: {required_token}"
+        )
 
 
 def test_async_provisioning_startup_regenerates_matching_public_ssh_key() -> None:
