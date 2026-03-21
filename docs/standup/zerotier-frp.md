@@ -31,6 +31,8 @@ network:
 Record the resulting `ZEROTIER_NETWORK` and the ZeroTier IPs assigned to each
 host.
 
+Registry, provisioning, seller, and buyer HTTP traffic stays on ZeroTier. FRP is only used for leased VM SSH access. Do not put the registry or agent HTTP APIs behind FRP.
+
 ## FRP
 
 Use `compute-provisioning-iac` to configure the FRP gateway:
@@ -48,6 +50,24 @@ Keep the generated credentials file outside Git. The IaC role writes
 control machine. That file contains the FRP dashboard password needed by the
 async provisioning service and the canary preflight.
 
+Record the public FRP values from this phase as:
+
+- `FRP_SERVER_ADDR`
+- `FRP_DOMAIN`
+- `FRP_DASHBOARD_PASSWORD`
+
+The FRP dashboard public URL is `https://frp-admin.<domain>`. The default API
+user is `admin`.
+
+```bash
+export FRP_USER=admin
+export FRP_PASSWORD="<dashboard-password-from-credentials-file>"
+export FRP_API_URL="https://frp-admin.<domain>/api"
+
+curl -u "${FRP_USER}:${FRP_PASSWORD}" \
+  "${FRP_API_URL}/serverinfo"
+```
+
 ## Verification
 
 Verify all of the following before deploying services:
@@ -58,9 +78,19 @@ Verify all of the following before deploying services:
 - any `ufw` or host firewall rules allow the traffic described in
   `compute-provisioning-iac/README.md`
 
+Run concrete network checks from the participating hosts:
+
+```bash
+sudo zerotier-cli listnetworks
+ping -c 1 <peer-zerotier-ip>
+curl http://<registry-zerotier-ip>:8080/health
+curl http://<seller-zerotier-ip>:8000/.well-known/agent-card.json
+```
+
 Outputs from this phase:
 
 - `ZEROTIER_NETWORK`
+- `FRP_SERVER_ADDR`
 - FRP gateway hostname or IP
 - `FRP_DOMAIN`
 - `FRP_DASHBOARD_PASSWORD`

@@ -325,6 +325,37 @@ def test_root_readme_documents_full_local_compose_stack() -> None:
         )
 
 
+def test_zerotier_frp_standup_doc_defines_service_network_model() -> None:
+    text = STANDUP_ZEROTIER_FRP_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## ZeroTier",
+        "## FRP",
+        "## Verification",
+    ):
+        assert required_heading in text, (
+            f"zerotier-frp.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "FRP is only used for leased VM SSH access",
+        "Do not put the registry or agent HTTP APIs behind FRP",
+        "https://frp-admin.<domain>",
+        "FRP_SERVER_ADDR",
+        "FRP_DOMAIN",
+        "FRP_DASHBOARD_PASSWORD",
+        'curl -u "${FRP_USER}:${FRP_PASSWORD}"',
+        "${FRP_API_URL}/serverinfo",
+        "ping -c 1 <peer-zerotier-ip>",
+        "curl http://<registry-zerotier-ip>:8080/health",
+        "curl http://<seller-zerotier-ip>:8000/.well-known/agent-card.json",
+    ):
+        assert required_token in text, (
+            f"zerotier-frp.md is missing overlay detail: {required_token}"
+        )
+
+
 def test_core_agent_readme_does_not_reference_missing_deployment_readme() -> None:
     text = AGENT_README.read_text(encoding="utf-8")
 
