@@ -1,0 +1,52 @@
+name: Full Test Matrix
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - codex/full-stack-production-deployment
+  workflow_dispatch:
+
+jobs:
+  test-matrix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.8.13"
+          enable-cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: erc-8004-contracts/package-lock.json
+
+      - name: Run canonical full repo validation
+        shell: bash
+        run: |
+          python scripts/run_full_repo_validation.py 2>&1 | tee full-repo-validation.log
+
+      - name: Upload validation log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-repo-validation-log
+          path: full-repo-validation.log

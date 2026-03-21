@@ -47,8 +47,12 @@ TEST_MATRIX: list[tuple[list[str], Path]] = [
         [
             "bash",
             "-lc",
+            "if [ -s \"$HOME/.nvm/nvm.sh\" ]; then "
             "source ~/.nvm/nvm.sh && "
-            "nvm use 22.12.0 >/dev/null && "
+            "nvm use 22.12.0 >/dev/null; "
+            "else "
+            "test \"$(node -v)\" = \"v22.12.0\"; "
+            "fi && "
             "export SEPOLIA_RPC_URL=http://127.0.0.1:8545 "
             "MAINNET_RPC_URL=http://127.0.0.1:8545 && "
             "npm install --legacy-peer-deps && "

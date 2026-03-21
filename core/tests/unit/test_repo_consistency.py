@@ -66,6 +66,7 @@ REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
+TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
 AGENT_README = ROOT / "core/agent/README.md"
@@ -189,6 +190,17 @@ def test_repo_exposes_canonical_full_repo_validation_entrypoint() -> None:
         "scripts/run_full_repo_validation.py must exist as the canonical "
         "full-matrix test entrypoint"
     )
+
+
+def test_repo_exposes_ci_test_matrix_workflow() -> None:
+    assert TEST_MATRIX_WORKFLOW.exists(), (
+        ".github/workflows/test-matrix.yml must exist for the canonical "
+        "full-matrix CI workflow"
+    )
+
+    text = TEST_MATRIX_WORKFLOW.read_text(encoding="utf-8")
+    assert "scripts/run_full_repo_validation.py" in text
+    assert "node-version: 22.12.0" in text or "node-version: '22.12.0'" in text
 
 
 def test_async_provisioning_startup_regenerates_matching_public_ssh_key() -> None:
