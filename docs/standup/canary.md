@@ -77,6 +77,19 @@ The script reads threshold keys from `prod-canary.env`, including:
 When the printed plan looks correct, rerun with `--apply` to broadcast the
 top-up transactions from the configured funder wallet.
 
+For repeatable isolated runs, prefer the single wrapper instead of hand-running
+each step:
+
+```bash
+python scripts/run_repeatable_canary.py \
+  --environment isolated-base-sepolia \
+  --local-secrets-dir ~/.config/simple-market-service \
+  --output-dir /etc/simple-market-service \
+  --artifacts-dir artifacts \
+  --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+  --apply-funding
+```
+
 ## Gate Sequence
 
 Source the runner env before executing the live checks and smoke run:

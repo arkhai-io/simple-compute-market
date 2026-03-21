@@ -148,6 +148,26 @@ When you are ready to broadcast the top-up transactions from
 `SEPOLIA_FUNDER_PRIVATE_KEY` or `MAINNET_FUNDER_PRIVATE_KEY`, rerun with
 `--apply`.
 
+## One-Shot Repeatable Run
+
+For the isolated runner or a local operator machine, use the single orchestration
+entrypoint after the local secret bundle is ready:
+
+```bash
+python scripts/run_repeatable_canary.py \
+  --environment isolated-base-sepolia \
+  --local-secrets-dir ~/.config/simple-market-service \
+  --output-dir /etc/simple-market-service \
+  --artifacts-dir artifacts \
+  --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+  --apply-funding
+```
+
+That wrapper runs `scripts/materialize_host_envs.py`,
+`scripts/pre_canary_fund.py`, `scripts/run_deployment_gate_checks.py`,
+`scripts/validate_deployment_bundle.py`, `scripts/prod_canary_smoke.py`, and
+`scripts/prod_canary_rollback.py` in the correct order.
+
 ## Verification
 
 After the render completes, confirm that the expected files exist and stay

@@ -88,6 +88,7 @@ CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
 MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
 PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
+REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -239,8 +240,11 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
         "workflow_dispatch:",
         "self-hosted",
         "isolated environment",
+        "~/.config/simple-market-service",
         "/etc/simple-market-service/prod-canary.env",
-        "scripts/run_deployment_gate_checks.py",
+        "scripts/run_repeatable_canary.py",
+        "scripts/materialize_host_envs.py",
+        "scripts/pre_canary_fund.py",
         "scripts/run_release_gate_checks.py",
         "--deployed-canary-log",
         "artifacts/prod-canary.log",
@@ -253,10 +257,10 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
             f"{required_token}"
         )
 
-    preflight_index = text.index("scripts/run_deployment_gate_checks.py")
+    orchestration_index = text.index("scripts/run_repeatable_canary.py")
     smoke_index = text.index("scripts/prod_canary_smoke.py")
     release_index = text.index("scripts/run_release_gate_checks.py")
-    assert preflight_index < smoke_index < release_index
+    assert orchestration_index < smoke_index < release_index
 
 
 def test_repo_exposes_release_gate_entrypoint() -> None:
@@ -312,6 +316,31 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
     ):
         assert required_token in text, (
             "pre_canary_fund.py is missing required funding contract token: "
+            f"{required_token}"
+        )
+
+
+def test_repo_exposes_repeatable_canary_runner_entrypoint() -> None:
+    assert REPEATABLE_CANARY_RUNNER_SCRIPT.exists(), (
+        "scripts/run_repeatable_canary.py must exist as the repeatable "
+        "orchestration entrypoint"
+    )
+
+    text = REPEATABLE_CANARY_RUNNER_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/materialize_host_envs.py",
+        "scripts/pre_canary_fund.py",
+        "scripts/run_deployment_gate_checks.py",
+        "scripts/validate_deployment_bundle.py",
+        "scripts/prod_canary_smoke.py",
+        "scripts/prod_canary_rollback.py",
+        "artifacts/prod-canary.log",
+        "--apply-funding",
+        "--skip-deployment-gates",
+        "--skip-bundle-validation",
+    ):
+        assert required_token in text, (
+            "run_repeatable_canary.py is missing required orchestration token: "
             f"{required_token}"
         )
 

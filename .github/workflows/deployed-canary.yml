@@ -11,31 +11,21 @@ on:
         description: 'Type "isolated" to confirm this run targets an isolated environment.'
         required: true
         type: string
-      canary_env_file:
-        description: "Host-local canary env file on the self-hosted runner."
+      local_secrets_dir:
+        description: "Local secret source-of-truth on the self-hosted runner."
         required: true
-        default: "/etc/simple-market-service/prod-canary.env"
+        default: "~/.config/simple-market-service"
         type: string
-      seller_agent_env:
-        description: "Host-local deployed seller env file."
+      render_output_dir:
+        description: "Host-local rendered env directory."
         required: true
-        default: "/etc/simple-market-service/seller-agent.env"
+        default: "/etc/simple-market-service"
         type: string
-      buyer_agent_env:
-        description: "Host-local deployed buyer env file."
+      apply_funding:
+        description: "Broadcast funding top-ups before the canary instead of only planning them."
         required: true
-        default: "/etc/simple-market-service/buyer-agent.env"
-        type: string
-      provisioning_env:
-        description: "Host-local deployed provisioning env file."
-        required: true
-        default: "/etc/simple-market-service/provisioning.env"
-        type: string
-      registry_env:
-        description: "Host-local deployed registry env file."
-        required: true
-        default: "/etc/simple-market-service/registry.env"
-        type: string
+        default: true
+        type: boolean
       run_release_gates:
         description: "Run repo-side deployment gates before the live canary."
         required: true
@@ -95,73 +85,62 @@ jobs:
         shell: bash
         run: |
           for path in \
-            "${{ inputs.canary_env_file }}" \
-            "${{ inputs.seller_agent_env }}" \
-            "${{ inputs.buyer_agent_env }}" \
-            "${{ inputs.provisioning_env }}" \
-            "${{ inputs.registry_env }}"; do
+            "${{ inputs.local_secrets_dir }}/alchemy.env" \
+            "${{ inputs.local_secrets_dir }}/wallets.env" \
+            "${{ inputs.local_secrets_dir }}/shared.env" \
+            "${{ inputs.local_secrets_dir }}/contracts.env" \
+            "${{ inputs.local_secrets_dir }}/registry.env" \
+            "${{ inputs.local_secrets_dir }}/provisioning.env" \
+            "${{ inputs.local_secrets_dir }}/seller-agent.env" \
+            "${{ inputs.local_secrets_dir }}/buyer-agent.env" \
+            "${{ inputs.local_secrets_dir }}/prod-canary.env" \
+            "${{ inputs.local_secrets_dir }}/management-vars.yaml"; do
             if [[ ! -f "$path" ]]; then
-              echo "Required env file not found: $path" >&2
+              echo "Required local secret file not found: $path" >&2
               exit 1
             fi
           done
 
-      - name: Run deployment gates
-        if: ${{ inputs.run_release_gates }}
+      - name: Run repeatable canary
+        id: repeatable-canary
+        continue-on-error: true
         shell: bash
         run: |
-          python scripts/run_deployment_gate_checks.py \
-            --environment "${{ inputs.isolated_environment }}" \
-            --seller-agent-env "${{ inputs.seller_agent_env }}" \
-            --buyer-agent-env "${{ inputs.buyer_agent_env }}" \
-            --provisioning-env "${{ inputs.provisioning_env }}" \
-            --registry-env "${{ inputs.registry_env }}" \
-            --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
-            --skip-smoke-help
-
-      - name: Run deployed canary
-        shell: bash
-        run: |
+          # scripts/run_repeatable_canary.py orchestrates scripts/materialize_host_envs.py,
+          # scripts/pre_canary_fund.py, scripts/prod_canary_smoke.py, and
+          # scripts/prod_canary_rollback.py while rendering
+          # /etc/simple-market-service/prod-canary.env and siblings.
           mkdir -p artifacts
-          set -a
-          . "${{ inputs.canary_env_file }}"
-          set +a
 
-          set +e
-          (
-            cd cli
-            uv --no-config run python ../scripts/prod_canary_smoke.py
-          ) 2>&1 | tee artifacts/prod-canary.log
-          canary_exit_code=${PIPESTATUS[0]}
-          set -e
+          args=(
+            --environment "${{ inputs.isolated_environment }}"
+            --local-secrets-dir "${{ inputs.local_secrets_dir }}"
+            --output-dir "${{ inputs.render_output_dir }}"
+            --artifacts-dir artifacts
+            --inventory-path compute-provisioning-iac/ansible/inventory/hosts
+          )
 
-          echo "canary_exit_code=${canary_exit_code}" >> "$GITHUB_ENV"
+          if [[ "${{ inputs.apply_funding }}" == "true" ]]; then
+            args+=(--apply-funding)
+          fi
 
-      - name: Roll back failed canary
-        if: ${{ env.canary_exit_code != '0' }}
-        shell: bash
-        run: |
-          set -a
-          . "${{ inputs.canary_env_file }}"
-          set +a
+          if [[ "${{ inputs.run_release_gates }}" != "true" ]]; then
+            args+=(--skip-deployment-gates)
+          fi
 
-          (
-            cd cli
-            uv --no-config run python ../scripts/prod_canary_rollback.py \
-              --log-path ../artifacts/prod-canary.log
-          ) 2>&1 | tee artifacts/prod-canary-rollback.log || true
+          python scripts/run_repeatable_canary.py "${args[@]}"
 
       - name: Validate release signoff proof after the canary succeeds
-        if: ${{ env.canary_exit_code == '0' }}
+        if: ${{ steps.repeatable-canary.outcome == 'success' }}
         shell: bash
         run: |
           python scripts/run_release_gate_checks.py \
             --deployed-canary-log artifacts/prod-canary.log \
             --environment "${{ inputs.isolated_environment }}" \
-            --seller-agent-env "${{ inputs.seller_agent_env }}" \
-            --buyer-agent-env "${{ inputs.buyer_agent_env }}" \
-            --provisioning-env "${{ inputs.provisioning_env }}" \
-            --registry-env "${{ inputs.registry_env }}" \
+            --seller-agent-env "${{ inputs.render_output_dir }}/seller-agent.env" \
+            --buyer-agent-env "${{ inputs.render_output_dir }}/buyer-agent.env" \
+            --provisioning-env "${{ inputs.render_output_dir }}/provisioning.env" \
+            --registry-env "${{ inputs.render_output_dir }}/registry.env" \
             --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
             --skip-smoke-help
 
@@ -173,7 +152,7 @@ jobs:
           path: artifacts/
 
       - name: Fail if deployed canary did not pass
-        if: ${{ env.canary_exit_code != '0' }}
+        if: ${{ steps.repeatable-canary.outcome != 'success' }}
         shell: bash
         run: |
           echo "Live canary failed. Rollback was attempted; inspect uploaded artifacts." >&2
