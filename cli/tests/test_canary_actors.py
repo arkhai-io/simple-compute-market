@@ -142,6 +142,23 @@ def test_canary_coordinator_runs_expected_actor_sequence() -> None:
     result = coordinator.run()
 
     assert result == {
+        "status": "succeeded",
+        "seller_order_id": "seller-order",
+        "buyer_order_id": "buyer-order",
+        "provisioning_job_id": "job-1",
+        "vm_host": None,
+        "vm_target": None,
+        "cleanup": {
+            "preexisting_closed_order_ids": {
+                "seller": ["seller-stale"],
+                "buyer": ["buyer-stale"],
+            },
+            "post_provisioning_closed_order_ids": {
+                "seller": ["seller-order"],
+                "buyer": ["buyer-order"],
+            },
+            "final_order_ids": ["seller-order", "buyer-order"],
+        },
         "job": {"job_id": "job-1", "status": "succeeded"},
         "orders": {
             "seller-order": {"status": "closed"},

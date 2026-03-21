@@ -1182,12 +1182,12 @@ class CanaryCoordinator:
         self.provisioning_probe = provisioning_probe
         self.registry_probe = registry_probe
 
-    def run(self) -> dict[str, dict]:
+    def run(self) -> dict[str, object]:
         self.validator.validate()
         self.network_probe.verify()
         self.chain_probe.verify()
-        self.seller.cleanup_open_orders()
-        self.buyer.cleanup_open_orders()
+        seller_preexisting_closed = self.seller.cleanup_open_orders()
+        buyer_preexisting_closed = self.buyer.cleanup_open_orders()
         seller_config = getattr(self.seller, "config", None)
         if seller_config is not None:
             print(
@@ -1213,20 +1213,44 @@ class CanaryCoordinator:
             raise SystemExit("No tenant credentials returned for buyer agent")
         self.provisioning_probe.verify_access(credentials)
 
+        seller_post_provision_closed = self.seller.cleanup_open_orders()
+        buyer_post_provision_closed = self.buyer.cleanup_open_orders()
         final_order_ids = list(
             dict.fromkeys(
                 [
                     seller_order_id,
                     buyer_order_id,
-                    *self.seller.cleanup_open_orders(),
-                    *self.buyer.cleanup_open_orders(),
+                    *seller_post_provision_closed,
+                    *buyer_post_provision_closed,
                 ]
             )
         )
         orders = self.registry_probe.await_orders_closed(
             order_ids=final_order_ids,
         )
-        return {"job": job, "orders": orders}
+        job_params = job.get("params") if isinstance(job.get("params"), dict) else {}
+        job_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        return {
+            "status": "succeeded",
+            "seller_order_id": seller_order_id,
+            "buyer_order_id": buyer_order_id,
+            "provisioning_job_id": job.get("job_id"),
+            "vm_host": job_result.get("vm_host") or job_params.get("vm_host"),
+            "vm_target": job_result.get("vm_target") or job_params.get("vm_target"),
+            "cleanup": {
+                "preexisting_closed_order_ids": {
+                    "seller": seller_preexisting_closed,
+                    "buyer": buyer_preexisting_closed,
+                },
+                "post_provisioning_closed_order_ids": {
+                    "seller": seller_post_provision_closed,
+                    "buyer": buyer_post_provision_closed,
+                },
+                "final_order_ids": final_order_ids,
+            },
+            "job": job,
+            "orders": orders,
+        }
 
 
 def build_coordinator(config: CanaryConfig) -> CanaryCoordinator:

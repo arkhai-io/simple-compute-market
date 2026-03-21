@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import types
@@ -309,6 +310,88 @@ def test_main_runs_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
         "http://100.64.0.50:8001/resources/portfolio",
     ]
     assert len(verified_credentials) == 1
+
+
+def test_main_emits_structured_canary_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_canary_module()
+
+    monkeypatch.setattr(module, "_check_health", lambda label, url: {"label": label, "url": url})
+    monkeypatch.setattr(module.time, "time", lambda: 100)
+    monkeypatch.setattr(module, "_request_json", _request_json_with_portfolio())
+    monkeypatch.setattr(module, "_fetch_agent_orders", lambda registry_url, agent_id: [])
+    monkeypatch.setattr(module, "_list_jobs", lambda provisioning_url, agent_id: [])
+    monkeypatch.setattr(module, "_create_order", lambda **kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "_wait_for_new_order",
+        lambda **kwargs: "seller-order" if kwargs["agent_id"] == SELLER_AGENT_ID else "buyer-order",
+    )
+    monkeypatch.setattr(
+        module,
+        "_wait_for_new_succeeded_job",
+        lambda **kwargs: {
+            "job_id": "job-1",
+            "status": "succeeded",
+            "params": {"vm_host": "btc1", "vm_target": "tenant-d908"},
+            "result": {"vm_host": "btc1", "vm_target": "tenant-d908"},
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_fetch_credentials",
+        lambda provisioning_url, job_id, agent_id: [
+            {"role": "tenant", "ssh_commands": {"external": "ssh ubuntu@100.64.0.55"}}
+        ],
+    )
+    monkeypatch.setattr(module, "_verify_ssh", lambda credentials, ssh_private_key_path, **kwargs: None)
+    monkeypatch.setattr(
+        module,
+        "_wait_for_orders_closed",
+        lambda **kwargs: {
+            "seller-order": {"status": "closed"},
+            "buyer-order": {"status": "closed"},
+        },
+    )
+
+    exit_code = module.main(
+        [
+            "--registry-url",
+            "http://100.64.0.10:8080",
+            "--provisioning-url",
+            "http://100.64.0.11:8081",
+            "--seller-agent-url",
+            "http://100.64.0.50:8001",
+            "--buyer-agent-url",
+            "http://100.64.0.51:8000",
+            "--seller-agent-id",
+            SELLER_AGENT_ID,
+            "--buyer-agent-id",
+            BUYER_AGENT_ID,
+            "--seller-private-key",
+            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "--buyer-private-key",
+            "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ]
+    )
+
+    assert exit_code == 0
+    stdout = capsys.readouterr().out
+    result = json.loads(stdout.split("[success] canary completed\n", 1)[1])
+
+    assert result["status"] == "succeeded"
+    assert result["seller_order_id"] == "seller-order"
+    assert result["buyer_order_id"] == "buyer-order"
+    assert result["provisioning_job_id"] == "job-1"
+    assert result["vm_host"] == "btc1"
+    assert result["vm_target"] == "tenant-d908"
+    assert result["cleanup"] == {
+        "preexisting_closed_order_ids": {"seller": [], "buyer": []},
+        "post_provisioning_closed_order_ids": {"seller": [], "buyer": []},
+        "final_order_ids": ["seller-order", "buyer-order"],
+    }
 
 
 def test_main_creates_seller_then_buyer_orders_with_expected_resources(
