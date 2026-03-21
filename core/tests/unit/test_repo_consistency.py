@@ -501,11 +501,16 @@ def test_registry_standup_doc_is_executable_runbook() -> None:
         "/etc/simple-market-service/registry.env",
         "docker pull",
         "docker run",
+        "docker login -u oauth2accesstoken --password-stdin",
         "DATABASE_URL",
         "RPC_URL",
         "IDENTITY_REGISTRY_ADDRESS",
         "REPUTATION_REGISTRY_ADDRESS",
         "VALIDATION_REGISTRY_ADDRESS",
+        "host is already joined to the ZeroTier network",
+        "does not join ZeroTier from inside the container",
+        "docker ps",
+        "docker logs --tail 200 sms-registry",
         "curl http://<registry-host>:8080/health",
     ):
         assert required_token in text, (

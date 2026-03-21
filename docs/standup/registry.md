@@ -10,7 +10,8 @@ canary path.
 - a PostgreSQL database for the registry
 - an authenticated `RPC_URL`
 - verified ERC-8004 contract addresses for the target network
-- ZeroTier network settings if the service must join the overlay directly
+- a runtime host that is already joined to the ZeroTier network when the
+  registry must be reachable over the overlay
 
 ## Image
 
@@ -22,6 +23,8 @@ Choose the exact immutable image tag or digest before deployment:
 
 ```bash
 export REGISTRY_IMAGE="us-east4-docker.pkg.dev/<gcp-project>/erc-8004-registry/erc-8004-registry-py:<tag-or-digest>"
+gcloud auth print-access-token \
+  | sudo docker login -u oauth2accesstoken --password-stdin https://<region>-docker.pkg.dev
 sudo docker pull "${REGISTRY_IMAGE}"
 ```
 
@@ -49,6 +52,8 @@ The required env bundle must include at least:
 
 Use `.env.production.sample` as the source template, not `.env.sample`.
 
+For deployed canaries, run the registry container on a host that is already joined to the ZeroTier network before you start the container. In other words, the host is already joined to the ZeroTier network before the registry process starts. The registry image does not join ZeroTier from inside the container.
+
 The registry process initializes tables at startup via `init_db()`. The Makefile
 still exposes `make migrate` for development and schema maintenance, but the
 deployed canary path should treat the runtime env contract as the primary
@@ -75,6 +80,8 @@ sudo docker run -d \
 After deployment, verify:
 
 ```bash
+sudo docker ps --filter name=sms-registry
+sudo docker logs --tail 200 sms-registry
 curl http://<registry-host>:8080/health
 ```
 
