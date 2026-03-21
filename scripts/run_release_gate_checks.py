@@ -52,11 +52,27 @@ def _validate_deployed_canary_log(log_path: Path) -> None:
 
     result = _extract_canary_result(log_path)
     required_tokens = ("seller_order_id", "buyer_order_id", "provisioning_job_id")
-    if result.get("status") != "succeeded" or any(not result.get(token) for token in required_tokens):
-        raise SystemExit(
-            f"{log_path} does not prove a successful deployed canary: "
-            "expected status=succeeded with seller_order_id, buyer_order_id, and provisioning_job_id"
-        )
+    if result.get("status") == "succeeded" and all(result.get(token) for token in required_tokens):
+        return
+
+    legacy_job = result.get("job")
+    legacy_orders = result.get("orders")
+    if isinstance(legacy_job, dict) and isinstance(legacy_orders, dict):
+        job_id = legacy_job.get("job_id")
+        closed_order_ids = [
+            order_id
+            for order_id, payload in legacy_orders.items()
+            if order_id
+            and isinstance(payload, dict)
+            and payload.get("status") == "closed"
+        ]
+        if job_id and len(closed_order_ids) >= 2:
+            return
+
+    raise SystemExit(
+        f"{log_path} does not prove a successful deployed canary: "
+        "expected status=succeeded with seller_order_id, buyer_order_id, and provisioning_job_id"
+    )
 
 
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:

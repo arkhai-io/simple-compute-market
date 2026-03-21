@@ -128,6 +128,46 @@ def test_release_gate_runner_forwards_gate_arguments_to_deployment_checks(
     )
 
 
+def test_release_gate_runner_accepts_legacy_successful_canary_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    commands: list[tuple[list[str], Path]] = []
+
+    def fake_run(command: list[str], *, cwd: Path) -> None:
+        commands.append((command, cwd))
+
+    monkeypatch.setattr(module, "_run_command", fake_run)
+
+    canary_log = tmp_path / "prod-canary.log"
+    canary_log.write_text(
+        "[success] canary completed\n"
+        '{\n'
+        '  "job": {"job_id": "job-1"},\n'
+        '  "orders": {\n'
+        '    "seller-order": {"status": "closed"},\n'
+        '    "buyer-order": {"status": "closed"}\n'
+        "  }\n"
+        '}\n',
+        encoding="utf-8",
+    )
+
+    exit_code = module.main(["--deployed-canary-log", str(canary_log)])
+
+    assert exit_code == 0
+    assert commands == [
+        (
+            ["python", "scripts/run_deployment_gate_checks.py"],
+            module.ROOT,
+        ),
+        (
+            ["python", "scripts/run_full_repo_validation.py"],
+            module.ROOT,
+        ),
+    ]
+
+
 def test_release_gate_runner_requires_deployed_canary_log() -> None:
     module = _load_script_module()
 
