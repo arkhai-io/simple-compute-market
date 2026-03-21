@@ -396,6 +396,89 @@ def test_seller_deployment_doc_references_resource_seeding_and_portfolio_verific
     assert "/resources/portfolio" in text
 
 
+def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:
+    text = STANDUP_RESOURCE_SEEDING_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "/etc/simple-market-service/seller-agent.env",
+        "make import-resources",
+        "market portfolio import-csv",
+        "core/agent/app/data/resources.sample.csv",
+        "grep '^BASE_URL_OVERRIDE=' /etc/simple-market-service/seller-agent.env",
+        "/resources/portfolio",
+        "docs/standup/canary.md",
+    ):
+        assert required_token in text, (
+            f"resource-seeding.md is missing deployment detail: {required_token}"
+        )
+
+
+def test_standup_canary_doc_covers_prereq_collection_flow() -> None:
+    text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "/etc/simple-market-service/prod-canary.env",
+        "python scripts/run_deployment_gate_checks.py --skip-smoke-help",
+        "python scripts/validate_deployment_bundle.py",
+        "--vm-host",
+        "CANARY_VM_HOSTS",
+        "--ssh-private-key-path",
+        "docs/e2e-runbook.md",
+        "docs/production-canary.md",
+    ):
+        assert required_token in text, (
+            f"canary.md is missing prerequisite or execution detail: {required_token}"
+        )
+
+
+def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:
+    text = STANDUP_RESOURCE_SEEDING_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "/etc/simple-market-service/seller-agent.env",
+        "/var/lib/market/agent.db",
+        "make import-resources",
+        "market portfolio import-csv",
+        "/resources/portfolio",
+        "quarantined canary resource",
+    ):
+        assert required_token in text, (
+            "resource-seeding.md is missing deployed seller coverage: "
+            f"{required_token}"
+        )
+
+
+def test_standup_canary_doc_covers_prerequisite_sequence() -> None:
+    text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Required Inputs",
+        "## Prerequisites",
+        "## Gate Sequence",
+        "## Live Verification",
+        "## Smoke Run",
+        "## Success Criteria",
+        "## Failure Handling",
+    ):
+        assert required_heading in text, (
+            f"canary.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "python scripts/run_deployment_gate_checks.py --skip-smoke-help",
+        "python scripts/validate_deployment_bundle.py",
+        "curl http://<registry-host>:<registry-port>/health",
+        "curl http://<seller-host>:<seller-port>/resources/portfolio",
+        "--vm-host",
+        "CANARY_VM_HOSTS",
+        "--ssh-private-key-path",
+    ):
+        assert required_token in text, (
+            "canary.md is missing executable canary prerequisite coverage: "
+            f"{required_token}"
+        )
+
+
 @pytest.mark.parametrize(
     ("path", "forbidden", "required"),
     [
