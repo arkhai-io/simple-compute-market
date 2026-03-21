@@ -2,6 +2,10 @@
 
 A Python/FastAPI service that integrates with ERC-8004 smart contracts for agent registration, discovery, and health monitoring. This Indexer provides a REST API server with off-chain indexing for fast queries while maintaining on-chain data integrity.
 
+For the deployed full-stack path, start with `docs/standup/overview.md` and use
+`docs/standup/registry.md` as the operator runbook. This README still covers
+local development and service internals.
+
 ## Features
 
 - **Agent Registration**: Register agents on-chain via ERC-8004 IdentityRegistry

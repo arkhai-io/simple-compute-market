@@ -431,6 +431,44 @@ def test_standup_canary_doc_covers_prereq_collection_flow() -> None:
         )
 
 
+def test_registry_standup_doc_is_executable_runbook() -> None:
+    text = STANDUP_REGISTRY_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## Image",
+        "## Host Preparation",
+        "## Container Launch",
+        "## Verification",
+        "## Outputs",
+    ):
+        assert required_heading in text, (
+            f"registry.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "/etc/simple-market-service/registry.env",
+        "docker pull",
+        "docker run",
+        "DATABASE_URL",
+        "RPC_URL",
+        "IDENTITY_REGISTRY_ADDRESS",
+        "REPUTATION_REGISTRY_ADDRESS",
+        "VALIDATION_REGISTRY_ADDRESS",
+        "curl http://<registry-host>:8080/health",
+    ):
+        assert required_token in text, (
+            f"registry.md is missing deployment detail: {required_token}"
+        )
+
+
+def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
+    text = REGISTRY_README.read_text(encoding="utf-8")
+
+    assert "docs/standup/registry.md" in text
+    assert "docs/standup/overview.md" in text
+
+
 def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:
     text = STANDUP_RESOURCE_SEEDING_PATH.read_text(encoding="utf-8")
 
