@@ -87,6 +87,7 @@ CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
 MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
+PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -287,6 +288,30 @@ def test_repo_exposes_local_secret_materialization_entrypoint() -> None:
     ):
         assert required_token in text, (
             "materialize_host_envs.py is missing required local-secret contract token: "
+            f"{required_token}"
+        )
+
+
+def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
+    assert PRE_CANARY_FUND_SCRIPT.exists(), (
+        "scripts/pre_canary_fund.py must exist as the canonical canary funding "
+        "preflight entrypoint"
+    )
+
+    text = PRE_CANARY_FUND_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "~/.config/simple-market-service",
+        "prod-canary.env",
+        "wallets.env",
+        "alchemy.env",
+        "SEPOLIA_FUNDER_PRIVATE_KEY",
+        "MAINNET_FUNDER_PRIVATE_KEY",
+        "--apply",
+        "CANARY_FUNDING_TOKEN_ADDRESS",
+        "CANARY_FUNDING_TOKEN_DECIMALS",
+    ):
+        assert required_token in text, (
+            "pre_canary_fund.py is missing required funding contract token: "
             f"{required_token}"
         )
 
@@ -707,8 +732,11 @@ def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> No
         "/etc/simple-market-service",
         "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
         "ALCHEMY_BASE_SEPOLIA_WSS_URL",
+        "SEPOLIA_FUNDER_PRIVATE_KEY",
+        "MAINNET_FUNDER_PRIVATE_KEY",
         "PROVISIONER_SSH_PRIVATE_KEY_PATH",
         "CANARY_TENANT_SSH_PRIVATE_KEY_PATH",
+        "scripts/pre_canary_fund.py",
     ):
         assert required_token in text, (
             "local-secrets.md is missing required secret-layout token: "
@@ -727,6 +755,20 @@ def test_canary_and_provisioning_docs_reference_local_secret_materialization() -
             assert required_token in text, (
                 f"{path.name} is missing local secret materialization guidance: {required_token}"
             )
+
+
+def test_canary_docs_reference_pre_run_funding_step() -> None:
+    text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/pre_canary_fund.py",
+        "BUYER_NATIVE_FLOOR_WEI",
+        "SELLER_NATIVE_FLOOR_WEI",
+        "BUYER_TOKEN_BUFFER_BASE_UNITS",
+        "--apply",
+    ):
+        assert required_token in text, (
+            f"canary.md is missing pre-run funding guidance: {required_token}"
+        )
 
 
 def test_clean_room_acceptance_checklist_exists_and_is_linked() -> None:

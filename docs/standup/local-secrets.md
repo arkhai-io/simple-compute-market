@@ -48,6 +48,8 @@ ALCHEMY_BASE_MAINNET_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
 `wallets.env` should include the local credential paths and agent wallets:
 
 ```dotenv
+SEPOLIA_FUNDER_PRIVATE_KEY=0x<sepolia-funder-private-key>
+MAINNET_FUNDER_PRIVATE_KEY=0x<mainnet-funder-private-key>
 SELLER_PRIVATE_KEY=0x<seller-private-key>
 SELLER_WALLET_ADDRESS=0x<seller-wallet-address>
 BUYER_PRIVATE_KEY=0x<buyer-private-key>
@@ -93,6 +95,16 @@ MANAGEMENT_VARS_PATH=~/.config/simple-market-service/management-vars.yaml
 
 `seller-agent.env`, `buyer-agent.env`, and `prod-canary.env` should each hold
 their role-specific overrides such as agent IDs, URLs, and canary defaults.
+For repeatable canary funding, add these keys to `prod-canary.env`:
+
+```dotenv
+BUYER_NATIVE_FLOOR_WEI=20000000000000
+SELLER_NATIVE_FLOOR_WEI=10000000000000
+BUYER_TOKEN_BUFFER_BASE_UNITS=0
+# Required for Base mainnet ERC20 funding when the token is not in the checked-in registry:
+# CANARY_FUNDING_TOKEN_ADDRESS=0x...
+# CANARY_FUNDING_TOKEN_DECIMALS=6
+```
 
 ## Materialization Step
 
@@ -122,6 +134,19 @@ The renderer also derives and injects:
   `/etc/simple-market-service/provisioning.env`
 - `PROVISIONER_SSH_PRIVATE_KEY_PATH` and `CANARY_TENANT_SSH_PRIVATE_KEY_PATH`
   into the provisioning and canary contracts
+
+## Canary Funding Preflight
+
+Before a live run, compute the top-ups from the same local secret bundle:
+
+```bash
+python scripts/pre_canary_fund.py \
+  --local-secrets-dir ~/.config/simple-market-service
+```
+
+When you are ready to broadcast the top-up transactions from
+`SEPOLIA_FUNDER_PRIVATE_KEY` or `MAINNET_FUNDER_PRIVATE_KEY`, rerun with
+`--apply`.
 
 ## Verification
 

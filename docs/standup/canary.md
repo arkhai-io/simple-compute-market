@@ -60,6 +60,23 @@ Before creating orders, confirm that:
 - the selected `--vm-host` aliases or `CANARY_VM_HOSTS` values exist in
   `compute-provisioning-iac/ansible/inventory/hosts`
 
+Run the funding preflight before a live canary so the buyer and seller wallets
+meet the configured thresholds:
+
+```bash
+python scripts/pre_canary_fund.py \
+  --local-secrets-dir ~/.config/simple-market-service
+```
+
+The script reads threshold keys from `prod-canary.env`, including:
+
+- `BUYER_NATIVE_FLOOR_WEI`
+- `SELLER_NATIVE_FLOOR_WEI`
+- `BUYER_TOKEN_BUFFER_BASE_UNITS`
+
+When the printed plan looks correct, rerun with `--apply` to broadcast the
+top-up transactions from the configured funder wallet.
+
 ## Gate Sequence
 
 Source the runner env before executing the live checks and smoke run:
