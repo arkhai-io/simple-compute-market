@@ -16,6 +16,7 @@ import asyncio
 import inspect
 import os
 import threading
+from contextlib import asynccontextmanager
 
 from a2a.server.apps import A2AStarletteApplication
 from fastapi import FastAPI
@@ -107,10 +108,19 @@ def _attach_a2a_routes(app: FastAPI) -> None:
 
 
 def _register_startup_hook(app: FastAPI) -> None:
-    @app.on_event("startup")
-    async def startup_event():
-        """Start background tasks on server startup."""
-        await _startup_tasks()
+    if getattr(app.state, "_sms_startup_lifespan_registered", False):
+        return
+
+    existing_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def startup_lifespan(app_instance: FastAPI):
+        async with existing_lifespan(app_instance):
+            await _startup_tasks()
+            yield
+
+    app.router.lifespan_context = startup_lifespan
+    app.state._sms_startup_lifespan_registered = True
 
 
 def build_vertex_app(

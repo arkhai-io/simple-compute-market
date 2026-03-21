@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import BaseModel
 import pytest
 
@@ -98,6 +99,75 @@ def test_build_vertex_app_attaches_market_routes_and_feedback_endpoint() -> None
     }.issubset(_route_paths(app))
     assert "POST" in _route_methods_by_path(app).get("/", set())
     assert bucket_calls == [("gs://test-project-a2a-agent-logs", "test-project", "asia-southeast1")]
+
+
+def test_build_vertex_app_runs_startup_tasks_via_lifespan(monkeypatch) -> None:
+    startup_calls: list[str] = []
+
+    class DummyFeedback(BaseModel):
+        message: str
+
+    class DummyLogger:
+        def log_struct(self, payload: dict, severity: str) -> None:
+            return None
+
+    class DummyLoggingClient:
+        def logger(self, name: str) -> DummyLogger:
+            return DummyLogger()
+
+    class DummyTracerProvider:
+        def add_span_processor(self, processor) -> None:
+            return None
+
+    class DummyProcessor:
+        def __init__(self, exporter) -> None:
+            self.exporter = exporter
+
+    class DummyTraceModule:
+        @staticmethod
+        def set_tracer_provider(provider) -> None:
+            return None
+
+    async def fake_startup_tasks() -> None:
+        startup_calls.append("vertex")
+
+    monkeypatch.setattr(server, "_startup_tasks", fake_startup_tasks)
+
+    app = server.build_vertex_app(
+        get_fast_api_app_fn=lambda **kwargs: FastAPI(),
+        google_auth_default_fn=lambda: (object(), "test-project"),
+        logging_client_factory=DummyLoggingClient,
+        create_bucket_if_not_exists_fn=lambda **kwargs: None,
+        cloud_trace_exporter_cls=lambda: object(),
+        tracer_provider_cls=DummyTracerProvider,
+        batch_span_processor_cls=DummyProcessor,
+        trace_module=DummyTraceModule,
+        feedback_model_cls=DummyFeedback,
+    )
+
+    assert app.router.on_startup == []
+    with TestClient(app):
+        pass
+    assert startup_calls == ["vertex"]
+
+
+def test_build_local_app_runs_startup_tasks_via_lifespan(monkeypatch) -> None:
+    startup_calls: list[str] = []
+    fake_a2a_app = FastAPI()
+
+    async def fake_startup_tasks() -> None:
+        startup_calls.append("local")
+
+    monkeypatch.setattr(server, "a2a_app", fake_a2a_app)
+    monkeypatch.setattr(server, "_startup_tasks", fake_startup_tasks)
+    monkeypatch.setattr(server, "attach_market_routes", lambda app: None)
+
+    app = server.build_local_app()
+
+    assert app.router.on_startup == []
+    with TestClient(app):
+        pass
+    assert startup_calls == ["local"]
 
 
 @pytest.mark.asyncio
