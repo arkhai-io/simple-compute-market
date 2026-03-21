@@ -48,6 +48,7 @@ SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
 SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
 SUBAGENT_SUMMARY_PATH = SUBAGENT_DIR / "2026-03-20-audit-summary.md"
 CLEAN_ROOM_ACCEPTANCE_PATH = ROOT / "docs/clean-room-acceptance.md"
+ISOLATED_CANARY_SIGNOFF_PATH = ROOT / "docs/isolated-canary-signoff-2026-03-20.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
@@ -680,6 +681,30 @@ def test_clean_room_acceptance_checklist_exists_and_is_linked() -> None:
 
     overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
     assert "docs/clean-room-acceptance.md" in overview_text
+
+
+def test_isolated_canary_signoff_record_exists_and_is_linked() -> None:
+    assert ISOLATED_CANARY_SIGNOFF_PATH.exists(), (
+        "docs/isolated-canary-signoff-2026-03-20.md must exist as the tracked "
+        "isolated deployed-canary signoff record"
+    )
+
+    signoff_text = ISOLATED_CANARY_SIGNOFF_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "2026-03-20",
+        "47a612d4-fc26-41a0-9aa2-e63cbb685845",
+        "fc6f7eb4-7316-4826-94ef-304ac25c9b4f",
+        "6b792e1d-64b3-4ec9-8f49-1a3e64aebc0f",
+        "python scripts/run_release_gate_checks.py",
+        "docs/clean-room-acceptance.md",
+    ):
+        assert required_token in signoff_text, (
+            "isolated canary signoff record is missing required token: "
+            f"{required_token}"
+        )
+
+    checklist_text = CLEAN_ROOM_ACCEPTANCE_PATH.read_text(encoding="utf-8")
+    assert "docs/isolated-canary-signoff-2026-03-20.md" in checklist_text
 
 
 def test_root_readme_points_to_canonical_standup_docs() -> None:

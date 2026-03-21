@@ -45,6 +45,7 @@ Record the following before signoff:
 - blocker summary:
 
 Current repo-side rerun on 2026-03-21 found no repo-documentation blocker that
-would prevent a competent operator from following the stand-up path. Final
-signoff still depends on a real isolated environment run with the required
-external resources.
+would prevent a competent operator from following the stand-up path.
+
+Final isolated-canary signoff is recorded in
+`docs/isolated-canary-signoff-2026-03-20.md`.
