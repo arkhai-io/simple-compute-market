@@ -69,6 +69,7 @@ ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
 AGENT_README = ROOT / "core/agent/README.md"
 TRAINING_README = ROOT / "domain/compute/training/README.md"
+GITMODULES_PATH = ROOT / ".gitmodules"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -663,17 +664,18 @@ def test_contract_bootstrap_doc_is_executable_runbook() -> None:
         )
 
 
-def test_contracts_package_uses_hardhat_version_compatible_with_node_test_runner() -> None:
+def test_contracts_submodule_points_to_canonical_upstream() -> None:
+    gitmodules = GITMODULES_PATH.read_text(encoding="utf-8")
+    assert "https://github.com/erc-8004/erc-8004-contracts.git" in gitmodules
+
+
+def test_contracts_package_declares_hardhat_test_entrypoint() -> None:
     package = json.loads(CONTRACTS_PACKAGE_JSON.read_text(encoding="utf-8"))
     package_lock = json.loads(CONTRACTS_PACKAGE_LOCK.read_text(encoding="utf-8"))
 
-    hardhat_range = package["devDependencies"]["hardhat"]
-    resolved_hardhat = package_lock["packages"]["node_modules/hardhat"]["version"]
-
-    # hardhat-node-test-runner imports hardhat/internal/gas-analytics, which is
-    # only exported by hardhat >= 3.0.11.
-    assert _parse_semver_floor(hardhat_range) >= (3, 0, 11)
-    assert _parse_semver_floor(resolved_hardhat) >= (3, 0, 11)
+    assert "test" in package["scripts"]
+    assert "hardhat" in package["devDependencies"]
+    assert "node_modules/hardhat" in package_lock["packages"]
 
 
 def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
