@@ -66,6 +66,7 @@ REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
+RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
@@ -201,6 +202,13 @@ def test_repo_exposes_ci_test_matrix_workflow() -> None:
     text = TEST_MATRIX_WORKFLOW.read_text(encoding="utf-8")
     assert "scripts/run_full_repo_validation.py" in text
     assert "node-version: 22.12.0" in text or "node-version: '22.12.0'" in text
+
+
+def test_repo_exposes_release_gate_entrypoint() -> None:
+    assert RELEASE_GATE_SCRIPT.exists(), (
+        "scripts/run_release_gate_checks.py must exist as the canonical "
+        "expanded release gate entrypoint"
+    )
 
 
 def test_async_provisioning_startup_regenerates_matching_public_ssh_key() -> None:
