@@ -114,6 +114,22 @@ def _serialize_decisions(decisions: Any) -> list[Any]:
     return [_serialize_decision(decisions)]
 
 
+def _build_mock_escrow_uid(
+    *,
+    order_dict: dict[str, Any],
+    our_order_id: str | None,
+    their_order_id: str | None,
+) -> str:
+    seed = ":".join(
+        [
+            str(order_dict.get("order_id") or ""),
+            str(our_order_id or ""),
+            str(their_order_id or ""),
+        ]
+    )
+    return f"mock-escrow-{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex}"
+
+
 def _json_safe_value(value: Any) -> Any:
     """Recursively normalize nested models/enums into JSON-safe primitives."""
     return json.loads(json.dumps(value, default=json_serializer))
@@ -1378,6 +1394,18 @@ async def _accept_as_buyer(
                 logger.warning("[ALKAHEST] Failed to create escrow on attempt %d/%d: %s", attempt + 1, max_retries, e)
                 if attempt < max_retries - 1:
                     await asyncio.sleep(base_delay * (2 ** attempt))
+                elif CONFIG.provisioning_mode == "mock":
+                    escrow_uid = _build_mock_escrow_uid(
+                        order_dict=order_dict,
+                        our_order_id=our_order_id,
+                        their_order_id=their_order_id,
+                    )
+                    escrow_receipt = {"log": {"uid": escrow_uid}, "mock": True}
+                    logger.warning(
+                        "[ALKAHEST] Using mock escrow uid %s after escrow failure because PROVISIONING_MODE=mock",
+                        escrow_uid,
+                    )
+                    break
                 else:
                     raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
 

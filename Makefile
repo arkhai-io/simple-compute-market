@@ -1,7 +1,7 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 
-.PHONY: build
+.PHONY: build test-local-e2e
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
@@ -74,6 +74,9 @@ init-images:
 deploy-local:
 	docker compose up
 	docker compose ps
+
+test-local-e2e:
+	cd core && uv --no-config run pytest ../tests/e2e/test_local_dual_agent_stack.py -q
 
 #Ideally a helm chart eventually replaces 3 different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
 deploy: deploy-test-env deploy-registry

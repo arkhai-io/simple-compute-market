@@ -77,6 +77,7 @@ REGISTRY_CONTAINER_SMOKE_TEST = (
     ROOT / "erc-8004-registry-py/tests/integration/test_container_smoke.py"
 )
 CORE_CONTAINER_SMOKE_TEST = ROOT / "core/tests/integration/test_container_smoke.py"
+LOCAL_DUAL_AGENT_E2E_TEST = ROOT / "tests/e2e/test_local_dual_agent_stack.py"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
@@ -456,6 +457,56 @@ def test_core_agent_readme_documents_container_smoke_path() -> None:
         assert required_token in text, (
             "core/agent/README.md must document the container smoke path "
             f"including '{required_token}'"
+        )
+
+
+def test_root_makefile_exposes_local_dual_agent_e2e_target() -> None:
+    text = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    for required_token in (
+        "test-local-e2e:",
+        "cd core && uv --no-config run pytest ../tests/e2e/test_local_dual_agent_stack.py -q",
+    ):
+        assert required_token in text, (
+            "Makefile must expose the local dual-agent e2e target via "
+            f"'{required_token}'"
+        )
+
+
+def test_local_dual_agent_e2e_test_exists_and_covers_stack_contract() -> None:
+    text = LOCAL_DUAL_AGENT_E2E_TEST.read_text(encoding="utf-8")
+
+    for required_token in (
+        "docker compose",
+        "18080",
+        "18000",
+        "18001",
+        "/resources/portfolio",
+        "/orders/create",
+        "/orders/close",
+        "maker_attestation",
+        "accepted",
+    ):
+        assert required_token in text, (
+            "local dual-agent e2e coverage is missing "
+            f"'{required_token}'"
+        )
+
+
+def test_root_readme_documents_local_dual_agent_e2e_path() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make test-local-e2e",
+        "/resources/portfolio",
+        "/orders/create",
+        "/orders/close",
+        "seller agent",
+        "buyer agent",
+    ):
+        assert required_token in text, (
+            "README.md must document the local dual-agent e2e path including "
+            f"'{required_token}'"
         )
 
 

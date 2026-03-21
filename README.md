@@ -182,6 +182,19 @@ curl http://localhost:18000/.well-known/agent-card.json
 curl http://localhost:18001/.well-known/agent-card.json
 ```
 
+Run the local dual-agent e2e path:
+
+```bash
+make test-local-e2e
+```
+
+That target boots its own isolated stack and verifies:
+
+- seller agent portfolio visibility at `/resources/portfolio`
+- signed buyer and seller order creation via `/orders/create`
+- a matched negotiation that reaches an `accepted` registry state
+- dual-agent closeout via `/orders/close`
+
 Stop and clean up the compose stack:
 
 ```bash
