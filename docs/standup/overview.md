@@ -47,9 +47,13 @@ Follow these documents in order:
 Supporting references:
 
 - [Deployment Input Checklist](../deployment-input-checklist.md)
+- [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
 - [End-to-End Runbook](../e2e-runbook.md)
 - [Production Canary Runbook](../production-canary.md)
 - [End-to-End Deployment Test Plan](../e2e-deployment-test-plan.md)
+
+Use `docs/clean-room-acceptance.md` as the tracked final checklist before
+signing off the stand-up path as clean-room ready.
 
 ## Success Criteria
 

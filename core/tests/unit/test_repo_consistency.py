@@ -47,6 +47,7 @@ SUBAGENT_CANARY_PATH = SUBAGENT_DIR / "canary-e2e.md"
 SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
 SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
 SUBAGENT_SUMMARY_PATH = SUBAGENT_DIR / "2026-03-20-audit-summary.md"
+CLEAN_ROOM_ACCEPTANCE_PATH = ROOT / "docs/clean-room-acceptance.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
@@ -646,6 +647,31 @@ def test_canonical_standup_docs_exist() -> None:
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
     assert not missing, f"Missing canonical stand-up docs: {missing}"
+
+
+def test_clean_room_acceptance_checklist_exists_and_is_linked() -> None:
+    assert CLEAN_ROOM_ACCEPTANCE_PATH.exists(), (
+        "docs/clean-room-acceptance.md must exist as the tracked clean-room "
+        "operator acceptance checklist"
+    )
+
+    checklist_text = CLEAN_ROOM_ACCEPTANCE_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "## Scope",
+        "## Required Inputs",
+        "## Acceptance Checklist",
+        "## Evidence",
+        "docs/standup/overview.md",
+        "docs/production-canary.md",
+        "docs/e2e-runbook.md",
+    ):
+        assert required_token in checklist_text, (
+            "clean-room acceptance checklist is missing required token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "docs/clean-room-acceptance.md" in overview_text
 
 
 def test_root_readme_points_to_canonical_standup_docs() -> None:
