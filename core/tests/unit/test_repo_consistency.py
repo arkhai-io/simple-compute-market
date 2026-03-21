@@ -975,12 +975,14 @@ def test_compute_provisioning_iac_readme_uses_real_inventory_aliases_and_secret_
 
     assert "proxy1" not in text
     assert "vm1" not in text
+    assert "@/inventory/management-vars.yaml" not in text
 
     for required_token in (
         "proxy-dev",
         "ww1",
         "build-vars.yaml is only required for golden image creation",
         "management-vars.yaml is only required when runtime VM operations use golden images",
+        "--extra-vars @inventory/management-vars.yaml",
         "image_setup_type=scratch",
         "image_setup_type=golden",
         "credentials/frp-server-credentials-<host>-<timestamp>.json",
