@@ -69,6 +69,21 @@ at least:
 `management-vars.yaml` file through the IaC host-kit workflow, then base64-encode
 it for container injection as documented in `compute-provisioning-iac/README.md`.
 
+Start from `compute-provisioning-iac/ansible/inventory/vm-vars-example.yaml` for
+the VM-operation contract, then keep a separate
+`/etc/simple-market-service/management-vars.yaml` bundle for the golden-image
+metadata used by provisioning. At minimum, that secret bundle should define:
+
+```yaml
+root_ssh_filename: <root-ssh-key-filename-on-kvm-host>
+golden_image_name: <published-golden-image-name>
+gcs_bucket_url: gs://<golden-image-bucket>
+gcs_image_path: <golden-image-object-prefix>
+```
+
+`image_setup_type=scratch does not require management-vars.yaml`. Use the
+bundle only when `image_setup_type=golden requires management-vars.yaml`.
+
 For the direct-run path, the image already contains the checked-in
 `compute-provisioning-iac/ansible/inventory/hosts` file. The container startup
 script materializes `MANAGEMENT_VARS_YAML` at
