@@ -151,6 +151,20 @@ jobs:
               --log-path ../artifacts/prod-canary.log
           ) 2>&1 | tee artifacts/prod-canary-rollback.log || true
 
+      - name: Validate release signoff proof
+        if: ${{ env.canary_exit_code == '0' }}
+        shell: bash
+        run: |
+          python scripts/run_release_gate_checks.py \
+            --deployed-canary-log artifacts/prod-canary.log \
+            --environment "${{ inputs.isolated_environment }}" \
+            --seller-agent-env "${{ inputs.seller_agent_env }}" \
+            --buyer-agent-env "${{ inputs.buyer_agent_env }}" \
+            --provisioning-env "${{ inputs.provisioning_env }}" \
+            --registry-env "${{ inputs.registry_env }}" \
+            --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+            --skip-smoke-help
+
       - name: Upload deployed canary artifacts
         if: always()
         uses: actions/upload-artifact@v4

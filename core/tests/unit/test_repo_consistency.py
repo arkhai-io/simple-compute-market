@@ -237,6 +237,8 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
         "isolated environment",
         "/etc/simple-market-service/prod-canary.env",
         "scripts/run_release_gate_checks.py",
+        "--deployed-canary-log",
+        "artifacts/prod-canary.log",
         "scripts/prod_canary_smoke.py",
         "scripts/prod_canary_rollback.py",
         "upload-artifact",
@@ -1502,6 +1504,23 @@ def test_release_docs_require_deployed_canary_proof_for_signoff() -> None:
             assert required_token in text, (
                 f"{path.name} is missing release-signoff proof token: {required_token}"
             )
+
+
+def test_e2e_runbook_locks_release_readiness_contract() -> None:
+    text = (ROOT / "docs/e2e-runbook.md").read_text(encoding="utf-8")
+
+    for required_token in (
+        "docs/clean-room-acceptance.md",
+        ".github/workflows/deployed-canary.yml",
+        "scripts/prod_canary_smoke.py",
+        "scripts/prod_canary_rollback.py",
+        "python scripts/run_release_gate_checks.py",
+        "--deployed-canary-log",
+    ):
+        assert required_token in text, (
+            "e2e-runbook.md is missing a release-readiness contract token: "
+            f"{required_token}"
+        )
 
 
 @pytest.mark.parametrize(

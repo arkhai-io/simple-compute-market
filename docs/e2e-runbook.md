@@ -198,6 +198,7 @@ If the run fails:
 
 1. Preserve the exact runner output, provisioning job ID, and canary order IDs.
 2. Follow the exact rollback procedure in `docs/production-canary.md#rollback`.
+   Use `scripts/prod_canary_rollback.py --log-path <path-to-prod-canary.log>` if the canary was executed from the repo checkout or from `.github/workflows/deployed-canary.yml`.
 3. Verify that the provisioned guest is stopped and reclaimed before retrying.
 4. Re-run the repo gates after any repo-side fix.
 
@@ -212,6 +213,29 @@ moves forward:
 - `dev`: one clean canary trade
 - `staging`: one clean canary trade, then three consecutive clean trades
 - `production`: one isolated canary trade, then three consecutive clean trades only after the first isolated run passes
+
+## 8. Release Signoff
+
+Before a release is considered ready, tie the live canary result back to the
+repo-side gates:
+
+1. Use `docs/clean-room-acceptance.md` as the final operator checklist.
+2. Preserve `prod-canary.log` from the manual run or from `.github/workflows/deployed-canary.yml`.
+3. Keep the same canary execution path based on `scripts/prod_canary_smoke.py`.
+4. If cleanup was needed, preserve the output from `scripts/prod_canary_rollback.py`.
+5. Feed the successful isolated canary proof into:
+
+```bash
+python scripts/run_release_gate_checks.py \
+  --deployed-canary-log /path/to/prod-canary.log \
+  --environment <environment> \
+  --seller-agent-env /etc/simple-market-service/seller-agent.env \
+  --buyer-agent-env /etc/simple-market-service/buyer-agent.env \
+  --provisioning-env /etc/simple-market-service/provisioning.env \
+  --registry-env /etc/simple-market-service/registry.env \
+  --inventory-path compute-provisioning-iac/ansible/inventory/hosts \
+  --skip-smoke-help
+```
 
 ## Definition Of Done
 
