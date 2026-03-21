@@ -28,6 +28,18 @@ STANDUP_AGENT_SELLER_PATH = STANDUP_DIR / "agent-seller.md"
 STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
 STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
+SUBAGENT_DIR = ROOT / "docs/subagents"
+SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
+SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
+SUBAGENT_REGISTRY_PATH = SUBAGENT_DIR / "registry-deploy.md"
+SUBAGENT_PROVISIONING_PATH = SUBAGENT_DIR / "provisioning-deploy.md"
+SUBAGENT_IAC_PATH = SUBAGENT_DIR / "iac-host-kit.md"
+SUBAGENT_AGENT_SELLER_PATH = SUBAGENT_DIR / "agent-seller.md"
+SUBAGENT_AGENT_BUYER_PATH = SUBAGENT_DIR / "agent-buyer.md"
+SUBAGENT_NETWORK_PATH = SUBAGENT_DIR / "network-overlay.md"
+SUBAGENT_CANARY_PATH = SUBAGENT_DIR / "canary-e2e.md"
+SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
+SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
@@ -508,6 +520,64 @@ def test_async_provisioning_readme_points_deployed_users_to_standup_runbook() ->
 
     assert "docs/standup/provisioning.md" in text
     assert "docs/standup/overview.md" in text
+
+
+def test_subagent_prompt_docs_exist_for_all_deployment_paths() -> None:
+    required_paths = [
+        SUBAGENT_INDEX_PATH,
+        SUBAGENT_LOCAL_STACK_PATH,
+        SUBAGENT_REGISTRY_PATH,
+        SUBAGENT_PROVISIONING_PATH,
+        SUBAGENT_IAC_PATH,
+        SUBAGENT_AGENT_SELLER_PATH,
+        SUBAGENT_AGENT_BUYER_PATH,
+        SUBAGENT_NETWORK_PATH,
+        SUBAGENT_CANARY_PATH,
+        SUBAGENT_ROLLBACK_PATH,
+        SUBAGENT_CLEAN_ROOM_PATH,
+    ]
+
+    missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
+    assert not missing, f"Missing subagent prompt docs: {missing}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        SUBAGENT_LOCAL_STACK_PATH,
+        SUBAGENT_REGISTRY_PATH,
+        SUBAGENT_PROVISIONING_PATH,
+        SUBAGENT_IAC_PATH,
+        SUBAGENT_AGENT_SELLER_PATH,
+        SUBAGENT_AGENT_BUYER_PATH,
+        SUBAGENT_NETWORK_PATH,
+        SUBAGENT_CANARY_PATH,
+        SUBAGENT_ROLLBACK_PATH,
+        SUBAGENT_CLEAN_ROOM_PATH,
+    ],
+)
+def test_subagent_prompt_docs_define_audit_contract(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "# ",
+        "## Goal",
+        "## Inputs",
+        "## Procedure",
+        "## Output Contract",
+    ):
+        assert required_heading in text, (
+            f"{path.name} is missing subagent prompt section: {required_heading}"
+        )
+
+    for required_token in (
+        "file/line references",
+        "Do not assume prior chat context",
+        "blockers",
+    ):
+        assert required_token in text, (
+            f"{path.name} is missing subagent prompt requirement: {required_token}"
+        )
 
 
 def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:

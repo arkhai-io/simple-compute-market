@@ -1,19 +1,14 @@
 # Canary Validation
 
-Once the stack is live, continue with:
-
-- [End-to-End Runbook](../e2e-runbook.md)
-- [Production Canary Runbook](../production-canary.md)
-
-For the full operator workflow, treat `docs/e2e-runbook.md` as the detailed
-execution guide and `docs/production-canary.md` as the live-canary reference.
+Once the stack is live, continue with `docs/e2e-runbook.md` and
+`docs/production-canary.md`. This page is the short stand-up handoff that
+collects the deployed prerequisites before the live smoke run.
 
 Use a dedicated deployment namespace for the canary environment. On GCP, that
 means a dedicated GCP project or a fresh GCP project for isolated validation.
 
 ## Required Inputs
 
-- `/etc/simple-market-service/prod-canary.env`
 - `REGISTRY_URL`
 - `PROVISIONING_SERVICE_URL`
 - seller and buyer agent URLs
@@ -22,28 +17,59 @@ means a dedicated GCP project or a fresh GCP project for isolated validation.
 - one or more candidate `--vm-host` aliases
 - optional tenant SSH private key
 - optional FRP dashboard URL and password
+- a runner env file at `/etc/simple-market-service/prod-canary.env`
 
 ## Prerequisites
 
-Before the live run, prepare `/etc/simple-market-service/prod-canary.env` with
-the environment-specific defaults you want the runner to use. A typical private
-runner bundle includes `CANARY_VM_HOSTS`, optional FRP credentials, and the
-target token / region defaults.
+Keep the runner-only defaults outside Git in
+`/etc/simple-market-service/prod-canary.env`. A practical place for optional
+defaults is:
 
-Do not start a live canary until the stack already satisfies the deployment
-sequence from `docs/standup/overview.md`, including seller resource seeding.
+- `CANARY_VM_HOSTS=ww1`
+- `FRP_DASHBOARD_URL=http://<frp-host>:7500`
+- `FRP_DASHBOARD_PASSWORD=<password>`
+- `CANARY_GPU_MODEL=<gpu-model>`
+- `CANARY_REGION=<region>`
+- `CANARY_TOKEN_SYMBOL=<token-symbol>`
+- `CANARY_TOKEN_AMOUNT=<token-amount>`
+
+Before creating orders, confirm that:
+
+- the seller inventory was seeded via `docs/standup/resource-seeding.md`
+- the registry, provisioning service, seller, and buyer are reachable from the
+  runner host
+- the selected `--vm-host` aliases or `CANARY_VM_HOSTS` values exist in
+  `compute-provisioning-iac/ansible/inventory/hosts`
 
 ## Gate Sequence
 
-1. `python scripts/run_deployment_gate_checks.py --skip-smoke-help`
-2. `python scripts/validate_deployment_bundle.py ...`
-3. live service verification
-4. `uv --no-config run python ../scripts/prod_canary_smoke.py ...`
+Run the repo-only readiness gates first:
+
+```bash
+python scripts/run_deployment_gate_checks.py --skip-smoke-help
+```
+
+Then validate the deployed bundle before a live run:
+
+```bash
+python scripts/validate_deployment_bundle.py \
+  --environment <environment> \
+  --seller-agent-env /etc/simple-market-service/seller-agent.env \
+  --buyer-agent-env /etc/simple-market-service/buyer-agent.env \
+  --provisioning-env /etc/simple-market-service/provisioning.env \
+  --registry-env /etc/simple-market-service/registry.env \
+  --seller-agent-url http://<seller-host>:<seller-port> \
+  --buyer-agent-url http://<buyer-host>:<buyer-port> \
+  --seller-agent-id eip155:<chain_id>:<identity_registry>:<seller_token_id> \
+  --buyer-agent-id eip155:<chain_id>:<identity_registry>:<buyer_token_id> \
+  --seller-private-key 0x<seller-private-key> \
+  --buyer-private-key 0x<buyer-private-key> \
+  --ssh-private-key-path ~/.ssh/id_ed25519
+```
 
 ## Live Verification
 
-Before any order creation, verify the deployed endpoints from the machine that
-will run the canary:
+Verify the deployed services from the same machine that will run the canary:
 
 ```bash
 curl http://<registry-host>:<registry-port>/health
@@ -57,9 +83,7 @@ curl http://<buyer-host>:<buyer-port>/.well-known/erc-8004-registration.json
 
 ## Smoke Run
 
-Run the smoke script from the repo with explicit host selection. Use one or more
-`--vm-host` flags directly, or set `CANARY_VM_HOSTS` in
-`/etc/simple-market-service/prod-canary.env` before launch.
+Run the live smoke test from the repo with the CLI environment:
 
 ```bash
 cd cli
@@ -76,10 +100,12 @@ uv --no-config run python ../scripts/prod_canary_smoke.py \
   --region "<region>" \
   --token-symbol <token-symbol> \
   --token-amount <token-amount> \
-  --vm-host <candidate-host-1> \
-  --vm-host <candidate-host-2> \
+  --vm-host <candidate-host> \
   --ssh-private-key-path ~/.ssh/id_ed25519
 ```
+
+If `/etc/simple-market-service/prod-canary.env` sets `CANARY_VM_HOSTS`, the
+runner can preflight multiple candidate hosts before orders are created.
 
 ## Success Criteria
 
