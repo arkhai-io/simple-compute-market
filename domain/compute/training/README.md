@@ -19,13 +19,13 @@ This project uses `ArkhaiPufferEnv` via `pufferlib` directly. Training produces 
 ```bash
 # Install is automatic (transitive dep from pufferlib)
 # Login with your API key from https://wandb.ai/authorize
-cd agent
+cd core/agent
 uv run wandb login
 ```
 
 ## Training Commands
 
-Run from `/agent`:
+Run from `/core/agent`:
 
 ```bash
 # ──────────────────────────────────────────────
@@ -146,7 +146,7 @@ GPU names in `ARKHAI_GPU_SLOT_MAP` must match the `GPUModel` enum values in `app
 
 Training configs in `config/` set per-slot cluster capacities (`cluster_gpu_N_capacity`) and job sizes (`job_gpu_N_nodes`). These must be consistent with the slot map.
 
-See `agent/.env.sample` for a complete reference of all configurable variables.
+See `core/agent/.env.sample` for a complete reference of all configurable variables.
 
 ## Policy Integration
 

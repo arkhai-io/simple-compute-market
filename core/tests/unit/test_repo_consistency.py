@@ -59,9 +59,11 @@ AGENT_DATA_DIR = ROOT / "core/agent/app/data"
 REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
 REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
+REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
 AGENT_README = ROOT / "core/agent/README.md"
+TRAINING_README = ROOT / "domain/compute/training/README.md"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -520,6 +522,22 @@ def test_async_provisioning_readme_points_deployed_users_to_standup_runbook() ->
 
     assert "docs/standup/provisioning.md" in text
     assert "docs/standup/overview.md" in text
+
+
+def test_registry_makefile_uses_tracked_docker_compose_env_file() -> None:
+    text = REGISTRY_MAKEFILE.read_text(encoding="utf-8")
+
+    assert ".env.docker " not in text
+    assert ".env.docker-compose" in text
+
+
+def test_training_readme_uses_current_core_agent_paths() -> None:
+    text = TRAINING_README.read_text(encoding="utf-8")
+
+    assert "cd agent" not in text
+    assert "Run from `/agent`" not in text
+    assert "cd core/agent" in text
+    assert "core/agent/.env.sample" in text
 
 
 def test_subagent_prompt_docs_exist_for_all_deployment_paths() -> None:
