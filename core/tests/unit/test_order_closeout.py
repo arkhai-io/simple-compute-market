@@ -129,6 +129,100 @@ async def test_accept_as_buyer_stamps_counterparty_for_buyer_maker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_accept_as_buyer_prefers_order_oracle_address(monkeypatch):
+    order_dict = {
+        "order_id": "alice-order-1",
+        "order_maker": ALICE_URL,
+        "offer_resource": _tokens().model_dump(mode="json"),
+        "demand_resource": _compute().model_dump(mode="json"),
+        "duration_hours": 1,
+        "oracle_address": "0xOrderOracle",
+    }
+
+    sqlite_client = SimpleNamespace(update_order=AsyncMock())
+    registry_client = SimpleNamespace(update_order=AsyncMock(return_value={"status": "accepted"}))
+    buy_compute_with_erc20 = AsyncMock(return_value={"log": {"uid": "escrow-123"}})
+
+    monkeypatch.setattr(ae, "BASE_URL_OVERRIDE", ALICE_URL)
+    monkeypatch.setattr(ae, "SSH_PUBLIC_KEY", "ssh-rsa AAA")
+    monkeypatch.setattr(
+        ae,
+        "CONFIG",
+        replace(
+            ae.CONFIG,
+            agent_wallet_address="0xLocalOracle",
+            enable_registry_discovery=True,
+        ),
+    )
+    monkeypatch.setattr(ae, "get_sqlite_client", lambda: sqlite_client)
+    monkeypatch.setattr(ae, "get_registry_client", lambda: registry_client)
+    monkeypatch.setattr(ae, "buy_compute_with_erc20", buy_compute_with_erc20)
+    monkeypatch.setattr(
+        ae,
+        "send_to_remote_agent",
+        AsyncMock(return_value=SimpleNamespace(content=None)),
+    )
+
+    await ae._accept_as_buyer(
+        alkahest_client=object(),
+        ctx=SimpleNamespace(invocation_id="inv-1", branch="main"),
+        parameters={
+            "counterparty_url": BOB_URL,
+            "matched_order_id": "bob-order-1",
+        },
+        order_dict=order_dict,
+        our_order_id="alice-order-1",
+        their_order_id="bob-order-1",
+    )
+
+    assert buy_compute_with_erc20.await_args.kwargs["oracle_address"] == "0xOrderOracle"
+
+
+@pytest.mark.asyncio
+async def test_buy_compute_with_erc20_uses_permit_and_create_with_future_expiration(
+    monkeypatch,
+):
+    permit_and_create = AsyncMock(return_value={"log": {"uid": "escrow-123"}})
+    approve = AsyncMock(return_value="0xapprove")
+    client = SimpleNamespace(
+        erc20=SimpleNamespace(
+            util=SimpleNamespace(approve=approve),
+            escrow=SimpleNamespace(
+                non_tierable=SimpleNamespace(
+                    permit_and_create=permit_and_create,
+                    create=AsyncMock(side_effect=AssertionError("unexpected create call")),
+                )
+            ),
+        )
+    )
+
+    monkeypatch.setattr(ae, "get_trusted_oracle_arbiter", lambda: "0xTrustedOracleArbiter")
+    monkeypatch.setattr(ae.time, "time", lambda: 1_700_000_000)
+
+    compute = _compute()
+    payment = _tokens(1_000_003)
+
+    receipt = await ae.buy_compute_with_erc20(
+        compute_resource=compute,
+        token_resource=payment,
+        duration_hours=1,
+        oracle_address="0x1111111111111111111111111111111111111111",
+        client=client,
+    )
+
+    assert receipt == {"log": {"uid": "escrow-123"}}
+    approve.assert_awaited_once()
+    permit_and_create.assert_awaited_once()
+    price_data, arbiter_data, expiration = permit_and_create.await_args.args
+    assert price_data == {
+        "address": payment.token.contract_address,
+        "value": payment.amount,
+    }
+    assert arbiter_data["arbiter"] == "0xTrustedOracleArbiter"
+    assert expiration == 1_700_003_600
+
+
+@pytest.mark.asyncio
 async def test_trust_action_closes_local_order_by_escrow(monkeypatch):
     sqlite_client = SimpleNamespace(
         update_order_by_escrow_uid=AsyncMock(),

@@ -7,6 +7,7 @@ Move domain-specific execution into the domain package as refactor continues.
 from __future__ import annotations
 
 import asyncio
+import time
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -1353,7 +1354,7 @@ async def _accept_as_buyer(
     their_order_id: str | None,
 ) -> dict[str, Any]:
     """Buyer path: create on-chain escrow and send AcceptOfferEvent with escrow_uid."""
-    oracle_address = CONFIG.agent_wallet_address
+    oracle_address = order_dict.get("oracle_address") or CONFIG.agent_wallet_address
     if not oracle_address:
         raise ValueError("Agent wallet address is required for buyer accept_offer but not configured")
     counterparty_ref = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
@@ -2123,10 +2124,10 @@ async def buy_compute_with_erc20(
 
     # 4) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
-    expiration = 0  # non-expiring escrow for now; may become time-limited later
+    expiration = int(time.time()) + max(duration_hours, 1) * 3600
 
     logger.info(
-        "[ALKAHEST] escrow.create price_data=%s arbiter=%s expiration=%s",
+        "[ALKAHEST] escrow.permit_and_create price_data=%s arbiter=%s expiration=%s",
         price_data,
         arbiter_address,
         expiration,
@@ -2135,7 +2136,7 @@ async def buy_compute_with_erc20(
     escrow_receipt = None
 
     try:
-        escrow_receipt = await client.erc20.escrow.non_tierable.create(
+        escrow_receipt = await client.erc20.escrow.non_tierable.permit_and_create(
             price_data,
             arbiter_data,
             expiration,
