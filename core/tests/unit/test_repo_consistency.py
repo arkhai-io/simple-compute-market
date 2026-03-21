@@ -63,6 +63,8 @@ REGISTRY_CONFIG = ROOT / "erc-8004-registry-py/src/config.py"
 REGISTRY_README = ROOT / "erc-8004-registry-py/README.md"
 REGISTRY_DOCKERFILE = ROOT / "erc-8004-registry-py/Dockerfile"
 REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
+CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
+CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
 AGENT_README = ROOT / "core/agent/README.md"
@@ -101,6 +103,14 @@ def _parse_inventory(path: Path) -> dict[str, set[str]]:
 def _parse_script_args(path: Path) -> set[str]:
     text = path.read_text(encoding="utf-8")
     return set(re.findall(r'add_argument\("(?P<arg>--[a-z0-9-]+)"', text))
+
+
+def _parse_semver_floor(raw: str) -> tuple[int, int, int]:
+    stripped = raw.strip().lstrip("^~<>=")
+    core = stripped.split("-", 1)[0]
+    parts = core.split(".")
+    padded = (parts + ["0", "0", "0"])[:3]
+    return tuple(int(part) for part in padded)
 
 
 def _parse_runbook_args(path: Path) -> set[str]:
@@ -651,6 +661,19 @@ def test_contract_bootstrap_doc_is_executable_runbook() -> None:
         assert required_token in text, (
             f"contracts.md is missing contract-bootstrap detail: {required_token}"
         )
+
+
+def test_contracts_package_uses_hardhat_version_compatible_with_node_test_runner() -> None:
+    package = json.loads(CONTRACTS_PACKAGE_JSON.read_text(encoding="utf-8"))
+    package_lock = json.loads(CONTRACTS_PACKAGE_LOCK.read_text(encoding="utf-8"))
+
+    hardhat_range = package["devDependencies"]["hardhat"]
+    resolved_hardhat = package_lock["packages"]["node_modules/hardhat"]["version"]
+
+    # hardhat-node-test-runner imports hardhat/internal/gas-analytics, which is
+    # only exported by hardhat >= 3.0.11.
+    assert _parse_semver_floor(hardhat_range) >= (3, 0, 11)
+    assert _parse_semver_floor(resolved_hardhat) >= (3, 0, 11)
 
 
 def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
