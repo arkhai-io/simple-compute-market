@@ -22,6 +22,7 @@ CHECKLIST_PATH = ROOT / "docs/deployment-input-checklist.md"
 STANDUP_DIR = ROOT / "docs/standup"
 STANDUP_OVERVIEW_PATH = STANDUP_DIR / "overview.md"
 STANDUP_IMAGE_SELECTION_PATH = STANDUP_DIR / "image-selection.md"
+STANDUP_CONTRACTS_PATH = STANDUP_DIR / "contracts.md"
 STANDUP_ZEROTIER_FRP_PATH = STANDUP_DIR / "zerotier-frp.md"
 STANDUP_REGISTRY_PATH = STANDUP_DIR / "registry.md"
 STANDUP_PROVISIONING_PATH = STANDUP_DIR / "provisioning.md"
@@ -343,6 +344,13 @@ def test_deployment_docs_reference_canonical_standup_overview() -> None:
     )
 
 
+def test_standup_overview_includes_contract_bootstrap_step() -> None:
+    text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+
+    assert "contracts.md" in text
+    assert "Contract Address Bootstrap" in text
+
+
 def test_root_readme_uses_current_core_agent_paths() -> None:
     text = ROOT_README.read_text(encoding="utf-8")
 
@@ -593,6 +601,8 @@ def test_registry_standup_doc_is_executable_runbook() -> None:
         )
 
     for required_token in (
+        "docs/standup/contracts.md",
+        "/etc/simple-market-service/contracts.env",
         "/etc/simple-market-service/registry.env",
         "docker pull",
         "docker run",
@@ -613,11 +623,57 @@ def test_registry_standup_doc_is_executable_runbook() -> None:
         )
 
 
+def test_contract_bootstrap_doc_is_executable_runbook() -> None:
+    text = STANDUP_CONTRACTS_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## Use Published Base Sepolia Registries",
+        "## Record The Shared Contract Bundle",
+        "## Verification",
+        "## Outputs",
+    ):
+        assert required_heading in text, (
+            f"contracts.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "erc-8004-contracts/README.md",
+        "Base Sepolia",
+        "/etc/simple-market-service/contracts.env",
+        "CHAIN_ID=84532",
+        "RPC_URL=https://<rpc-provider>",
+        "IDENTITY_REGISTRY_ADDRESS=",
+        "REPUTATION_REGISTRY_ADDRESS=",
+        "VALIDATION_REGISTRY_ADDRESS=",
+        "eth_getCode",
+    ):
+        assert required_token in text, (
+            f"contracts.md is missing contract-bootstrap detail: {required_token}"
+        )
+
+
 def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
     text = REGISTRY_README.read_text(encoding="utf-8")
 
     assert "docs/standup/registry.md" in text
     assert "docs/standup/overview.md" in text
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        STANDUP_REGISTRY_PATH,
+        STANDUP_AGENT_SELLER_PATH,
+        STANDUP_AGENT_BUYER_PATH,
+    ],
+)
+def test_deployed_service_docs_reference_shared_contract_bundle(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+
+    assert "/etc/simple-market-service/contracts.env" in text, (
+        f"{path.name} must reference the shared deployed contract bundle"
+    )
 
 
 def test_provisioning_standup_doc_is_executable_runbook() -> None:
@@ -843,6 +899,12 @@ def test_standup_canary_doc_covers_prerequisite_sequence() -> None:
         )
 
 
+def test_standup_canary_doc_points_to_actionable_rollback_runbook() -> None:
+    text = STANDUP_CANARY_PATH.read_text(encoding="utf-8")
+
+    assert "../production-canary.md#rollback" in text
+
+
 def test_production_canary_doc_matches_runner_contract() -> None:
     text = RUNBOOK_PATH.read_text(encoding="utf-8")
 
@@ -883,6 +945,16 @@ def test_production_canary_rollback_is_self_contained() -> None:
 
     for required_token in (
         "Preserve the exact runner output, provisioning job ID, and canary order IDs.",
+        "/api/v1/jobs/${CANARY_JOB_ID}",
+        "/api/v1/jobs/${CANARY_JOB_ID}/cancel",
+        "X-Agent-ID: ${SELLER_AGENT_ID}",
+        "CANARY_VM_HOST",
+        "CANARY_VM_NAME",
+        "SELLER_ORDER_ID",
+        "BUYER_ORDER_ID",
+        "update_order",
+        "destroy",
+        "undefine",
         "Close any canary orders that remained open.",
         "Verify that the provisioned guest is stopped and reclaimed before retrying.",
         "Re-run the repo gates after any repo-side fix.",

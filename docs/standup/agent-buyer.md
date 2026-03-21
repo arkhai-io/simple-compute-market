@@ -4,6 +4,7 @@ This document covers the deployed buyer agent path for the production canary.
 
 ## Inputs
 
+- a shared contract bundle at `/etc/simple-market-service/contracts.env`
 - `core/agent/.env.production.sample`
 - a writable host-local buyer env file at `/etc/simple-market-service/buyer-agent.env`
 - a buyer wallet private key and address
@@ -28,6 +29,10 @@ sudo docker pull "${BUYER_AGENT_IMAGE}"
 ```
 
 ## Host Preparation
+
+Resolve the shared chain bundle first via `docs/standup/contracts.md`, then
+reuse `/etc/simple-market-service/contracts.env` while you prepare the buyer
+env file.
 
 Create dedicated host paths for the buyer env file, SQLite DB, and ZeroTier
 state:
@@ -61,6 +66,11 @@ At minimum, set:
 - `TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_base_sepolia.json`
 - `ENABLE_EVENT_QUEUE=false`
 - `AUTO_REGISTER=true`
+
+Copy `CHAIN_ID`, `CHAIN_RPC_URL` (from `RPC_URL`),
+`IDENTITY_REGISTRY_ADDRESS`, `REPUTATION_REGISTRY_ADDRESS`, and
+`VALIDATION_REGISTRY_ADDRESS` from `/etc/simple-market-service/contracts.env`
+into `/etc/simple-market-service/buyer-agent.env`.
 
 The buyer runtime has the same writable `ENV_FILE` requirement as the seller
 path. Startup writes `ZEROTIER_IP`, the resolved `BASE_URL_OVERRIDE`, and

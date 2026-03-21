@@ -238,12 +238,137 @@ grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log
 If the canary fails:
 
 1. Preserve the exact runner output, provisioning job ID, and canary order IDs.
-2. Cancel the new provisioning job or reclaim the VM if the worker already created one.
-3. Close any canary orders that remained open.
-4. Verify that the provisioned guest is stopped and reclaimed before retrying.
-5. Remove the quarantined canary resource from service if state is inconsistent.
-6. Keep traffic pinned to the previous deployment until the failure is understood.
-7. Re-run the repo gates after any repo-side fix.
+2. Re-source the runner env and export the emitted IDs from the captured log:
+
+```bash
+set -a
+. /etc/simple-market-service/prod-canary.env
+set +a
+
+export SELLER_ORDER_ID="$(grep '^\[order\] seller order:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
+export BUYER_ORDER_ID="$(grep '^\[order\] buyer order:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
+export CANARY_JOB_ID="$(grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
+```
+
+3. Inspect the provisioning job directly and recover the VM coordinates needed
+   for cleanup:
+
+```bash
+curl -s \
+  -H "Accept: application/json" \
+  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
+  "${PROVISIONING_SERVICE_URL}/api/v1/jobs/${CANARY_JOB_ID}"
+
+eval "$(python - <<'PY'
+import json
+import os
+import urllib.request
+
+base = os.environ["PROVISIONING_SERVICE_URL"].rstrip("/")
+job_id = os.environ["CANARY_JOB_ID"]
+request = urllib.request.Request(
+    f"{base}/api/v1/jobs/{job_id}",
+    headers={
+        "Accept": "application/json",
+        "X-Agent-ID": os.environ["SELLER_AGENT_ID"],
+    },
+)
+with urllib.request.urlopen(request, timeout=60) as response:
+    job = json.load(response)
+vm_host = job["params"]["vm_host"]
+vm_name = job.get("result", {}).get("vm_name") or job["params"].get("vm_target", "")
+print(f"export CANARY_VM_HOST={json.dumps(vm_host)}")
+print(f"export CANARY_VM_NAME={json.dumps(vm_name)}")
+PY
+)"
+```
+
+4. Cancel the live provisioning job if it is still queued or running:
+
+```bash
+curl -s -X POST \
+  -H "Accept: application/json" \
+  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
+  "${PROVISIONING_SERVICE_URL}/api/v1/jobs/${CANARY_JOB_ID}/cancel"
+```
+
+5. If the job already succeeded or the cancel response says it cannot be
+   cancelled, reclaim the guest explicitly with `destroy` then `undefine`:
+
+```bash
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
+  "${PROVISIONING_SERVICE_URL}/api/v1/jobs" \
+  -d "{\"vm_host\":\"${CANARY_VM_HOST}\",\"vm_target\":\"${CANARY_VM_NAME}\",\"vm_action\":\"destroy\"}"
+
+curl -s -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-ID: ${SELLER_AGENT_ID}" \
+  "${PROVISIONING_SERVICE_URL}/api/v1/jobs" \
+  -d "{\"vm_host\":\"${CANARY_VM_HOST}\",\"vm_target\":\"${CANARY_VM_NAME}\",\"vm_action\":\"undefine\"}"
+```
+
+6. Close any canary orders that remained open. Use the matching maker keys to
+   sign `update_order` operations:
+
+```bash
+cd cli
+uv --no-config run python - <<'PY'
+import json
+import os
+import time
+import urllib.request
+
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+
+def close_order(*, order_id: str, signer_agent_id: str, private_key: str) -> None:
+    timestamp = int(time.time())
+    message = f"update_order:{order_id}:{timestamp}"
+    signature = Account.sign_message(
+        encode_defunct(text=message),
+        private_key,
+    ).signature.hex()
+    body = json.dumps(
+        {
+            "status": "closed",
+            "signer_agent_id": signer_agent_id,
+            "signature": signature,
+            "timestamp": timestamp,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{os.environ['REGISTRY_URL'].rstrip('/')}/orders/{order_id}",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        method="PUT",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        print(response.read().decode("utf-8"))
+
+
+close_order(
+    order_id=os.environ["SELLER_ORDER_ID"],
+    signer_agent_id=os.environ["SELLER_AGENT_ID"],
+    private_key=os.environ["SELLER_PRIVATE_KEY"],
+)
+close_order(
+    order_id=os.environ["BUYER_ORDER_ID"],
+    signer_agent_id=os.environ["BUYER_AGENT_ID"],
+    private_key=os.environ["BUYER_PRIVATE_KEY"],
+)
+PY
+```
+
+7. Verify that the provisioned guest is stopped and reclaimed before retrying.
+8. Remove the quarantined canary resource from service if state is inconsistent.
+9. Keep traffic pinned to the previous deployment until the failure is understood.
+10. Re-run the repo gates after any repo-side fix.
 
 If a KVM host needs to be rebooted during cleanup, stop the guest domains first.
 libvirt can block shutdown while it waits for active guests to stop.

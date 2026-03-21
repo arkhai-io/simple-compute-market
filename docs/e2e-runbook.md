@@ -197,10 +197,9 @@ Treat the run as successful only when all of the following are true:
 If the run fails:
 
 1. Preserve the exact runner output, provisioning job ID, and canary order IDs.
-2. Cancel the provisioning job or reclaim the VM if the worker already created one.
-3. Close any canary orders that remained open.
-4. Verify that the provisioned guest is stopped and reclaimed before retrying.
-5. Re-run the repo gates after any repo-side fix.
+2. Follow the exact rollback procedure in `docs/production-canary.md#rollback`.
+3. Verify that the provisioned guest is stopped and reclaimed before retrying.
+4. Re-run the repo gates after any repo-side fix.
 
 If a KVM host needs to be rebooted during cleanup, stop the guest domains first.
 Libvirt can block shutdown while it waits for active guests to stop.

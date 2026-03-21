@@ -35,13 +35,14 @@ Before you start, gather or provision:
 Follow these documents in order:
 
 1. [Deployable Image Selection](image-selection.md)
-2. [ZeroTier and FRP](zerotier-frp.md)
-3. [Registry Deployment](registry.md)
-4. [Provisioning Deployment](provisioning.md)
-5. [Seller Agent Deployment](agent-seller.md)
-6. [Buyer Agent Deployment](agent-buyer.md)
-7. [Resource Seeding](resource-seeding.md)
-8. [Canary Validation](canary.md)
+2. [Contract Address Bootstrap](contracts.md)
+3. [ZeroTier and FRP](zerotier-frp.md)
+4. [Registry Deployment](registry.md)
+5. [Provisioning Deployment](provisioning.md)
+6. [Seller Agent Deployment](agent-seller.md)
+7. [Buyer Agent Deployment](agent-buyer.md)
+8. [Resource Seeding](resource-seeding.md)
+9. [Canary Validation](canary.md)
 
 Supporting references:
 

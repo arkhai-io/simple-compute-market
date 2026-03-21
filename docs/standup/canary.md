@@ -141,8 +141,7 @@ Repeated `--vm-host` flags override `CANARY_VM_HOSTS` from the sourced runner en
 
 If the canary fails:
 
-1. cancel or clean up the provisioning job
-2. close any remaining canary orders
-3. reclaim the VM
-4. fix the repo or environment issue
-5. re-run the repo gates before retrying
+1. preserve the exact runner output, provisioning job ID, and canary order IDs
+2. follow the exact rollback procedure in [Production Canary Rollback](../production-canary.md#rollback)
+3. fix the repo or environment issue
+4. re-run the repo gates before retrying

@@ -5,6 +5,8 @@ canary path.
 
 ## Inputs
 
+- `docs/standup/contracts.md`
+- a shared contract bundle at `/etc/simple-market-service/contracts.env`
 - `erc-8004-registry-py/.env.production.sample`
 - a host-local runtime env file at `/etc/simple-market-service/registry.env`
 - a PostgreSQL database for the registry
@@ -34,6 +36,10 @@ sudo docker pull "${REGISTRY_IMAGE}"
 
 ## Host Preparation
 
+Resolve the target chain bundle first via `docs/standup/contracts.md`, then
+reuse `/etc/simple-market-service/contracts.env` while preparing the registry
+env file.
+
 Create the host-local env bundle and populate it from the deployed sample:
 
 ```bash
@@ -53,6 +59,11 @@ The required env bundle must include at least:
 - `HOST=0.0.0.0`
 - `PORT=8080`
 - `ZEROTIER_NETWORK` when joining the overlay directly
+
+Copy `CHAIN_ID`, `RPC_URL`, `IDENTITY_REGISTRY_ADDRESS`,
+`REPUTATION_REGISTRY_ADDRESS`, and `VALIDATION_REGISTRY_ADDRESS` from
+`/etc/simple-market-service/contracts.env` into
+`/etc/simple-market-service/registry.env` before you start the container.
 
 Use `.env.production.sample` as the source template, not `.env.sample`.
 

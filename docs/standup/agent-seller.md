@@ -4,6 +4,7 @@ This document covers the deployed seller agent path for the production canary.
 
 ## Inputs
 
+- a shared contract bundle at `/etc/simple-market-service/contracts.env`
 - `core/agent/.env.production.sample`
 - a writable host-local seller env file at `/etc/simple-market-service/seller-agent.env`
 - a seller wallet private key and address
@@ -33,6 +34,10 @@ Pin the image by immutable tag or digest. Do not deploy production canaries from
 an unpinned `latest` tag.
 
 ## Host Preparation
+
+Resolve the shared chain bundle first via `docs/standup/contracts.md`, then
+reuse `/etc/simple-market-service/contracts.env` while you prepare the seller
+env file.
 
 Create persistent host paths for the env file, the agent SQLite DB, and the
 ZeroTier identity/state directory:
@@ -67,6 +72,11 @@ deployment values. At minimum, set:
 - `TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_base_sepolia.json`
 - `ENABLE_EVENT_QUEUE=false`
 - `AUTO_REGISTER=true`
+
+Copy `CHAIN_ID`, `CHAIN_RPC_URL` (from `RPC_URL`),
+`IDENTITY_REGISTRY_ADDRESS`, `REPUTATION_REGISTRY_ADDRESS`, and
+`VALIDATION_REGISTRY_ADDRESS` from `/etc/simple-market-service/contracts.env`
+into `/etc/simple-market-service/seller-agent.env`.
 
 Keep the env file on the host, outside Git, because it contains real secrets and
 is mutated during startup.
