@@ -14,6 +14,38 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = ROOT / "scripts/prod_canary_smoke.py"
 SELLER_AGENT_ID = "eip155:84532:0x1111111111111111111111111111111111111111:101"
 BUYER_AGENT_ID = "eip155:84532:0x1111111111111111111111111111111111111111:202"
+CANARY_ENV_KEYS = (
+    "REGISTRY_URL",
+    "PROVISIONING_SERVICE_URL",
+    "SELLER_AGENT_URL",
+    "BUYER_AGENT_URL",
+    "FRP_DASHBOARD_URL",
+    "FRP_DASHBOARD_PASSWORD",
+    "SELLER_AGENT_ID",
+    "BUYER_AGENT_ID",
+    "SELLER_PRIVATE_KEY",
+    "BUYER_PRIVATE_KEY",
+    "SSH_PRIVATE_KEY_PATH",
+    "CANARY_GPU_MODEL",
+    "CANARY_REGION",
+    "CANARY_TOKEN_SYMBOL",
+    "CANARY_TOKEN_AMOUNT",
+    "CANARY_GPU_QUANTITY",
+    "CANARY_SLA",
+    "CANARY_DURATION_HOURS",
+    "CANARY_TIMEOUT_SECONDS",
+    "CANARY_POLL_INTERVAL",
+    "CANARY_MATCH_SALT",
+    "CHAIN_RPC_URL",
+    "CHAIN_NAME",
+    "CANARY_VM_HOSTS",
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_canary_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in CANARY_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
 
 
 def _load_script_module():
