@@ -1,4 +1,9 @@
+.PHONY: deploy deploy-buyer-agent deploy-seller-agent test-container-smoke
+
 deploy: deploy-buyer-agent
+
+test-container-smoke:
+	uv run pytest tests/integration/test_container_smoke.py -q
 
 # Todo, figure out what this volume was doing in the compose file: #      - zerotier-buy:/var/lib/zerotier-one
 deploy-buyer-agent:

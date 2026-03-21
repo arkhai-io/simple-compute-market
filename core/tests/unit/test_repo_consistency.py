@@ -76,6 +76,7 @@ REGISTRY_MAKEFILE = ROOT / "erc-8004-registry-py/Makefile"
 REGISTRY_CONTAINER_SMOKE_TEST = (
     ROOT / "erc-8004-registry-py/tests/integration/test_container_smoke.py"
 )
+CORE_CONTAINER_SMOKE_TEST = ROOT / "core/tests/integration/test_container_smoke.py"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
@@ -406,6 +407,55 @@ def test_async_provisioning_readme_documents_container_smoke_path() -> None:
         assert required_token in text, (
             "async-provisioning-service/README.md must document the container "
             f"smoke path including '{required_token}'"
+        )
+
+
+def test_core_makefile_exposes_container_smoke_target() -> None:
+    text = (ROOT / "core/Makefile").read_text(encoding="utf-8")
+
+    for required_token in (
+        "test-container-smoke:",
+        "uv run pytest tests/integration/test_container_smoke.py -q",
+    ):
+        assert required_token in text, (
+            "core/Makefile must expose the container smoke target via "
+            f"'{required_token}'"
+        )
+
+
+def test_core_container_smoke_test_exists_and_covers_env_persistence_contract() -> None:
+    text = CORE_CONTAINER_SMOKE_TEST.read_text(encoding="utf-8")
+
+    for required_token in (
+        "docker build",
+        "docker run",
+        "ENV_FILE",
+        "ONCHAIN_AGENT_ID",
+        "BASE_URL_OVERRIDE",
+        "ZEROTIER_IP",
+        "/.well-known/agent-card.json",
+        "/.well-known/erc-8004-registration.json",
+    ):
+        assert required_token in text, (
+            "core container smoke coverage is missing "
+            f"'{required_token}'"
+        )
+
+
+def test_core_agent_readme_documents_container_smoke_path() -> None:
+    text = AGENT_README.read_text(encoding="utf-8")
+
+    for required_token in (
+        "make test-container-smoke",
+        "ENV_FILE",
+        "ONCHAIN_AGENT_ID",
+        "BASE_URL_OVERRIDE",
+        "ZEROTIER_IP",
+        "/.well-known/agent-card.json",
+    ):
+        assert required_token in text, (
+            "core/agent/README.md must document the container smoke path "
+            f"including '{required_token}'"
         )
 
 

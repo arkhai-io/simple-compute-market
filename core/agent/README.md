@@ -38,6 +38,22 @@ Install required packages and launch the local development environment:
 make install && make playground
 ```
 
+## Container Smoke Test
+
+Verify the production-style runtime contract with the real `core/Dockerfile` image:
+
+```bash
+make test-container-smoke
+```
+
+This smoke path requires Docker and proves that the container entrypoint:
+
+- honors a writable `ENV_FILE`
+- persists `ONCHAIN_AGENT_ID`, `BASE_URL_OVERRIDE`, and `ZEROTIER_IP`
+- serves `/.well-known/agent-card.json`
+- serves `/.well-known/erc-8004-registration.json`
+- skips on-chain re-registration on restart once the persisted identity fields exist
+
 ## Commands
 
 | Command              | Description                                                                                 |
