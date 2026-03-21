@@ -179,17 +179,22 @@ async def test_accept_as_buyer_prefers_order_oracle_address(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_buy_compute_with_erc20_uses_permit_and_create_with_future_expiration(
+async def test_buy_compute_with_erc20_uses_approve_and_create_with_future_expiration(
     monkeypatch,
 ):
-    permit_and_create = AsyncMock(return_value={"log": {"uid": "escrow-123"}})
-    approve = AsyncMock(return_value="0xapprove")
+    approve_and_create = AsyncMock(
+        return_value=("0xapprove", {"log": {"uid": "escrow-123"}})
+    )
+    approve = AsyncMock(side_effect=AssertionError("unexpected direct approve call"))
     client = SimpleNamespace(
         erc20=SimpleNamespace(
             util=SimpleNamespace(approve=approve),
             escrow=SimpleNamespace(
                 non_tierable=SimpleNamespace(
-                    permit_and_create=permit_and_create,
+                    approve_and_create=approve_and_create,
+                    permit_and_create=AsyncMock(
+                        side_effect=AssertionError("unexpected permit call")
+                    ),
                     create=AsyncMock(side_effect=AssertionError("unexpected create call")),
                 )
             ),
@@ -210,10 +215,10 @@ async def test_buy_compute_with_erc20_uses_permit_and_create_with_future_expirat
         client=client,
     )
 
-    assert receipt == {"log": {"uid": "escrow-123"}}
-    approve.assert_awaited_once()
-    permit_and_create.assert_awaited_once()
-    price_data, arbiter_data, expiration = permit_and_create.await_args.args
+    assert receipt == {"approval_tx_hash": "0xapprove", "log": {"uid": "escrow-123"}}
+    approve.assert_not_awaited()
+    approve_and_create.assert_awaited_once()
+    price_data, arbiter_data, expiration = approve_and_create.await_args.args
     assert price_data == {
         "address": payment.token.contract_address,
         "value": payment.amount,

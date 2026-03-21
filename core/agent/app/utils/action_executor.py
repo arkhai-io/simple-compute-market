@@ -2082,9 +2082,9 @@ async def buy_compute_with_erc20(
     This is from the point of view of someone with a TokenResource who
     wishes to trade it for a ComputeResource.
 
-    Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
-    and creates escrow via the non-tierable permit flow. Expiration is set in the
-    future so the live canary can deterministically expire or reclaim stale escrows.
+    Encodes the compute lease as a JSON demand payload and creates escrow via the
+    non-tierable approve-and-create flow. Expiration is set in the future so the
+    live canary can deterministically expire or reclaim stale escrows.
     """
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
@@ -2119,15 +2119,12 @@ async def buy_compute_with_erc20(
 
     price_data = {"address": total_payment.token.contract_address, "value": total_payment.amount}
 
-    # 3) Approve escrow spend
-    await approve_token_escrow(total_payment, alkahest_client=client)
-
-    # 4) Buy with ERC20, tying demand to arbiter data
+    # 3) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
     expiration = int(time.time()) + max(duration_hours, 1) * 3600
 
     logger.info(
-        "[ALKAHEST] escrow.permit_and_create price_data=%s arbiter=%s expiration=%s",
+        "[ALKAHEST] escrow.approve_and_create price_data=%s arbiter=%s expiration=%s",
         price_data,
         arbiter_address,
         expiration,
@@ -2136,11 +2133,21 @@ async def buy_compute_with_erc20(
     escrow_receipt = None
 
     try:
-        escrow_receipt = await client.erc20.escrow.non_tierable.permit_and_create(
+        escrow_receipt = await client.erc20.escrow.non_tierable.approve_and_create(
             price_data,
             arbiter_data,
             expiration,
         )
+        if (
+            isinstance(escrow_receipt, tuple)
+            and len(escrow_receipt) == 2
+            and isinstance(escrow_receipt[0], str)
+            and isinstance(escrow_receipt[1], dict)
+        ):
+            escrow_receipt = {
+                "approval_tx_hash": escrow_receipt[0],
+                **escrow_receipt[1],
+            }
         logger.info(f"[ALKAHEST]: {escrow_receipt}")
     except Exception as buy_with_erc20_err:
         logger.error("[ALKAHEST] Failed to create escrow: %s", buy_with_erc20_err)
