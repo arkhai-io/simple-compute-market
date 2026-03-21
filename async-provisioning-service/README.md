@@ -2,6 +2,10 @@
 
 Async VM provisioning service. Exposes a REST API that queues provisioning jobs (create, destroy, start, stop, etc.) onto a Redis-backed worker that executes Ansible playbooks from the `compute-provisioning-iac` submodule.
 
+For the deployed full-stack path, start with `docs/standup/overview.md` and use
+`docs/standup/provisioning.md` as the operator runbook. This README still covers
+local development and service internals.
+
 ## Architecture
 
 ```

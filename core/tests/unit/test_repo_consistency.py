@@ -469,6 +469,47 @@ def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
     assert "docs/standup/overview.md" in text
 
 
+def test_provisioning_standup_doc_is_executable_runbook() -> None:
+    text = STANDUP_PROVISIONING_PATH.read_text(encoding="utf-8")
+
+    for required_heading in (
+        "## Inputs",
+        "## Image",
+        "## Host Preparation",
+        "## Container Launch",
+        "## Verification",
+        "## Outputs",
+    ):
+        assert required_heading in text, (
+            f"provisioning.md is missing section: {required_heading}"
+        )
+
+    for required_token in (
+        "/etc/simple-market-service/provisioning.env",
+        "/etc/simple-market-service/management-vars.yaml",
+        "docker pull",
+        "docker run",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "ENABLE_AUTH=true",
+        "AUTH_FAIL_OPEN=false",
+        "SSH_PRIVATE_KEY",
+        "MANAGEMENT_VARS_YAML",
+        "worker",
+        "curl http://<provisioning-host>:8081/health",
+    ):
+        assert required_token in text, (
+            f"provisioning.md is missing deployment detail: {required_token}"
+        )
+
+
+def test_async_provisioning_readme_points_deployed_users_to_standup_runbook() -> None:
+    text = ASYNC_README.read_text(encoding="utf-8")
+
+    assert "docs/standup/provisioning.md" in text
+    assert "docs/standup/overview.md" in text
+
+
 def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:
     text = STANDUP_RESOURCE_SEEDING_PATH.read_text(encoding="utf-8")
 
