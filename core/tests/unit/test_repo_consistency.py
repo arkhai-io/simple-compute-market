@@ -80,6 +80,7 @@ CORE_CONTAINER_SMOKE_TEST = ROOT / "core/tests/integration/test_container_smoke.
 LOCAL_DUAL_AGENT_E2E_TEST = ROOT / "tests/e2e/test_local_dual_agent_stack.py"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
+CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -1043,6 +1044,24 @@ def test_contracts_package_declares_hardhat_test_entrypoint() -> None:
     assert "test" in package["scripts"]
     assert "hardhat" in package["devDependencies"]
     assert "node_modules/hardhat" in package_lock["packages"]
+
+
+def test_contracts_package_declares_node_runtime_metadata() -> None:
+    package = json.loads(CONTRACTS_PACKAGE_JSON.read_text(encoding="utf-8"))
+
+    assert CONTRACTS_NVMRC.exists(), "erc-8004-contracts must declare its Node runtime in .nvmrc"
+    engines = package.get("engines")
+    assert isinstance(engines, dict), "erc-8004-contracts/package.json must declare engines"
+    node_range = engines.get("node")
+    assert isinstance(node_range, str) and node_range, (
+        "erc-8004-contracts/package.json must declare engines.node"
+    )
+
+    nvmrc_version = CONTRACTS_NVMRC.read_text(encoding="utf-8").strip()
+    assert nvmrc_version == "22.12.0"
+    assert "22.12.0" in node_range, (
+        "erc-8004-contracts engines.node should align with the pinned .nvmrc version"
+    )
 
 
 def test_registry_readme_points_deployed_users_to_standup_runbook() -> None:
