@@ -551,7 +551,13 @@ def test_provisioning_standup_doc_is_executable_runbook() -> None:
         "AUTH_FAIL_OPEN=false",
         "SSH_PRIVATE_KEY",
         "MANAGEMENT_VARS_YAML",
+        "base64 < /path/to/id_ed25519",
+        "/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml",
+        "compute-provisioning-iac/ansible/inventory/hosts",
         "worker",
+        "docker logs --tail 200 sms-provisioning",
+        "SSH private key written to ~/.ssh/id_ed25519",
+        "management-vars.yaml written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml",
         "curl http://<provisioning-host>:8081/health",
     ):
         assert required_token in text, (
@@ -929,6 +935,28 @@ def test_agent_entrypoint_re_registers_when_onchain_agent_id_is_noncanonical() -
 def test_agent_production_sample_includes_chain_id_for_deployed_registration() -> None:
     env = _parse_env_file(AGENT_PROD_ENV)
     assert env["CHAIN_ID"] == "84532"
+
+
+def test_async_provisioning_start_script_respects_runtime_host_port_and_materializes_secrets() -> None:
+    text = ASYNC_START_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'HOST="${HOST:-0.0.0.0}"' in text
+    assert 'PORT="${PORT:-8081}"' in text
+    assert "~/.ssh/id_ed25519" in text
+    assert "/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml" in text
+    assert "async_provisioning_service.worker" in text
+    assert 'uv run uvicorn async_provisioning_service.main:app --host "$HOST" --port "$PORT"' in text
+
+
+def test_async_provisioning_dockerfile_uses_runtime_port_configuration() -> None:
+    text = ASYNC_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "localhost:8081/health" not in text
+    assert (
+        "os.environ.get('PORT', '8081')" in text
+        or 'os.environ.get("PORT", "8081")' in text
+        or 'os.environ.get(\\"PORT\\", \\"8081\\")' in text
+    )
 
 
 def test_compute_provisioning_iac_vm_setup_avoids_missing_debian_packages() -> None:

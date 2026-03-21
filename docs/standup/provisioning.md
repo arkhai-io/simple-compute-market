@@ -24,6 +24,8 @@ Choose the exact immutable image tag or digest before deployment:
 
 ```bash
 export PROVISIONING_IMAGE="us-east4-docker.pkg.dev/<gcp-project>/async-provisioning-service/async-provisioning-service:<tag-or-digest>"
+gcloud auth print-access-token \
+  | sudo docker login -u oauth2accesstoken --password-stdin https://<region>-docker.pkg.dev
 sudo docker pull "${PROVISIONING_IMAGE}"
 ```
 
@@ -63,6 +65,17 @@ at least:
 `management-vars.yaml` file through the IaC host-kit workflow, then base64-encode
 it for container injection as documented in `compute-provisioning-iac/README.md`.
 
+For the direct-run path, the image already contains the checked-in
+`compute-provisioning-iac/ansible/inventory/hosts` file. The container startup
+script materializes `MANAGEMENT_VARS_YAML` at
+`/app/compute-provisioning-iac/ansible/inventory/management-vars.yaml`, so the
+operator only needs to choose a valid `DEFAULT_VM_HOST` alias and inject the
+real `management-vars.yaml` content at launch time.
+
+Do not try to store multi-line SSH keys in `/etc/simple-market-service/provisioning.env`.
+Keep the real private key on disk and inject it at container launch time via
+base64 so startup can write it to `~/.ssh/id_ed25519`.
+
 ## Container Launch
 
 Deploy the service through `compute-provisioning-iac` using
@@ -78,6 +91,7 @@ sudo docker run -d \
   --name sms-provisioning \
   --restart unless-stopped \
   --env-file /etc/simple-market-service/provisioning.env \
+  -e SSH_PRIVATE_KEY="$(base64 < /path/to/id_ed25519 | tr -d '\n')" \
   -e MANAGEMENT_VARS_YAML="$(base64 < /etc/simple-market-service/management-vars.yaml | tr -d '\n')" \
   -p 8081:8081 \
   "${PROVISIONING_IMAGE}"
@@ -88,11 +102,16 @@ sudo docker run -d \
 After deployment, verify:
 
 ```bash
+sudo docker logs --tail 200 sms-provisioning
 curl http://<provisioning-host>:8081/health
 ```
 
 and ensure the response reports both DB and Redis health. Also confirm the
-container logs show the worker booting alongside the API process.
+container logs show:
+
+- `SSH private key written to ~/.ssh/id_ed25519`
+- `management-vars.yaml written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml`
+- the worker booting alongside the API process
 
 ## Outputs
 

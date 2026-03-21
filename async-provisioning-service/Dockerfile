@@ -87,5 +87,5 @@ ENV REGISTRY_CACHE_MAX_SIZE=256
 USER appuser
 EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+  CMD ["sh", "-c", "python -c 'import os, urllib.request; urllib.request.urlopen(\"http://localhost:%s/health\" % os.environ.get(\"PORT\", \"8081\"))'"]
 CMD ["sh", "start.sh"]

@@ -22,12 +22,15 @@ if [ -n "$MANAGEMENT_VARS_YAML" ]; then
     echo "management-vars.yaml written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
 fi
 
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8081}"
+
 # Start the background worker
 uv run python -m async_provisioning_service.worker &
 WORKER_PID=$!
 
 # Start the API server
-uv run uvicorn async_provisioning_service.main:app --host 0.0.0.0 --port 8081 &
+uv run uvicorn async_provisioning_service.main:app --host "$HOST" --port "$PORT" &
 SERVER_PID=$!
 
 # If either process exits, shut down the other
