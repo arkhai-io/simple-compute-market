@@ -892,6 +892,29 @@ def test_compute_provisioning_iac_documents_actual_frp_credentials_path() -> Non
     assert "credentials/frp-server-credentials-" in tasks_text
 
 
+def test_compute_provisioning_iac_readme_uses_real_inventory_aliases_and_secret_handoff() -> None:
+    text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
+
+    assert "proxy1" not in text
+    assert "vm1" not in text
+
+    for required_token in (
+        "proxy-dev",
+        "ww1",
+        "build-vars.yaml is only required for golden image creation",
+        "management-vars.yaml is only required when runtime VM operations use golden images",
+        "image_setup_type=scratch",
+        "image_setup_type=golden",
+        "credentials/frp-server-credentials-<host>-<timestamp>.json",
+        "FRP_SERVER_ADDR",
+        "FRP_DOMAIN",
+        "FRP_DASHBOARD_PASSWORD",
+    ):
+        assert required_token in text, (
+            f"compute-provisioning-iac/README.md is missing host-kit detail: {required_token}"
+        )
+
+
 def test_compute_provisioning_iac_readme_uses_authenticated_provisioning_examples() -> None:
     text = PROVISIONING_IAC_README.read_text(encoding="utf-8")
     assert 'ENABLE_AUTH":"false"' not in text
