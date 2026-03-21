@@ -144,6 +144,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             "run",
             "pytest",
             "tests/test_canary_actors.py",
+            "tests/test_canary_rollback.py",
             "tests/test_prod_canary_smoke.py",
             "tests/test_config_init.py",
             "tests/test_order_auth.py",
