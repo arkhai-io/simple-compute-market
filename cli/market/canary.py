@@ -267,6 +267,7 @@ def _wait_for_new_succeeded_job(
     expected_vm_action: str = "create",
 ) -> dict:
     deadline = time.time() + timeout
+    observed_job_ids: set[str] = set()
     while time.time() < deadline:
         jobs = _list_jobs(provisioning_url, seller_agent_id)
         for job in jobs:
@@ -276,6 +277,21 @@ def _wait_for_new_succeeded_job(
             if _job_vm_action(job) != expected_vm_action:
                 continue
             status = str(job.get("status", ""))
+            if job_id not in observed_job_ids:
+                params = job.get("params") if isinstance(job.get("params"), dict) else {}
+                result = job.get("result") if isinstance(job.get("result"), dict) else {}
+                vm_host = result.get("vm_host") or params.get("vm_host") or "<unknown>"
+                vm_target = (
+                    result.get("vm_name")
+                    or result.get("vm_target")
+                    or params.get("vm_target")
+                    or "<unknown>"
+                )
+                print(
+                    f"[provisioning] observed job: {job_id} "
+                    f"status={status} vm_host={vm_host} vm_target={vm_target}"
+                )
+                observed_job_ids.add(str(job_id))
             if status == "succeeded":
                 return job
             if status in {"failed", "cancelled", "canceled"}:

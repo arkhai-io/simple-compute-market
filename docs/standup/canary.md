@@ -95,8 +95,9 @@ That runner contract is intentionally narrow:
 
 - it expects host-local env files such as `/etc/simple-market-service/prod-canary.env`
 - it refuses shared production style targets and requires an explicit isolated environment acknowledgement
-- it runs `scripts/run_release_gate_checks.py` before the live smoke path when enabled
+- it runs `scripts/run_deployment_gate_checks.py` before the live smoke path when enabled
 - it runs `scripts/prod_canary_smoke.py` from the repo checkout
+- it runs `scripts/run_release_gate_checks.py` after the canary succeeds, using the captured `prod-canary.log` as proof
 - if the canary fails, it attempts `scripts/prod_canary_rollback.py` against the captured canary log before surfacing the failure
 
 Use that workflow only for an isolated environment with the same host-local env

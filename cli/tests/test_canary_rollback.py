@@ -51,6 +51,28 @@ def test_extract_state_from_log_reads_emitted_ids() -> None:
     )
 
 
+def test_extract_state_from_log_reads_observed_failed_job_details() -> None:
+    module = _load_rollback_module()
+
+    state = module._extract_state_from_log(
+        "\n".join(
+            [
+                "[order] seller order: seller-order",
+                "[order] buyer order: buyer-order",
+                "[provisioning] observed job: job-9 status=failed vm_host=btc1 vm_target=tenant-d908",
+            ]
+        )
+    )
+
+    assert state == module.RollbackState(
+        seller_order_id="seller-order",
+        buyer_order_id="buyer-order",
+        provisioning_job_id="job-9",
+        vm_host="btc1",
+        vm_target="tenant-d908",
+    )
+
+
 def test_rollback_coordinator_cancels_running_job_and_closes_only_open_orders() -> None:
     module = _load_rollback_module()
     events: list[object] = []

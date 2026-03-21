@@ -20,6 +20,12 @@ from market.canary import (
 _SELLER_ORDER_PATTERN = re.compile(r"^\[order\] seller order:\s+(?P<value>\S+)", re.MULTILINE)
 _BUYER_ORDER_PATTERN = re.compile(r"^\[order\] buyer order:\s+(?P<value>\S+)", re.MULTILINE)
 _JOB_PATTERN = re.compile(r"^\[provisioning\] succeeded job:\s+(?P<value>\S+)", re.MULTILINE)
+_OBSERVED_JOB_PATTERN = re.compile(
+    r"^\[provisioning\] observed job:\s+"
+    r"(?P<job_id>\S+)\s+status=(?P<status>\S+)\s+"
+    r"vm_host=(?P<vm_host>\S+)\s+vm_target=(?P<vm_target>\S+)",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -68,17 +74,32 @@ def _extract_json_result(text: str) -> dict[str, object]:
 
 def _extract_state_from_log(text: str) -> RollbackState:
     result = _extract_json_result(text)
+    observed_matches = list(_OBSERVED_JOB_PATTERN.finditer(text))
+    observed_match = observed_matches[-1] if observed_matches else None
+    observed_job_id = observed_match.group("job_id") if observed_match else None
+    observed_vm_host = observed_match.group("vm_host") if observed_match else None
+    observed_vm_target = observed_match.group("vm_target") if observed_match else None
     return RollbackState(
         seller_order_id=_extract_value(_SELLER_ORDER_PATTERN, text) or _as_optional_str(result.get("seller_order_id")),
         buyer_order_id=_extract_value(_BUYER_ORDER_PATTERN, text) or _as_optional_str(result.get("buyer_order_id")),
-        provisioning_job_id=_extract_value(_JOB_PATTERN, text) or _as_optional_str(result.get("provisioning_job_id")),
-        vm_host=_as_optional_str(result.get("vm_host")),
-        vm_target=_as_optional_str(result.get("vm_target")),
+        provisioning_job_id=(
+            _extract_value(_JOB_PATTERN, text)
+            or _as_optional_str(result.get("provisioning_job_id"))
+            or observed_job_id
+        ),
+        vm_host=_normalize_observed_value(_as_optional_str(result.get("vm_host")) or observed_vm_host),
+        vm_target=_normalize_observed_value(_as_optional_str(result.get("vm_target")) or observed_vm_target),
     )
 
 
 def _as_optional_str(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _normalize_observed_value(value: str | None) -> str | None:
+    if value in {None, "", "<unknown>"}:
+        return None
+    return value
 
 
 def _job_vm_host(job: dict[str, object]) -> str | None:

@@ -236,6 +236,7 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
         "self-hosted",
         "isolated environment",
         "/etc/simple-market-service/prod-canary.env",
+        "scripts/run_deployment_gate_checks.py",
         "scripts/run_release_gate_checks.py",
         "--deployed-canary-log",
         "artifacts/prod-canary.log",
@@ -247,6 +248,11 @@ def test_repo_exposes_isolated_deployed_canary_runner_workflow() -> None:
             "deployed-canary workflow is missing required runner contract token: "
             f"{required_token}"
         )
+
+    preflight_index = text.index("scripts/run_deployment_gate_checks.py")
+    smoke_index = text.index("scripts/prod_canary_smoke.py")
+    release_index = text.index("scripts/run_release_gate_checks.py")
+    assert preflight_index < smoke_index < release_index
 
 
 def test_repo_exposes_release_gate_entrypoint() -> None:
@@ -1423,10 +1429,28 @@ def test_standup_canary_doc_references_isolated_deployed_runner() -> None:
         "workflow_dispatch",
         "isolated environment",
         "/etc/simple-market-service/prod-canary.env",
+        "scripts/run_deployment_gate_checks.py",
+        "before the live smoke path",
+        "scripts/run_release_gate_checks.py",
+        "after the canary succeeds",
         "scripts/prod_canary_rollback.py",
     ):
         assert required_token in text, (
             "canary.md is missing the documented deployed-canary runner entrypoint: "
+            f"{required_token}"
+        )
+
+
+def test_production_canary_rollback_docs_capture_observed_job_handle() -> None:
+    text = RUNBOOK_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "[provisioning] observed job:",
+        "prod_canary_rollback.py",
+        "CANARY_JOB_ID",
+    ):
+        assert required_token in text, (
+            "production-canary.md is missing observed-job rollback coverage: "
             f"{required_token}"
         )
 

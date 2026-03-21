@@ -216,11 +216,12 @@ must be provided together.
 After the run, preserve the emitted IDs before cleanup:
 
 Look for `[order] seller order:`, `[order] buyer order:`, and
-`[provisioning] succeeded job:` in the captured log.
+either `[provisioning] observed job:` or `[provisioning] succeeded job:` in the captured log.
 
 ```bash
 grep '^\[order\] seller order:' /tmp/prod-canary.log
 grep '^\[order\] buyer order:' /tmp/prod-canary.log
+grep '^\[provisioning\] observed job:' /tmp/prod-canary.log
 grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log
 ```
 
@@ -254,7 +255,9 @@ python scripts/run_release_gate_checks.py \
 If the canary fails:
 
 1. Preserve the exact runner output, provisioning job ID, and canary order IDs.
-2. Re-source the runner env and export the emitted IDs from the captured log:
+2. Re-source the runner env and export the emitted IDs from the captured log.
+   `scripts/prod_canary_rollback.py` understands both the observed-job and
+   succeeded-job markers, so you can use it directly against `/tmp/prod-canary.log`.
 
 ```bash
 set -a
@@ -263,7 +266,22 @@ set +a
 
 export SELLER_ORDER_ID="$(grep '^\[order\] seller order:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
 export BUYER_ORDER_ID="$(grep '^\[order\] buyer order:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
-export CANARY_JOB_ID="$(grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log | tail -n1 | awk '{print $4}')"
+export CANARY_JOB_ID="$(python - <<'PY'
+from pathlib import Path
+import re
+
+text = Path('/tmp/prod-canary.log').read_text(encoding='utf-8')
+patterns = [
+    re.compile(r'^\\[provisioning\\] succeeded job:\\s+(?P<job_id>\\S+)', re.MULTILINE),
+    re.compile(r'^\\[provisioning\\] observed job:\\s+(?P<job_id>\\S+)', re.MULTILINE),
+]
+for pattern in patterns:
+    matches = list(pattern.finditer(text))
+    if matches:
+        print(matches[-1].group('job_id'))
+        break
+PY
+)"
 ```
 
 3. Inspect the provisioning job directly and recover the VM coordinates needed

@@ -289,7 +289,10 @@ def test_canary_coordinator_requires_tenant_credentials() -> None:
         coordinator.run()
 
 
-def test_wait_for_new_succeeded_job_fails_fast_on_new_failed_job(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wait_for_new_succeeded_job_fails_fast_on_new_failed_job(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from market import canary
 
     monkeypatch.setattr(
@@ -318,6 +321,11 @@ def test_wait_for_new_succeeded_job_fails_fast_on_new_failed_job(monkeypatch: py
             timeout=60,
             poll_interval=1,
         )
+
+    assert (
+        "[provisioning] observed job: job-failed status=failed vm_host=<unknown> vm_target=<unknown>"
+        in capsys.readouterr().out
+    )
 
 
 def test_provisioning_probe_rejects_host_without_gpu_capacity() -> None:

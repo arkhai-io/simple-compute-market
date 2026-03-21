@@ -37,7 +37,7 @@ on:
         default: "/etc/simple-market-service/registry.env"
         type: string
       run_release_gates:
-        description: "Run release gates before the live canary."
+        description: "Run repo-side deployment gates before the live canary."
         required: true
         default: true
         type: boolean
@@ -106,11 +106,11 @@ jobs:
             fi
           done
 
-      - name: Run release gates
+      - name: Run deployment gates
         if: ${{ inputs.run_release_gates }}
         shell: bash
         run: |
-          python scripts/run_release_gate_checks.py \
+          python scripts/run_deployment_gate_checks.py \
             --environment "${{ inputs.isolated_environment }}" \
             --seller-agent-env "${{ inputs.seller_agent_env }}" \
             --buyer-agent-env "${{ inputs.buyer_agent_env }}" \
@@ -151,7 +151,7 @@ jobs:
               --log-path ../artifacts/prod-canary.log
           ) 2>&1 | tee artifacts/prod-canary-rollback.log || true
 
-      - name: Validate release signoff proof
+      - name: Validate release signoff proof after the canary succeeds
         if: ${{ env.canary_exit_code == '0' }}
         shell: bash
         run: |
