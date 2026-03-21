@@ -28,6 +28,20 @@ def test_resolve_config_base_sepolia_uses_sdk_defaults() -> None:
     assert resolve_alkahest_address_config(NETWORK_BASE_SEPOLIA) is None
 
 
+def test_get_trusted_oracle_arbiter_defaults_to_base_sepolia(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CHAIN_NAME", raising=False)
+    monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
+    from service.clients.alkahest import _load_override_config_cached
+
+    _load_override_config_cached.cache_clear()
+    assert (
+        get_trusted_oracle_arbiter()
+        == "0x3664b11bccceca27c21bbab43548961ed14d4d6d"
+    )
+
+
 def test_resolve_config_ethereum_mainnet_returns_explicit_config() -> None:
     config = resolve_alkahest_address_config(NETWORK_ETHEREUM_MAINNET)
     assert config is not None

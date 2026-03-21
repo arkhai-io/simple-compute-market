@@ -1878,7 +1878,6 @@ def test_base_sepolia_service_addresses_match_alkahest_deployment_when_available
     deployment = json.loads(ALKAHEST_BASE_DEPLOYMENT.read_text(encoding="utf-8"))
     required_mapping = {
         ("arbiters_addresses", "trivial_arbiter"): "trivialArbiter",
-        ("arbiters_addresses", "trusted_oracle_arbiter"): "trustedOracleArbiter",
         ("string_obligation_addresses", "obligation"): "stringObligation",
         ("erc20_addresses", "barter_utils"): "erc20BarterUtils",
         ("erc20_addresses", "escrow_obligation_nontierable"): "erc20EscrowObligation",

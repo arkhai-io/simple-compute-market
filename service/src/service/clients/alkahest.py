@@ -22,7 +22,7 @@ BASE_SEPOLIA_ADDRESSES: dict[str, Any] = {
     "arbiters_addresses": {
         "eas": "0x4200000000000000000000000000000000000021",
         "trivial_arbiter": "0x7D4bCD84901cEC903105564f63BE70432448B222",
-        "trusted_oracle_arbiter": "0x361E0950534F4a54A39F8C4f1f642C323f6e66B9",
+        "trusted_oracle_arbiter": "0x3664b11bccceca27c21bbab43548961ed14d4d6d",
         "intrinsics_arbiter": "0x0000000000000000000000000000000000000000",
         "intrinsics_arbiter_2": "0x0000000000000000000000000000000000000000",
         "erc8004_arbiter": "0x0000000000000000000000000000000000000000",
@@ -341,7 +341,7 @@ def resolve_alkahest_address_config(
 
 
 def get_trusted_oracle_arbiter() -> str:
-    selected = get_alkahest_network(os.getenv("CHAIN_NAME", "ethereum_sepolia"))
+    selected = get_alkahest_network(os.getenv("CHAIN_NAME"))
     override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
     if override is not None:
         return str(override["arbiters_addresses"]["trusted_oracle_arbiter"])

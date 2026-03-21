@@ -2083,8 +2083,8 @@ async def buy_compute_with_erc20(
     wishes to trade it for a ComputeResource.
 
     Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
-    and creates escrow via the non-tierable escrow client. Expiration is set to 0
-    (non-expiring) for now.
+    and creates escrow via the non-tierable escrow client. Expiration is set in the
+    future so the live canary can deterministically expire or reclaim stale escrows.
     """
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
@@ -2127,7 +2127,7 @@ async def buy_compute_with_erc20(
     expiration = int(time.time()) + max(duration_hours, 1) * 3600
 
     logger.info(
-        "[ALKAHEST] escrow.permit_and_create price_data=%s arbiter=%s expiration=%s",
+        "[ALKAHEST] escrow.create price_data=%s arbiter=%s expiration=%s",
         price_data,
         arbiter_address,
         expiration,
@@ -2136,7 +2136,7 @@ async def buy_compute_with_erc20(
     escrow_receipt = None
 
     try:
-        escrow_receipt = await client.erc20.escrow.non_tierable.permit_and_create(
+        escrow_receipt = await client.erc20.escrow.non_tierable.create(
             price_data,
             arbiter_data,
             expiration,
