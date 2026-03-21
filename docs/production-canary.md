@@ -237,8 +237,13 @@ grep '^\[provisioning\] succeeded job:' /tmp/prod-canary.log
 
 If the canary fails:
 
-1. Cancel the new provisioning job.
-2. Close or delete any canary orders that remained open.
-3. Verify the VM was shut down or reclaimed.
-4. Remove the quarantined canary resource from service if state is inconsistent.
-5. Keep traffic pinned to the previous deployment until the failure is understood.
+1. Preserve the exact runner output, provisioning job ID, and canary order IDs.
+2. Cancel the new provisioning job or reclaim the VM if the worker already created one.
+3. Close any canary orders that remained open.
+4. Verify that the provisioned guest is stopped and reclaimed before retrying.
+5. Remove the quarantined canary resource from service if state is inconsistent.
+6. Keep traffic pinned to the previous deployment until the failure is understood.
+7. Re-run the repo gates after any repo-side fix.
+
+If a KVM host needs to be rebooted during cleanup, stop the guest domains first.
+libvirt can block shutdown while it waits for active guests to stop.

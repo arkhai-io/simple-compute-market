@@ -807,6 +807,22 @@ def test_production_canary_doc_matches_runner_contract() -> None:
         )
 
 
+def test_production_canary_rollback_is_self_contained() -> None:
+    text = RUNBOOK_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "Preserve the exact runner output, provisioning job ID, and canary order IDs.",
+        "Close any canary orders that remained open.",
+        "Verify that the provisioned guest is stopped and reclaimed before retrying.",
+        "Re-run the repo gates after any repo-side fix.",
+        "stop the guest domains first",
+        "libvirt can block shutdown",
+    ):
+        assert required_token in text, (
+            f"production-canary.md is missing rollback detail: {required_token}"
+        )
+
+
 @pytest.mark.parametrize(
     ("path", "forbidden", "required"),
     [
