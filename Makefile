@@ -7,7 +7,7 @@ FOUNDRY_VERSION := v1.5.1
 #Build should construct all deployment and runtime arifacts locally.
 build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core
 
-build-cli: init-prerequisites init-dependencies
+build-cli: init-prerequisites
 	cd cli && make build
 
 build-contracts:
@@ -47,7 +47,7 @@ init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
 
 init-submodules:
-	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
+	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init --recursive
 
 init-dependencies: init-zero-tier init-registry init-cli
 
@@ -61,7 +61,7 @@ init-contracts:
 	npm install ./erc-8004-contracts
 
 init-registry:
-	cd erc-8004-registry-py && init
+	cd erc-8004-registry-py && make init
 
 # Initializing the cli should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
 init-cli:

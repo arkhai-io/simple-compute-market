@@ -158,6 +158,7 @@ single-agent quick start above. This brings up:
 
 Before the first compose run:
 
+- initialize submodules with `make init-submodules`
 - build the local images with `make build`
 - ensure `~/.ssh/id_ed25519` exists, because the local provisioning container
   mounts that key path for Ansible access
@@ -165,6 +166,7 @@ Before the first compose run:
 Bring the full stack up:
 
 ```bash
+make init-submodules
 make build
 make deploy-local
 ```

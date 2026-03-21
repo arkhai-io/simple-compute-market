@@ -359,6 +359,7 @@ def test_root_readme_documents_full_local_compose_stack() -> None:
     for required_token in (
         "Docker",
         "Docker Compose",
+        "make init-submodules",
         "make build",
         "make deploy-local",
         "make stop-local",
@@ -371,6 +372,19 @@ def test_root_readme_documents_full_local_compose_stack() -> None:
         assert required_token in text, (
             f"README.md is missing local compose stack guidance: {required_token}"
         )
+
+
+def test_makefile_local_build_path_does_not_require_zerotier_install() -> None:
+    text = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    build_cli_line = next(
+        line for line in text.splitlines() if line.startswith("build-cli:")
+    )
+    assert "init-dependencies" not in build_cli_line
+    assert "init-zero-tier" not in build_cli_line
+    assert "init-prerequisites" in build_cli_line
+
+    assert "init-registry:\n\tcd erc-8004-registry-py && make init" in text
 
 
 def test_zerotier_frp_standup_doc_defines_service_network_model() -> None:
