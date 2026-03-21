@@ -1279,6 +1279,15 @@ def test_subagent_audit_summary_covers_all_prompt_paths() -> None:
         )
 
 
+def test_subagent_audit_summary_marks_stale_clean_room_verdict_as_historical() -> None:
+    text = SUBAGENT_SUMMARY_PATH.read_text(encoding="utf-8")
+
+    assert "historical snapshot" in text.lower()
+    assert "superseded" in text.lower()
+    assert "clean-room verdict`: no" in text
+    assert "Later doc and test work superseded that verdict" in text
+
+
 def test_resource_seeding_doc_uses_deployed_seller_paths() -> None:
     text = STANDUP_RESOURCE_SEEDING_PATH.read_text(encoding="utf-8")
 

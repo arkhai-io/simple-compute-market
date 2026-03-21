@@ -3,6 +3,10 @@
 This file records the first full deployment-audit subagent sweep run on
 2026-03-20.
 
+This document is a historical snapshot of the repo state on 2026-03-20.
+Its blocker list and `clean-room verdict`: no were accurate at that time, but
+later doc and test work superseded that verdict.
+
 ## Results
 
 - `local-stack`: fail
@@ -61,3 +65,10 @@ credentials can get close, but the documented stack is still not fully
 stand-up-able without inference around local-stack bring-up, registry and
 provisioning deployment details, ZeroTier/FRP wiring, and the final canary
 runner bundle.
+
+## Superseded Status
+
+Later doc and test work superseded that verdict. Treat this file as the
+historical starting point for the audit effort, not the current production
+readiness verdict. The current source of truth is the canonical stand-up docs,
+deployment gates, and the green test matrix in the repo.
