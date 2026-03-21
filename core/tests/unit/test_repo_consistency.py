@@ -117,6 +117,18 @@ def _parse_runbook_args(path: Path) -> set[str]:
     }
 
 
+def _iter_markdown_paths() -> list[Path]:
+    return [
+        ROOT / "README.md",
+        *sorted((ROOT / "docs").rglob("*.md")),
+        ROOT / "domain/compute/training/README.md",
+        ROOT / "erc-8004-registry-py/README.md",
+        ROOT / "async-provisioning-service/README.md",
+        ROOT / "core/agent/README.md",
+        ROOT / "compute-provisioning-iac/README.md",
+    ]
+
+
 def test_async_provisioning_production_sample_includes_required_runtime_vars() -> None:
     env = _parse_env_file(ASYNC_PROD_ENV)
     required = {
@@ -538,6 +550,23 @@ def test_training_readme_uses_current_core_agent_paths() -> None:
     assert "Run from `/agent`" not in text
     assert "cd core/agent" in text
     assert "core/agent/.env.sample" in text
+
+
+def test_markdown_relative_links_resolve() -> None:
+    missing: list[str] = []
+    pattern = re.compile(r"\[[^\]]+\]\((?!https?://|mailto:|#)([^)]+\.md)\)")
+
+    for path in _iter_markdown_paths():
+        text = path.read_text(encoding="utf-8")
+        for raw_target in pattern.findall(text):
+            target = raw_target.split("#", 1)[0]
+            resolved = (path.parent / target).resolve()
+            if not resolved.exists():
+                missing.append(
+                    f"{path.relative_to(ROOT)} -> {raw_target}"
+                )
+
+    assert not missing, f"Broken markdown links: {missing}"
 
 
 def test_subagent_prompt_docs_exist_for_all_deployment_paths() -> None:
