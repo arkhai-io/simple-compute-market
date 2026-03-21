@@ -35,6 +35,7 @@ def _valid_agent_env() -> str:
     IDENTITY_REGISTRY_ADDRESS=0x1111111111111111111111111111111111111111
     REPUTATION_REGISTRY_ADDRESS=0x2222222222222222222222222222222222222222
     VALIDATION_REGISTRY_ADDRESS=0x3333333333333333333333333333333333333333
+    CHAIN_ID=84532
     REGISTRY_URL=http://100.64.0.10:8080/
     CHAIN_RPC_URL=wss://base-sepolia.example-rpc.invalid/ws
     AGENT_PRIV_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -397,6 +398,26 @@ def test_validator_rejects_http_rpc_for_agent_env(tmp_path: Path) -> None:
         "agent env:CHAIN_RPC_URL: expected a WebSocket RPC URL" in error
         for error in errors
     )
+
+
+def test_validator_requires_agent_chain_id(tmp_path: Path) -> None:
+    module = _load_script_module()
+    agent_env = _write(
+        tmp_path / "agent.env",
+        _valid_agent_env().replace("CHAIN_ID=84532\n", ""),
+    )
+    provisioning_env = _write(tmp_path / "provisioning.env", _valid_provisioning_env())
+    registry_env = _write(tmp_path / "registry.env", _valid_registry_env())
+    inventory = _write(tmp_path / "hosts", _inventory())
+
+    errors = module.validate_bundle(
+        agent_env_path=agent_env,
+        provisioning_env_path=provisioning_env,
+        registry_env_path=registry_env,
+        inventory_path=inventory,
+    )
+
+    assert "agent env: missing required keys: CHAIN_ID" in errors
 
 
 def test_validate_actor_bundle_accepts_distinct_buyer_and_seller_envs(

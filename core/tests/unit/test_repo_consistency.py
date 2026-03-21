@@ -40,6 +40,7 @@ SUBAGENT_NETWORK_PATH = SUBAGENT_DIR / "network-overlay.md"
 SUBAGENT_CANARY_PATH = SUBAGENT_DIR / "canary-e2e.md"
 SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
 SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
+SUBAGENT_SUMMARY_PATH = SUBAGENT_DIR / "2026-03-20-audit-summary.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
 ALKAHEST_REPO = ROOT.parent / "alkahest"
 ALKAHEST_BASE_DEPLOYMENT = (
@@ -359,6 +360,10 @@ def test_agent_standup_docs_cover_container_runtime_contract(
         "--device /dev/net/tun:/dev/net/tun",
         "/var/lib/zerotier-one",
         "grep '^ONCHAIN_AGENT_ID='",
+        "CHAIN_ID=84532",
+        "IDENTITY_REGISTRY_ADDRESS",
+        "REPUTATION_REGISTRY_ADDRESS",
+        "VALIDATION_REGISTRY_ADDRESS",
         "/.well-known/agent-card.json",
         "/.well-known/erc-8004-registration.json",
     }
@@ -582,6 +587,7 @@ def test_subagent_prompt_docs_exist_for_all_deployment_paths() -> None:
         SUBAGENT_CANARY_PATH,
         SUBAGENT_ROLLBACK_PATH,
         SUBAGENT_CLEAN_ROOM_PATH,
+        SUBAGENT_SUMMARY_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -624,6 +630,27 @@ def test_subagent_prompt_docs_define_audit_contract(path: Path) -> None:
     ):
         assert required_token in text, (
             f"{path.name} is missing subagent prompt requirement: {required_token}"
+        )
+
+
+def test_subagent_audit_summary_covers_all_prompt_paths() -> None:
+    text = SUBAGENT_SUMMARY_PATH.read_text(encoding="utf-8")
+
+    for required_token in (
+        "local-stack",
+        "registry-deploy",
+        "provisioning-deploy",
+        "iac-host-kit",
+        "agent-seller",
+        "agent-buyer",
+        "network-overlay",
+        "canary-e2e",
+        "rollback",
+        "clean-room",
+        "clean-room verdict",
+    ):
+        assert required_token in text, (
+            f"Audit summary is missing path result: {required_token}"
         )
 
 
@@ -867,9 +894,16 @@ def test_agent_entrypoint_re_registers_when_onchain_agent_id_is_noncanonical() -
     assert 'needs_registration=true' in text
     assert 'set -a\n  . "${_env_file}"\n  set +a' in text
     assert text.index('. "${_env_file}"') < text.index("needs_registration=false")
+    assert '--env-file="${_env_file}"' in text
+    assert "--env_file=" not in text
     assert 'CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]' not in text
     assert "/app/.venv/bin/uvicorn" in text
     assert "${PORT:-8080}" in text or "os.environ.get('PORT'" in text or 'os.environ.get("PORT"' in text
+
+
+def test_agent_production_sample_includes_chain_id_for_deployed_registration() -> None:
+    env = _parse_env_file(AGENT_PROD_ENV)
+    assert env["CHAIN_ID"] == "84532"
 
 
 def test_compute_provisioning_iac_vm_setup_avoids_missing_debian_packages() -> None:

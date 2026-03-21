@@ -41,6 +41,10 @@ At minimum, set:
 - `PORT=8000`
 - `BASE_URL_OVERRIDE=http://{ZEROTIER_IP}:8000/`
 - `AGENT_DB_PATH=/var/lib/market/agent.db`
+- `IDENTITY_REGISTRY_ADDRESS`
+- `REPUTATION_REGISTRY_ADDRESS`
+- `VALIDATION_REGISTRY_ADDRESS`
+- `CHAIN_ID=84532`
 - `REGISTRY_URL`
 - `CHAIN_RPC_URL`
 - `CHAIN_NAME=base_sepolia`
@@ -60,6 +64,14 @@ path. Startup writes `ZEROTIER_IP`, the resolved `BASE_URL_OVERRIDE`, and
 
 The buyer and seller env files must not reuse the same URL, wallet, or
 `ONCHAIN_AGENT_ID`.
+
+If the image is stored in Artifact Registry, authenticate Docker on the host
+before the first pull:
+
+```bash
+gcloud auth print-access-token \
+  | sudo docker login -u oauth2accesstoken --password-stdin https://<region>-docker.pkg.dev
+```
 
 ## Container Launch
 
@@ -104,6 +116,10 @@ grep '^ZEROTIER_IP=' /etc/simple-market-service/buyer-agent.env
 grep '^BASE_URL_OVERRIDE=' /etc/simple-market-service/buyer-agent.env
 grep '^ONCHAIN_AGENT_ID=' /etc/simple-market-service/buyer-agent.env
 ```
+
+If the buyer host is joining the ZeroTier network for the first time, capture
+the reported ZeroTier node ID from the startup logs and authorize that member on
+the controller before expecting `ZEROTIER_IP` resolution to complete.
 
 Do not proceed until `/etc/simple-market-service/buyer-agent.env` contains a
 canonical `ONCHAIN_AGENT_ID=eip155:...` value that is distinct from the seller's

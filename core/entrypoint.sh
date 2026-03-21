@@ -47,7 +47,7 @@ if [ "${needs_registration}" = "true" ]; then
   echo "ZeroTier Env file:"${ENV_FILE}
   # Ensure the file exists so register_onchain.py can write ONCHAIN_AGENT_ID back to it
   touch "${_env_file}"
-  PYTHONPATH="/:/app:/app/core/agent${PYTHONPATH:+:${PYTHONPATH}}" uv run python core/agent/scripts/register_onchain.py --env_file="${_env_file}"
+  PYTHONPATH="/:/app:/app/core/agent${PYTHONPATH:+:${PYTHONPATH}}" uv run python core/agent/scripts/register_onchain.py --env-file="${_env_file}"
   # Reload env file so ONCHAIN_AGENT_ID written by registration is visible to the server
   set -a
   . "${_env_file}"
