@@ -30,6 +30,20 @@ def test_extract_agent_id_from_env_text() -> None:
     )
 
 
+def test_extract_agent_id_builds_canonical_id_from_numeric_env_text() -> None:
+    module = _load_script_module()
+    env_text = (
+        "CHAIN_ID=11155111\n"
+        "IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e\n"
+        "ONCHAIN_AGENT_ID=2072\n"
+    )
+
+    assert (
+        module._extract_agent_id(env_text)
+        == "eip155:11155111:0x8004a818bfb912233c491871b3d84c89a494bd9e:2072"
+    )
+
+
 def test_update_canary_env_replaces_agent_ids_without_touching_other_values(tmp_path: Path) -> None:
     module = _load_script_module()
     canary_env = tmp_path / "prod-canary.env"
@@ -58,6 +72,38 @@ def test_update_canary_env_replaces_agent_ids_without_touching_other_values(tmp_
         in updated
     )
     assert "CANARY_VM_HOSTS=btc1" in updated
+
+
+def test_read_remote_env_uses_sudo_cat(monkeypatch) -> None:
+    module = _load_script_module()
+    captured: list[list[str]] = []
+
+    def fake_capture_stdout(command: list[str]) -> str:
+        captured.append(command)
+        return "ONCHAIN_AGENT_ID=2072\n"
+
+    monkeypatch.setattr(module, "_capture_stdout", fake_capture_stdout)
+
+    text = module._read_remote_env(
+        instance="sms-seller",
+        env_path="/etc/simple-market-service/seller-agent.env",
+        project="sms-canary-project",
+        zone="us-east4-c",
+    )
+
+    assert text == "ONCHAIN_AGENT_ID=2072\n"
+    assert captured == [[
+        "gcloud",
+        "compute",
+        "ssh",
+        "sms-seller",
+        "--project",
+        "sms-canary-project",
+        "--zone",
+        "us-east4-c",
+        "--command",
+        "sudo cat /etc/simple-market-service/seller-agent.env",
+    ]]
 
 
 def test_refresh_agent_ids_updates_local_file_and_syncs_runner(

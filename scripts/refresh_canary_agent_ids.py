@@ -11,6 +11,12 @@ from pathlib import Path
 
 DEFAULT_CANARY_ENV_PATH = Path("~/.config/simple-market-service/prod-canary.env").expanduser()
 AGENT_ID_RE = re.compile(r"^ONCHAIN_AGENT_ID=(?P<value>eip155:\d+:0x[0-9a-fA-F]{40}:\d+)$", re.MULTILINE)
+NUMERIC_AGENT_ID_RE = re.compile(r"^ONCHAIN_AGENT_ID=(?P<value>\d+)$", re.MULTILINE)
+CHAIN_ID_RE = re.compile(r"^CHAIN_ID=(?P<value>\d+)$", re.MULTILINE)
+IDENTITY_REGISTRY_RE = re.compile(
+    r"^IDENTITY_REGISTRY_ADDRESS=(?P<value>0x[0-9a-fA-F]{40})$",
+    re.MULTILINE,
+)
 
 
 def _run_command(command: list[str]) -> None:
@@ -74,9 +80,20 @@ def _gcloud_scp_command(
 
 def _extract_agent_id(env_text: str) -> str:
     match = AGENT_ID_RE.search(env_text)
-    if not match:
-        raise SystemExit("Remote env file is missing ONCHAIN_AGENT_ID")
-    return match.group("value")
+    if match:
+        return match.group("value")
+
+    numeric_match = NUMERIC_AGENT_ID_RE.search(env_text)
+    chain_match = CHAIN_ID_RE.search(env_text)
+    identity_match = IDENTITY_REGISTRY_RE.search(env_text)
+    if numeric_match and chain_match and identity_match:
+        return (
+            f"eip155:{chain_match.group('value')}:"
+            f"{identity_match.group('value').lower()}:"
+            f"{numeric_match.group('value')}"
+        )
+
+    raise SystemExit("Remote env file is missing ONCHAIN_AGENT_ID")
 
 
 def _read_remote_env(
@@ -90,7 +107,7 @@ def _read_remote_env(
         instance=instance,
         project=project,
         zone=zone,
-        remote_command=f"cat {env_path}",
+        remote_command=f"sudo cat {env_path}",
     )
     return _capture_stdout(command)
 
