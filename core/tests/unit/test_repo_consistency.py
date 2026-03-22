@@ -94,6 +94,7 @@ PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
 REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
 HUMAN_BUYER_TUNNEL_SCRIPT = ROOT / "scripts/start_human_buyer_tunnel.py"
 HUMAN_BUYER_SANDBOX_SCRIPT = ROOT / "scripts/setup_human_buyer_sandbox.py"
+SEED_HUMAN_SELLER_OFFER_SCRIPT = ROOT / "scripts/seed_human_seller_offer.py"
 WAIT_FOR_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/wait_for_human_purchase.py"
 CLEANUP_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/cleanup_human_purchase.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
@@ -407,6 +408,15 @@ def test_repo_exposes_human_buyer_operator_entrypoints() -> None:
             "build",
             "venv",
             "pip",
+        ),
+        SEED_HUMAN_SELLER_OFFER_SCRIPT: (
+            "--context-path",
+            "/resources/portfolio",
+            "--resource-id",
+            "--gpu-model",
+            "--region",
+            "--amount",
+            "AGENT_AUTH_URL",
         ),
         WAIT_FOR_HUMAN_PURCHASE_SCRIPT: (
             "--seller-order-id",
@@ -892,10 +902,10 @@ def test_human_buyer_runbook_exists_and_is_linked() -> None:
     for required_token in (
         "scripts/start_human_buyer_tunnel.py",
         "scripts/setup_human_buyer_sandbox.py",
+        "scripts/seed_human_seller_offer.py",
         "scripts/pre_canary_fund.py",
         "scripts/wait_for_human_purchase.py",
         "scripts/cleanup_human_purchase.py",
-        "market order create",
         "market order match",
         "market order close",
         "buyer.env",
@@ -904,6 +914,7 @@ def test_human_buyer_runbook_exists_and_is_linked() -> None:
         "AGENT_AUTH_URL",
         "SSH_PRIVATE_KEY_PATH",
         "0.0001",
+        "--resource-id",
         "--seller-order-id",
         "--buyer-order-id",
         "--job-id",

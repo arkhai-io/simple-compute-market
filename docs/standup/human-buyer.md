@@ -87,21 +87,22 @@ python scripts/pre_canary_fund.py \
   --apply
 ```
 
-## 4. Seed A Seller Offer
+## 4. Seed A Seller Offer From Live Inventory
 
-Use the sandbox-installed CLI to create a fresh seller offer:
+Use the helper to create a seller offer from the live advertised portfolio so
+the order matches what the seller can actually fulfill:
 
 ```bash
-/tmp/market-human-buyer/venv/bin/market order create \
-  --agent-url http://127.0.0.1:28002 \
-  --auth-agent-url http://10.243.0.68:8000 \
-  --env /tmp/market-human-buyer/seller.env \
-  --offer '{"gpu_model":"H200","quantity":1,"sla":90.0,"region":"California, US"}' \
-  --demand '{"token":"WETH","amount":0.0001}' \
-  --duration-hours 1
+python scripts/seed_human_seller_offer.py \
+  --context-path /tmp/market-human-buyer/context.json \
+  --amount 0.0001
 ```
 
 Record the returned seller order ID.
+
+Optional: if you want a specific live resource, pass `--resource-id`. If you
+want to filter the portfolio without naming the exact resource, pass
+`--gpu-model` and/or `--region`.
 
 ## 5. Purchase Compute As The Buyer
 
@@ -173,5 +174,8 @@ Treat the manual run as successful only when all of the following are true:
 
 - If you want a dedicated manual buyer identity, override `BUYER_PRIVATE_KEY`
   in the local wallet bundle before running `scripts/setup_human_buyer_sandbox.py`.
+- `scripts/seed_human_seller_offer.py` uses the seller's live
+  `/resources/portfolio` output instead of hardcoding a GPU model. That avoids
+  creating offers that the isolated seller cannot actually provision.
 - Keep the tunnel terminal open until both `scripts/wait_for_human_purchase.py`
   and `scripts/cleanup_human_purchase.py` are done.
