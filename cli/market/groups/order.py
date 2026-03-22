@@ -40,6 +40,11 @@ def order_create(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    auth_agent_url: str | None = typer.Option(
+        None,
+        "--auth-agent-url",
+        help="Canonical agent base URL to sign against when requests are sent through a tunnel or proxy.",
+    ),
     env: str | None = typer.Option(
         None,
         "--env",
@@ -55,9 +60,11 @@ def order_create(
 ) -> None:
     """Create a new order via the Agent endpoint."""
     env_path = Path(env) if env else None
-    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
-    base_url = _normalize_registry_url(base_url)
+    base_url, auth_url = _resolve_agent_urls(
+        env_path=env_path,
+        agent_url=agent_url,
+        auth_agent_url=auth_agent_url,
+    )
     duration = duration_hours if duration_hours is not None else 1
     if duration < 1:
         raise typer.BadParameter("duration-hours must be >= 1")
@@ -81,7 +88,7 @@ def order_create(
         "duration_hours": duration,
     }
     url = f"{base_url}/orders/create"
-    response = _post_json(url, payload, _get_auth_headers("create_order", base_url, private_key))
+    response = _post_json(url, payload, _get_auth_headers("create_order", auth_url, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -260,6 +267,11 @@ def order_match(
         "-a",
         help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
     ),
+    auth_agent_url: str | None = typer.Option(
+        None,
+        "--auth-agent-url",
+        help="Canonical agent base URL to sign against when requests are sent through a tunnel or proxy.",
+    ),
     duration_hours: int | None = typer.Option(
         None,
         "--duration-hours",
@@ -306,15 +318,17 @@ def order_match(
     }
 
     env_path = Path(env) if env else None
-    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_agent_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
-    base_agent_url = _normalize_registry_url(base_agent_url)
+    base_agent_url, auth_url = _resolve_agent_urls(
+        env_path=env_path,
+        agent_url=agent_url,
+        auth_agent_url=auth_agent_url,
+    )
     private_key = (
         (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
         or os.getenv("AGENT_PRIV_KEY")
     )
     create_url = f"{base_agent_url}/orders/create"
-    response = _post_json(create_url, payload, _get_auth_headers("create_order", base_agent_url, private_key))
+    response = _post_json(create_url, payload, _get_auth_headers("create_order", auth_url, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -333,6 +347,26 @@ def order_match(
 
 def _normalize_registry_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
+
+
+def _resolve_agent_urls(
+    *,
+    env_path: Path | None,
+    agent_url: str | None,
+    auth_agent_url: str | None,
+) -> tuple[str, str]:
+    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    env_auth_url = _read_env_value(env_path, "AGENT_AUTH_URL") if env_path else None
+    request_url = (
+        agent_url
+        or env_base_url
+        or os.getenv("AGENT_URL")
+        or os.getenv("BASE_URL_OVERRIDE")
+        or "http://localhost:8000"
+    )
+    request_url = _normalize_registry_url(request_url)
+    canonical_auth_url = auth_agent_url or env_auth_url or request_url
+    return request_url, _normalize_registry_url(canonical_auth_url)
 
 
 def _short_contract_address(value: str) -> str:
