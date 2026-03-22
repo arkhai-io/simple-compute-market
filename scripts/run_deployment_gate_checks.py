@@ -34,6 +34,8 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seller-private-key")
     parser.add_argument("--buyer-private-key")
     parser.add_argument("--ssh-private-key-path")
+    parser.add_argument("--expected-chain-name")
+    parser.add_argument("--expected-chain-id", type=int)
     parser.add_argument(
         "--skip-smoke-help",
         action="store_true",
@@ -100,6 +102,10 @@ def _validator_command(args: argparse.Namespace) -> list[str]:
     )
     if args.inventory_path:
         command.extend(["--inventory-path", str(args.inventory_path)])
+    if args.expected_chain_name:
+        command.extend(["--expected-chain-name", args.expected_chain_name])
+    if args.expected_chain_id is not None:
+        command.extend(["--expected-chain-id", str(args.expected_chain_id)])
     optional_args = {
         "--seller-agent-url": args.seller_agent_url,
         "--buyer-agent-url": args.buyer_agent_url,

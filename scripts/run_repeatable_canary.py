@@ -136,7 +136,7 @@ def _build_bundle_validation_command(
             + ", ".join(missing)
         )
 
-    return [
+    command = [
         "python",
         "scripts/validate_deployment_bundle.py",
         "--environment",
@@ -166,6 +166,12 @@ def _build_bundle_validation_command(
         "--ssh-private-key-path",
         canary_env["SSH_PRIVATE_KEY_PATH"],
     ]
+    if canary_env.get("CHAIN_NAME"):
+        command.extend(["--expected-chain-name", canary_env["CHAIN_NAME"]])
+    if canary_env.get("CHAIN_ID"):
+        command.extend(["--expected-chain-id", canary_env["CHAIN_ID"]])
+    return command
+    return command
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -239,24 +245,29 @@ def main(argv: list[str] | None = None) -> int:
     canary_env = _parse_env_file(rendered_paths["canary"])
 
     if not args.skip_deployment_gates:
+        gate_command = [
+            "python",
+            "scripts/run_deployment_gate_checks.py",
+            "--environment",
+            args.environment,
+            "--seller-agent-env",
+            str(rendered_paths["seller"]),
+            "--buyer-agent-env",
+            str(rendered_paths["buyer"]),
+            "--provisioning-env",
+            str(rendered_paths["provisioning"]),
+            "--registry-env",
+            str(rendered_paths["registry"]),
+            "--inventory-path",
+            str(inventory_path),
+            "--skip-smoke-help",
+        ]
+        if canary_env.get("CHAIN_NAME"):
+            gate_command.extend(["--expected-chain-name", canary_env["CHAIN_NAME"]])
+        if canary_env.get("CHAIN_ID"):
+            gate_command.extend(["--expected-chain-id", canary_env["CHAIN_ID"]])
         _run_command(
-            [
-                "python",
-                "scripts/run_deployment_gate_checks.py",
-                "--environment",
-                args.environment,
-                "--seller-agent-env",
-                str(rendered_paths["seller"]),
-                "--buyer-agent-env",
-                str(rendered_paths["buyer"]),
-                "--provisioning-env",
-                str(rendered_paths["provisioning"]),
-                "--registry-env",
-                str(rendered_paths["registry"]),
-                "--inventory-path",
-                str(inventory_path),
-                "--skip-smoke-help",
-            ],
+            gate_command,
             cwd=ROOT,
         )
 

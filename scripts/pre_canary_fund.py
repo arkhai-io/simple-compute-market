@@ -23,16 +23,25 @@ ROOT = Path(__file__).resolve().parents[1]
 SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
 BASE_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_base_sepolia.json"
+ETH_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_eth_sepolia.json"
 CHAIN_CONFIG = {
     "base_sepolia": {
         "chain_id": "84532",
         "rpc_env": "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
         "funder_env": "SEPOLIA_FUNDER_PRIVATE_KEY",
+        "token_registry": BASE_SEPOLIA_TOKEN_REGISTRY,
     },
     "base": {
         "chain_id": "8453",
         "rpc_env": "ALCHEMY_BASE_MAINNET_HTTP_URL",
         "funder_env": "MAINNET_FUNDER_PRIVATE_KEY",
+        "token_registry": None,
+    },
+    "ethereum_sepolia": {
+        "chain_id": "11155111",
+        "rpc_env": "ETH_SEPOLIA_HTTP_RPC_URL",
+        "funder_env": "SEPOLIA_FUNDER_PRIVATE_KEY",
+        "token_registry": ETH_SEPOLIA_TOKEN_REGISTRY,
     },
 }
 ERC20_ABI = [
@@ -219,8 +228,9 @@ def resolve_token_metadata(context: FundingContext) -> TokenMetadata:
             decimals=context.token_decimals_override,
         )
 
-    if context.chain_name == "base_sepolia":
-        token_registry = json.loads(BASE_SEPOLIA_TOKEN_REGISTRY.read_text(encoding="utf-8"))
+    token_registry_path = CHAIN_CONFIG[context.chain_name]["token_registry"]
+    if token_registry_path is not None:
+        token_registry = json.loads(token_registry_path.read_text(encoding="utf-8"))
         for entry in token_registry:
             if entry.get("symbol", "").upper() == context.token_symbol:
                 return TokenMetadata(

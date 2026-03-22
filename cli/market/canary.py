@@ -19,6 +19,8 @@ _KNOWN_WRAPPED_NATIVE_TOKENS: dict[str, tuple[str, int]] = {
     "base": ("0x4200000000000000000000000000000000000006", 18),
     "base_sepolia": ("0x4200000000000000000000000000000000000006", 18),
     "base-sepolia": ("0x4200000000000000000000000000000000000006", 18),
+    "ethereum_sepolia": ("0xfff9976782d46cc05630d1f6ebab18b2324d6b14", 18),
+    "ethereum-sepolia": ("0xfff9976782d46cc05630d1f6ebab18b2324d6b14", 18),
 }
 _KNOWN_TOKEN_DECIMALS: dict[str, int] = {
     "USDC": 6,

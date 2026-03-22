@@ -48,11 +48,19 @@ CHAIN_CONFIG = {
         "chain_id": "84532",
         "http_key": "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
         "wss_key": "ALCHEMY_BASE_SEPOLIA_WSS_URL",
+        "token_registry_path": "/app/core/agent/app/data/token_registry_base_sepolia.json",
     },
     "base": {
         "chain_id": "8453",
         "http_key": "ALCHEMY_BASE_MAINNET_HTTP_URL",
         "wss_key": "ALCHEMY_BASE_MAINNET_WSS_URL",
+        "token_registry_path": "/app/core/agent/app/data/token_registry_base_sepolia.json",
+    },
+    "ethereum_sepolia": {
+        "chain_id": "11155111",
+        "http_key": "ETH_SEPOLIA_HTTP_RPC_URL",
+        "wss_key": "ETH_SEPOLIA_WSS_RPC_URL",
+        "token_registry_path": "/app/core/agent/app/data/token_registry_eth_sepolia.json",
     },
 }
 
@@ -137,7 +145,7 @@ def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...]) 
         raise SystemExit(f"Missing required {label} keys: {', '.join(missing)}")
 
 
-def _chain_context(shared: dict[str, str], alchemy: dict[str, str]) -> tuple[str, str, str]:
+def _chain_context(shared: dict[str, str], alchemy: dict[str, str]) -> tuple[str, str, str, str, str]:
     chain_name = shared.get("CHAIN_NAME", "base_sepolia")
     if chain_name not in CHAIN_CONFIG:
         raise SystemExit(
@@ -153,7 +161,13 @@ def _chain_context(shared: dict[str, str], alchemy: dict[str, str]) -> tuple[str
             "alchemy.env is missing required RPC URLs for "
             f"{chain_name}: {chain_config['http_key']}, {chain_config['wss_key']}"
         )
-    return chain_name, shared.get("CHAIN_ID", chain_config["chain_id"]), http_url, wss_url
+    return (
+        chain_name,
+        shared.get("CHAIN_ID", chain_config["chain_id"]),
+        http_url,
+        wss_url,
+        chain_config["token_registry_path"],
+    )
 
 
 def _load_templates() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -244,7 +258,7 @@ def materialize_host_envs(
         keys=("SELLER_AGENT_URL", "BUYER_AGENT_URL", "SELLER_AGENT_ID", "BUYER_AGENT_ID"),
     )
 
-    chain_name, chain_id, http_url, wss_url = _chain_context(shared, alchemy)
+    chain_name, chain_id, http_url, wss_url, token_registry_path = _chain_context(shared, alchemy)
     management_vars_path = Path(
         provisioning_overrides.get("MANAGEMENT_VARS_PATH", str(local_secrets_dir / "management-vars.yaml"))
     ).expanduser()
@@ -296,6 +310,7 @@ def materialize_host_envs(
         "CHAIN_ID": chain_id,
         "REGISTRY_URL": shared["REGISTRY_URL"],
         "CHAIN_RPC_URL": wss_url,
+        "TOKEN_REGISTRY_PATH": token_registry_path,
         "SSH_PUBLIC_KEY": wallets["SSH_PUBLIC_KEY"],
         "ZEROTIER_NETWORK": shared["ZEROTIER_NETWORK"],
         "PROVISIONING_SERVICE_URL": shared["PROVISIONING_SERVICE_URL"],
@@ -322,6 +337,7 @@ def materialize_host_envs(
 
     canary_env = {
         "CHAIN_NAME": chain_name,
+        "CHAIN_ID": chain_id,
         "CHAIN_RPC_URL": http_url,
         "REGISTRY_URL": shared["REGISTRY_URL"],
         "PROVISIONING_SERVICE_URL": shared["PROVISIONING_SERVICE_URL"],

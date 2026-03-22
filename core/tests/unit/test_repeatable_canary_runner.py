@@ -351,3 +351,69 @@ def test_repeatable_canary_runner_refuses_mainnet_without_explicit_flag(
                 "--skip-bundle-validation",
             ]
         )
+
+
+def test_repeatable_canary_runner_passes_rendered_chain_expectations_to_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    output_dir = tmp_path / "rendered"
+    commands: list[list[str]] = []
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+    _write_env(local_secrets_dir / "shared.env", {"CHAIN_NAME": "ethereum_sepolia", "CHAIN_ID": "11155111"})
+
+    def fake_run(
+        command: list[str],
+        *,
+        cwd: Path,
+        env: dict[str, str] | None = None,
+    ) -> None:
+        commands.append(command)
+        if command[:2] == ["python", "scripts/materialize_host_envs.py"]:
+            _render_bundle(output_dir)
+            _write_env(
+                output_dir / "prod-canary.env",
+                {
+                    "REGISTRY_URL": "http://10.0.0.11:8080",
+                    "PROVISIONING_SERVICE_URL": "http://10.0.0.12:8081",
+                    "SELLER_AGENT_URL": "http://10.0.0.21:8000",
+                    "BUYER_AGENT_URL": "http://10.0.0.22:8000",
+                    "SELLER_AGENT_ID": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e:101",
+                    "BUYER_AGENT_ID": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e:202",
+                    "SELLER_PRIVATE_KEY": "0xseller-private-key",
+                    "BUYER_PRIVATE_KEY": "0xbuyer-private-key",
+                    "SSH_PRIVATE_KEY_PATH": "/tmp/tenant_ed25519",
+                    "CHAIN_NAME": "ethereum_sepolia",
+                    "CHAIN_ID": "11155111",
+                },
+            )
+
+    monkeypatch.setattr(module, "_run_command", fake_run)
+    monkeypatch.setattr(module, "_run_logged_command", lambda *args, **kwargs: 0)
+
+    exit_code = module.main(
+        [
+            "--environment",
+            "isolated-ethereum-sepolia",
+            "--shared-secrets-dir",
+            str(shared_secrets_dir),
+            "--local-secrets-dir",
+            str(local_secrets_dir),
+            "--output-dir",
+            str(output_dir),
+            "--skip-deployment-gates",
+        ]
+    )
+
+    assert exit_code == 0
+    validator_command = next(
+        command for command in commands if command[:2] == ["python", "scripts/validate_deployment_bundle.py"]
+    )
+    assert "--expected-chain-name" in validator_command
+    assert validator_command[validator_command.index("--expected-chain-name") + 1] == "ethereum_sepolia"
+    assert "--expected-chain-id" in validator_command
+    assert validator_command[validator_command.index("--expected-chain-id") + 1] == "11155111"

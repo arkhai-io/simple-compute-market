@@ -340,6 +340,109 @@ def test_materialize_host_envs_merges_shared_credentials_with_local_overrides(
     assert "AGENT_PRIV_KEY=0xlocal-buyer-private-key" in buyer_text
 
 
+def test_materialize_host_envs_renders_ethereum_sepolia_bundle(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    output_dir = tmp_path / "rendered"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "ethereum_sepolia",
+            "CHAIN_ID": "11155111",
+            "ZEROTIER_NETWORK": "zt-network",
+            "FRP_SERVER_ADDR": "frp.example.internal",
+            "FRP_DOMAIN": "example.internal",
+            "FRP_DASHBOARD_PASSWORD": "frp-password",
+            "DEFAULT_VM_HOST": "btc1",
+            "REGISTRY_URL": "http://10.0.0.11:8080",
+            "PROVISIONING_SERVICE_URL": "http://10.0.0.12:8081",
+        },
+    )
+    _write_env(
+        shared_secrets_dir / "alchemy.env",
+        {
+            "ETH_SEPOLIA_HTTP_RPC_URL": "https://alchemy.example/eth-sepolia-http",
+            "ETH_SEPOLIA_WSS_RPC_URL": "wss://alchemy.example/eth-sepolia-wss",
+        },
+    )
+    _write_env(
+        shared_secrets_dir / "wallets.env",
+        {
+            "SELLER_PRIVATE_KEY": "0xseller-private-key",
+            "SELLER_WALLET_ADDRESS": "0x4444444444444444444444444444444444444444",
+            "BUYER_PRIVATE_KEY": "0xbuyer-private-key",
+            "BUYER_WALLET_ADDRESS": "0x5555555555555555555555555555555555555555",
+            "SSH_PUBLIC_KEY": "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQCbuyer canary@example",
+            "PROVISIONER_SSH_PRIVATE_KEY_PATH": str(local_secrets_dir / "provisioner_ed25519"),
+            "CANARY_TENANT_SSH_PRIVATE_KEY_PATH": str(local_secrets_dir / "tenant_ed25519"),
+        },
+    )
+    _write_env(
+        local_secrets_dir / "contracts.env",
+        {
+            "IDENTITY_REGISTRY_ADDRESS": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+            "REPUTATION_REGISTRY_ADDRESS": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+            "VALIDATION_REGISTRY_ADDRESS": "0x8004C269D0A5647E51E121FeB226200ECE932d55",
+        },
+    )
+    _write_env(local_secrets_dir / "registry.env", {"DATABASE_URL": "postgresql://registry"})
+    _write_env(
+        local_secrets_dir / "provisioning.env",
+        {
+            "DATABASE_URL": "postgresql+psycopg2://prov",
+            "REDIS_URL": "redis://redis.internal:6379/0",
+            "REDIS_QUEUE_NAME": "provisioning_jobs",
+            "ANSIBLE_BECOME_PASS": "sudo-password",
+            "MANAGEMENT_VARS_PATH": str(local_secrets_dir / "management-vars.yaml"),
+        },
+    )
+    _write_env(
+        local_secrets_dir / "seller-agent.env",
+        {"AGENT_ID": "seller-prod", "GEMINI_API_KEY": "seller-gemini-key"},
+    )
+    _write_env(
+        local_secrets_dir / "buyer-agent.env",
+        {"AGENT_ID": "buyer-prod", "GEMINI_API_KEY": "buyer-gemini-key"},
+    )
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "SELLER_AGENT_URL": "http://10.0.0.21:8000",
+            "BUYER_AGENT_URL": "http://10.0.0.22:8000",
+            "SELLER_AGENT_ID": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e:101",
+            "BUYER_AGENT_ID": "eip155:11155111:0x8004A818BFB912233c491871b3d84c89A494BD9e:202",
+        },
+    )
+    (local_secrets_dir / "management-vars.yaml").write_text("ansible_user: ubuntu\n", encoding="utf-8")
+    (local_secrets_dir / "provisioner_ed25519").write_text("provisioner\n", encoding="utf-8")
+    (local_secrets_dir / "tenant_ed25519").write_text("tenant\n", encoding="utf-8")
+
+    module.materialize_host_envs(
+        local_secrets_dir=local_secrets_dir,
+        output_dir=output_dir,
+        shared_secrets_dir=shared_secrets_dir,
+    )
+
+    seller_text = (output_dir / "seller-agent.env").read_text(encoding="utf-8")
+    registry_text = (output_dir / "registry.env").read_text(encoding="utf-8")
+    canary_text = (output_dir / "prod-canary.env").read_text(encoding="utf-8")
+
+    assert "CHAIN_NAME=ethereum_sepolia" in seller_text
+    assert "CHAIN_ID=11155111" in seller_text
+    assert "CHAIN_RPC_URL=wss://alchemy.example/eth-sepolia-wss" in seller_text
+    assert "TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_eth_sepolia.json" in seller_text
+    assert "RPC_URL=https://alchemy.example/eth-sepolia-http" in registry_text
+    assert "CHAIN_ID=11155111" in registry_text
+    assert "CHAIN_NAME=ethereum_sepolia" in canary_text
+    assert "CHAIN_RPC_URL=https://alchemy.example/eth-sepolia-http" in canary_text
+
+
 def test_materialize_host_envs_requires_shared_credentials_when_not_overridden(
     tmp_path: Path,
 ) -> None:
