@@ -470,6 +470,21 @@ def _native_balance_of(rpc_url: str, owner_address: str) -> int:
     return int(str(result), 16)
 
 
+def _checksum_transaction_address(address: str) -> str:
+    from eth_utils import to_checksum_address
+
+    return to_checksum_address(address)
+
+
+def _signed_raw_transaction_hex(signed: object) -> str:
+    raw_value = getattr(signed, "raw_transaction", None)
+    if raw_value is None:
+        raw_value = getattr(signed, "rawTransaction", None)
+    if raw_value is None:
+        raise SystemExit("Signed transaction did not expose raw transaction bytes")
+    return f"0x{raw_value.hex()}"
+
+
 def _chain_id(rpc_url: str) -> int:
     result = _rpc_request(rpc_url, "eth_chainId", [])
     return int(str(result), 16)
@@ -547,7 +562,7 @@ def _wrap_native_to_wrapped_token(
     tx = {
         "chainId": _chain_id(rpc_url),
         "nonce": _nonce(rpc_url, account.address),
-        "to": token_address,
+        "to": _checksum_transaction_address(token_address),
         "value": amount_wei,
         "data": _WRAP_NATIVE_CALLDATA,
         "gas": _WRAP_GAS_LIMIT,
@@ -557,7 +572,7 @@ def _wrap_native_to_wrapped_token(
     tx_hash = _rpc_request(
         rpc_url,
         "eth_sendRawTransaction",
-        [f"0x{signed.raw_transaction.hex()}"],
+        [_signed_raw_transaction_hex(signed)],
     )
     receipt = _wait_for_transaction_receipt(rpc_url, str(tx_hash))
     if int(str(receipt.get("status", "0x0")), 16) != 1:
@@ -579,7 +594,7 @@ def _transfer_native_token(
     tx = {
         "chainId": _chain_id(rpc_url),
         "nonce": _nonce(rpc_url, account.address),
-        "to": recipient_address,
+        "to": _checksum_transaction_address(recipient_address),
         "value": amount_wei,
         "gas": _NATIVE_TRANSFER_GAS_LIMIT,
         "gasPrice": _gas_price(rpc_url),
@@ -588,7 +603,7 @@ def _transfer_native_token(
     tx_hash = _rpc_request(
         rpc_url,
         "eth_sendRawTransaction",
-        [f"0x{signed.raw_transaction.hex()}"],
+        [_signed_raw_transaction_hex(signed)],
     )
     receipt = _wait_for_transaction_receipt(rpc_url, str(tx_hash))
     if int(str(receipt.get("status", "0x0")), 16) != 1:

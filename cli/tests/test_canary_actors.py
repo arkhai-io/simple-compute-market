@@ -746,6 +746,68 @@ def test_chain_probe_rejects_weth_canary_without_rpc_url() -> None:
         ChainProbe(config).verify()
 
 
+def test_wrap_native_to_wrapped_token_normalizes_lowercase_address_before_signing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from market.canary import _wrap_native_to_wrapped_token
+
+    sent: list[tuple[str, list[object]]] = []
+
+    monkeypatch.setattr("market.canary._chain_id", lambda rpc_url: 11155111)
+    monkeypatch.setattr("market.canary._nonce", lambda rpc_url, owner: 7)
+    monkeypatch.setattr("market.canary._gas_price", lambda rpc_url: 5)
+    monkeypatch.setattr(
+        "market.canary._rpc_request",
+        lambda rpc_url, method, params: sent.append((method, params)) or "0xdeadbeef",
+    )
+    monkeypatch.setattr(
+        "market.canary._wait_for_transaction_receipt",
+        lambda rpc_url, tx_hash, timeout=120: {"status": "0x1"},
+    )
+
+    _wrap_native_to_wrapped_token(
+        "https://rpc.example.invalid",
+        "0x32cb52625677caf0a2ccf6e650cc78fe6d6eefecef5088d7b6f36cf08c5eea86",
+        "0xfff9976782d46cc05630d1f6ebab18b2324d6b14",
+        12345,
+    )
+
+    assert sent[0][0] == "eth_sendRawTransaction"
+    assert isinstance(sent[0][1][0], str)
+    assert sent[0][1][0].startswith("0x")
+
+
+def test_transfer_native_token_normalizes_lowercase_recipient_before_signing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from market.canary import _transfer_native_token
+
+    sent: list[tuple[str, list[object]]] = []
+
+    monkeypatch.setattr("market.canary._chain_id", lambda rpc_url: 11155111)
+    monkeypatch.setattr("market.canary._nonce", lambda rpc_url, owner: 8)
+    monkeypatch.setattr("market.canary._gas_price", lambda rpc_url: 5)
+    monkeypatch.setattr(
+        "market.canary._rpc_request",
+        lambda rpc_url, method, params: sent.append((method, params)) or "0xfeedbeef",
+    )
+    monkeypatch.setattr(
+        "market.canary._wait_for_transaction_receipt",
+        lambda rpc_url, tx_hash, timeout=120: {"status": "0x1"},
+    )
+
+    _transfer_native_token(
+        "https://rpc.example.invalid",
+        "0x32cb52625677caf0a2ccf6e650cc78fe6d6eefecef5088d7b6f36cf08c5eea86",
+        "0x31446552a35044be5d6581f06ca5d35184ac1d8e",
+        54321,
+    )
+
+    assert sent[0][0] == "eth_sendRawTransaction"
+    assert isinstance(sent[0][1][0], str)
+    assert sent[0][1][0].startswith("0x")
+
+
 def test_network_probe_rejects_missing_matching_seller_inventory() -> None:
     from market.canary import CanaryGateway, NetworkProbe
 
