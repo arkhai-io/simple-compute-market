@@ -544,3 +544,79 @@ def test_signed_tx_bytes_accepts_legacy_and_modern_web3_attribute_names() -> Non
 
     with pytest.raises(AttributeError, match="missing raw transaction bytes"):
         module._signed_tx_bytes(object())
+
+
+def test_apply_funding_plan_increments_nonce_across_multiple_topups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+
+    class FakeWeb3:
+        pass
+
+    captured_nonces: list[int | None] = []
+
+    def fake_build_web3(rpc_url: str):
+        assert rpc_url == "https://alchemy.example/eth-sepolia-http"
+        return FakeWeb3()
+
+    def fake_initial_funder_nonce(web3, private_key: str) -> int:
+        assert isinstance(web3, FakeWeb3)
+        assert private_key == "0xfunder-private-key"
+        return 2
+
+    def fake_send_native_transfer(web3, *, private_key: str, recipient: str, amount: int, nonce=None) -> str:
+        assert isinstance(web3, FakeWeb3)
+        assert private_key == "0xfunder-private-key"
+        captured_nonces.append(nonce)
+        return f"0x{len(captured_nonces):064x}"
+
+    monkeypatch.setattr(module, "_build_web3", fake_build_web3)
+    monkeypatch.setattr(module, "_initial_funder_nonce", fake_initial_funder_nonce, raising=False)
+    monkeypatch.setattr(module, "_send_native_transfer", fake_send_native_transfer)
+
+    context = module.FundingContext(
+        chain_name="ethereum_sepolia",
+        chain_id=11155111,
+        rpc_url="https://alchemy.example/eth-sepolia-http",
+        funder_private_key="0xfunder-private-key",
+        seller_wallet_address="0x4444444444444444444444444444444444444444",
+        buyer_wallet_address="0x5555555555555555555555555555555555555555",
+        token_symbol="ETH",
+        token_amount=0,
+        duration_hours=1,
+        buyer_native_floor_wei=20000,
+        seller_native_floor_wei=10000,
+        buyer_registration_native_floor_wei=0,
+        seller_registration_native_floor_wei=0,
+        buyer_token_buffer_base_units=0,
+        token_address_override=None,
+        token_decimals_override=None,
+        mainnet_max_native_topup_wei=None,
+        mainnet_max_erc20_topup_base_units=None,
+    )
+
+    token_metadata = module.TokenMetadata(symbol="ETH", address="", decimals=18)
+    plan = [
+        module.FundingTransfer(
+            asset_kind="native",
+            symbol="ETH",
+            recipient=context.seller_wallet_address,
+            amount=123,
+        ),
+        module.FundingTransfer(
+            asset_kind="native",
+            symbol="ETH",
+            recipient=context.buyer_wallet_address,
+            amount=456,
+        ),
+    ]
+
+    tx_hashes = module.apply_funding_plan(
+        context=context,
+        token_metadata=token_metadata,
+        plan=plan,
+    )
+
+    assert captured_nonces == [2, 3]
+    assert tx_hashes == ["0x0000000000000000000000000000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000000000000000000000000000002"]

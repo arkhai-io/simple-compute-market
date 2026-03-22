@@ -367,13 +367,30 @@ def _signed_tx_bytes(signed) -> bytes:
     return raw_tx
 
 
-def _send_native_transfer(web3, *, private_key: str, recipient: str, amount: int) -> str:
+def _initial_funder_nonce(web3, private_key: str) -> int:
+    from eth_account import Account
+
+    account = Account.from_key(private_key)
+    try:
+        return int(web3.eth.get_transaction_count(account.address, "pending"))
+    except TypeError:
+        return int(web3.eth.get_transaction_count(account.address))
+
+
+def _send_native_transfer(
+    web3,
+    *,
+    private_key: str,
+    recipient: str,
+    amount: int,
+    nonce: int | None = None,
+) -> str:
     from eth_account import Account
 
     account = Account.from_key(private_key)
     tx = {
         "chainId": web3.eth.chain_id,
-        "nonce": web3.eth.get_transaction_count(account.address),
+        "nonce": nonce if nonce is not None else web3.eth.get_transaction_count(account.address),
         "to": web3.to_checksum_address(recipient),
         "value": amount,
         "gas": 21_000,
@@ -394,6 +411,7 @@ def _send_erc20_transfer(
     token_address: str,
     recipient: str,
     amount: int,
+    nonce: int | None = None,
 ) -> str:
     from eth_account import Account
 
@@ -405,7 +423,7 @@ def _send_erc20_transfer(
     ).build_transaction(
         {
             "chainId": web3.eth.chain_id,
-            "nonce": web3.eth.get_transaction_count(account.address),
+            "nonce": nonce if nonce is not None else web3.eth.get_transaction_count(account.address),
             "from": account.address,
             "gasPrice": int(web3.eth.gas_price),
         }
@@ -426,6 +444,7 @@ def apply_funding_plan(
 ) -> list[str]:
     web3 = _build_web3(context.rpc_url)
     tx_hashes: list[str] = []
+    next_nonce = _initial_funder_nonce(web3, context.funder_private_key)
     for transfer in plan:
         if transfer.asset_kind == "native":
             tx_hashes.append(
@@ -434,8 +453,10 @@ def apply_funding_plan(
                     private_key=context.funder_private_key,
                     recipient=transfer.recipient,
                     amount=transfer.amount,
+                    nonce=next_nonce,
                 )
             )
+            next_nonce += 1
             continue
         tx_hashes.append(
             _send_erc20_transfer(
@@ -444,8 +465,10 @@ def apply_funding_plan(
                 token_address=token_metadata.address,
                 recipient=transfer.recipient,
                 amount=transfer.amount,
+                nonce=next_nonce,
             )
         )
+        next_nonce += 1
     return tx_hashes
 
 
