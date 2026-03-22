@@ -132,6 +132,7 @@ def build_ssh_probe_command(
         raise SystemExit(f"Unsupported SSH command format: {ssh_command}")
     return [
         "ssh",
+        "-4",
         "-i",
         ssh_private_key_path,
         "-o",

@@ -78,12 +78,13 @@ def test_build_ssh_probe_command_uses_local_key_and_known_hosts_path(tmp_path: P
 
     assert command[:6] == [
         "ssh",
+        "-4",
         "-i",
         "/tmp/tenant-key",
         "-o",
         "StrictHostKeyChecking=no",
-        "-o",
     ]
+    assert command[6] == "-o"
     assert f"UserKnownHostsFile={known_hosts}" in command
     assert "-p" in command
     assert "7004" in command
