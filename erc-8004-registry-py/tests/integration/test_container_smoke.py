@@ -177,7 +177,7 @@ def test_registry_container_starts_against_postgres_and_serves_core_routes(
                   RPC_URL: http://anvil:8545
                   IDENTITY_REGISTRY_ADDRESS: 0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
                   REPUTATION_REGISTRY_ADDRESS: 0x8004bd8daB57f14Ed299135749a5CB5c42d341BF
-                  VALIDATION_REGISTRY_ADDRESS: 0x8004C269D0A5647E51E121FeB226200ECE932d55
+                  VALIDATION_REGISTRY_ADDRESS: 0x8004Cb1BF31DAf7788923b405b754f57acEB4272
                   PORT: "8080"
                   HOST: 0.0.0.0
                   ENABLE_HEALTH_CHECKS: "false"

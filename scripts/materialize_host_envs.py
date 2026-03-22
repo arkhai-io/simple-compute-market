@@ -20,10 +20,18 @@ from __future__ import annotations
 import argparse
 import base64
 import os
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from chain_profiles import get_chain_profile, merge_contract_overrides
+
+
 SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
 OUTPUT_DIR = Path("/etc/simple-market-service")
@@ -36,33 +44,12 @@ REQUIRED_SHARED_OR_LOCAL_FILES = (
 )
 REQUIRED_LOCAL_FILES = (
     "buyer-agent.env",
-    "contracts.env",
     "prod-canary.env",
     "provisioning.env",
     "registry.env",
     "seller-agent.env",
     "shared.env",
 )
-CHAIN_CONFIG = {
-    "base_sepolia": {
-        "chain_id": "84532",
-        "http_key": "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
-        "wss_key": "ALCHEMY_BASE_SEPOLIA_WSS_URL",
-        "token_registry_path": "/app/core/agent/app/data/token_registry_base_sepolia.json",
-    },
-    "base": {
-        "chain_id": "8453",
-        "http_key": "ALCHEMY_BASE_MAINNET_HTTP_URL",
-        "wss_key": "ALCHEMY_BASE_MAINNET_WSS_URL",
-        "token_registry_path": "/app/core/agent/app/data/token_registry_base_sepolia.json",
-    },
-    "ethereum_sepolia": {
-        "chain_id": "11155111",
-        "http_key": "ETH_SEPOLIA_HTTP_RPC_URL",
-        "wss_key": "ETH_SEPOLIA_WSS_RPC_URL",
-        "token_registry_path": "/app/core/agent/app/data/token_registry_eth_sepolia.json",
-    },
-}
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -145,28 +132,33 @@ def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...]) 
         raise SystemExit(f"Missing required {label} keys: {', '.join(missing)}")
 
 
+def _supported_chain_names() -> str:
+    return ", ".join(sorted({"base", "base_sepolia", "ethereum_mainnet", "ethereum_sepolia"}))
+
+
 def _chain_context(shared: dict[str, str], alchemy: dict[str, str]) -> tuple[str, str, str, str, str]:
     chain_name = shared.get("CHAIN_NAME", "base_sepolia")
-    if chain_name not in CHAIN_CONFIG:
+    try:
+        chain_profile = get_chain_profile(chain_name)
+    except ValueError as exc:
         raise SystemExit(
             "shared.env:CHAIN_NAME must be one of "
-            + ", ".join(sorted(CHAIN_CONFIG))
+            + _supported_chain_names()
             + f", got {chain_name}"
-        )
-    chain_config = CHAIN_CONFIG[chain_name]
-    http_url = alchemy.get(chain_config["http_key"], "")
-    wss_url = alchemy.get(chain_config["wss_key"], "")
+        ) from exc
+    http_url = alchemy.get(chain_profile.http_rpc_env, "")
+    wss_url = alchemy.get(chain_profile.wss_rpc_env or "", "")
     if not http_url or not wss_url:
         raise SystemExit(
             "alchemy.env is missing required RPC URLs for "
-            f"{chain_name}: {chain_config['http_key']}, {chain_config['wss_key']}"
+            f"{chain_name}: {chain_profile.http_rpc_env}, {chain_profile.wss_rpc_env}"
         )
     return (
         chain_name,
-        shared.get("CHAIN_ID", chain_config["chain_id"]),
+        shared.get("CHAIN_ID", str(chain_profile.chain_id)),
         http_url,
         wss_url,
-        chain_config["token_registry_path"],
+        chain_profile.runtime_token_registry_path or "",
     )
 
 
@@ -196,7 +188,10 @@ def materialize_host_envs(
         shared_secrets_dir=shared_secrets_dir,
         local_secrets_dir=local_secrets_dir,
     )
-    contracts = _parse_env_file(local_secrets_dir / "contracts.env")
+    contracts = merge_contract_overrides(
+        shared.get("CHAIN_NAME", "base_sepolia"),
+        _optional_env_file(local_secrets_dir / "contracts.env"),
+    )
     wallets = _load_merged_env_file(
         "wallets.env",
         shared_secrets_dir=shared_secrets_dir,
@@ -220,15 +215,6 @@ def materialize_host_envs(
             "DEFAULT_VM_HOST",
             "REGISTRY_URL",
             "PROVISIONING_SERVICE_URL",
-        ),
-    )
-    _require_keys(
-        contracts,
-        label="contracts.env",
-        keys=(
-            "IDENTITY_REGISTRY_ADDRESS",
-            "REPUTATION_REGISTRY_ADDRESS",
-            "VALIDATION_REGISTRY_ADDRESS",
         ),
     )
     _require_keys(

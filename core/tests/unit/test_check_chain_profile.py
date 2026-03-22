@@ -70,6 +70,41 @@ def test_load_chain_profile_prefers_shared_rpc_and_local_contracts(tmp_path: Pat
     }
 
 
+def test_load_chain_profile_uses_chain_profile_defaults_when_contracts_env_is_missing(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared"
+    local_secrets_dir = tmp_path / "local"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        shared_secrets_dir / "alchemy.env",
+        {
+            "ETH_SEPOLIA_HTTP_RPC_URL": "https://eth-sepolia.example/rpc",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "ethereum_sepolia",
+            "CHAIN_ID": "11155111",
+        },
+    )
+
+    profile = module.load_chain_profile(
+        shared_secrets_dir=shared_secrets_dir,
+        local_secrets_dir=local_secrets_dir,
+    )
+
+    assert profile.registry_addresses == {
+        "IDENTITY_REGISTRY_ADDRESS": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+        "REPUTATION_REGISTRY_ADDRESS": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+        "VALIDATION_REGISTRY_ADDRESS": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+    }
+
+
 def test_validate_chain_profile_rejects_chain_id_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

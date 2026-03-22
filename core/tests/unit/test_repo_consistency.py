@@ -86,6 +86,8 @@ LOCAL_DUAL_AGENT_E2E_TEST = ROOT / "tests/e2e/test_local_dual_agent_stack.py"
 CONTRACTS_PACKAGE_JSON = ROOT / "erc-8004-contracts/package.json"
 CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
+CONTRACTS_ADDRESSES_TS = ROOT / "erc-8004-contracts/scripts/addresses.ts"
+CHAIN_PROFILES_SCRIPT = ROOT / "scripts/chain_profiles.py"
 MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
 PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
 REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
@@ -132,6 +134,17 @@ def _parse_inventory(path: Path) -> dict[str, set[str]]:
 def _parse_script_args(path: Path) -> set[str]:
     text = path.read_text(encoding="utf-8")
     return set(re.findall(r'add_argument\("(?P<arg>--[a-z0-9-]+)"', text))
+
+
+def _read_testnet_validation_registry_address() -> str:
+    text = CONTRACTS_ADDRESSES_TS.read_text(encoding="utf-8")
+    match = re.search(
+        r'TESTNET_ADDRESSES\s*=\s*\{.*?validationRegistry:\s*"(?P<address>0x[0-9a-fA-F]{40})"',
+        text,
+        re.DOTALL,
+    )
+    assert match, "Could not read testnet validationRegistry from erc-8004-contracts/scripts/addresses.ts"
+    return match.group("address")
 
 
 def _parse_semver_floor(raw: str) -> tuple[int, int, int]:
@@ -307,8 +320,13 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
         "scripts/pre_canary_fund.py must exist as the canonical canary funding "
         "preflight entrypoint"
     )
+    assert CHAIN_PROFILES_SCRIPT.exists(), (
+        "scripts/chain_profiles.py must exist as the canonical source of chain RPC "
+        "and funding key names"
+    )
 
     text = PRE_CANARY_FUND_SCRIPT.read_text(encoding="utf-8")
+    chain_profiles_text = CHAIN_PROFILES_SCRIPT.read_text(encoding="utf-8")
     for required_token in (
         "~/.config/web3-ops",
         "~/.config/simple-market-service",
@@ -316,8 +334,6 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
         "prod-canary.env",
         "wallets.env",
         "alchemy.env",
-        "SEPOLIA_FUNDER_PRIVATE_KEY",
-        "MAINNET_FUNDER_PRIVATE_KEY",
         "--apply",
         "--allow-mainnet",
         "CANARY_FUNDING_TOKEN_ADDRESS",
@@ -327,6 +343,12 @@ def test_repo_exposes_pre_canary_funding_entrypoint() -> None:
     ):
         assert required_token in text, (
             "pre_canary_fund.py is missing required funding contract token: "
+            f"{required_token}"
+        )
+
+    for required_token in ("SEPOLIA_FUNDER_PRIVATE_KEY", "MAINNET_FUNDER_PRIVATE_KEY"):
+        assert required_token in chain_profiles_text, (
+            "scripts/chain_profiles.py is missing required funding-key contract token: "
             f"{required_token}"
         )
 
@@ -1939,6 +1961,26 @@ def test_registry_readme_uses_authenticated_rpc_examples() -> None:
     text = REGISTRY_README.read_text(encoding="utf-8")
     assert "RPC_URL=https://sepolia.base.org" not in text
     assert "RPC_URL=https://base-sepolia.infura.io/v3/YOUR_API_KEY" in text
+
+
+def test_testnet_validation_registry_defaults_match_contracts_repo() -> None:
+    expected = _read_testnet_validation_registry_address()
+
+    checked_files = {
+        ROOT / "cli/config/agent.schema.yaml",
+        ROOT / "core/agent/.env.sample",
+        ROOT / "docs/standup/contracts.md",
+        ROOT / "docker-compose.yml",
+        ROOT / "market-contract-deployer/deploy-local.sh",
+        ROOT / "erc-8004-registry-py/.env.sample",
+        ROOT / "erc-8004-registry-py/.env.docker-compose",
+        ROOT / "erc-8004-registry-py/src/config.py",
+        ROOT / "erc-8004-registry-py/README.md",
+    }
+
+    for path in checked_files:
+        text = path.read_text(encoding="utf-8")
+        assert expected in text, f"{path} must use the canonical testnet validation registry {expected}"
 
 
 def test_registry_dockerfile_uses_runtime_port_configuration() -> None:

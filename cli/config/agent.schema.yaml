@@ -80,7 +80,7 @@ fields:
     description: "On-chain reputation registry address. Currently not used by the agent but reserved for future use. Defaults to Ethereum Sepolia testnet address."
   VALIDATION_REGISTRY_ADDRESS:
     required: false
-    default: "0x8004C269D0A5647E51E121FeB226200ECE932d55"
+    default: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
     secret: false
     description: "On-chain validation registry address. Currently not used by the agent but reserved for future use."
 

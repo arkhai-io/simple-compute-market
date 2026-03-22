@@ -7,11 +7,19 @@ import argparse
 import json
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import NamedTuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from chain_profiles import get_chain_profile
+
+
 DEFAULT_RENDER_OUTPUT_DIR = Path("/tmp/sms-rendered")
 
 
@@ -43,12 +51,6 @@ TARGETS = {
     ),
 }
 PRESERVED_ENV_KEYS = {"ENV_FILE"}
-CHAIN_TEMP_FILE_SUFFIX = {
-    "ethereum_sepolia": "eth-sepolia",
-    "ethereum_mainnet": "eth-mainnet",
-    "base_sepolia": "base-sepolia",
-    "base": "base-mainnet",
-}
 
 
 def _run_command(command: list[str]) -> None:
@@ -116,7 +118,10 @@ def _quote_args(args: list[str]) -> str:
 
 def _remote_temp_env_path(*, env_filename: str, chain_name: str) -> str:
     stem = Path(env_filename).stem
-    suffix = CHAIN_TEMP_FILE_SUFFIX.get(chain_name, chain_name.replace("_", "-"))
+    try:
+        suffix = get_chain_profile(chain_name).temp_file_suffix
+    except ValueError:
+        suffix = chain_name.replace("_", "-")
     return f"/tmp/{stem}.{suffix}.env"
 
 

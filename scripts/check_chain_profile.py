@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import NamedTuple
 from urllib.error import URLError
@@ -12,32 +13,15 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from chain_profiles import get_chain_profile, merge_contract_overrides
+
+
 DEFAULT_SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 DEFAULT_LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
-BASE_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_base_sepolia.json"
-ETH_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_eth_sepolia.json"
-CHAIN_CONFIG = {
-    "base_sepolia": {
-        "chain_id": 84532,
-        "rpc_env": "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
-        "token_registry": BASE_SEPOLIA_TOKEN_REGISTRY,
-    },
-    "base": {
-        "chain_id": 8453,
-        "rpc_env": "ALCHEMY_BASE_MAINNET_HTTP_URL",
-        "token_registry": None,
-    },
-    "ethereum_sepolia": {
-        "chain_id": 11155111,
-        "rpc_env": "ETH_SEPOLIA_HTTP_RPC_URL",
-        "token_registry": ETH_SEPOLIA_TOKEN_REGISTRY,
-    },
-    "ethereum_mainnet": {
-        "chain_id": 1,
-        "rpc_env": "ETH_MAINNET_HTTP_RPC_URL",
-        "token_registry": None,
-    },
-}
 REQUIRED_CONTRACT_KEYS = (
     "IDENTITY_REGISTRY_ADDRESS",
     "REPUTATION_REGISTRY_ADDRESS",
@@ -94,6 +78,10 @@ def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...] |
         raise SystemExit(f"Missing required {label} keys: {', '.join(missing)}")
 
 
+def _supported_chain_names() -> str:
+    return ", ".join(sorted({"base", "base_sepolia", "ethereum_mainnet", "ethereum_sepolia"}))
+
+
 def load_chain_profile(
     *,
     shared_secrets_dir: Path = DEFAULT_SHARED_SECRETS_DIR,
@@ -105,29 +93,33 @@ def load_chain_profile(
         shared_secrets_dir=shared_secrets_dir,
         local_secrets_dir=local_secrets_dir,
     )
-    contracts = _parse_env_file(local_secrets_dir / "contracts.env")
+    contracts = merge_contract_overrides(
+        shared.get("CHAIN_NAME", "base_sepolia"),
+        _optional_env_file(local_secrets_dir / "contracts.env"),
+    )
 
     _require_keys(shared, label="shared.env", keys=("CHAIN_NAME",))
     chain_name = shared["CHAIN_NAME"]
-    if chain_name not in CHAIN_CONFIG:
+    try:
+        chain_profile = get_chain_profile(chain_name)
+    except ValueError as exc:
         raise SystemExit(
             "shared.env:CHAIN_NAME must be one of "
-            + ", ".join(sorted(CHAIN_CONFIG))
+            + _supported_chain_names()
             + f", got {chain_name}"
-        )
-    chain_config = CHAIN_CONFIG[chain_name]
+        ) from exc
 
-    _require_keys(alchemy, label="alchemy.env", keys=(chain_config["rpc_env"],))
+    _require_keys(alchemy, label="alchemy.env", keys=(chain_profile.http_rpc_env,))
     _require_keys(contracts, label="contracts.env", keys=REQUIRED_CONTRACT_KEYS)
 
-    token_registry_path = chain_config["token_registry"]
+    token_registry_path = chain_profile.token_registry_path
     if token_registry_path is not None and not token_registry_path.exists():
         raise SystemExit(f"Token registry path does not exist: {token_registry_path}")
 
     return ChainProfile(
         chain_name=chain_name,
-        chain_id=int(shared.get("CHAIN_ID", chain_config["chain_id"])),
-        rpc_url=alchemy[chain_config["rpc_env"]],
+        chain_id=int(shared.get("CHAIN_ID", str(chain_profile.chain_id))),
+        rpc_url=alchemy[chain_profile.http_rpc_env],
         registry_addresses={key: contracts[key] for key in REQUIRED_CONTRACT_KEYS},
         token_registry_path=token_registry_path,
     )

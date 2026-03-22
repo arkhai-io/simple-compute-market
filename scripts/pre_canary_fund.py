@@ -14,36 +14,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
 from typing import NamedTuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from chain_profiles import get_chain_profile
+
+
 SHARED_SECRETS_DIR = Path("~/.config/web3-ops").expanduser()
 LOCAL_SECRETS_DIR = Path("~/.config/simple-market-service").expanduser()
-BASE_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_base_sepolia.json"
-ETH_SEPOLIA_TOKEN_REGISTRY = ROOT / "core/agent/app/data/token_registry_eth_sepolia.json"
-CHAIN_CONFIG = {
-    "base_sepolia": {
-        "chain_id": "84532",
-        "rpc_env": "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
-        "funder_env": "SEPOLIA_FUNDER_PRIVATE_KEY",
-        "token_registry": BASE_SEPOLIA_TOKEN_REGISTRY,
-    },
-    "base": {
-        "chain_id": "8453",
-        "rpc_env": "ALCHEMY_BASE_MAINNET_HTTP_URL",
-        "funder_env": "MAINNET_FUNDER_PRIVATE_KEY",
-        "token_registry": None,
-    },
-    "ethereum_sepolia": {
-        "chain_id": "11155111",
-        "rpc_env": "ETH_SEPOLIA_HTTP_RPC_URL",
-        "funder_env": "SEPOLIA_FUNDER_PRIVATE_KEY",
-        "token_registry": ETH_SEPOLIA_TOKEN_REGISTRY,
-    },
-}
 ERC20_ABI = [
     {
         "constant": True,
@@ -163,20 +149,21 @@ def load_funding_context(
 
     _require_keys(shared, label="shared.env", keys=("CHAIN_NAME",))
     chain_name = shared["CHAIN_NAME"]
-    if chain_name not in CHAIN_CONFIG:
+    try:
+        chain_profile = get_chain_profile(chain_name)
+    except ValueError as exc:
         raise SystemExit(
             "shared.env:CHAIN_NAME must be one of "
-            + ", ".join(sorted(CHAIN_CONFIG))
+            + ", ".join(sorted({"base", "base_sepolia", "ethereum_mainnet", "ethereum_sepolia"}))
             + f", got {chain_name}"
-        )
-    chain_cfg = CHAIN_CONFIG[chain_name]
+        ) from exc
 
-    _require_keys(alchemy, label="alchemy.env", keys=(chain_cfg["rpc_env"],))
+    _require_keys(alchemy, label="alchemy.env", keys=(chain_profile.http_rpc_env,))
     _require_keys(
         wallets,
         label="wallets.env",
         keys=(
-            chain_cfg["funder_env"],
+            chain_profile.funder_env,
             "SELLER_WALLET_ADDRESS",
             "BUYER_WALLET_ADDRESS",
         ),
@@ -191,9 +178,9 @@ def load_funding_context(
 
     return FundingContext(
         chain_name=chain_name,
-        chain_id=int(shared.get("CHAIN_ID", chain_cfg["chain_id"])),
-        rpc_url=alchemy[chain_cfg["rpc_env"]],
-        funder_private_key=wallets[chain_cfg["funder_env"]],
+        chain_id=int(shared.get("CHAIN_ID", str(chain_profile.chain_id))),
+        rpc_url=alchemy[chain_profile.http_rpc_env],
+        funder_private_key=wallets[chain_profile.funder_env],
         seller_wallet_address=wallets["SELLER_WALLET_ADDRESS"],
         buyer_wallet_address=wallets["BUYER_WALLET_ADDRESS"],
         token_symbol=canary["CANARY_TOKEN_SYMBOL"].upper(),
@@ -218,6 +205,7 @@ def load_funding_context(
 
 
 def resolve_token_metadata(context: FundingContext) -> TokenMetadata:
+    chain_profile = get_chain_profile(context.chain_name)
     if context.token_symbol in {"ETH", "NATIVE"}:
         return TokenMetadata(symbol=context.token_symbol, address="", decimals=18)
 
@@ -228,7 +216,7 @@ def resolve_token_metadata(context: FundingContext) -> TokenMetadata:
             decimals=context.token_decimals_override,
         )
 
-    token_registry_path = CHAIN_CONFIG[context.chain_name]["token_registry"]
+    token_registry_path = chain_profile.token_registry_path
     if token_registry_path is not None:
         token_registry = json.loads(token_registry_path.read_text(encoding="utf-8"))
         for entry in token_registry:
