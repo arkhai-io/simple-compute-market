@@ -104,6 +104,38 @@ def test_build_recreate_command_preserves_ports_for_bridge_container() -> None:
     assert "CHAIN_ID=84532" not in command
 
 
+def test_build_recreate_command_uses_explicit_image_override() -> None:
+    module = _load_script_module()
+    inspect_payload = {
+        "Name": "/sms-seller-agent",
+        "Config": {
+            "Image": "registry.example/core-agent:stale",
+            "Cmd": ["./entrypoint.sh"],
+            "Entrypoint": None,
+            "Env": ["ENV_FILE=/etc/simple-market-service/seller-agent.env"],
+        },
+        "HostConfig": {
+            "RestartPolicy": {"Name": "unless-stopped"},
+            "NetworkMode": "host",
+            "Binds": [
+                "/etc/simple-market-service/seller-agent.env:/etc/simple-market-service/seller-agent.env",
+            ],
+            "CapAdd": [],
+            "Devices": [],
+            "PortBindings": {},
+        },
+    }
+
+    command = module._build_recreate_command(
+        inspect_payload,
+        env_file_path="/etc/simple-market-service/seller-agent.env",
+        image_override="registry.example/core-agent:fresh",
+    )
+
+    assert "registry.example/core-agent:fresh ./entrypoint.sh" in command
+    assert "registry.example/core-agent:stale ./entrypoint.sh" not in command
+
+
 def test_rollout_target_uploads_installs_recreates_and_verifies_container(
     tmp_path: Path,
     monkeypatch,
@@ -174,3 +206,54 @@ def test_rollout_target_uploads_installs_recreates_and_verifies_container(
     assert "sudo install -m 600 /tmp/seller-agent.eth-sepolia.env /etc/simple-market-service/seller-agent.env" in commands[1][-1]
     assert "sudo docker run -d --name sms-seller-agent" in commands[2][-1]
     assert commands[3][-1] == "sudo docker ps --filter name=sms-seller-agent --format '{{.Names}}'"
+
+
+def test_rollout_target_recreates_container_with_target_image_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_script_module()
+    commands: list[list[str]] = []
+    rendered_env = tmp_path / "buyer-agent.env"
+    rendered_env.write_text("CHAIN_NAME=ethereum_sepolia\n", encoding="utf-8")
+
+    target = module.RolloutTarget(
+        name="buyer",
+        instance="sms-buyer",
+        container_name="sms-buyer-agent",
+        env_filename="buyer-agent.env",
+    )
+
+    inspect_payload = {
+        "Name": "/sms-buyer-agent",
+        "Config": {
+            "Image": "registry.example/core-agent:stale",
+            "Cmd": ["./entrypoint.sh"],
+            "Entrypoint": None,
+            "Env": ["ENV_FILE=/etc/simple-market-service/buyer-agent.env"],
+        },
+        "HostConfig": {
+            "RestartPolicy": {"Name": "unless-stopped"},
+            "NetworkMode": "host",
+            "Binds": [
+                "/etc/simple-market-service/buyer-agent.env:/etc/simple-market-service/buyer-agent.env",
+            ],
+            "CapAdd": [],
+            "Devices": [],
+            "PortBindings": {},
+        },
+    }
+
+    monkeypatch.setattr(module, "_inspect_container", lambda **kwargs: inspect_payload)
+    monkeypatch.setattr(module, "_run_command", lambda command: commands.append(command))
+
+    module.rollout_target(
+        target=target,
+        project="sms-canary-project",
+        zone="us-east4-c",
+        rendered_env_path=rendered_env,
+        image_override="registry.example/core-agent:fresh",
+    )
+
+    assert "registry.example/core-agent:fresh ./entrypoint.sh" in commands[2][-1]
+    assert "registry.example/core-agent:stale ./entrypoint.sh" not in commands[2][-1]

@@ -125,6 +125,26 @@ def _remote_temp_env_path(*, env_filename: str, chain_name: str) -> str:
     return f"/tmp/{stem}.{suffix}.env"
 
 
+def _parse_image_overrides(entries: list[str]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    for entry in entries:
+        name, sep, image = entry.partition("=")
+        target_name = name.strip()
+        image_ref = image.strip()
+        if sep != "=" or not target_name or not image_ref:
+            raise SystemExit(
+                "Image overrides must use the form <target>=<image>, "
+                f"got: {entry!r}"
+            )
+        if target_name not in TARGETS:
+            raise SystemExit(
+                f"Unsupported image override target {target_name!r}; "
+                f"expected one of: {', '.join(sorted(TARGETS))}"
+            )
+        overrides[target_name] = image_ref
+    return overrides
+
+
 def _inspect_container(
     *,
     project: str,
@@ -189,13 +209,18 @@ def _preserved_env_flags(inspect_payload: dict[str, object]) -> list[str]:
     return flags
 
 
-def _build_recreate_command(inspect_payload: dict[str, object], *, env_file_path: str) -> str:
+def _build_recreate_command(
+    inspect_payload: dict[str, object],
+    *,
+    env_file_path: str,
+    image_override: str | None = None,
+) -> str:
     container_name = str(inspect_payload.get("Name") or "").lstrip("/")
     if not container_name:
         raise SystemExit("docker inspect payload is missing container Name")
 
     config = inspect_payload.get("Config") or {}
-    image = config.get("Image")
+    image = image_override or config.get("Image")
     if not isinstance(image, str) or not image:
         raise SystemExit(f"docker inspect payload for {container_name} is missing Config.Image")
 
@@ -268,6 +293,7 @@ def rollout_target(
     zone: str,
     rendered_env_path: Path,
     chain_name: str = "ethereum_sepolia",
+    image_override: str | None = None,
 ) -> None:
     remote_temp_env_path = _remote_temp_env_path(
         env_filename=target.env_filename,
@@ -310,6 +336,7 @@ def rollout_target(
             remote_command=_build_recreate_command(
                 inspect_payload,
                 env_file_path=remote_env_path,
+                image_override=image_override,
             ),
         )
     )
@@ -344,6 +371,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--registry-instance", default=TARGETS["registry"].instance)
     parser.add_argument("--seller-instance", default=TARGETS["seller"].instance)
     parser.add_argument("--buyer-instance", default=TARGETS["buyer"].instance)
+    parser.add_argument(
+        "--image-override",
+        action="append",
+        default=[],
+        help="Optional rollout image override in the form <target>=<image>. "
+        "May be supplied multiple times for registry,seller,buyer.",
+    )
     return parser
 
 
@@ -361,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
     invalid = sorted(set(selected_names) - targets.keys())
     if invalid:
         raise SystemExit(f"Unsupported rollout targets: {', '.join(invalid)}")
+    image_overrides = _parse_image_overrides(args.image_override)
 
     render_output_dir = args.render_output_dir.expanduser()
     for name in selected_names:
@@ -374,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
             zone=args.zone,
             rendered_env_path=rendered_env_path,
             chain_name=args.chain_name,
+            image_override=image_overrides.get(name),
         )
 
     print(f"[ok] rolled out targets: {', '.join(selected_names)}")
