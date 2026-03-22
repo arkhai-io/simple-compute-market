@@ -63,6 +63,8 @@ class FundingContext(NamedTuple):
     duration_hours: int
     buyer_native_floor_wei: int
     seller_native_floor_wei: int
+    buyer_registration_native_floor_wei: int
+    seller_registration_native_floor_wei: int
     buyer_token_buffer_base_units: int
     token_address_override: str | None
     token_decimals_override: int | None
@@ -129,6 +131,13 @@ def _to_base_units(amount: Decimal, decimals: int) -> int:
     return int((amount * scale).to_integral_value(rounding=ROUND_CEILING))
 
 
+def _requires_onchain_registration(values: dict[str, str]) -> bool:
+    if not values:
+        return False
+    onchain_agent_id = values.get("ONCHAIN_AGENT_ID", "").strip()
+    return not onchain_agent_id.startswith("eip155:")
+
+
 def load_funding_context(
     local_secrets_dir: Path,
     *,
@@ -145,6 +154,8 @@ def load_funding_context(
         shared_secrets_dir=shared_secrets_dir,
         local_secrets_dir=local_secrets_dir,
     )
+    seller_agent = _optional_env_file(local_secrets_dir / "seller-agent.env")
+    buyer_agent = _optional_env_file(local_secrets_dir / "buyer-agent.env")
     canary = _parse_env_file(local_secrets_dir / "prod-canary.env")
 
     _require_keys(shared, label="shared.env", keys=("CHAIN_NAME",))
@@ -175,6 +186,16 @@ def load_funding_context(
     )
 
     token_decimals_override = canary.get("CANARY_FUNDING_TOKEN_DECIMALS")
+    seller_registration_native_floor_wei = (
+        int(canary.get("SELLER_REGISTRATION_NATIVE_FLOOR_WEI", "10000000000000000"))
+        if _requires_onchain_registration(seller_agent)
+        else 0
+    )
+    buyer_registration_native_floor_wei = (
+        int(canary.get("BUYER_REGISTRATION_NATIVE_FLOOR_WEI", "10000000000000000"))
+        if _requires_onchain_registration(buyer_agent)
+        else 0
+    )
 
     return FundingContext(
         chain_name=chain_name,
@@ -188,6 +209,8 @@ def load_funding_context(
         duration_hours=int(canary["CANARY_DURATION_HOURS"]),
         buyer_native_floor_wei=int(canary.get("BUYER_NATIVE_FLOOR_WEI", "20000000000000")),
         seller_native_floor_wei=int(canary.get("SELLER_NATIVE_FLOOR_WEI", "10000000000000")),
+        buyer_registration_native_floor_wei=buyer_registration_native_floor_wei,
+        seller_registration_native_floor_wei=seller_registration_native_floor_wei,
         buyer_token_buffer_base_units=int(canary.get("BUYER_TOKEN_BUFFER_BASE_UNITS", "0")),
         token_address_override=canary.get("CANARY_FUNDING_TOKEN_ADDRESS") or None,
         token_decimals_override=int(token_decimals_override) if token_decimals_override else None,
@@ -243,18 +266,25 @@ def build_funding_plan(
     plan: list[FundingTransfer] = []
 
     seller_balance = native_balances.get(context.seller_wallet_address, 0)
-    if seller_balance < context.seller_native_floor_wei:
+    seller_native_floor = max(
+        context.seller_native_floor_wei,
+        context.seller_registration_native_floor_wei,
+    )
+    if seller_balance < seller_native_floor:
         plan.append(
             FundingTransfer(
                 asset_kind="native",
                 symbol="ETH",
                 recipient=context.seller_wallet_address,
-                amount=context.seller_native_floor_wei - seller_balance,
+                amount=seller_native_floor - seller_balance,
             )
         )
 
     buyer_balance = native_balances.get(context.buyer_wallet_address, 0)
-    buyer_native_floor = context.buyer_native_floor_wei
+    buyer_native_floor = max(
+        context.buyer_native_floor_wei,
+        context.buyer_registration_native_floor_wei,
+    )
 
     if context.token_symbol == "WETH":
         buyer_native_floor += _to_base_units(

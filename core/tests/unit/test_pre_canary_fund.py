@@ -145,6 +145,143 @@ def test_pre_canary_fund_requires_explicit_token_metadata_for_base_mainnet(
         module.resolve_token_metadata(context)
 
 
+def test_pre_canary_fund_adds_registration_buffer_when_agent_ids_are_missing(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "ethereum_sepolia",
+            "CHAIN_ID": "11155111",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "alchemy.env",
+        {
+            "ETH_SEPOLIA_HTTP_RPC_URL": "https://alchemy.example/eth-sepolia-http",
+            "ETH_SEPOLIA_WSS_RPC_URL": "wss://alchemy.example/eth-sepolia-wss",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "wallets.env",
+        {
+            "SEPOLIA_FUNDER_PRIVATE_KEY": "0xfunder-private-key",
+            "SELLER_PRIVATE_KEY": "0xseller-private-key",
+            "SELLER_WALLET_ADDRESS": "0x4444444444444444444444444444444444444444",
+            "BUYER_PRIVATE_KEY": "0xbuyer-private-key",
+            "BUYER_WALLET_ADDRESS": "0x5555555555555555555555555555555555555555",
+        },
+    )
+    _write_env(local_secrets_dir / "seller-agent.env", {"AGENT_ID": "seller"})
+    _write_env(local_secrets_dir / "buyer-agent.env", {"AGENT_ID": "buyer"})
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "CANARY_TOKEN_SYMBOL": "ETH",
+            "CANARY_TOKEN_AMOUNT": "0",
+            "CANARY_DURATION_HOURS": "1",
+            "BUYER_NATIVE_FLOOR_WEI": "20000",
+            "SELLER_NATIVE_FLOOR_WEI": "10000",
+            "SELLER_REGISTRATION_NATIVE_FLOOR_WEI": "7000000000000000",
+            "BUYER_REGISTRATION_NATIVE_FLOOR_WEI": "8000000000000000",
+        },
+    )
+
+    context = module.load_funding_context(local_secrets_dir, shared_secrets_dir=shared_secrets_dir)
+    token_metadata = module.resolve_token_metadata(context)
+    plan = module.build_funding_plan(
+        context=context,
+        token_metadata=token_metadata,
+        native_balances={
+            context.seller_wallet_address: 0,
+            context.buyer_wallet_address: 0,
+        },
+        erc20_balances={},
+    )
+
+    assert [transfer.asset_kind for transfer in plan] == ["native", "native"]
+    assert [transfer.recipient for transfer in plan] == [
+        context.seller_wallet_address,
+        context.buyer_wallet_address,
+    ]
+    assert [transfer.amount for transfer in plan] == [7000000000000000, 8000000000000000]
+
+
+def test_pre_canary_fund_skips_registration_buffer_when_agent_ids_already_exist(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "ethereum_sepolia",
+            "CHAIN_ID": "11155111",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "alchemy.env",
+        {
+            "ETH_SEPOLIA_HTTP_RPC_URL": "https://alchemy.example/eth-sepolia-http",
+            "ETH_SEPOLIA_WSS_RPC_URL": "wss://alchemy.example/eth-sepolia-wss",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "wallets.env",
+        {
+            "SEPOLIA_FUNDER_PRIVATE_KEY": "0xfunder-private-key",
+            "SELLER_PRIVATE_KEY": "0xseller-private-key",
+            "SELLER_WALLET_ADDRESS": "0x4444444444444444444444444444444444444444",
+            "BUYER_PRIVATE_KEY": "0xbuyer-private-key",
+            "BUYER_WALLET_ADDRESS": "0x5555555555555555555555555555555555555555",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "seller-agent.env",
+        {"AGENT_ID": "seller", "ONCHAIN_AGENT_ID": "eip155:11155111:0xabc:1"},
+    )
+    _write_env(
+        local_secrets_dir / "buyer-agent.env",
+        {"AGENT_ID": "buyer", "ONCHAIN_AGENT_ID": "eip155:11155111:0xabc:2"},
+    )
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "CANARY_TOKEN_SYMBOL": "ETH",
+            "CANARY_TOKEN_AMOUNT": "0",
+            "CANARY_DURATION_HOURS": "1",
+            "BUYER_NATIVE_FLOOR_WEI": "20000",
+            "SELLER_NATIVE_FLOOR_WEI": "10000",
+            "SELLER_REGISTRATION_NATIVE_FLOOR_WEI": "7000000000000000",
+            "BUYER_REGISTRATION_NATIVE_FLOOR_WEI": "8000000000000000",
+        },
+    )
+
+    context = module.load_funding_context(local_secrets_dir, shared_secrets_dir=shared_secrets_dir)
+    token_metadata = module.resolve_token_metadata(context)
+    plan = module.build_funding_plan(
+        context=context,
+        token_metadata=token_metadata,
+        native_balances={
+            context.seller_wallet_address: 0,
+            context.buyer_wallet_address: 0,
+        },
+        erc20_balances={},
+    )
+
+    assert [transfer.amount for transfer in plan] == [10000, 20000]
+
+
 def test_pre_canary_fund_refuses_base_mainnet_apply_without_allow_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
