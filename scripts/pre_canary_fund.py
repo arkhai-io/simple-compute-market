@@ -340,6 +340,15 @@ def fetch_live_balances(
     return native_balances, erc20_balances
 
 
+def _signed_tx_bytes(signed) -> bytes:
+    raw_tx = getattr(signed, "raw_transaction", None)
+    if raw_tx is None:
+        raw_tx = getattr(signed, "rawTransaction", None)
+    if raw_tx is None:
+        raise AttributeError("Signed transaction is missing raw transaction bytes")
+    return raw_tx
+
+
 def _send_native_transfer(web3, *, private_key: str, recipient: str, amount: int) -> str:
     from eth_account import Account
 
@@ -353,7 +362,7 @@ def _send_native_transfer(web3, *, private_key: str, recipient: str, amount: int
         "gasPrice": int(web3.eth.gas_price),
     }
     signed = account.sign_transaction(tx)
-    tx_hash = web3.eth.send_raw_transaction(signed.raw_transaction)
+    tx_hash = web3.eth.send_raw_transaction(_signed_tx_bytes(signed))
     receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
     if int(receipt.status) != 1:
         raise SystemExit(f"Native funding transfer failed: {tx_hash.hex()}")
@@ -384,7 +393,7 @@ def _send_erc20_transfer(
         }
     )
     signed = account.sign_transaction(tx)
-    tx_hash = web3.eth.send_raw_transaction(signed.raw_transaction)
+    tx_hash = web3.eth.send_raw_transaction(_signed_tx_bytes(signed))
     receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
     if int(receipt.status) != 1:
         raise SystemExit(f"ERC20 funding transfer failed: {tx_hash.hex()}")

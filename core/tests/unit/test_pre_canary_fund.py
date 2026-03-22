@@ -391,3 +391,19 @@ def test_pre_canary_fund_plans_ethereum_sepolia_topups_from_shared_rpc(
     assert context.funder_private_key == "0xshared-funder-private-key"
     assert token_metadata.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
     assert [transfer.amount for transfer in plan] == [10000, 20000, 1300000]
+
+
+def test_signed_tx_bytes_accepts_legacy_and_modern_web3_attribute_names() -> None:
+    module = _load_script_module()
+
+    class LegacySigned:
+        rawTransaction = b"legacy"
+
+    class ModernSigned:
+        raw_transaction = b"modern"
+
+    assert module._signed_tx_bytes(LegacySigned()) == b"legacy"
+    assert module._signed_tx_bytes(ModernSigned()) == b"modern"
+
+    with pytest.raises(AttributeError, match="missing raw transaction bytes"):
+        module._signed_tx_bytes(object())
