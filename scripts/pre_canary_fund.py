@@ -49,6 +49,10 @@ ERC20_ABI = [
         "type": "function",
     },
 ]
+_ESCROW_APPROVAL_GAS_LIMIT = 100_000
+_ESCROW_CREATE_GAS_LIMIT = 600_000
+_MIN_ESCROW_GAS_BUFFER_WEI = 1_000_000_000_000
+_ESCROW_GAS_BUFFER_MULTIPLIER = 2
 
 
 class FundingContext(NamedTuple):
@@ -129,6 +133,16 @@ def _require_keys(values: dict[str, str], *, label: str, keys: tuple[str, ...]) 
 def _to_base_units(amount: Decimal, decimals: int) -> int:
     scale = Decimal(10) ** decimals
     return int((amount * scale).to_integral_value(rounding=ROUND_CEILING))
+
+
+def _escrow_gas_buffer_wei(*, gas_price_wei: int) -> int:
+    estimated_escrow_cost = gas_price_wei * (
+        _ESCROW_APPROVAL_GAS_LIMIT + _ESCROW_CREATE_GAS_LIMIT
+    )
+    return max(
+        _MIN_ESCROW_GAS_BUFFER_WEI,
+        estimated_escrow_cost * _ESCROW_GAS_BUFFER_MULTIPLIER,
+    )
 
 
 def _requires_onchain_registration(values: dict[str, str]) -> bool:
@@ -262,6 +276,7 @@ def build_funding_plan(
     token_metadata: TokenMetadata,
     native_balances: dict[str, int],
     erc20_balances: dict[tuple[str, str], int],
+    gas_price_wei: int | None = None,
 ) -> list[FundingTransfer]:
     plan: list[FundingTransfer] = []
 
@@ -287,10 +302,18 @@ def build_funding_plan(
     )
 
     if context.token_symbol == "WETH":
-        buyer_native_floor += _to_base_units(
+        required_wrapped_units = _to_base_units(
             context.token_amount * Decimal(context.duration_hours),
             token_metadata.decimals,
         ) + context.buyer_token_buffer_base_units
+        current_wrapped_balance = erc20_balances.get(
+            (context.buyer_wallet_address, token_metadata.address),
+            0,
+        )
+        wrapped_deficit = max(0, required_wrapped_units - current_wrapped_balance)
+        buyer_native_floor += wrapped_deficit
+        if gas_price_wei is not None:
+            buyer_native_floor += _escrow_gas_buffer_wei(gas_price_wei=gas_price_wei)
 
     if buyer_balance < buyer_native_floor:
         plan.append(
@@ -356,6 +379,11 @@ def fetch_live_balances(
             ).call()
         )
     return native_balances, erc20_balances
+
+
+def fetch_live_gas_price(*, context: FundingContext) -> int:
+    web3 = _build_web3(context.rpc_url)
+    return int(web3.eth.gas_price)
 
 
 def _signed_tx_bytes(signed) -> bytes:
@@ -562,11 +590,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     token_metadata = resolve_token_metadata(context)
     native_balances, erc20_balances = fetch_live_balances(context=context, token_metadata=token_metadata)
+    gas_price_wei = fetch_live_gas_price(context=context)
     plan = build_funding_plan(
         context=context,
         token_metadata=token_metadata,
         native_balances=native_balances,
         erc20_balances=erc20_balances,
+        gas_price_wei=gas_price_wei,
     )
     print(_plan_to_json(plan))
 

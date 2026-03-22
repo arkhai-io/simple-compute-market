@@ -334,6 +334,7 @@ def test_pre_canary_fund_refuses_base_mainnet_apply_without_allow_flag(
             {("0x5555555555555555555555555555555555555555", "0x6666666666666666666666666666666666666666"): 0},
         ),
     )
+    monkeypatch.setattr(module, "fetch_live_gas_price", lambda **kwargs: 1)
 
     with pytest.raises(SystemExit, match="Refusing to apply base mainnet funding without --allow-mainnet"):
         module.main(
@@ -400,6 +401,7 @@ def test_pre_canary_fund_rejects_base_mainnet_plan_that_exceeds_caps(
             {("0x5555555555555555555555555555555555555555", "0x6666666666666666666666666666666666666666"): 0},
         ),
     )
+    monkeypatch.setattr(module, "fetch_live_gas_price", lambda **kwargs: 1)
 
     with pytest.raises(SystemExit, match="Base mainnet funding plan exceeds configured caps"):
         module.main(
@@ -528,6 +530,73 @@ def test_pre_canary_fund_plans_ethereum_sepolia_topups_from_shared_rpc(
     assert context.funder_private_key == "0xshared-funder-private-key"
     assert token_metadata.address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
     assert [transfer.amount for transfer in plan] == [10000, 20000, 1300000]
+
+
+def test_pre_canary_fund_accounts_for_existing_weth_balance_and_escrow_gas_reserve(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    shared_secrets_dir = tmp_path / "shared-secrets"
+    local_secrets_dir = tmp_path / "local-secrets"
+    shared_secrets_dir.mkdir()
+    local_secrets_dir.mkdir()
+
+    _write_env(
+        local_secrets_dir / "shared.env",
+        {
+            "CHAIN_NAME": "ethereum_sepolia",
+            "CHAIN_ID": "11155111",
+        },
+    )
+    _write_env(
+        shared_secrets_dir / "alchemy.env",
+        {
+            "ETH_SEPOLIA_HTTP_RPC_URL": "https://alchemy.example/eth-sepolia-http",
+            "ETH_SEPOLIA_WSS_RPC_URL": "wss://alchemy.example/eth-sepolia-wss",
+        },
+    )
+    _write_env(
+        shared_secrets_dir / "wallets.env",
+        {
+            "SEPOLIA_FUNDER_PRIVATE_KEY": "0xshared-funder-private-key",
+            "SELLER_WALLET_ADDRESS": "0x4444444444444444444444444444444444444444",
+            "BUYER_WALLET_ADDRESS": "0x5555555555555555555555555555555555555555",
+        },
+    )
+    _write_env(
+        local_secrets_dir / "prod-canary.env",
+        {
+            "CANARY_TOKEN_SYMBOL": "WETH",
+            "CANARY_TOKEN_AMOUNT": "0.0001",
+            "CANARY_DURATION_HOURS": "1",
+            "BUYER_NATIVE_FLOOR_WEI": "20000",
+            "SELLER_NATIVE_FLOOR_WEI": "10000",
+            "BUYER_TOKEN_BUFFER_BASE_UNITS": "0",
+        },
+    )
+
+    context = module.load_funding_context(
+        local_secrets_dir=local_secrets_dir,
+        shared_secrets_dir=shared_secrets_dir,
+    )
+    token_metadata = module.resolve_token_metadata(context)
+    plan = module.build_funding_plan(
+        context=context,
+        token_metadata=token_metadata,
+        native_balances={
+            context.seller_wallet_address: 10000,
+            context.buyer_wallet_address: 1_000_000_000_000,
+        },
+        erc20_balances={
+            (context.buyer_wallet_address, token_metadata.address): 60_000_000_000_000,
+        },
+        gas_price_wei=6_000_000,
+    )
+
+    assert [transfer.asset_kind for transfer in plan] == ["native"]
+    assert [transfer.recipient for transfer in plan] == [context.buyer_wallet_address]
+    assert [transfer.amount for transfer in plan] == [47_400_000_020_000]
+    assert plan[0].symbol == "ETH"
 
 
 def test_signed_tx_bytes_accepts_legacy_and_modern_web3_attribute_names() -> None:
