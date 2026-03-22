@@ -532,7 +532,7 @@ def test_pre_canary_fund_plans_ethereum_sepolia_topups_from_shared_rpc(
     assert [transfer.amount for transfer in plan] == [10000, 20000, 1300000]
 
 
-def test_pre_canary_fund_accounts_for_existing_weth_balance_and_escrow_gas_reserve(
+def test_pre_canary_fund_accounts_for_existing_weth_balance_wrap_gas_and_wrap_step(
     tmp_path: Path,
 ) -> None:
     module = _load_script_module()
@@ -593,10 +593,16 @@ def test_pre_canary_fund_accounts_for_existing_weth_balance_and_escrow_gas_reser
         gas_price_wei=6_000_000,
     )
 
-    assert [transfer.asset_kind for transfer in plan] == ["native"]
-    assert [transfer.recipient for transfer in plan] == [context.buyer_wallet_address]
-    assert [transfer.amount for transfer in plan] == [47_400_000_020_000]
-    assert plan[0].symbol == "ETH"
+    assert [transfer.asset_kind for transfer in plan] == ["native", "wrap"]
+    assert [transfer.recipient for transfer in plan] == [
+        context.buyer_wallet_address,
+        context.buyer_wallet_address,
+    ]
+    assert [transfer.amount for transfer in plan] == [
+        48_840_000_020_000,
+        40_000_000_000_000,
+    ]
+    assert [transfer.symbol for transfer in plan] == ["ETH", "WETH"]
 
 
 def test_signed_tx_bytes_accepts_legacy_and_modern_web3_attribute_names() -> None:
@@ -649,6 +655,7 @@ def test_apply_funding_plan_increments_nonce_across_multiple_topups(
         chain_id=11155111,
         rpc_url="https://alchemy.example/eth-sepolia-http",
         funder_private_key="0xfunder-private-key",
+        buyer_private_key=None,
         seller_wallet_address="0x4444444444444444444444444444444444444444",
         buyer_wallet_address="0x5555555555555555555555555555555555555555",
         token_symbol="ETH",
@@ -689,3 +696,95 @@ def test_apply_funding_plan_increments_nonce_across_multiple_topups(
 
     assert captured_nonces == [2, 3]
     assert tx_hashes == ["0x0000000000000000000000000000000000000000000000000000000000000001", "0x0000000000000000000000000000000000000000000000000000000000000002"]
+
+
+def test_apply_funding_plan_wraps_weth_after_native_topup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+
+    class FakeWeb3:
+        pass
+
+    operations: list[tuple[str, int | str]] = []
+
+    def fake_build_web3(rpc_url: str):
+        assert rpc_url == "https://alchemy.example/eth-sepolia-http"
+        return FakeWeb3()
+
+    def fake_initial_funder_nonce(web3, private_key: str) -> int:
+        assert isinstance(web3, FakeWeb3)
+        assert private_key == "0xfunder-private-key"
+        return 7
+
+    def fake_send_native_transfer(web3, *, private_key: str, recipient: str, amount: int, nonce=None) -> str:
+        assert isinstance(web3, FakeWeb3)
+        operations.append(("native", nonce if nonce is not None else -1))
+        assert private_key == "0xfunder-private-key"
+        assert recipient == "0x5555555555555555555555555555555555555555"
+        assert amount == 48_840_000_020_000
+        return "0xnative"
+
+    def fake_wrap_native_to_wrapped_token(web3, *, private_key: str, token_address: str, amount: int) -> str:
+        assert isinstance(web3, FakeWeb3)
+        operations.append(("wrap", amount))
+        assert private_key == "0xbuyer-private-key"
+        assert token_address == "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+        assert amount == 40_000_000_000_000
+        return "0xwrap"
+
+    monkeypatch.setattr(module, "_build_web3", fake_build_web3)
+    monkeypatch.setattr(module, "_initial_funder_nonce", fake_initial_funder_nonce, raising=False)
+    monkeypatch.setattr(module, "_send_native_transfer", fake_send_native_transfer)
+    monkeypatch.setattr(module, "_wrap_native_to_wrapped_token", fake_wrap_native_to_wrapped_token)
+
+    context = module.FundingContext(
+        chain_name="ethereum_sepolia",
+        chain_id=11155111,
+        rpc_url="https://alchemy.example/eth-sepolia-http",
+        funder_private_key="0xfunder-private-key",
+        buyer_private_key="0xbuyer-private-key",
+        seller_wallet_address="0x4444444444444444444444444444444444444444",
+        buyer_wallet_address="0x5555555555555555555555555555555555555555",
+        token_symbol="WETH",
+        token_amount=0,
+        duration_hours=1,
+        buyer_native_floor_wei=20000,
+        seller_native_floor_wei=10000,
+        buyer_registration_native_floor_wei=0,
+        seller_registration_native_floor_wei=0,
+        buyer_token_buffer_base_units=0,
+        token_address_override=None,
+        token_decimals_override=None,
+        mainnet_max_native_topup_wei=None,
+        mainnet_max_erc20_topup_base_units=None,
+    )
+
+    token_metadata = module.TokenMetadata(
+        symbol="WETH",
+        address="0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        decimals=18,
+    )
+    plan = [
+        module.FundingTransfer(
+            asset_kind="native",
+            symbol="ETH",
+            recipient=context.buyer_wallet_address,
+            amount=48_840_000_020_000,
+        ),
+        module.FundingTransfer(
+            asset_kind="wrap",
+            symbol="WETH",
+            recipient=context.buyer_wallet_address,
+            amount=40_000_000_000_000,
+        ),
+    ]
+
+    tx_hashes = module.apply_funding_plan(
+        context=context,
+        token_metadata=token_metadata,
+        plan=plan,
+    )
+
+    assert operations == [("native", 7), ("wrap", 40_000_000_000_000)]
+    assert tx_hashes == ["0xnative", "0xwrap"]

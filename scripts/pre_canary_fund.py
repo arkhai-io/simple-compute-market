@@ -49,6 +49,10 @@ ERC20_ABI = [
         "type": "function",
     },
 ]
+_WRAP_NATIVE_CALLDATA = "0xd0e30db0"
+_WRAP_GAS_LIMIT = 120_000
+_MIN_WRAP_GAS_BUFFER_WEI = 1_000_000_000_000
+_WRAP_GAS_BUFFER_MULTIPLIER = 2
 _ESCROW_APPROVAL_GAS_LIMIT = 100_000
 _ESCROW_CREATE_GAS_LIMIT = 600_000
 _MIN_ESCROW_GAS_BUFFER_WEI = 1_000_000_000_000
@@ -60,6 +64,7 @@ class FundingContext(NamedTuple):
     chain_id: int
     rpc_url: str
     funder_private_key: str
+    buyer_private_key: str | None
     seller_wallet_address: str
     buyer_wallet_address: str
     token_symbol: str
@@ -145,6 +150,14 @@ def _escrow_gas_buffer_wei(*, gas_price_wei: int) -> int:
     )
 
 
+def _wrap_gas_buffer_wei(*, gas_price_wei: int) -> int:
+    estimated_wrap_cost = gas_price_wei * _WRAP_GAS_LIMIT
+    return max(
+        _MIN_WRAP_GAS_BUFFER_WEI,
+        estimated_wrap_cost * _WRAP_GAS_BUFFER_MULTIPLIER,
+    )
+
+
 def _requires_onchain_registration(values: dict[str, str]) -> bool:
     if not values:
         return False
@@ -216,6 +229,7 @@ def load_funding_context(
         chain_id=int(shared.get("CHAIN_ID", str(chain_profile.chain_id))),
         rpc_url=alchemy[chain_profile.http_rpc_env],
         funder_private_key=wallets[chain_profile.funder_env],
+        buyer_private_key=wallets.get("BUYER_PRIVATE_KEY") or None,
         seller_wallet_address=wallets["SELLER_WALLET_ADDRESS"],
         buyer_wallet_address=wallets["BUYER_WALLET_ADDRESS"],
         token_symbol=canary["CANARY_TOKEN_SYMBOL"].upper(),
@@ -313,6 +327,8 @@ def build_funding_plan(
         wrapped_deficit = max(0, required_wrapped_units - current_wrapped_balance)
         buyer_native_floor += wrapped_deficit
         if gas_price_wei is not None:
+            if wrapped_deficit > 0:
+                buyer_native_floor += _wrap_gas_buffer_wei(gas_price_wei=gas_price_wei)
             buyer_native_floor += _escrow_gas_buffer_wei(gas_price_wei=gas_price_wei)
 
     if buyer_balance < buyer_native_floor:
@@ -322,6 +338,16 @@ def build_funding_plan(
                 symbol="ETH",
                 recipient=context.buyer_wallet_address,
                 amount=buyer_native_floor - buyer_balance,
+            )
+        )
+
+    if context.token_symbol == "WETH" and wrapped_deficit > 0:
+        plan.append(
+            FundingTransfer(
+                asset_kind="wrap",
+                symbol="WETH",
+                recipient=context.buyer_wallet_address,
+                amount=wrapped_deficit,
             )
         )
 
@@ -464,6 +490,33 @@ def _send_erc20_transfer(
     return tx_hash.hex()
 
 
+def _wrap_native_to_wrapped_token(
+    web3,
+    *,
+    private_key: str,
+    token_address: str,
+    amount: int,
+) -> str:
+    from eth_account import Account
+
+    account = Account.from_key(private_key)
+    tx = {
+        "chainId": web3.eth.chain_id,
+        "nonce": web3.eth.get_transaction_count(account.address),
+        "to": web3.to_checksum_address(token_address),
+        "value": amount,
+        "data": _WRAP_NATIVE_CALLDATA,
+        "gas": _WRAP_GAS_LIMIT,
+        "gasPrice": int(web3.eth.gas_price),
+    }
+    signed = account.sign_transaction(tx)
+    tx_hash = web3.eth.send_raw_transaction(_signed_tx_bytes(signed))
+    receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
+    if int(receipt.status) != 1:
+        raise SystemExit(f"WETH wrap transaction failed: {tx_hash.hex()}")
+    return tx_hash.hex()
+
+
 def apply_funding_plan(
     *,
     context: FundingContext,
@@ -485,6 +538,18 @@ def apply_funding_plan(
                 )
             )
             next_nonce += 1
+            continue
+        if transfer.asset_kind == "wrap":
+            if not context.buyer_private_key:
+                raise SystemExit("WETH funding apply requires BUYER_PRIVATE_KEY for buyer-side wrapping")
+            tx_hashes.append(
+                _wrap_native_to_wrapped_token(
+                    web3,
+                    private_key=context.buyer_private_key,
+                    token_address=token_metadata.address,
+                    amount=transfer.amount,
+                )
+            )
             continue
         tx_hashes.append(
             _send_erc20_transfer(
