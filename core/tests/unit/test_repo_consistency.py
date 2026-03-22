@@ -35,6 +35,7 @@ STANDUP_AGENT_SELLER_PATH = STANDUP_DIR / "agent-seller.md"
 STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
 STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
+STANDUP_HUMAN_BUYER_PATH = STANDUP_DIR / "human-buyer.md"
 SUBAGENT_DIR = ROOT / "docs/subagents"
 SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
 SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
@@ -91,6 +92,10 @@ CHAIN_PROFILES_SCRIPT = ROOT / "scripts/chain_profiles.py"
 MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
 PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
 REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
+HUMAN_BUYER_TUNNEL_SCRIPT = ROOT / "scripts/start_human_buyer_tunnel.py"
+HUMAN_BUYER_SANDBOX_SCRIPT = ROOT / "scripts/setup_human_buyer_sandbox.py"
+WAIT_FOR_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/wait_for_human_purchase.py"
+CLEANUP_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/cleanup_human_purchase.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -378,6 +383,60 @@ def test_repo_exposes_repeatable_canary_runner_entrypoint() -> None:
             "run_repeatable_canary.py is missing required orchestration token: "
             f"{required_token}"
         )
+
+
+def test_repo_exposes_human_buyer_operator_entrypoints() -> None:
+    scripts_and_tokens = {
+        HUMAN_BUYER_TUNNEL_SCRIPT: (
+            "--tunnel-through-iap",
+            "28080:10.243.0.219:18080",
+            "28081:10.243.0.115:8081",
+            "28001:10.243.0.117:8000",
+            "28002:10.243.0.68:8000",
+            "command",
+            "open",
+            "check",
+        ),
+        HUMAN_BUYER_SANDBOX_SCRIPT: (
+            "~/.config/web3-ops",
+            "~/.config/simple-market-service",
+            "buyer.env",
+            "seller.env",
+            "context.json",
+            "uv",
+            "build",
+            "venv",
+            "pip",
+        ),
+        WAIT_FOR_HUMAN_PURCHASE_SCRIPT: (
+            "--seller-order-id",
+            "--buyer-order-id",
+            "/api/v1/jobs",
+            "/credentials",
+            "known_hosts",
+            "echo connected && hostname && whoami",
+        ),
+        CLEANUP_HUMAN_PURCHASE_SCRIPT: (
+            "--seller-order-id",
+            "--buyer-order-id",
+            "--job-id",
+            "order",
+            "close",
+            "destroy",
+            "undefine",
+        ),
+    }
+
+    for script_path, required_tokens in scripts_and_tokens.items():
+        assert script_path.exists(), (
+            f"{script_path.relative_to(ROOT)} must exist for the human buyer operator flow"
+        )
+        text = script_path.read_text(encoding="utf-8")
+        for required_token in required_tokens:
+            assert required_token in text, (
+                f"{script_path.name} is missing required human-buyer contract token: "
+                f"{required_token}"
+            )
 
 
 def test_compute_provisioning_iac_exposes_validation_entrypoints() -> None:
@@ -767,6 +826,7 @@ def test_canonical_standup_docs_exist() -> None:
         STANDUP_AGENT_BUYER_PATH,
         STANDUP_RESOURCE_SEEDING_PATH,
         STANDUP_CANARY_PATH,
+        STANDUP_HUMAN_BUYER_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -825,6 +885,36 @@ def test_canary_and_provisioning_docs_reference_local_secret_materialization() -
             assert required_token in text, (
                 f"{path.name} is missing local secret materialization guidance: {required_token}"
             )
+
+
+def test_human_buyer_runbook_exists_and_is_linked() -> None:
+    text = STANDUP_HUMAN_BUYER_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/start_human_buyer_tunnel.py",
+        "scripts/setup_human_buyer_sandbox.py",
+        "scripts/pre_canary_fund.py",
+        "scripts/wait_for_human_purchase.py",
+        "scripts/cleanup_human_purchase.py",
+        "market order create",
+        "market order match",
+        "market order close",
+        "buyer.env",
+        "seller.env",
+        "context.json",
+        "AGENT_AUTH_URL",
+        "SSH_PRIVATE_KEY_PATH",
+        "0.0001",
+        "--seller-order-id",
+        "--buyer-order-id",
+        "--job-id",
+    ):
+        assert required_token in text, (
+            "human-buyer.md is missing required human test workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Human Buyer Walkthrough](human-buyer.md)" in overview_text
 
 
 def test_canary_docs_reference_pre_run_funding_step() -> None:

@@ -41,6 +41,31 @@ def test_select_create_job_prefers_latest_match_for_buyer_agent() -> None:
     assert selected["job_id"] == "latest-match"
 
 
+def test_select_create_job_ignores_terminal_jobs_older_than_current_order() -> None:
+    module = _load_script_module()
+    jobs = [
+        {
+            "job_id": "stale-terminal",
+            "status": "succeeded",
+            "params": {"vm_action": "create", "buyer_agent_id": "buyer-7"},
+            "result": {"timestamp": "2026-03-22T20:10:48Z"},
+        },
+        {
+            "job_id": "fresh-running",
+            "status": "running",
+            "params": {"vm_action": "create", "buyer_agent_id": "buyer-7"},
+        },
+    ]
+
+    selected = module.select_create_job(
+        jobs=jobs,
+        buyer_agent_id="buyer-7",
+        order_created_at="2026-03-22T20:46:51.027026+00:00",
+    )
+
+    assert selected["job_id"] == "fresh-running"
+
+
 def test_build_ssh_probe_command_uses_local_key_and_known_hosts_path(tmp_path: Path) -> None:
     module = _load_script_module()
     known_hosts = tmp_path / "known_hosts"

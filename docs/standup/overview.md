@@ -49,6 +49,7 @@ Supporting references:
 
 - [Deployment Input Checklist](../deployment-input-checklist.md)
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
+- [Human Buyer Walkthrough](human-buyer.md)
 - [End-to-End Runbook](../e2e-runbook.md)
 - [Production Canary Runbook](../production-canary.md)
 - [End-to-End Deployment Test Plan](../e2e-deployment-test-plan.md)

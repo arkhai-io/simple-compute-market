@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -55,7 +56,34 @@ def list_jobs(provisioning_url: str, agent_id: str, *, limit: int = 100) -> list
     return [job for job in jobs if isinstance(job, dict)]
 
 
-def select_create_job(*, jobs: list[dict[str, object]], buyer_agent_id: str) -> dict[str, object]:
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized).astimezone(timezone.utc)
+
+
+def _is_stale_terminal_job(job: dict[str, object], *, order_created_at: str | None) -> bool:
+    if not order_created_at:
+        return False
+    if str(job.get("status")) not in TERMINAL_JOB_STATUSES:
+        return False
+    order_time = _parse_timestamp(order_created_at)
+    result = job.get("result")
+    if order_time is None or not isinstance(result, dict):
+        return False
+    job_time = _parse_timestamp(result.get("timestamp") if isinstance(result.get("timestamp"), str) else None)
+    if job_time is None:
+        return False
+    return job_time < order_time
+
+
+def select_create_job(
+    *,
+    jobs: list[dict[str, object]],
+    buyer_agent_id: str,
+    order_created_at: str | None = None,
+) -> dict[str, object]:
     for job in jobs:
         params = job.get("params")
         if not isinstance(params, dict):
@@ -63,6 +91,8 @@ def select_create_job(*, jobs: list[dict[str, object]], buyer_agent_id: str) -> 
         if params.get("vm_action") != "create":
             continue
         if params.get("buyer_agent_id") != buyer_agent_id:
+            continue
+        if _is_stale_terminal_job(job, order_created_at=order_created_at):
             continue
         return job
     raise SystemExit(
@@ -162,9 +192,19 @@ def wait_for_human_purchase(
     while time.monotonic() < deadline:
         seller_order = fetch_order(registry_url, seller_order_id)
         buyer_order = fetch_order(registry_url, buyer_order_id)
+        if str(seller_order.get("status")) not in {"accepted", "closed"}:
+            time.sleep(poll_seconds)
+            continue
+        if str(buyer_order.get("status")) not in {"accepted", "closed"}:
+            time.sleep(poll_seconds)
+            continue
         jobs = list_jobs(provisioning_url, seller_agent_id, limit=100)
         try:
-            selected_job = select_create_job(jobs=jobs, buyer_agent_id=buyer_agent_id)
+            selected_job = select_create_job(
+                jobs=jobs,
+                buyer_agent_id=buyer_agent_id,
+                order_created_at=seller_order.get("created_at") if isinstance(seller_order.get("created_at"), str) else None,
+            )
         except SystemExit:
             selected_job = None
 
