@@ -63,9 +63,11 @@ def test_build_human_buyer_context_uses_local_auth_urls_and_shared_wallets(tmp_p
     )
 
     assert context["buyer_env"]["AGENT_URL"] == "http://127.0.0.1:28001/"
+    assert context["buyer_env"]["BASE_URL_OVERRIDE"] == "http://127.0.0.1:28001/"
     assert context["buyer_env"]["AGENT_AUTH_URL"] == "http://10.243.0.117:8000/"
     assert context["buyer_env"]["REGISTRY_URL"] == "http://127.0.0.1:28080/"
     assert context["buyer_env"]["AGENT_PRIV_KEY"] == "0xbuyer"
+    assert context["seller_env"]["BASE_URL_OVERRIDE"] == "http://127.0.0.1:28002/"
     assert context["seller_env"]["AGENT_AUTH_URL"] == "http://10.243.0.68:8000/"
     assert context["context"]["seller_agent_id"] == "seller-id"
     assert context["context"]["buyer_agent_id"] == "buyer-id"
@@ -140,7 +142,9 @@ def test_setup_human_buyer_sandbox_writes_bundle_and_runs_install_plan(
     context = json.loads((sandbox_dir / "context.json").read_text(encoding="utf-8"))
 
     assert "AGENT_URL=http://127.0.0.1:28001/" in buyer_env
+    assert "BASE_URL_OVERRIDE=http://127.0.0.1:28001/" in buyer_env
     assert "AGENT_AUTH_URL=http://10.243.0.117:8000/" in buyer_env
     assert "AGENT_URL=http://127.0.0.1:28002/" in seller_env
+    assert "BASE_URL_OVERRIDE=http://127.0.0.1:28002/" in seller_env
     assert context["sandbox_dir"] == str(sandbox_dir)
     assert result["context_path"] == str(sandbox_dir / "context.json")

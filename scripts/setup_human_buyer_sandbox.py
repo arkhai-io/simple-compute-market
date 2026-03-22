@@ -105,12 +105,14 @@ def build_human_buyer_context(
     return {
         "buyer_env": {
             "AGENT_URL": buyer_agent_url,
+            "BASE_URL_OVERRIDE": buyer_agent_url,
             "AGENT_AUTH_URL": buyer_overrides["BASE_URL_OVERRIDE"],
             "REGISTRY_URL": registry_url,
             "AGENT_PRIV_KEY": wallets["BUYER_PRIVATE_KEY"],
         },
         "seller_env": {
             "AGENT_URL": seller_agent_url,
+            "BASE_URL_OVERRIDE": seller_agent_url,
             "AGENT_AUTH_URL": seller_overrides["BASE_URL_OVERRIDE"],
             "REGISTRY_URL": registry_url,
             "AGENT_PRIV_KEY": wallets["SELLER_PRIVATE_KEY"],
