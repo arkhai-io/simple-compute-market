@@ -37,6 +37,7 @@ STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
 STANDUP_HUMAN_BUYER_PATH = STANDUP_DIR / "human-buyer.md"
 STANDUP_LESSONS_LEARNED_PATH = STANDUP_DIR / "lessons-learned.md"
+STANDUP_LIVE_CONTRACTS_PATH = STANDUP_DIR / "live-contracts.md"
 SUBAGENT_DIR = ROOT / "docs/subagents"
 SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
 SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
@@ -90,6 +91,7 @@ CONTRACTS_PACKAGE_LOCK = ROOT / "erc-8004-contracts/package-lock.json"
 CONTRACTS_NVMRC = ROOT / "erc-8004-contracts/.nvmrc"
 CONTRACTS_ADDRESSES_TS = ROOT / "erc-8004-contracts/scripts/addresses.ts"
 CHAIN_PROFILES_SCRIPT = ROOT / "scripts/chain_profiles.py"
+ROLE_CONTRACTS_SCRIPT = ROOT / "scripts/role_contracts.py"
 MATERIALIZE_HOST_ENVS_SCRIPT = ROOT / "scripts/materialize_host_envs.py"
 PRE_CANARY_FUND_SCRIPT = ROOT / "scripts/pre_canary_fund.py"
 REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
@@ -839,6 +841,7 @@ def test_canonical_standup_docs_exist() -> None:
         STANDUP_CANARY_PATH,
         STANDUP_HUMAN_BUYER_PATH,
         STANDUP_LESSONS_LEARNED_PATH,
+        STANDUP_LIVE_CONTRACTS_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -949,6 +952,53 @@ def test_lessons_learned_doc_exists_and_is_linked() -> None:
 
     overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
     assert "[Lessons Learned](lessons-learned.md)" in overview_text
+
+
+def test_live_contracts_doc_exists_and_is_linked() -> None:
+    text = STANDUP_LIVE_CONTRACTS_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "public endpoint model",
+        "auth/signing model",
+        "agent identity model",
+        "artifact schema",
+        "lifecycle states",
+        "cleanup semantics",
+        "support correlation",
+        "buyer",
+        "seller",
+        "platform",
+        "support",
+        "host",
+    ):
+        assert required_token in text, (
+            "live-contracts.md is missing required shared-contract token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Live Role Contracts](live-contracts.md)" in overview_text
+
+
+def test_repo_exposes_shared_role_contract_module() -> None:
+    assert ROLE_CONTRACTS_SCRIPT.exists(), (
+        "scripts/role_contracts.py must exist for shared production role contracts"
+    )
+    text = ROLE_CONTRACTS_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "SCHEMA_VERSION",
+        "ROLE_KINDS",
+        "DEFAULT_CORRELATION_KEYS",
+        "build_artifact(",
+        "request_url",
+        "auth_url",
+        "order_id",
+        "job_id",
+        "vm_target",
+    ):
+        assert required_token in text, (
+            "role_contracts.py is missing required shared-contract token: "
+            f"{required_token}"
+        )
 
 
 def test_canary_docs_reference_pre_run_funding_step() -> None:

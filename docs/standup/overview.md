@@ -51,6 +51,7 @@ Supporting references:
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
 - [Human Buyer Walkthrough](human-buyer.md)
 - [Lessons Learned](lessons-learned.md)
+- [Live Role Contracts](live-contracts.md)
 - [End-to-End Runbook](../e2e-runbook.md)
 - [Production Canary Runbook](../production-canary.md)
 - [End-to-End Deployment Test Plan](../e2e-deployment-test-plan.md)
