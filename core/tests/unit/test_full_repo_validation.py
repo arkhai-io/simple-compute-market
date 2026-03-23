@@ -103,6 +103,10 @@ def test_full_repo_validation_runner_extends_fast_matrix_with_heavy_slices() -> 
     ]
     assert module.FULL_ONLY_TEST_MATRIX == [
         (
+            ["python", "scripts/run_bootstrap_acceptance.py"],
+            module.ROOT,
+        ),
+        (
             ["python", "-B", "-m", "pytest", "tests", "-q"],
             module.ROOT / "compute-provisioning-iac",
         ),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the full cross-repo validation matrix, including heavyweight slices."""
+"""Run the heavyweight bootstrap acceptance checks."""
 
 from __future__ import annotations
 
@@ -10,30 +10,33 @@ from typing import Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FAST_TEST_MATRIX: list[tuple[list[str], Path]] = [
+CONTRACT_GATE_MATRIX: list[tuple[list[str], Path]] = [
     (
-        [
-            "python",
-            "scripts/run_fast_repo_validation.py",
-        ],
+        ["python", "scripts/check_local_bootstrap_contract.py"],
+        ROOT,
+    ),
+    (
+        ["python", "scripts/check_installed_bundle_contract.py"],
         ROOT,
     ),
 ]
-FULL_ONLY_TEST_MATRIX: list[tuple[list[str], Path]] = [
+E2E_MATRIX: list[tuple[list[str], Path]] = [
     (
-        ["python", "scripts/run_bootstrap_acceptance.py"],
+        [
+            str(ROOT / "core/.venv/bin/python"),
+            "-m",
+            "pytest",
+            "tests/e2e/test_manual_local_bootstrap.py",
+            "-q",
+        ],
         ROOT,
-    ),
-    (
-        ["python", "-B", "-m", "pytest", "tests", "-q"],
-        ROOT / "compute-provisioning-iac",
     ),
     (
         [
             str(ROOT / "core/.venv/bin/python"),
             "-m",
             "pytest",
-            "tests/e2e/test_local_dual_agent_stack.py",
+            "tests/e2e/test_installed_bundle_smoke.py",
             "-q",
         ],
         ROOT,
@@ -54,10 +57,10 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 def main(argv: Iterable[str] | None = None) -> int:
     _parse_args(argv)
 
-    for command, cwd in FAST_TEST_MATRIX + FULL_ONLY_TEST_MATRIX:
+    for command, cwd in CONTRACT_GATE_MATRIX + E2E_MATRIX:
         _run_command(command, cwd=cwd)
 
-    print("[ok] full repo validation completed")
+    print("[ok] bootstrap acceptance completed")
     return 0
 
 

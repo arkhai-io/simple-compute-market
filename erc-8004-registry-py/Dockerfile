@@ -1,10 +1,12 @@
 ARG PYTHON_VERSION=3.13
 
 # Stage 1: Install dependencies into .venv
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+FROM python:${PYTHON_VERSION}-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+
+RUN python -m pip install --no-cache-dir uv
 
 WORKDIR /app
 

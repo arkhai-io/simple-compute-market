@@ -34,11 +34,159 @@ LOCALHOST_NETWORK_SNIPPET = """\
       url: process.env.LOCALHOST_RPC_URL || "http://127.0.0.1:8545",
     },
 """
+LOCAL_UPGRADE_SCRIPT = """\
+import hre from "hardhat";
+import {
+  createWalletClient,
+  encodeFunctionData,
+  getCreate2Address,
+  Hex,
+  http,
+  keccak256,
+} from "viem";
+import {
+  EXPECTED_OWNER,
+  IMPLEMENTATION_SALTS,
+  SAFE_SINGLETON_FACTORY,
+  getAddresses,
+} from "./addresses";
+
+const RPC_URL = process.env.LOCALHOST_RPC_URL || "http://127.0.0.1:8545";
+
+async function rpc(method: string, params: unknown[] = []): Promise<void> {
+  const response = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method,
+      params,
+    }),
+  });
+  const payload = await response.json();
+  if (payload.error) {
+    throw new Error(`${method} failed: ${payload.error.message}`);
+  }
+}
+
+async function main() {
+  const { viem } = await hre.network.connect("localhost");
+  const publicClient = await viem.getPublicClient();
+  const chainId = await publicClient.getChainId();
+  const addresses = getAddresses(chainId);
+
+  await rpc("anvil_impersonateAccount", [EXPECTED_OWNER]);
+
+  try {
+    const walletClient = createWalletClient({
+      account: EXPECTED_OWNER,
+      chain: publicClient.chain,
+      transport: http(RPC_URL),
+    });
+
+    const minimalUUPSArtifact = await hre.artifacts.readArtifact("MinimalUUPS");
+    const identityImplArtifact = await hre.artifacts.readArtifact("IdentityRegistryUpgradeable");
+    const reputationImplArtifact = await hre.artifacts.readArtifact("ReputationRegistryUpgradeable");
+    const validationImplArtifact = await hre.artifacts.readArtifact("ValidationRegistryUpgradeable");
+
+    const identityImpl = getCreate2Address({
+      from: SAFE_SINGLETON_FACTORY,
+      salt: IMPLEMENTATION_SALTS.identityRegistry,
+      bytecodeHash: keccak256(identityImplArtifact.bytecode as Hex),
+    });
+    const reputationImpl = getCreate2Address({
+      from: SAFE_SINGLETON_FACTORY,
+      salt: IMPLEMENTATION_SALTS.reputationRegistry,
+      bytecodeHash: keccak256(reputationImplArtifact.bytecode as Hex),
+    });
+    const validationImpl = getCreate2Address({
+      from: SAFE_SINGLETON_FACTORY,
+      salt: IMPLEMENTATION_SALTS.validationRegistry,
+      bytecodeHash: keccak256(validationImplArtifact.bytecode as Hex),
+    });
+
+    const implSlot =
+      "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc" as const;
+
+    async function upgradeProxy(
+      proxyAddress: `0x${string}`,
+      expectedImplementation: `0x${string}`,
+      initData: `0x${string}`,
+    ): Promise<void> {
+      const storageValue = await publicClient.getStorageAt({
+        address: proxyAddress,
+        slot: implSlot,
+      });
+      const currentImplementation = storageValue
+        ? (`0x${storageValue.slice(-40)}` as `0x${string}`)
+        : null;
+      if (
+        currentImplementation &&
+        currentImplementation.toLowerCase() === expectedImplementation.toLowerCase()
+      ) {
+        return;
+      }
+
+      const callData = encodeFunctionData({
+        abi: minimalUUPSArtifact.abi,
+        functionName: "upgradeToAndCall",
+        args: [expectedImplementation, initData],
+      });
+
+      const hash = await walletClient.sendTransaction({
+        account: EXPECTED_OWNER,
+        to: proxyAddress,
+        data: callData,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error(`Upgrade failed for ${proxyAddress}`);
+      }
+    }
+
+    await upgradeProxy(
+      addresses.identityRegistry,
+      identityImpl,
+      encodeFunctionData({
+        abi: identityImplArtifact.abi,
+        functionName: "initialize",
+        args: [],
+      }),
+    );
+    await upgradeProxy(
+      addresses.reputationRegistry,
+      reputationImpl,
+      encodeFunctionData({
+        abi: reputationImplArtifact.abi,
+        functionName: "initialize",
+        args: [addresses.identityRegistry],
+      }),
+    );
+    await upgradeProxy(
+      addresses.validationRegistry,
+      validationImpl,
+      encodeFunctionData({
+        abi: validationImplArtifact.abi,
+        functionName: "initialize",
+        args: [addresses.identityRegistry],
+      }),
+    );
+  } finally {
+    await rpc("anvil_stopImpersonatingAccount", [EXPECTED_OWNER]);
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+"""
 LOCAL_DEPLOY_COMMANDS: list[list[str]] = [
     ["npx", "hardhat", "run", "scripts/deploy-create2-factory.ts", "--network", "localhost"],
     ["npm", "run", "local:fund-owner"],
     ["npm", "run", "local:deploy:vanity"],
-    ["npm", "run", "local:upgrade:vanity:presigned"],
+    ["npx", "hardhat", "run", "scripts/local-upgrade-impersonated.ts", "--network", "localhost"],
     ["npm", "run", "local:verify:vanity"],
 ]
 
@@ -46,6 +194,14 @@ LOCAL_DEPLOY_COMMANDS: list[list[str]] = [
 def format_local_deploy_command(rpc_url: str) -> str:
     command = CANONICAL_LOCAL_DEPLOY_WRAPPER[:-1] + [rpc_url]
     return " ".join(command)
+
+
+def _normalize_http_rpc_url(rpc_url: str) -> str:
+    if rpc_url.startswith("ws://"):
+        return "http://" + rpc_url[len("ws://") :]
+    if rpc_url.startswith("wss://"):
+        return "https://" + rpc_url[len("wss://") :]
+    return rpc_url
 
 
 def _assert_contracts_submodule_ready(contracts_dir: Path) -> None:
@@ -83,6 +239,13 @@ def _ensure_localhost_network(hardhat_config_path: Path) -> None:
     hardhat_config_path.write_text(updated, encoding="utf-8")
 
 
+def _write_local_upgrade_script(contracts_dir: Path) -> None:
+    (contracts_dir / "scripts/local-upgrade-impersonated.ts").write_text(
+        LOCAL_UPGRADE_SCRIPT,
+        encoding="utf-8",
+    )
+
+
 def prepare_contracts_workspace(source_dir: Path, workspace_root: Path) -> Path:
     destination_dir = workspace_root / source_dir.name
     if destination_dir.exists():
@@ -90,6 +253,7 @@ def prepare_contracts_workspace(source_dir: Path, workspace_root: Path) -> Path:
     workspace_root.mkdir(parents=True, exist_ok=True)
     _copy_contracts_workspace(source_dir, destination_dir)
     _ensure_localhost_network(destination_dir / "hardhat.config.ts")
+    _write_local_upgrade_script(destination_dir)
     return destination_dir
 
 
@@ -160,7 +324,8 @@ def deploy_local_contracts(
     output_path: Path | None = None,
 ) -> dict[str, Any]:
     _assert_contracts_submodule_ready(CONTRACTS_SOURCE_DIR)
-    env = _command_env(rpc_url)
+    normalized_rpc_url = _normalize_http_rpc_url(rpc_url)
+    env = _command_env(normalized_rpc_url)
 
     with tempfile.TemporaryDirectory(prefix="sms-local-contracts-") as temp_dir:
         workspace = prepare_contracts_workspace(
@@ -170,7 +335,7 @@ def deploy_local_contracts(
         for command in LOCAL_DEPLOY_COMMANDS:
             _run_command(command, cwd=workspace, env=env)
         artifact = build_local_contract_artifact(
-            rpc_url=rpc_url,
+            rpc_url=normalized_rpc_url,
             addresses_path=workspace / "scripts/addresses.ts",
         )
 

@@ -7,6 +7,7 @@ BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
+ASSUME_YES="${MARKET_INSTALL_ASSUME_YES:-0}"
 
 # ── System dependency mapping ─────────────────────────────────
 # Format: "command:apt-package"
@@ -28,27 +29,44 @@ ok()    { printf '\033[1;32m[ok]\033[0m %s\n' "$*"; }
 
 # ── Prerequisite checks ───────────────────────────────────────
 
-check_python_version() {
-    local python_cmd=""
-    if command -v python3 &>/dev/null; then
-        python_cmd="python3"
-    elif command -v python &>/dev/null; then
-        python_cmd="python"
-    else
-        error "Python 3.12+ is required but neither 'python3' nor 'python' was found."
-        exit 1
-    fi
-
+python_meets_minimum() {
+    local python_cmd="$1"
     local version
     version=$($python_cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
     local major minor
     major=$(echo "$version" | cut -d. -f1)
     minor=$(echo "$version" | cut -d. -f2)
 
-    if [ "$major" -lt "$MIN_PYTHON_MAJOR" ] || { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -lt "$MIN_PYTHON_MINOR" ]; }; then
-        error "Python >= ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR} is required, but found $version."
+    if [ "$major" -gt "$MIN_PYTHON_MAJOR" ]; then
+        return 0
+    fi
+    if [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; then
+        return 0
+    fi
+    return 1
+}
+
+find_supported_python_command() {
+    local candidate
+    for candidate in python3.12 python3 python; do
+        if command -v "$candidate" &>/dev/null && python_meets_minimum "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+check_python_version() {
+    local python_cmd=""
+    if ! python_cmd="$(find_supported_python_command)"; then
+        error "Python 3.12+ is required but no supported interpreter was found."
         exit 1
     fi
+
+    local version
+    version=$($python_cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    ok "Using $python_cmd ($version)"
 }
 
 detect_platform() {
@@ -98,6 +116,10 @@ check_and_install_dependencies() {
                 local cmd="${entry%%:*}"
                 local pkg="${entry##*:}"
 
+                if [ "$cmd" = "python3.12" ] && find_supported_python_command &>/dev/null; then
+                    continue
+                fi
+
                 if ! command -v "$cmd" &>/dev/null; then
                     missing_apt_cmds+=("$cmd")
                     # Deduplicate packages
@@ -132,6 +154,9 @@ check_and_install_dependencies() {
         local mac_missing=()
         for entry in "${LINUX_SYSTEM_DEPS[@]}"; do
             local cmd="${entry%%:*}"
+            if [ "$cmd" = "python3.12" ] && find_supported_python_command &>/dev/null; then
+                continue
+            fi
             if ! command -v "$cmd" &>/dev/null; then
                 mac_missing+=("$cmd")
             fi
@@ -181,7 +206,17 @@ check_and_install_dependencies() {
     echo ""
 
     printf '\033[1;34m[?]\033[0m Would you like to install them? [Y/n] '
-    read -r answer </dev/tty
+    if [ "$ASSUME_YES" = "1" ]; then
+        answer="y"
+        echo "y"
+    elif [ -r /dev/tty ]; then
+        read -r answer </dev/tty
+    else
+        echo ""
+        error "Missing dependencies require confirmation, but no interactive TTY is available."
+        error "Re-run interactively or set MARKET_INSTALL_ASSUME_YES=1."
+        exit 1
+    fi
     case "$answer" in
         [nN]|[nN][oO])
             error "Cannot proceed without required dependencies."

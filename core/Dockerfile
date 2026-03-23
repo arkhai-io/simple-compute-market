@@ -2,12 +2,15 @@
 # Keep this pin in all FROM lines.
 
 # Stage 1: Install Python dependencies using uv
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM --platform=linux/amd64 python:3.12-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
-RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
+RUN python -m pip install --no-cache-dir uv && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends git g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -33,7 +36,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 
 # Stage 2: Lean runtime image
-FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runtime
+FROM --platform=linux/amd64 python:3.12-slim-bookworm AS runtime
 
 USER root
 
@@ -56,6 +59,7 @@ WORKDIR /app
 
 EXPOSE 9993/udp
 
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 

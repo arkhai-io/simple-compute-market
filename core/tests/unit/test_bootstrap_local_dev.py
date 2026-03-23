@@ -66,6 +66,7 @@ def test_deploy_local_contracts_uses_reviewable_command_matrix(
     contracts_dir = _write_minimal_contracts_fixture(tmp_path)
     output_path = tmp_path / "local-contracts.json"
     commands: list[tuple[list[str], Path, dict[str, str]]] = []
+    normalized_rpc_url = "http://127.0.0.1:45165"
 
     def fake_run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
         commands.append(
@@ -84,7 +85,7 @@ def test_deploy_local_contracts_uses_reviewable_command_matrix(
     monkeypatch.setattr(module, "_run_command", fake_run)
 
     artifact = module.deploy_local_contracts(
-        rpc_url="http://127.0.0.1:45165",
+        rpc_url="ws://127.0.0.1:45165",
         output_path=output_path,
     )
 
@@ -93,60 +94,60 @@ def test_deploy_local_contracts_uses_reviewable_command_matrix(
             ["npm", "ci", "--legacy-peer-deps"],
             commands[0][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
         (
             ["npx", "hardhat", "run", "scripts/deploy-create2-factory.ts", "--network", "localhost"],
             commands[1][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
         (
             ["npm", "run", "local:fund-owner"],
             commands[2][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
         (
             ["npm", "run", "local:deploy:vanity"],
             commands[3][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
         (
-            ["npm", "run", "local:upgrade:vanity:presigned"],
+            ["npx", "hardhat", "run", "scripts/local-upgrade-impersonated.ts", "--network", "localhost"],
             commands[4][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
         (
             ["npm", "run", "local:verify:vanity"],
             commands[5][1],
             {
-                "LOCALHOST_RPC_URL": "http://127.0.0.1:45165",
-                "SEPOLIA_RPC_URL": "http://127.0.0.1:45165",
-                "MAINNET_RPC_URL": "http://127.0.0.1:45165",
+                "LOCALHOST_RPC_URL": normalized_rpc_url,
+                "SEPOLIA_RPC_URL": normalized_rpc_url,
+                "MAINNET_RPC_URL": normalized_rpc_url,
             },
         ),
     ]
     assert output_path.exists()
     assert artifact == json.loads(output_path.read_text(encoding="utf-8"))
-    assert artifact["rpc_url"] == "http://127.0.0.1:45165"
+    assert artifact["rpc_url"] == normalized_rpc_url
     assert artifact["alkahest_address_config_path"] == str(
         ROOT / "core/agent/app/data/alkahest_anvil_addresses.json"
     )
@@ -156,7 +157,7 @@ def test_deploy_local_contracts_uses_reviewable_command_matrix(
         "VALIDATION_REGISTRY_ADDRESS": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
     }
     assert artifact["recommended_env"]["CHAIN_NAME"] == "anvil"
-    assert artifact["recommended_env"]["CHAIN_RPC_URL"] == "http://127.0.0.1:45165"
+    assert artifact["recommended_env"]["CHAIN_RPC_URL"] == normalized_rpc_url
 
 
 def test_prepare_contracts_workspace_injects_dynamic_localhost_network(
@@ -170,6 +171,7 @@ def test_prepare_contracts_workspace_injects_dynamic_localhost_network(
     hardhat_config = (workspace / "hardhat.config.ts").read_text(encoding="utf-8")
     assert 'localhost: {' in hardhat_config
     assert 'process.env.LOCALHOST_RPC_URL || "http://127.0.0.1:8545"' in hardhat_config
+    assert (workspace / "scripts/local-upgrade-impersonated.ts").exists()
 
 
 def test_format_local_deploy_command_uses_canonical_wrapper() -> None:

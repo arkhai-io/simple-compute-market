@@ -1,10 +1,12 @@
 ARG PYTHON_VERSION=3.13
 
 # Stage 1: Install Python deps and Ansible collections
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+FROM python:${PYTHON_VERSION}-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+
+RUN python -m pip install --no-cache-dir uv
 
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 WORKDIR /app
