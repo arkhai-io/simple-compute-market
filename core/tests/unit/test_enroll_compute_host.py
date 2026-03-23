@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -90,3 +91,41 @@ def test_build_host_artifact_uses_shared_role_contract() -> None:
     assert artifact["details"]["host_alias"] == "btc1"
     assert artifact["details"]["ansible_host"] == "12.150.85.70"
     assert artifact["details"]["gpus"] == "8"
+
+
+def test_run_host_flow_reports_failed_acceptance_as_failed_artifact(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_script_module()
+    inventory_path = tmp_path / "hosts"
+    inventory_path.write_text(
+        "[kvm_hosts]\nbtc1 ansible_host=12.150.85.70 ansible_user=ubuntu gpus=8\n",
+        encoding="utf-8",
+    )
+
+    commands: list[list[str]] = []
+
+    def fail_run(command: list[str], *, cwd: Path) -> None:
+        commands.append(command)
+        if command[0] == "./scripts/run_acceptance_validation.sh":
+            raise subprocess.CalledProcessError(returncode=4, cmd=command)
+
+    monkeypatch.setattr(module, "_run_command", fail_run)
+
+    result = module.run_host_flow(
+        action="enroll",
+        kvm_host="btc1",
+        inventory_path=inventory_path,
+        run_acceptance=True,
+        vm_name="iac-acceptance-btc1",
+        skip_host_kit=False,
+        extra_vars_file=None,
+        artifact_path=tmp_path / "host-failed.json",
+    )
+
+    assert commands[-1][0] == "./scripts/run_acceptance_validation.sh"
+    assert result["status"] == "failed"
+    assert result["details"]["failed_command"][0] == "./scripts/run_acceptance_validation.sh"
+    assert result["details"]["returncode"] == 4
+    assert Path(result["artifact_path"]).exists()

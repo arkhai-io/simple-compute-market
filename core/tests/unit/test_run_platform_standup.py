@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -126,3 +127,34 @@ def test_build_platform_artifact_uses_shared_role_contract() -> None:
     assert artifact["details"]["render_output_dir"] == "/tmp/sms-rendered"
     assert artifact["details"]["seller_agent_id"] == "seller-id"
     assert artifact["details"]["buyer_agent_id"] == "buyer-id"
+
+
+def test_deploy_platform_reports_failed_stage_as_failed_artifact(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _load_script_module()
+    profile = type("Profile", (), {"chain_name": "ethereum_sepolia", "chain_id": 11155111})()
+    monkeypatch.setattr(module, "load_chain_profile", lambda **kwargs: profile)
+
+    def fail_run(command, *, cwd=ROOT, capture_json=False):
+        if any(str(part).endswith("rollout_live_env.py") for part in command):
+            raise subprocess.CalledProcessError(returncode=4, cmd=command)
+        return {}
+
+    monkeypatch.setattr(module, "_run_command", fail_run)
+
+    result = module.deploy_platform(
+        project="sms-canary-project",
+        zone="us-east4-c",
+        shared_secrets_dir=tmp_path / "shared",
+        local_secrets_dir=tmp_path / "local",
+        render_output_dir=tmp_path / "rendered",
+        canary_env_path=tmp_path / "prod-canary.env",
+        artifact_path=tmp_path / "platform-failed.json",
+    )
+
+    assert result["status"] == "failed"
+    assert result["details"]["failed_command"][-1] == "ethereum_sepolia"
+    assert result["details"]["returncode"] == 4
+    assert Path(result["artifact_path"]).exists()

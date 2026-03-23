@@ -116,6 +116,13 @@ def _write_artifact(path: Path, payload: dict[str, object]) -> Path:
     return path
 
 
+def _failure_details(exc: subprocess.CalledProcessError) -> dict[str, object]:
+    return {
+        "failed_command": [str(part) for part in exc.cmd] if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)],
+        "returncode": int(exc.returncode),
+    }
+
+
 def run_host_flow(
     *,
     action: str,
@@ -140,23 +147,39 @@ def run_host_flow(
         skip_host_kit=skip_host_kit,
         extra_vars_file=extra_vars_file,
     )
-    for command in commands:
-        _run_command(command, cwd=IAC_ROOT)
-
-    artifact = build_host_artifact(
-        action=action,
-        status="succeeded",
-        request_url=f"ansible://{kvm_host}",
-        auth_url=f"ansible://{kvm_host}",
-        host_alias=kvm_host,
-        details={
-            **host_details,
-            "inventory_path": str(inventory_path),
-            "run_acceptance": run_acceptance or action == "enroll",
-            "vm_name": vm_name,
-            "extra_vars_file": str(extra_vars_file) if extra_vars_file is not None else None,
-        },
-    )
+    try:
+        for command in commands:
+            _run_command(command, cwd=IAC_ROOT)
+        artifact = build_host_artifact(
+            action=action,
+            status="succeeded",
+            request_url=f"ansible://{kvm_host}",
+            auth_url=f"ansible://{kvm_host}",
+            host_alias=kvm_host,
+            details={
+                **host_details,
+                "inventory_path": str(inventory_path),
+                "run_acceptance": run_acceptance or action == "enroll",
+                "vm_name": vm_name,
+                "extra_vars_file": str(extra_vars_file) if extra_vars_file is not None else None,
+            },
+        )
+    except subprocess.CalledProcessError as exc:
+        artifact = build_host_artifact(
+            action=action,
+            status="failed",
+            request_url=f"ansible://{kvm_host}",
+            auth_url=f"ansible://{kvm_host}",
+            host_alias=kvm_host,
+            details={
+                **host_details,
+                "inventory_path": str(inventory_path),
+                "run_acceptance": run_acceptance or action == "enroll",
+                "vm_name": vm_name,
+                "extra_vars_file": str(extra_vars_file) if extra_vars_file is not None else None,
+                **_failure_details(exc),
+            },
+        )
     if artifact_path is not None:
         artifact["artifact_path"] = str(_write_artifact(artifact_path, artifact))
     return artifact
@@ -198,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         artifact_path=args.artifact_path.expanduser() if args.artifact_path else None,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    return 0 if result.get("status") == "succeeded" else 1
 
 
 if __name__ == "__main__":

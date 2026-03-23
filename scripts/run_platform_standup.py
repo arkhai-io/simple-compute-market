@@ -212,6 +212,13 @@ def _default_request_url(project: str, zone: str) -> str:
     return f"gcloud://{project}/{zone}"
 
 
+def _failure_details(exc: subprocess.CalledProcessError) -> dict[str, object]:
+    return {
+        "failed_command": [str(part) for part in exc.cmd] if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)],
+        "returncode": int(exc.returncode),
+    }
+
+
 def deploy_platform(
     *,
     project: str,
@@ -236,26 +243,39 @@ def deploy_platform(
         canary_env_path=canary_env_path,
         chain_name=profile.chain_name,
     )
-    for index, command in enumerate(commands):
-        chain_result = _run_command(
-            command,
-            capture_json=index == 1,
-        ) or chain_result
-
-    agent_ids = _extract_agent_ids_from_env(canary_env_path)
-    artifact = build_platform_artifact(
-        action="deploy",
-        status="succeeded",
-        request_url=_default_request_url(project, zone),
-        auth_url=_default_request_url(project, zone),
-        render_output_dir=str(render_output_dir),
-        details={
-            "chain_name": profile.chain_name,
-            "chain_id": profile.chain_id,
-            "chain_profile": chain_result,
-            **agent_ids,
-        },
-    )
+    try:
+        for index, command in enumerate(commands):
+            chain_result = _run_command(
+                command,
+                capture_json=index == 1,
+            ) or chain_result
+        agent_ids = _extract_agent_ids_from_env(canary_env_path)
+        artifact = build_platform_artifact(
+            action="deploy",
+            status="succeeded",
+            request_url=_default_request_url(project, zone),
+            auth_url=_default_request_url(project, zone),
+            render_output_dir=str(render_output_dir),
+            details={
+                "chain_name": profile.chain_name,
+                "chain_id": profile.chain_id,
+                "chain_profile": chain_result,
+                **agent_ids,
+            },
+        )
+    except subprocess.CalledProcessError as exc:
+        artifact = build_platform_artifact(
+            action="deploy",
+            status="failed",
+            request_url=_default_request_url(project, zone),
+            auth_url=_default_request_url(project, zone),
+            render_output_dir=str(render_output_dir),
+            details={
+                "chain_name": profile.chain_name,
+                "chain_id": profile.chain_id,
+                **_failure_details(exc),
+            },
+        )
     if artifact_path is not None:
         artifact["artifact_path"] = str(_write_artifact(artifact_path, artifact))
     return artifact
@@ -274,39 +294,54 @@ def verify_platform(
         shared_secrets_dir=shared_secrets_dir,
         local_secrets_dir=local_secrets_dir,
     )
-    _run_command(
-        [
-            "python",
-            "scripts/materialize_host_envs.py",
-            "--shared-secrets-dir",
-            str(shared_secrets_dir),
-            "--local-secrets-dir",
-            str(local_secrets_dir),
-            "--output-dir",
-            str(render_output_dir),
-        ]
-    )
-    _run_command(
-        build_verify_command(
-            environment=environment,
-            render_output_dir=render_output_dir,
-            inventory_path=inventory_path,
-            expected_chain_name=profile.chain_name,
-            expected_chain_id=profile.chain_id,
+    try:
+        _run_command(
+            [
+                "python",
+                "scripts/materialize_host_envs.py",
+                "--shared-secrets-dir",
+                str(shared_secrets_dir),
+                "--local-secrets-dir",
+                str(local_secrets_dir),
+                "--output-dir",
+                str(render_output_dir),
+            ]
         )
-    )
-    artifact = build_platform_artifact(
-        action="verify",
-        status="succeeded",
-        request_url=f"file://{render_output_dir}",
-        auth_url=f"file://{inventory_path}",
-        render_output_dir=str(render_output_dir),
-        details={
-            "chain_name": profile.chain_name,
-            "chain_id": profile.chain_id,
-            "inventory_path": str(inventory_path),
-        },
-    )
+        _run_command(
+            build_verify_command(
+                environment=environment,
+                render_output_dir=render_output_dir,
+                inventory_path=inventory_path,
+                expected_chain_name=profile.chain_name,
+                expected_chain_id=profile.chain_id,
+            )
+        )
+        artifact = build_platform_artifact(
+            action="verify",
+            status="succeeded",
+            request_url=f"file://{render_output_dir}",
+            auth_url=f"file://{inventory_path}",
+            render_output_dir=str(render_output_dir),
+            details={
+                "chain_name": profile.chain_name,
+                "chain_id": profile.chain_id,
+                "inventory_path": str(inventory_path),
+            },
+        )
+    except subprocess.CalledProcessError as exc:
+        artifact = build_platform_artifact(
+            action="verify",
+            status="failed",
+            request_url=f"file://{render_output_dir}",
+            auth_url=f"file://{inventory_path}",
+            render_output_dir=str(render_output_dir),
+            details={
+                "chain_name": profile.chain_name,
+                "chain_id": profile.chain_id,
+                "inventory_path": str(inventory_path),
+                **_failure_details(exc),
+            },
+        )
     if artifact_path is not None:
         artifact["artifact_path"] = str(_write_artifact(artifact_path, artifact))
     return artifact
@@ -324,29 +359,43 @@ def run_platform_canary(
     allow_mainnet: bool,
     artifact_path: Path | None,
 ) -> dict[str, object]:
-    _run_command(
-        build_canary_command(
-            environment=environment,
-            shared_secrets_dir=shared_secrets_dir,
-            local_secrets_dir=local_secrets_dir,
-            render_output_dir=render_output_dir,
-            artifacts_dir=artifacts_dir,
-            inventory_path=inventory_path,
-            apply_funding=apply_funding,
-            allow_mainnet=allow_mainnet,
+    try:
+        _run_command(
+            build_canary_command(
+                environment=environment,
+                shared_secrets_dir=shared_secrets_dir,
+                local_secrets_dir=local_secrets_dir,
+                render_output_dir=render_output_dir,
+                artifacts_dir=artifacts_dir,
+                inventory_path=inventory_path,
+                apply_funding=apply_funding,
+                allow_mainnet=allow_mainnet,
+            )
         )
-    )
-    artifact = build_platform_artifact(
-        action="canary",
-        status="succeeded",
-        request_url=f"file://{render_output_dir}",
-        auth_url=f"file://{artifacts_dir}",
-        render_output_dir=str(render_output_dir),
-        details={
-            "artifacts_dir": str(artifacts_dir),
-            "prod_canary_log": str(artifacts_dir / "prod-canary.log"),
-        },
-    )
+        artifact = build_platform_artifact(
+            action="canary",
+            status="succeeded",
+            request_url=f"file://{render_output_dir}",
+            auth_url=f"file://{artifacts_dir}",
+            render_output_dir=str(render_output_dir),
+            details={
+                "artifacts_dir": str(artifacts_dir),
+                "prod_canary_log": str(artifacts_dir / "prod-canary.log"),
+            },
+        )
+    except subprocess.CalledProcessError as exc:
+        artifact = build_platform_artifact(
+            action="canary",
+            status="failed",
+            request_url=f"file://{render_output_dir}",
+            auth_url=f"file://{artifacts_dir}",
+            render_output_dir=str(render_output_dir),
+            details={
+                "artifacts_dir": str(artifacts_dir),
+                "prod_canary_log": str(artifacts_dir / "prod-canary.log"),
+                **_failure_details(exc),
+            },
+        )
     if artifact_path is not None:
         artifact["artifact_path"] = str(_write_artifact(artifact_path, artifact))
     return artifact
@@ -422,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    return 0 if result.get("status") == "succeeded" else 1
 
 
 if __name__ == "__main__":
