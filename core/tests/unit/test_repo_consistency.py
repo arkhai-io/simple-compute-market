@@ -41,6 +41,8 @@ STANDUP_LESSONS_LEARNED_PATH = STANDUP_DIR / "lessons-learned.md"
 STANDUP_LIVE_CONTRACTS_PATH = STANDUP_DIR / "live-contracts.md"
 STANDUP_BUYER_QUICKSTART_PATH = STANDUP_DIR / "buyer-quickstart.md"
 STANDUP_SUPPORT_QUICKSTART_PATH = STANDUP_DIR / "support-quickstart.md"
+STANDUP_PLATFORM_QUICKSTART_PATH = STANDUP_DIR / "platform-quickstart.md"
+STANDUP_HOST_QUICKSTART_PATH = STANDUP_DIR / "host-quickstart.md"
 SUBAGENT_DIR = ROOT / "docs/subagents"
 SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
 SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
@@ -106,6 +108,8 @@ WAIT_FOR_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/wait_for_human_purchase.py"
 CLEANUP_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/cleanup_human_purchase.py"
 RUN_HUMAN_BUYER_PURCHASE_SCRIPT = ROOT / "scripts/run_human_buyer_purchase.py"
 RUN_MARKET_SUPPORT_SCRIPT = ROOT / "scripts/run_market_support.py"
+RUN_PLATFORM_STANDUP_SCRIPT = ROOT / "scripts/run_platform_standup.py"
+ENROLL_COMPUTE_HOST_SCRIPT = ROOT / "scripts/enroll_compute_host.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -874,6 +878,8 @@ def test_canonical_standup_docs_exist() -> None:
         STANDUP_LIVE_CONTRACTS_PATH,
         STANDUP_BUYER_QUICKSTART_PATH,
         STANDUP_SUPPORT_QUICKSTART_PATH,
+        STANDUP_PLATFORM_QUICKSTART_PATH,
+        STANDUP_HOST_QUICKSTART_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -1084,6 +1090,54 @@ def test_support_quickstart_doc_exists_and_is_linked() -> None:
     assert "[Support Quickstart](support-quickstart.md)" in overview_text
 
 
+def test_platform_quickstart_doc_exists_and_is_linked() -> None:
+    text = STANDUP_PLATFORM_QUICKSTART_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/run_platform_standup.py",
+        "deploy",
+        "verify",
+        "canary",
+        "scripts/materialize_host_envs.py",
+        "scripts/check_chain_profile.py",
+        "scripts/rollout_live_env.py",
+        "scripts/refresh_canary_agent_ids.py",
+        "scripts/run_repeatable_canary.py",
+        "render_output_dir",
+        "seller_agent_id",
+        "buyer_agent_id",
+    ):
+        assert required_token in text, (
+            "platform-quickstart.md is missing required platform workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Platform Quickstart](platform-quickstart.md)" in overview_text
+
+
+def test_host_quickstart_doc_exists_and_is_linked() -> None:
+    text = STANDUP_HOST_QUICKSTART_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/enroll_compute_host.py",
+        "check-ready",
+        "enroll",
+        "--kvm-host",
+        "--run-acceptance",
+        "compute-provisioning-iac/ansible/inventory/hosts",
+        "compute-provisioning-iac/scripts/run_acceptance_validation.sh",
+        "host_alias",
+        "ansible_host",
+        "gpus",
+    ):
+        assert required_token in text, (
+            "host-quickstart.md is missing required host workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Host Quickstart](host-quickstart.md)" in overview_text
+
+
 def test_repo_exposes_shared_role_contract_module() -> None:
     assert ROLE_CONTRACTS_SCRIPT.exists(), (
         "scripts/role_contracts.py must exist for shared production role contracts"
@@ -1123,6 +1177,50 @@ def test_repo_exposes_market_support_entrypoint() -> None:
     ):
         assert required_token in text, (
             "run_market_support.py is missing required support token: "
+            f"{required_token}"
+        )
+
+
+def test_repo_exposes_platform_operator_entrypoint() -> None:
+    assert RUN_PLATFORM_STANDUP_SCRIPT.exists(), (
+        "scripts/run_platform_standup.py must exist for platform operator flows"
+    )
+    text = RUN_PLATFORM_STANDUP_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "deploy",
+        "verify",
+        "canary",
+        "build_artifact",
+        "materialize_host_envs.py",
+        "check_chain_profile.py",
+        "rollout_live_env.py",
+        "refresh_canary_agent_ids.py",
+        "run_repeatable_canary.py",
+    ):
+        assert required_token in text, (
+            "run_platform_standup.py is missing required platform token: "
+            f"{required_token}"
+        )
+
+
+def test_repo_exposes_host_operator_entrypoint() -> None:
+    assert ENROLL_COMPUTE_HOST_SCRIPT.exists(), (
+        "scripts/enroll_compute_host.py must exist for compute host operator flows"
+    )
+    text = ENROLL_COMPUTE_HOST_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "check-ready",
+        "enroll",
+        "build_artifact",
+        "compute-provisioning-iac",
+        "run_acceptance_validation.sh",
+        "validate-inventory",
+        "validate-playbooks",
+        "validate-tests",
+        "kvm_hosts",
+    ):
+        assert required_token in text, (
+            "enroll_compute_host.py is missing required host token: "
             f"{required_token}"
         )
 

@@ -53,6 +53,8 @@ Supporting references:
 - [Human Buyer Walkthrough](human-buyer.md)
 - [Buyer Quickstart](buyer-quickstart.md)
 - [Support Quickstart](support-quickstart.md)
+- [Platform Quickstart](platform-quickstart.md)
+- [Host Quickstart](host-quickstart.md)
 - [Lessons Learned](lessons-learned.md)
 - [Live Role Contracts](live-contracts.md)
 - [End-to-End Runbook](../e2e-runbook.md)
