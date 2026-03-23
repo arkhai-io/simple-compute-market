@@ -53,17 +53,17 @@ At minimum, set:
 - `IDENTITY_REGISTRY_ADDRESS`
 - `REPUTATION_REGISTRY_ADDRESS`
 - `VALIDATION_REGISTRY_ADDRESS`
-- `CHAIN_ID=84532`
+- `CHAIN_ID=11155111`
 - `REGISTRY_URL`
 - `CHAIN_RPC_URL`
-- `CHAIN_NAME=base_sepolia`
+- `CHAIN_NAME=ethereum_sepolia`
 - `AGENT_PRIV_KEY`
 - `AGENT_WALLET_ADDRESS`
 - `SSH_PUBLIC_KEY`
 - `ZEROTIER_NETWORK`
 - `PROVISIONING_MODE=http`
 - `PROVISIONING_SERVICE_URL`
-- `TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_base_sepolia.json`
+- `TOKEN_REGISTRY_PATH=/app/core/agent/app/data/token_registry_eth_sepolia.json`
 - `ENABLE_EVENT_QUEUE=false`
 - `AUTO_REGISTER=true`
 

@@ -3,6 +3,15 @@
 This is the canonical entry point for standing up the deployed full stack.
 Start here before using the canary runbooks.
 
+The current documented live lane is Ethereum Sepolia:
+
+- `CHAIN_NAME=ethereum_sepolia`
+- `CHAIN_ID=11155111`
+
+If you are starting from zero, begin with
+[Deploy Your Own Marketplace](deploy-your-own-marketplace.md), then follow this
+overview from top to bottom.
+
 This path assumes:
 
 - real ZeroTier networking
@@ -27,7 +36,7 @@ Before you start, gather or provision:
 - PostgreSQL for the registry
 - PostgreSQL for async provisioning
 - Redis for the async provisioning job queue
-- an authenticated chain RPC endpoint for Base Sepolia
+- an authenticated chain RPC endpoint for Ethereum Sepolia
 - seller and buyer canary wallets plus a tenant SSH keypair
 
 ## Bring-Up Sequence
@@ -48,6 +57,7 @@ Follow these documents in order:
 Supporting references:
 
 - [Role Entry Points](../role-entrypoints.md)
+- [Deploy Your Own Marketplace](deploy-your-own-marketplace.md)
 - [Deployment Input Checklist](../deployment-input-checklist.md)
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
 - [Seller Quickstart](seller-quickstart.md)

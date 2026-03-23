@@ -925,8 +925,10 @@ def test_local_secret_runbook_covers_alchemy_backed_materialization_flow() -> No
         "scripts/materialize_host_envs.py",
         "/etc/simple-market-service",
         "--shared-secrets-dir",
-        "ALCHEMY_BASE_SEPOLIA_HTTP_URL",
-        "ALCHEMY_BASE_SEPOLIA_WSS_URL",
+        "ETH_SEPOLIA_HTTP_RPC_URL",
+        "ETH_SEPOLIA_WSS_RPC_URL",
+        "CHAIN_NAME=ethereum_sepolia",
+        "CHAIN_ID=11155111",
         "SEPOLIA_FUNDER_PRIVATE_KEY",
         "MAINNET_FUNDER_PRIVATE_KEY",
         "CANARY_MAINNET_MAX_NATIVE_TOPUP_WEI",
@@ -1046,6 +1048,7 @@ def test_deploy_your_own_marketplace_doc_exists_and_points_to_bootstrap_flow() -
         "# Deploy Your Own Marketplace",
         "docs/standup/overview.md",
         "docs/standup/platform-quickstart.md",
+        "Ethereum Sepolia",
         "Local Secret Layout",
         "Contract Address Bootstrap",
         "Registry Deployment",
@@ -1300,6 +1303,47 @@ def test_platform_quickstart_doc_exists_and_is_linked() -> None:
     overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
     assert "[Platform Quickstart](platform-quickstart.md)" in overview_text
 
+
+def test_standup_overview_uses_ethereum_sepolia_as_the_current_documented_lane() -> None:
+    text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "Ethereum Sepolia",
+        "CHAIN_NAME=ethereum_sepolia",
+        "CHAIN_ID=11155111",
+        "deploy-your-own-marketplace.md",
+    ):
+        assert required_token in text, (
+            "overview.md is missing required current-lane token: "
+            f"{required_token}"
+        )
+
+
+def test_contract_and_agent_docs_use_ethereum_sepolia_defaults() -> None:
+    contracts_text = STANDUP_CONTRACTS_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "Ethereum Sepolia",
+        "CHAIN_ID=11155111",
+        "ETH_SEPOLIA_HTTP_RPC_URL",
+        "IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e",
+        "REPUTATION_REGISTRY_ADDRESS=0x8004B663056A597Dffe9eCcC1965A193B7388713",
+        "VALIDATION_REGISTRY_ADDRESS=0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+    ):
+        assert required_token in contracts_text, (
+            "contracts.md is missing required Ethereum Sepolia token: "
+            f"{required_token}"
+        )
+
+    for path in (STANDUP_AGENT_SELLER_PATH, STANDUP_AGENT_BUYER_PATH):
+        text = path.read_text(encoding="utf-8")
+        for required_token in (
+            "CHAIN_ID=11155111",
+            "CHAIN_NAME=ethereum_sepolia",
+            "token_registry_eth_sepolia.json",
+        ):
+            assert required_token in text, (
+                f"{path.name} is missing required Ethereum Sepolia token: "
+                f"{required_token}"
+            )
 
 def test_host_quickstart_doc_exists_and_is_linked() -> None:
     text = STANDUP_HOST_QUICKSTART_PATH.read_text(encoding="utf-8")
@@ -1731,7 +1775,7 @@ def test_agent_standup_docs_cover_container_runtime_contract(
         "--device /dev/net/tun:/dev/net/tun",
         "/var/lib/zerotier-one",
         "grep '^ONCHAIN_AGENT_ID='",
-        "CHAIN_ID=84532",
+        "CHAIN_ID=11155111",
         "IDENTITY_REGISTRY_ADDRESS",
         "REPUTATION_REGISTRY_ADDRESS",
         "VALIDATION_REGISTRY_ADDRESS",
@@ -1876,7 +1920,7 @@ def test_contract_bootstrap_doc_is_executable_runbook() -> None:
 
     for required_heading in (
         "## Inputs",
-        "## Use Published Base Sepolia Registries",
+        "## Use Published Ethereum Sepolia Registries",
         "## Record The Shared Contract Bundle",
         "## Verification",
         "## Outputs",
@@ -1887,10 +1931,10 @@ def test_contract_bootstrap_doc_is_executable_runbook() -> None:
 
     for required_token in (
         "erc-8004-contracts/README.md",
-        "Base Sepolia",
+        "Ethereum Sepolia",
         "/etc/simple-market-service/contracts.env",
-        "CHAIN_ID=84532",
-        "RPC_URL=https://<rpc-provider>",
+        "CHAIN_ID=11155111",
+        "RPC_URL=https://<eth-sepolia-rpc-provider>",
         "IDENTITY_REGISTRY_ADDRESS=",
         "REPUTATION_REGISTRY_ADDRESS=",
         "VALIDATION_REGISTRY_ADDRESS=",

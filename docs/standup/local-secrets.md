@@ -42,8 +42,8 @@ Recommended key files that stay outside this directory but remain local:
 `~/.config/web3-ops/alchemy.env` should include at least:
 
 ```dotenv
-ALCHEMY_BASE_SEPOLIA_HTTP_URL=https://base-sepolia.g.alchemy.com/v2/<key>
-ALCHEMY_BASE_SEPOLIA_WSS_URL=wss://base-sepolia.g.alchemy.com/v2/<key>
+ETH_SEPOLIA_HTTP_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/<key>
+ETH_SEPOLIA_WSS_RPC_URL=wss://eth-sepolia.g.alchemy.com/v2/<key>
 ALCHEMY_BASE_MAINNET_HTTP_URL=https://base-mainnet.g.alchemy.com/v2/<key>
 ALCHEMY_BASE_MAINNET_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/<key>
 ```
@@ -68,8 +68,8 @@ values that stay aligned across registry, agents, provisioning, and the canary
 runner:
 
 ```dotenv
-CHAIN_NAME=base_sepolia
-CHAIN_ID=84532
+CHAIN_NAME=ethereum_sepolia
+CHAIN_ID=11155111
 ZEROTIER_NETWORK=<network-id>
 FRP_SERVER_ADDR=<frp-host-or-zerotier-ip>
 FRP_DOMAIN=<frp-domain>
@@ -139,8 +139,8 @@ That command writes:
 
 The renderer also derives and injects:
 
-- `ALCHEMY_BASE_SEPOLIA_HTTP_URL` and `ALCHEMY_BASE_SEPOLIA_WSS_URL` into the
-  right services for Base Sepolia
+- `ETH_SEPOLIA_HTTP_RPC_URL` and `ETH_SEPOLIA_WSS_RPC_URL` into the right
+  services for Ethereum Sepolia
 - `SSH_PRIVATE_KEY` and `MANAGEMENT_VARS_YAML` as base64 payloads in
   `/etc/simple-market-service/provisioning.env`
 - `PROVISIONER_SSH_PRIVATE_KEY_PATH` and `CANARY_TENANT_SSH_PRIVATE_KEY_PATH`
@@ -170,7 +170,7 @@ entrypoint after the local secret bundle is ready:
 
 ```bash
 python scripts/run_repeatable_canary.py \
-  --environment isolated-base-sepolia \
+  --environment isolated-eth-sepolia \
   --shared-secrets-dir ~/.config/web3-ops \
   --local-secrets-dir ~/.config/simple-market-service \
   --output-dir /etc/simple-market-service \

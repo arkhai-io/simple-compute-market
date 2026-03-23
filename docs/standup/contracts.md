@@ -5,26 +5,29 @@ bundle for the deployed canary path.
 
 ## Inputs
 
-- an authenticated Base Sepolia RPC endpoint
+- an authenticated Ethereum Sepolia RPC endpoint
 - `erc-8004-contracts/README.md`
 - a host-local shared contract bundle at `/etc/simple-market-service/contracts.env`
 
-## Use Published Base Sepolia Registries
+## Use Published Ethereum Sepolia Registries
 
-The deployed canary path in this repo assumes Base Sepolia (`CHAIN_ID=84532`).
-For that network, use the published registry addresses from
+The deployed canary path in this repo assumes Ethereum Sepolia
+(`CHAIN_ID=11155111`). For that network, use the published registry addresses from
 `erc-8004-contracts/README.md` unless your environment already manages an
 equivalent deployed ERC-8004 stack.
 
-On the current branch, the published Base Sepolia addresses are:
+On the current branch, the documented Ethereum Sepolia addresses are:
 
-- `IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb`
-- `REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF`
+- `IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e`
+- `REPUTATION_REGISTRY_ADDRESS=0x8004B663056A597Dffe9eCcC1965A193B7388713`
 - `VALIDATION_REGISTRY_ADDRESS=0x8004Cb1BF31DAf7788923b405b754f57acEB4272`
 
-If you are not targeting Base Sepolia, stop here and replace the rest of this
+If you are not targeting Ethereum Sepolia, stop here and replace the rest of this
 document with the equivalent addresses for your environment before you continue
 with the stand-up sequence.
+
+Use `ETH_SEPOLIA_HTTP_RPC_URL` from your local shared secrets as the source for
+the runtime `RPC_URL` value in the shared contract bundle.
 
 ## Record The Shared Contract Bundle
 
@@ -35,10 +38,10 @@ service-specific env files:
 ```bash
 sudo install -d -m 0755 /etc/simple-market-service
 sudo tee /etc/simple-market-service/contracts.env >/dev/null <<'EOF'
-CHAIN_ID=84532
-RPC_URL=https://<rpc-provider>
-IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
-REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF
+CHAIN_ID=11155111
+RPC_URL=https://<eth-sepolia-rpc-provider>
+IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e
+REPUTATION_REGISTRY_ADDRESS=0x8004B663056A597Dffe9eCcC1965A193B7388713
 VALIDATION_REGISTRY_ADDRESS=0x8004Cb1BF31DAf7788923b405b754f57acEB4272
 EOF
 ```
