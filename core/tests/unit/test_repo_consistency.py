@@ -36,6 +36,7 @@ STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
 STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
 STANDUP_HUMAN_BUYER_PATH = STANDUP_DIR / "human-buyer.md"
+STANDUP_LESSONS_LEARNED_PATH = STANDUP_DIR / "lessons-learned.md"
 SUBAGENT_DIR = ROOT / "docs/subagents"
 SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
 SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
@@ -837,6 +838,7 @@ def test_canonical_standup_docs_exist() -> None:
         STANDUP_RESOURCE_SEEDING_PATH,
         STANDUP_CANARY_PATH,
         STANDUP_HUMAN_BUYER_PATH,
+        STANDUP_LESSONS_LEARNED_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -926,6 +928,27 @@ def test_human_buyer_runbook_exists_and_is_linked() -> None:
 
     overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
     assert "[Human Buyer Walkthrough](human-buyer.md)" in overview_text
+
+
+def test_lessons_learned_doc_exists_and_is_linked() -> None:
+    text = STANDUP_LESSONS_LEARNED_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "Local e2e was necessary but not sufficient",
+        "docker restart",
+        "/resources/portfolio",
+        "WETH",
+        "AGENT_AUTH_URL",
+        "run_full_repo_validation.py",
+        "pre_canary_fund.py",
+        "wait_for_human_purchase.py",
+    ):
+        assert required_token in text, (
+            "lessons-learned.md is missing required retrospective token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Lessons Learned](lessons-learned.md)" in overview_text
 
 
 def test_canary_docs_reference_pre_run_funding_step() -> None:
