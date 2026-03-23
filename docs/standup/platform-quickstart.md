@@ -8,6 +8,12 @@ The operator uses:
 
 - `scripts/run_platform_standup.py`
 
+Who this is for:
+
+- a human platform operator driving deploy, verify, and canary steps
+- a coordinating agent/service that needs a stable platform orchestration
+  surface and structured artifacts
+
 The wrapper keeps the existing repo orchestration intact by delegating to:
 
 - `scripts/materialize_host_envs.py`
@@ -78,3 +84,5 @@ The platform wrapper writes a shared live-contract artifact that includes:
 - This is operator-facing, not buyer-facing.
 - It keeps the live rollout contract centralized instead of introducing another
   ad hoc deployment path.
+- The current production entrypoint is the script wrapper above, not an
+  installed `market platform ...` subcommand yet.

@@ -47,6 +47,7 @@ Follow these documents in order:
 
 Supporting references:
 
+- [Role Entry Points](../role-entrypoints.md)
 - [Deployment Input Checklist](../deployment-input-checklist.md)
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
 - [Seller Quickstart](seller-quickstart.md)

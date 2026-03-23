@@ -4,6 +4,12 @@ This quickstart packages the live support path for inspecting and cleaning up a
 real market run. It is meant for an operator who needs to correlate order IDs,
 job IDs, and VM targets without reconstructing the whole live run by hand.
 
+Who this is for:
+
+- a human support operator handling a broken or completed live run
+- a coordinating agent/service that needs structured inspect and cleanup
+  artifacts
+
 This path assumes:
 
 - the live isolated environment is already up
@@ -81,3 +87,5 @@ Treat the support path as successful only when all of the following are true:
   produces.
 - The shared live contracts define how support artifacts should be structured
   across order, job, and VM correlation.
+- The current production entrypoint is the script wrapper above, not an
+  installed `market support ...` subcommand yet.

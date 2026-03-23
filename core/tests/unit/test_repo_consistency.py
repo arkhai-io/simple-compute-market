@@ -56,6 +56,7 @@ SUBAGENT_CANARY_PATH = SUBAGENT_DIR / "canary-e2e.md"
 SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
 SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
 SUBAGENT_SUMMARY_PATH = SUBAGENT_DIR / "2026-03-20-audit-summary.md"
+ROLE_ENTRYPOINTS_PATH = ROOT / "docs/role-entrypoints.md"
 CLEAN_ROOM_ACCEPTANCE_PATH = ROOT / "docs/clean-room-acceptance.md"
 ISOLATED_CANARY_SIGNOFF_PATH = ROOT / "docs/isolated-canary-signoff-2026-03-20.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
@@ -116,6 +117,7 @@ TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
 DEPLOYED_CANARY_WORKFLOW = ROOT / ".github/workflows/deployed-canary.yml"
 ENTRYPOINT_PATH = ROOT / "core/entrypoint.sh"
 ROOT_README = ROOT / "README.md"
+CLI_INSTALLER_DOC = ROOT / "cli/INSTALLER.md"
 AGENT_README = ROOT / "core/agent/README.md"
 TRAINING_README = ROOT / "domain/compute/training/README.md"
 GITMODULES_PATH = ROOT / ".gitmodules"
@@ -961,6 +963,8 @@ def test_human_buyer_runbook_exists_and_is_linked() -> None:
         "--seller-order-id",
         "--buyer-order-id",
         "--job-id",
+        "operator-friendly path",
+        "not the default buyer entrypoint",
     ):
         assert required_token in text, (
             "human-buyer.md is missing required human test workflow token: "
@@ -1088,6 +1092,68 @@ def test_support_quickstart_doc_exists_and_is_linked() -> None:
 
     overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
     assert "[Support Quickstart](support-quickstart.md)" in overview_text
+
+
+def test_role_entrypoints_doc_exists_and_links_role_quickstarts() -> None:
+    text = ROLE_ENTRYPOINTS_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "# Role Entry Points",
+        "## Choose Your Path",
+        "Buyer",
+        "Seller",
+        "Platform Operator",
+        "Compute Host Operator",
+        "Support Operator",
+        "Local Developer",
+        "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-quickstart.md",
+        "docs/standup/platform-quickstart.md",
+        "docs/standup/host-quickstart.md",
+        "docs/standup/support-quickstart.md",
+        "docs/standup/human-buyer.md",
+        "cli/INSTALLER.md",
+        "docs/standup/overview.md",
+    ):
+        assert required_token in text, (
+            "docs/role-entrypoints.md is missing required navigation token: "
+            f"{required_token}"
+        )
+
+
+def test_root_readme_routes_users_to_role_entrypoints() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+    for required_token in (
+        "## Choose Your Path",
+        "docs/role-entrypoints.md",
+        "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-quickstart.md",
+        "docs/standup/platform-quickstart.md",
+        "docs/standup/host-quickstart.md",
+        "docs/standup/support-quickstart.md",
+        "Local Developer Path",
+        "cli/INSTALLER.md",
+    ):
+        assert required_token in text, (
+            "README.md is missing required role-entrypoint navigation token: "
+            f"{required_token}"
+        )
+
+
+def test_cli_installer_doc_points_installed_users_to_role_entrypoints() -> None:
+    text = CLI_INSTALLER_DOC.read_text(encoding="utf-8")
+    for required_token in (
+        "## After Install",
+        "docs/role-entrypoints.md",
+        "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-quickstart.md",
+        "docs/standup/platform-quickstart.md",
+        "docs/standup/host-quickstart.md",
+        "docs/standup/support-quickstart.md",
+    ):
+        assert required_token in text, (
+            "cli/INSTALLER.md is missing required post-install navigation token: "
+            f"{required_token}"
+        )
 
 
 def test_platform_quickstart_doc_exists_and_is_linked() -> None:

@@ -12,6 +12,11 @@ The goal is simple:
 - one command to publish or refresh a seller offer
 - one structured artifact for support and follow-up
 
+Who this is for:
+
+- a seller publishing real inventory into the live production environment
+- an agent or service that needs a stable seller publication wrapper
+
 ## Required Inputs
 
 - a seller env file with `AGENT_URL`, `AGENT_AUTH_URL`, and `AGENT_PRIV_KEY`
@@ -76,5 +81,7 @@ After the command succeeds:
 - This quickstart is seller-facing, not operator-facing.
 - It avoids hardcoded example JSON and instead uses the seller's live portfolio
   as the source of truth.
+- The current production entrypoint is the script wrapper above, not an
+  installed `market seller ...` subcommand yet.
 - For operator deployment instructions, continue using
   `docs/standup/agent-seller.md`.

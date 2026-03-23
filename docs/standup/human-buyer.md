@@ -5,6 +5,11 @@ manual, operator-friendly path. The goal is to let a human install the buyer
 CLI into a local sandbox, purchase compute from the live seller, verify SSH
 access, and clean up afterward without ad hoc debugging.
 
+It is not the default buyer entrypoint. Use
+`docs/standup/buyer-quickstart.md` first if you want the buyer-facing
+production path and only use this walkthrough when you need the manual
+operator-friendly path for live validation.
+
 This path assumes:
 
 - the isolated live environment is already up

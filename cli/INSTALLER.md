@@ -175,6 +175,28 @@ Releases follow the tag format `market-cli-v{major}.{minor}.{patch}` (e.g., `mar
 | `GCS_BUCKET` | `ww-migration-arkhai-installer-files` | GCS bucket name (CI/CD and upload script only) |
 | `GCS_STG_WRITER_KEY` | — | GCP service account credentials (CI/CD secret) |
 
+## After Install
+
+Installing the CLI is only the first step. After `market --help` works, choose
+the path that matches your role:
+
+- start with [docs/role-entrypoints.md](docs/role-entrypoints.md)
+- buyers:
+  - [docs/standup/buyer-quickstart.md](docs/standup/buyer-quickstart.md)
+- sellers:
+  - [docs/standup/seller-quickstart.md](docs/standup/seller-quickstart.md)
+- platform operators:
+  - [docs/standup/platform-quickstart.md](docs/standup/platform-quickstart.md)
+- compute host operators:
+  - [docs/standup/host-quickstart.md](docs/standup/host-quickstart.md)
+- support operators:
+  - [docs/standup/support-quickstart.md](docs/standup/support-quickstart.md)
+
+Important: the installed `market` CLI is still a generic local/dev surface.
+The current production-facing buyer, seller, platform, host, and support flows
+are role wrappers under `scripts/` rather than installed `market buyer ...`
+style subcommands.
+
 ## Creating a Dev Build
 
 Dev builds are created by triggering the CI/CD workflow manually (without a `market-cli-v*` tag). The version will be `dev-{short-sha}`.

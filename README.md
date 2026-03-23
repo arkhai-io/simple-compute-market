@@ -4,6 +4,34 @@ Simple Market Service (SMS) is a reference implementation of Arkhai's vision for
 
 More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, an A2A-capable market agent, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
 
+## Choose Your Path
+
+Start with [docs/role-entrypoints.md](docs/role-entrypoints.md). It is the
+top-level guide for deciding which production or development path applies to
+you.
+
+Live production paths:
+
+- Buyer: [docs/standup/buyer-quickstart.md](docs/standup/buyer-quickstart.md)
+- Seller: [docs/standup/seller-quickstart.md](docs/standup/seller-quickstart.md)
+- Platform Operator: [docs/standup/platform-quickstart.md](docs/standup/platform-quickstart.md)
+- Compute Host Operator: [docs/standup/host-quickstart.md](docs/standup/host-quickstart.md)
+- Support Operator: [docs/standup/support-quickstart.md](docs/standup/support-quickstart.md)
+
+If you only need to install the CLI first, use
+[cli/INSTALLER.md](cli/INSTALLER.md).
+
+### Local Developer Path
+
+Use the rest of this README if you are:
+
+- developing locally
+- bringing up the local chain or local compose stack
+- running repo-local tests and e2e paths
+
+Use [docs/standup/overview.md](docs/standup/overview.md) only when you are
+standing up the deployed production environment rather than working locally.
+
 ## Technology Stack
 
 - [Alkahest](https://github.com/arkhai-io/alkahest) for programmable peer-to-peer agreements and escrow-backed settlement flows used by the market agent.
@@ -43,6 +71,14 @@ This will make the cli at ./cli/dist/market
 You can then run it using e.g. market -v
 
 If `market` isn't found, ensure the dist folder is on PATH.
+
+For cross-platform installation and remote install options, see
+[cli/INSTALLER.md](cli/INSTALLER.md).
+
+Important: the installed `market` CLI is still primarily a generic local/dev
+surface. The current production role flows for buyer, seller, platform, host,
+and support are documented in [docs/role-entrypoints.md](docs/role-entrypoints.md)
+and currently use role-specific wrapper scripts under `scripts/`.
 
 ## Order Creation (CLI)
 
@@ -288,6 +324,7 @@ Production deployment templates and the canary smoke workflow live in:
 - `core/agent/.env.production.sample`
 - `async-provisioning-service/.env.production.sample`
 - `erc-8004-registry-py/.env.production.sample`
+- `docs/role-entrypoints.md`
 - `docs/standup/overview.md`
 - `docs/standup/canary.md`
 - `docs/production-canary.md`

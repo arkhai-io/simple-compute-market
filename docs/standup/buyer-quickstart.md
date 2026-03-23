@@ -7,6 +7,12 @@ The buyer uses one wrapper entrypoint:
 
 - `scripts/run_human_buyer_purchase.py`
 
+Who this is for:
+
+- a human buyer purchasing compute from a live production environment
+- an agent or service that needs one stable buyer-facing wrapper and a
+  structured artifact
+
 The wrapper discovers an open live offer, creates the buyer order, waits for
 provisioning, and writes a structured artifact with at least:
 
@@ -58,9 +64,21 @@ from `scripts/role_contracts.py`. That artifact includes:
 - the buyer `request_url` and canonical `auth_url`
 - optional SSH verification output if `--ssh-private-key-path` is provided
 
+## Success Criteria
+
+Treat the buyer path as successful only when all of the following are true:
+
+- a live seller offer is discovered or explicitly selected
+- the buyer order is created successfully
+- provisioning reaches a terminal `succeeded` state
+- the artifact records the selected seller order, `order_id`, `job_id`, and
+  `vm_target`
+
 ## Notes
 
 - This quickstart is buyer-facing, not operator-facing.
 - It does not assume seller-owned secrets.
 - It uses the live registry and live provisioning history rather than a locally
   seeded seller sandbox.
+- The current production entrypoint is the script wrapper above, not an
+  installed `market buyer ...` subcommand yet.

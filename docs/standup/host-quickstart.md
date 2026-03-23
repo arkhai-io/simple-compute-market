@@ -7,6 +7,12 @@ The operator uses:
 
 - `scripts/enroll_compute_host.py`
 
+Who this is for:
+
+- a compute-host operator validating or enrolling a real KVM host
+- a coordinating agent/service that needs machine-readable readiness or
+  enrollment artifacts
+
 The wrapper is intentionally thin and builds on the existing IaC surface:
 
 - `compute-provisioning-iac/ansible/inventory/hosts`
@@ -74,5 +80,7 @@ The wrapper writes a structured host artifact that records:
 
 - This is operator-facing and intentionally keeps the privileged IaC surface in
   one place.
+- The current production entrypoint is the script wrapper above, not an
+  installed `market host ...` subcommand yet.
 - For agent or platform coordination, the resulting artifact aligns with the
   shared live role contracts.
