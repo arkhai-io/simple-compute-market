@@ -121,6 +121,7 @@ CLI_INSTALLER_DOC = ROOT / "cli/INSTALLER.md"
 AGENT_README = ROOT / "core/agent/README.md"
 TRAINING_README = ROOT / "domain/compute/training/README.md"
 GITMODULES_PATH = ROOT / ".gitmodules"
+DUMMY_TEST_PATH = ROOT / "core/tests/unit/test_dummy.py"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -1154,6 +1155,13 @@ def test_cli_installer_doc_points_installed_users_to_role_entrypoints() -> None:
             "cli/INSTALLER.md is missing required post-install navigation token: "
             f"{required_token}"
         )
+
+
+def test_placeholder_dummy_test_has_been_removed() -> None:
+    assert not DUMMY_TEST_PATH.exists(), (
+        "core/tests/unit/test_dummy.py is still present. Replace placeholder "
+        "coverage with a real behavior test or remove the file."
+    )
 
 
 def test_platform_quickstart_doc_exists_and_is_linked() -> None:
