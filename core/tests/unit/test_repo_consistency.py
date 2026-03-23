@@ -112,6 +112,7 @@ RUN_MARKET_SUPPORT_SCRIPT = ROOT / "scripts/run_market_support.py"
 RUN_PLATFORM_STANDUP_SCRIPT = ROOT / "scripts/run_platform_standup.py"
 ENROLL_COMPUTE_HOST_SCRIPT = ROOT / "scripts/enroll_compute_host.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
+FAST_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_fast_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
 DEPLOYED_CANARY_WORKFLOW = ROOT / ".github/workflows/deployed-canary.yml"
@@ -246,6 +247,13 @@ def test_async_provisioning_contract_does_not_reference_admin_secret() -> None:
     assert "ADMIN_SECRET" not in sample_text
 
 
+def test_repo_exposes_canonical_fast_repo_validation_entrypoint() -> None:
+    assert FAST_REPO_VALIDATION_SCRIPT.exists(), (
+        "scripts/run_fast_repo_validation.py must exist as the canonical "
+        "fast-matrix test entrypoint"
+    )
+
+
 def test_repo_exposes_canonical_full_repo_validation_entrypoint() -> None:
     assert FULL_REPO_VALIDATION_SCRIPT.exists(), (
         "scripts/run_full_repo_validation.py must exist as the canonical "
@@ -260,7 +268,7 @@ def test_repo_exposes_ci_test_matrix_workflow() -> None:
     )
 
     text = TEST_MATRIX_WORKFLOW.read_text(encoding="utf-8")
-    assert "scripts/run_full_repo_validation.py" in text
+    assert "scripts/run_fast_repo_validation.py" in text
     assert "node-version: 22.12.0" in text or "node-version: '22.12.0'" in text
 
 
@@ -1814,7 +1822,11 @@ def test_contracts_package_declares_node_runtime_metadata() -> None:
         )
         return
 
-    validation_script = FULL_REPO_VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    validation_script = (
+        FULL_REPO_VALIDATION_SCRIPT.read_text(encoding="utf-8")
+        + "\n"
+        + FAST_REPO_VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    )
     workflow = TEST_MATRIX_WORKFLOW.read_text(encoding="utf-8")
     assert "nvm use 22.12.0" in validation_script or 'test "$(node -v)" = "v22.12.0"' in validation_script
     assert "node-version: 22.12.0" in workflow or "node-version: '22.12.0'" in workflow

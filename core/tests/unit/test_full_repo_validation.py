@@ -5,19 +5,20 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
+FAST_SCRIPT_PATH = ROOT / "scripts/run_fast_repo_validation.py"
 SCRIPT_PATH = ROOT / "scripts/run_full_repo_validation.py"
 
 
-def _load_script_module():
-    spec = importlib.util.spec_from_file_location("run_full_repo_validation", SCRIPT_PATH)
+def _load_script_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_full_repo_validation_runner_defines_reviewable_command_matrix() -> None:
-    module = _load_script_module()
+def test_fast_repo_validation_runner_defines_reviewable_command_matrix() -> None:
+    module = _load_script_module(FAST_SCRIPT_PATH, "run_fast_repo_validation")
 
     assert module.TEST_MATRIX == [
         (
@@ -73,8 +74,8 @@ def test_full_repo_validation_runner_defines_reviewable_command_matrix() -> None
     ]
 
 
-def test_full_repo_validation_runner_executes_matrix_in_order(monkeypatch) -> None:
-    module = _load_script_module()
+def test_fast_repo_validation_runner_executes_matrix_in_order(monkeypatch) -> None:
+    module = _load_script_module(FAST_SCRIPT_PATH, "run_fast_repo_validation")
     commands: list[tuple[list[str], Path]] = []
 
     def fake_run(command: list[str], *, cwd: Path) -> None:
@@ -86,3 +87,42 @@ def test_full_repo_validation_runner_executes_matrix_in_order(monkeypatch) -> No
 
     assert exit_code == 0
     assert commands == module.TEST_MATRIX
+
+
+def test_full_repo_validation_runner_extends_fast_matrix_with_heavy_slices() -> None:
+    module = _load_script_module(SCRIPT_PATH, "run_full_repo_validation")
+
+    assert module.FAST_TEST_MATRIX == [
+        (
+            [
+                "python",
+                "scripts/run_fast_repo_validation.py",
+            ],
+            module.ROOT,
+        ),
+    ]
+    assert module.FULL_ONLY_TEST_MATRIX == [
+        (
+            ["pytest", "tests", "-q"],
+            module.ROOT / "compute-provisioning-iac",
+        ),
+        (
+            ["uv", "--no-config", "run", "pytest", "tests/e2e/test_local_dual_agent_stack.py", "-q"],
+            module.ROOT,
+        ),
+    ]
+
+
+def test_full_repo_validation_runner_executes_fast_then_full_only_commands(monkeypatch) -> None:
+    module = _load_script_module(SCRIPT_PATH, "run_full_repo_validation")
+    commands: list[tuple[list[str], Path]] = []
+
+    def fake_run(command: list[str], *, cwd: Path) -> None:
+        commands.append((command, cwd))
+
+    monkeypatch.setattr(module, "_run_command", fake_run)
+
+    exit_code = module.main([])
+
+    assert exit_code == 0
+    assert commands == module.FAST_TEST_MATRIX + module.FULL_ONLY_TEST_MATRIX

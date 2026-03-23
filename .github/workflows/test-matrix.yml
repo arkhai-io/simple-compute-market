@@ -1,4 +1,4 @@
-name: Full Test Matrix
+name: Fast Test Matrix
 
 on:
   pull_request:
@@ -39,14 +39,14 @@ jobs:
           cache: npm
           cache-dependency-path: erc-8004-contracts/package-lock.json
 
-      - name: Run canonical full repo validation
+      - name: Run canonical fast repo validation
         shell: bash
         run: |
-          python scripts/run_full_repo_validation.py 2>&1 | tee full-repo-validation.log
+          python scripts/run_fast_repo_validation.py 2>&1 | tee fast-repo-validation.log
 
       - name: Upload validation log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: full-repo-validation-log
-          path: full-repo-validation.log
+          name: fast-repo-validation-log
+          path: fast-repo-validation.log
