@@ -1,126 +1,145 @@
 """Unit tests for event sync functionality."""
 
+from __future__ import annotations
+
 import asyncio
-import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 from web3 import Web3
+
 import src.services.event_sync as event_sync_module
+from src.db.models import Agent
 from src.services.event_sync import EventSyncService
 from src.types import NetworkConfig
-from src.db.models import Agent
+
+
+REGISTRY_ADDRESS = "0x21df544947ba3e8b3c32561399e88b52dc8b2823"
 
 
 @pytest.fixture
-def mock_network_config():
+def mock_network_config() -> NetworkConfig:
     """Create a mock network config with checksum addresses."""
-    # Convert to checksum address for web3.py compatibility
-    identity_registry = Web3.to_checksum_address("0x21df544947ba3e8b3c32561399e88b52dc8b2823")
     return NetworkConfig(
         chain_id=31337,
         rpc_url="http://localhost:8545",
-        identity_registry=identity_registry,
+        identity_registry=Web3.to_checksum_address(REGISTRY_ADDRESS),
         reputation_registry="0x0000000000000000000000000000000000000000",
         validation_registry="0x0000000000000000000000000000000000000000",
     )
 
 
-@pytest.fixture
-def mock_identity_registry():
-    """Create a mock identity registry client."""
+def _build_registry_mock() -> Mock:
     mock_registry = Mock()
     mock_registry.w3 = Mock()
     mock_registry.w3.eth = Mock()
     mock_registry.w3.eth.block_number = 1000
+    mock_registry.get_past_agent_registered_events = Mock(return_value=[])
+    mock_registry.get_past_metadata_set_events = Mock(return_value=[])
+    mock_registry.get_past_uri_updated_events = Mock(return_value=[])
     return mock_registry
 
 
-@patch('src.services.event_sync.IdentityRegistryClient')
-def test_uri_updated_event_processing(MockIdentityRegistryClient, mock_network_config, db_session, sample_agent):
-    """Test UriUpdated event processing."""
-    # Mock the identity registry client to avoid web3 initialization
-    mock_registry_instance = Mock()
-    mock_registry_instance.get_past_uri_updated_events = Mock(return_value=[])
-    MockIdentityRegistryClient.return_value = mock_registry_instance
-    
-    # Create event sync service
+def _apply_sync_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(event_sync_module.settings, "chain_id", 31337)
+    monkeypatch.setattr(event_sync_module.settings, "identity_registry_address", REGISTRY_ADDRESS)
+
+
+@patch("src.services.event_sync.IdentityRegistryClient")
+def test_extract_event_arg_handles_supported_web3_event_shapes(
+    MockIdentityRegistryClient: Mock,
+    mock_network_config: NetworkConfig,
+) -> None:
+    MockIdentityRegistryClient.return_value = _build_registry_mock()
     event_sync = EventSyncService(mock_network_config)
-    
-    # Verify the mock was used
-    assert event_sync.identity_registry == mock_registry_instance
-    
-    # Test that sample agent exists
-    assert sample_agent.token_uri == "http://localhost:8001/.well-known/agent-card.json"
+
+    assert (
+        event_sync._extract_event_arg(SimpleNamespace(agentId=1), "agentId", "agent_id")
+        == 1
+    )
+    assert (
+        event_sync._extract_event_arg(SimpleNamespace(agent_id=2), "agentId", "agent_id")
+        == 2
+    )
+    assert event_sync._extract_event_arg({"agentId": 3}, "agentId", "agent_id") == 3
+    assert event_sync._extract_event_arg(("tuple-value",), "agentId") == "tuple-value"
+    assert event_sync._extract_event_arg(None, "agentId") is None
+    assert event_sync._extract_event_arg(SimpleNamespace(), "agentId") is None
 
 
-@patch('src.services.event_sync.IdentityRegistryClient')
-def test_event_argument_extraction(MockIdentityRegistryClient, mock_network_config):
-    """Test event argument extraction (different web3.py formats)."""
-    # Mock the identity registry client to avoid web3 initialization
-    mock_registry_instance = Mock()
-    MockIdentityRegistryClient.return_value = mock_registry_instance
-    
-    # Create event sync service
+@patch("src.services.event_sync.IdentityRegistryClient")
+def test_sync_block_range_skips_malformed_events_without_mutating_db(
+    MockIdentityRegistryClient: Mock,
+    mock_network_config: NetworkConfig,
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    _apply_sync_settings(monkeypatch)
+    mock_registry = _build_registry_mock()
+    mock_registry.get_past_agent_registered_events.return_value = [
+        SimpleNamespace(args=None),
+        SimpleNamespace(args=SimpleNamespace()),
+    ]
+    mock_registry.get_past_metadata_set_events.return_value = [
+        SimpleNamespace(args=None),
+        SimpleNamespace(args={"agentId": 1}),
+    ]
+    mock_registry.get_past_uri_updated_events.return_value = [
+        SimpleNamespace(args=None),
+        SimpleNamespace(args=SimpleNamespace(agentId=1)),
+    ]
+    MockIdentityRegistryClient.return_value = mock_registry
+
     event_sync = EventSyncService(mock_network_config)
-    
-    # Test different event argument formats
-    # Format 1: camelCase attributes
-    event1 = Mock()
-    event1.args = Mock()
-    event1.args.agentId = 1
-    event1.args.newUri = "http://example.com"
-    assert hasattr(event1.args, 'agentId')
-    assert hasattr(event1.args, 'newUri')
-    
-    # Format 2: snake_case attributes
-    event2 = Mock()
-    event2.args = Mock()
-    event2.args.agent_id = 1
-    event2.args.new_uri = "http://example.com"
-    assert hasattr(event2.args, 'agent_id')
-    assert hasattr(event2.args, 'new_uri')
-    
-    # Format 3: dict-like
-    event3 = Mock()
-    event3.args = {"agentId": 1, "newUri": "http://example.com"}
-    assert isinstance(event3.args, dict)
+    with patch("src.services.event_sync.SessionLocal", return_value=db_session):
+        with caplog.at_level("WARNING"):
+            asyncio.run(event_sync.sync_block_range(0, 0))
+
+    assert db_session.query(Agent).count() == 0
+    assert "Event missing args" in caplog.text
+    assert "Could not extract agentId from event" in caplog.text
+    assert "MetadataUpdated event missing args" in caplog.text
+    assert "Could not extract agentId/key from MetadataSet event" in caplog.text
+    assert "UriUpdated event missing args" in caplog.text
+    assert "Could not extract agentId/newUri from UriUpdated event" in caplog.text
 
 
-@patch('src.services.event_sync.IdentityRegistryClient')
-def test_error_handling_malformed_events(MockIdentityRegistryClient, mock_network_config, db_session):
-    """Test error handling for malformed events."""
-    # Mock the identity registry client to avoid web3 initialization
-    mock_registry_instance = Mock()
-    MockIdentityRegistryClient.return_value = mock_registry_instance
-    
-    # Create event sync service
+@patch("src.services.event_sync.IdentityRegistryClient")
+def test_sync_block_range_updates_token_uri_from_uri_updated_event(
+    MockIdentityRegistryClient: Mock,
+    mock_network_config: NetworkConfig,
+    db_session,
+    sample_agent: Agent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _apply_sync_settings(monkeypatch)
+    sample_agent_id = sample_agent.id
+    mock_registry = _build_registry_mock()
+    mock_registry.get_past_uri_updated_events.return_value = [
+        SimpleNamespace(
+            args=SimpleNamespace(agent_id=sample_agent.onchain_agent_id, new_uri="http://example.com/updated.json"),
+            block_number=15,
+        )
+    ]
+    MockIdentityRegistryClient.return_value = mock_registry
+
     event_sync = EventSyncService(mock_network_config)
-    
-    # Test event with missing args
-    event_no_args = Mock()
-    event_no_args.args = None
-    
-    # Test event with missing attributes
-    event_missing_attrs = Mock()
-    event_missing_attrs.args = Mock()
-    # Use hasattr/delattr pattern that works with Mock
-    if hasattr(event_missing_attrs.args, 'agentId'):
-        delattr(event_missing_attrs.args, 'agentId')
-    if hasattr(event_missing_attrs.args, 'newUri'):
-        delattr(event_missing_attrs.args, 'newUri')
-    
-    # These should be handled gracefully without raising exceptions
-    # The actual processing would skip these events
-    assert True  # Test passes if no exception is raised
+    with patch("src.services.event_sync.SessionLocal", return_value=db_session):
+        asyncio.run(event_sync.sync_block_range(10, 15))
+
+    db_session.expire_all()
+    refreshed = db_session.query(Agent).filter(Agent.id == sample_agent_id).one()
+    assert refreshed.token_uri == "http://example.com/updated.json"
 
 
-@patch('src.services.event_sync.IdentityRegistryClient')
+@patch("src.services.event_sync.IdentityRegistryClient")
 def test_sync_from_start_uses_configured_initial_lookback(
-    MockIdentityRegistryClient, mock_network_config
-):
-    mock_registry_instance = Mock()
-    mock_registry_instance.w3 = Mock()
-    mock_registry_instance.w3.eth = Mock()
-    mock_registry_instance.w3.eth.block_number = 1000
+    MockIdentityRegistryClient: Mock,
+    mock_network_config: NetworkConfig,
+) -> None:
+    mock_registry_instance = _build_registry_mock()
     MockIdentityRegistryClient.return_value = mock_registry_instance
 
     event_sync = EventSyncService(mock_network_config)
@@ -136,16 +155,13 @@ def test_sync_from_start_uses_configured_initial_lookback(
     event_sync.sync_block_range.assert_awaited_once_with(975, 1000)
 
 
-@patch('src.services.event_sync.IdentityRegistryClient')
+@patch("src.services.event_sync.IdentityRegistryClient")
 def test_sync_block_range_uses_configured_chunk_size(
-    MockIdentityRegistryClient, mock_network_config, db_session
-):
-    mock_registry_instance = Mock()
-    mock_registry_instance.w3 = Mock()
-    mock_registry_instance.w3.eth = Mock()
-    mock_registry_instance.get_past_agent_registered_events = Mock(return_value=[])
-    mock_registry_instance.get_past_metadata_set_events = Mock(return_value=[])
-    mock_registry_instance.get_past_uri_updated_events = Mock(return_value=[])
+    MockIdentityRegistryClient: Mock,
+    mock_network_config: NetworkConfig,
+    db_session,
+) -> None:
+    mock_registry_instance = _build_registry_mock()
     MockIdentityRegistryClient.return_value = mock_registry_instance
 
     event_sync = EventSyncService(mock_network_config)
@@ -153,7 +169,7 @@ def test_sync_block_range_uses_configured_chunk_size(
     original_chunk_size = event_sync_module.settings.event_sync_chunk_size
     try:
         event_sync_module.settings.event_sync_chunk_size = 10
-        with patch('src.services.event_sync.SessionLocal', return_value=db_session):
+        with patch("src.services.event_sync.SessionLocal", return_value=db_session):
             asyncio.run(event_sync.sync_block_range(0, 25))
     finally:
         event_sync_module.settings.event_sync_chunk_size = original_chunk_size
