@@ -33,6 +33,10 @@ STANDUP_REGISTRY_PATH = STANDUP_DIR / "registry.md"
 STANDUP_PROVISIONING_PATH = STANDUP_DIR / "provisioning.md"
 STANDUP_AGENT_SELLER_PATH = STANDUP_DIR / "agent-seller.md"
 STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
+STANDUP_DEPLOY_YOUR_OWN_MARKETPLACE_PATH = (
+    STANDUP_DIR / "deploy-your-own-marketplace.md"
+)
+STANDUP_SELLER_ONBOARDING_PATH = STANDUP_DIR / "seller-onboarding.md"
 STANDUP_SELLER_QUICKSTART_PATH = STANDUP_DIR / "seller-quickstart.md"
 STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
@@ -57,6 +61,7 @@ SUBAGENT_ROLLBACK_PATH = SUBAGENT_DIR / "rollback.md"
 SUBAGENT_CLEAN_ROOM_PATH = SUBAGENT_DIR / "clean-room.md"
 SUBAGENT_SUMMARY_PATH = SUBAGENT_DIR / "2026-03-20-audit-summary.md"
 ROLE_ENTRYPOINTS_PATH = ROOT / "docs/role-entrypoints.md"
+GET_STARTED_PATH = ROOT / "docs/get-started.md"
 CLEAN_ROOM_ACCEPTANCE_PATH = ROOT / "docs/clean-room-acceptance.md"
 ISOLATED_CANARY_SIGNOFF_PATH = ROOT / "docs/isolated-canary-signoff-2026-03-20.md"
 CANARY_MODULE_PATH = ROOT / "cli/market/canary.py"
@@ -1011,6 +1016,63 @@ def test_buyer_quickstart_exists_and_is_linked() -> None:
     assert "[Buyer Quickstart](buyer-quickstart.md)" in overview_text
 
 
+def test_get_started_doc_exists_and_routes_newcomer_intents() -> None:
+    text = GET_STARTED_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "# Get Started",
+        "Deploy your own marketplace",
+        "Join an existing marketplace as a buyer",
+        "Join an existing marketplace as a seller",
+        "Develop locally",
+        "docs/standup/deploy-your-own-marketplace.md",
+        "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-onboarding.md",
+        "README.md",
+    ):
+        assert required_token in text, (
+            "docs/get-started.md is missing required newcomer-routing token: "
+            f"{required_token}"
+        )
+
+
+def test_deploy_your_own_marketplace_doc_exists_and_points_to_bootstrap_flow() -> None:
+    text = STANDUP_DEPLOY_YOUR_OWN_MARKETPLACE_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "# Deploy Your Own Marketplace",
+        "docs/standup/overview.md",
+        "docs/standup/platform-quickstart.md",
+        "Local Secret Layout",
+        "Contract Address Bootstrap",
+        "Registry Deployment",
+        "Provisioning Deployment",
+        "Seller Agent Deployment",
+        "Buyer Agent Deployment",
+        "Canary Validation",
+    ):
+        assert required_token in text, (
+            "deploy-your-own-marketplace.md is missing required bootstrap token: "
+            f"{required_token}"
+        )
+
+
+def test_seller_onboarding_doc_exists_and_routes_new_sellers_to_deployment_then_publish() -> None:
+    text = STANDUP_SELLER_ONBOARDING_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "# Seller Onboarding",
+        "docs/standup/agent-seller.md",
+        "docs/standup/seller-quickstart.md",
+        "AGENT_URL",
+        "AGENT_AUTH_URL",
+        "AGENT_PRIV_KEY",
+        "/resources/portfolio",
+        "run_human_seller_publish.py",
+    ):
+        assert required_token in text, (
+            "seller-onboarding.md is missing required newcomer seller token: "
+            f"{required_token}"
+        )
+
+
 def test_seller_quickstart_exists_and_is_linked() -> None:
     text = STANDUP_SELLER_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
@@ -1108,6 +1170,7 @@ def test_role_entrypoints_doc_exists_and_links_role_quickstarts() -> None:
     for required_token in (
         "# Role Entry Points",
         "## Choose Your Path",
+        "docs/get-started.md",
         "Buyer",
         "Seller",
         "Platform Operator",
@@ -1115,6 +1178,7 @@ def test_role_entrypoints_doc_exists_and_links_role_quickstarts() -> None:
         "Support Operator",
         "Local Developer",
         "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-onboarding.md",
         "docs/standup/seller-quickstart.md",
         "docs/standup/platform-quickstart.md",
         "docs/standup/host-quickstart.md",
@@ -1132,9 +1196,15 @@ def test_role_entrypoints_doc_exists_and_links_role_quickstarts() -> None:
 def test_root_readme_routes_users_to_role_entrypoints() -> None:
     text = ROOT_README.read_text(encoding="utf-8")
     for required_token in (
+        "docs/get-started.md",
+        "Deploy your own marketplace",
+        "Join an existing marketplace as a buyer",
+        "Join an existing marketplace as a seller",
         "## Choose Your Path",
         "docs/role-entrypoints.md",
+        "docs/standup/deploy-your-own-marketplace.md",
         "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-onboarding.md",
         "docs/standup/seller-quickstart.md",
         "docs/standup/platform-quickstart.md",
         "docs/standup/host-quickstart.md",

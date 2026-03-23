@@ -6,13 +6,23 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 
 ## Choose Your Path
 
-Start with [docs/role-entrypoints.md](docs/role-entrypoints.md). It is the
-top-level guide for deciding which production or development path applies to
-you.
+If you are new to the repo, start with [docs/get-started.md](docs/get-started.md).
+It is the top-level guide for the three newcomer outcomes:
+
+- Deploy your own marketplace:
+  [docs/standup/deploy-your-own-marketplace.md](docs/standup/deploy-your-own-marketplace.md)
+- Join an existing marketplace as a buyer:
+  [docs/standup/buyer-quickstart.md](docs/standup/buyer-quickstart.md)
+- Join an existing marketplace as a seller:
+  [docs/standup/seller-onboarding.md](docs/standup/seller-onboarding.md)
+
+Use [docs/role-entrypoints.md](docs/role-entrypoints.md) when you already know
+which production or development role applies to you.
 
 Live production paths:
 
 - Buyer: [docs/standup/buyer-quickstart.md](docs/standup/buyer-quickstart.md)
+- Seller Onboarding: [docs/standup/seller-onboarding.md](docs/standup/seller-onboarding.md)
 - Seller: [docs/standup/seller-quickstart.md](docs/standup/seller-quickstart.md)
 - Platform Operator: [docs/standup/platform-quickstart.md](docs/standup/platform-quickstart.md)
 - Compute Host Operator: [docs/standup/host-quickstart.md](docs/standup/host-quickstart.md)

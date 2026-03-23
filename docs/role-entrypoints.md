@@ -3,6 +3,11 @@
 Use this page as the first navigation layer when you are deciding how to
 approach SMS from a live production or local development context.
 
+If you are completely new to the repo, start with [Get Started](get-started.md)
+before you choose a role-specific path.
+
+Canonical newcomer-routing path: `docs/get-started.md`
+
 ## Choose Your Path
 
 ### Buyer
@@ -21,15 +26,16 @@ environment.
 
 ### Seller
 
-Choose this path if you already operate a seller agent and want to publish or
-refresh real offers from live inventory.
+Choose this path if you want to join an existing marketplace as a seller.
 
-- Primary doc: [Seller Quickstart](standup/seller-quickstart.md)
+- Primary doc: [Seller Onboarding](standup/seller-onboarding.md)
 - Current entrypoint: `scripts/run_human_seller_publish.py`
 - Notes:
-  - this is seller-facing, not platform-facing
-  - it publishes from live `/resources/portfolio` state instead of manual JSON
-  - canonical doc path: `docs/standup/seller-quickstart.md`
+  - start with onboarding if you do not already have a deployed seller agent
+  - move to [Seller Quickstart](standup/seller-quickstart.md) once you have a
+    live seller agent and `/resources/portfolio`
+  - canonical doc paths: `docs/standup/seller-onboarding.md`,
+    `docs/standup/seller-quickstart.md`
 
 ### Platform Operator
 
@@ -38,6 +44,8 @@ Choose this path if you stand up, verify, or canary the live environment.
 - Primary doc: [Platform Quickstart](standup/platform-quickstart.md)
 - Current entrypoint: `scripts/run_platform_standup.py`
 - Notes:
+  - if you are starting from zero, begin with
+    [Deploy Your Own Marketplace](standup/deploy-your-own-marketplace.md)
   - this is the production orchestration surface for deploy, verify, and canary
   - it composes the existing render, chain-profile, rollout, and canary scripts
   - canonical doc path: `docs/standup/platform-quickstart.md`
