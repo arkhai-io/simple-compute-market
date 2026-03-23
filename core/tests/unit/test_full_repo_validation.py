@@ -65,7 +65,7 @@ def test_fast_repo_validation_runner_defines_reviewable_command_matrix() -> None
                 "fi && "
                 "export SEPOLIA_RPC_URL=http://127.0.0.1:8545 "
                 "MAINNET_RPC_URL=http://127.0.0.1:8545 && "
-                "npm install --legacy-peer-deps && "
+                "npm ci --legacy-peer-deps && "
                 "npx hardhat compile && "
                 "npm test",
             ],
@@ -103,11 +103,17 @@ def test_full_repo_validation_runner_extends_fast_matrix_with_heavy_slices() -> 
     ]
     assert module.FULL_ONLY_TEST_MATRIX == [
         (
-            ["pytest", "tests", "-q"],
+            ["python", "-B", "-m", "pytest", "tests", "-q"],
             module.ROOT / "compute-provisioning-iac",
         ),
         (
-            ["uv", "--no-config", "run", "pytest", "tests/e2e/test_local_dual_agent_stack.py", "-q"],
+            [
+                str(module.ROOT / "core/.venv/bin/python"),
+                "-m",
+                "pytest",
+                "tests/e2e/test_local_dual_agent_stack.py",
+                "-q",
+            ],
             module.ROOT,
         ),
     ]

@@ -55,7 +55,7 @@ TEST_MATRIX: list[tuple[list[str], Path]] = [
             "fi && "
             "export SEPOLIA_RPC_URL=http://127.0.0.1:8545 "
             "MAINNET_RPC_URL=http://127.0.0.1:8545 && "
-            "npm install --legacy-peer-deps && "
+            "npm ci --legacy-peer-deps && "
             "npx hardhat compile && "
             "npm test",
         ],

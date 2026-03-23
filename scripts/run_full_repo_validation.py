@@ -21,11 +21,17 @@ FAST_TEST_MATRIX: list[tuple[list[str], Path]] = [
 ]
 FULL_ONLY_TEST_MATRIX: list[tuple[list[str], Path]] = [
     (
-        ["pytest", "tests", "-q"],
+        ["python", "-B", "-m", "pytest", "tests", "-q"],
         ROOT / "compute-provisioning-iac",
     ),
     (
-        ["uv", "--no-config", "run", "pytest", "tests/e2e/test_local_dual_agent_stack.py", "-q"],
+        [
+            str(ROOT / "core/.venv/bin/python"),
+            "-m",
+            "pytest",
+            "tests/e2e/test_local_dual_agent_stack.py",
+            "-q",
+        ],
         ROOT,
     ),
 ]
