@@ -33,11 +33,14 @@ STANDUP_REGISTRY_PATH = STANDUP_DIR / "registry.md"
 STANDUP_PROVISIONING_PATH = STANDUP_DIR / "provisioning.md"
 STANDUP_AGENT_SELLER_PATH = STANDUP_DIR / "agent-seller.md"
 STANDUP_AGENT_BUYER_PATH = STANDUP_DIR / "agent-buyer.md"
+STANDUP_SELLER_QUICKSTART_PATH = STANDUP_DIR / "seller-quickstart.md"
 STANDUP_RESOURCE_SEEDING_PATH = STANDUP_DIR / "resource-seeding.md"
 STANDUP_CANARY_PATH = STANDUP_DIR / "canary.md"
 STANDUP_HUMAN_BUYER_PATH = STANDUP_DIR / "human-buyer.md"
 STANDUP_LESSONS_LEARNED_PATH = STANDUP_DIR / "lessons-learned.md"
 STANDUP_LIVE_CONTRACTS_PATH = STANDUP_DIR / "live-contracts.md"
+STANDUP_BUYER_QUICKSTART_PATH = STANDUP_DIR / "buyer-quickstart.md"
+STANDUP_SUPPORT_QUICKSTART_PATH = STANDUP_DIR / "support-quickstart.md"
 SUBAGENT_DIR = ROOT / "docs/subagents"
 SUBAGENT_INDEX_PATH = SUBAGENT_DIR / "README.md"
 SUBAGENT_LOCAL_STACK_PATH = SUBAGENT_DIR / "local-stack.md"
@@ -98,8 +101,11 @@ REPEATABLE_CANARY_RUNNER_SCRIPT = ROOT / "scripts/run_repeatable_canary.py"
 HUMAN_BUYER_TUNNEL_SCRIPT = ROOT / "scripts/start_human_buyer_tunnel.py"
 HUMAN_BUYER_SANDBOX_SCRIPT = ROOT / "scripts/setup_human_buyer_sandbox.py"
 SEED_HUMAN_SELLER_OFFER_SCRIPT = ROOT / "scripts/seed_human_seller_offer.py"
+RUN_HUMAN_SELLER_PUBLISH_SCRIPT = ROOT / "scripts/run_human_seller_publish.py"
 WAIT_FOR_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/wait_for_human_purchase.py"
 CLEANUP_HUMAN_PURCHASE_SCRIPT = ROOT / "scripts/cleanup_human_purchase.py"
+RUN_HUMAN_BUYER_PURCHASE_SCRIPT = ROOT / "scripts/run_human_buyer_purchase.py"
+RUN_MARKET_SUPPORT_SCRIPT = ROOT / "scripts/run_market_support.py"
 FULL_REPO_VALIDATION_SCRIPT = ROOT / "scripts/run_full_repo_validation.py"
 RELEASE_GATE_SCRIPT = ROOT / "scripts/run_release_gate_checks.py"
 TEST_MATRIX_WORKFLOW = ROOT / ".github/workflows/test-matrix.yml"
@@ -421,6 +427,17 @@ def test_repo_exposes_human_buyer_operator_entrypoints() -> None:
             "--amount",
             "AGENT_AUTH_URL",
         ),
+        RUN_HUMAN_SELLER_PUBLISH_SCRIPT: (
+            "--env",
+            "--resource-id",
+            "--gpu-model",
+            "--region",
+            "--token",
+            "--amount",
+            "--duration-hours",
+            "/resources/portfolio",
+            "seller_order_id",
+        ),
         WAIT_FOR_HUMAN_PURCHASE_SCRIPT: (
             "--seller-order-id",
             "--buyer-order-id",
@@ -437,6 +454,18 @@ def test_repo_exposes_human_buyer_operator_entrypoints() -> None:
             "close",
             "destroy",
             "undefine",
+        ),
+        RUN_HUMAN_BUYER_PURCHASE_SCRIPT: (
+            "--registry-url",
+            "--buyer-agent-url",
+            "--buyer-auth-url",
+            "--provisioning-url",
+            "--buyer-private-key-env",
+            "--order-id",
+            "--gpu-model",
+            "--region",
+            "--max-price",
+            "build_artifact(",
         ),
     }
 
@@ -837,11 +866,14 @@ def test_canonical_standup_docs_exist() -> None:
         STANDUP_PROVISIONING_PATH,
         STANDUP_AGENT_SELLER_PATH,
         STANDUP_AGENT_BUYER_PATH,
+        STANDUP_SELLER_QUICKSTART_PATH,
         STANDUP_RESOURCE_SEEDING_PATH,
         STANDUP_CANARY_PATH,
         STANDUP_HUMAN_BUYER_PATH,
         STANDUP_LESSONS_LEARNED_PATH,
         STANDUP_LIVE_CONTRACTS_PATH,
+        STANDUP_BUYER_QUICKSTART_PATH,
+        STANDUP_SUPPORT_QUICKSTART_PATH,
     ]
 
     missing = [str(path.relative_to(ROOT)) for path in required_paths if not path.exists()]
@@ -933,6 +965,56 @@ def test_human_buyer_runbook_exists_and_is_linked() -> None:
     assert "[Human Buyer Walkthrough](human-buyer.md)" in overview_text
 
 
+def test_buyer_quickstart_exists_and_is_linked() -> None:
+    text = STANDUP_BUYER_QUICKSTART_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/run_human_buyer_purchase.py",
+        "--registry-url",
+        "--buyer-agent-url",
+        "--buyer-auth-url",
+        "--provisioning-url",
+        "--buyer-private-key-env",
+        "--order-id",
+        "--gpu-model",
+        "--region",
+        "--max-price",
+        "BUYER_PRIVATE_KEY",
+        "order_id",
+        "job_id",
+        "vm_target",
+    ):
+        assert required_token in text, (
+            "buyer-quickstart.md is missing required buyer workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Buyer Quickstart](buyer-quickstart.md)" in overview_text
+
+
+def test_seller_quickstart_exists_and_is_linked() -> None:
+    text = STANDUP_SELLER_QUICKSTART_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "scripts/run_human_seller_publish.py",
+        "--env",
+        "--resource-id",
+        "--gpu-model",
+        "--region",
+        "--amount",
+        "AGENT_AUTH_URL",
+        "/resources/portfolio",
+        "seller_order_id",
+        "role_contracts.py",
+    ):
+        assert required_token in text, (
+            "seller-quickstart.md is missing required seller workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Seller Quickstart](seller-quickstart.md)" in overview_text
+
+
 def test_lessons_learned_doc_exists_and_is_linked() -> None:
     text = STANDUP_LESSONS_LEARNED_PATH.read_text(encoding="utf-8")
     for required_token in (
@@ -979,6 +1061,29 @@ def test_live_contracts_doc_exists_and_is_linked() -> None:
     assert "[Live Role Contracts](live-contracts.md)" in overview_text
 
 
+def test_support_quickstart_doc_exists_and_is_linked() -> None:
+    text = STANDUP_SUPPORT_QUICKSTART_PATH.read_text(encoding="utf-8")
+    for required_token in (
+        "run_market_support.py",
+        "inspect",
+        "cleanup",
+        "context.json",
+        "order_id",
+        "job_id",
+        "vm_target",
+        "reclaim_actions",
+        "support artifact",
+        "shared live contracts",
+    ):
+        assert required_token in text, (
+            "support-quickstart.md is missing required support workflow token: "
+            f"{required_token}"
+        )
+
+    overview_text = STANDUP_OVERVIEW_PATH.read_text(encoding="utf-8")
+    assert "[Support Quickstart](support-quickstart.md)" in overview_text
+
+
 def test_repo_exposes_shared_role_contract_module() -> None:
     assert ROLE_CONTRACTS_SCRIPT.exists(), (
         "scripts/role_contracts.py must exist for shared production role contracts"
@@ -997,6 +1102,27 @@ def test_repo_exposes_shared_role_contract_module() -> None:
     ):
         assert required_token in text, (
             "role_contracts.py is missing required shared-contract token: "
+            f"{required_token}"
+        )
+
+
+def test_repo_exposes_market_support_entrypoint() -> None:
+    assert RUN_MARKET_SUPPORT_SCRIPT.exists(), (
+        "scripts/run_market_support.py must exist for support operator flows"
+    )
+    text = RUN_MARKET_SUPPORT_SCRIPT.read_text(encoding="utf-8")
+    for required_token in (
+        "inspect",
+        "cleanup",
+        "run_market_support",
+        "build_artifact",
+        "order_id",
+        "job_id",
+        "vm_target",
+        "context_path",
+    ):
+        assert required_token in text, (
+            "run_market_support.py is missing required support token: "
             f"{required_token}"
         )
 

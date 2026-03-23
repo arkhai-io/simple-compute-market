@@ -49,7 +49,9 @@ Supporting references:
 
 - [Deployment Input Checklist](../deployment-input-checklist.md)
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
+- [Seller Quickstart](seller-quickstart.md)
 - [Human Buyer Walkthrough](human-buyer.md)
+- [Support Quickstart](support-quickstart.md)
 - [Lessons Learned](lessons-learned.md)
 - [Live Role Contracts](live-contracts.md)
 - [End-to-End Runbook](../e2e-runbook.md)
