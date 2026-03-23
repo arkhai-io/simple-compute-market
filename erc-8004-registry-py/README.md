@@ -122,25 +122,31 @@ alembic upgrade head
 
 ## Local Development with Anvil
 
-For local development, you can use [Anvil](https://getfoundry.sh/anvil/overview/) (a local Ethereum node) instead of connecting to testnet.
+For local development, use the parent repo's canonical local bootstrap
+contract instead of hand-running ad hoc Hardhat scripts.
 
 Quick start:
 
 ```bash
-# 1. Start Anvil in a separate terminal
-anvil
+# 1. From the repo root, initialize submodules once
+git submodule update --init --recursive
 
-# 2. Deploy ERC-8004 contracts to Anvil
-# Navigate to erc-8004-contracts/ and run deployment scripts
+# 2. Start the local chain
+cd core/agent && make test-env
 
-# 3. Update .env with Anvil configuration:
+# 3. From the repo root, deploy contracts with the canonical wrapper
+python scripts/deploy_local_contracts.py --rpc-url <rpc-url from test-env>
+
+# 4. Update .env with Anvil configuration:
 # CHAIN_ID=1337
-# RPC_URL=http://localhost:8545
-# Update contract addresses to your deployed addresses
+# RPC_URL=<rpc-url from test-env>
+# Update contract addresses to the values emitted by scripts/deploy_local_contracts.py
 
-# 4. Run with local config
+# 5. Run with local config
 uvicorn src.main:app --reload
 ```
+
+For the full local bootstrap sequence, use the root [README](../README.md).
 
 ## Startup Order
 

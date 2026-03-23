@@ -78,35 +78,6 @@ python scripts/run_platform_standup.py canary \
 This delegates to `scripts/run_repeatable_canary.py` so the platform operator
 and automated agents use the same production-facing canary surface.
 
-## Installed Invocation
-
-If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), run
-the same wrapper from the default install root:
-
-```bash
-python ~/.market/scripts/run_platform_standup.py deploy \
-  --project sms-canary-project \
-  --zone us-east4-c \
-  --render-output-dir /tmp/sms-rendered \
-  --canary-env-path ~/.config/simple-market-service/prod-canary.env
-```
-
-```bash
-python ~/.market/scripts/run_platform_standup.py verify \
-  --environment isolated-eth-sepolia \
-  --render-output-dir /tmp/sms-rendered
-```
-
-```bash
-python ~/.market/scripts/run_platform_standup.py canary \
-  --environment isolated-eth-sepolia \
-  --render-output-dir /tmp/sms-rendered \
-  --artifacts-dir ./artifacts/platform
-```
-
-If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
-that path.
-
 ## Output
 
 The platform wrapper writes a shared live-contract artifact that includes:
@@ -123,5 +94,6 @@ The platform wrapper writes a shared live-contract artifact that includes:
 - This is operator-facing, not buyer-facing.
 - It keeps the live rollout contract centralized instead of introducing another
   ad hoc deployment path.
-- The current production entrypoint is the script wrapper above, not an
-  installed `market platform ...` subcommand yet.
+- The current production entrypoint is the script wrapper above; this is a
+  repo-checkout surface today, not an installed `market platform ...`
+  subcommand.

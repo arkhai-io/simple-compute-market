@@ -80,7 +80,6 @@ Use the validation entrypoint that matches the job you are doing:
 - Python 3.12+ with `uv`
 - Node.js 12+ with npm
 - Docker
-- Docker Compose
 - ZeroTier CLI (optional, requires sudo)
 - Anvil/Foundry (for local chain)
 
@@ -149,28 +148,48 @@ CSV columns:
 
 ## Quick Start
 
-### 1. Start Local Chain
+### 1. Initialize Submodules
+
+The contracts repo is a required git submodule for local bootstrap.
+
+```bash
+git submodule update --init --recursive
+```
+
+### 2. Start Local Chain
 
 ```bash
 cd core/agent
 make test-env
 ```
 
-Note the RPC URL and port (keep this terminal open). It runs on `http://localhost:45165` by default.
+Note the dynamic RPC URL printed by `make test-env` and keep that terminal
+open. The local Anvil port is assigned dynamically.
 
-### 2. Deploy Contracts
+You can also use the CLI helper:
+
+```bash
+market dev test-env
+```
+
+### 3. Deploy Contracts
 
 In a new terminal:
 
 ```bash
-cd erc-8004-contracts
-npm install
-ANVIL_RPC_URL=<rpc_url from step 1> npm run deploy:anvil
+python scripts/deploy_local_contracts.py --rpc-url <rpc-url from step 2>
 ```
 
-Note the deployed contract addresses.
+Or via the CLI helper:
 
-### 3. Start Registry/Indexer
+```bash
+market dev deploy-contracts --rpc-url <rpc-url from step 2>
+```
+
+The canonical deploy wrapper handles the contracts dependency contract for you
+and writes the local address bundle needed by the agent runtime.
+
+### 4. Start Registry/Indexer
 
 In a new terminal:
 
@@ -182,7 +201,7 @@ make serve
 
 The registry runs on `http://localhost:8080` by default.
 
-### 4. Configure and Start Agent
+### 5. Configure and Start Agent
 
 In a new terminal:
 
@@ -194,8 +213,10 @@ cp .env.sample .env
 
 Edit `.env` with:
 
-- Contract addresses from step 2
-- `CHAIN_RPC_URL` (from step 1)
+- Contract addresses from step 3
+- `CHAIN_NAME=anvil`
+- `CHAIN_RPC_URL` (from step 2)
+- `ALKAHEST_ADDRESS_CONFIG_PATH=/absolute/path/to/core/agent/app/data/alkahest_anvil_addresses.json`
 - `REGISTRY_URL=http://localhost:8080/`
 - `AGENT_PRIV_KEY` and `AGENT_WALLET_ADDRESS` (use test keys)
 
@@ -204,6 +225,10 @@ Start the agent:
 ```bash
 make serve-a2a
 ```
+
+The `make test-env` helper and `market dev test-env` both print the exact
+`ALKAHEST_ADDRESS_CONFIG_PATH` value for the current checkout. Use that path
+instead of inventing a local copy.
 
 ## Deprecated Docker Compose Local Stack
 

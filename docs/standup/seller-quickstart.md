@@ -65,20 +65,6 @@ python scripts/run_human_seller_publish.py \
   --amount 0.0001
 ```
 
-## Installed Invocation
-
-If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), run
-the same publish wrapper from the default install root:
-
-```bash
-python ~/.market/scripts/run_human_seller_publish.py \
-  --env /etc/simple-market-service/seller-agent.env \
-  --amount 0.0001
-```
-
-If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
-that path.
-
 Optional selectors:
 
 - `--resource-id` to target one live resource
@@ -126,7 +112,8 @@ After the command succeeds:
 - This quickstart is seller-facing, not operator-facing.
 - It avoids hardcoded example JSON and instead uses the seller's live portfolio
   as the source of truth.
-- The current production entrypoint is the script wrapper above, not an
-  installed `market seller ...` subcommand yet.
+- The current production entrypoint is the script wrapper above; this is a
+  repo-checkout surface today, not an installed `market seller ...`
+  subcommand.
 - For operator deployment instructions, continue using
   `docs/standup/agent-seller.md`.

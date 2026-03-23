@@ -78,25 +78,6 @@ python scripts/run_human_buyer_purchase.py \
   --buyer-private-key-env BUYER_PRIVATE_KEY
 ```
 
-## Installed Invocation
-
-If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), the
-same wrapper is available from the default install root:
-
-```bash
-export BUYER_PRIVATE_KEY=0x...
-
-python ~/.market/scripts/run_human_buyer_purchase.py \
-  --registry-url http://127.0.0.1:28080 \
-  --buyer-agent-url http://127.0.0.1:28001 \
-  --buyer-auth-url http://10.243.0.117:8000 \
-  --provisioning-url http://127.0.0.1:28081 \
-  --buyer-private-key-env BUYER_PRIVATE_KEY
-```
-
-If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
-that path.
-
 If you already know the exact seller offer to match, pass `--order-id`.
 Otherwise the wrapper discovers open compute offers, applies any `--gpu-model`,
 `--region`, and `--max-price` filters, and chooses the cheapest matching offer.
@@ -129,5 +110,6 @@ Treat the buyer path as successful only when all of the following are true:
 - It does not assume seller-owned secrets.
 - It uses the live registry and live provisioning history rather than a locally
   seeded seller sandbox.
-- The current production entrypoint is the script wrapper above, not an
-  installed `market buyer ...` subcommand yet.
+- The current production entrypoint is the script wrapper above; this is a
+  repo-checkout surface today, not an installed `market buyer ...`
+  subcommand.
