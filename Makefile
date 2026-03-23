@@ -85,6 +85,9 @@ deploy-agents:
 deploy-provisioning:
 	cd async-provisioning-service && make deploy
 
+stop:
+	docker ps -aq | xargs -r docker stop
+
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-compose:
 	docker compose down
