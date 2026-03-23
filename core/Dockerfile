@@ -6,6 +6,7 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS bui
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
+ENV UV_HTTP_TIMEOUT=120
 
 RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -rf /var/lib/apt/lists/*
 
@@ -49,8 +50,10 @@ RUN apt-get update && \
     echo 'appuser ALL=(root) NOPASSWD: /usr/sbin/zerotier-one, /usr/sbin/zerotier-cli' \
       > /etc/sudoers.d/appuser && \
     chmod 0440 /etc/sudoers.d/appuser && \
-    mkdir -p /app
+    mkdir -p /app && \
+    chown appuser /app
 
+USER appuser
 WORKDIR /app
 
 EXPOSE 9993/udp
@@ -70,7 +73,7 @@ ARG PORT=8080
 ENV PORT=${PORT}
 EXPOSE ${PORT}
 
-COPY core/entrypoint.sh ./entrypoint.sh
+COPY --chown=appuser:appuser core/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 ARG MODEL_VERSION=""
