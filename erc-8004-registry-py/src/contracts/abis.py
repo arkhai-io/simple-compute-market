@@ -104,7 +104,7 @@ IDENTITY_REGISTRY_ABI = [
             {"indexed": False, "name": "newUri", "type": "string"},
             {"indexed": True, "name": "updatedBy", "type": "address"}
         ],
-        "name": "UriUpdated",
+        "name": "URIUpdated",
         "type": "event",
     },
 ]
