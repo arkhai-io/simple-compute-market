@@ -51,6 +51,7 @@ Supporting references:
 - [Clean-Room Acceptance Checklist](../clean-room-acceptance.md)
 - [Seller Quickstart](seller-quickstart.md)
 - [Human Buyer Walkthrough](human-buyer.md)
+- [Buyer Quickstart](buyer-quickstart.md)
 - [Support Quickstart](support-quickstart.md)
 - [Lessons Learned](lessons-learned.md)
 - [Live Role Contracts](live-contracts.md)
