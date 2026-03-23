@@ -11,7 +11,7 @@ build-images:
 
 deploy:
 	-docker network create market
-	docker run -d --rm --network market --name test-env -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 $(IMAGE_NAME):$(IMAGE_TAG)
+	docker run -d --rm --network market --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 $(IMAGE_NAME):$(IMAGE_TAG)
 
 # tests that the test-env container is reachable and state was loaded. It should just dump a huge blob at you.
 smoke:
