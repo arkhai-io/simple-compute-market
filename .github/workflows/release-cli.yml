@@ -34,31 +34,7 @@ jobs:
 
       - name: Build tarball for cURL installer
         run: |
-          tar czf "/tmp/$TARBALL_NAME" \
-            --transform 's,^\./,market-cli/,' \
-            --transform 's,^\.$$,market-cli,' \
-            --exclude='.git' \
-            --exclude='.github' \
-            --exclude='mcp' \
-            --exclude='./scripts' \
-            --exclude='tmp' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='*.pyo' \
-            --exclude='.venv' \
-            --exclude='node_modules' \
-            --exclude='.env' \
-            --exclude='.env.tmp' \
-            --exclude='*.egg-info' \
-            --exclude='.claude' \
-            --exclude='Dockerfile' \
-            --exclude='docker-compose*.yml' \
-            --exclude='market-installer.sh' \
-            --exclude='.DS_Store' \
-            --exclude='*.pt' \
-            --exclude='experiments' \
-            .
-          mv "/tmp/$TARBALL_NAME" .
+          python scripts/build_package_tarball.py --output "$TARBALL_NAME"
           ls -lh "$TARBALL_NAME"
 
       - name: Generate checksums

@@ -39,28 +39,7 @@ trap 'rm -rf "$TMPDIR_BUILD"' EXIT
 TARBALL="$TMPDIR_BUILD/$TARBALL_NAME"
 
 info "Creating tarball from $REPO_ROOT..."
-
-tar czf "$TARBALL" \
-    -C "$(dirname "$REPO_ROOT")" \
-    --exclude='.git' \
-    --exclude='.github' \
-    --exclude='mcp' \
-    --exclude="$(basename "$REPO_ROOT")/scripts" \
-    --exclude='tmp' \
-    --exclude='__pycache__' \
-    --exclude='*.pyc' \
-    --exclude='*.pyo' \
-    --exclude='.venv' \
-    --exclude='node_modules' \
-    --exclude='.env' \
-    --exclude='.env.tmp' \
-    --exclude='*.egg-info' \
-    --exclude='.claude' \
-    --exclude='Dockerfile' \
-    --exclude='docker-compose*.yml' \
-    --exclude='market-installer.sh' \
-    --exclude='.DS_Store' \
-    "$(basename "$REPO_ROOT")"
+python scripts/build_package_tarball.py --output "$TARBALL"
 
 TARBALL_SIZE=$(wc -c < "$TARBALL" | tr -d ' ')
 ok "Tarball: $(( TARBALL_SIZE / 1024 )) KB"

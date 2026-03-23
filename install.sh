@@ -7,9 +7,6 @@ BIN_DIR="$HOME/.local/bin"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=12
 UV_VERSION="0.8.13"
-GCP_SA_KEY_URL="https://us-central1-ww-migration-arkhai.cloudfunctions.net/getServiceAccountKey"
-DOCKER_IMAGE="us-east4-docker.pkg.dev/ww-migration-arkhai/a2a-agent/a2a-agent:v0.0.1"
-GCP_DOCKER_REGISTRY="$(echo "$DOCKER_IMAGE" | cut -d'/' -f1)"
 
 # ── System dependency mapping ─────────────────────────────────
 # Format: "command:apt-package"
@@ -19,9 +16,6 @@ LINUX_SYSTEM_DEPS=(
     "git:git"
     "gcc:build-essential"
     "g++:build-essential"
-    "make:build-essential"
-    "npm:npm"
-    "docker:docker.io"
     "python3.12:python3.12"
 )
 LINUX_PYTHON_DEV_PKGS=("python3.12-dev" "software-properties-common")
@@ -33,20 +27,6 @@ error() { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; }
 ok()    { printf '\033[1;32m[ok]\033[0m %s\n' "$*"; }
 
 # ── Prerequisite checks ───────────────────────────────────────
-
-check_command() {
-    if ! command -v "$1" &>/dev/null; then
-        error "'$1' is required but not found. Please install it and try again."
-        exit 1
-    fi
-}
-
-check_docker_running() {
-    if ! docker info &>/dev/null; then
-        error "Docker daemon is not running. Please start Docker and try again."
-        exit 1
-    fi
-}
 
 check_python_version() {
     local python_cmd=""
@@ -97,68 +77,13 @@ detect_platform() {
 
 # ── Dependency detection & installation ───────────────────────
 
-# Known install locations to check when a command is not on PATH
-GCLOUD_SEARCH_PATHS=(
-    "$HOME/google-cloud-sdk/bin"
-    "/usr/local/google-cloud-sdk/bin"
-    "/opt/google-cloud-sdk/bin"
-    "/snap/google-cloud-cli/current/bin"
-)
-
-ZEROTIER_SEARCH_PATHS=(
-    "/usr/sbin"
-    "/usr/local/bin"
-    "/Library/Application Support/ZeroTier/One"
-    "/opt/zerotier/bin"
-)
-
-# Try to find a command either on PATH or in known locations.
-# If found off-PATH, exports the directory to PATH.
-# Returns 0 if found, 1 if not.
-resolve_command() {
-    local cmd="$1"
-    shift
-    local search_paths=("$@")
-
-    if command -v "$cmd" &>/dev/null; then
-        return 0
-    fi
-
-    for dir in "${search_paths[@]}"; do
-        if [ -x "$dir/$cmd" ]; then
-            info "Found '$cmd' at $dir (adding to PATH)"
-            export PATH="$dir:$PATH"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-install_gcloud() {
-    info "Installing Google Cloud SDK..."
-
-    curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir="$HOME"
-
-    export PATH="$HOME/google-cloud-sdk/bin:$PATH"
-
-    if ! command -v gcloud &>/dev/null; then
-        error "Google Cloud SDK installation failed. Please install manually."
-        exit 1
-    fi
-
-    ok "Google Cloud SDK installed ($(gcloud --version 2>&1 | head -1))"
-}
-
 check_and_install_dependencies() {
     # ── Collect everything that's missing ──
     local display_items=()        # human-readable list for the prompt
     local missing_apt_cmds=()     # commands to verify after apt install
     local missing_apt_pkgs=()     # deduplicated apt packages
     local need_python312=false
-    local need_gcloud=false
     local has_apt=false
-    ZEROTIER_ALREADY_INSTALLED=true
 
     # -- System packages (Linux only) --
     if [ "$OS" = "linux" ]; then
@@ -229,21 +154,6 @@ check_and_install_dependencies() {
         fi
     fi
 
-    # -- gcloud --
-    if ! resolve_command gcloud "${GCLOUD_SEARCH_PATHS[@]}"; then
-        need_gcloud=true
-        display_items+=("Google Cloud SDK (gcloud)")
-    else
-        ok "gcloud found ($(command -v gcloud))"
-    fi
-
-    # -- zerotier (detection only; market install --with-zerotier handles installation) --
-    if ! resolve_command zerotier-cli "${ZEROTIER_SEARCH_PATHS[@]}"; then
-        ZEROTIER_ALREADY_INSTALLED=false
-    else
-        ok "zerotier-cli found ($(command -v zerotier-cli))"
-    fi
-
     # ── Nothing missing → done ──
     if [ ${#display_items[@]} -eq 0 ]; then
         ok "All dependencies are present."
@@ -311,9 +221,6 @@ check_and_install_dependencies() {
         fi
         ok "System packages installed successfully."
     fi
-
-    # ── Install gcloud ──
-    [ "$need_gcloud" = true ] && install_gcloud
 }
 
 # ── Install uv ────────────────────────────────────────────────
@@ -477,7 +384,6 @@ main() {
     echo ""
 
     detect_platform
-    check_docker_running
     check_and_install_dependencies
     check_python_version
     install_uv
@@ -489,38 +395,12 @@ main() {
     echo ""
     ok "Market CLI installed successfully!"
     echo ""
-
-    info "Running market install to set up service dependencies..."
-    echo ""
-    if [ "$ZEROTIER_ALREADY_INSTALLED" = true ]; then
-        market install
-    else
-        market install --with-zerotier
-    fi
-
-    # ── Pull Docker image ──────────
-    local gcp_sa_key_file
-    gcp_sa_key_file="$(mktemp)"
-
-    info "Pulling Agent Docker Image..."
-    curl -sSfL "$GCP_SA_KEY_URL" -o "$gcp_sa_key_file"
-
-    gcloud auth activate-service-account --key-file="$gcp_sa_key_file"
-    gcloud auth configure-docker "$GCP_DOCKER_REGISTRY" --quiet
-
-    docker pull "$DOCKER_IMAGE"
-
-    info "Cleaning up..."
-    local sa_email
-    sa_email="$(python3 -c "import json; print(json.load(open('$gcp_sa_key_file'))['client_email'])")"
-    gcloud auth revoke "$sa_email" --quiet 2>/dev/null || true
-    rm -f "$gcp_sa_key_file"
-
     ok "Installation complete"
 
     echo ""
     info "Get started:"
     echo "    market --help              Show all commands"
+    echo "    market install             Sync local agent/registry/contracts dependencies"
     echo "    market config init agent   Configure the agent"
     echo ""
 }

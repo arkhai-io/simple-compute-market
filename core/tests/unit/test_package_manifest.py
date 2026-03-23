@@ -38,6 +38,7 @@ def test_package_manifest_includes_scripts_and_excludes_broken_compose_artifacts
     assert "docker-compose.yml" not in module.INCLUDED_TOP_LEVEL_PATHS
     assert "scripts" not in module.TAR_EXCLUDE_PATTERNS
     assert "docker-compose*.yml" in module.TAR_EXCLUDE_PATTERNS
+    assert ".pytest_cache" in module.TAR_EXCLUDE_PATTERNS
 
 
 def test_package_manifest_snapshot_is_machine_readable() -> None:

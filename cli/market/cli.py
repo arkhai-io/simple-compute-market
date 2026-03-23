@@ -62,8 +62,8 @@ def install(
             REPO_ROOT / "erc-8004-registry-py",
         ),
         (
-            "Contracts dependencies (npm install)",
-            ["npm", "install"],
+            "Contracts dependencies (npm ci)",
+            ["npm", "ci", "--legacy-peer-deps"],
             REPO_ROOT / "erc-8004-contracts",
         ),
     ]
