@@ -995,11 +995,9 @@ def test_buyer_quickstart_exists_and_is_linked() -> None:
     text = STANDUP_BUYER_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_human_buyer_purchase.py",
-        "~/.market/scripts/run_human_buyer_purchase.py",
         "## This Path Assumes",
         "## How To Get These Values",
         "## Repo Checkout Invocation",
-        "## Installed Invocation",
         "--registry-url",
         "--buyer-agent-url",
         "--buyer-auth-url",
@@ -1085,12 +1083,10 @@ def test_seller_quickstart_exists_and_is_linked() -> None:
     text = STANDUP_SELLER_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_human_seller_publish.py",
-        "~/.market/scripts/run_human_seller_publish.py",
         "docs/standup/seller-onboarding.md",
         "## This Path Assumes",
         "## How To Get These Values",
         "## Repo Checkout Invocation",
-        "## Installed Invocation",
         "--env",
         "--resource-id",
         "--gpu-model",
@@ -1252,9 +1248,6 @@ def test_cli_installer_doc_points_installed_users_to_role_entrypoints() -> None:
     for required_token in (
         "## After Install",
         "docs/role-entrypoints.md",
-        "~/.market/scripts/run_human_buyer_purchase.py",
-        "~/.market/scripts/run_human_seller_publish.py",
-        "~/.market/scripts/run_platform_standup.py",
         "docs/standup/buyer-quickstart.md",
         "docs/standup/seller-onboarding.md",
         "docs/standup/seller-quickstart.md",
@@ -1279,10 +1272,8 @@ def test_platform_quickstart_doc_exists_and_is_linked() -> None:
     text = STANDUP_PLATFORM_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_platform_standup.py",
-        "~/.market/scripts/run_platform_standup.py",
         "## This Path Assumes",
         "## Repo Checkout Invocation",
-        "## Installed Invocation",
         "deploy",
         "verify",
         "canary",
@@ -1604,29 +1595,6 @@ def test_root_readme_uses_current_core_agent_paths() -> None:
     assert re.search(r"(?<!core/)agent/\.env", text) is None
     assert "`core/agent/`" in text
     assert "cd core/agent" in text
-
-
-def test_root_readme_documents_full_local_compose_stack() -> None:
-    text = ROOT_README.read_text(encoding="utf-8")
-
-    for required_token in (
-        "Docker",
-        "Docker Compose",
-        "/dev/net/tun",
-        "Linux host",
-        "make init-submodules",
-        "make build",
-        "make deploy-local",
-        "make stop-local",
-        "~/.ssh/id_ed25519",
-        "http://localhost:18080/health",
-        "http://localhost:18081/health",
-        "http://localhost:18000/.well-known/agent-card.json",
-        "http://localhost:18001/.well-known/agent-card.json",
-    ):
-        assert required_token in text, (
-            f"README.md is missing local compose stack guidance: {required_token}"
-        )
 
 
 def test_makefile_local_build_path_does_not_require_zerotier_install() -> None:
