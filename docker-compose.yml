@@ -10,7 +10,24 @@ services:
     networks:
       - market-network
 
-  # # 2. Registry/Indexer service
+  # 2. One-shot contract deployer — writes IDENTITY_REGISTRY_ADDRESS to shared-env/.env, then exits.
+  #    registry and agents depend on this completing before they start.
+  contracts-deploy:
+    image: arkhai:contract-deployer
+    container_name: market-contracts-deploy
+    depends_on:
+      anvil:
+        condition: service_started
+    environment:
+      - ENV_FILE=/app/shared-env/.env
+      - RPC_URL=http://anvil:8545
+    volumes:
+      - ./shared-env:/app/shared-env
+    networks:
+      - market-network
+    command: sh -c ./deploy-local.sh
+
+  # 3. Registry/Indexer service
   registry:
     image: arkhai:registry
     depends_on:
@@ -22,7 +39,7 @@ services:
       - ./erc-8004-registry-py/.env.docker-compose
       - ./shared-env/.env
     volumes:
-      - shared-env:/app/shared-env
+      - ./shared-env:/app/shared-env
     networks:
       - market-network
     restart: unless-stopped
@@ -37,7 +54,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # 3. Buyer agent (Alice)
+  # 4. Buyer agent (Alice)
   buy_agent:
     image: arkhai:core
     platform: linux/amd64
@@ -59,7 +76,7 @@ services:
       - ONCHAIN_AGENT_ID=
       - ZEROTIER_IP=
     volumes:
-      - shared-env:/app/shared-env
+      - ./shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
     networks:
       - market-network
@@ -76,7 +93,7 @@ services:
         set +a
         exec ./entrypoint.sh
 
-  # 4. Seller agent (Bob)
+  # 5. Seller agent (Bob)
   sell_agent:
     image: arkhai:core
     platform: linux/amd64
@@ -98,7 +115,7 @@ services:
       - ONCHAIN_AGENT_ID=
       - ZEROTIER_IP=
     volumes:
-      - shared-env:/app/shared-env
+      - ./shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one
     networks:
       - market-network
@@ -118,7 +135,7 @@ services:
           --csv core/agent/app/data/ww1-machine.csv
         exec ./entrypoint.sh
 
-  # 5. Redis (job queue for provisioning service)
+  # 6. Redis (job queue for provisioning service)
   redis:
     image: redis:7-alpine
     container_name: market-redis
@@ -132,7 +149,7 @@ services:
       timeout: 3s
       retries: 3
 
-  # 6. Async provisioning service
+  # 7. Async provisioning service
   provisioning:
     image: arkhai:provisioning
     container_name: market-provisioning
@@ -155,14 +172,11 @@ services:
       resources:
         limits:
           memory: 384m
+
 networks:
   market-network:
     driver: bridge
 
 volumes:
-  contracts-artifacts:
-  contracts-deployments:
-  registry-data:
-  shared-env:
   zerotier-buy:
   zerotier-sell:

@@ -1,21 +1,22 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
-CONTRACTS_IMAGE := arkhai:contracts
 
-.PHONY: build
+.PHONY: build build-runtime-images
 
-#Basic flow: build (optional), init (downloads if not built), run 
+#Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core build-provisioning
+# build-test-env must run after build-market-contract-deployer (uses the image).
+# build-runtime-images parallelizes the three independent service images.
+build: build-cli build-market-contract-deployer build-test-env build-runtime-images
+
+build-runtime-images:
+	$(MAKE) -j3 build-registry build-core build-provisioning
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build
 
-build-contracts:
-	cd erc-8004-contracts && docker build -t ${CONTRACTS_IMAGE}-${GIT_SUFFIX} .
-
 build-market-contract-deployer:
-	cd market-contract-deployer && make build CONTRACTS_IMAGE=${CONTRACTS_IMAGE}
+	cd market-contract-deployer && make build
 
 #The anvil rpc url is hard coded inside of deploy_alkhahest.py. Don't change the network name or anvil container name.
 #Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
@@ -23,7 +24,7 @@ build-anvil-state:
 	-docker network create anvil
 	-mkdir shared-env
 	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run -it --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer sh -c ./deploy-local.sh
+	docker run --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:contract-deployer sh -c ./deploy-local.sh
 	echo "Todo: add a step here to verify contract deployment"
 	docker stop anvil
 	-docker network rm anvil
