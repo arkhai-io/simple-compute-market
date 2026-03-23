@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+.env
+*.egg
+
+# Secrets — NEVER commit real values
+.secrets.toml
+
+# Pytest / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+pytest-report.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

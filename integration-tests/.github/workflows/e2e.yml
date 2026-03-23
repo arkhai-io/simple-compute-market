@@ -1,0 +1,118 @@
+# .github/workflows/e2e.yml
+# -----------------------------------------------------------------------
+# Arkhai E2E Integration Tests
+#
+# Triggered manually (workflow_dispatch) or on a schedule so it can run
+# against live deployed environments.  Profile-specific secrets are
+# mounted as files into CONFIG_DIRECTORY from GitHub / Kubernetes secrets.
+#
+# Required GitHub Actions secrets (set per environment):
+#   ARKHAI_RPC_URL
+#   ARKHAI_CHAIN_ID
+#   ARKHAI_REGISTRY_IDENTITY_ADDRESS
+#   ARKHAI_REGISTRY_REPUTATION_ADDRESS
+#   ARKHAI_REGISTRY_VALIDATION_ADDRESS
+#   ARKHAI_REGISTRY_OWNER_ADDRESS
+#   ARKHAI_BUYER_WALLET_ADDRESS
+#   ARKHAI_BUYER_PRIVATE_KEY
+#   ARKHAI_SELLER_WALLET_ADDRESS
+#   ARKHAI_SELLER_PRIVATE_KEY
+# -----------------------------------------------------------------------
+
+name: E2E Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Active profile (e.g. staging, production)"
+        required: true
+        default: staging
+      pytest_args:
+        description: "Extra pytest args (e.g. -k contracts)"
+        required: false
+        default: ""
+  schedule:
+    # Run nightly at 02:00 UTC against staging
+    - cron: "0 2 * * *"
+
+jobs:
+  e2e:
+    name: "E2E [${{ inputs.profile || 'staging' }}]"
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.profile || 'staging' }}
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout
+      # ------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # 2. Python setup
+      # ------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e .
+
+      # ------------------------------------------------------------------
+      # 3. Write secret profile config file into CONFIG_DIRECTORY
+      #    This simulates what a Kubernetes secret mount or Vault agent
+      #    would do in a real cluster deployment.
+      # ------------------------------------------------------------------
+      - name: Write secrets profile config
+        env:
+          PROFILE: ${{ inputs.profile || 'staging' }}
+          BUYER_PRIVATE_KEY:  ${{ secrets.ARKHAI_BUYER_PRIVATE_KEY }}
+          SELLER_PRIVATE_KEY: ${{ secrets.ARKHAI_SELLER_PRIVATE_KEY }}
+        run: |
+          mkdir -p ./config-runtime
+          cp config/config.yml ./config-runtime/config.yml
+          cat > ./config-runtime/config-${PROFILE}.yml <<EOF
+          rpc:
+            url:      "${{ secrets.ARKHAI_RPC_URL }}"
+            chain_id: ${{ secrets.ARKHAI_CHAIN_ID }}
+          registry:
+            identity_address:   "${{ secrets.ARKHAI_REGISTRY_IDENTITY_ADDRESS }}"
+            reputation_address: "${{ secrets.ARKHAI_REGISTRY_REPUTATION_ADDRESS }}"
+            validation_address: "${{ secrets.ARKHAI_REGISTRY_VALIDATION_ADDRESS }}"
+            owner_address:      "${{ secrets.ARKHAI_REGISTRY_OWNER_ADDRESS }}"
+          buyer:
+            wallet_address: "${{ secrets.ARKHAI_BUYER_WALLET_ADDRESS }}"
+            private_key:    "${BUYER_PRIVATE_KEY}"
+          seller:
+            wallet_address: "${{ secrets.ARKHAI_SELLER_WALLET_ADDRESS }}"
+            private_key:    "${SELLER_PRIVATE_KEY}"
+          EOF
+
+      # ------------------------------------------------------------------
+      # 4. Run tests
+      # ------------------------------------------------------------------
+      - name: Run E2E tests
+        env:
+          ACTIVE_PROFILES: ${{ inputs.profile || 'staging' }}
+          CONFIG_DIRECTORY: ${{ github.workspace }}/config-runtime
+        run: |
+          pytest \
+            --html=pytest-report.html \
+            --self-contained-html \
+            --no-header \
+            -p no:cacheprovider \
+            ${{ inputs.pytest_args }}
+
+      # ------------------------------------------------------------------
+      # 5. Publish test report
+      # ------------------------------------------------------------------
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report-${{ inputs.profile || 'staging' }}-${{ github.run_id }}
+          path: pytest-report.html
+          retention-days: 30

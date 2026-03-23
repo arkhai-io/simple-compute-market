@@ -85,6 +85,9 @@ deploy-agents:
 deploy-provisioning:
 	cd async-provisioning-service && make deploy
 
+test-deployment:
+	cd integration-tests && make test
+
 stop:
 	docker ps -aq | xargs -r docker stop
 
