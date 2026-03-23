@@ -22,6 +22,14 @@ The wrapper keeps the existing repo orchestration intact by delegating to:
 - `scripts/refresh_canary_agent_ids.py`
 - `scripts/run_repeatable_canary.py`
 
+## This Path Assumes
+
+- you are already operating a marketplace environment rather than joining one
+- the marketplace bootstrap inputs are prepared, including local secret bundles
+  and the live canary env
+- if you are starting from zero, you have already read
+  [Deploy Your Own Marketplace](deploy-your-own-marketplace.md)
+
 ## Required Inputs
 
 - `--project` and `--zone` for live rollout actions
@@ -31,7 +39,9 @@ The wrapper keeps the existing repo orchestration intact by delegating to:
 - a live canary env that can receive refreshed `seller_agent_id` and
   `buyer_agent_id` values
 
-## Deploy
+## Repo Checkout Invocation
+
+### Deploy
 
 ```bash
 python scripts/run_platform_standup.py deploy \
@@ -45,7 +55,7 @@ This deploy stage renders host envs, validates the selected chain profile,
 rolls out the live targets, and refreshes the canary `seller_agent_id` and
 `buyer_agent_id`.
 
-## Verify
+### Verify
 
 ```bash
 python scripts/run_platform_standup.py verify \
@@ -56,7 +66,7 @@ python scripts/run_platform_standup.py verify \
 This runs the repo deployment-gate checks against the rendered env bundle and
 the checked-in inventory contract.
 
-## Canary
+### Canary
 
 ```bash
 python scripts/run_platform_standup.py canary \
@@ -67,6 +77,35 @@ python scripts/run_platform_standup.py canary \
 
 This delegates to `scripts/run_repeatable_canary.py` so the platform operator
 and automated agents use the same production-facing canary surface.
+
+## Installed Invocation
+
+If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), run
+the same wrapper from the default install root:
+
+```bash
+python ~/.market/scripts/run_platform_standup.py deploy \
+  --project sms-canary-project \
+  --zone us-east4-c \
+  --render-output-dir /tmp/sms-rendered \
+  --canary-env-path ~/.config/simple-market-service/prod-canary.env
+```
+
+```bash
+python ~/.market/scripts/run_platform_standup.py verify \
+  --environment isolated-eth-sepolia \
+  --render-output-dir /tmp/sms-rendered
+```
+
+```bash
+python ~/.market/scripts/run_platform_standup.py canary \
+  --environment isolated-eth-sepolia \
+  --render-output-dir /tmp/sms-rendered \
+  --artifacts-dir ./artifacts/platform
+```
+
+If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
+that path.
 
 ## Output
 

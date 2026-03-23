@@ -993,6 +993,11 @@ def test_buyer_quickstart_exists_and_is_linked() -> None:
     text = STANDUP_BUYER_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_human_buyer_purchase.py",
+        "~/.market/scripts/run_human_buyer_purchase.py",
+        "## This Path Assumes",
+        "## How To Get These Values",
+        "## Repo Checkout Invocation",
+        "## Installed Invocation",
         "--registry-url",
         "--buyer-agent-url",
         "--buyer-auth-url",
@@ -1077,6 +1082,12 @@ def test_seller_quickstart_exists_and_is_linked() -> None:
     text = STANDUP_SELLER_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_human_seller_publish.py",
+        "~/.market/scripts/run_human_seller_publish.py",
+        "docs/standup/seller-onboarding.md",
+        "## This Path Assumes",
+        "## How To Get These Values",
+        "## Repo Checkout Invocation",
+        "## Installed Invocation",
         "--env",
         "--resource-id",
         "--gpu-model",
@@ -1238,7 +1249,11 @@ def test_cli_installer_doc_points_installed_users_to_role_entrypoints() -> None:
     for required_token in (
         "## After Install",
         "docs/role-entrypoints.md",
+        "~/.market/scripts/run_human_buyer_purchase.py",
+        "~/.market/scripts/run_human_seller_publish.py",
+        "~/.market/scripts/run_platform_standup.py",
         "docs/standup/buyer-quickstart.md",
+        "docs/standup/seller-onboarding.md",
         "docs/standup/seller-quickstart.md",
         "docs/standup/platform-quickstart.md",
         "docs/standup/host-quickstart.md",
@@ -1261,6 +1276,10 @@ def test_platform_quickstart_doc_exists_and_is_linked() -> None:
     text = STANDUP_PLATFORM_QUICKSTART_PATH.read_text(encoding="utf-8")
     for required_token in (
         "scripts/run_platform_standup.py",
+        "~/.market/scripts/run_platform_standup.py",
+        "## This Path Assumes",
+        "## Repo Checkout Invocation",
+        "## Installed Invocation",
         "deploy",
         "verify",
         "canary",

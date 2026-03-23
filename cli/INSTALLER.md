@@ -184,6 +184,8 @@ the path that matches your role:
 - buyers:
   - [docs/standup/buyer-quickstart.md](docs/standup/buyer-quickstart.md)
 - sellers:
+  - onboarding:
+    - [docs/standup/seller-onboarding.md](docs/standup/seller-onboarding.md)
   - [docs/standup/seller-quickstart.md](docs/standup/seller-quickstart.md)
 - platform operators:
   - [docs/standup/platform-quickstart.md](docs/standup/platform-quickstart.md)
@@ -196,6 +198,22 @@ Important: the installed `market` CLI is still a generic local/dev surface.
 The current production-facing buyer, seller, platform, host, and support flows
 are role wrappers under `scripts/` rather than installed `market buyer ...`
 style subcommands.
+
+With the default install location, the current production wrappers are:
+
+- buyer:
+  - `python ~/.market/scripts/run_human_buyer_purchase.py ...`
+- seller:
+  - `python ~/.market/scripts/run_human_seller_publish.py ...`
+- platform:
+  - `python ~/.market/scripts/run_platform_standup.py ...`
+- host:
+  - `python ~/.market/scripts/enroll_compute_host.py ...`
+- support:
+  - `python ~/.market/scripts/run_market_support.py ...`
+
+If you set `MARKET_INSTALL_DIR` during installation, replace `~/.market` with
+that path.
 
 ## Creating a Dev Build
 

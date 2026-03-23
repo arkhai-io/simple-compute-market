@@ -20,6 +20,36 @@ provisioning, and writes a structured artifact with at least:
 - `job_id`
 - `vm_target`
 
+## This Path Assumes
+
+- a marketplace operator has already deployed a live registry, buyer agent, and
+  provisioning service
+- you control a buyer private key that the marketplace accepts for purchases
+- you have been given the buyer-facing request URL, canonical auth URL, and
+  provisioning URL for that marketplace
+
+## How To Get These Values
+
+- `BUYER_PRIVATE_KEY`:
+  - use your own buyer wallet key
+  - if you are joining an operator-managed marketplace, do not ask for a seller
+    or platform key; this should stay buyer-owned
+- `--registry-url`:
+  - get the public registry URL from the marketplace operator or published
+    marketplace onboarding docs
+- `--buyer-agent-url`:
+  - use the buyer-facing request URL that the marketplace exposes to buyers
+- `--buyer-auth-url`:
+  - use the buyer agent's canonical signing URL
+  - if the operator gives you only one public URL and signatures are verified
+    against that same URL, this may match `--buyer-agent-url`
+- `--provisioning-url`:
+  - get the public provisioning API URL from the marketplace operator
+
+If you do not yet have those marketplace-specific values, stop here and ask the
+marketplace operator for the buyer onboarding bundle before trying the purchase
+wrapper.
+
 ## Required Inputs
 
 - `BUYER_PRIVATE_KEY` set in the environment, or pass `--buyer-private-key-env`
@@ -35,7 +65,7 @@ Optional selectors:
 - `--region`
 - `--max-price`
 
-## One-Command Purchase
+## Repo Checkout Invocation
 
 ```bash
 export BUYER_PRIVATE_KEY=0x...
@@ -47,6 +77,25 @@ python scripts/run_human_buyer_purchase.py \
   --provisioning-url http://127.0.0.1:28081 \
   --buyer-private-key-env BUYER_PRIVATE_KEY
 ```
+
+## Installed Invocation
+
+If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), the
+same wrapper is available from the default install root:
+
+```bash
+export BUYER_PRIVATE_KEY=0x...
+
+python ~/.market/scripts/run_human_buyer_purchase.py \
+  --registry-url http://127.0.0.1:28080 \
+  --buyer-agent-url http://127.0.0.1:28001 \
+  --buyer-auth-url http://10.243.0.117:8000 \
+  --provisioning-url http://127.0.0.1:28081 \
+  --buyer-private-key-env BUYER_PRIVATE_KEY
+```
+
+If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
+that path.
 
 If you already know the exact seller offer to match, pass `--order-id`.
 Otherwise the wrapper discovers open compute offers, applies any `--gpu-model`,

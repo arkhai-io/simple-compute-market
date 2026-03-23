@@ -17,6 +17,37 @@ Who this is for:
 - a seller publishing real inventory into the live production environment
 - an agent or service that needs a stable seller publication wrapper
 
+If you do not yet have a deployed seller agent or seller env file, start with
+[Seller Onboarding](seller-onboarding.md) first. This quickstart is the
+post-onboarding publish surface.
+
+Canonical onboarding path: `docs/standup/seller-onboarding.md`
+
+## This Path Assumes
+
+- you already have a deployed seller agent
+- the seller agent serves a real `/.well-known/agent-card.json`
+- the seller agent serves a live `/resources/portfolio`
+- you already have the seller env file that contains the canonical auth and
+  request URLs
+
+## How To Get These Values
+
+- `--env`:
+  - use the seller agent env file produced by your seller deployment path
+  - for self-hosted sellers, follow [Seller Onboarding](seller-onboarding.md)
+    and then [Seller Agent Deployment](agent-seller.md) until the env file is
+    present
+- `AGENT_URL` and `AGENT_AUTH_URL`:
+  - these are written into the seller env file by the deployed seller runtime
+  - use the canonical auth URL for signing, not a transport-specific proxy URL
+- `AGENT_PRIV_KEY`:
+  - use the seller-owned private key that controls the seller agent
+- `/resources/portfolio`:
+  - this must already reflect the resource inventory you intend to publish
+  - if it does not, stop and fix seller inventory before using the publish
+    wrapper
+
 ## Required Inputs
 
 - a seller env file with `AGENT_URL`, `AGENT_AUTH_URL`, and `AGENT_PRIV_KEY`
@@ -24,7 +55,7 @@ Who this is for:
 - access to the seller's live portfolio through `/.well-known/agent-card.json`
   and `/resources/portfolio`
 
-## One-Command Publish
+## Repo Checkout Invocation
 
 Publish a fresh offer from the seller's live portfolio:
 
@@ -33,6 +64,20 @@ python scripts/run_human_seller_publish.py \
   --env /etc/simple-market-service/seller-agent.env \
   --amount 0.0001
 ```
+
+## Installed Invocation
+
+If you installed the bundle with [CLI Installer](../../cli/INSTALLER.md), run
+the same publish wrapper from the default install root:
+
+```bash
+python ~/.market/scripts/run_human_seller_publish.py \
+  --env /etc/simple-market-service/seller-agent.env \
+  --amount 0.0001
+```
+
+If you installed to a different `MARKET_INSTALL_DIR`, replace `~/.market` with
+that path.
 
 Optional selectors:
 
