@@ -32,6 +32,22 @@ Use the rest of this README if you are:
 Use [docs/standup/overview.md](docs/standup/overview.md) only when you are
 standing up the deployed production environment rather than working locally.
 
+## Validation Tiers
+
+Use the validation entrypoint that matches the job you are doing:
+
+- Fast CI Matrix:
+  - `python scripts/run_fast_repo_validation.py`
+  - runs the canonical fast cross-repo matrix used by
+    `.github/workflows/test-matrix.yml`
+  - best for routine local verification and CI parity
+- Full Validation:
+  - `python scripts/run_full_repo_validation.py`
+  - runs the fast matrix plus the heavyweight local dual-agent e2e and the
+    `compute-provisioning-iac` contract slice
+  - used when you want the broader local proof surface or when release-gate
+    workflows call for the true full validation pass
+
 ## Technology Stack
 
 - [Alkahest](https://github.com/arkhai-io/alkahest) for programmable peer-to-peer agreements and escrow-backed settlement flows used by the market agent.

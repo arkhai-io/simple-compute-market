@@ -62,6 +62,14 @@ Supporting references:
 - [Production Canary Runbook](../production-canary.md)
 - [End-to-End Deployment Test Plan](../e2e-deployment-test-plan.md)
 
+Validation tiers:
+
+- use `python scripts/run_fast_repo_validation.py` for the fast CI-aligned
+  matrix
+- use `python scripts/run_full_repo_validation.py` when you need the fast
+  matrix plus the heavyweight local dual-agent e2e and
+  `compute-provisioning-iac` coverage before a broader release proof
+
 Use `docs/clean-room-acceptance.md` as the tracked final checklist before
 signing off the stand-up path as clean-room ready.
 

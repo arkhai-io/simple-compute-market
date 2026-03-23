@@ -1148,6 +1148,21 @@ def test_root_readme_routes_users_to_role_entrypoints() -> None:
         )
 
 
+def test_root_readme_explains_validation_tiers() -> None:
+    text = ROOT_README.read_text(encoding="utf-8")
+    for required_token in (
+        "## Validation Tiers",
+        "scripts/run_fast_repo_validation.py",
+        "scripts/run_full_repo_validation.py",
+        "Fast CI Matrix",
+        "Full Validation",
+    ):
+        assert required_token in text, (
+            "README.md is missing required validation-tier token: "
+            f"{required_token}"
+        )
+
+
 def test_cli_installer_doc_points_installed_users_to_role_entrypoints() -> None:
     text = CLI_INSTALLER_DOC.read_text(encoding="utf-8")
     for required_token in (
