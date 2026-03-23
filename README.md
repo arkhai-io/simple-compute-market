@@ -36,7 +36,7 @@ If you only need to install the CLI first, use
 Use the rest of this README if you are:
 
 - developing locally
-- bringing up the local chain or local compose stack
+- bringing up the local chain or local e2e stack
 - running repo-local tests and e2e paths
 
 Use [docs/standup/overview.md](docs/standup/overview.md) only when you are
@@ -205,63 +205,27 @@ Start the agent:
 make serve-a2a
 ```
 
-## Full Local Stack (Docker Compose)
+## Deprecated Docker Compose Local Stack
 
-Use this path when you want the full local stack instead of the manual
-single-agent quick start above. This brings up:
+Docker Compose local stack is deprecated. The checked-in compose surface is not
+part of the supported newcomer contract until it is rebuilt against the
+canonical local bootstrap wrappers in `scripts/bootstrap_local_dev.py` and
+`scripts/deploy_local_contracts.py`.
 
-- Anvil
-- ERC-8004 contract deployment
-- registry
-- buyer agent
-- seller agent
-- Redis
-- async provisioning service
+Use the supported local paths instead:
 
-Before the first compose run:
-
-- use a Linux host that exposes `/dev/net/tun`, because the buyer and seller
-  agent containers mount that device directly
-- initialize submodules with `make init-submodules`
-- build the local images with `make build`
-- ensure `~/.ssh/id_ed25519` exists, because the local provisioning container
-  mounts that key path for Ansible access
-
-Bring the full stack up:
-
-```bash
-make init-submodules
-make build
-make deploy-local
-```
-
-Verify the local services:
-
-```bash
-curl http://localhost:18080/health
-curl http://localhost:18081/health
-curl http://localhost:18000/.well-known/agent-card.json
-curl http://localhost:18001/.well-known/agent-card.json
-```
-
-Run the local dual-agent e2e path:
-
-```bash
-make test-local-e2e
-```
-
-That target boots its own isolated stack and verifies:
-
-- seller agent portfolio visibility at `/resources/portfolio`
-- signed buyer and seller order creation via `/orders/create`
-- a matched negotiation that reaches an `accepted` registry state
-- dual-agent closeout via `/orders/close`
-
-Stop and clean up the compose stack:
-
-```bash
-make stop-local
-```
+- manual local bootstrap:
+  - `cd core/agent && make test-env`
+  - `python scripts/deploy_local_contracts.py --rpc-url <rpc-url>`
+- local helper/CLI path:
+  - `market dev test-env`
+  - `market dev deploy-contracts --rpc-url <rpc-url>`
+- local e2e proof:
+  - `make test-local-e2e`
+  - `python scripts/run_full_repo_validation.py`
+  - verifies seller agent portfolio visibility at `/resources/portfolio`
+  - verifies signed buyer agent and seller agent order creation via `/orders/create`
+  - verifies dual-agent closeout via `/orders/close`
 
 ## ZeroTier Setup (Optional)
 

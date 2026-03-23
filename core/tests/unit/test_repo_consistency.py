@@ -2570,8 +2570,6 @@ def test_testnet_validation_registry_defaults_match_contracts_repo() -> None:
         ROOT / "cli/config/agent.schema.yaml",
         ROOT / "core/agent/.env.sample",
         ROOT / "docs/standup/contracts.md",
-        ROOT / "docker-compose.yml",
-        ROOT / "market-contract-deployer/deploy-local.sh",
         ROOT / "erc-8004-registry-py/.env.sample",
         ROOT / "erc-8004-registry-py/.env.docker-compose",
         ROOT / "erc-8004-registry-py/src/config.py",

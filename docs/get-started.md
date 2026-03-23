@@ -56,7 +56,7 @@ deploying a live marketplace.
 - Primary doc: [README](../README.md)
 - Canonical doc path: `README.md`
 - What this assumes:
-  - you want local chain, local compose, repo tests, or local e2e work
+  - you want local chain, repo tests, or local e2e work
 - What you get:
   - the local developer and validation surface documented in the root README
 

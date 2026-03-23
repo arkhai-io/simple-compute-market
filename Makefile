@@ -1,36 +1,32 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 
-.PHONY: build test-local-e2e
+.PHONY: build test-local-e2e deprecate-compose-local
+
+COMPOSE_DEPRECATION_MESSAGE := compose_local is deprecated; use the manual local bootstrap in README.md or scripts/deploy_local_contracts.py instead.
 
 #Basic flow: build (optional), init (downloads if not built), run 
 #Build should construct all deployment and runtime arifacts locally.
-build: build-cli build-contracts build-market-contract-deployer build-test-env build-registry build-core
+build: build-cli build-registry build-core
 
 build-cli: init-prerequisites
 	cd cli && make build
 
-build-contracts:
-	cd erc-8004-contracts && docker build -t arkhai:contracts-$(GIT_SUFFIX) .
+deprecate-compose-local:
+	@echo "$(COMPOSE_DEPRECATION_MESSAGE)" >&2
+	@exit 1
 
-build-market-contract-deployer:
-	cd market-contract-deployer && make build
+build-contracts: deprecate-compose-local
+
+build-market-contract-deployer: deprecate-compose-local
 
 #The anvil rpc url is hard coded inside of deploy_alkhahest.py. Don't change the network name or anvil container name.
 #For whatever reason the --dump-state and --state-interval flags on anvil were not working so I created a script to pull the state via rpc for now and dump it.
 #The Anvil container doesn't have the dependencies so I'm just calling it from the os until I containerize that step or figure out what's wrong with the --dump-state
-build-anvil-state:
-	-docker network create anvil
-	-mkdir shared-env
-	docker run -d --rm --network anvil --name anvil -p 8545:8545 -e ANVIL_IP_ADDR=0.0.0.0 -v ./test-env/state:/state --user root --entrypoint anvil ghcr.io/foundry-rs/foundry:${FOUNDRY_VERSION} --dump-state /state/state.json
-	docker run -it --rm --network anvil --name market-contracts-deploy -e ENV_FILE=/app/shared-env/.env -v ./shared-env:/app/shared-env/ arkhai:market-contract-deployer-$(GIT_SUFFIX) sh -c ./deploy-local.sh
-	echo "Todo: add a step here to verify contract deployment"
-	docker stop anvil
-	-docker network rm anvil
+build-anvil-state: deprecate-compose-local
 
 #Yes it's weird running containers to build a container but the --init <genesis.json> way of initializing anvil looks tedious
-build-test-env: build-anvil-state
-	cd test-env && make build
+build-test-env: deprecate-compose-local
 
 build-registry:
 	cd erc-8004-registry-py && make build
@@ -72,8 +68,8 @@ init-images:
 	echo "NYI"
 
 deploy-local:
-	docker compose up
-	docker compose ps
+	@echo "$(COMPOSE_DEPRECATION_MESSAGE)" >&2
+	@exit 1
 
 test-local-e2e:
 	cd core && uv --no-config run pytest ../tests/e2e/test_local_dual_agent_stack.py -q
@@ -93,5 +89,6 @@ deploy-agents:
 
 #We're also going to want some targets built to idempotently smoke test a deployment
 stop-local:
+	@echo "$(COMPOSE_DEPRECATION_MESSAGE)" >&2
 	docker compose down
 	docker compose rm

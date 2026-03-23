@@ -84,7 +84,7 @@ stack, or working on the repo rather than operating the live environment.
   - [README](../README.md)
   - [Production Stand-Up Overview](standup/overview.md)
 - Notes:
-  - use the root README for local chain, local compose, and local e2e flows
+  - use the root README for local chain and local e2e flows
   - use the stand-up overview only when you are moving into the deployed path
   - canonical doc paths: `README.md`, `docs/standup/overview.md`
 
