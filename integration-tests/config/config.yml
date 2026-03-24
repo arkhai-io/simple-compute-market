@@ -15,21 +15,28 @@ rpc:
   retry_backoff_seconds: 2
 
 registry: # injected from environment profile file
+  api_url:
   identity_address:
   reputation_address:
   validation_address:
   owner_address:
-  api_url:
 
-buyer: # injected from secret profile file
-  private_key:    ""
-  wallet_address: ""
+buyer: 
+  api_url:           "" # injected from environment profile file
+  base_url_override: "" # agent's BASE_URL_OVERRIDE; used as resource_id in create_order auth. Defaults to api_url if unset.
+  private_key:       "" # injected from secret profile file
+  wallet_address:    ""
 
-seller: # injected from secret profile file
-  private_key:    ""
-  wallet_address: ""
+seller: 
+  api_url:           "" # injected from environment profile file
+  base_url_override: "" # agent's BASE_URL_OVERRIDE; used as resource_id in create_order auth. Defaults to api_url if unset.
+  private_key:       "" # injected from secret profile file
+  wallet_address:    ""
 
 tests:
   minimum_eth_balance: "0.01"
   gas_price_strategy: "medium"
   require_checksummed_addresses: true
+  order_create_timeout: 30 #time in seconds
+  order_match_timeout: 60
+  order_close_timeout: 30

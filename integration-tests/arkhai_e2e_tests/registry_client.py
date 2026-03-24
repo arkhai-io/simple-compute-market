@@ -20,10 +20,6 @@ from arkhai_e2e_tests.eip191_http_client import sign_eip191, build_auth_headers,
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Registry API client
-# ---------------------------------------------------------------------------
-
 class RegistryClient:
     """
     Synchronous client for the Registry REST API.
