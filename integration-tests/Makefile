@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------
 
 PYTHON      ?= python3
-ARKHAI_TEST := .venv/bin/arkhai-test
 
 # Default profile if none supplied
 ACTIVE_PROFILES ?= local
@@ -24,6 +23,21 @@ init-venv:
 
 init: init-venv
 	uv sync
+
+# -----------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------
+
+IMAGE_NAME ?= arkhai
+IMAGE_TAG  ?= provisioning
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+PYTHON_VERSION := 3.13
+
+build: build-images
+
+build-images:
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile .
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 # -----------------------------------------------------------------------
 # Tests — local
@@ -52,3 +66,10 @@ test-ci:
 		--no-header \
 		-p no:cacheprovider \
 		$(PYTEST_ARGS)
+
+# -----------------------------------------------------------------------
+# Tests — docker
+# -----------------------------------------------------------------------
+
+test-docker:
+	docker run --rm -it --network market --name integration-tests $(IMAGE_NAME):$(IMAGE_TAG)

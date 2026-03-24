@@ -31,7 +31,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["arkhai_e2e_tests"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

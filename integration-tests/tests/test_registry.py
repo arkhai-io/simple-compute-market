@@ -16,8 +16,8 @@ import logging
 
 import pytest
 
-from arkhai_e2e_tests.registry_client import ApiError, RegistryClient
-from arkhai_e2e_tests.models.registry import AgentListResponse, OrderListResponse
+from src.registry_client import ApiError, RegistryClient
+from src.models.registry import AgentListResponse, OrderListResponse
 
 log = logging.getLogger(__name__)
 

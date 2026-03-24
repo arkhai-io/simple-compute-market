@@ -17,8 +17,8 @@ from typing import Any
 
 import httpx
 
-from arkhai_e2e_tests.eip191_http_client import ApiError, build_auth_headers, sign_eip191
-from arkhai_e2e_tests.models.agent import (
+from src.eip191_http_client import ApiError, build_auth_headers, sign_eip191
+from src.models.agent import (
     AgentOrderCloseRequest,
     AgentOrderCloseResponse,
     AgentOrderCreateRequest,

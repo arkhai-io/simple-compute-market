@@ -6,7 +6,7 @@ import httpx
 import logging
 import time
 
-from arkhai_e2e_tests.models.registry import (
+from src.models.registry import (
     AgentListResponse,
     AgentSummary,
     HealthResponse,
@@ -16,7 +16,7 @@ from arkhai_e2e_tests.models.registry import (
     OrderSummary,
 )
 
-from arkhai_e2e_tests.eip191_http_client import sign_eip191, build_auth_headers, ApiError
+from src.eip191_http_client import sign_eip191, build_auth_headers, ApiError
 
 log = logging.getLogger(__name__)
 

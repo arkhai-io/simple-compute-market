@@ -18,15 +18,13 @@ from typing import Any
 
 import pytest
 
-from arkhai_e2e_tests.agent_client import AgentClient
-from arkhai_e2e_tests.registry_client import RegistryClient
-from arkhai_e2e_tests.eip191_http_client import ApiError
-from arkhai_e2e_tests.models.agent import (
+from src.agent_client import AgentClient
+from src.registry_client import RegistryClient
+from src.eip191_http_client import ApiError
+from src.models.agent import (
     AgentOrderCreateRequest,
-    AgentOrderCreateResponse,
-    ERC8004RegistrationFile,
 )
-from arkhai_e2e_tests.settings import settings
+from src.settings import settings
 
 log = logging.getLogger(__name__)
 

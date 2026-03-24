@@ -12,8 +12,8 @@ from decimal import Decimal
 import pytest
 from web3 import Web3
 
-from arkhai_e2e_tests.settings import active_profiles, config_directory, settings
-from arkhai_e2e_tests.web3_client import OWNABLE_ABI, get_web3
+from src.settings import active_profiles, config_directory, settings
+from src.web3_client import OWNABLE_ABI, get_web3
 
 log = logging.getLogger(__name__)
 
