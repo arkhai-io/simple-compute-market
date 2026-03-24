@@ -220,7 +220,7 @@ def load_config() -> Config:
         enable_redis_ingest=_get_bool_env("ENABLE_REDIS_INGEST", False),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
         redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
-        enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", True),
+        enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", False),
         log_file_path=os.getenv("LOG_FILE_PATH"),  # None if not set
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         token_registry_path=os.getenv(
