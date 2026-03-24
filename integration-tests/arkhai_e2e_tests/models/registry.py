@@ -163,8 +163,8 @@ class AgentListResponse:
         """
         if isinstance(raw, list):
             return cls(agents=[AgentSummary.from_dict(a) for a in raw])
-        # Paginated envelope — look for common key names
-        items = raw.get("agents") or raw.get("items") or raw.get("data") or []
+        # Paginated envelope — registry uses "items"; also handle "agents" / "data"
+        items = raw.get("items") or raw.get("agents") or raw.get("data") or []
         return cls(
             agents=[AgentSummary.from_dict(a) for a in items],
             total=raw.get("total"),
@@ -247,17 +247,37 @@ class OrderSummary:
 
     @classmethod
     def from_dict(cls, d: dict) -> "OrderSummary":
-        known = {"id", "status", "makerAgentId", "offer", "demand",
-                 "durationHours", "createdAt", "duration_hours", "created_at",
-                 "maker_agent_id"}
+        known = {
+            # registry snake_case names (actual API)
+            "order_id", "agent_id", "order_maker", "offer_resource",
+            "demand_resource", "duration_hours", "created_at", "updated_at",
+            "status", "maker_attestation", "taker_attestation",
+            "order_taker",
+            # camelCase alternatives
+            "id", "makerAgentId", "offer", "demand", "durationHours", "createdAt",
+            "maker_agent_id",
+        }
+        # Registry uses "order_id" as the primary key; fall back to "id"
+        order_id = d.get("order_id") or d.get("id")
+        # "agent_id" is the canonical agent who made the order in registry responses;
+        # camelCase APIs use "makerAgentId"
+        maker = (
+            d.get("agent_id")
+            or d.get("makerAgentId")
+            or d.get("maker_agent_id")
+            or d.get("order_maker")   # order_maker is the agent's base URL
+        )
+        # offer/demand may be nested as offer_resource/demand_resource
+        offer = d.get("offer") or d.get("offer_resource") or {}
+        demand = d.get("demand") or d.get("demand_resource") or {}
         return cls(
-            id=d.get("id"),
+            id=order_id,
             status=d.get("status"),
-            maker_agent_id=d.get("makerAgentId") or d.get("maker_agent_id"),
-            offer=d.get("offer", {}),
-            demand=d.get("demand", {}),
-            duration_hours=d.get("durationHours") or d.get("duration_hours"),
-            created_at=d.get("createdAt") or d.get("created_at"),
+            maker_agent_id=maker,
+            offer=offer,
+            demand=demand,
+            duration_hours=d.get("duration_hours") or d.get("durationHours"),
+            created_at=d.get("created_at") or d.get("createdAt"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -274,7 +294,8 @@ class OrderListResponse:
     def from_raw(cls, raw: list | dict) -> "OrderListResponse":
         if isinstance(raw, list):
             return cls(orders=[OrderSummary.from_dict(o) for o in raw])
-        items = raw.get("orders") or raw.get("items") or raw.get("data") or []
+        # Registry returns {"items": [...]} — also handle "orders" / "data"
+        items = raw.get("items") or raw.get("orders") or raw.get("data") or []
         return cls(
             orders=[OrderSummary.from_dict(o) for o in items],
             total=raw.get("total"),

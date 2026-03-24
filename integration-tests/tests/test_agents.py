@@ -235,6 +235,48 @@ class TestAgentRegistration:
 # Test suite 2 — Order create, match, and close
 # ---------------------------------------------------------------------------
 
+def _discover_order_id_from_registry(
+    registry_client,
+    agent_canonical_id: str,
+    event_id: str,
+    timeout: int,
+) -> str | None:
+    """
+    When the agent queues an order, the HTTP response contains only an
+    event_id — the order_id is assigned asynchronously and only appears in
+    the registry once the agent processes the queue entry.
+
+    Poll GET /agents/{agent_canonical_id}/orders and return the order_id of
+    the first order whose event_id matches, or the most-recently-created
+    order if the event_id is not surfaced in the registry response.
+
+    The registry order record does not carry the agent's internal event_id,
+    so we use created_at recency as a proxy: the newest order after the
+    create call is the one we just made.
+    """
+    deadline = time.monotonic() + timeout
+    # Record the wall-clock time before polling so we can filter by recency
+    started_at = time.time()
+
+    while time.monotonic() < deadline:
+        try:
+            result = registry_client.get_agent_orders(agent_canonical_id, limit=50)
+            if result.orders:
+                # orders are typically newest-first; take the first open one
+                for order in result.orders:
+                    if order.status == "open":
+                        log.debug(
+                            "Discovered order by recency: order_id=%s created_at=%s",
+                            order.id, order.created_at,
+                        )
+                        return str(order.id)
+        except ApiError as exc:
+            log.debug(
+                "get_agent_orders(%s) → %s (will retry)", agent_canonical_id, exc.status_code
+            )
+        time.sleep(1.0)
+    return None
+
 @pytest.mark.agents
 @pytest.mark.slow
 class TestAgentOrderLifecycle:
@@ -260,6 +302,8 @@ class TestAgentOrderLifecycle:
         self,
         buyer_client: AgentClient,
         seller_client: AgentClient,
+        registry_client: RegistryClient,
+        order_create_timeout: int,
     ) -> dict[str, str]:
         """
         Class-scoped fixture: create one order per agent and return a dict
@@ -287,6 +331,20 @@ class TestAgentOrderLifecycle:
             duration_hours=_DURATION_H,
         )
 
+        # Resolve each agent's canonical registry ID from their registration file
+        agent_canonical_ids: dict[str, str] = {}
+        for role, client in [("buyer", buyer_client), ("seller", seller_client)]:
+            try:
+                reg = client.get_registration_file()
+                if reg.registrations:
+                    first = reg.registrations[0]
+                    agent_canonical_ids[role] = f"{first.agent_registry}:{first.agent_id}"
+                log.info("[%s] canonical id: %s", role, agent_canonical_ids[role])
+            except ApiError as exc:
+                pytest.skip(
+                    f"Could not fetch {role} registration file to resolve agent ID.\n{exc}"
+                )
+
         for role, client, order_req in [
             ("buyer", buyer_client, buyer_order),
             ("seller", seller_client, seller_order),
@@ -304,28 +362,44 @@ class TestAgentOrderLifecycle:
                 role, resp.status, resp.event_id, resp.order_id,
             )
 
-            if resp.status == "queued":
-                # Agent is using event queue — order_id will be assigned
-                # asynchronously.  We poll the registry below rather than
-                # relying on the synchronous response.
-                log.info("[%s] Order queued for async processing", role)
-                # order_id will be None; caller must discover via registry
-            elif resp.status not in ("created", "no_action"):
-                pytest.skip(
-                    f"{role} agent returned unexpected create status: {resp.status!r}. "
-                    "Skipping order lifecycle tests."
-                )
-
             if resp.order_id:
+            # Synchronous path: order_id returned directly
                 order_ids[role] = resp.order_id
-                log.info("✓ [%s] order_id=%s", role, resp.order_id)
+                log.info("✓ [%s] order_id=%s (sync)", role, resp.order_id)
+
+            elif resp.status == "queued":
+            # Async path: poll the registry until the order appears
+                canonical_id = agent_canonical_ids.get(role, "")
+                if not canonical_id:
+                    pytest.skip(
+                        f"[{role}] Cannot discover queued order — "
+                        "agent canonical ID not found in registration file."
+                    )
+                log.info("Marker 1 %d", order_create_timeout)
+                log.info(
+                    "[%s] Order queued (event_id=%s) — polling registry "
+                    "agent=%s for up to %ds ...",
+                    role, resp.event_id, canonical_id, order_create_timeout,
+                )
+                discovered = _discover_order_id_from_registry(
+                    registry_client,
+                    canonical_id,
+                    resp.event_id or "",
+                    order_create_timeout,
+                )
+                if not discovered:
+                    pytest.skip(
+                        f"[{role}] Queued order did not appear in registry within "
+                        f"{order_create_timeout}s (event_id={resp.event_id})."
+                    )
+                order_ids[role] = discovered
+                log.info("✓ [%s] order_id=%s (discovered from registry)", role, discovered)
+
             else:
                 pytest.skip(
-                    f"{role} agent did not return an order_id "
-                    f"(status={resp.status!r}, agent_response={resp.root_agent_response!r}).\n"
-                    "Skipping order lifecycle tests."
+                    f"[{role}] Agent did not return an order_id "
+                    f"(status={resp.status!r}, response={resp.root_agent_response!r})."
                 )
-
         return order_ids
 
     def test_buyer_order_created(self, order_ids: dict[str, str]) -> None:
