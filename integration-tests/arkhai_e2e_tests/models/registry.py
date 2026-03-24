@@ -1,0 +1,297 @@
+"""
+arkhai_e2e_tests/models/registry.py
+-------------------------------------
+Typed dataclasses for Registry API requests and responses.
+
+These are intentionally permissive — fields that the API may omit are
+Optional so that responses from different environments (local, staging,
+production) don't cause parse failures when non-critical fields are absent.
+
+All models use dataclasses + a lightweight ``from_dict`` factory rather than
+a heavy validation library, keeping the test package dependency-light.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Shared / primitive models
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ValidationErrorDetail:
+    loc: list[str | int]
+    msg: str
+    type: str
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ValidationErrorDetail":
+        return cls(loc=d["loc"], msg=d["msg"], type=d["type"])
+
+
+@dataclass
+class HTTPValidationError:
+    detail: list[ValidationErrorDetail]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "HTTPValidationError":
+        return cls(detail=[ValidationErrorDetail.from_dict(e) for e in d.get("detail", [])])
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HealthResponse:
+    """Response body from GET /health."""
+    status: str | None = None
+    health_checks_enabled: bool | None = None
+    # Preserve any extra fields the service may return
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "HealthResponse":
+        known = {"status", "health_checks_enabled"}
+        return cls(
+            status=d.get("status"),
+            health_checks_enabled=d.get("health_checks_enabled"),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Capability:
+    id: str
+    name: str
+    description: str | None = None
+    tags: list[str] = field(default_factory=list)
+    input_modes: list[str] = field(default_factory=lambda: ["text/plain"])
+    output_modes: list[str] = field(default_factory=lambda: ["text/plain"])
+    examples: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Capability":
+        return cls(
+            id=d["id"],
+            name=d["name"],
+            description=d.get("description"),
+            tags=d.get("tags", []),
+            input_modes=d.get("inputModes", ["text/plain"]),
+            output_modes=d.get("outputModes", ["text/plain"]),
+            examples=d.get("examples", []),
+        )
+
+
+@dataclass
+class Endpoint:
+    name: str
+    endpoint: str
+    version: str | None = None
+    mcp_tools: list[str] | None = None
+    mcp_prompts: list[str] | None = None
+    mcp_resources: list[str] | None = None
+    a2a_skills: list[str] | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Endpoint":
+        return cls(
+            name=d["name"],
+            endpoint=d["endpoint"],
+            version=d.get("version"),
+            mcp_tools=d.get("mcpTools"),
+            mcp_prompts=d.get("mcpPrompts"),
+            mcp_resources=d.get("mcpResources"),
+            a2a_skills=d.get("a2aSkills"),
+        )
+
+
+@dataclass
+class AgentSummary:
+    """
+    Lightweight agent representation returned by GET /agents.
+    The API currently returns ``{}`` schema, so we capture all known fields
+    defensively and stash extras.
+    """
+    id: str | int | None = None
+    agent_id: str | None = None          # canonical eip155:… form
+    name: str | None = None
+    description: str | None = None
+    owner: str | None = None
+    chain_id: int | None = None
+    visibility: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AgentSummary":
+        known = {"id", "agentId", "name", "description", "owner", "chainId",
+                 "visibility", "labels"}
+        return cls(
+            id=d.get("id"),
+            agent_id=d.get("agentId"),
+            name=d.get("name"),
+            description=d.get("description"),
+            owner=d.get("owner"),
+            chain_id=d.get("chainId"),
+            visibility=d.get("visibility"),
+            labels=d.get("labels", {}),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class AgentListResponse:
+    """Wrapper around the list returned by GET /agents."""
+    agents: list[AgentSummary]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
+
+    @classmethod
+    def from_raw(cls, raw: list | dict) -> "AgentListResponse":
+        """
+        The API may return a plain list or a paginated envelope dict.
+        Handle both shapes.
+        """
+        if isinstance(raw, list):
+            return cls(agents=[AgentSummary.from_dict(a) for a in raw])
+        # Paginated envelope — look for common key names
+        items = raw.get("agents") or raw.get("items") or raw.get("data") or []
+        return cls(
+            agents=[AgentSummary.from_dict(a) for a in items],
+            total=raw.get("total"),
+            limit=raw.get("limit"),
+            offset=raw.get("offset"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Orders
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ComputeResource:
+    gpu_model: str
+    quantity: int
+    sla: float
+    region: str
+
+    def to_dict(self) -> dict:
+        return {
+            "gpu_model": self.gpu_model,
+            "quantity": self.quantity,
+            "sla": self.sla,
+            "region": self.region,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ComputeResource":
+        return cls(
+            gpu_model=d["gpu_model"],
+            quantity=d["quantity"],
+            sla=d["sla"],
+            region=d["region"],
+        )
+
+
+@dataclass
+class TokenResource:
+    token: str
+    amount: float
+
+    def to_dict(self) -> dict:
+        return {"token": self.token, "amount": self.amount}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TokenResource":
+        return cls(token=d["token"], amount=d["amount"])
+
+
+@dataclass
+class OrderRequest:
+    """Request body for POST /agents/{agent_id}/orders."""
+    offer: dict[str, Any]
+    demand: dict[str, Any]
+    duration_hours: float
+
+    def to_dict(self) -> dict:
+        return {
+            "offer": self.offer,
+            "demand": self.demand,
+            "duration_hours": self.duration_hours,
+        }
+
+
+@dataclass
+class OrderSummary:
+    """
+    Single order record as returned by GET /orders or GET /agents/{id}/orders.
+    Schema is ``{}`` in the spec; we capture common fields defensively.
+    """
+    id: str | int | None = None
+    status: str | None = None
+    maker_agent_id: str | None = None
+    offer: dict[str, Any] = field(default_factory=dict)
+    demand: dict[str, Any] = field(default_factory=dict)
+    duration_hours: float | None = None
+    created_at: str | int | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "OrderSummary":
+        known = {"id", "status", "makerAgentId", "offer", "demand",
+                 "durationHours", "createdAt", "duration_hours", "created_at",
+                 "maker_agent_id"}
+        return cls(
+            id=d.get("id"),
+            status=d.get("status"),
+            maker_agent_id=d.get("makerAgentId") or d.get("maker_agent_id"),
+            offer=d.get("offer", {}),
+            demand=d.get("demand", {}),
+            duration_hours=d.get("durationHours") or d.get("duration_hours"),
+            created_at=d.get("createdAt") or d.get("created_at"),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class OrderListResponse:
+    """Wrapper around GET /orders response (list or paginated envelope)."""
+    orders: list[OrderSummary]
+    total: int | None = None
+    limit: int | None = None
+    offset: int | None = None
+
+    @classmethod
+    def from_raw(cls, raw: list | dict) -> "OrderListResponse":
+        if isinstance(raw, list):
+            return cls(orders=[OrderSummary.from_dict(o) for o in raw])
+        items = raw.get("orders") or raw.get("items") or raw.get("data") or []
+        return cls(
+            orders=[OrderSummary.from_dict(o) for o in items],
+            total=raw.get("total"),
+            limit=raw.get("limit"),
+            offset=raw.get("offset"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Agent registration (request)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HeartbeatRequest:
+    signature: str | None = None
+    timestamp: int | None = None
+
+    def to_dict(self) -> dict:
+        return {k: v for k, v in {"signature": self.signature, "timestamp": self.timestamp}.items()
+                if v is not None}

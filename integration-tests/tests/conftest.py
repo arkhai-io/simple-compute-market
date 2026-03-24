@@ -47,6 +47,7 @@ def registry_settings() -> dict:
         "reputation_address": settings.REGISTRY.REPUTATION_ADDRESS,
         "validation_address": settings.REGISTRY.VALIDATION_ADDRESS,
         "owner_address": settings.REGISTRY.OWNER_ADDRESS,
+        "api_url": settings.REGISTRY.API_URL,
     }
 
 

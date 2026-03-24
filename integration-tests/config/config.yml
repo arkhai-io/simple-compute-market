@@ -19,6 +19,7 @@ registry: # injected from environment profile file
   reputation_address:
   validation_address:
   owner_address:
+  api_url:
 
 buyer: # injected from secret profile file
   private_key:    ""
