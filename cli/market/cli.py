@@ -16,7 +16,6 @@ from .groups.policy import policy_app
 
 app = typer.Typer(no_args_is_help=True)
 
-
 def version_callback(value: bool) -> None:
     """Show version and exit."""
     if value:
@@ -26,7 +25,6 @@ def version_callback(value: bool) -> None:
             __version__ = "unknown (not installed)"
         typer.echo(f"Market CLI version {__version__}")
         raise typer.Exit()
-
 
 @app.callback()
 def main(
@@ -104,7 +102,6 @@ def register(
         REPO_ROOT / "core" / "agent",
     )
 
-
 @app.command()
 def start(
     env: str | None = typer.Option(
@@ -124,7 +121,6 @@ def start(
         REPO_ROOT / "core" / "agent",
     )
 
-
 app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 app.add_typer(
     config_app,
@@ -136,7 +132,6 @@ app.add_typer(registry_app, name="registry", help="As Market Admin, manage the R
 app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
 app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
 app.add_typer(policy_app, name="policy", help="RL policy lifecycle: train, eval, export.")
-
 
 if __name__ == "__main__":
     app()

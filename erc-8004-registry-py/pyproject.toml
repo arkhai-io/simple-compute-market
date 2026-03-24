@@ -15,7 +15,6 @@ dependencies = [
     "eth-account>=0.9.0",
     "python-dotenv>=1.0.0",
     "aiohttp>=3.9.0",
-    "pydantic>=2.0.0",
 ]
 
 [build-system]
@@ -25,8 +24,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "httpx>=0.25.0",

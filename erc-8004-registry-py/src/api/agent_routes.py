@@ -106,7 +106,7 @@ async def register_agent(
         
         # Extract metadata from registration file
         metadata_list = [
-            AgentMetadata(key="agentName", value=registration_file.name),
+            AgentMetadata(key="name", value=registration_file.name),
             AgentMetadata(key="agentDescription", value=registration_file.description),
             AgentMetadata(key="registrationFileType", value=registration_file.type),
             AgentMetadata(key="supportedTrust", value=",".join(registration_file.supported_trust)),

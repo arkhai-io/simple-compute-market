@@ -147,7 +147,7 @@ class IdentityRegistryClient:
         """Get past UriUpdated events using get_logs (more reliable than filters)"""
         try:
             # Use get_logs directly instead of create_filter for better RPC compatibility
-            return self.contract.events.UriUpdated.get_logs(
+            return self.contract.events.URIUpdated.get_logs(
                 from_block=from_block,
                 to_block=to_block if to_block is not None else "latest"
             )
@@ -155,7 +155,7 @@ class IdentityRegistryClient:
             # Fallback: try with create_filter if get_logs fails
             # This handles cases where RPC doesn't support get_logs with block ranges
             try:
-                event_filter = self.contract.events.UriUpdated.create_filter(
+                event_filter = self.contract.events.URIUpdated.create_filter(
                     from_block=from_block,
                     to_block=to_block or "latest"
                 )

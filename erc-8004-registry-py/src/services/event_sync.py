@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.orm.attributes import flag_modified
 from src.contracts.identity_registry import IdentityRegistryClient
 from src.types import NetworkConfig, AgentMetadata
 from src.db.models import Agent, AgentMetadataEntry
@@ -177,22 +178,23 @@ class EventSyncService:
                                     existing.owner = owner_address
                                 
                                 # Update metadata with on-chain agent ID and ensure ERC-8004 format
-                                metadata = existing.metadata_json or {}
+                                metadata = dict(existing.metadata_json or {})
                                 # Use camelCase for A2A/ERC-8004 JSON (migrate legacy key if present)
                                 if "onchainAgentId" in metadata:
                                     # Migrate legacy key to camelCase
                                     metadata["onChainAgentId"] = metadata.pop("onchainAgentId")
                                 else:
                                     metadata["onChainAgentId"] = onchain_agent_id  # Store as int
-                                
+
                                 # Ensure metadata has ERC-8004 structure (category, type, etc.)
                                 # If missing, try to infer from existing metadata or use defaults
                                 if "category" not in metadata:
                                     metadata["category"] = metadata.get("label.category", "compute")
                                 if "type" not in metadata:
                                     metadata["type"] = metadata.get("label.type", "trader")
-                                
+
                                 existing.metadata_json = metadata
+                                flag_modified(existing, "metadata_json")
 
                                 db.commit()
                                 block_number = getattr(event, 'blockNumber', getattr(event, 'block_number', None))
@@ -340,9 +342,10 @@ class EventSyncService:
                                 db.add(metadata_entry)
 
                             # Update agent's metadata JSON
-                            current_metadata = agent.metadata_json or {}
+                            current_metadata = dict(agent.metadata_json or {})
                             current_metadata[key] = value
                             agent.metadata_json = current_metadata
+                            flag_modified(agent, "metadata_json")
 
                             db.commit()
                             logger.info(f"[EventSync] Updated metadata for agent {canonical_id}, key: {key}")

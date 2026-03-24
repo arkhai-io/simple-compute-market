@@ -1,0 +1,46 @@
+# settings.toml — base dynaconf configuration
+# Values here serve as defaults and documentation of all supported keys.
+# Override via: config.yml, config-<profile>.yml, env vars, or CLI args.
+
+[default]
+
+# ---------------------------------------------------------------------------
+# RPC / chain connection
+# ---------------------------------------------------------------------------
+[default.rpc]
+url = "http://localhost:8545"
+chain_id = 31337          # Hardhat / Anvil default; override per environment
+timeout_seconds = 30
+retry_attempts = 3
+retry_backoff_seconds = 2
+
+# ---------------------------------------------------------------------------
+# Registry contract addresses
+# ---------------------------------------------------------------------------
+[default.registry]
+identity_address   = ""
+reputation_address = ""
+validation_address = ""
+owner_address      = ""
+
+# ---------------------------------------------------------------------------
+# Buyer wallet
+# ---------------------------------------------------------------------------
+[default.buyer]
+private_key    = ""
+wallet_address = ""
+
+# ---------------------------------------------------------------------------
+# Seller wallet
+# ---------------------------------------------------------------------------
+[default.seller]
+private_key    = ""
+wallet_address = ""
+
+# ---------------------------------------------------------------------------
+# Test behaviour
+# ---------------------------------------------------------------------------
+[default.tests]
+minimum_eth_balance = "0.01"          # ETH — wallets must hold at least this
+gas_price_strategy  = "medium"        # low | medium | high
+require_checksummed_addresses = true

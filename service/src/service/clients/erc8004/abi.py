@@ -636,7 +636,7 @@ IDENTITY_REGISTRY_EVENTS = [
                 "type": "address"
             }
         ],
-        "name": "UriUpdated",
+        "name": "URIUpdated",
         "type": "event"
     }
 ]

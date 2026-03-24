@@ -184,6 +184,10 @@ infra/*/*.plan
 experiments/
 wandb/
 !.env.sample
+!.env.docker-compose
+!.env.*.docker-compose
+!.env.*.docker-compose
+!.env.docker-compose
 .cursor/
 
 # Cloud Function
@@ -192,3 +196,6 @@ node_modules
 # Puffer artifacts — ignore any resources/ dir or symlink at any depth
 **/resources
 pr-message-puffer.md
+*/uv.lock
+test-env/state/state.json
+shared-env/*

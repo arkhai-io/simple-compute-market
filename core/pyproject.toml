@@ -5,27 +5,24 @@ description = ""
 authors = [
     {name = "Your Name", email = "your@email.com"},
 ]
+#3.13 requires numpy>2 or else you have to install the gcc toolchain and compile numpy yourself.
+#pufferlib requires numpy<2. So we're stuck with python 3.12
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "market-service",
     "market-cli",
     "google-adk[a2a] @ git+https://github.com/google/adk-python@5eca72f9bfd05c7c28a3d738391138a59a31167d",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
-    "google-cloud-aiplatform[evaluation]>=1.118.0,<2.0.0",
     "fastapi~=0.115.8",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     "a2a-sdk>=0.3.9",
-    "torch>=2.7.0",
-    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
-    "alkahest-py @ git+https://github.com/arkhai-io/alkahest@main#subdirectory=sdks/py",
+    "alkahest-py",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "aiohttp>=3.12.15",
 ]
-
-requires-python = ">=3.12,<3.14"
-
 
 [dependency-groups]
 dev = [
@@ -36,6 +33,11 @@ dev = [
 ]
 
 [project.optional-dependencies]
+
+rl = [
+    "torch>=2.7.0",
+    "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
+]
 
 jupyter = [
     "jupyter>=1.0.0,<2.0.0",
@@ -51,11 +53,21 @@ lint = [
 [tool.uv]
 no-build-isolation-package = ["pufferlib"]
 
+# requirement for pufferlib 3.0.0
+[tool.uv.extra-build-dependencies]
+pufferlib = ["setuptools", "Cython", "numpy<2"]
+
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
 market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },
+]
+alkahest-py = [
+    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
+    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-macosx_10_12_x86_64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'x86_64'" },
+    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-manylinux_2_36_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
+    { path = "agent/packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]
 
 [[tool.uv.index]]
@@ -117,7 +129,6 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.metadata]
 allow-direct-references=true
-# Keep commit pin until the ADK A2A PR https://github.com/google/adk-python/pull/3262 is merged.
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent"]

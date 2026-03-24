@@ -151,7 +151,7 @@ async def heartbeat_loop(
             await asyncio.sleep(HEARTBEAT_INTERVAL)
             success = await send_heartbeat(agent_id, indexer_url, private_key)
             if success:
-                logger.debug(f"[HEARTBEAT] Heartbeat sent successfully")
+                logger.info(f"[HEARTBEAT] Heartbeat sent successfully for agent {agent_id}")
         except asyncio.CancelledError:
             logger.info("[HEARTBEAT] Heartbeat loop cancelled")
             break

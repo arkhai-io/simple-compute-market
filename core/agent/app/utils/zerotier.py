@@ -136,7 +136,7 @@ def _check_zerotier_cli() -> bool:
     """Return True if zerotier-cli is installed, False otherwise."""
     try:
         subprocess.run(
-            ["zerotier-cli", "-v"],
+            ["sudo", "zerotier-cli", "-v"],
             check=False,
             capture_output=True,
             text=True,
