@@ -32,8 +32,8 @@ smoke:
 ENV_FILE := $(if $(wildcard .env.local),.env.local,$(if $(wildcard .env),.env,))
 ENV_ARG := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
 ifneq (,$(ENV_FILE))
-  include $(ENV_FILE)
-  export $(shell sed '/^\s*#/d;/^\s*$$/d;s/=.*//' $(ENV_FILE))
+  -include $(ENV_FILE)
+  export
 endif
 
 serve:

@@ -50,8 +50,8 @@ PYTHONPATH := ../..$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 # Load .env variables into Make if the file exists
 ifneq (,$(wildcard $(ENV_FILE)))
-  include $(ENV_FILE)
-  export $(shell sed '/^\s*#/d;/^\s*$$/d;s/=.*//' $(ENV_FILE))
+  -include $(ENV_FILE)
+  export
 endif
 
 serve-a2a:

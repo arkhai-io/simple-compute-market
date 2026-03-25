@@ -196,6 +196,18 @@ In a new terminal:
 ```bash
 cd erc-8004-registry-py
 uv sync
+cp .env.sample .env
+```
+
+Edit `.env` with the contract addresses and RPC URL from step 3:
+
+- `RPC_URL=http://localhost:<port>/` (use the HTTP RPC URL printed by the deploy script)
+- `CHAIN_ID=31337`
+- `IDENTITY_REGISTRY_ADDRESS`, `REPUTATION_REGISTRY_ADDRESS`, `VALIDATION_REGISTRY_ADDRESS` (from the deploy output)
+
+Then start the server:
+
+```bash
 make serve
 ```
 
