@@ -711,6 +711,45 @@ def _resolve_db_path(db: str | None, env: str | None) -> str | None:
     return None
 
 
+def _negotiation_price_decimals(db_path: str, order_id: str) -> int:
+    """Return the token decimals for an order by reading its token resource from SQLite."""
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT offer_resource, demand_resource FROM orders WHERE order_id = ?",
+                (order_id,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return 0
+        for raw in row:
+            try:
+                resource = json.loads(raw) if isinstance(raw, str) else raw
+                token = resource.get("token") if isinstance(resource, dict) else None
+                if isinstance(token, dict) and "decimals" in token:
+                    return int(token["decimals"])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return 0
+
+
+def _fmt_price(price: int | None, decimals: int) -> str:
+    if price is None:
+        return "-"
+    if decimals == 0:
+        return str(price)
+    from decimal import Decimal
+    return str((Decimal(price) / Decimal(10) ** decimals).normalize())
+
+
 def _print_negotiation_table(console: Console, db_path: str, order_id: str) -> None:
     """Query negotiation_messages for this order and print as a table."""
     try:
@@ -742,6 +781,8 @@ def _print_negotiation_table(console: Console, db_path: str, order_id: str) -> N
         console.print("\n[dim]No negotiation history found for this order.[/dim]")
         return
 
+    decimals = _negotiation_price_decimals(db_path, order_id)
+
     table = Table(title="Negotiation History", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Round", justify="right", style="bold", no_wrap=True)
     table.add_column("Sender", overflow="fold")
@@ -762,9 +803,9 @@ def _print_negotiation_table(console: Console, db_path: str, order_id: str) -> N
         table.add_row(
             str(rnd),
             sender_short,
-            str(our_price) if our_price is not None else "-",
-            str(their_price) if their_price is not None else "-",
-            str(proposed) if proposed is not None else "-",
+            _fmt_price(our_price, decimals),
+            _fmt_price(their_price, decimals),
+            _fmt_price(proposed, decimals),
             str(action or "-"),
             str(msg_type or "-"),
             _short_ts(ts),
