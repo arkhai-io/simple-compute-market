@@ -29,7 +29,7 @@ init: init-venv
 # -----------------------------------------------------------------------
 
 IMAGE_NAME ?= arkhai
-IMAGE_TAG  ?= provisioning
+IMAGE_TAG  ?= integration-tests
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 PYTHON_VERSION := 3.13
 
