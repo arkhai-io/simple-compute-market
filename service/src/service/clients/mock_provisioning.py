@@ -35,6 +35,18 @@ PROVISION_RESULT: dict[str, Any] = {
     "ssh_port": "2222",
     "tenant_user": "tenant",
     "vm_host_ip": "127.0.0.1",
+    "authentication": {
+        "root": {
+            "password": "mock-root-password",
+            "ssh_commands": {"default": "ssh -i /tmp/mock_key root@127.0.0.1"},
+            "ssh_key_path_host": "/tmp/mock_key",
+        },
+        "tenant": {
+            "password": "mock-tenant-password",
+            "ssh_commands": {"default": "ssh -p 2222 tenant@127.0.0.1"},
+            "key_type": "ed25519",
+        },
+    },
 }
 
 SHUTDOWN_RESULT: dict[str, Any] = {
@@ -85,6 +97,18 @@ def _reset_defaults() -> None:
         "ssh_port": "2222",
         "tenant_user": "tenant",
         "vm_host_ip": "127.0.0.1",
+        "authentication": {
+            "root": {
+                "password": "mock-root-password",
+                "ssh_commands": {"default": "ssh -i /tmp/mock_key root@127.0.0.1"},
+                "ssh_key_path_host": "/tmp/mock_key",
+            },
+            "tenant": {
+                "password": "mock-tenant-password",
+                "ssh_commands": {"default": "ssh -p 2222 tenant@127.0.0.1"},
+                "key_type": "ed25519",
+            },
+        },
     }
     SHUTDOWN_RESULT = {"status": "ok", "vm_host": "ww1", "vm_target": "tenant-vm"}
     RESOURCES_RESULT = {"status": "ok", "vm_host": "ww1", "available": True, "running_vms": 0}
