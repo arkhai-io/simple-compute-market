@@ -67,6 +67,7 @@ from core.agent.app.schema.pydantic_models import (
     MarketOrder,
     MakeOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
+    FulfillmentFailedEvent,
     ArbitrationCompleteEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
@@ -405,6 +406,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 "source_url": source_url,
             }
             return ReceiveComputeObligationFulfillmentEvent.from_payload(fulfillment_payload)
+
+        elif event_type == EventType.FULFILLMENT_FAILED:
+            return FulfillmentFailedEvent(
+                event_id=payload.get("event_id", f"ff_{uuid.uuid4()}"),
+                source=payload.get("source", "unknown"),
+                escrow_uid=data.get("escrow_uid", ""),
+                reason=data.get("reason"),
+                seller_order_id=data.get("seller_order_id"),
+                buyer_order_id=data.get("buyer_order_id"),
+                data=data,
+            )
 
         elif event_type == EventType.ARBITRATION_COMPLETE:
             arb_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
