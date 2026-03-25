@@ -112,10 +112,26 @@ def start(
         None,
         "--env",
         "-e",
-        help="Path to env file passed as ENV_FILE to make serve-a2a.",
+        help="Path to env file. For host mode, passed as ENV_FILE to make serve-a2a. For container mode, passed as --env-file to docker run.",
     ),
 ) -> None:
     """Start Agent service."""
+    agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
+    if agent_mode == "container":
+        port = read_env_value(env, "PORT", default="8000")
+        env_abs = str(Path(env).resolve())
+        cmd = [
+            "docker", "run", "--rm",
+            "--platform", "linux/amd64",  # image is built for linux/amd64; needed on ARM hosts
+            "--env-file", env_abs,
+            "-p", f"{port}:{port}",
+            "--cap-add", "NET_ADMIN",     # ZeroTier needs to create/configure a virtual network interface
+            "--cap-add", "SYS_MODULE",    # ZeroTier may need to load the tun kernel module
+            "--device", "/dev/net/tun",   # exposes the host TUN/TAP device so ZeroTier can create its interface
+            "arkhai:core",
+        ]
+        run_step("Start agent (docker run arkhai:core)", cmd, REPO_ROOT)
+        return
     cmd = ["make", "serve-a2a"]
     if env:
         cmd.append(f"ENV_FILE={env}")

@@ -82,3 +82,45 @@ def test_register_defaults_to_host_when_mode_absent(tmp_path: Path):
         result = runner.invoke(app, ["register", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# market start
+# ---------------------------------------------------------------------------
+
+def test_start_runs_docker_when_container_mode(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nPORT=8001\n")
+    with patch("market.cli.run_step") as mock_run:
+        result = runner.invoke(app, ["start", "--env", str(env)])
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][1]
+    assert cmd[0] == "docker"
+    assert "run" in cmd
+    assert "arkhai:core" in cmd
+    assert "-p" in cmd
+    assert "8001:8001" in cmd
+    assert "--env-file" in cmd
+
+
+def test_start_runs_make_when_host_mode(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=host\n")
+    with patch("market.cli.run_step") as mock_run:
+        result = runner.invoke(app, ["start", "--env", str(env)])
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    cmd = mock_run.call_args[0][1]
+    assert cmd[0] == "make"
+    assert "serve-a2a" in cmd
+
+
+def test_start_defaults_to_host_when_mode_absent(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("PORT=8000\n")
+    with patch("market.cli.run_step") as mock_run:
+        result = runner.invoke(app, ["start", "--env", str(env)])
+    assert result.exit_code == 0
+    cmd = mock_run.call_args[0][1]
+    assert cmd[0] == "make"
