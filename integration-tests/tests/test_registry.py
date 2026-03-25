@@ -189,19 +189,15 @@ class TestRegistryOrders:
         historical ones still passes.
         """
         try:
-            # First try with no status filter to capture any order at all
-            result = registry_client.list_orders(limit=1, status=None)
+            # A null status filter only returns open orders. Here we use closed to try to capture historical data.
+            result = registry_client.list_orders(limit=1, status="closed")
+            if len(result.orders) == 0:
+                result = registry_client.list_orders(limit=1, status=None)
         except ApiError as exc:
             pytest.fail(f"GET /orders failed — cannot verify order book population.\n{exc}")
 
-        log.info(
-            "Order book population — orders_in_page=%d total=%s",
-            len(result.orders),
-            result.total,
-        )
-
         assert len(result.orders) >= 1, (
-            "No orders found in the registry (queried with no status filter).\n"
+            "No orders found in the registry (queried with closed and null status filter).\n"
             "Expected at least one order in a healthy deployment.\n"
             f"Response: total={result.total} orders_in_page={len(result.orders)}"
         )
