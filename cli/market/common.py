@@ -8,6 +8,22 @@ import typer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+DEFAULT_AGENT_ENV = REPO_ROOT / "core" / "agent" / ".env"
+
+
+def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> str:
+    """Read a single KEY=value from an env file, returning default if absent."""
+    if not env_file:
+        return default
+    path = Path(env_file)
+    if not path.exists():
+        return default
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return default
+
 
 def run_step(
     label: str,

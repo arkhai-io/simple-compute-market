@@ -5,7 +5,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
-from .common import REPO_ROOT, run_step
+from .common import REPO_ROOT, DEFAULT_AGENT_ENV, read_env_value, run_step
 from .groups.order import order_app
 from .groups.registry import registry_app
 from .groups.network import network_app
@@ -93,6 +93,10 @@ def register(
     ),
 ) -> None:
     """Register agent on-chain (make register)."""
+    agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
+    if agent_mode == "container":
+        typer.echo("Agent is running as a container — registration is handled automatically at startup. Nothing to do.")
+        return
     cmd = ["make", "register"]
     if env:
         cmd.append(f"ENV_FILE={env}")

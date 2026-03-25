@@ -1,6 +1,13 @@
 component: agent
 schema_version: 1
 fields:
+  # CLI runtime mode
+  AGENT_MODE:
+    required: false
+    default: "host"
+    secret: false
+    description: "How the agent is being run: \"host\" (default, running on host) or \"container\" (Docker). Controls which CLI commands are active vs. no-ops."
+
   # Core server
   BASE_URL_OVERRIDE:
     required: true
