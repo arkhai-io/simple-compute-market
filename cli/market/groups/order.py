@@ -75,13 +75,18 @@ def order_create(
         (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
         or os.getenv("AGENT_PRIV_KEY")
     )
+    wallet_address = (
+        (_read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
+        or os.getenv("AGENT_WALLET_ADDRESS")
+        or ""
+    )
     payload = {
         "offer": offer_data,
         "demand": demand_data,
         "duration_hours": duration,
     }
     url = f"{base_url}/orders/create"
-    response = _post_json(url, payload, _get_auth_headers("create_order", base_url, private_key))
+    response = _post_json(url, payload, _get_auth_headers("create_order", wallet_address, private_key))
 
     console = Console()
     table = Table.grid(padding=(0, 2))
