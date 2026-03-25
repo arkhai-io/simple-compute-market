@@ -349,6 +349,8 @@ async def execute_action(
                         status="accepted",
                         escrow_uid=escrow_uid,
                         order_taker=parameters.get("counterparty_url"),
+                        taker_attestation=escrow_uid,  # buyer (taker) contributed escrow
+                        oracle_address=oracle_address,
                     )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
@@ -404,6 +406,7 @@ async def execute_action(
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
             try:
                 escrow_uid = parameters.get("escrow_uid")
+                fulfillment_uid = parameters.get("fulfillment_uid")
                 connection_details = parameters.get("connection_details")
                 tenant_credentials = parameters.get("tenant_credentials")
                 sqlite_client = get_sqlite_client()
@@ -412,6 +415,7 @@ async def execute_action(
                         escrow_uid=escrow_uid,
                         status="accepted",
                         fulfillment_resource=connection_details,
+                        taker_attestation=fulfillment_uid,  # seller (taker) contributed fulfillment
                     )
                 if tenant_credentials and escrow_uid:
                     order_id_for_escrow = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
@@ -437,7 +441,7 @@ async def execute_action(
                         logger.warning("[LOCAL DB] Cannot store tenant credentials: no order found for escrow_uid=%s", escrow_uid)
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
-            # Close buyer's order when arbitration succeeded (all decisions True).
+            # Update buyer's own registry order with taker_attestation, then close.
             if decisions and all(d.get("decision") for d in decisions):
                 _escrow = parameters.get("escrow_uid")
                 if _escrow:
@@ -445,12 +449,15 @@ async def execute_action(
                         sqlite_client = get_sqlite_client()
                         _oid = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=_escrow)
                         if _oid:
-                            await sqlite_client.update_order(order_id=_oid, status="closed")
                             registry_client = get_registry_client()
+                            if fulfillment_uid and CONFIG.enable_registry_discovery:
+                                await registry_client.update_order(_oid, {"taker_attestation": fulfillment_uid})
+                                logger.info("[TRUST] Updated buyer order %s with taker_attestation", _oid)
+                            await sqlite_client.update_order(order_id=_oid, status="closed")
                             await registry_client.update_order(_oid, {"status": "closed"})
                             logger.info("[TRUST] Closed buyer order %s after successful arbitration", _oid)
                     except Exception as exc:
-                        logger.warning("[TRUST] Failed to close buyer order after arbitration: %s", exc)
+                        logger.warning("[TRUST] Failed to update/close buyer order after arbitration: %s", exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
@@ -792,16 +799,20 @@ async def _fulfill_in_background(
 
     if result.get("status") == "fulfilled":
         # --- Success path (existing logic) ---
+        fulfillment_uid = result.get("fulfillment_uid")
         if matched_order_id:
             try:
                 sqlite_client = get_sqlite_client()
                 await sqlite_client.update_order(
                     order_id=matched_order_id,
-                    maker_attestation=result.get("fulfillment_uid"),
+                    maker_attestation=fulfillment_uid,
                     fulfillment_resource=result.get("connection_details"),
                 )
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
+
+        # NOTE: buyer's registry order taker_attestation is set by the buyer itself
+        # in TRUST_COMPUTE_OBLIGATION_FULFILLMENT (EIP-191 auth prevents cross-agent updates).
 
         for oid in filter(None, [matched_order_id, buyer_order_id]):
             try:
@@ -1649,7 +1660,8 @@ async def _accept_as_buyer(
     we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
     taker_url = counterparty_url if we_are_maker else BASE_URL_OVERRIDE
     order_dict["order_taker"] = taker_url
-    order_dict["taker_attestation"] = escrow_uid
+    # Buyer is always maker of own order → escrow goes in maker_attestation
+    order_dict["maker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
 
     # Echo the seller's order_id back so they can update their local DB without a lookup.
@@ -1680,7 +1692,7 @@ async def _accept_as_buyer(
                 order_id=our_order_id,
                 status="accepted",
                 order_taker=taker_url,
-                taker_attestation=escrow_uid,
+                maker_attestation=escrow_uid,  # buyer is maker of own order
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
                 oracle_address=oracle_address,
@@ -1691,23 +1703,31 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid}
-            # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
-            # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
+            # Update counterparty's (seller's) order — buyer is taker there
             their_id = order_dict.get("order_id")
             if their_id:
-                result = await registry_client.update_order(their_id, registry_updates)
+                their_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(their_id, their_updates)
                 if result:
-                    logger.info("[REGISTRY] Updated order %s to accepted", their_id)
+                    logger.info("[REGISTRY] Updated seller's order %s to accepted", their_id)
                 else:
-                    logger.warning("[REGISTRY] Failed to update order %s", their_id)
-            # In seller-as-maker flow, also update the seller's registry entry.
+                    logger.warning("[REGISTRY] Failed to update seller's order %s", their_id)
+            # Also update our own order — buyer is maker, contributed escrow
+            if our_order_id:
+                our_updates = {"status": "accepted", "order_taker": counterparty_url, "maker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(our_order_id, our_updates)
+                if result:
+                    logger.info("[REGISTRY] Updated buyer's own order %s with maker_attestation", our_order_id)
+                else:
+                    logger.warning("[REGISTRY] Failed to update buyer's order %s", our_order_id)
+            # In seller-as-maker flow, also update the matched order if different
             if matched_order_id and matched_order_id != their_id:
-                result = await registry_client.update_order(matched_order_id, registry_updates)
+                matched_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(matched_order_id, matched_updates)
                 if result:
-                    logger.info("[REGISTRY] Updated seller's order %s to accepted", matched_order_id)
+                    logger.info("[REGISTRY] Updated matched order %s to accepted", matched_order_id)
                 else:
-                    logger.warning("[REGISTRY] Failed to update seller's order %s", matched_order_id)
+                    logger.warning("[REGISTRY] Failed to update matched order %s", matched_order_id)
         except Exception as e:
             logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 
