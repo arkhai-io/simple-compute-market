@@ -1,5 +1,7 @@
 # Default values for test-env.
 # These are overridden by the parent chart's test-env: block in values.yaml.
+# The RPC port and host are authoritative in global.rpc (parent values.yaml)
+# and are not duplicated here.
 
 image:
   repository: ""
@@ -9,7 +11,6 @@ image:
 
 service:
   type: NodePort
-  port: 8545
 
 env:
   ANVIL_IP_ADDR: "0.0.0.0"

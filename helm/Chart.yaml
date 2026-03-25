@@ -10,3 +10,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/test-env"
     condition: test-env.enabled
+  - name: registry
+    version: "0.1.0"
+    repository: "file://charts/registry"
+    condition: registry.enabled

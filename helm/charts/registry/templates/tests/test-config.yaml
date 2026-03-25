@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "test-env.fullname" . }}-chain-environment-test-config
+  name: {{ include "registry.fullname" . }}-registry-environment-test-config
   labels:
-    {{- include "test-env.labels" . | nindent 4 }}
+    {{- include "registry.labels" . | nindent 4 }}
 data:
   config-helm.yml: |
     rpc:
@@ -15,4 +15,4 @@ data:
       reputation_address: {{ .Values.global.registry.reputation_address | quote }}
       validation_address: {{ .Values.global.registry.validation_address | quote }}
       owner_address:      {{ .Values.global.registry.owner_address | quote }}
-      api_url: ""
+      api_url:            {{ printf "http://%s:%d" (include "registry.fullname" .) (int .Values.service.port) | quote }}

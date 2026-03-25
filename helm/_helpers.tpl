@@ -66,3 +66,16 @@ Usage:
 {{- printf "%s:%s" .imageValues.name .imageValues.tag -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Compose the RPC URL from global.rpc.host and global.rpc.port.
+Defined in the root chart so the pattern is documented centrally.
+Each subchart mirrors this with an identical definition in its own _helpers.tpl
+because Helm does not make root-chart helpers available inside subcharts.
+
+Usage (inside any chart):
+  url: {{ include "arkhai.rpcUrl" . }}
+*/}}
+{{- define "arkhai.rpcUrl" -}}
+{{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- end }}

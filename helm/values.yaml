@@ -5,10 +5,16 @@ global:
   imageRepository: ""
 
   # ---------------------------------------------------------------------------
-  # Chain / network configuration shared across all subcharts
+  # Chain / network configuration shared across all subcharts.
+  # rpc.host and rpc.port are the single source of truth for the Anvil node's
+  # in-cluster service coordinates. They default to the service name and port
+  # produced by the test-env subchart under a release named "arkhai-node-operator".
+  # Override when using an external node or a differently-named release.
   # ---------------------------------------------------------------------------
   rpc:
     chainId: 31337
+    host: "arkhai-node-operator-test-env"
+    port: 8545
 
   # ---------------------------------------------------------------------------
   # Registry contract addresses shared across all subcharts
@@ -32,17 +38,40 @@ test-env:
     tag: test-env
     pullPolicy: IfNotPresent
 
-  # Mirrors: docker run -p 8545:8545
   service:
-    type: ClusterIP
-    port: 8545
+    type: NodePort
 
   # Mirrors: -e ANVIL_IP_ADDR=0.0.0.0
   env:
     ANVIL_IP_ADDR: "0.0.0.0"
 
 # ---------------------------------------------------------------------------
-# integration-tests (used by the test hook in the test-env subchart)
+# registry subchart
+# ---------------------------------------------------------------------------
+registry:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: registry
+    pullPolicy: IfNotPresent
+
+  service:
+    type: NodePort
+    port: 8080
+
+  config:
+    databaseUrl: "sqlite:///./indexer.db"
+    host: "0.0.0.0"
+    enableHealthChecks: true
+    healthCheckInterval: 60
+    endpointCheckTimeout: 10
+    heartbeatTtlSecs: 60
+    logLevel: "info"
+
+# ---------------------------------------------------------------------------
+# integration-tests (used by the test hook in each subchart)
 # ---------------------------------------------------------------------------
 integrationTests:
   image:

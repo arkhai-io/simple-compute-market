@@ -10,6 +10,6 @@ spec:
     {{- include "test-env.selectorLabels" . | nindent 4 }}
   ports:
     - name: rpc
-      port: {{ .Values.service.port }}
+      port: {{ .Values.global.rpc.port }}
       targetPort: rpc
       protocol: TCP
