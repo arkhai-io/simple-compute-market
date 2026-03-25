@@ -10,11 +10,10 @@ WORKDIR /app
 
 COPY src ./src
 COPY tests ./tests
-COPY conftest.py .
 COPY pyproject.toml uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+    uv sync --frozen
 
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -25,10 +24,12 @@ COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tests ./tests
 COPY config ./config
+COPY conftest.py .
+COPY settings.toml .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 ENV ACTIVE_PROFILES="docker"
-ENV CONFIG_DIRECTORY="/app/"
+ENV CONFIG_DIRECTORY="/app/config/"
 
 CMD .venv/bin/pytest 

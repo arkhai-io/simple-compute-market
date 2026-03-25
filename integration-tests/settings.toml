@@ -18,6 +18,7 @@ retry_backoff_seconds = 2
 # Registry contract addresses
 # ---------------------------------------------------------------------------
 [default.registry]
+api_url            = ""
 identity_address   = ""
 reputation_address = ""
 validation_address = ""
@@ -27,15 +28,19 @@ owner_address      = ""
 # Buyer wallet
 # ---------------------------------------------------------------------------
 [default.buyer]
-private_key    = ""
-wallet_address = ""
+api_url           = ""
+base_url_override = ""
+private_key       = ""
+wallet_address    = ""
 
 # ---------------------------------------------------------------------------
 # Seller wallet
 # ---------------------------------------------------------------------------
 [default.seller]
-private_key    = ""
-wallet_address = ""
+api_url           = ""
+base_url_override = ""
+private_key       = ""
+wallet_address    = ""
 
 # ---------------------------------------------------------------------------
 # Test behaviour
@@ -44,3 +49,6 @@ wallet_address = ""
 minimum_eth_balance = "0.01"          # ETH — wallets must hold at least this
 gas_price_strategy  = "medium"        # low | medium | high
 require_checksummed_addresses = true
+order_create_timeout = 30             #time in seconds
+order_match_timeout = 60
+order_close_timeout = 30

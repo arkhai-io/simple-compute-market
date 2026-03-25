@@ -45,6 +45,7 @@ markers = [
     "contracts: Tests that validate on-chain contract state",
     "wallets: Tests that validate wallet balances and key pairs",
     "registry: Tests that validate the Registry REST API",
+	"agents: Tests that validate the buyer and seller agent",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
 ]
