@@ -1457,6 +1457,9 @@ async def _accept_as_buyer(
     if alkahest_client:
         try:
             compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+            their_price = parameters.get("their_price")
+            if their_price is not None:
+                token_resource = {**token_resource, "amount": their_price}
         except ValueError as exc:
             logger.error(
                 "[ACCEPT OFFER] Cannot identify compute/token resources in order — skipping escrow: %s | order_dict keys=%s",
@@ -1496,9 +1499,10 @@ async def _accept_as_buyer(
     else:
         raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
 
-    # The counterparty (seller) is the taker of Alice's buy order.
     counterparty_url = parameters.get("counterparty_url")
-    order_dict["order_taker"] = counterparty_url
+    we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
+    taker_url = counterparty_url if we_are_maker else BASE_URL_OVERRIDE
+    order_dict["order_taker"] = taker_url
     order_dict["taker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
 
@@ -1526,7 +1530,7 @@ async def _accept_as_buyer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=counterparty_url,
+                order_taker=taker_url,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1538,7 +1542,7 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": counterparty_url, "taker_attestation": escrow_uid}
+            registry_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid}
             # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
             # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
             their_id = order_dict.get("order_id")
