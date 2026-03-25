@@ -77,6 +77,7 @@ services:
     volumes:
       - ./shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
+      - ./core/agent/app/data/buy-agent:/app/core/agent/app/data/buy-agent
     networks:
       - market-network
     deploy:
@@ -116,6 +117,7 @@ services:
     volumes:
       - ./shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one
+      - ./core/agent/app/data/sell-agent:/app/core/agent/app/data/sell-agent
     networks:
       - market-network
     deploy:
