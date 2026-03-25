@@ -42,8 +42,8 @@ def network_join(
     """Join a ZeroTier network."""
     run_step(
         f"Join ZeroTier network {network_id}",
-        ["sudo", "zerotier-cli", "join", network_id],
-        REPO_ROOT,
+        ["make", "join", f"NETWORK_ID={network_id}"],
+        REPO_ROOT / "infra",
     )
 
 

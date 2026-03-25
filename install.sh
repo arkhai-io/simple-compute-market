@@ -23,6 +23,7 @@ LINUX_SYSTEM_DEPS=(
     "npm:npm"
     "docker:docker.io"
     "python3.12:python3.12"
+    "jq:jq"
 )
 LINUX_PYTHON_DEV_PKGS=("python3.12-dev" "software-properties-common")
 
