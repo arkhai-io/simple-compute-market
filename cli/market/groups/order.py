@@ -170,13 +170,23 @@ def order_history(
         "-e",
         help="Path to env file (default: core/agent/.env).",
     ),
+    db: str | None = typer.Option(
+        None,
+        "--db",
+        help="Explicit path to the agent SQLite DB.",
+    ),
 ) -> None:
     """Show order history from local SQLite."""
     env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
     db_path = read_env_value(env_path, "AGENT_DB_PATH")
     if not db_path:
-        typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
+        typer.secho(
+            "Local DB not found. Pass --db <path> or --env <envfile> with AGENT_DB_PATH set.",
+            err=True,
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(code=1)
+    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
     agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
     if agent_mode == "container":
         # DB lives in a host-mounted volume; resolve container path to host path
