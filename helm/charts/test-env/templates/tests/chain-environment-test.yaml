@@ -1,0 +1,51 @@
+{{- $itValues := dict -}}
+{{- if .Values.global -}}
+  {{- $itValues = .Values.global.integrationTests | default dict -}}
+{{- end -}}
+{{- $rootIt := ((.Values).integrationTests) | default dict -}}
+{{- $itRepo := $rootIt.repository | default ($itValues.repository | default "") -}}
+{{- if and (not $itRepo) .Values.global -}}
+  {{- $itRepo = .Values.global.imageRepository | default "" -}}
+{{- end -}}
+{{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
+{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "integration-tests") -}}
+{{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
+{{- $itImage := "" -}}
+{{- if $itRepo -}}
+  {{- $itImage = printf "%s/%s:%s" $itRepo $itName $itTag -}}
+{{- else -}}
+  {{- $itImage = printf "%s:%s" $itName $itTag -}}
+{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "test-env.fullname" . }}-chain-environment-test
+  labels:
+    {{- include "test-env.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: {{ include "test-env.fullname" . }}-environment-test
+      image: {{ $itImage }}
+      imagePullPolicy: {{ $itPull }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - contracts
+      env:
+        # Override the dockerfile defaults so the container loads config-helm.yml
+        # from the mounted ConfigMap alongside the baked-in config.yml.
+        - name: ACTIVE_PROFILES
+          value: "helm"
+      volumeMounts:
+        - name: helm-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+  volumes:
+    - name: helm-config
+      configMap:
+        name: {{ include "test-env.fullname" . }}-chain-environment-test-config

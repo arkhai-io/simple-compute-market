@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "test-env.fullname" . }}-chain-environment-test-config
+  labels:
+    {{- include "test-env.labels" . | nindent 4 }}
+  #annotations:
+  #  "helm.sh/hook": test
+  #  "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  config-helm.yml: |
+    # ---------------------------------------------------------------------------
+    # Profile: helm
+    # Targets the test-env Anvil node deployed by the test-env subchart.
+    # ---------------------------------------------------------------------------
+
+    rpc:
+      url: "http://{{ include "test-env.fullname" . }}:{{ .Values.service.port }}"
+      chain_id: {{ .Values.global.rpc.chainId }}
+
+    registry:
+      identity_address:   {{ .Values.global.registry.identity_address | quote }}
+      reputation_address: {{ .Values.global.registry.reputation_address | quote }}
+      validation_address: {{ .Values.global.registry.validation_address | quote }}
+      owner_address:      {{ .Values.global.registry.owner_address | quote }}
+      api_url: ""

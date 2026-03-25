@@ -1,0 +1,52 @@
+# Global image settings shared across subcharts.
+# imageRepository can be set to a registry prefix, e.g. "registry.example.com/arkhai"
+# Leave empty ("") to use bare image names (matches local Docker builds).
+global:
+  imageRepository: ""
+
+  # ---------------------------------------------------------------------------
+  # Chain / network configuration shared across all subcharts
+  # ---------------------------------------------------------------------------
+  rpc:
+    chainId: 31337
+
+  # ---------------------------------------------------------------------------
+  # Registry contract addresses shared across all subcharts
+  # ---------------------------------------------------------------------------
+  registry:
+    identity_address:   "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+    validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
+
+# ---------------------------------------------------------------------------
+# test-env subchart
+# ---------------------------------------------------------------------------
+test-env:
+  enabled: true
+
+  image:
+    # Repository override for this subchart. Falls back to global.imageRepository.
+    repository: ""
+    name: arkhai
+    tag: test-env
+    pullPolicy: IfNotPresent
+
+  # Mirrors: docker run -p 8545:8545
+  service:
+    type: ClusterIP
+    port: 8545
+
+  # Mirrors: -e ANVIL_IP_ADDR=0.0.0.0
+  env:
+    ANVIL_IP_ADDR: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# integration-tests (used by the test hook in the test-env subchart)
+# ---------------------------------------------------------------------------
+integrationTests:
+  image:
+    repository: ""
+    name: arkhai
+    tag: integration-tests
+    pullPolicy: IfNotPresent

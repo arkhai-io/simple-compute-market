@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "test-env.fullname" . }}
+  labels:
+    {{- include "test-env.labels" . | nindent 4 }}
+spec:
+  # Anvil maintains in-memory chain state; more than one replica is not useful.
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "test-env.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "test-env.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: anvil
+          image: {{ include "test-env.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: rpc
+              containerPort: 8545
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          # Anvil only accepts JSON-RPC POST requests — a bare HTTP GET returns 400
+          # so httpGet probes will always fail. Use exec+curl to POST a valid call.
+          livenessProbe:
+            exec:
+              command:
+                - curl
+                - --silent
+                - --fail
+                - --max-time
+                - "2"
+                - -X
+                - POST
+                - -H
+                - "Content-Type: application/json"
+                - --data
+                - '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+                - http://localhost:8545
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command:
+                - curl
+                - --silent
+                - --fail
+                - --max-time
+                - "2"
+                - -X
+                - POST
+                - -H
+                - "Content-Type: application/json"
+                - --data
+                - '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+                - http://localhost:8545
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

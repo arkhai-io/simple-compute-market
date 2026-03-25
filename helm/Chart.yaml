@@ -1,0 +1,12 @@
+apiVersion: v2
+name: arkhai-node-operator
+description: Arkhai node operator cloud stack
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: test-env
+    version: "0.1.0"
+    repository: "file://charts/test-env"
+    condition: test-env.enabled
