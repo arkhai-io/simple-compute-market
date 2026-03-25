@@ -358,9 +358,9 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address") or (order if isinstance(order, dict) else {}).get("oracle_address"),
+                oracle_address=parameters.get("oracle_address") or order_dict.get("oracle_address"),
                 ssh_public_key=ssh_public_key,
-                order=order,
+                order=order_dict,
                 seller_order_id=matched_order_id,
             )
             if result.get("status") == "fulfilled":
@@ -1522,6 +1522,9 @@ async def _accept_as_buyer(
         # when the seller initiated the MakeOfferEvent (Case B: offer field contains seller's order,
         # so order.order_id would be wrong without this echo).
         "buyer_order_id": our_order_id,
+        # Carry the negotiated price forward so the counterparty can use it for
+        # fulfillment encoding / escrow creation (Reactive Decision Pattern).
+        "agreed_price": parameters.get("their_price"),
     }
 
     try:
@@ -1612,6 +1615,9 @@ async def _accept_as_seller(
         "matched_order_id": our_order_id,
         # Tell the buyer which order_id they should use as their local record reference.
         "buyer_order_id": their_order_id,
+        # Carry the negotiated price forward so the buyer can create escrow at the
+        # agreed amount (Reactive Decision Pattern).
+        "agreed_price": parameters.get("their_price"),
     }
 
     try:

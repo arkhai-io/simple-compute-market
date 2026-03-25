@@ -378,12 +378,14 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
             source = data.get("source") or payload.get("source")
             buyer_order_id = data.get("buyer_order_id") or payload.get("buyer_order_id")
+            agreed_price = data.get("agreed_price") or payload.get("agreed_price")
             event = AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
                 matched_order_id=matched_order_id,
                 source=source,
+                agreed_price=agreed_price,
             )
             if buyer_order_id:
                 event = event.model_copy(update={"buyer_order_id": buyer_order_id})
@@ -1422,7 +1424,7 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to create market orders via the root agent.
     """
-    auth_error = _check_agent_request_auth(request, "create_order", BASE_URL_OVERRIDE)
+    auth_error = _check_agent_request_auth(request, "create_order", CONFIG.agent_wallet_address)
     if auth_error:
         return auth_error
 

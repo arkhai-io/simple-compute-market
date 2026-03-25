@@ -172,6 +172,10 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
 
     compute_buyer = (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
 
+    # The agreed price flows through the event chain (Reactive Decision Pattern).
+    # When negotiation occurred, the AcceptOfferEvent carries the converged price.
+    agreed_price = getattr(context.event, "agreed_price", None)
+
     if compute_buyer:
         if escrow_uid:
             return None
@@ -191,8 +195,8 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
                 "matched_order_id": matched_order_id,
                 "negotiation_id": neg_id,
                 "our_initial_price": our_initial_price,
-                "our_price": our_initial_price,
-                "their_price": our_initial_price,
+                "our_price": agreed_price or our_initial_price,
+                "their_price": agreed_price or our_initial_price,
                 # compute_buyer = True means we minimize (token payer wants lowest price)
                 "our_strategy": "minimize",
             },
@@ -200,10 +204,19 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
 
     if not escrow_uid or not ssh_key:
         return None
+
+    # Patch order dict with negotiated price so encode_compute_lease produces
+    # demand_bytes matching what the buyer used when creating the escrow.
+    order_data = order.model_dump(mode="json")
+    if agreed_price is not None:
+        demand = order_data.get("demand_resource") or {}
+        if isinstance(demand, dict) and "amount" in demand:
+            order_data = {**order_data, "demand_resource": {**demand, "amount": agreed_price}}
+
     return DomainAction(
         action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
         parameters={
-            "order": order.model_dump(mode="json"),
+            "order": order_data,
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
             "oracle_address": order.oracle_address,
