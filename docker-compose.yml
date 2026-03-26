@@ -114,6 +114,9 @@ services:
       # Force re-registration on every fresh Anvil — clear stale IDs from env file
       - ONCHAIN_AGENT_ID=
       - ZEROTIER_IP=
+      # Overridable via host env vars (e.g. PROVISIONING_MODE=mock make e2e-mock-happy)
+      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
     volumes:
       - ./shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one

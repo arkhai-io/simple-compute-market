@@ -38,9 +38,23 @@ private_key    = ""
 wallet_address = ""
 
 # ---------------------------------------------------------------------------
+# Agent / registry endpoints (e2e tests)
+# ---------------------------------------------------------------------------
+[default.agents]
+registry_url = ""
+buyer_url = ""
+seller_url = ""
+buyer_db = ""
+seller_db = ""
+buyer_env = ""
+seller_env = ""
+
+# ---------------------------------------------------------------------------
 # Test behaviour
 # ---------------------------------------------------------------------------
 [default.tests]
 minimum_eth_balance = "0.01"          # ETH — wallets must hold at least this
 gas_price_strategy  = "medium"        # low | medium | high
 require_checksummed_addresses = true
+e2e_poll_timeout_s = 120
+e2e_poll_interval_s = 3
