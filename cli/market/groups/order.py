@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from ..common import REPO_ROOT
+from ..common import REPO_ROOT, read_env_value, container_db_to_host
 
 order_app = typer.Typer(no_args_is_help=True)
 
@@ -177,14 +177,20 @@ def order_history(
     if not db_path:
         typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
-    if not Path(db_path).exists():
-        typer.secho(f"No local order database found at {db_path}", err=True, fg=typer.colors.RED)
+    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
+    if agent_mode == "container":
+        # DB lives in a host-mounted volume; resolve container path to host path
+        resolved = container_db_to_host(db_path)
+    else:
+        resolved = Path(db_path)
+    if not resolved.exists():
+        typer.secho(f"No local order database found at {resolved}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
     try:
         import sqlite3
 
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(resolved)
         try:
             cur = conn.cursor()
             cur.execute(

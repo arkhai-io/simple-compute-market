@@ -25,6 +25,24 @@ def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> 
     return default
 
 
+def container_db_to_host(db_path: str) -> Path:
+    """Resolve a container-side AGENT_DB_PATH to its host-side equivalent under REPO_ROOT.
+
+    Container paths are relative to the container WORKDIR (/app), e.g.:
+      ./core/agent/app/data/buy-agent/agent.db  →  REPO_ROOT/core/agent/app/data/buy-agent/agent.db
+      /app/core/agent/app/data/buy-agent/agent.db  →  same
+
+    With the -v mount added by `market start`, the file is accessible at this
+    host path without needing docker exec.
+    """
+    rel = db_path
+    if rel.startswith("/app/"):
+        rel = rel[len("/app/"):]
+    elif rel.startswith("./"):
+        rel = rel[2:]
+    return REPO_ROOT / rel
+
+
 def run_step(
     label: str,
     cmd: list[str],

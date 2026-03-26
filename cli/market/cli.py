@@ -5,7 +5,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 import typer
 
-from .common import REPO_ROOT, DEFAULT_AGENT_ENV, read_env_value, run_step
+from .common import REPO_ROOT, DEFAULT_AGENT_ENV, read_env_value, container_db_to_host, run_step
 from .groups.order import order_app
 from .groups.registry import registry_app
 from .groups.network import network_app
@@ -119,7 +119,14 @@ def start(
     agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
     if agent_mode == "container":
         port = read_env_value(env, "PORT", default="8000")
+        db_path = read_env_value(env, "AGENT_DB_PATH", default="")
         env_abs = str(Path(env).resolve())
+        volume_flags: list[str] = []
+        if db_path:
+            host_data_dir = str(container_db_to_host(db_path).parent)
+            rel = db_path[len("/app/"):] if db_path.startswith("/app/") else db_path.lstrip("./")
+            container_data_dir = "/app/" + str(Path(rel).parent)
+            volume_flags = ["-v", f"{host_data_dir}:{container_data_dir}"]
         cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",  # image is built for linux/amd64; needed on ARM hosts
@@ -128,6 +135,7 @@ def start(
             "--cap-add", "NET_ADMIN",     # ZeroTier needs to create/configure a virtual network interface
             "--cap-add", "SYS_MODULE",    # ZeroTier may need to load the tun kernel module
             "--device", "/dev/net/tun",   # exposes the host TUN/TAP device so ZeroTier can create its interface
+            *volume_flags,
             "arkhai:core",
         ]
         run_step("Start agent (docker run arkhai:core)", cmd, REPO_ROOT)

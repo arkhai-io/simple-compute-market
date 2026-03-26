@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from market.cli import app
-from market.common import read_env_value
+from market.common import read_env_value, container_db_to_host, REPO_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -124,3 +124,82 @@ def test_start_defaults_to_host_when_mode_absent(tmp_path: Path):
     assert result.exit_code == 0
     cmd = mock_run.call_args[0][1]
     assert cmd[0] == "make"
+
+
+def test_start_includes_volume_mount_when_db_path_set(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nPORT=8000\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    with patch("market.cli.run_step") as mock_run:
+        result = runner.invoke(app, ["start", "--env", str(env)])
+    assert result.exit_code == 0
+    cmd = mock_run.call_args[0][1]
+    assert "-v" in cmd
+    v_index = cmd.index("-v")
+    mount = cmd[v_index + 1]
+    host_part, container_part = mount.split(":")
+    assert host_part == str(REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent")
+    assert container_part == "/app/core/agent/app/data/buy-agent"
+
+
+def test_start_no_volume_mount_when_db_path_absent(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nPORT=8000\n")
+    with patch("market.cli.run_step") as mock_run:
+        result = runner.invoke(app, ["start", "--env", str(env)])
+    assert result.exit_code == 0
+    cmd = mock_run.call_args[0][1]
+    assert "-v" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# container_db_to_host
+# ---------------------------------------------------------------------------
+
+def test_container_db_to_host_strips_dot_slash():
+    p = container_db_to_host("./core/agent/app/data/buy-agent/agent.db")
+    assert p == REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent" / "agent.db"
+
+
+def test_container_db_to_host_strips_app_prefix():
+    p = container_db_to_host("/app/core/agent/app/data/buy-agent/agent.db")
+    assert p == REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent" / "agent.db"
+
+
+# ---------------------------------------------------------------------------
+# market order history
+# ---------------------------------------------------------------------------
+
+def test_order_history_resolves_host_path_in_container_mode(tmp_path: Path):
+    """order history resolves AGENT_DB_PATH via container_db_to_host when AGENT_MODE=container."""
+    db_file = tmp_path / "agent.db"
+    # Write a minimal SQLite DB with an empty orders table
+    import sqlite3
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE orders (order_id TEXT, status TEXT, created_at TEXT, updated_at TEXT, offer_resource TEXT, demand_resource TEXT, fulfillment_resource TEXT)")
+    conn.commit()
+    conn.close()
+
+    env = tmp_path / ".env"
+    env.write_text(f"AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+
+    with patch("market.groups.order.container_db_to_host", return_value=db_file):
+        result = runner.invoke(app, ["order", "history", "--env", str(env)])
+    assert result.exit_code == 0
+    assert "No local orders found." in result.output
+
+
+def test_order_history_uses_raw_path_in_host_mode(tmp_path: Path):
+    """order history reads AGENT_DB_PATH directly when AGENT_MODE=host."""
+    db_file = tmp_path / "agent.db"
+    import sqlite3
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE orders (order_id TEXT, status TEXT, created_at TEXT, updated_at TEXT, offer_resource TEXT, demand_resource TEXT, fulfillment_resource TEXT)")
+    conn.commit()
+    conn.close()
+
+    env = tmp_path / ".env"
+    env.write_text(f"AGENT_MODE=host\nAGENT_DB_PATH={db_file}\n")
+
+    result = runner.invoke(app, ["order", "history", "--env", str(env)])
+    assert result.exit_code == 0
+    assert "No local orders found." in result.output
