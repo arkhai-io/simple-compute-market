@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from ..common import REPO_ROOT, run_step
+from ..common import REPO_ROOT, read_env_value, container_db_to_host, run_step, DEFAULT_AGENT_ENV
 
 portfolio_app = typer.Typer(no_args_is_help=True)
 
@@ -33,6 +33,15 @@ def portfolio_import_csv(
     csv_file = Path(csv_path)
     if not csv_file.exists():
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
+
+    # In container mode, resolve the container DB path to its host-side volume mount
+    # so the import script can write directly without needing docker exec.
+    if not db_path:
+        agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
+        if agent_mode == "container":
+            raw = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_DB_PATH", default="")
+            if raw:
+                db_path = str(container_db_to_host(raw))
 
     cmd = ["make", "import-resources", f"CSV={csv_file.resolve()}"]
     if env:

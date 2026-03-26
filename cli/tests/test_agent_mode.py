@@ -242,3 +242,53 @@ def test_order_show_uses_raw_path_in_host_mode(tmp_path: Path):
     result = runner.invoke(app, ["order", "show", "nonexistent-id", "--env", str(env)])
     # DB resolves correctly; fails on missing order, not missing DB
     assert "not found" in result.output.lower() or result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# market portfolio import-csv
+# ---------------------------------------------------------------------------
+
+def test_portfolio_import_csv_passes_host_db_path_in_container_mode(tmp_path: Path):
+    """In container mode, import-csv resolves AGENT_DB_PATH and passes it as DB_PATH to make."""
+    csv_file = tmp_path / "resources.csv"
+    csv_file.write_text("name,value\n")
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+
+    with patch("market.groups.portfolio.run_step") as mock_run:
+        runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env)])
+
+    cmd = mock_run.call_args[0][1]
+    db_args = [a for a in cmd if a.startswith("DB_PATH=")]
+    assert len(db_args) == 1
+    assert db_args[0] == f"DB_PATH={REPO_ROOT}/core/agent/app/data/buy-agent/agent.db"
+
+
+def test_portfolio_import_csv_no_db_path_override_in_host_mode(tmp_path: Path):
+    """In host mode, import-csv does not inject DB_PATH — make reads it from the env file."""
+    csv_file = tmp_path / "resources.csv"
+    csv_file.write_text("name,value\n")
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=host\nAGENT_DB_PATH=./agent.db\n")
+
+    with patch("market.groups.portfolio.run_step") as mock_run:
+        runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env)])
+
+    cmd = mock_run.call_args[0][1]
+    db_args = [a for a in cmd if a.startswith("DB_PATH=")]
+    assert len(db_args) == 0
+
+
+def test_portfolio_import_csv_explicit_db_path_takes_precedence(tmp_path: Path):
+    """--db-path flag overrides container mode resolution."""
+    csv_file = tmp_path / "resources.csv"
+    csv_file.write_text("name,value\n")
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+
+    with patch("market.groups.portfolio.run_step") as mock_run:
+        runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env), "--db-path", "/explicit/agent.db"])
+
+    cmd = mock_run.call_args[0][1]
+    db_args = [a for a in cmd if a.startswith("DB_PATH=")]
+    assert db_args == ["DB_PATH=/explicit/agent.db"]
