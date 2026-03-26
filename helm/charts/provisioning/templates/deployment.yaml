@@ -1,0 +1,150 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provisioning.fullname" . }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioning
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "provisioning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: provisioning
+  template:
+    metadata:
+      labels:
+        {{- include "provisioning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: provisioning
+    spec:
+      initContainers:
+        # Wait for the Redis sidecar to accept connections before starting the provisioning service.
+        # Redis speaks a binary protocol, not HTTP, so wget cannot probe it.
+        # Use the same redis-cli ping check as the Redis readiness probe.
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Redis at {{ include "provisioning.fullname" . }}-redis:{{ .Values.redis.port }}..."
+              until redis-cli -h {{ include "provisioning.fullname" . }}-redis -p {{ .Values.redis.port }} ping 2>&1 | grep -q PONG; do
+                echo "Redis not ready, retrying in 3s..."; sleep 3
+              done
+              echo "Redis ready."
+      containers:
+        - name: provisioning
+          image: {{ include "provisioning.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            # --- sourced from subchart values ---
+            - name: HOST
+              value: {{ .Values.config.host | quote }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: DATABASE_URL
+              value: {{ .Values.config.databaseUrl | quote }}
+            - name: REDIS_QUEUE_NAME
+              value: {{ .Values.config.redisQueueName | quote }}
+            - name: ANSIBLE_TIMEOUT_SECONDS
+              value: {{ .Values.config.ansibleTimeoutSeconds | quote }}
+            - name: DEFAULT_VM_HOST
+              value: {{ .Values.config.defaultVmHost | quote }}
+            - name: ZEROTIER_NETWORK
+              value: {{ .Values.config.zerotierNetwork | quote }}
+            - name: ENABLE_AUTH
+              value: {{ .Values.config.enableAuth | quote }}
+            - name: REGISTRY_CACHE_TTL_SECONDS
+              value: {{ .Values.config.registryCacheTtlSeconds | quote }}
+            - name: REGISTRY_CACHE_MAX_SIZE
+              value: {{ .Values.config.registryCacheMaxSize | quote }}
+            - name: ENABLE_RATE_LIMITING
+              value: {{ .Values.config.enableRateLimiting | quote }}
+            - name: RATE_LIMIT_REQUESTS_PER_MINUTE
+              value: {{ .Values.config.rateLimitRequestsPerMinute | quote }}
+            # --- sourced from global ---
+            - name: REGISTRY_URL
+              value: {{ include "registry.url" . | quote }}
+            # --- sourced from helpers ---
+            - name: REDIS_URL
+              value: {{ include "provisioning.redisUrl" . | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provisioning.fullname" . }}-redis
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "provisioning.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "provisioning.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          imagePullPolicy: {{ .Values.redis.pullPolicy }}
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

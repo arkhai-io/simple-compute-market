@@ -1,0 +1,67 @@
+# Default values for provisioning.
+# These are overridden by the parent chart's provisioning: block in values.yaml.
+# The registry URL is sourced from global.registry.host/port and is not
+# duplicated here.
+
+image:
+  repository: ""
+  name: arkhai
+  tag: provisioning
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8081
+
+# ---------------------------------------------------------------------------
+# Application settings — map directly to env vars in the container.
+# ---------------------------------------------------------------------------
+config:
+  host: "0.0.0.0"
+  logLevel: "info"
+  databaseUrl: "sqlite:///provisioning.db"
+
+  # Redis queue
+  redisQueueName: "provisioning_jobs"
+
+  # Ansible
+  ansibleTimeoutSeconds: 1800
+  defaultVmHost: "ww1"
+
+  # ZeroTier
+  zerotierNetwork: "88c5b1f339bbf5ab"
+
+  # Authentication — disabled for local dev
+  enableAuth: false
+  registryCacheTtlSeconds: 300
+  registryCacheMaxSize: 256
+
+  # Rate limiting — disabled for local dev
+  enableRateLimiting: false
+  rateLimitRequestsPerMinute: 30
+
+# ---------------------------------------------------------------------------
+# Redis sidecar — used as the job queue backend.
+# Runs as a separate Deployment + Service within this subchart rather than
+# a nested subchart dependency, keeping the provisioning concern self-contained.
+# ---------------------------------------------------------------------------
+redis:
+  image: "redis:7-alpine"
+  port: 6379
+  pullPolicy: IfNotPresent
+
+# Number of replicas.
+replicaCount: 1
+
+# Resource requests/limits – tune per environment.
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

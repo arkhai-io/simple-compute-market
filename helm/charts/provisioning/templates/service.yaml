@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioning
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioning
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+---
+# Redis is internal to the provisioning subchart — ClusterIP only,
+# not exposed via the parent chart's service type.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}-redis
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: {{ .Values.redis.port }}
+      targetPort: redis
+      protocol: TCP

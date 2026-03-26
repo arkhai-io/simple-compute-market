@@ -15,7 +15,7 @@ global:
     port: 8545
 
   # ---------------------------------------------------------------------------
-  # Registry contract addresses shared across all subcharts
+  # Registry service coordinates and contract addresses shared across all subcharts.
   # Defaults to the service name produced by the registry subchart under a
   # release named "arkhai-node-operator".
   # ---------------------------------------------------------------------------
@@ -123,6 +123,41 @@ agents:
       secretName: ""
       privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
       walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+# ---------------------------------------------------------------------------
+# provisioning subchart
+# ---------------------------------------------------------------------------
+provisioning:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: provisioning
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8081
+
+  config:
+    host: "0.0.0.0"
+    logLevel: "info"
+    databaseUrl: "sqlite:///provisioning.db"
+    redisQueueName: "provisioning_jobs"
+    ansibleTimeoutSeconds: 1800
+    defaultVmHost: "ww1"
+    zerotierNetwork: "88c5b1f339bbf5ab"
+    enableAuth: false
+    registryCacheTtlSeconds: 300
+    registryCacheMaxSize: 256
+    enableRateLimiting: false
+    rateLimitRequestsPerMinute: 30
+
+  redis:
+    image: "redis:7-alpine"
+    port: 6379
+    pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
 # integration-tests (used by the test hook in each subchart)

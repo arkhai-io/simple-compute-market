@@ -49,9 +49,10 @@ test:
 ##   test-env  → $(RELEASE)-test-env-chain-environment-test
 ##   registry  → $(RELEASE)-registry-registry-environment-test
 ##   agents    → $(RELEASE)-agents-agents-environment-test
-TEST_POD_SUFFIX_test-env  := chain-environment-test
-TEST_POD_SUFFIX_registry  := registry-environment-test
-TEST_POD_SUFFIX_agents    := agents-environment-test
+TEST_POD_SUFFIX_test-env     := chain-environment-test
+TEST_POD_SUFFIX_registry     := registry-environment-test
+TEST_POD_SUFFIX_agents       := agents-environment-test
+TEST_POD_SUFFIX_provisioning := provisioning-environment-test
  
 test-module:
 ifndef MODULE
@@ -72,6 +73,7 @@ FORWARD_PID_FILE := .port-forward.pids
 ##   Registry    http://localhost:8080
 ##   Agent buy   http://localhost:8000
 ##   Agent sell  http://localhost:8001
+##   Provisioning http://localhost:8081
 forward: unforward
 	@echo "Starting port-forwards..."
 	@kubectl port-forward --namespace $(NAMESPACE) \
@@ -82,10 +84,13 @@ forward: unforward
 		svc/$(RELEASE)-agents-buyer 8000:8000 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-agents-seller 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@echo "  anvil    → http://localhost:8545"
 	@echo "  registry → http://localhost:8080"
 	@echo "  buy      → http://localhost:8000"
 	@echo "  sell     → http://localhost:8001"
+	@echo "  prov     → http://localhost:8081"
 	@echo "Run 'make unforward' to stop."
 
 ## Kill all port-forwards started by 'make forward'

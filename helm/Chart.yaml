@@ -18,3 +18,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/agents"
     condition: agents.enabled
+  - name: provisioning
+    version: "0.1.0"
+    repository: "file://charts/provisioning"
+    condition: provisioning.enabled
