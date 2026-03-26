@@ -21,6 +21,35 @@ spec:
         {{- include "agents.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: buyer
     spec:
+      initContainers:
+        # Wait for the Anvil RPC node to be accepting JSON-RPC requests.
+        # Uses HTTP since that is sufficient to prove the node is ready;
+        # the main container connects over WebSocket.
+        - name: wait-for-rpc
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for RPC at {{ include "rpc.url" . }}..."
+              until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                --header 'Content-Type: application/json' \
+                {{ include "rpc.url" . }} > /dev/null 2>&1; do
+                echo "RPC not ready, retrying in 5s..."; sleep 5
+              done
+              echo "RPC ready."
+        # Wait for the registry /health endpoint to return 200.
+        - name: wait-for-registry
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for registry at {{ include "registry.url" . }}/health..."
+              until wget -qO- {{ include "registry.url" . }}/health > /dev/null 2>&1; do
+                echo "Registry not ready, retrying in 5s..."; sleep 5
+              done
+              echo "Registry ready."
       containers:
         - name: market-agent-buy
           image: {{ include "agents.image" . }}
@@ -134,6 +163,35 @@ spec:
         {{- include "agents.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: seller
     spec:
+      initContainers:
+        # Wait for the Anvil RPC node to be accepting JSON-RPC requests.
+        # Uses HTTP since that is sufficient to prove the node is ready;
+        # the main container connects over WebSocket.
+        - name: wait-for-rpc
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for RPC at {{ include "rpc.url" . }}..."
+              until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                --header 'Content-Type: application/json' \
+                {{ include "rpc.url" . }} > /dev/null 2>&1; do
+                echo "RPC not ready, retrying in 5s..."; sleep 5
+              done
+              echo "RPC ready."
+        # Wait for the registry /health endpoint to return 200.
+        - name: wait-for-registry
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for registry at {{ include "registry.url" . }}/health..."
+              until wget -qO- {{ include "registry.url" . }}/health > /dev/null 2>&1; do
+                echo "Registry not ready, retrying in 5s..."; sleep 5
+              done
+              echo "Registry ready."
       containers:
         - name: market-agent-sell
           image: {{ include "agents.image" . }}
