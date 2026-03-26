@@ -1,6 +1,4 @@
 """
-arkhai_e2e_tests/settings.py
-----------------------------
 Centralised dynaconf configuration loader.
 
 Resolution order (highest priority wins):
@@ -11,6 +9,11 @@ Resolution order (highest priority wins):
   5. .env / .env.<ENV_FOR_DYNACONF> files
   6. .secrets.toml
   7. settings.toml  (project defaults / schema documentation)
+
+Merge behaviour:
+  Values are unioned using deep-merge behavior.
+  This is good for combining values with secrets but inconvenient if you wish
+  to delete previous configuration values
 """
 
 from __future__ import annotations
@@ -56,14 +59,22 @@ settings = Dynaconf(
     environments=False,  # we use profiles, not dynaconf environments
     # Allow nested keys via __ separator in env vars (ARKHAI_RPC__URL)
     nested_sep="__",
+    # Deep-merge all loaded files by default. Without this, a profile file
+    # that defines `buyer:` replaces the entire buyer mapping from earlier
+    # files rather than updating only the keys it sets. Individual files can
+    # still opt out by setting `dynaconf_merge: false` at their top level.
+    merge_enabled=True,
 )
+
 
 def validate_all() -> None:
     """Run all validators and raise on the first failure."""
     settings.validators.validate_all()
 
+
 def active_profiles() -> List[str]:
     return list(_active_profiles)
+
 
 def config_directory() -> Path:
     return _CONFIG_DIR
