@@ -712,9 +712,12 @@ def _resolve_db_path(db: str | None, env: str | None) -> str | None:
     if db:
         return db
     env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    value = _read_env_value(env_path, "AGENT_DB_PATH")
-    if value and Path(value).exists():
-        return value
+    db_path_from_env = _read_env_value(env_path, "AGENT_DB_PATH")
+    if db_path_from_env:
+        agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
+        resolved = str(container_db_to_host(db_path_from_env)) if agent_mode == "container" else db_path_from_env
+        if Path(resolved).exists():
+            return resolved
     # Fallback: check env var directly
     from_env = os.getenv("AGENT_DB_PATH")
     if from_env and Path(from_env).exists():

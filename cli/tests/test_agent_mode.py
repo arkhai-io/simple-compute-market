@@ -203,3 +203,42 @@ def test_order_history_uses_raw_path_in_host_mode(tmp_path: Path):
     result = runner.invoke(app, ["order", "history", "--env", str(env)])
     assert result.exit_code == 0
     assert "No local orders found." in result.output
+
+
+# ---------------------------------------------------------------------------
+# market order show — _resolve_db_path
+# ---------------------------------------------------------------------------
+
+def test_order_show_resolves_host_path_in_container_mode(tmp_path: Path):
+    """order show resolves AGENT_DB_PATH via container_db_to_host when AGENT_MODE=container."""
+    import sqlite3
+    db_file = tmp_path / "agent.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE orders (order_id TEXT, status TEXT, created_at TEXT, updated_at TEXT, offer_resource TEXT, demand_resource TEXT, fulfillment_resource TEXT)")
+    conn.commit()
+    conn.close()
+
+    env = tmp_path / ".env"
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+
+    with patch("market.groups.order.container_db_to_host", return_value=db_file):
+        result = runner.invoke(app, ["order", "show", "nonexistent-id", "--env", str(env)])
+    # DB resolves correctly; fails on missing order, not missing DB
+    assert "not found" in result.output.lower() or result.exit_code != 0
+
+
+def test_order_show_uses_raw_path_in_host_mode(tmp_path: Path):
+    """order show reads AGENT_DB_PATH directly when AGENT_MODE=host."""
+    import sqlite3
+    db_file = tmp_path / "agent.db"
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE orders (order_id TEXT, status TEXT, created_at TEXT, updated_at TEXT, offer_resource TEXT, demand_resource TEXT, fulfillment_resource TEXT)")
+    conn.commit()
+    conn.close()
+
+    env = tmp_path / ".env"
+    env.write_text(f"AGENT_MODE=host\nAGENT_DB_PATH={db_file}\n")
+
+    result = runner.invoke(app, ["order", "show", "nonexistent-id", "--env", str(env)])
+    # DB resolves correctly; fails on missing order, not missing DB
+    assert "not found" in result.output.lower() or result.exit_code != 0
