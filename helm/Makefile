@@ -41,6 +41,27 @@ test:
 		--namespace $(NAMESPACE) \
 		--logs
 
+## Run helm tests for a single subchart.
+## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=registry
+## Valid values: test-env, registry, agents
+##
+## Test pod names per module:
+##   test-env  → $(RELEASE)-test-env-chain-environment-test
+##   registry  → $(RELEASE)-registry-registry-environment-test
+##   agents    → $(RELEASE)-agents-agents-environment-test
+TEST_POD_SUFFIX_test-env  := chain-environment-test
+TEST_POD_SUFFIX_registry  := registry-environment-test
+TEST_POD_SUFFIX_agents    := agents-environment-test
+ 
+test-module:
+ifndef MODULE
+	$(error MODULE is not set. Usage: make test-module MODULE=<subchart-name>)
+endif
+	helm test $(RELEASE) \
+		--namespace $(NAMESPACE) \
+		--logs \
+		--filter name=$(RELEASE)-$(MODULE)-$(TEST_POD_SUFFIX_$(MODULE))
+
 # PID file used by forward/unforward targets
 FORWARD_PID_FILE := .port-forward.pids
 
