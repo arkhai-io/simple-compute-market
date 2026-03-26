@@ -56,3 +56,11 @@ Mirrors the definition in the root chart's _helpers.tpl.
 {{- define "rpc.url" -}}
 {{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
+
+{{/*
+Compose the registry URL from global.registry.host and global.registry.port.
+Mirrors the rpc.url pattern.
+*/}}
+{{- define "registry.url" -}}
+{{- printf "http://%s:%d" .Values.global.registry.host (int .Values.global.registry.port) -}}
+{{- end }}

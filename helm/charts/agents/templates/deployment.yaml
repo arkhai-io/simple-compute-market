@@ -1,0 +1,225 @@
+{{/*
+Buyer agent deployment (Alice / market-agent-buy)
+Mirrors: docker run --cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agents.fullname" . }}-buyer
+  labels:
+    {{- include "agents.labels" . | nindent 4 }}
+    app.kubernetes.io/component: buyer
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agents.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: buyer
+  template:
+    metadata:
+      labels:
+        {{- include "agents.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: buyer
+    spec:
+      containers:
+        - name: market-agent-buy
+          image: {{ include "agents.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.buyer.port }}
+              protocol: TCP
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - SYS_MODULE
+          # /dev/net/tun is required for VPN-based networking
+          volumeMounts:
+            - name: tun-device
+              mountPath: /dev/net/tun
+          env:
+            # --- agent identity ---
+            - name: PORT
+              value: {{ .Values.buyer.port | quote }}
+            - name: AGENT_ID
+              value: {{ .Values.buyer.agentId | quote }}
+            - name: BASE_URL_OVERRIDE
+              value: {{ .Values.buyer.baseUrlOverride | quote }}
+            - name: AGENT_DB_PATH
+              value: {{ .Values.buyer.agentDbPath | quote }}
+            - name: LOG_FILE_PATH
+              value: {{ .Values.buyer.logFilePath | quote }}
+            - name: AUTO_REGISTER
+              value: {{ .Values.buyer.autoRegister | quote }}
+            - name: ENABLE_EVENT_QUEUE
+              value: {{ .Values.buyer.enableEventQueue | quote }}
+            - name: GEMINI_API_KEY
+              value: {{ .Values.buyer.geminiApiKey | quote }}
+            # --- chain / networking ---
+            - name: CHAIN_RPC_URL
+              value: {{ include "rpc.wsUrl" . | quote }}
+            - name: CHAIN_NAME
+              value: {{ .Values.buyer.chainName | quote }}
+            - name: ALKAHEST_ADDRESS_CONFIG_PATH
+              value: {{ .Values.buyer.alkahestAddressConfigPath | quote }}
+            - name: TOKEN_REGISTRY_PATH
+              value: {{ .Values.buyer.tokenRegistryPath | quote }}
+            - name: SSH_PUBLIC_KEY
+              value: {{ .Values.buyer.sshPublicKey | quote }}
+            # --- registry / indexer ---
+            - name: INDEXER_URL
+              value: {{ include "registry.url" . | quote }}
+            - name: IDENTITY_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.identity_address | quote }}
+            - name: REPUTATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.reputation_address | quote }}
+            - name: VALIDATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.validation_address | quote }}
+            # --- provisioning / negotiation ---
+            - name: PROVISIONING_MODE
+              value: {{ .Values.buyer.provisioningMode | quote }}
+            - name: NEGOTIATION_POLICY_MODE
+              value: {{ .Values.buyer.negotiationPolicyMode | quote }}
+            # --- wallet (from secret) ---
+            - name: AGENT_PRIV_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agents.buyer.secretName" . }}
+                  key: privKey
+            - name: AGENT_WALLET_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agents.buyer.secretName" . }}
+                  key: walletAddress
+          # TODO: add liveness/readiness probes once agent health endpoint is defined.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tun-device
+          hostPath:
+            path: /dev/net/tun
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{/*
+Seller agent deployment (Bob / market-agent-sell)
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agents.fullname" . }}-seller
+  labels:
+    {{- include "agents.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seller
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agents.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: seller
+  template:
+    metadata:
+      labels:
+        {{- include "agents.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: seller
+    spec:
+      containers:
+        - name: market-agent-sell
+          image: {{ include "agents.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.seller.port }}
+              protocol: TCP
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - SYS_MODULE
+          volumeMounts:
+            - name: tun-device
+              mountPath: /dev/net/tun
+          env:
+            # --- agent identity ---
+            - name: PORT
+              value: {{ .Values.seller.port | quote }}
+            - name: AGENT_ID
+              value: {{ .Values.seller.agentId | quote }}
+            - name: BASE_URL_OVERRIDE
+              value: {{ .Values.seller.baseUrlOverride | quote }}
+            - name: AGENT_DB_PATH
+              value: {{ .Values.seller.agentDbPath | quote }}
+            - name: LOG_FILE_PATH
+              value: {{ .Values.seller.logFilePath | quote }}
+            - name: AUTO_REGISTER
+              value: {{ .Values.seller.autoRegister | quote }}
+            - name: ENABLE_EVENT_QUEUE
+              value: {{ .Values.seller.enableEventQueue | quote }}
+            - name: GEMINI_API_KEY
+              value: {{ .Values.seller.geminiApiKey | quote }}
+            # --- chain / networking ---
+            - name: CHAIN_RPC_URL
+              value: {{ include "rpc.wsUrl" . | quote }}
+            - name: CHAIN_NAME
+              value: {{ .Values.seller.chainName | quote }}
+            - name: ALKAHEST_ADDRESS_CONFIG_PATH
+              value: {{ .Values.seller.alkahestAddressConfigPath | quote }}
+            - name: TOKEN_REGISTRY_PATH
+              value: {{ .Values.seller.tokenRegistryPath | quote }}
+            - name: SSH_PUBLIC_KEY
+              value: {{ .Values.seller.sshPublicKey | quote }}
+            # --- registry / indexer ---
+            - name: INDEXER_URL
+              value: {{ include "registry.url" . | quote }}
+            - name: IDENTITY_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.identity_address | quote }}
+            - name: REPUTATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.reputation_address | quote }}
+            - name: VALIDATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.validation_address | quote }}
+            # --- provisioning / negotiation ---
+            - name: PROVISIONING_MODE
+              value: {{ .Values.seller.provisioningMode | quote }}
+            - name: NEGOTIATION_POLICY_MODE
+              value: {{ .Values.seller.negotiationPolicyMode | quote }}
+            # --- wallet (from secret) ---
+            - name: AGENT_PRIV_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agents.seller.secretName" . }}
+                  key: privKey
+            - name: AGENT_WALLET_ADDRESS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agents.seller.secretName" . }}
+                  key: walletAddress
+          # TODO: add liveness/readiness probes once agent health endpoint is defined.
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tun-device
+          hostPath:
+            path: /dev/net/tun
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

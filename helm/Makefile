@@ -1,17 +1,11 @@
 # Makefile for arkhai-node-operator Helm chart
-#
-# Usage:
-#   make template                    # Template the full parent chart
-#   make template-module MODULE=test-env  # Template a single subchart
-#   make deploy                      # Install or upgrade the release
-#   make test                        # Run helm tests against the release
 
 CHART_DIR   := .
 RELEASE     := arkhai-node-operator
 NAMESPACE   := default
 VALUES      := values.yaml
 
-.PHONY: dep template template-module deploy test
+.PHONY: init template deploy test
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -46,3 +40,33 @@ test:
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs
+
+# PID file used by forward/unforward targets
+FORWARD_PID_FILE := .port-forward.pids
+
+## Forward all service ports to localhost in the background.
+## PIDs are written to $(FORWARD_PID_FILE) so unforward can clean them up.
+## Access services at:
+##   Anvil RPC   http://localhost:8545
+##   Registry    http://localhost:8080
+##   Agent buy   http://localhost:8000
+##   Agent sell  http://localhost:8001
+forward: unforward
+	@echo "Starting port-forwards..."
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-test-env 8545:8545 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-agents-buyer 8000:8000 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-agents-seller 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@echo "  anvil    → http://localhost:8545"
+	@echo "  registry → http://localhost:8080"
+	@echo "  buy      → http://localhost:8000"
+	@echo "  sell     → http://localhost:8001"
+	@echo "Run 'make unforward' to stop."
+
+## Kill all port-forwards started by 'make forward'
+unforward:
+	@test -f $(FORWARD_PID_FILE) && cat $(FORWARD_PID_FILE) | xargs kill 2>/dev/null; rm -f $(FORWARD_PID_FILE); true

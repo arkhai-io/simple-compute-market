@@ -14,3 +14,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/registry"
     condition: registry.enabled
+  - name: agents
+    version: "0.1.0"
+    repository: "file://charts/agents"
+    condition: agents.enabled

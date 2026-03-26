@@ -1,0 +1,63 @@
+{{- $itValues := dict -}}
+{{- if .Values.global -}}
+  {{- $itValues = .Values.global.integrationTests | default dict -}}
+{{- end -}}
+{{- $rootIt := ((.Values).integrationTests) | default dict -}}
+{{- $itRepo := $rootIt.repository | default ($itValues.repository | default "") -}}
+{{- if and (not $itRepo) .Values.global -}}
+  {{- $itRepo = .Values.global.imageRepository | default "" -}}
+{{- end -}}
+{{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
+{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "integration-tests") -}}
+{{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
+{{- $itImage := "" -}}
+{{- if $itRepo -}}
+  {{- $itImage = printf "%s/%s:%s" $itRepo $itName $itTag -}}
+{{- else -}}
+  {{- $itImage = printf "%s:%s" $itName $itTag -}}
+{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "agents.fullname" . }}-agents-environment-test
+  labels:
+    {{- include "agents.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: {{ include "agents.fullname" . }}-environment-test
+      image: {{ $itImage }}
+      imagePullPolicy: {{ $itPull }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - agents
+      env:
+        - name: ACTIVE_PROFILES
+          value: "helm,buyer-secret,seller-secret"
+      volumeMounts:
+        - name: helm-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+        - name: buyer-secret-config
+          mountPath: /app/config/config-buyer-secret.yml
+          subPath: config-buyer-secret.yml
+          readOnly: true
+        - name: seller-secret-config
+          mountPath: /app/config/config-seller-secret.yml
+          subPath: config-seller-secret.yml
+          readOnly: true
+  volumes:
+    - name: helm-config
+      configMap:
+        name: {{ include "agents.fullname" . }}-agents-environment-test-config
+    - name: buyer-secret-config
+      secret:
+        secretName: {{ include "agents.fullname" . }}-agents-environment-test-buyer-secret
+    - name: seller-secret-config
+      secret:
+        secretName: {{ include "agents.fullname" . }}-agents-environment-test-seller-secret
