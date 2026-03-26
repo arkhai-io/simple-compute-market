@@ -18,10 +18,24 @@ def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> 
     path = Path(env_file)
     if not path.exists():
         return default
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if line.startswith(f"{key}="):
-            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    try:
+        for raw_line in path.read_text().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            if name.strip() != key:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            return value
+    except Exception:
+        return default
     return default
 
 
