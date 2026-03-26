@@ -121,12 +121,14 @@ def start(
         port = read_env_value(env, "PORT", default="8000")
         db_path = read_env_value(env, "AGENT_DB_PATH", default="")
         env_abs = str(Path(env).resolve())
+        docker_network = read_env_value(env, "DOCKER_NETWORK", default="")
         volume_flags: list[str] = []
         if db_path:
             host_data_dir = str(container_db_to_host(db_path).parent)
             rel = db_path[len("/app/"):] if db_path.startswith("/app/") else db_path.lstrip("./")
             container_data_dir = "/app/" + str(Path(rel).parent)
             volume_flags = ["-v", f"{host_data_dir}:{container_data_dir}"]
+        network_flags = ["--network", docker_network] if docker_network else []
         cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",  # image is built for linux/amd64; needed on ARM hosts
@@ -136,6 +138,7 @@ def start(
             "--cap-add", "SYS_MODULE",    # ZeroTier may need to load the tun kernel module
             "--device", "/dev/net/tun",   # exposes the host TUN/TAP device so ZeroTier can create its interface
             *volume_flags,
+            *network_flags,
             "arkhai:core",
         ]
         run_step("Start agent (docker run arkhai:core)", cmd, REPO_ROOT)
