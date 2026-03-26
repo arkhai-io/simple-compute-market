@@ -154,21 +154,6 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
 # Accept-offer -> fulfill flow
 @policy_callable("ao.action.fulfill_after_accept")
 def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | None:
-    """Handle AcceptOfferEvent by role.
-
-    Two paths depending on who we are and what escrow state we're in:
-
-    - Compute buyer, no escrow_uid yet: the seller just signalled acceptance.
-      We create the escrow by dispatching ACCEPT_OFFER (which will send a second
-      AcceptOfferEvent back to the seller with escrow_uid).
-
-    - Compute seller, escrow_uid present: the buyer created the escrow and is
-      asking us to provision. We dispatch FULFILL_COMPUTE_OBLIGATION.
-
-    Role detection: we are the compute buyer if the maker offers compute and we
-    are the taker, OR the maker offers tokens and we are the maker (buyer-as-maker
-    dispatch where we're creating the escrow for our own buy order).
-    """
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
@@ -178,7 +163,6 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
     escrow_uid = context.event.escrow_uid
     ssh_key = context.event.ssh_public_key
     matched_order_id = context.event.matched_order_id
-    # source is the URL of whoever sent us this event (set by the sender).
     sender_url = context.event.source
 
     maker_offers_compute = isinstance(order.offer_resource, ComputeResource)
@@ -186,39 +170,64 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
     maker_url = (order.order_maker or "").rstrip("/")
     we_are_maker = bool(our_url and maker_url and our_url == maker_url)
 
-    # We are the compute buyer if:
-    # - Maker offers compute and we're the taker (seller-as-maker, normal flow).
-    # - Maker offers tokens and we're the maker (buyer-as-maker, policy-triggered).
     compute_buyer = (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
 
+    # The agreed price flows through the event chain (Reactive Decision Pattern).
+    # When negotiation occurred, the AcceptOfferEvent carries the converged price.
+    agreed_price = getattr(context.event, "agreed_price", None)
+
     if compute_buyer:
-        # Escrow not yet created — create it now.
         if escrow_uid:
-            return None  # already processed
+            return None
+        neg_id = make_negotiation_id(order.order_id, matched_order_id) if matched_order_id else None
+        our_initial_price = _extract_initial_price_from_order(order)
+        # buyer_order_id is set by the seller so the buyer can link escrow_uid to their local
+        # order record. Fall back to order.order_id for backwards-compat (older seller agents).
+        our_order_id = getattr(context.event, "buyer_order_id", None) or order.order_id
         return DomainAction(
             action_type=DomainActionType.ACCEPT_OFFER,
             parameters={
                 "order": order.model_dump(mode="json"),
                 "order_id": order.order_id,
-                "our_order_id": order.order_id,
+                "our_order_id": our_order_id,
                 "their_order_id": matched_order_id,
                 "counterparty_url": sender_url,
                 "matched_order_id": matched_order_id,
+                "negotiation_id": neg_id,
+                "our_initial_price": our_initial_price,
+                "our_price": agreed_price or our_initial_price,
+                "their_price": agreed_price or our_initial_price,
+                # compute_buyer = True means we minimize (token payer wants lowest price)
+                "our_strategy": "minimize",
             },
         )
 
-    # Compute seller: fulfill once buyer has supplied escrow_uid and ssh_key.
     if not escrow_uid or not ssh_key:
         return None
+
+    # Patch order dict with negotiated price so encode_compute_lease produces
+    # demand_bytes matching what the buyer used when creating the escrow.
+    order_data = order.model_dump(mode="json")
+    if agreed_price is not None:
+        demand = order_data.get("demand_resource") or {}
+        if isinstance(demand, dict) and "amount" in demand:
+            order_data = {**order_data, "demand_resource": {**demand, "amount": agreed_price}}
+
     return DomainAction(
         action_type=DomainActionType.FULFILL_COMPUTE_OBLIGATION,
         parameters={
-            "order": order.model_dump(mode="json"),
+            "order": order_data,
             "escrow_uid": escrow_uid,
             "ssh_public_key": ssh_key,
             "oracle_address": order.oracle_address,
             "counterparty_url": sender_url,
             "matched_order_id": matched_order_id,
+            # buyer_order_id is echoed by the buyer in their AcceptOfferEvent so the seller
+            # can reconstruct make_negotiation_id(seller_order, buyer_order) regardless of
+            # who initiated the MakeOfferEvent.
+            # Case A (buyer initiates): offer field = buyer's order → order.order_id = buyer's ✓
+            # Case B (seller initiates): offer field = seller's order → need the echo ✓
+            "buyer_order_id": getattr(context.event, "buyer_order_id", None) or order.order_id,
         },
     )
 
@@ -316,7 +325,13 @@ def negotiation_guard_always_negotiate_on_price_diff(context: DecisionContext) -
 
     if last_our_proposal is not None and their_price is not None and last_our_proposal == their_price:
         logger.info(f"[NEGOTIATION] Prices equal ({last_our_proposal}), accepting directly")
-        data = {**data, "counterparty_url": thread_info.get("their_agent_id")}
+        data = {
+            **data,
+            "counterparty_url": thread_info.get("their_agent_id"),
+            "our_price": thread_info.get("our_initial_price"),
+            "their_price": their_price,
+            "our_strategy": thread_info.get("our_strategy"),
+        }
         actions = NegotiationActionBuilder(data)
         return actions.accept("price_equal")
 
@@ -397,9 +412,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MINIMIZE] Converged: their_price {their_price} <= last_our_proposal {last_our_proposal} * {1 + CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price <= our_price * REASONABLE_MULTIPLIER:
-            # Above last bid but reasonable — counter with midpoint
+            # Above last bid but reasonable — counter with midpoint, converging toward their price
             proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            logger.info(f"[NEGOTIATION][MINIMIZE] Counter-offering {proposed_price} (midpoint of {last_our_proposal} and {their_price}, ceiling={our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far above ceiling
@@ -421,9 +436,9 @@ def negotiation_action_price_interval_concession(context: DecisionContext) -> Do
             logger.info(f"[NEGOTIATION][MAXIMIZE] Converged: their_price {their_price} >= last_our_proposal {last_our_proposal} * {1 - CONVERGENCE_RATIO:.2f}, accepting")
             return actions.accept("convergence")
         elif their_price >= our_price / REASONABLE_MULTIPLIER:
-            # Below last ask but reasonable — counter with midpoint
+            # Below last ask but reasonable — counter with midpoint, converging toward their price
             proposed_price = (last_our_proposal + their_price) // 2
-            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (between {last_our_proposal} and {their_price})")
+            logger.info(f"[NEGOTIATION][MAXIMIZE] Counter-offering {proposed_price} (midpoint of {last_our_proposal} and {their_price}, floor={our_price})")
             return actions.counter(proposed_price)
         else:
             # Unreasonable - far below floor
@@ -597,61 +612,6 @@ def negotiation_action_handle_exit(context: DecisionContext) -> DomainAction | N
     return None  # No action to send back
 
 
-@policy_callable("mo.action.accept_offer")
-def mo_action_accept_offer(context: DecisionContext) -> DomainAction | None:
-    """Accept offer policy that validates resources and checks agent capacity.
-    
-    Extracts offer_resource and demand_resource from MakeOfferEvent.
-    - If demand is a ComputeResource: checks if agent has sufficient capacity, rejects if not.
-    - If demand is a TokenResource: accepts the offer (simulated assumption: we have enough tokens).
-    Includes resource details in action parameters.
-    """
-    from core.agent.app.schema.pydantic_models import ActionType
-    
-    # Only process MakeOfferEvent
-    if not isinstance(context.event, MakeOfferEvent):
-        return None
-    
-    # Extract order and resources using utility function
-    order, offer_resource, demand_resource = extract_resources_from_make_offer_event(context)
-    
-    if order is None:
-        return None
-    
-    # Check agent capacity for demand resource if it's a ComputeResource
-    if isinstance(demand_resource, ComputeResource):
-        # Get portfolio from available_resources
-        portfolio = get_compute_resource_portfolio(context)
-        if portfolio and not portfolio.has_capacity(demand_resource):
-            # Agent doesn't have capacity - reject
-            return DomainAction(
-                action_type=ActionType.REJECT_OFFER,
-                parameters={
-                    "reason": "insufficient_capacity",
-                    "demand_resource": demand_resource.model_dump(mode="json"),
-                }
-            )
-    elif isinstance(demand_resource, TokenResource):
-        # If demand is a TokenResource, accept the offer
-        # Simulated assumption: we have enough tokens in our wallet
-        pass
-    
-    # Accept offer with resource details
-    # buyer_order_id is echoed back by the seller so the buyer can update their
-    # local order record directly without a fuzzy symmetric DB lookup.
-    buyer_order_id = getattr(context.event, "buyer_order_id", None)
-    return DomainAction(
-        action_type=ActionType.ACCEPT_OFFER,
-        parameters={
-            "order_id": order.order_id,
-            "order": order,
-            "offer_resource": offer_resource.model_dump(mode='json'),
-            "demand_resource": demand_resource.model_dump(mode='json'),
-            "counterparty_url": order.order_maker,
-            "our_order_id": buyer_order_id,
-        }
-    )
-
 
 @policy_callable("negotiation.respond_to_make_offer")
 async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainAction | None:
@@ -745,6 +705,43 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
             "active thread found (we got no_match earlier) — responding to their offer.",
             our_order_id,
         )
+
+    # Round guard: mirrors negotiation_guard_bounded_rounds_and_timeout but for make_offer path.
+    # That guard only fires on `negotiation` events; this function handles `make_offer` events
+    # and is in a separate chain, so the guard never applies here without this check.
+    MAX_ROUNDS = 10
+    _ts = get_thread_store()
+    _thread_msgs = await _ts.get_thread(negotiation_id)
+    _our_counters = [
+        m for m in _thread_msgs
+        if (m.get("sender") or "").strip().rstrip("/").lower() == _our_url
+        and m.get("action_taken") == DomainActionType.COUNTER_OFFER.value
+    ]
+    _action_dict = {
+        "negotiation_id": negotiation_id,
+        "their_order_id": their_order_id,
+        "our_order_id": our_order_id,
+        "our_price": our_price,
+        "their_price": their_proposed_price,
+        "proposed_price": their_proposed_price,
+        "our_strategy": strategy,
+        "order": incoming_order,
+        "counterparty_url": incoming_order.get("order_maker"),
+    }
+    if len(_our_counters) >= MAX_ROUNDS:
+        logger.info(
+            "[NEGOTIATION] make_offer round guard: reached MAX_ROUNDS=%d for negotiation %s — exiting.",
+            MAX_ROUNDS, negotiation_id,
+        )
+        return NegotiationActionBuilder(_action_dict).exit("max_rounds")
+    if len(_our_counters) >= 2:
+        _last_prices = [m.get("proposed_price") for m in _our_counters[-2:]]
+        if _last_prices[0] is not None and _last_prices[0] == _last_prices[1]:
+            logger.info(
+                "[NEGOTIATION] make_offer stale guard: price stuck at %s for negotiation %s — exiting.",
+                _last_prices[0], negotiation_id,
+            )
+            return NegotiationActionBuilder(_action_dict).exit("stale_negotiation")
 
     actions = NegotiationActionBuilder({
         "negotiation_id": negotiation_id,

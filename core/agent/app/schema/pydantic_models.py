@@ -348,6 +348,20 @@ class AcceptOfferEvent(DomainEvent):
             "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
         ),
     )
+    buyer_order_id: str | None = Field(
+        default=None,
+        description=(
+            "The buyer's own demand order_id, set by the seller on the first (no-escrow) "
+            "acceptance so the buyer can link the escrow_uid to their local order record."
+        ),
+    )
+    agreed_price: float | int | None = Field(
+        default=None,
+        description=(
+            "The negotiated/agreed price carried forward from the negotiation thread. "
+            "When present, overrides demand_resource.amount for escrow and fulfillment encoding."
+        ),
+    )
 
     @classmethod
     def from_order(
@@ -357,6 +371,7 @@ class AcceptOfferEvent(DomainEvent):
         ssh_public_key: str | None = None,
         matched_order_id: str | None = None,
         source: str | None = None,
+        agreed_price: float | int | None = None,
     ) -> "AcceptOfferEvent":
         """Create an accept-offer event from a market order and optional escrow UID."""
         return cls(
@@ -366,6 +381,7 @@ class AcceptOfferEvent(DomainEvent):
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
             matched_order_id=matched_order_id,
+            agreed_price=agreed_price,
             data={
                 "order_id": order.order_id,
                 "offer_resource": order.offer_resource.model_dump(mode="json"),
@@ -375,6 +391,7 @@ class AcceptOfferEvent(DomainEvent):
                 "ssh_public_key": ssh_public_key,
                 "oracle_address": order.oracle_address,
                 "matched_order_id": matched_order_id,
+                "agreed_price": agreed_price,
             },
         )
 

@@ -194,7 +194,7 @@ class TestMinimizerStrategy:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should counter with midpoint: (100 + 140) // 2 = 120
+        # Midpoint: (100 + 140) // 2 = 120  (no clamp)
         assert result is not None
         assert result.action_type.value == "counter_offer"
         assert result.parameters.get("proposed_price") == 120
@@ -252,7 +252,7 @@ class TestMaximizerStrategy:
         ce = CallableEvaluator(func)
         result = await ce.evaluate(context)
 
-        # Should counter with midpoint: (100 + 70) // 2 = 85
+        # Midpoint: (100 + 70) // 2 = 85  (no clamp)
         assert result is not None
         assert result.action_type.value == "counter_offer"
         assert result.parameters.get("proposed_price") == 85
@@ -336,9 +336,9 @@ class TestNegotiationScenarios:
 
         Initial: Minimizer at 100, Maximizer at 100
         Offer: 140 (above minimizer's ceiling)
-        Expected: Minimizer counters to 120, Maximizer accepts (120 >= 100)
+        Expected: Minimizer counters to 120 (midpoint), Maximizer accepts (120 >= 100)
         """
-        # Minimizer sees 140 → counters to 120
+        # Minimizer sees 140 → counters to 120 (midpoint: (100+140)//2 = 120)
         minimizer_context = create_test_context(
             our_price=100,
             their_price=140,
@@ -352,11 +352,11 @@ class TestNegotiationScenarios:
         ce = CallableEvaluator(func)
         minimizer_result = await ce.evaluate(minimizer_context)
 
-        # Minimizer should counter to 120
+        # Minimizer should counter to 120 (midpoint, no clamp)
         assert minimizer_result.action_type.value == "counter_offer"
         assert minimizer_result.parameters.get("proposed_price") == 120
 
-        # Maximizer sees 120 (from minimizer counter) → should accept (>= floor)
+        # Maximizer sees 120 (minimizer's midpoint counter) → should accept (120 >= floor of 100)
         maximizer_context = create_test_context(
             our_price=100,
             their_price=120,
@@ -470,7 +470,7 @@ class TestMultipleBilateralNegotiations:
         - Agent A is a minimizer with order_A (ceiling=100)
         - Agent B is a maximizer with order_B (asking 150)
         - Agent C is a maximizer with order_C (asking 130)
-        - A should counter both B and C independently
+        - A should counter both B and C, clamped to ceiling
         """
         func = policy_store._registry.get("negotiation.action.price_interval_concession")
         ce = CallableEvaluator(func)
@@ -521,11 +521,11 @@ class TestMultipleBilateralNegotiations:
         result_B = await ce.evaluate(context_B)
         result_C = await ce.evaluate(context_C)
 
-        # Both should counter (150 and 130 are above 120% of 100)
+        # Both should counter (150 and 130 are above ceiling of 100 but <= 1.5x)
         assert result_B.action_type.value == "counter_offer"
         assert result_C.action_type.value == "counter_offer"
 
-        # Counter prices should be different (midpoints)
+        # Counter prices are unclamped midpoints
         assert result_B.parameters.get("proposed_price") == 125  # (100 + 150) // 2
         assert result_C.parameters.get("proposed_price") == 115  # (100 + 130) // 2
 
@@ -894,3 +894,145 @@ class TestMultipleBilateralNegotiations:
         # C's offer of 90 is below floor (100), but >= 0.67x (67), so maximizer should counter
         # Wait, 90 < 100, so maximizer should counter (not accept)
         assert result_C.action_type.value == "counter_offer"
+
+
+class TestMakeOfferRoundGuard:
+    """Tests for the round guard injected into negotiation_respond_to_make_offer.
+
+    The guard prevents infinite 7↔8 oscillation (Scenario B: no ZOPA, prices within 1.5x band)
+    by counting our own COUNTER_OFFER messages in the thread and exiting when stale or exhausted.
+    """
+
+    OUR_URL = "http://alice.local"
+    OUR_ORDER_ID = "order-zzz-alice"   # sorts AFTER "order-aaa-bob" → canonical guard skipped
+    THEIR_ORDER_ID = "order-aaa-bob"   # sorts FIRST → not canonical initiator
+
+    @pytest.fixture
+    def thread_store(self, temp_db):
+        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        return NegotiationThreadStore(SQLiteClient(db_path=temp_db))
+
+    def _make_event_and_context(self, their_price: int = 150):
+        """Build a MakeOfferEvent + DecisionContext for the incoming offer."""
+        from core.agent.app.schema.pydantic_models import (
+            MakeOfferEvent, MarketOrder, ComputeResource, TokenResource,
+            ERC20TokenMetadata, GPUModel, Region, DecisionContext,
+        )
+        token = ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6)
+        their_order = MarketOrder(
+            order_id=self.THEIR_ORDER_ID,
+            order_maker="http://bob.local",
+            offer_resource=TokenResource(token=token, amount=their_price),
+            demand_resource=ComputeResource(
+                gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
+            ),
+            duration_hours=1,
+        )
+        event = MakeOfferEvent(event_id="evt_test_guard", source="http://bob.local", order=their_order)
+        context = DecisionContext(event=event, agent_id=self.OUR_URL, available_resources={})
+        return event, context
+
+    def _our_order_dict(self, our_price: int = 100):
+        """Build our maximizer order as a dict (seller offering compute, demanding tokens)."""
+        from core.agent.app.schema.pydantic_models import (
+            MarketOrder, ComputeResource, TokenResource, ERC20TokenMetadata, GPUModel, Region,
+        )
+        token = ERC20TokenMetadata(symbol="USDC", contract_address="0x1234", decimals=6)
+        order = MarketOrder(
+            order_id=self.OUR_ORDER_ID,
+            order_maker=self.OUR_URL,
+            offer_resource=ComputeResource(
+                gpu_model=GPUModel.H200, quantity=1, sla=99.9, region=Region.CALIFORNIA_US,
+            ),
+            demand_resource=TokenResource(token=token, amount=our_price),
+            duration_hours=1,
+        )
+        return order.model_dump(mode="json")
+
+    @pytest.mark.asyncio
+    async def test_make_offer_exits_at_max_rounds(self, thread_store, temp_db):
+        """Round guard exits with EXIT_NEGOTIATION / max_rounds after MAX_ROUNDS counter-offers."""
+        from unittest.mock import AsyncMock, patch
+        from core.agent.app.policy.action_builders import make_negotiation_id
+        import core.agent.app.utils.config as cfg_mod
+        from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
+
+        neg_id = make_negotiation_id(self.OUR_ORDER_ID, self.THEIR_ORDER_ID)
+
+        # Seed thread with 10 counter-offers from our agent (= MAX_ROUNDS)
+        for i in range(10):
+            await thread_store.add_message(
+                negotiation_id=neg_id,
+                sender=self.OUR_URL,
+                our_price=100,
+                their_price=150,
+                proposed_price=120 - i,
+                action_taken="counter_offer",
+                message_type="counter_proposal",
+            )
+
+        _, context = self._make_event_and_context(their_price=150)
+        our_order = self._our_order_dict(our_price=100)
+
+        original_base_url = cfg_mod.CONFIG.base_url_override
+        try:
+            object.__setattr__(cfg_mod.CONFIG, "base_url_override", self.OUR_URL)
+            with (
+                patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_reg,
+                patch("domain.compute.agent.app.policy.store.get_thread_store", return_value=thread_store),
+            ):
+                mock_client = AsyncMock()
+                mock_client.query_orders = AsyncMock(return_value=[our_order])
+                mock_reg.return_value = mock_client
+
+                result = await negotiation_respond_to_make_offer(context)
+        finally:
+            object.__setattr__(cfg_mod.CONFIG, "base_url_override", original_base_url)
+
+        assert result is not None
+        assert result.action_type.value == "exit_negotiation"
+        assert result.parameters.get("reason") == "max_rounds"
+
+    @pytest.mark.asyncio
+    async def test_make_offer_exits_on_stale_price(self, thread_store, temp_db):
+        """Round guard exits with EXIT_NEGOTIATION / stale_negotiation when last 2 counters have same price."""
+        from unittest.mock import AsyncMock, patch
+        from core.agent.app.policy.action_builders import make_negotiation_id
+        from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
+
+        neg_id = make_negotiation_id(self.OUR_ORDER_ID, self.THEIR_ORDER_ID)
+
+        # Two counter-offers from our agent, both at proposed_price=7 (the oscillation case)
+        for _ in range(2):
+            await thread_store.add_message(
+                negotiation_id=neg_id,
+                sender=self.OUR_URL,
+                our_price=8,
+                their_price=7,
+                proposed_price=7,
+                action_taken="counter_offer",
+                message_type="counter_proposal",
+            )
+
+        _, context = self._make_event_and_context(their_price=7)
+        our_order = self._our_order_dict(our_price=8)
+
+        import core.agent.app.utils.config as cfg_mod
+        original_base_url = cfg_mod.CONFIG.base_url_override
+        try:
+            object.__setattr__(cfg_mod.CONFIG, "base_url_override", self.OUR_URL)
+            with (
+                patch("domain.compute.agent.app.policy.store.get_registry_client") as mock_reg,
+                patch("domain.compute.agent.app.policy.store.get_thread_store", return_value=thread_store),
+            ):
+                mock_client = AsyncMock()
+                mock_client.query_orders = AsyncMock(return_value=[our_order])
+                mock_reg.return_value = mock_client
+
+                result = await negotiation_respond_to_make_offer(context)
+        finally:
+            object.__setattr__(cfg_mod.CONFIG, "base_url_override", original_base_url)
+
+        assert result is not None
+        assert result.action_type.value == "exit_negotiation"
+        assert result.parameters.get("reason") == "stale_negotiation"

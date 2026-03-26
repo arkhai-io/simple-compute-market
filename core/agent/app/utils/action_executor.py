@@ -7,6 +7,7 @@ Move domain-specific execution into the domain package as refactor continues.
 from __future__ import annotations
 
 import asyncio
+import functools
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -349,6 +350,7 @@ async def execute_action(
                         order_id=matched_order_id,
                         status="accepted",
                         escrow_uid=escrow_uid,
+                        order_taker=parameters.get("counterparty_url"),
                     )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
@@ -356,9 +358,10 @@ async def execute_action(
             result = await fulfill_compute_obligation(
                 client=alkahest_client,
                 escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address") or (order if isinstance(order, dict) else {}).get("oracle_address"),
+                oracle_address=parameters.get("oracle_address") or order_dict.get("oracle_address"),
                 ssh_public_key=ssh_public_key,
-                order=order,
+                order=order_dict,
+                seller_order_id=matched_order_id,
             )
             if result.get("status") == "fulfilled":
                 # Update our own local order with fulfillment details.
@@ -375,8 +378,11 @@ async def execute_action(
                         )
                     except Exception as exc:
                         logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
-                # Close both orders in registry and local DB after successful fulfillment
-                buyer_order_id = order_dict.get("order_id")
+                # Close both orders in registry and local DB after successful fulfillment.
+                # buyer_order_id is the buyer's order_id, derived from order.order_id in the
+                # AcceptOfferEvent (the offer field IS the buyer's order).  Falls back to
+                # order_dict.get("order_id") which is the same value.
+                buyer_order_id = parameters.get("buyer_order_id") or order_dict.get("order_id")
                 for oid in filter(None, [matched_order_id, buyer_order_id]):
                     try:
                         registry_client = get_registry_client()
@@ -393,6 +399,25 @@ async def execute_action(
                     try:
                         neg_id = make_negotiation_id(matched_order_id, buyer_order_id)
                         async with NegotiationThreadTransaction("FULFILL_COMPUTE_OBLIGATION") as txn:
+                            thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
+                            our_price = (thread_info or {}).get("our_initial_price")
+                            # Derive agreed price from last non-terminal message's their_price
+                            # (the counterparty's final proposal), rather than reading the raw
+                            # order amount which reflects the original ask, not the agreed price.
+                            messages = await txn.thread_store.get_thread(neg_id)
+                            agreed_price = next(
+                                (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
+                                None,
+                            )
+                            await txn.add_message(
+                                negotiation_id=neg_id,
+                                sender=_sender_id(),
+                                our_price=our_price,
+                                their_price=agreed_price,
+                                proposed_price=agreed_price,
+                                action_taken=ActionType.FULFILL_COMPUTE_OBLIGATION.value,
+                                message_type="fulfilled",
+                            )
                             await txn.mark_terminal(neg_id, "success")
                     except Exception as _term_err:
                         logger.warning(
@@ -432,7 +457,7 @@ async def execute_action(
                             invocation_id=ctx.invocation_id,
                             branch=ctx.branch,
                         )
-                        await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
+                        _background_send(ctx, event, agent_url=counterparty_url)
                     except Exception as send_err:
                         logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
             else:
@@ -471,17 +496,41 @@ async def execute_action(
                 if tenant_credentials and escrow_uid:
                     order_id_for_escrow = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
                     if order_id_for_escrow:
+                        # Build ssh_commands from connection_details (contains ssh_command for the tenant).
+                        tenant_ssh_commands = None
+                        try:
+                            cd = json.loads(connection_details) if isinstance(connection_details, str) else (connection_details or {})
+                            ssh_cmd = cd.get("ssh_command")
+                            if ssh_cmd:
+                                tenant_ssh_commands = json.dumps({"external": ssh_cmd})
+                        except Exception:
+                            pass
                         await sqlite_client.store_credential(
                             order_id=order_id_for_escrow,
                             role="tenant",
                             granted_to="self",
                             password=tenant_credentials.get("password"),
                             key_type=tenant_credentials.get("key_type"),
+                            ssh_commands=tenant_ssh_commands,
                         )
                     else:
                         logger.warning("[LOCAL DB] Cannot store tenant credentials: no order found for escrow_uid=%s", escrow_uid)
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
+            # Close buyer's order when arbitration succeeded (all decisions True).
+            if decisions and all(d.get("decision") for d in decisions):
+                _escrow = parameters.get("escrow_uid")
+                if _escrow:
+                    try:
+                        sqlite_client = get_sqlite_client()
+                        _oid = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=_escrow)
+                        if _oid:
+                            await sqlite_client.update_order(order_id=_oid, status="closed")
+                            registry_client = get_registry_client()
+                            await registry_client.update_order(_oid, {"status": "closed"})
+                            logger.info("[TRUST] Closed buyer order %s after successful arbitration", _oid)
+                    except Exception as exc:
+                        logger.warning("[TRUST] Failed to close buyer order after arbitration: %s", exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
@@ -513,7 +562,7 @@ async def execute_action(
                         invocation_id=ctx.invocation_id,
                         branch=ctx.branch,
                     )
-                    await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
+                    _background_send(ctx, event, agent_url=counterparty_url)
                 except Exception as send_err:
                     logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
@@ -549,6 +598,17 @@ async def execute_action(
                         "escrow_collection_uid": result,
                         "fulfillment_uid": fulfillment_uid,
                     }
+                    # Close the buyer's order in local DB and registry.
+                    try:
+                        sqlite_client = get_sqlite_client()
+                        order_id = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
+                        if order_id:
+                            await sqlite_client.update_order(order_id=order_id, status="closed")
+                            registry_client = get_registry_client()
+                            await registry_client.update_order(order_id, {"status": "closed"})
+                            logger.info("[COLLECT_ESCROW] Closed order %s after escrow collection", order_id)
+                    except Exception as _close_err:
+                        logger.warning("[COLLECT_ESCROW] Failed to close order after collection: %s", _close_err)
                 else:
                     outcome["result"] = {
                         "status": "collected",
@@ -689,6 +749,41 @@ async def send_to_remote_agent(
             return event
 
 
+def _background_send(
+    ctx: InvocationContext,
+    event: Event,
+    agent_url: str,
+) -> None:
+    """Schedule send_to_remote_agent as a background asyncio task.
+
+    Use this whenever an outbound A2A send is triggered from *within* an incoming
+    A2A request handler (execute_action / _run_async_impl).  Awaiting
+    send_to_remote_agent in that context blocks the handler until the peer
+    responds — when both sides do this simultaneously the result is a 600-second
+    deadlock while each waits for the other.
+    """
+    async def _safe_send() -> None:
+        try:
+            # Use a fresh session so the background send is not contaminated by
+            # the current handler's session history.  By the time this task runs
+            # the original handler has already returned and appended its response
+            # event to ctx.session — reusing that session causes ADK to replay the
+            # full exchange history to the peer instead of just the new event,
+            # resulting in "Cannot parse empty payload as DomainEvent" on the
+            # receiver because the last part is the old response text, not the
+            # new function_response payload.
+            fresh_session = await ctx.session_service.create_session(
+                app_name=ctx.session.app_name,
+                user_id=ctx.session.user_id,
+            )
+            fresh_ctx = ctx.model_copy(update={"session": fresh_session})
+            await send_to_remote_agent(fresh_ctx, event, agent_url=agent_url)
+        except Exception as exc:
+            logger.warning("[A2A] Background send to %s failed: %s", agent_url, exc)
+
+    asyncio.create_task(_safe_send())
+
+
 def rebalance_internal_resources() -> bool:
     """Reallocate internal resources to optimize usage.
 
@@ -774,6 +869,51 @@ def _get_shutdown_fn():
     return http_schedule_vm_shutdown_async
 
 
+@functools.lru_cache(maxsize=1)
+def _canonical_agent_id() -> str | None:
+    """Return the full ERC-8004 canonical ID for this agent (eip155:<chain>:0x<contract>:<id>).
+
+    The provisioning service's X-Agent-ID header requires the canonical form, not the raw
+    numeric ONCHAIN_AGENT_ID.  If the ID is already canonical (starts with 'eip155:') it is
+    returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
+    Returns None if the required config values are missing.
+    """
+    raw = CONFIG.onchain_agent_id
+    if not raw:
+        return None
+    if isinstance(raw, str) and raw.startswith("eip155:"):
+        return raw
+    try:
+        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
+        chain_id = 31337  # default for Anvil/local
+        if CONFIG.chain_rpc_url:
+            try:
+                from web3 import Web3
+                from web3.providers import HTTPProvider
+                from service.clients.erc8004.blockchain import rpc_url_for_http_provider
+                w3 = Web3(HTTPProvider(rpc_url_for_http_provider(CONFIG.chain_rpc_url), request_kwargs={"timeout": 5}))
+                chain_id = w3.eth.chain_id
+            except Exception:
+                pass
+        return build_erc8004_canonical_id(
+            chain_id=chain_id,
+            identity_registry=CONFIG.identity_registry_address,
+            agent_id=int(raw),
+        )
+    except Exception as exc:
+        logger.warning("[PROVISIONING] Could not build canonical agent ID from %r: %s", raw, exc)
+        return str(raw)
+
+
+def _sender_id() -> str:
+    """Return the canonical ERC-8004 agent ID for use as negotiation message sender.
+
+    Falls back to the local AGENT_ID (e.g. 'agent_8000') when the on-chain
+    identity is not configured.
+    """
+    return _canonical_agent_id() or AGENT_ID
+
+
 async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
     """Dispatch to the configured provisioning client."""
     params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
@@ -783,6 +923,23 @@ async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) ->
         params["frp_domain"] = CONFIG.frp_domain
     if CONFIG.frp_dashboard_password:
         params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+    if CONFIG.provisioning_mode == "http":
+        from service.clients.provisioning import provision_machine_async_with_id, get_job_credentials_async
+        canonical_id = _canonical_agent_id()
+        job_id, result = await provision_machine_async_with_id(
+            CONFIG.provisioning_service_url,
+            params,
+            timeout=CONFIG.provisioning_timeout,
+            poll_interval=CONFIG.provisioning_poll_interval,
+            agent_id=canonical_id,
+        )
+        if job_id and canonical_id:
+            auth = await get_job_credentials_async(
+                CONFIG.provisioning_service_url, job_id, canonical_id
+            )
+            if auth:
+                result["authentication"] = auth
+        return result
     return await _get_provision_fn()(
         CONFIG.provisioning_service_url,
         params,
@@ -941,7 +1098,7 @@ async def _prepare_counter_offer(
             )
             await txn.add_message(
                 negotiation_id=params.negotiation_id,
-                sender=AGENT_ID,
+                sender=_sender_id(),
                 our_price=params.our_price,
                 their_price=params.their_price,
                 proposed_price=params.proposed_price,
@@ -954,7 +1111,7 @@ async def _prepare_counter_offer(
             "event_type": EventType.NEGOTIATION.value,
             "negotiation_id": params.negotiation_id,
             "message_type": "counter_proposal",
-            "sender": AGENT_ID,
+            "sender": _sender_id(),
             "source": BASE_URL_OVERRIDE,
             "data": {
                 "proposed_price": params.proposed_price,
@@ -1016,43 +1173,41 @@ async def _dispatch_counter_offer(
     params: CounterOfferParams,
 ) -> dict[str, Any]:
     """Dispatch phase for counter_offer: send the A2A message (no lock held)."""
-    try:
-        result = await send_to_remote_agent(neg_ctx, event, agent_url=their_agent_id)
-        # Fix 4 (Issue 1): Re-fetch the session after dispatch so _negotiation_sessions
-        # holds an up-to-date reference. InMemorySessionService.append_event may create
-        # a new Session object internally, making the stored reference stale and causing
-        # _construct_message_parts_from_session to miss the a2a:context_id on the next round.
+    neg_id = params.negotiation_id
+
+    async def _send_and_refresh() -> None:
         try:
-            updated_session = await neg_ctx.session_service.get_session(
+            await send_to_remote_agent(neg_ctx, event, agent_url=their_agent_id)
+        except Exception as exc:
+            logger.warning("[A2A] Background send to %s failed: %s", their_agent_id, exc)
+            return
+        # Re-fetch session after dispatch so _negotiation_sessions holds a live reference.
+        # InMemorySessionService.append_event may produce a new Session object internally,
+        # making the stored reference stale and causing _construct_message_parts_from_session
+        # to miss the a2a:context_id on the next round (Fix 4).
+        try:
+            updated = await neg_ctx.session_service.get_session(
                 app_name=neg_ctx.session.app_name,
                 user_id=neg_ctx.session.user_id,
                 session_id=neg_ctx.session.id,
             )
-            if updated_session:
-                _negotiation_sessions[params.negotiation_id] = updated_session
+            if updated:
+                _negotiation_sessions[neg_id] = updated
                 logger.debug(
-                    "[COUNTER_OFFER] Re-fetched session %s: %d events, authors=%s",
+                    "[COUNTER_OFFER] Re-fetched session %s after background send: %d events",
                     neg_ctx.session.id,
-                    len(updated_session.events),
-                    [e.author for e in updated_session.events],
+                    len(updated.events),
                 )
-            else:
-                logger.debug("[COUNTER_OFFER] get_session returned None for %s", neg_ctx.session.id)
-        except Exception as e:
-            logger.debug("[COUNTER_OFFER] Could not re-fetch negotiation session: %s", e)
-        return {
-            "status": "sent",
-            "message": "Counter offer sent",
-            "negotiation_id": params.negotiation_id,
-            "proposed_price": params.proposed_price,
-            "remote_response": getattr(result, "content", None),
-        }
-    except Exception as e:
-        logger.error(f"[ACTION] Failed to dispatch counter offer: {e}")
-        return {
-            "status": "error",
-            "message": f"Failed to send counter offer: {e}",
-        }
+        except Exception as exc:
+            logger.debug("[COUNTER_OFFER] Could not re-fetch negotiation session: %s", exc)
+
+    asyncio.create_task(_send_and_refresh())
+    return {
+        "status": "sent",
+        "message": "Counter offer sent",
+        "negotiation_id": neg_id,
+        "proposed_price": params.proposed_price,
+    }
 
 
 async def exit_negotiation(
@@ -1095,7 +1250,7 @@ async def exit_negotiation(
                         "event_type": EventType.NEGOTIATION.value,
                         "negotiation_id": negotiation_id,
                         "message_type": "exit",
-                        "sender": AGENT_ID,
+                        "sender": _sender_id(),
                         "source": BASE_URL_OVERRIDE,
                         "data": {"reason": reason},
                     }
@@ -1172,6 +1327,8 @@ async def accept_offer(
     counterparty_url = parameters.get("counterparty_url")
     their_price = parameters.get("their_price")
     our_price = parameters.get("our_price")
+    our_initial_price = parameters.get("our_initial_price") or our_price
+    our_strategy = parameters.get("our_strategy")
 
     async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
         if negotiation_id:
@@ -1181,10 +1338,12 @@ async def accept_offer(
                 their_order_id=their_order_id or "",
                 our_agent_id=BASE_URL_OVERRIDE,
                 their_agent_id=counterparty_url or "",
+                our_initial_price=our_initial_price,
+                our_strategy=our_strategy,
             )
             await txn.add_message(
                 negotiation_id=negotiation_id,
-                sender=AGENT_ID,
+                sender=_sender_id(),
                 our_price=our_price,
                 their_price=their_price,
                 proposed_price=their_price,
@@ -1209,7 +1368,7 @@ async def accept_offer(
                     "event_type": EventType.NEGOTIATION.value,
                     "negotiation_id": competing_neg_id,
                     "message_type": "exit",
-                    "sender": AGENT_ID,
+                    "sender": _sender_id(),
                     "source": BASE_URL_OVERRIDE,
                     "data": {"reason": "order_accepted_elsewhere"},
                 }
@@ -1250,7 +1409,7 @@ async def accept_offer(
             logger.warning("[LOCAL DB] Failed to infer our_order_id: %s", exc)
 
     if _we_are_compute_buyer(order_dict):
-        return await _accept_as_buyer(
+        result = await _accept_as_buyer(
             alkahest_client=alkahest_client,
             ctx=ctx,
             parameters=parameters,
@@ -1259,13 +1418,23 @@ async def accept_offer(
             their_order_id=their_order_id,
         )
     else:
-        return await _accept_as_seller(
+        result = await _accept_as_seller(
             ctx=ctx,
             parameters=parameters,
             order_dict=order_dict,
             our_order_id=our_order_id,
             their_order_id=their_order_id,
         )
+    if negotiation_id:
+        result["artifact"] = {
+            "negotiation_id": negotiation_id,
+            "agreed_price": their_price,
+            "escrow_uid": result.get("escrow_uid"),
+            "our_initial_price": our_initial_price,
+            "our_order_id": our_order_id,
+            "their_order_id": their_order_id,
+        }
+    return result
 
 
 async def _accept_as_buyer(
@@ -1288,6 +1457,9 @@ async def _accept_as_buyer(
     if alkahest_client:
         try:
             compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+            their_price = parameters.get("their_price")
+            if their_price is not None:
+                token_resource = {**token_resource, "amount": their_price}
         except ValueError as exc:
             logger.error(
                 "[ACCEPT OFFER] Cannot identify compute/token resources in order — skipping escrow: %s | order_dict keys=%s",
@@ -1327,12 +1499,17 @@ async def _accept_as_buyer(
     else:
         raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
 
-    order_dict["order_taker"] = BASE_URL_OVERRIDE
+    counterparty_url = parameters.get("counterparty_url")
+    we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
+    taker_url = counterparty_url if we_are_maker else BASE_URL_OVERRIDE
+    order_dict["order_taker"] = taker_url
     order_dict["taker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
 
     # Echo the seller's order_id back so they can update their local DB without a lookup.
-    matched_order_id = parameters.get("matched_order_id")
+    # Fall back to their_order_id when matched_order_id is absent (direct-match path where
+    # the policy passes their_order_id but not matched_order_id explicitly).
+    matched_order_id = parameters.get("matched_order_id") or their_order_id
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
@@ -1341,6 +1518,13 @@ async def _accept_as_buyer(
         "escrow_uid": escrow_uid,
         "ssh_public_key": SSH_PUBLIC_KEY,
         "matched_order_id": matched_order_id,
+        # Echo our own order_id so the seller can reconstruct make_negotiation_id(seller, buyer)
+        # when the seller initiated the MakeOfferEvent (Case B: offer field contains seller's order,
+        # so order.order_id would be wrong without this echo).
+        "buyer_order_id": our_order_id,
+        # Carry the negotiated price forward so the counterparty can use it for
+        # fulfillment encoding / escrow creation (Reactive Decision Pattern).
+        "agreed_price": parameters.get("their_price"),
     }
 
     try:
@@ -1349,7 +1533,7 @@ async def _accept_as_buyer(
             await sqlite_client.update_order(
                 order_id=our_order_id,
                 status="accepted",
-                order_taker=BASE_URL_OVERRIDE,
+                order_taker=taker_url,
                 taker_attestation=escrow_uid,
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
@@ -1361,7 +1545,7 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": BASE_URL_OVERRIDE, "taker_attestation": escrow_uid}
+            registry_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid}
             # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
             # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
             their_id = order_dict.get("order_id")
@@ -1400,18 +1584,13 @@ async def _accept_as_buyer(
         branch=ctx.branch,
     )
     logger.info("[TOOL] Buyer accepting offer, notifying seller: %s", counterparty_url)
-    try:
-        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
-        return {
-            "status": "sent",
-            "message": "Offer matched.",
-            "escrow_uid": escrow_uid,
-            "offer": order_dict,
-            "remote_response": getattr(result, "content", None),
-        }
-    except Exception as e:
-        logger.error("[TOOL] Failed to send acceptance: %s", e)
-        return {"status": "error", "message": f"Failed to send acceptance: {e}", "escrow_uid": escrow_uid, "offer": order_dict}
+    _background_send(ctx, event, agent_url=counterparty_url)
+    return {
+        "status": "sent",
+        "message": "Offer matched.",
+        "escrow_uid": escrow_uid,
+        "offer": order_dict,
+    }
 
 
 async def _accept_as_seller(
@@ -1427,8 +1606,6 @@ async def _accept_as_seller(
     The buyer will receive this and create the escrow on their side, then send
     back an AcceptOfferEvent with escrow_uid for the seller to fulfill.
     """
-    # Include our order_id so the buyer can echo it back, letting us update our
-    # local DB directly when we receive the second AcceptOfferEvent.
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
         "source": BASE_URL_OVERRIDE,
@@ -1436,6 +1613,11 @@ async def _accept_as_seller(
         "escrow_uid": None,
         "ssh_public_key": None,
         "matched_order_id": our_order_id,
+        # Tell the buyer which order_id they should use as their local record reference.
+        "buyer_order_id": their_order_id,
+        # Carry the negotiated price forward so the buyer can create escrow at the
+        # agreed amount (Reactive Decision Pattern).
+        "agreed_price": parameters.get("their_price"),
     }
 
     try:
@@ -1468,17 +1650,12 @@ async def _accept_as_seller(
         branch=ctx.branch,
     )
     logger.info("[TOOL] Seller signalling acceptance to buyer (no escrow yet): %s", counterparty_url)
-    try:
-        result = await send_to_remote_agent(ctx, event, agent_url=counterparty_url)
-        return {
-            "status": "sent",
-            "message": "Order matched.",
-            "offer": order_dict,
-            "remote_response": getattr(result, "content", None),
-        }
-    except Exception as e:
-        logger.error("[TOOL] Failed to send seller acceptance: %s", e)
-        return {"status": "error", "message": f"Failed to send seller acceptance: {e}", "offer": order_dict}
+    _background_send(ctx, event, agent_url=counterparty_url)
+    return {
+        "status": "sent",
+        "message": "Order matched.",
+        "offer": order_dict,
+    }
 
 
 def create_order(
@@ -1697,6 +1874,18 @@ async def _find_and_send_matching_offers(
                                 )
                                 continue
 
+                            # Record round 0 in our thread so the seller side has a
+                            # full message history matching the buyer's thread.
+                            their_initial_price = _extract_initial_price_from_order(matched_order) if matched_order else None
+                            await txn.add_message(
+                                negotiation_id=negotiation_id,
+                                sender=_sender_id(),
+                                our_price=our_initial_price,
+                                their_price=their_initial_price,
+                                proposed_price=our_initial_price,
+                                action_taken=ActionType.MAKE_OFFER.value,
+                                message_type="offer",
+                            )
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
@@ -2064,6 +2253,7 @@ async def fulfill_compute_obligation(
     ssh_public_key: str,
     oracle_address: str | None = None,
     order: str | dict | None = None,
+    seller_order_id: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
     
@@ -2184,14 +2374,17 @@ async def fulfill_compute_obligation(
             )
 
     # Persist seller-side credentials (root + tenant) — off-chain only.
-    if authentication and order_id:
+    # Use seller_order_id if provided (the seller's own order); fall back to order_id
+    # (the buyer's order from the offer dict) only when seller_order_id is absent.
+    cred_order_id = seller_order_id or order_id
+    if authentication and cred_order_id:
         try:
             _cred_client = get_sqlite_client()
             root_data = authentication.get("root", {}) or {}
             tenant_data = authentication.get("tenant", {}) or {}
             if root_data:
                 await _cred_client.store_credential(
-                    order_id=order_id,
+                    order_id=cred_order_id,
                     role="root",
                     granted_to="self",
                     password=root_data.get("password"),
@@ -2200,7 +2393,7 @@ async def fulfill_compute_obligation(
                 )
             if tenant_data:
                 await _cred_client.store_credential(
-                    order_id=order_id,
+                    order_id=cred_order_id,
                     role="tenant",
                     granted_to="self",
                     password=tenant_data.get("password"),
@@ -2208,7 +2401,7 @@ async def fulfill_compute_obligation(
                     key_type=tenant_data.get("key_type"),
                 )
         except Exception as cred_err:
-            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", order_id, cred_err)
+            logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", cred_order_id, cred_err)
     await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
     if not client or not oracle_address:
