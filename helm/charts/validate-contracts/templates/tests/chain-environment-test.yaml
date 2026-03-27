@@ -41,4 +41,4 @@ spec:
   volumes:
     - name: helm-config
       configMap:
-        name: {{ include "validate-contracts.fullname" . }}-chain-environment-test-config
+        name: {{ .Release.Name }}-test-config

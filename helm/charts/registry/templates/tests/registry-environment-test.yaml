@@ -46,4 +46,4 @@ spec:
   volumes:
     - name: helm-config
       configMap:
-        name: {{ include "registry.fullname" . }}-registry-environment-test-config
+        name: {{ .Release.Name }}-test-config

@@ -33,16 +33,3 @@ app.kubernetes.io/name: {{ include "validate-contracts.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{/*
-Resolve the RPC URL for the contract validation test.
-Uses .Values.rpcUrl when set; otherwise composes the URL from
-global.rpc.host and global.rpc.port, which resolves to the test-env
-service when that subchart is enabled.
-*/}}
-{{- define "validate-contracts.rpcUrl" -}}
-{{- if .Values.rpcUrl -}}
-{{- .Values.rpcUrl -}}
-{{- else -}}
-{{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
-{{- end -}}
-{{- end }}

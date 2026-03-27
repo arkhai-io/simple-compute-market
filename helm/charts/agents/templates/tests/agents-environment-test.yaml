@@ -54,7 +54,7 @@ spec:
   volumes:
     - name: helm-config
       configMap:
-        name: {{ include "agents.fullname" . }}-agents-environment-test-config
+        name: {{ .Release.Name }}-test-config
     - name: buyer-secret-config
       secret:
         secretName: {{ include "agents.fullname" . }}-agents-environment-test-buyer-secret
