@@ -150,6 +150,11 @@ provisioning:
     replicaCount: 1
     port: 8082
 
+  sshKey:
+    createSecret: true
+    secretName: ""
+    sshPrivateKey: ""
+
   config:
     logLevel: "info"
     databaseUrl: "sqlite:///provisioning.db"

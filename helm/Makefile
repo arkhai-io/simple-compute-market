@@ -1,9 +1,10 @@
 # Makefile for arkhai-node-operator Helm chart
 
-CHART_DIR   := .
-RELEASE     := arkhai-node-operator
-NAMESPACE   := default
-VALUES      := values.yaml
+CHART_DIR    := .
+RELEASE      := arkhai-node-operator
+NAMESPACE    := default
+VALUES       := values.yaml
+SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 
 .PHONY: init template deploy test
 
@@ -28,11 +29,14 @@ endif
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
 ## Install or upgrade the release in the target namespace
+## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
+##   make deploy SSH_KEY_FILE=/path/to/other_key
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
+		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
 		--wait
 
 ## Run helm tests against the deployed release
@@ -49,9 +53,9 @@ test:
 ##   test-env  → $(RELEASE)-test-env-chain-environment-test
 ##   registry  → $(RELEASE)-registry-registry-environment-test
 ##   agents    → $(RELEASE)-agents-agents-environment-test
-TEST_POD_SUFFIX_test-env     := chain-environment-test
-TEST_POD_SUFFIX_registry     := registry-environment-test
-TEST_POD_SUFFIX_agents       := agents-environment-test
+TEST_POD_SUFFIX_test-env  := chain-environment-test
+TEST_POD_SUFFIX_registry  := registry-environment-test
+TEST_POD_SUFFIX_agents    := agents-environment-test
 TEST_POD_SUFFIX_provisioning := provisioning-environment-test
  
 test-module:

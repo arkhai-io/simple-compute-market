@@ -61,6 +61,18 @@ Resolve the full image reference for the worker container.
 {{- end }}
 
 {{/*
+Resolve the Secret name for the SSH private key.
+Uses .Values.sshKey.secretName when set, otherwise auto-generates from fullname.
+*/}}
+{{- define "provisioning.sshKeySecretName" -}}
+{{- if .Values.sshKey.secretName -}}
+{{- .Values.sshKey.secretName -}}
+{{- else -}}
+{{- printf "%s-ssh-key" (include "provisioning.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Compose the registry (indexer) URL from global.registry.host and global.registry.port.
 */}}
 {{- define "registry.url" -}}

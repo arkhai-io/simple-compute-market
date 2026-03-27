@@ -94,6 +94,12 @@ spec:
           env:
             - name: WORKER_HEALTH_PORT
               value: {{ .Values.worker.port | quote }}
+            # SSH private key is written to ~/.ssh/id_ed25519 by start-worker.sh
+            - name: SSH_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "provisioning.sshKeySecretName" . }}
+                  key: sshPrivateKey
             {{- include "provisioning.commonEnv" . | nindent 12 }}
           livenessProbe:
             httpGet:
