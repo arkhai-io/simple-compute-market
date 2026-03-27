@@ -46,17 +46,18 @@ test:
 		--logs
 
 ## Run helm tests for a single subchart.
-## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=registry
-## Valid values: test-env, registry, agents
+## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
+## Valid values: validate-contracts, registry, agents, provisioning
 ##
 ## Test pod names per module:
-##   test-env  → $(RELEASE)-test-env-chain-environment-test
-##   registry  → $(RELEASE)-registry-registry-environment-test
-##   agents    → $(RELEASE)-agents-agents-environment-test
-TEST_POD_SUFFIX_test-env  := chain-environment-test
-TEST_POD_SUFFIX_registry  := registry-environment-test
-TEST_POD_SUFFIX_agents    := agents-environment-test
-TEST_POD_SUFFIX_provisioning := provisioning-environment-test
+##   validate-contracts → $(RELEASE)-validate-contracts-chain-environment-test
+##   registry           → $(RELEASE)-registry-registry-environment-test
+##   agents             → $(RELEASE)-agents-agents-environment-test
+##   provisioning       → $(RELEASE)-provisioning-provisioning-environment-test
+TEST_POD_SUFFIX_validate-contracts := chain-environment-test
+TEST_POD_SUFFIX_registry           := registry-environment-test
+TEST_POD_SUFFIX_agents             := agents-environment-test
+TEST_POD_SUFFIX_provisioning       := provisioning-environment-test
  
 test-module:
 ifndef MODULE

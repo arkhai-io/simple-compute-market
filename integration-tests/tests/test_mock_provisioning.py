@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from arkhai_e2e_tests.settings import settings
+from src.settings import settings
 from tests.helpers.cli_client import cli_create_order, cli_order_history, cli_order_show
 from tests.helpers.polling import (
     poll_registry_orders,

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: validate-contracts
+description: Helm test that validates smart contract deployments against an RPC endpoint
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

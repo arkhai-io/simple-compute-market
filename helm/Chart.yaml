@@ -22,3 +22,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/provisioning"
     condition: provisioning.enabled
+  - name: validate-contracts
+    version: "0.1.0"
+    repository: "file://charts/validate-contracts"
+    condition: validate-contracts.enabled

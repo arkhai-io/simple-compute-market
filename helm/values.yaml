@@ -174,8 +174,17 @@ provisioning:
     pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
-# integration-tests (used by the test hook in each subchart)
+# validate-contracts subchart
+# Runs the contract validation helm test.
+# When test-env is enabled, tests run against that deployment via global.rpc.
+# When test-env is disabled, set rpcUrl to point at your target endpoint.
 # ---------------------------------------------------------------------------
+validate-contracts:
+  enabled: true
+  # Override the RPC endpoint. Leave empty to use global.rpc.host:port
+  # (i.e. the test-env service when that subchart is enabled).
+  rpcUrl: ""
+
 integrationTests:
   image:
     repository: ""

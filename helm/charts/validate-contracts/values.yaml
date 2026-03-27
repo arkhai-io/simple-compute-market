@@ -1,0 +1,13 @@
+# Default values for validate-contracts.
+
+# Override the RPC URL used by the contract validation test.
+# When empty, the URL is composed from global.rpc.host and global.rpc.port,
+# which resolves to the test-env deployment when that subchart is enabled.
+# Set this to a production or staging endpoint when test-env is disabled.
+rpcUrl: ""
+
+integrationTests:
+  repository: ""
+  name: arkhai
+  tag: integration-tests
+  pullPolicy: IfNotPresent

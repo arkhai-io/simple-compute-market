@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "test-env.fullname" . }}-chain-environment-test-config
+  name: {{ include "validate-contracts.fullname" . }}-chain-environment-test-config
   labels:
-    {{- include "test-env.labels" . | nindent 4 }}
+    {{- include "validate-contracts.labels" . | nindent 4 }}
 data:
   config-helm.yml: |
     rpc:
-      url: {{ include "rpc.url" . | quote }}
+      url: {{ include "validate-contracts.rpcUrl" . | quote }}
       chain_id: {{ .Values.global.rpc.chainId }}
 
     registry:

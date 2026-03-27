@@ -25,6 +25,7 @@ COPY --from=builder /app/src ./src
 COPY --from=builder /app/tests ./tests
 COPY config ./config
 COPY conftest.py .
+COPY pyproject.toml .
 COPY settings.toml .
 
 ENV PATH="/app/.venv/bin:$PATH"

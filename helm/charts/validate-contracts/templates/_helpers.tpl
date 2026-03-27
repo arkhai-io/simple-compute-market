@@ -1,12 +1,12 @@
 {{/*
-charts/test-env/templates/_helpers.tpl
+charts/validate-contracts/templates/_helpers.tpl
 */}}
 
-{{- define "test-env.name" -}}
+{{- define "validate-contracts.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "test-env.fullname" -}}
+{{- define "validate-contracts.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -19,33 +19,30 @@ charts/test-env/templates/_helpers.tpl
 {{- end }}
 {{- end }}
 
-{{- define "test-env.labels" -}}
+{{- define "validate-contracts.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "test-env.selectorLabels" . }}
+{{ include "validate-contracts.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "test-env.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "test-env.name" . }}
+{{- define "validate-contracts.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "validate-contracts.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Resolve the full image reference for the test-env container.
-Supports an optional global.imageRepository passed down from the parent.
+Resolve the RPC URL for the contract validation test.
+Uses .Values.rpcUrl when set; otherwise composes the URL from
+global.rpc.host and global.rpc.port, which resolves to the test-env
+service when that subchart is enabled.
 */}}
-{{- define "test-env.image" -}}
-{{- $repo := .Values.image.repository -}}
-{{- if and (not $repo) .Values.global -}}
-  {{- $repo = .Values.global.imageRepository -}}
-{{- end -}}
-{{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.image.name .Values.image.tag -}}
+{{- define "validate-contracts.rpcUrl" -}}
+{{- if .Values.rpcUrl -}}
+{{- .Values.rpcUrl -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.name .Values.image.tag -}}
+{{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end -}}
 {{- end }}
-
