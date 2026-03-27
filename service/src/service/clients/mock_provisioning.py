@@ -62,8 +62,9 @@ RESOURCES_RESULT: dict[str, Any] = {
     "running_vms": 0,
 }
 
-# Set to True to make provision_machine_async raise ProvisioningJobError
-SHOULD_FAIL: bool = False
+# Set to True to make provision_machine_async raise ProvisioningJobError.
+# Env var MOCK_PROVISIONING_SUCCESS=false activates failure mode for docker-compose testing.
+SHOULD_FAIL: bool = os.getenv("MOCK_PROVISIONING_SUCCESS", "true").lower() == "false"
 
 # How long (seconds) before a provisioned slot is auto-freed. Mirrors MOCK_RESOURCE_FREE_INTERVAL env var.
 MOCK_RESOURCE_FREE_INTERVAL: int = int(os.getenv("MOCK_RESOURCE_FREE_INTERVAL", "60"))
@@ -112,7 +113,7 @@ def _reset_defaults() -> None:
     }
     SHUTDOWN_RESULT = {"status": "ok", "vm_host": "ww1", "vm_target": "tenant-vm"}
     RESOURCES_RESULT = {"status": "ok", "vm_host": "ww1", "available": True, "running_vms": 0}
-    SHOULD_FAIL = False
+    SHOULD_FAIL = os.getenv("MOCK_PROVISIONING_SUCCESS", "true").lower() == "false"
 
 
 # ---------------------------------------------------------------------------

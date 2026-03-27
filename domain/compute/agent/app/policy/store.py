@@ -8,6 +8,7 @@ from core.agent.app.schema.pydantic_models import (
     ActionType as DomainActionType,
     AcceptOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
+    FulfillmentFailedEvent,
     ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
@@ -245,6 +246,22 @@ def rcf_action_trust_fulfillment(context: DecisionContext) -> DomainAction | Non
             "connection_details": context.event.connection_details,
             "counterparty_url": context.event.fulfilling_party_url,
             "tenant_credentials": context.event.tenant_credentials,
+        },
+    )
+
+# Fulfillment failed -> acknowledge failure, reopen order
+@policy_callable("ff.action.handle_fulfillment_failure")
+def ff_action_handle_fulfillment_failure(context: DecisionContext) -> DomainAction | None:
+    """When the seller notifies us that provisioning failed, handle the failure."""
+    if not isinstance(context.event, FulfillmentFailedEvent):
+        return None
+    return DomainAction(
+        action_type=DomainActionType.HANDLE_FULFILLMENT_FAILURE,
+        parameters={
+            "escrow_uid": context.event.escrow_uid,
+            "reason": context.event.reason,
+            "seller_order_id": context.event.seller_order_id,
+            "buyer_order_id": context.event.buyer_order_id,
         },
     )
 

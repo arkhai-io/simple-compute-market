@@ -340,9 +340,7 @@ async def execute_action(
             if not ssh_public_key:
                 raise ValueError("ssh_public_key is required for fulfill_compute_obligation")
 
-            # Update our own local order if matched_order_id was threaded through the event.
-            # This handles the seller-as-taker case where order_id in the order dict is the
-            # buyer's order_id (not present in the seller's local DB).
+            # Update our own local order synchronously (fast).
             if matched_order_id:
                 try:
                     sqlite_client = get_sqlite_client()
@@ -351,122 +349,46 @@ async def execute_action(
                         status="accepted",
                         escrow_uid=escrow_uid,
                         order_taker=parameters.get("counterparty_url"),
+                        taker_attestation=escrow_uid,  # buyer (taker) contributed escrow
+                        oracle_address=oracle_address,
                     )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to update matched_order_id %s at fulfillment: %s", matched_order_id, exc)
 
-            result = await fulfill_compute_obligation(
-                client=alkahest_client,
-                escrow_uid=escrow_uid,
-                oracle_address=parameters.get("oracle_address") or order_dict.get("oracle_address"),
-                ssh_public_key=ssh_public_key,
-                order=order_dict,
-                seller_order_id=matched_order_id,
-            )
-            if result.get("status") == "fulfilled":
-                # Update our own local order with fulfillment details.
-                # fulfill_compute_obligation uses order_dict["order_id"] (the buyer's ID) for its
-                # internal DB write, which doesn't exist in the seller's local DB.  We correct that
-                # here using matched_order_id (the seller's own order).
-                if matched_order_id:
-                    try:
-                        sqlite_client = get_sqlite_client()
-                        await sqlite_client.update_order(
-                            order_id=matched_order_id,
-                            maker_attestation=result.get("fulfillment_uid"),
-                            fulfillment_resource=result.get("connection_details"),
-                        )
-                    except Exception as exc:
-                        logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
-                # Close both orders in registry and local DB after successful fulfillment.
-                # buyer_order_id is the buyer's order_id, derived from order.order_id in the
-                # AcceptOfferEvent (the offer field IS the buyer's order).  Falls back to
-                # order_dict.get("order_id") which is the same value.
-                buyer_order_id = parameters.get("buyer_order_id") or order_dict.get("order_id")
-                for oid in filter(None, [matched_order_id, buyer_order_id]):
-                    try:
-                        registry_client = get_registry_client()
-                        await registry_client.update_order(oid, {"status": "closed"})
-                        sqlite_client = get_sqlite_client()
-                        await sqlite_client.update_order(order_id=oid, status="closed")
-                        logger.info(f"[FULFILL] Closed order {oid}")
-                    except Exception as e:
-                        logger.warning(f"[FULFILL] Failed to close order {oid}: {e}")
-                # Close the negotiation thread — covers equal-price direct-accept where the
-                # buyer never entered a negotiation round and their ACCEPT_OFFER had no
-                # negotiation_id, leaving the seller's thread open indefinitely.
-                if matched_order_id and buyer_order_id:
-                    try:
-                        neg_id = make_negotiation_id(matched_order_id, buyer_order_id)
-                        async with NegotiationThreadTransaction("FULFILL_COMPUTE_OBLIGATION") as txn:
-                            thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
-                            our_price = (thread_info or {}).get("our_initial_price")
-                            # Derive agreed price from last non-terminal message's their_price
-                            # (the counterparty's final proposal), rather than reading the raw
-                            # order amount which reflects the original ask, not the agreed price.
-                            messages = await txn.thread_store.get_thread(neg_id)
-                            agreed_price = next(
-                                (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
-                                None,
-                            )
-                            await txn.add_message(
-                                negotiation_id=neg_id,
-                                sender=_sender_id(),
-                                our_price=our_price,
-                                their_price=agreed_price,
-                                proposed_price=agreed_price,
-                                action_taken=ActionType.FULFILL_COMPUTE_OBLIGATION.value,
-                                message_type="fulfilled",
-                            )
-                            await txn.mark_terminal(neg_id, "success")
-                    except Exception as _term_err:
-                        logger.warning(
-                            "[ACTION] Could not mark negotiation thread terminal after fulfillment: %s",
-                            _term_err,
-                        )
-                # Include event_type for downstream parsing and propagate to remote agent.
-                result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
-                if ctx:
-                    # Counterparty to notify is the order taker (we are the maker fulfilling for them).
-                    order_obj = parameters.get("order")
-                    if isinstance(order_obj, dict):
-                        order_dict = order_obj
-                    elif hasattr(order_obj, "model_dump"):
-                        order_dict = order_obj.model_dump(mode="json") if order_obj else {}
-                    else:
-                        order_dict = {}
-                    counterparty_ref = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
-                    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                    if not counterparty_url:
-                        raise ValueError(
-                            f"fulfill_compute_obligation: cannot notify buyer — "
-                            f"unresolved counterparty={counterparty_ref!r}"
-                        )
-                    try:
-                        event = Event(
-                            author=AGENT_ID,
-                            content=genai_types.Content(
-                                role="model",
-                                parts=[
-                                    genai_types.Part.from_function_response(
-                                        name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-                                        response=result,
-                                    )
-                                ],
-                            ),
-                            invocation_id=ctx.invocation_id,
-                            branch=ctx.branch,
-                        )
-                        _background_send(ctx, event, agent_url=counterparty_url)
-                    except Exception as send_err:
-                        logger.warning("[ACTION] Failed to send fulfillment to remote agent: %s", send_err)
-            else:
-                logger.warning(
-                    "[ACTION] Skipping fulfillment event; status=%s",
-                    result.get("status"),
+            # Pre-resolve counterparty URL synchronously so we fail fast if missing.
+            counterparty_ref = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
+            counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
+            buyer_order_id = parameters.get("buyer_order_id") or order_dict.get("order_id")
+
+            if not counterparty_url:
+                raise ValueError(
+                    f"fulfill_compute_obligation: cannot notify buyer — "
+                    f"unresolved counterparty={counterparty_ref!r}"
                 )
-            outcome["result"] = result
-            outcome["message"] = result.get("message")
+
+            # Dispatch provisioning + fulfillment to a background task so the
+            # A2A response (ACK) is returned immediately to the buyer.
+            asyncio.create_task(
+                _fulfill_in_background(
+                    alkahest_client=alkahest_client,
+                    ctx=ctx,
+                    escrow_uid=escrow_uid,
+                    ssh_public_key=ssh_public_key,
+                    oracle_address=oracle_address,
+                    order_dict=order_dict,
+                    matched_order_id=matched_order_id,
+                    buyer_order_id=buyer_order_id,
+                    counterparty_url=counterparty_url,
+                    parameters=parameters,
+                )
+            )
+
+            outcome["result"] = {
+                "status": "provisioning",
+                "message": "Compute obligation accepted; provisioning in background",
+                "escrow_uid": escrow_uid,
+            }
+            outcome["message"] = outcome["result"]["message"]
 
         case ActionType.TRUST_COMPUTE_OBLIGATION_FULFILLMENT.value:
             logger.info(f"[ACTION] Trusting compute fulfillment with params: {parameters}")
@@ -484,6 +406,7 @@ async def execute_action(
             logger.info("[ACTION] Arbitration decisions: %s", decisions)
             try:
                 escrow_uid = parameters.get("escrow_uid")
+                fulfillment_uid = parameters.get("fulfillment_uid")
                 connection_details = parameters.get("connection_details")
                 tenant_credentials = parameters.get("tenant_credentials")
                 sqlite_client = get_sqlite_client()
@@ -492,6 +415,7 @@ async def execute_action(
                         escrow_uid=escrow_uid,
                         status="accepted",
                         fulfillment_resource=connection_details,
+                        taker_attestation=fulfillment_uid,  # seller (taker) contributed fulfillment
                     )
                 if tenant_credentials and escrow_uid:
                     order_id_for_escrow = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=escrow_uid)
@@ -517,7 +441,7 @@ async def execute_action(
                         logger.warning("[LOCAL DB] Cannot store tenant credentials: no order found for escrow_uid=%s", escrow_uid)
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to store fulfillment details for escrow %s: %s", parameters.get("escrow_uid"), exc)
-            # Close buyer's order when arbitration succeeded (all decisions True).
+            # Update buyer's own registry order with taker_attestation, then close.
             if decisions and all(d.get("decision") for d in decisions):
                 _escrow = parameters.get("escrow_uid")
                 if _escrow:
@@ -525,12 +449,15 @@ async def execute_action(
                         sqlite_client = get_sqlite_client()
                         _oid = await sqlite_client.get_order_id_by_escrow_uid(escrow_uid=_escrow)
                         if _oid:
-                            await sqlite_client.update_order(order_id=_oid, status="closed")
                             registry_client = get_registry_client()
+                            if fulfillment_uid and CONFIG.enable_registry_discovery:
+                                await registry_client.update_order(_oid, {"taker_attestation": fulfillment_uid})
+                                logger.info("[TRUST] Updated buyer order %s with taker_attestation", _oid)
+                            await sqlite_client.update_order(order_id=_oid, status="closed")
                             await registry_client.update_order(_oid, {"status": "closed"})
                             logger.info("[TRUST] Closed buyer order %s after successful arbitration", _oid)
                     except Exception as exc:
-                        logger.warning("[TRUST] Failed to close buyer order after arbitration: %s", exc)
+                        logger.warning("[TRUST] Failed to update/close buyer order after arbitration: %s", exc)
             if ctx:
                 # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
                 counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
@@ -627,6 +554,61 @@ async def execute_action(
                 }
                 outcome["message"] = outcome["result"]["message"]
             
+        case ActionType.HANDLE_FULFILLMENT_FAILURE.value:
+            logger.info("[ACTION] Handling fulfillment failure: %s", parameters)
+            escrow_uid = parameters.get("escrow_uid")
+            reason = parameters.get("reason")
+            buyer_order_id = parameters.get("buyer_order_id")
+            seller_order_id = parameters.get("seller_order_id")
+
+            # 1. Record failure in buyer's negotiation thread
+            if buyer_order_id and seller_order_id:
+                neg_id = make_negotiation_id(buyer_order_id, seller_order_id)
+                try:
+                    async with NegotiationThreadTransaction("HANDLE_FULFILLMENT_FAILURE") as txn:
+                        thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
+                        our_price = (thread_info or {}).get("our_initial_price")
+                        messages = await txn.thread_store.get_thread(neg_id)
+                        agreed_price = next(
+                            (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
+                            None,
+                        )
+                        await txn.add_message(
+                            negotiation_id=neg_id,
+                            sender=_sender_id(),
+                            our_price=our_price,
+                            their_price=agreed_price,
+                            proposed_price=agreed_price,
+                            action_taken="fulfillment_failed",
+                            message_type="failed",
+                        )
+                        await txn.mark_terminal(neg_id, "failure")
+                    logger.info("[FAILURE] Recorded failure in negotiation thread %s", neg_id)
+                except Exception as _neg_err:
+                    logger.warning("[FAILURE] Failed to record in negotiation thread: %s", _neg_err)
+
+            # 2. Reopen buyer's order
+            if buyer_order_id:
+                try:
+                    sqlite_client = get_sqlite_client()
+                    await sqlite_client.update_order(order_id=buyer_order_id, status="open")
+                    registry_client = get_registry_client()
+                    await registry_client.update_order(buyer_order_id, {"status": "open"})
+                    logger.info("[FAILURE] Reopened buyer order %s after fulfillment failure", buyer_order_id)
+                except Exception as _reopen_err:
+                    logger.warning("[FAILURE] Failed to reopen buyer order %s: %s", buyer_order_id, _reopen_err)
+
+            # 3. Escrow release — deferred (no alkahest revocation API wired yet)
+            if escrow_uid:
+                logger.warning("[FAILURE] Escrow %s remains locked — on-chain revocation not yet implemented", escrow_uid)
+
+            outcome["result"] = {
+                "status": "failure_acknowledged",
+                "message": f"Fulfillment failed: {reason}. Order reopened.",
+                "escrow_uid": escrow_uid,
+            }
+            outcome["message"] = outcome["result"]["message"]
+
         case ActionType.COUNTER_OFFER.value:
             logger.info(f"[ACTION] Countering offer with params: {parameters}")
             # Execute counter offer: create negotiation thread and send negotiation event
@@ -782,6 +764,181 @@ def _background_send(
             logger.warning("[A2A] Background send to %s failed: %s", agent_url, exc)
 
     asyncio.create_task(_safe_send())
+
+
+async def _fulfill_in_background(
+    *,
+    alkahest_client,
+    ctx: InvocationContext | None,
+    escrow_uid: str,
+    ssh_public_key: str,
+    oracle_address: str | None,
+    order_dict: dict,
+    matched_order_id: str | None,
+    buyer_order_id: str | None,
+    counterparty_url: str | None,
+    parameters: dict,
+) -> None:
+    """Run provisioning + fulfillment in a background task.
+
+    On success: update DB, close orders, close neg thread, send fulfillment to buyer.
+    On failure: record failure in neg thread, reopen seller order, notify buyer.
+    """
+    try:
+        result = await fulfill_compute_obligation(
+            client=alkahest_client,
+            escrow_uid=escrow_uid,
+            oracle_address=oracle_address,
+            ssh_public_key=ssh_public_key,
+            order=order_dict,
+            seller_order_id=matched_order_id,
+        )
+    except Exception as exc:
+        logger.error("[FULFILL_BG] fulfill_compute_obligation raised: %s", exc)
+        result = {"status": "error", "message": f"Provisioning failed: {exc}"}
+
+    if result.get("status") == "fulfilled":
+        # --- Success path (existing logic) ---
+        fulfillment_uid = result.get("fulfillment_uid")
+        if matched_order_id:
+            try:
+                sqlite_client = get_sqlite_client()
+                await sqlite_client.update_order(
+                    order_id=matched_order_id,
+                    maker_attestation=fulfillment_uid,
+                    fulfillment_resource=result.get("connection_details"),
+                )
+            except Exception as exc:
+                logger.warning("[LOCAL DB] Failed to update fulfillment for matched_order_id %s: %s", matched_order_id, exc)
+
+        # NOTE: buyer's registry order taker_attestation is set by the buyer itself
+        # in TRUST_COMPUTE_OBLIGATION_FULFILLMENT (EIP-191 auth prevents cross-agent updates).
+
+        for oid in filter(None, [matched_order_id, buyer_order_id]):
+            try:
+                registry_client = get_registry_client()
+                await registry_client.update_order(oid, {"status": "closed"})
+                sqlite_client = get_sqlite_client()
+                await sqlite_client.update_order(order_id=oid, status="closed")
+                logger.info("[FULFILL_BG] Closed order %s", oid)
+            except Exception as e:
+                logger.warning("[FULFILL_BG] Failed to close order %s: %s", oid, e)
+
+        # Close the negotiation thread
+        if matched_order_id and buyer_order_id:
+            try:
+                neg_id = make_negotiation_id(matched_order_id, buyer_order_id)
+                async with NegotiationThreadTransaction("FULFILL_COMPUTE_OBLIGATION") as txn:
+                    thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
+                    our_price = (thread_info or {}).get("our_initial_price")
+                    messages = await txn.thread_store.get_thread(neg_id)
+                    agreed_price = next(
+                        (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
+                        None,
+                    )
+                    await txn.add_message(
+                        negotiation_id=neg_id,
+                        sender=_sender_id(),
+                        our_price=our_price,
+                        their_price=agreed_price,
+                        proposed_price=agreed_price,
+                        action_taken=ActionType.FULFILL_COMPUTE_OBLIGATION.value,
+                        message_type="fulfilled",
+                    )
+                    await txn.mark_terminal(neg_id, "success")
+            except Exception as _term_err:
+                logger.warning("[FULFILL_BG] Could not mark negotiation thread terminal after fulfillment: %s", _term_err)
+
+        # Send fulfillment to buyer
+        result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
+        if ctx and counterparty_url:
+            try:
+                event = Event(
+                    author=AGENT_ID,
+                    content=genai_types.Content(
+                        role="model",
+                        parts=[
+                            genai_types.Part.from_function_response(
+                                name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                                response=result,
+                            )
+                        ],
+                    ),
+                    invocation_id=ctx.invocation_id,
+                    branch=ctx.branch,
+                )
+                _background_send(ctx, event, agent_url=counterparty_url)
+            except Exception as send_err:
+                logger.warning("[FULFILL_BG] Failed to send fulfillment to remote agent: %s", send_err)
+    else:
+        # --- Failure path ---
+        error_msg = result.get("message", "Unknown provisioning error")
+        logger.error("[FULFILL_BG] Provisioning failed: %s", error_msg)
+
+        # 1. Record failure in seller's negotiation thread
+        if matched_order_id and buyer_order_id:
+            try:
+                neg_id = make_negotiation_id(matched_order_id, buyer_order_id)
+                async with NegotiationThreadTransaction("FULFILL_FAILURE") as txn:
+                    thread_info = await txn.thread_store.get_thread_info(neg_id, owner_id=BASE_URL_OVERRIDE or "")
+                    our_price = (thread_info or {}).get("our_initial_price")
+                    messages = await txn.thread_store.get_thread(neg_id)
+                    agreed_price = next(
+                        (m["their_price"] for m in reversed(messages) if m.get("their_price") is not None),
+                        None,
+                    )
+                    await txn.add_message(
+                        negotiation_id=neg_id,
+                        sender=_sender_id(),
+                        our_price=our_price,
+                        their_price=agreed_price,
+                        proposed_price=agreed_price,
+                        action_taken=ActionType.FULFILL_COMPUTE_OBLIGATION.value,
+                        message_type="failed",
+                    )
+                    await txn.mark_terminal(neg_id, "failure")
+            except Exception as neg_err:
+                logger.warning("[FULFILL_BG] Failed to record failure in negotiation thread: %s", neg_err)
+
+        # 2. Reopen seller's order
+        if matched_order_id:
+            try:
+                sqlite_client = get_sqlite_client()
+                await sqlite_client.update_order(order_id=matched_order_id, status="open")
+                registry_client = get_registry_client()
+                await registry_client.update_order(matched_order_id, {"status": "open"})
+                logger.info("[FULFILL_BG] Reopened seller order %s after failure", matched_order_id)
+            except Exception as reopen_err:
+                logger.warning("[FULFILL_BG] Failed to reopen seller order %s: %s", matched_order_id, reopen_err)
+
+        # 3. Notify buyer of failure
+        if ctx and counterparty_url:
+            try:
+                failure_payload = {
+                    "event_type": EventType.FULFILLMENT_FAILED.value,
+                    "escrow_uid": escrow_uid,
+                    "reason": error_msg,
+                    "seller_order_id": matched_order_id,
+                    "buyer_order_id": buyer_order_id,
+                }
+                event = Event(
+                    author=AGENT_ID,
+                    content=genai_types.Content(
+                        role="model",
+                        parts=[
+                            genai_types.Part.from_function_response(
+                                name=EventType.FULFILLMENT_FAILED.value,
+                                response=failure_payload,
+                            )
+                        ],
+                    ),
+                    invocation_id=ctx.invocation_id,
+                    branch=ctx.branch,
+                )
+                _background_send(ctx, event, agent_url=counterparty_url)
+                logger.info("[FULFILL_BG] Sent fulfillment_failed notification to buyer at %s", counterparty_url)
+            except Exception as send_err:
+                logger.warning("[FULFILL_BG] Failed to send failure notification to buyer: %s", send_err)
 
 
 def rebalance_internal_resources() -> bool:
@@ -1503,7 +1660,8 @@ async def _accept_as_buyer(
     we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
     taker_url = counterparty_url if we_are_maker else BASE_URL_OVERRIDE
     order_dict["order_taker"] = taker_url
-    order_dict["taker_attestation"] = escrow_uid
+    # Buyer is always maker of own order → escrow goes in maker_attestation
+    order_dict["maker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
 
     # Echo the seller's order_id back so they can update their local DB without a lookup.
@@ -1534,7 +1692,7 @@ async def _accept_as_buyer(
                 order_id=our_order_id,
                 status="accepted",
                 order_taker=taker_url,
-                taker_attestation=escrow_uid,
+                maker_attestation=escrow_uid,  # buyer is maker of own order
                 escrow_uid=escrow_uid,
                 matched_offer_id=their_order_id,
                 oracle_address=oracle_address,
@@ -1545,23 +1703,31 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            registry_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid}
-            # Update the order that is in the registry (order_dict["order_id"] is the buyer's order
-            # in buyer-as-maker flow; matched_order_id is the seller's order in seller-as-maker flow).
+            # Update counterparty's (seller's) order — buyer is taker there
             their_id = order_dict.get("order_id")
             if their_id:
-                result = await registry_client.update_order(their_id, registry_updates)
+                their_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(their_id, their_updates)
                 if result:
-                    logger.info("[REGISTRY] Updated order %s to accepted", their_id)
+                    logger.info("[REGISTRY] Updated seller's order %s to accepted", their_id)
                 else:
-                    logger.warning("[REGISTRY] Failed to update order %s", their_id)
-            # In seller-as-maker flow, also update the seller's registry entry.
+                    logger.warning("[REGISTRY] Failed to update seller's order %s", their_id)
+            # Also update our own order — buyer is maker, contributed escrow
+            if our_order_id:
+                our_updates = {"status": "accepted", "order_taker": counterparty_url, "maker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(our_order_id, our_updates)
+                if result:
+                    logger.info("[REGISTRY] Updated buyer's own order %s with maker_attestation", our_order_id)
+                else:
+                    logger.warning("[REGISTRY] Failed to update buyer's order %s", our_order_id)
+            # In seller-as-maker flow, also update the matched order if different
             if matched_order_id and matched_order_id != their_id:
-                result = await registry_client.update_order(matched_order_id, registry_updates)
+                matched_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
+                result = await registry_client.update_order(matched_order_id, matched_updates)
                 if result:
-                    logger.info("[REGISTRY] Updated seller's order %s to accepted", matched_order_id)
+                    logger.info("[REGISTRY] Updated matched order %s to accepted", matched_order_id)
                 else:
-                    logger.warning("[REGISTRY] Failed to update seller's order %s", matched_order_id)
+                    logger.warning("[REGISTRY] Failed to update matched order %s", matched_order_id)
         except Exception as e:
             logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 

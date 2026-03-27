@@ -45,6 +45,9 @@ markers = [
     "wallets: Tests that validate wallet balances and key pairs",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
+    "mock_provisioning: E2E mock provisioning flow tests",
+    "mock_provisioning_happy: Happy path — deal completes successfully",
+    "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
 ]
 log_cli = true
 log_cli_level = "INFO"

@@ -259,6 +259,7 @@ class EventType(str, Enum):
     MAKE_OFFER = "make_offer"
     ACCEPT_OFFER = "accept_offer"
     RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
+    FULFILLMENT_FAILED = "fulfillment_failed"
     ARBITRATION_COMPLETE = "arbitration_complete"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
@@ -433,6 +434,16 @@ class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
             tenant_credentials=payload.get("tenant_credentials"),
             data=payload,
         )
+
+class FulfillmentFailedEvent(DomainEvent):
+    """Event triggered when the seller's provisioning fails after accepting an offer."""
+
+    event_type: EventType = Field(default=EventType.FULFILLMENT_FAILED)
+    escrow_uid: str = Field(description="Escrow UID that was locked for this deal")
+    reason: str | None = Field(default=None, description="Human-readable failure reason")
+    seller_order_id: str | None = Field(default=None, description="Seller's local order ID")
+    buyer_order_id: str | None = Field(default=None, description="Buyer's local order ID")
+
 
 class ArbitrationCompleteEvent(DomainEvent):
     """Event triggered when arbitration over fulfillment has completed."""
@@ -694,6 +705,7 @@ class ActionType(str, Enum):
     FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
     TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
     COLLECT_ESCROW = "collect_escrow"
+    HANDLE_FULFILLMENT_FAILURE = "handle_fulfillment_failure"
     VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
 
     # No-op
