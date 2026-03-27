@@ -53,6 +53,15 @@ test-module:
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
 	.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
 
+test-container-module:
+	docker run --rm -it \
+		--network=market \
+		-e ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
+		-e CONFIG_DIRECTORY=/app/config \
+		-v $(CONFIG_DIRECTORY):/app/config:ro \
+		$(IMAGE_NAME):$(IMAGE_TAG) \
+		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+
 # -----------------------------------------------------------------------
 # Tests — CI (HTML report, no colour, exit-on-first-fail)
 # -----------------------------------------------------------------------
