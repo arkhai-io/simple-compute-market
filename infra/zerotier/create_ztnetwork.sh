@@ -145,6 +145,7 @@ RESPONSE=$(curl -s --max-time 10 -X POST $CONTROLLER_URL/controller/network/${NE
   -d "{
     \"name\": \"$NETWORK_NAME\",
     \"private\": true,
+    \"mtu\": 1300,
     \"v4AssignMode\": {
       \"zt\": true
     },

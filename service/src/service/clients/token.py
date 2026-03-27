@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "service" / "data" / "token_registry.json"
+_DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry_docker_compose.json"
 
 
 class ERC20TokenMetadata(BaseModel):
@@ -41,7 +41,7 @@ class TokenRegistry:
                 self._path = Path(env_path)
             else:
                 # Fall back to the core data directory if it exists
-                core_data = Path(__file__).resolve().parents[3] / "core" / "agent" / "app" / "data" / "token_registry.json"
+                core_data = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry.json"
                 self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
         self._lock = RLock()
         self._tokens_by_symbol: dict[str, ERC20TokenMetadata] = {}

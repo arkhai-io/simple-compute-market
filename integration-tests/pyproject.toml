@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arkhai-e2e-tests"
+version = "0.1.0"
+description = "End-to-end integration tests for Arkhai deployed blockchain environments"
+requires-python = ">=3.13"
+dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-html>=4.0",
+    "pytest-xdist>=3.5",
+    "dynaconf>=3.2",
+    "web3>=7.0",
+    "eth-account>=0.12",
+    "eth-typing>=4.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0",
+    "isort>=5.13",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["arkhai_e2e_tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--tb=short",
+    "-v",
+    "--strict-markers",
+]
+markers = [
+    "contracts: Tests that validate on-chain contract state",
+    "wallets: Tests that validate wallet balances and key pairs",
+    "smoke: Quick smoke tests",
+    "slow: Tests that may take longer due to RPC latency",
+    "mock_provisioning: E2E mock provisioning flow tests",
+    "mock_provisioning_happy: Happy path — deal completes successfully",
+    "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
+]
+log_cli = true
+log_cli_level = "INFO"
+log_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+log_date_format = "%Y-%m-%dT%H:%M:%S"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

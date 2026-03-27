@@ -2,6 +2,7 @@
 Agent card utilities for building agent card data from configuration.
 Shared by server (agent.py) and registration script (onchain_registration.py).
 """
+import time
 from typing import Optional
 
 
@@ -93,6 +94,7 @@ def build_erc8004_registration_file(
         "name": agent_card_data.get("name", "A2A Agent"),
         "description": agent_card_data.get("description", ""),
         "endpoints": endpoints,
+        "updatedAt": int(time.time()),
     }
     
     # Add image if available (for ERC-721 compatibility)

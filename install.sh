@@ -23,6 +23,7 @@ LINUX_SYSTEM_DEPS=(
     "npm:npm"
     "docker:docker.io"
     "python3.12:python3.12"
+    "jq:jq"
 )
 LINUX_PYTHON_DEV_PKGS=("python3.12-dev" "software-properties-common")
 
@@ -391,20 +392,19 @@ install_repo() {
 # ── Set up venv and install CLI ───────────────────────────────
 
 install_cli() {
-    local cli_dir="$INSTALL_DIR/cli"
+    local core_dir="$INSTALL_DIR/core"
+    local core_venv="$core_dir/.venv"
 
-    info "Setting up Python environment..."
-    cd "$cli_dir"
-    uv venv
-    uv pip install -q -e .
+    info "Installing CLI into core venv..."
+    uv --project "$core_dir" sync --no-dev -q
 
-    ok "CLI installed in $cli_dir/.venv"
+    ok "CLI installed into $core_venv"
 }
 
 # ── Create symlink and set up PATH ────────────────────────────
 
 setup_path() {
-    local market_bin="$INSTALL_DIR/cli/.venv/bin/market"
+    local market_bin="$INSTALL_DIR/core/.venv/bin/market"
 
     mkdir -p "$BIN_DIR"
 

@@ -1,6 +1,13 @@
 component: agent
 schema_version: 1
 fields:
+  # CLI runtime mode
+  AGENT_MODE:
+    required: false
+    default: "host"
+    secret: false
+    description: "How the agent is being run: \"host\" (default, running uncontainerized on host) or \"container\" (Docker). Controls which CLI commands are active vs. no-ops. Host just means the agent is run directly on a machine, not to be confused with the VM host. Container means the agent is running in a Docker container, and some CLI commands will execute differently to accommodate that (e.g. file paths, docker exec vs. local execution, etc.)."
+
   # Core server
   BASE_URL_OVERRIDE:
     required: true
@@ -99,7 +106,7 @@ fields:
   # Token catalog and SSH access
   TOKEN_REGISTRY_PATH:
     required: true
-    default: "../core/agent/app/data/token_registry.json"
+    default: "../core/agent/app/data/token_registry_docker_compose.json"
     secret: false
     description: "Path to token registry JSON. This is the catalog of all known and supported tokens for trade."
   SSH_PUBLIC_KEY:

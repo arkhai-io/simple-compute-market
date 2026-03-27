@@ -522,7 +522,7 @@ async def register_onchain(
         metadata = [
             # Store agent name on-chain (as per ERC-8004 spec example)
             # Uses AGENT_NAME env var if provided, otherwise from agent card, otherwise AGENT_ID
-            {"key": "agentName", "value": Web3.to_hex(text=final_agent_name)},
+            {"key": "name", "value": Web3.to_hex(text=final_agent_name)},
             # Store category and type for filtering/discovery
             {"key": "category", "value": Web3.to_hex(text=labels.get("category", "compute"))},
             {"key": "type", "value": Web3.to_hex(text=labels.get("type", "trader"))},

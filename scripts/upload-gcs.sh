@@ -45,7 +45,7 @@ tar czf "$TARBALL" \
     --exclude='.git' \
     --exclude='.github' \
     --exclude='mcp' \
-    --exclude='scripts' \
+    --exclude="$(basename "$REPO_ROOT")/scripts" \
     --exclude='tmp' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \

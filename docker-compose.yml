@@ -1,0 +1,186 @@
+services:
+  # 1. Local test chain (Anvil)
+  anvil:
+    image: arkhai:test-env
+    container_name: anvil
+    ports:
+      - "8545:8545"
+    environment:
+      - ANVIL_IP_ADDR=0.0.0.0
+    networks:
+      - market-network
+
+  # 2. One-shot contract deployer — writes IDENTITY_REGISTRY_ADDRESS to shared-env/.env, then exits.
+  #    registry and agents depend on this completing before they start.
+  contracts-deploy:
+    image: arkhai:contract-deployer
+    container_name: market-contracts-deploy
+    depends_on:
+      anvil:
+        condition: service_started
+    environment:
+      - ENV_FILE=/app/shared-env/.env
+      - RPC_URL=http://anvil:8545
+    volumes:
+      - ./shared-env:/app/shared-env
+    networks:
+      - market-network
+    command: sh -c ./deploy-local.sh
+
+  # 3. Registry/Indexer service
+  registry:
+    image: arkhai:registry
+    depends_on:
+      contracts-deploy:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./erc-8004-registry-py/.env.docker-compose
+    volumes:
+      - ./shared-env:/app/shared-env
+    networks:
+      - market-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # 4. Buyer agent (Alice)
+  buy_agent:
+    image: arkhai:core
+    platform: linux/amd64
+    container_name: market-agent-buy
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ./core/agent/.env.alice.docker-compose
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs from env file
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+    volumes:
+      - ./shared-env:/app/shared-env
+      - zerotier-buy:/var/lib/zerotier-one
+      - ./core/agent/app/data/buy-agent:/app/core/agent/app/data/buy-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        exec ./entrypoint.sh
+
+  # 5. Seller agent (Bob)
+  sell_agent:
+    image: arkhai:core
+    platform: linux/amd64
+    container_name: market-agent-sell
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ./core/agent/.env.bob.docker-compose
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs from env file
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+      # Overridable via host env vars (e.g. PROVISIONING_MODE=mock make e2e-mock-happy)
+      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+    volumes:
+      - ./shared-env:/app/shared-env
+      - zerotier-sell:/var/lib/zerotier-one
+      - ./core/agent/app/data/sell-agent:/app/core/agent/app/data/sell-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        echo "Importing seller resources..."
+        PYTHONPATH="/:/app:/app/core/agent" uv run python core/agent/scripts/import_resources_csv.py \
+          --csv core/agent/app/data/ww1-machine.csv
+        exec ./entrypoint.sh
+
+  # 6. Redis (job queue for provisioning service)
+  redis:
+    image: redis:7-alpine
+    container_name: market-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - market-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # 7. Async provisioning service
+  provisioning:
+    image: arkhai:provisioning
+    container_name: market-provisioning
+    depends_on:
+      redis:
+        condition: service_healthy
+      registry:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    env_file:
+      - ./async-provisioning-service/.env.docker-compose
+    volumes:
+      - ./compute-provisioning-iac:/app/compute-provisioning-iac
+      - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
+    networks:
+      - market-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+
+networks:
+  market-network:
+    driver: bridge
+
+volumes:
+  zerotier-buy:
+  zerotier-sell:

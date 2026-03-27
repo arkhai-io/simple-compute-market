@@ -111,6 +111,7 @@ class MarketOrder(Base):
     duration_hours = Column(Integer, nullable=False)
     maker_attestation = Column(Text, nullable=True)
     taker_attestation = Column(Text, nullable=True)
+    oracle_address = Column(Text, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum), nullable=False, default=OrderStatusEnum.open)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

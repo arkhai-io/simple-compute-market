@@ -72,6 +72,7 @@ async def publish_order(
             "duration_hours": order_data.get("duration_hours"),
             "maker_attestation": order_data.get("maker_attestation"),
             "taker_attestation": order_data.get("taker_attestation"),
+            "oracle_address": order_data.get("oracle_address"),
         }
         for field, value in update_fields.items():
             if value is not None:
@@ -95,6 +96,7 @@ async def publish_order(
             duration_hours=order_data.get("duration_hours", 1),
             maker_attestation=order_data.get("maker_attestation"),
             taker_attestation=order_data.get("taker_attestation"),
+            oracle_address=order_data.get("oracle_address"),
             status=validate_order_status(status_str),
         )
         db.add(order)
@@ -227,16 +229,27 @@ async def update_order(
     original_demand_resource = order.demand_resource
     
     symmetric_order = None
-    if "order_taker" in updates:
-        temp_taker = updates["order_taker"]
-        original_taker = order.order_taker
-        order.order_taker = temp_taker
-        try:
+    needs_symmetric_lookup = (
+        "order_taker" in updates
+        or ("maker_attestation" in updates and order.order_taker)
+        or ("taker_attestation" in updates and order.order_taker)
+        or ("oracle_address" in updates and order.order_taker)
+    )
+    if needs_symmetric_lookup:
+        if "order_taker" in updates:
+            temp_taker = updates["order_taker"]
+            original_taker = order.order_taker
+            order.order_taker = temp_taker
+            try:
+                symmetric_order = find_symmetric_order(
+                    db, order, original_offer_resource, original_demand_resource
+                )
+            finally:
+                order.order_taker = original_taker
+        else:
             symmetric_order = find_symmetric_order(
                 db, order, original_offer_resource, original_demand_resource
             )
-        finally:
-            order.order_taker = original_taker
     
     if "status" in updates:
         order.status = validate_order_status(updates["status"])
@@ -246,8 +259,10 @@ async def update_order(
         order.taker_attestation = updates["taker_attestation"]
     if "maker_attestation" in updates:
         order.maker_attestation = updates["maker_attestation"]
+    if "oracle_address" in updates:
+        order.oracle_address = updates["oracle_address"]
     order.updated_at = datetime.utcnow()
-    
+
     if symmetric_order:
         if "status" in updates:
             symmetric_order.status = validate_order_status(updates["status"])
@@ -257,6 +272,8 @@ async def update_order(
             symmetric_order.taker_attestation = order.maker_attestation
         if "taker_attestation" in updates and order.taker_attestation:
             symmetric_order.maker_attestation = order.taker_attestation
+        if "oracle_address" in updates and order.oracle_address:
+            symmetric_order.oracle_address = order.oracle_address
         symmetric_order.updated_at = datetime.utcnow()
     
     try:

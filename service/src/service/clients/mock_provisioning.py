@@ -35,6 +35,18 @@ PROVISION_RESULT: dict[str, Any] = {
     "ssh_port": "2222",
     "tenant_user": "tenant",
     "vm_host_ip": "127.0.0.1",
+    "authentication": {
+        "root": {
+            "password": "mock-root-password",
+            "ssh_commands": {"default": "ssh -i /tmp/mock_key root@127.0.0.1"},
+            "ssh_key_path_host": "/tmp/mock_key",
+        },
+        "tenant": {
+            "password": "mock-tenant-password",
+            "ssh_commands": {"default": "ssh -p 2222 tenant@127.0.0.1"},
+            "key_type": "ed25519",
+        },
+    },
 }
 
 SHUTDOWN_RESULT: dict[str, Any] = {
@@ -50,8 +62,9 @@ RESOURCES_RESULT: dict[str, Any] = {
     "running_vms": 0,
 }
 
-# Set to True to make provision_machine_async raise ProvisioningJobError
-SHOULD_FAIL: bool = False
+# Set to True to make provision_machine_async raise ProvisioningJobError.
+# Env var MOCK_PROVISIONING_SUCCESS=false activates failure mode for docker-compose testing.
+SHOULD_FAIL: bool = os.getenv("MOCK_PROVISIONING_SUCCESS", "true").lower() == "false"
 
 # How long (seconds) before a provisioned slot is auto-freed. Mirrors MOCK_RESOURCE_FREE_INTERVAL env var.
 MOCK_RESOURCE_FREE_INTERVAL: int = int(os.getenv("MOCK_RESOURCE_FREE_INTERVAL", "60"))
@@ -85,10 +98,22 @@ def _reset_defaults() -> None:
         "ssh_port": "2222",
         "tenant_user": "tenant",
         "vm_host_ip": "127.0.0.1",
+        "authentication": {
+            "root": {
+                "password": "mock-root-password",
+                "ssh_commands": {"default": "ssh -i /tmp/mock_key root@127.0.0.1"},
+                "ssh_key_path_host": "/tmp/mock_key",
+            },
+            "tenant": {
+                "password": "mock-tenant-password",
+                "ssh_commands": {"default": "ssh -p 2222 tenant@127.0.0.1"},
+                "key_type": "ed25519",
+            },
+        },
     }
     SHUTDOWN_RESULT = {"status": "ok", "vm_host": "ww1", "vm_target": "tenant-vm"}
     RESOURCES_RESULT = {"status": "ok", "vm_host": "ww1", "available": True, "running_vms": 0}
-    SHOULD_FAIL = False
+    SHOULD_FAIL = os.getenv("MOCK_PROVISIONING_SUCCESS", "true").lower() == "false"
 
 
 # ---------------------------------------------------------------------------

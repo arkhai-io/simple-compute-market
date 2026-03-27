@@ -30,21 +30,17 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 
 ## CLI
 
-Install the CLI and add `market` to your PATH:
+To build the CLI and add `market` to your PATH:
 
 ```bash
-cd cli
-uv venv
-uv pip install -e .
+make build-cli
 ```
 
-If `market` isn't found, ensure your user bin is on PATH (common default is `~/.local/bin`).
+This will make the cli at ./cli/dist/market
 
-Install all component dependencies and venvs:
+You can then run it using e.g. market -v
 
-```bash
-market install
-```
+If `market` isn't found, ensure the dist folder is on PATH.
 
 ## Order Creation (CLI)
 
@@ -96,7 +92,7 @@ cd agent
 make test-env
 ```
 
-Note the RPC URL and port (keep this terminal open).
+Note the RPC URL and port (keep this terminal open). It runs on `http://localhost:45165` by default.
 
 ### 2. Deploy Contracts
 

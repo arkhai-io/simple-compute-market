@@ -96,6 +96,7 @@ class NegotiationActionBuilder:
                 "counterparty_url": self.data.get("counterparty_url"),
                 "their_price": self.data.get("their_price"),
                 "our_price": self.data.get("our_price"),
+                "our_strategy": self.data.get("our_strategy"),
             },
         )
 

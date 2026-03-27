@@ -21,10 +21,12 @@ if [ -n "$MANAGEMENT_VARS_YAML" ]; then
 fi
 
 # Start the background worker
+echo "starting background worker"
 uv run python -m async_provisioning_service.worker &
 WORKER_PID=$!
 
 # Start the API server
+echo "starting api server"
 uv run uvicorn async_provisioning_service.main:app --host 0.0.0.0 --port 8081 &
 SERVER_PID=$!
 

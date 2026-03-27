@@ -1,11 +1,26 @@
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+PYTHON_VERSION := 3.13
 # ==============================================================================
 # Installation & Setup
 # ==============================================================================
 
-# Install dependencies using uv package manager
-install:
+init: init-uv
+	uv sync --dev --python $(PYTHON_VERSION)
+
+init-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
-	uv sync --dev
+
+build: build-images
+
+build-images:
+	docker build -f Dockerfile -t arkhai:registry .
+	docker tag arkhai:registry arkhai:registry-$(GIT_SUFFIX)
+
+deploy:
+	docker run --rm -d --network market --name registry --env-file ./.env.docker-compose --env-file ../shared-env/.env -p 8080:8080 arkhai:registry
+
+smoke:
+	curl localhost:8080/health
 
 # ==============================================================================
 # Server Targets

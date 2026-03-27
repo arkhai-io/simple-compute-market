@@ -7,8 +7,9 @@ from web3 import Web3
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Check both .env.local and .env files
-        env_file=[".env.local", ".env"],
+        # Load local overrides, then the shared-env written by contracts-deploy at runtime
+        env_file=[".env.local", ".env", "/app/shared-env/.env"],
+        env_file_encoding="utf-8",
         case_sensitive=False,
     )
     

@@ -18,6 +18,7 @@ class ComputePolicySeeder:
         EventType.MAKE_OFFER.value,
         EventType.ACCEPT_OFFER.value,
         EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+        EventType.FULFILLMENT_FAILED.value,
         EventType.ARBITRATION_COMPLETE.value,
         EventType.ORDER_CREATE.value,
         EventType.ORDER_CLOSE.value,
@@ -116,6 +117,16 @@ class ComputePolicySeeder:
             )
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save receive_fulfillment policy: {e}")
+
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="fulfillment_failed_default_v1",
+                trigger_type=EventType.FULFILLMENT_FAILED.value,
+                callable_ref="ff.action.handle_fulfillment_failure",
+            )
+        except Exception as e:
+            logger.warning(f"[POLICY SEED] Failed to save fulfillment_failed policy: {e}")
 
         try:
             await self._policy_store.save_policy(

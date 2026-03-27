@@ -1,0 +1,34 @@
+# config.yml
+# ---------------------------------------------------------------------------
+# Environment-level configuration file.
+# Placed (or mounted) in the directory pointed to by CONFIG_DIRECTORY.
+# Profile-specific overrides go in config-<profileName>.yml files in the
+# same directory.  Sensitive values (private keys) are injected by
+# Kubernetes secrets / Vault into config-<profileName>.yml at deploy time.
+# ---------------------------------------------------------------------------
+
+rpc:
+  url: # injected from environment profile file
+  chain_id: # injected from environment profile file
+  timeout_seconds: 30
+  retry_attempts: 3
+  retry_backoff_seconds: 2
+
+registry: # injected from environment profile file
+  identity_address:
+  reputation_address:
+  validation_address:
+  owner_address:
+
+buyer: # injected from secret profile file
+  private_key:    ""
+  wallet_address: ""
+
+seller: # injected from secret profile file
+  private_key:    ""
+  wallet_address: ""
+
+tests:
+  minimum_eth_balance: "0.01"
+  gas_price_strategy: "medium"
+  require_checksummed_addresses: true
