@@ -35,3 +35,23 @@ spec:
       port: {{ .Values.redis.port }}
       targetPort: redis
       protocol: TCP
+---
+# Worker health service — exposes the worker's /health endpoint within the cluster.
+# Used by helm tests to verify worker + Redis connectivity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}-worker
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  ports:
+    - name: health
+      port: {{ .Values.worker.healthPort }}
+      targetPort: health
+      protocol: TCP

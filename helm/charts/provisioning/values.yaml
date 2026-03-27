@@ -6,7 +6,14 @@
 image:
   repository: ""
   name: arkhai
-  tag: provisioning
+  tag: provisioning-api
+  pullPolicy: IfNotPresent
+
+# The worker uses a separately built image with start-worker.sh baked in as CMD.
+workerImage:
+  repository: ""
+  name: arkhai
+  tag: provisioning-worker
   pullPolicy: IfNotPresent
 
 service:
@@ -50,8 +57,15 @@ redis:
   port: 6379
   pullPolicy: IfNotPresent
 
-# Number of replicas.
+# Number of replicas for the API server.
 replicaCount: 1
+
+# Number of worker replicas.
+# Multiple workers process jobs concurrently across pods; each pod also
+# respects max_concurrent_jobs internally.
+worker:
+  replicaCount: 1
+  healthPort: 8082
 
 # Resource requests/limits – tune per environment.
 resources: {}

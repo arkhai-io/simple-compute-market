@@ -7,7 +7,8 @@
 !async-provisioning-service/pyproject.toml
 !async-provisioning-service/uv.lock
 !async-provisioning-service/src/
-!async-provisioning-service/start.sh
+!async-provisioning-service/start-api.sh
+!async-provisioning-service/start-worker.sh
 
 # ── compute-provisioning-iac (Ansible only, no Terraform) ───────────
 !compute-provisioning-iac/ansible/

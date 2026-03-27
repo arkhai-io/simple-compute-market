@@ -74,6 +74,7 @@ FORWARD_PID_FILE := .port-forward.pids
 ##   Agent buy   http://localhost:8000
 ##   Agent sell  http://localhost:8001
 ##   Provisioning http://localhost:8081
+##   Provisioning worker  http://localhost:8082
 forward: unforward
 	@echo "Starting port-forwards..."
 	@kubectl port-forward --namespace $(NAMESPACE) \
@@ -86,11 +87,14 @@ forward: unforward
 		svc/$(RELEASE)-agents-seller 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+	@kubectl port-forward --namespace $(NAMESPACE) \
+		svc/$(RELEASE)-provisioning-worker 8082:8082 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@echo "  anvil    → http://localhost:8545"
 	@echo "  registry → http://localhost:8080"
 	@echo "  buy      → http://localhost:8000"
 	@echo "  sell     → http://localhost:8001"
 	@echo "  prov     → http://localhost:8081"
+	@echo "  prov-wkr → http://localhost:8082"
 	@echo "Run 'make unforward' to stop."
 
 ## Kill all port-forwards started by 'make forward'

@@ -35,7 +35,8 @@ COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
 COPY --chown=appuser:appuser async-provisioning-service/src ./src
-COPY --chown=appuser:appuser async-provisioning-service/start.sh ./
+COPY --chown=appuser:appuser async-provisioning-service/start-api.sh ./
+COPY --chown=appuser:appuser async-provisioning-service/start-worker.sh ./
 COPY --chown=appuser:appuser compute-provisioning-iac ./compute-provisioning-iac
 
 ENV PATH="/app/.venv/bin:$PATH"
@@ -72,9 +73,12 @@ ENV FRP_DOMAIN=""
 ENV FRP_DASHBOARD_PASSWORD=""
 
 # SSH private key (base64-encoded or raw PEM). Written to ~/.ssh/id_ed25519 at startup.
+# Only consumed by the worker image; ignored by the API image.
 ENV SSH_PRIVATE_KEY=""
 
-# Ansible inventory management vars (base64-encoded or raw YAML). Written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml at startup.
+# Ansible inventory management vars (base64-encoded or raw YAML).
+# Written to /app/compute-provisioning-iac/ansible/inventory/management-vars.yaml at startup.
+# Only consumed by the worker image; ignored by the API image.
 ENV MANAGEMENT_VARS_YAML=""
 
 # Authentication
@@ -87,7 +91,21 @@ ENV REGISTRY_CACHE_MAX_SIZE=256
 ENV ADMIN_SECRET=""
 
 USER appuser
+
+# ---------------------------------------------------------------------------
+# ENTRYPOINT_SCRIPT selects which process this image runs.
+# Build with --build-arg ENTRYPOINT_SCRIPT=start-api.sh    → API server image
+# Build with --build-arg ENTRYPOINT_SCRIPT=start-worker.sh → worker image
+# ---------------------------------------------------------------------------
+ARG ENTRYPOINT_SCRIPT=start-api.sh
+ENV ENTRYPOINT_SCRIPT=${ENTRYPOINT_SCRIPT}
+
+# The HEALTHCHECK and EXPOSE are conditional on the role.
+# We use a shell-form CMD so the ARG value is baked in at build time via ENV.
+# The worker image intentionally has no HEALTHCHECK — Kubernetes restarts it
+# on process exit, which is the correct recovery mechanism for a queue worker.
 EXPOSE 8081
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
-CMD ["sh", "start.sh"]
+
+# Bake the selected script as the image entrypoint. Using CMD (not ENTRYPOINT)
+# preserves the ability to override at runtime for debugging.
+CMD sh ${ENTRYPOINT_SCRIPT}

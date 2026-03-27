@@ -133,7 +133,13 @@ provisioning:
   image:
     repository: ""
     name: arkhai
-    tag: provisioning
+    tag: provisioning-api
+    pullPolicy: IfNotPresent
+
+  workerImage:
+    repository: ""
+    name: arkhai
+    tag: provisioning-worker
     pullPolicy: IfNotPresent
 
   service:
@@ -153,6 +159,9 @@ provisioning:
     registryCacheMaxSize: 256
     enableRateLimiting: false
     rateLimitRequestsPerMinute: 30
+
+  worker:
+    replicaCount: 1
 
   redis:
     image: "redis:7-alpine"
