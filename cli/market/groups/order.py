@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from ..common import REPO_ROOT
+from ..common import REPO_ROOT, read_env_value, container_db_to_host
 
 order_app = typer.Typer(no_args_is_help=True)
 
@@ -55,7 +55,7 @@ def order_create(
 ) -> None:
     """Create a new order via the Agent endpoint."""
     env_path = Path(env) if env else None
-    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
     base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     duration = duration_hours if duration_hours is not None else 1
@@ -72,11 +72,11 @@ def order_create(
         raise typer.BadParameter("Offer and demand must be JSON objects")
 
     private_key = (
-        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
         or os.getenv("AGENT_PRIV_KEY")
     )
     wallet_address = (
-        (_read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
+        (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
         or os.getenv("AGENT_WALLET_ADDRESS")
         or ""
     )
@@ -134,14 +134,14 @@ def order_close(
 ) -> None:
     """Close an order via the Agent endpoint."""
     env_path = Path(env) if env else None
-    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
     base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     if not order_id.strip():
         raise typer.BadParameter("order-id must be a non-empty string")
 
     private_key = (
-        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
         or os.getenv("AGENT_PRIV_KEY")
     )
     payload = {"order_id": order_id}
@@ -173,18 +173,24 @@ def order_history(
 ) -> None:
     """Show order history from local SQLite."""
     env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    db_path = _read_env_value(env_path, "AGENT_DB_PATH")
+    db_path = read_env_value(env_path, "AGENT_DB_PATH")
     if not db_path:
         typer.secho(f"AGENT_DB_PATH not found in {env_path}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
-    if not Path(db_path).exists():
-        typer.secho(f"No local order database found at {db_path}", err=True, fg=typer.colors.RED)
+    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
+    if agent_mode == "container":
+        # DB lives in a host-mounted volume; resolve container path to host path
+        resolved = container_db_to_host(db_path)
+    else:
+        resolved = Path(db_path)
+    if not resolved.exists():
+        typer.secho(f"No local order database found at {resolved}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
     try:
         import sqlite3
 
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(resolved)
         try:
             cur = conn.cursor()
             cur.execute(
@@ -311,11 +317,11 @@ def order_match(
     }
 
     env_path = Path(env) if env else None
-    env_base_url = _read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
     base_agent_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_agent_url = _normalize_registry_url(base_agent_url)
     private_key = (
-        (_read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
         or os.getenv("AGENT_PRIV_KEY")
     )
     create_url = f"{base_agent_url}/orders/create"
@@ -424,29 +430,6 @@ def _short_ts(value: str | None) -> str:
         return "-"
     return value.replace("T", " ")[:19]
 
-
-def _read_env_value(path: Path, key: str) -> str | None:
-    if not path.exists():
-        return None
-    try:
-        for raw_line in path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            if name.strip() != key:
-                continue
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
-                value = value[1:-1]
-            return value
-    except Exception:
-        return None
-    return None
 
 
 def _parse_db_resource(value: str | None) -> dict | str | None:
@@ -706,9 +689,12 @@ def _resolve_db_path(db: str | None, env: str | None) -> str | None:
     if db:
         return db
     env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    value = _read_env_value(env_path, "AGENT_DB_PATH")
-    if value and Path(value).exists():
-        return value
+    db_path_from_env = read_env_value(env_path, "AGENT_DB_PATH")
+    if db_path_from_env:
+        agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
+        resolved = str(container_db_to_host(db_path_from_env)) if agent_mode == "container" else db_path_from_env
+        if Path(resolved).exists():
+            return resolved
     # Fallback: check env var directly
     from_env = os.getenv("AGENT_DB_PATH")
     if from_env and Path(from_env).exists():
