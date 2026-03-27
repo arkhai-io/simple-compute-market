@@ -39,7 +39,7 @@ spec:
         - name: ACTIVE_PROFILES
           value: "helm,buyer-secret,seller-secret"
       volumeMounts:
-        - name: helm-config
+        - name: test-config
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
           readOnly: true
@@ -52,12 +52,12 @@ spec:
           subPath: config-seller-secret.yml
           readOnly: true
   volumes:
-    - name: helm-config
+    - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
     - name: buyer-secret-config
       secret:
-        secretName: {{ include "agents.fullname" . }}-agents-environment-test-buyer-secret
+        secretName: {{ include "agents.buyer.secretName" . }}
     - name: seller-secret-config
       secret:
-        secretName: {{ include "agents.fullname" . }}-agents-environment-test-seller-secret
+        secretName: {{ include "agents.seller.secretName" . }}

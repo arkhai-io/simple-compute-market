@@ -115,12 +115,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "agents.buyer.secretName" . }}
-                  key: privKey
+                  key: private_key
             - name: AGENT_WALLET_ADDRESS
               valueFrom:
                 secretKeyRef:
                   name: {{ include "agents.buyer.secretName" . }}
-                  key: walletAddress
+                  key: wallet_address
           # TODO: add liveness/readiness probes once agent health endpoint is defined.
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -256,12 +256,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "agents.seller.secretName" . }}
-                  key: privKey
+                  key: private_key
             - name: AGENT_WALLET_ADDRESS
               valueFrom:
                 secretKeyRef:
                   name: {{ include "agents.seller.secretName" . }}
-                  key: walletAddress
+                  key: wallet_address
           # TODO: add liveness/readiness probes once agent health endpoint is defined.
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
