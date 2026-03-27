@@ -114,14 +114,31 @@ def start(
         "-e",
         help="Path to env file. For host mode, passed as ENV_FILE to make serve-a2a. For container mode, passed as --env-file to docker run.",
     ),
+    detach: bool = typer.Option(
+        False,
+        "--detach",
+        "-d",
+        help="Run container in the background (container mode only).",
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--container-name",
+        help="Container name (container mode only). Defaults to AGENT_ID from env file.",
+    ),
+    network: str | None = typer.Option(
+        None,
+        "--network",
+        help="Docker network to join (container mode only). Defaults to DOCKER_NETWORK from env file.",
+    ),
 ) -> None:
     """Start Agent service."""
     agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
     if agent_mode == "container":
         port = read_env_value(env, "PORT", default="8000")
         db_path = read_env_value(env, "AGENT_DB_PATH", default="")
+        agent_id = name or read_env_value(env, "AGENT_ID", default="")
         env_abs = str(Path(env).resolve())
-        docker_network = read_env_value(env, "DOCKER_NETWORK", default="")
+        docker_network = network or read_env_value(env, "DOCKER_NETWORK", default="")
         volume_flags: list[str] = []
         if db_path:
             host_data_dir = str(container_db_to_host(db_path).parent)
@@ -129,8 +146,12 @@ def start(
             container_data_dir = "/app/" + str(Path(rel).parent)
             volume_flags = ["-v", f"{host_data_dir}:{container_data_dir}"]
         network_flags = ["--network", docker_network] if docker_network else []
+        name_flags = ["--name", agent_id] if agent_id else []
+        detach_flags = ["-d"] if detach else []
         cmd = [
             "docker", "run", "--rm",
+            *detach_flags,
+            *name_flags,
             "--platform", "linux/amd64",  # image is built for linux/amd64; needed on ARM hosts
             "--env-file", env_abs,
             "-p", f"{port}:{port}",
@@ -143,6 +164,9 @@ def start(
         ]
         run_step("Start agent (docker run arkhai:core)", cmd, REPO_ROOT)
         return
+    container_only = [f for f, v in [("--detach", detach), ("--container-name", name), ("--network", network)] if v]
+    if container_only:
+        typer.echo(f"{', '.join(container_only)} ignored (only applies to container mode).")
     cmd = ["make", "serve-a2a"]
     if env:
         cmd.append(f"ENV_FILE={env}")
