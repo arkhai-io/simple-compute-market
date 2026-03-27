@@ -4,20 +4,38 @@ metadata:
   name: {{ include "provisioning.fullname" . }}
   labels:
     {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: provisioning
+    app.kubernetes.io/component: api
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.apiServer.type }}
   selector:
     {{- include "provisioning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: provisioning
+    app.kubernetes.io/component: api
   ports:
     - name: http
-      port: {{ .Values.service.port }}
+      port: {{ .Values.apiServer.port }}
       targetPort: http
       protocol: TCP
 ---
-# Redis is internal to the provisioning subchart — ClusterIP only,
-# not exposed via the parent chart's service type.
+# Worker API server — exposes health, inventory, and connectivity endpoints.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}-worker
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  ports:
+    - name: worker-api
+      port: {{ .Values.worker.port }}
+      targetPort: worker-api
+      protocol: TCP
+---
+# Redis is internal to the provisioning subchart — ClusterIP only.
 apiVersion: v1
 kind: Service
 metadata:
@@ -34,24 +52,4 @@ spec:
     - name: redis
       port: {{ .Values.redis.port }}
       targetPort: redis
-      protocol: TCP
----
-# Worker health service — exposes the worker's /health endpoint within the cluster.
-# Used by helm tests to verify worker + Redis connectivity.
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "provisioning.fullname" . }}-worker
-  labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-spec:
-  type: ClusterIP
-  selector:
-    {{- include "provisioning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-  ports:
-    - name: health
-      port: {{ .Values.worker.healthPort }}
-      targetPort: health
       protocol: TCP

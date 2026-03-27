@@ -6,7 +6,7 @@ metadata:
     {{- include "provisioning.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.apiServer.replicaCount }}
   selector:
     matchLabels:
       {{- include "provisioning.selectorLabels" . | nindent 6 }}
@@ -21,17 +21,17 @@ spec:
         {{- include "provisioning.waitForRedis" . | nindent 8 }}
       containers:
         - name: api
-          image: {{ include "provisioning.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: {{ include "provisioning.apiImage" . }}
+          imagePullPolicy: {{ .Values.apiServer.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.apiServer.port }}
               protocol: TCP
           env:
             - name: HOST
-              value: {{ .Values.config.host | quote }}
+              value: {{ .Values.apiServer.host | quote }}
             - name: PORT
-              value: {{ .Values.service.port | quote }}
+              value: {{ .Values.apiServer.port | quote }}
             {{- include "provisioning.commonEnv" . | nindent 12 }}
           livenessProbe:
             httpGet:
@@ -86,26 +86,26 @@ spec:
       containers:
         - name: worker
           image: {{ include "provisioning.workerImage" . }}
-          imagePullPolicy: {{ .Values.workerImage.pullPolicy }}
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
           ports:
-            - name: health
-              containerPort: {{ .Values.worker.healthPort }}
+            - name: worker-api
+              containerPort: {{ .Values.worker.port }}
               protocol: TCP
           env:
             - name: WORKER_HEALTH_PORT
-              value: {{ .Values.worker.healthPort | quote }}
+              value: {{ .Values.worker.port | quote }}
             {{- include "provisioning.commonEnv" . | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /health
-              port: health
+              port: worker-api
             initialDelaySeconds: 10
             periodSeconds: 15
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /health
-              port: health
+              port: worker-api
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3

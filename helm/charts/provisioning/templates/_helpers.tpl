@@ -30,40 +30,38 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
-Resolve the full image reference for the provisioning container.
+Resolve the full image reference for the API server container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
-{{- define "provisioning.image" -}}
-{{- $repo := .Values.image.repository -}}
+{{- define "provisioning.apiImage" -}}
+{{- $repo := .Values.apiServer.image.repository -}}
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
 {{- end -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.image.name .Values.image.tag -}}
+{{- printf "%s/%s:%s" $repo .Values.apiServer.image.name .Values.apiServer.image.tag -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.image.name .Values.image.tag -}}
+{{- printf "%s:%s" .Values.apiServer.image.name .Values.apiServer.image.tag -}}
 {{- end -}}
 {{- end }}
 
 {{/*
 Resolve the full image reference for the worker container.
-Mirrors provisioning.image but reads from .Values.workerImage.
 */}}
 {{- define "provisioning.workerImage" -}}
-{{- $repo := .Values.workerImage.repository -}}
+{{- $repo := .Values.worker.image.repository -}}
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
 {{- end -}}
 {{- if $repo -}}
-{{- printf "%s/%s:%s" $repo .Values.workerImage.name .Values.workerImage.tag -}}
+{{- printf "%s/%s:%s" $repo .Values.worker.image.name .Values.worker.image.tag -}}
 {{- else -}}
-{{- printf "%s:%s" .Values.workerImage.name .Values.workerImage.tag -}}
+{{- printf "%s:%s" .Values.worker.image.name .Values.worker.image.tag -}}
 {{- end -}}
 {{- end }}
 
 {{/*
 Compose the registry (indexer) URL from global.registry.host and global.registry.port.
-Mirrors the definition used in the agents and test-env subcharts.
 */}}
 {{- define "registry.url" -}}
 {{- printf "http://%s:%d" .Values.global.registry.host (int .Values.global.registry.port) -}}
@@ -71,18 +69,13 @@ Mirrors the definition used in the agents and test-env subcharts.
 
 {{/*
 Compose the internal Redis URL for the provisioning service.
-Redis runs as a sibling Deployment within this subchart.
 */}}
 {{- define "provisioning.redisUrl" -}}
 {{- printf "redis://%s-redis:%d/0" (include "provisioning.fullname" .) (int .Values.redis.port) -}}
 {{- end }}
 
 {{/*
-Common environment variables shared by both the API and worker containers.
-Extracted to avoid duplication across the two Deployments.
-Usage:
-  env:
-    {{- include "provisioning.commonEnv" . | nindent 12 }}
+Common environment variables shared by both the API server and worker containers.
 */}}
 {{- define "provisioning.commonEnv" -}}
 # --- sourced from subchart values ---
@@ -117,8 +110,7 @@ Usage:
 {{- end }}
 
 {{/*
-Init container that waits for Redis to be accepting connections.
-Shared between the API and worker Deployments.
+Init container that waits for Redis before either main container starts.
 */}}
 {{- define "provisioning.waitForRedis" -}}
 - name: wait-for-redis
