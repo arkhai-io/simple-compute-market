@@ -137,6 +137,73 @@ async def provision_machine_async(
     return _normalize_vm_create_result(result)
 
 
+async def provision_machine_async_with_id(
+    provisioning_service_url: str,
+    params: dict[str, Any],
+    *,
+    timeout: int = 3600,
+    poll_interval: int = 15,
+    agent_id: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """POST /api/v1/jobs and poll until succeeded. Returns (job_id, result_dict).
+
+    Use this variant when the caller needs the job_id (e.g. to fetch credentials
+    separately via get_job_credentials_async after the job completes).
+    """
+    async with aiohttp.ClientSession() as session:
+        job_id = await _submit_job(session, provisioning_service_url, params, agent_id)
+        logger.info("[PROVISIONING] Submitted job %s to %s", job_id, provisioning_service_url)
+        result = await _poll_job(
+            session,
+            provisioning_service_url,
+            job_id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            agent_id=agent_id,
+        )
+    logger.info("[PROVISIONING] Job %s completed successfully", job_id)
+    return job_id, _normalize_vm_create_result(result)
+
+
+async def get_job_credentials_async(
+    service_url: str,
+    job_id: str,
+    agent_id: str,
+) -> dict | None:
+    """Fetch credentials for a completed job from the provisioning service.
+
+    Returns a dict matching the authentication structure:
+      {"root": {...}, "tenant": {...}}
+    or None if the service returns no credentials.
+    Requires X-Agent-ID header; seller (agent_id == job.agent_id) gets root+tenant,
+    buyer gets tenant only.
+    """
+    url = f"{service_url.rstrip('/')}/api/v1/jobs/{job_id}/credentials"
+    headers = {"X-Agent-ID": str(agent_id)}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 404:
+                    return None
+                resp.raise_for_status()
+                data = await resp.json()
+        creds = data.get("credentials") or []
+        auth: dict[str, dict] = {}
+        for c in creds:
+            role = c.get("role")
+            if role:
+                auth[role] = {
+                    "password": c.get("password"),
+                    "ssh_commands": c.get("ssh_commands"),
+                    "ssh_key_path_host": c.get("ssh_key_path_host"),
+                    "key_type": c.get("key_type"),
+                }
+        return auth or None
+    except Exception as exc:
+        logger.warning("[PROVISIONING] Failed to fetch credentials for job %s: %s", job_id, exc)
+        return None
+
+
 async def schedule_vm_shutdown_async(
     provisioning_service_url: str,
     lease_end_utc: str,

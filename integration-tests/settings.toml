@@ -43,6 +43,18 @@ private_key       = ""
 wallet_address    = ""
 
 # ---------------------------------------------------------------------------
+# Agent / registry endpoints (e2e tests)
+# ---------------------------------------------------------------------------
+[default.agents]
+registry_url = ""
+buyer_url = ""
+seller_url = ""
+buyer_db = ""
+seller_db = ""
+buyer_env = ""
+seller_env = ""
+
+# ---------------------------------------------------------------------------
 # Test behaviour
 # ---------------------------------------------------------------------------
 [default.tests]
@@ -52,3 +64,5 @@ require_checksummed_addresses = true
 order_create_timeout = 30             #time in seconds
 order_match_timeout = 60
 order_close_timeout = 30
+e2e_poll_timeout_s = 120
+e2e_poll_interval_s = 3

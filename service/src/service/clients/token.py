@@ -40,7 +40,9 @@ class TokenRegistry:
             if env_path:
                 self._path = Path(env_path)
             else:
-                self._path = _DEFAULT_REGISTRY_PATH
+                # Fall back to the core data directory if it exists
+                core_data = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry.json"
+                self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
         self._lock = RLock()
         self._tokens_by_symbol: dict[str, ERC20TokenMetadata] = {}
         self._tokens_by_address: dict[str, ERC20TokenMetadata] = {}

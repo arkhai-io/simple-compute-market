@@ -67,6 +67,7 @@ from core.agent.app.schema.pydantic_models import (
     MarketOrder,
     MakeOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
+    FulfillmentFailedEvent,
     ArbitrationCompleteEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
@@ -87,6 +88,7 @@ from core.agent.app.policy.negotiation_thread import get_thread_store
 from core.agent.app.policy.seeding import ComputePolicySeeder
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.schema.pydantic_models import DecisionContext, Action, Decision
+from core.agent.app.utils.action_executor import _sender_id as _get_sender_id
 from core.agent.app.utils.event_ingestion import (
     configure_default_ingestion,
     queue_event,
@@ -376,13 +378,19 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
             matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
             source = data.get("source") or payload.get("source")
-            return AcceptOfferEvent.from_order(
+            buyer_order_id = data.get("buyer_order_id") or payload.get("buyer_order_id")
+            agreed_price = data.get("agreed_price") or payload.get("agreed_price")
+            event = AcceptOfferEvent.from_order(
                 order,
                 escrow_uid=escrow_uid,
                 ssh_public_key=ssh_public_key,
                 matched_order_id=matched_order_id,
                 source=source,
+                agreed_price=agreed_price,
             )
+            if buyer_order_id:
+                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            return event
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
@@ -398,6 +406,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 "source_url": source_url,
             }
             return ReceiveComputeObligationFulfillmentEvent.from_payload(fulfillment_payload)
+
+        elif event_type == EventType.FULFILLMENT_FAILED:
+            return FulfillmentFailedEvent(
+                event_id=payload.get("event_id", f"ff_{uuid.uuid4()}"),
+                source=payload.get("source", "unknown"),
+                escrow_uid=data.get("escrow_uid", ""),
+                reason=data.get("reason"),
+                seller_order_id=data.get("seller_order_id"),
+                buyer_order_id=data.get("buyer_order_id"),
+                data=data,
+            )
 
         elif event_type == EventType.ARBITRATION_COMPLETE:
             arb_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
@@ -705,7 +724,7 @@ class TraderAgent(BaseAgent):
 
         decision_context = DecisionContext(
             event=domain_event,
-            agent_id=self.name,
+            agent_id=_get_sender_id(),
             available_resources=context_data.get("resource_portfolio", {}),
             market_state=context_data.get("market_state", {}),
             negotiation_history=context_data.get("negotiation_history", []),
@@ -764,7 +783,7 @@ class TraderAgent(BaseAgent):
             agent_id=self.name,
             context=DecisionContext(
                 event=domain_event,
-                agent_id=self.name,
+                agent_id=_get_sender_id(),
                 available_resources=context_data.get("resource_portfolio", {}),
                 market_state=context_data.get("market_state", {}),
                 negotiation_history=context_data.get("negotiation_history", []),
@@ -824,6 +843,60 @@ class TraderAgent(BaseAgent):
         logger.info(f"{outcome} {outcome_message}")
         return outcome_message or fallback_message
 
+    async def _check_orphan(
+        self, domain_event: Any, ctx: InvocationContext
+    ) -> str | None:
+        """Return a message string if the event is an orphaned negotiation round
+        (agent restarted, lost in-memory session). Returns None otherwise."""
+        from core.agent.app.utils.action_executor import (
+            _negotiation_sessions,
+            _negotiation_locks,
+            exit_negotiation,
+        )
+        from core.agent.app.policy.negotiation_thread import get_thread_store
+
+        event_data = getattr(domain_event, "data", None) or {}
+        msg_type = event_data.get("message_type") or getattr(domain_event, "message_type", None)
+        if msg_type not in ("counter_proposal", "initial_proposal"):
+            return None
+
+        neg_id = event_data.get("negotiation_id") or getattr(domain_event, "negotiation_id", None)
+        if not neg_id:
+            return None
+
+        # Not orphaned if we have an active session or lock for this negotiation
+        if neg_id in _negotiation_sessions or neg_id in _negotiation_locks:
+            return None
+
+        # Confirm orphan: thread must have prior messages (rules out genuine round-0 arrivals)
+        try:
+            ts = get_thread_store()
+            history = await ts.get_thread(neg_id)
+        except Exception:
+            history = []
+
+        # make_offer writes a round-0 "offer" record to the DB before any ADK session
+        # is created. Filter those out — they don't indicate a prior active session.
+        session_history = [m for m in history if m.get("message_type") not in ("offer",)]
+        if len(session_history) == 0:
+            return None  # Only make_offer round-0 record — session was never created, not an orphan
+
+        logger.warning(
+            "[AGENT] Orphaned negotiation %s detected after restart "
+            "(%d prior messages, no ADK session). Sending exit.",
+            neg_id, len(session_history),
+        )
+        their_order_id = event_data.get("their_order_id") or event_data.get("order_id")
+        await exit_negotiation(
+            ctx=ctx,
+            parameters={
+                "negotiation_id": neg_id,
+                "order_id": their_order_id,
+                "reason": "agent_restarted",
+            },
+        )
+        return f"Orphaned negotiation {neg_id} terminated: agent_restarted."
+
     @override
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -842,15 +915,40 @@ class TraderAgent(BaseAgent):
                 invocation_id=ctx.invocation_id,
                 branch=ctx.branch,
             )
+            return
 
         name, content = _extract_content_payload(last_event.content)
         logger.info(f"{name}: {content}")
 
         # Process through full reactive pipeline
         domain_event = _parse_domain_event(content)
-        policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
+
+        # Orphan guard: detect counter/initial proposals for negotiations whose ADK session
+        # was lost on restart. Respond with exit so the counterparty can requeue.
+        _orphan_msg = await self._check_orphan(domain_event, ctx)
+        if _orphan_msg is not None:
+            policy_recommendation = _orphan_msg
+        else:
+            policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
+
+        # Emit A2A artifact if action executor attached one (e.g. accept_offer settlement)
+        _outcome = self._last_action_outcomes.get(domain_event.event_id, {})
+        _artifact = _outcome.get("artifact") if isinstance(_outcome, dict) else None
+        if _artifact:
+            yield Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_function_response(
+                        name="negotiation_outcome",
+                        response=_artifact,
+                    )],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
 
         yield Event(
             author=self.name,
@@ -1338,7 +1436,7 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to create market orders via the root agent.
     """
-    auth_error = _check_agent_request_auth(request, "create_order", BASE_URL_OVERRIDE)
+    auth_error = _check_agent_request_auth(request, "create_order", CONFIG.agent_wallet_address)
     if auth_error:
         return auth_error
 

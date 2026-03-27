@@ -146,6 +146,26 @@ make test ACTIVE_PROFILES=staging CONFIG_DIRECTORY=/mnt/e2e-config
 make test PYTEST_ARGS="-k test_contract_owner -v --tb=long"
 ```
 
+### E2E mock provisioning tests
+
+These targets spin up the full docker-compose stack, wait for services to be
+ready (including on-chain agent registration), run the tests, then tear down.
+
+```bash
+make e2e-mock-happy       # deal lifecycle: create → negotiate → escrow → fulfill → arbitrate → close
+make e2e-mock-failure     # provisioning fails → orders reopen
+```
+
+Each target uses the CLI (`market order create`, `market order history`,
+`market order show --negotiation --credentials --show-password`) to drive
+order creation and inspect results. CLI output is captured in the pytest log.
+
+To run against an already-running stack without lifecycle management:
+
+```bash
+ACTIVE_PROFILES=local,e2e-mock uv run pytest -m mock_provisioning_happy -v --tb=long
+```
+
 ---
 
 ## CI/CD

@@ -305,6 +305,7 @@ def order_to_dict(order: MarketOrder) -> dict:
         "duration_hours": order.duration_hours,
         "maker_attestation": order.maker_attestation,
         "taker_attestation": order.taker_attestation,
+        "oracle_address": order.oracle_address,
         "status": order.status.value,
         "created_at": order.created_at.isoformat(),
         "updated_at": order.updated_at.isoformat(),
@@ -374,7 +375,7 @@ def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resourc
         and_(
             MarketOrder.order_id != order.order_id,
             MarketOrder.order_maker == order.order_taker,
-            MarketOrder.status == OrderStatusEnum.open,
+            MarketOrder.status.in_([OrderStatusEnum.open, OrderStatusEnum.accepted]),
         )
     ).all()
     
