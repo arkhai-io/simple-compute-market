@@ -87,12 +87,41 @@ class Deal:
     The buyer_order_id and seller_order_id are the two sides of the matched
     pair. Both agent DBs record the same deal, one as buyer (maker) and
     one as seller (taker), or vice versa depending on who created first.
+
+    Also captures the payment token's address and pre-deal balances so
+    balance-delta assertions at each stage are possible without additional
+    plumbing.
     """
     buyer_node: dict
     seller_node: dict
     buyer_order_id: str
     seller_order_id: str
     registry_url: str
+    # On-chain context for balance assertions
+    w3: Any
+    payment_token_address: str
+    buyer_balance_before: int
+    seller_balance_before: int
+
+    # ------------------------------------------------------------------
+    # Balance accessors (live reads at call time)
+    # ------------------------------------------------------------------
+
+    def buyer_balance(self) -> int:
+        """Current on-chain payment-token balance of the buyer's wallet."""
+        from tests.roles.helpers.erc20 import get_erc20_balance
+        return get_erc20_balance(
+            self.w3, self.payment_token_address,
+            self.buyer_node["wallet_address"],
+        )
+
+    def seller_balance(self) -> int:
+        """Current on-chain payment-token balance of the seller's wallet."""
+        from tests.roles.helpers.erc20 import get_erc20_balance
+        return get_erc20_balance(
+            self.w3, self.payment_token_address,
+            self.seller_node["wallet_address"],
+        )
 
     # ------------------------------------------------------------------
     # Milestones: block until the named stage has produced its signal

@@ -32,6 +32,7 @@ import pytest
 from tests.helpers.cli_client import cli_create_order
 from tests.helpers.polling import poll_registry_orders
 from tests.roles.helpers.deal import Deal
+from tests.roles.helpers.erc20 import get_erc20_balance
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ log = logging.getLogger(__name__)
 # unless they explicitly override for variant scenarios.
 COMPUTE = {"gpu_model": "RTX 5080", "quantity": 1, "sla": 90.0, "region": "California, US"}
 PAYMENT = {"token": "MOCK", "amount": 100}
+
+# MOCK token deployed by the contract deployer. Deterministic Alkahest
+# address on any chain the Alkahest replay was run against.
+MOCK_TOKEN_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 
 
 # ---------------------------------------------------------------------------
@@ -87,14 +92,24 @@ def discovery_output(seller_publishes: dict) -> dict:
 
 @pytest.fixture(scope="session")
 def initiated_deal(
-    seller_node: dict, buyer_node: dict, discovery_output: dict,
+    seller_node: dict, buyer_node: dict, discovery_output: dict, w3,
 ) -> Deal:
     """The buyer creates a matching order, initiating the full cascade.
 
-    Returns a Deal holding both order IDs and both agent-node contexts.
-    Individual stage fixtures call .wait_for_X() on this to observe each
-    milestone of the cascade.
+    Captures pre-deal on-chain balances before triggering so that later
+    stage fixtures can assert balance deltas without extra plumbing.
     """
+    # Capture pre-deal balances *before* the buyer creates an order so the
+    # first settlement-triggered escrow is observable as a balance delta.
+    buyer_before = get_erc20_balance(
+        w3, MOCK_TOKEN_ADDRESS, buyer_node["wallet_address"],
+    )
+    seller_before = get_erc20_balance(
+        w3, MOCK_TOKEN_ADDRESS, seller_node["wallet_address"],
+    )
+    log.info("Pre-deal balances: buyer=%d, seller=%d MOCK",
+             buyer_before, seller_before)
+
     resp = cli_create_order(
         agent_url=buyer_node["agent_url"],
         env_file=buyer_node["agent_env_file"],
@@ -111,6 +126,10 @@ def initiated_deal(
         buyer_order_id=buyer_order_id,
         seller_order_id=discovery_output["seller_order"]["order_id"],
         registry_url=seller_node["market"]["url"],
+        w3=w3,
+        payment_token_address=MOCK_TOKEN_ADDRESS,
+        buyer_balance_before=buyer_before,
+        seller_balance_before=seller_before,
     )
 
 
