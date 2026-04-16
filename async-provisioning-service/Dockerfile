@@ -16,7 +16,8 @@ RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
     uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
-RUN uv pip install ansible-core && \
+RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
+    uv pip install ansible-core && \
     uv run ansible-galaxy collection install -r /tmp/requirements.yml
 
 # Stage 2: Runtime
@@ -89,5 +90,5 @@ ENV ADMIN_SECRET=""
 USER appuser
 EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')" || exit 1
 CMD ["sh", "start.sh"]
