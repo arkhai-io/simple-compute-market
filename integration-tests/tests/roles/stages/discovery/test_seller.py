@@ -28,25 +28,25 @@ class TestSellerCanPublishOffer:
     """The seller can make their compute inventory visible to the market."""
 
     def test_published_order_is_visible_in_registry(
-        self, seller_node: dict, seller_publishes_order: dict,
+        self, seller_node: dict, seller_publishes: dict,
     ):
         """After publishing, the seller's order appears in /orders?status=open."""
         data = query_registry_orders(seller_node["market"]["url"], status="open")
         order_ids = {o["order_id"] for o in data.get("items", [])}
-        assert seller_publishes_order["order_id"] in order_ids
+        assert seller_publishes["order_id"] in order_ids
 
     def test_published_order_is_attributed_to_seller(
-        self, seller_node: dict, seller_publishes_order: dict,
+        self, seller_node: dict, seller_publishes: dict,
     ):
         """The published order's maker is the seller's own agent URL."""
-        assert seller_publishes_order["order_maker"] == seller_node["agent_url"], (
-            f"order_maker={seller_publishes_order['order_maker']!r} "
+        assert seller_publishes["order_maker"] == seller_node["agent_url"], (
+            f"order_maker={seller_publishes['order_maker']!r} "
             f"does not match seller URL={seller_node['agent_url']!r}"
         )
 
-    def test_published_order_offers_compute(self, seller_publishes_order: dict):
+    def test_published_order_offers_compute(self, seller_publishes: dict):
         """The seller's order offers a compute resource (GPU) as expected."""
-        offer = seller_publishes_order["offer_resource"]
+        offer = seller_publishes["offer_resource"]
         assert "gpu_model" in offer, (
             f"Seller's offer is not a compute resource: {offer}"
         )
