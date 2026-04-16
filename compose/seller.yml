@@ -1,0 +1,103 @@
+# Seller layer: what a seller (someone with compute to sell) runs on their machine.
+#
+# A seller runs:
+#   1. The seller agent — the process that publishes offers, negotiates,
+#      accepts matches, and coordinates provisioning on their hardware.
+#   2. A provisioning service — the process that actually turns escrows
+#      into running VMs on the seller's hardware (or mock hardware for dev).
+#   3. Redis — job queue used by the provisioning service.
+#
+# Depends on:
+#   - An external chain with contracts deployed
+#   - A marketplace registry (from compose/market.yml) reachable via INDEXER_URL
+#
+# Usage:
+#   docker compose -f compose/seller.yml up
+#
+# Environment:
+#   PROVISIONING_MODE        — mock | ansible | http (default: http)
+#   MOCK_PROVISIONING_SUCCESS — true | false (when mock mode)
+
+services:
+  seller-agent:
+    image: arkhai:core
+    platform: linux/amd64
+    container_name: market-agent-sell
+    ports:
+      - "8001:8001"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ../core/agent/.env.bob.docker-compose
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+    volumes:
+      - ../shared-env:/app/shared-env
+      - zerotier-sell:/var/lib/zerotier-one
+      - ../core/agent/app/data/sell-agent:/app/core/agent/app/data/sell-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        echo "Importing seller resources..."
+        PYTHONPATH="/:/app:/app/core/agent" uv run python core/agent/scripts/import_resources_csv.py \
+          --csv core/agent/app/data/ww1-machine.csv
+        exec ./entrypoint.sh
+
+  seller-redis:
+    image: redis:7-alpine
+    container_name: market-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - market-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  seller-provisioning:
+    image: arkhai:provisioning
+    container_name: market-provisioning
+    depends_on:
+      seller-redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    env_file:
+      - ../async-provisioning-service/.env.docker-compose
+    volumes:
+      - ../compute-provisioning-iac:/app/compute-provisioning-iac
+      - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
+    networks:
+      - market-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+
+networks:
+  market-network:
+    external: true
+    name: market-network
+
+volumes:
+  zerotier-sell:

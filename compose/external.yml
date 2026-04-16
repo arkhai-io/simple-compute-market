@@ -1,0 +1,45 @@
+# External layer: the EVM chain and deployed contracts.
+#
+# In production, this layer is NOT run by anyone in this repo — it's the
+# real chain (Ethereum, Base, etc.) with Alkahest + ERC-8004 contracts
+# already deployed by someone else.
+#
+# For local development and testing, we provide a test chain (Anvil) with
+# all required contracts deployed. Real users can ignore this file.
+#
+# Usage:
+#   docker compose -f compose/external.yml up       # start chain + deploy contracts
+#   docker compose -f compose/external.yml down     # tear down
+
+services:
+  anvil:
+    image: arkhai:test-env
+    container_name: anvil
+    ports:
+      - "8545:8545"
+    environment:
+      - ANVIL_IP_ADDR=0.0.0.0
+    networks:
+      - market-network
+
+  # One-shot: deploys Alkahest + ERC-8004 contracts, writes addresses to
+  # shared-env/.env, then exits. This runs once per fresh chain.
+  contracts-deploy:
+    image: arkhai:contract-deployer
+    container_name: market-contracts-deploy
+    depends_on:
+      anvil:
+        condition: service_started
+    environment:
+      - ENV_FILE=/app/shared-env/.env
+      - RPC_URL=http://anvil:8545
+    volumes:
+      - ./shared-env:/app/shared-env
+    networks:
+      - market-network
+    command: sh -c ./deploy-local.sh
+
+networks:
+  market-network:
+    driver: bridge
+    name: market-network

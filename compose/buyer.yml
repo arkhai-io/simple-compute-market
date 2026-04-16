@@ -1,0 +1,57 @@
+# Buyer layer: what a buyer (someone who wants to rent compute) runs.
+#
+# A buyer runs only the buyer agent — the process that finds offers,
+# negotiates prices, creates escrows, and receives access credentials.
+# Buyers do NOT run a provisioning service (no hardware to provision).
+#
+# Depends on:
+#   - An external chain with contracts deployed
+#   - A marketplace registry (from compose/market.yml) reachable via INDEXER_URL
+#
+# Usage:
+#   docker compose -f compose/buyer.yml up
+
+services:
+  buyer-agent:
+    image: arkhai:core
+    platform: linux/amd64
+    container_name: market-agent-buy
+    ports:
+      - "8000:8000"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    env_file:
+      - ../core/agent/.env.alice.docker-compose
+    environment:
+      # Force re-registration on every fresh Anvil — clear stale IDs
+      - ONCHAIN_AGENT_ID=
+      - ZEROTIER_IP=
+    volumes:
+      - ../shared-env:/app/shared-env
+      - zerotier-buy:/var/lib/zerotier-one
+      - ../core/agent/app/data/buy-agent:/app/core/agent/app/data/buy-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    command:
+      - sh
+      - -c
+      - |
+        set -a
+        . /app/shared-env/.env
+        set +a
+        exec ./entrypoint.sh
+
+networks:
+  market-network:
+    external: true
+    name: market-network
+
+volumes:
+  zerotier-buy:
