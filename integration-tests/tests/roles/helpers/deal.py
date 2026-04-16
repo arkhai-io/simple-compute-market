@@ -29,8 +29,18 @@ log = logging.getLogger(__name__)
 # hasn't been reached, and a snapshot dict when it has.
 
 
+def _ro_connect(db_path: str) -> sqlite3.Connection:
+    """Open SQLite read-only via URI to avoid conflicting with the agent's writes.
+
+    Podman's file sharing between the macOS host and the VM (9p / virtiofs)
+    can surface 'disk I/O error' when the agent writes while the host reads
+    normally. Read-only mode sidesteps WAL/lock coordination.
+    """
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+
+
 def _load_order(db_path: str, order_id: str) -> dict[str, Any] | None:
-    conn = sqlite3.connect(db_path, timeout=5)
+    conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -49,7 +59,7 @@ def _load_order(db_path: str, order_id: str) -> dict[str, Any] | None:
 
 def _load_negotiation_terminal_state(db_path: str, our_order_id: str) -> str | None:
     """Return the terminal_state for the negotiation thread tied to our order, or None."""
-    conn = sqlite3.connect(db_path, timeout=5)
+    conn = _ro_connect(db_path)
     try:
         cur = conn.cursor()
         cur.execute(
@@ -65,7 +75,7 @@ def _load_negotiation_terminal_state(db_path: str, our_order_id: str) -> str | N
 
 
 def _load_credentials(db_path: str, order_id: str, role: str) -> dict[str, Any] | None:
-    conn = sqlite3.connect(db_path, timeout=5)
+    conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -154,17 +164,23 @@ class Deal:
     def wait_for_settlement(
         self, *, timeout_s: float = 60, interval_s: float = 2,
     ) -> dict:
-        """Block until both orders have escrow_uid and status=accepted.
+        """Block until both orders have escrow_uid and status is at-or-past accepted.
 
-        Returns a snapshot of the settled orders.
+        In the mock-provisioning deployment the full cascade (settlement →
+        provision → arbitration → close) often lands in under a second, so
+        by the time we poll, status may already be 'closed' rather than
+        'accepted'. Either signal ok — what matters is escrow_uid is set
+        and the order has moved past 'open'/'matched'.
         """
+        POST_SETTLEMENT_STATES = ("accepted", "closed")
+
         def _check():
             buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_order_id)
             seller = _load_order(self.seller_node["agent_db_path"], self.seller_order_id)
             if not buyer or not seller:
                 return None
-            if (buyer.get("escrow_uid") and buyer["status"] == "accepted"
-                    and seller.get("escrow_uid") and seller["status"] in ("accepted", "matched")):
+            if (buyer.get("escrow_uid") and buyer["status"] in POST_SETTLEMENT_STATES
+                    and seller.get("escrow_uid") and seller["status"] in POST_SETTLEMENT_STATES + ("matched",)):
                 return {"buyer_order": buyer, "seller_order": seller}
             return None
 

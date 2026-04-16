@@ -16,13 +16,13 @@ import sqlite3
 
 import pytest
 
-from tests.roles.helpers.deal import Deal
+from tests.roles.helpers.deal import Deal, _ro_connect
 
 log = logging.getLogger(__name__)
 
 
 def _buyer_negotiation_thread(db_path: str, buyer_order_id: str) -> list[dict]:
-    conn = sqlite3.connect(db_path, timeout=5)
+    conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -75,7 +75,8 @@ class TestBuyerReachesAgreement:
             (m for m in thread if m.get("our_price") is not None), None,
         )
         accepted_final = next(
-            (m for m in reversed(thread) if m["action_taken"] == "ACCEPT_OFFER"), None,
+            (m for m in reversed(thread)
+             if m["action_taken"].lower() == "accept_offer"), None,
         )
         assert our_initial and accepted_final
 
@@ -110,7 +111,7 @@ class TestBothSidesAgreeOnSamePrice:
         )
         # seller thread lookup from the other test file's helper — inlined
         # here to avoid a cross-file import
-        conn = sqlite3.connect(deal.seller_node["agent_db_path"], timeout=5)
+        conn = _ro_connect(deal.seller_node["agent_db_path"])
         conn.row_factory = sqlite3.Row
         try:
             cur = conn.cursor()
@@ -130,10 +131,12 @@ class TestBothSidesAgreeOnSamePrice:
             conn.close()
 
         buyer_final = next(
-            (m for m in reversed(buyer_thread) if m["action_taken"] == "ACCEPT_OFFER"), None,
+            (m for m in reversed(buyer_thread)
+             if m["action_taken"].lower() == "accept_offer"), None,
         )
         seller_final = next(
-            (m for m in reversed(seller_msgs) if m["action_taken"] == "ACCEPT_OFFER"), None,
+            (m for m in reversed(seller_msgs)
+             if m["action_taken"].lower() == "accept_offer"), None,
         )
         assert buyer_final and seller_final
 

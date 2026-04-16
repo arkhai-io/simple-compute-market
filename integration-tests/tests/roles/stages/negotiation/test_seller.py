@@ -20,13 +20,13 @@ import sqlite3
 
 import pytest
 
-from tests.roles.helpers.deal import Deal
+from tests.roles.helpers.deal import Deal, _ro_connect
 
 log = logging.getLogger(__name__)
 
 
 def _seller_negotiation_thread(db_path: str, seller_order_id: str) -> list[dict]:
-    conn = sqlite3.connect(db_path, timeout=5)
+    conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
@@ -76,14 +76,17 @@ class TestSellerReachesAgreement:
         )
         assert thread, "Seller has no negotiation thread recorded"
 
-        # Find the seller's initial proposal (first message where sender is us)
+        # 'our_price' on any message is our floor for this agent.
+        # 'accept_offer' (lowercase — the ActionType.*.value form) is the
+        # terminal message. When prices align exactly at round 0, the thread
+        # may have only one message (an immediate accept_offer); in that
+        # case our_initial == accepted_final.
         our_initial = next(
-            (m for m in thread if m["sender"] != "buyer" and m.get("our_price") is not None),
-            None,
+            (m for m in thread if m.get("our_price") is not None), None,
         )
         accepted_final = next(
-            (m for m in reversed(thread) if m["action_taken"] == "ACCEPT_OFFER"),
-            None,
+            (m for m in reversed(thread)
+             if m["action_taken"].lower() == "accept_offer"), None,
         )
         assert our_initial and accepted_final, (
             f"Could not identify initial/final messages in thread: {thread}"

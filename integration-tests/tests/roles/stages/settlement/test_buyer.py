@@ -69,8 +69,10 @@ class TestBuyerSettlesEscrow:
         )
 
     def test_buyer_order_status_accepted(self, settlement_output: dict):
-        """Buyer's order transitioned to status=accepted."""
-        assert settlement_output["buyer_order"]["status"] == "accepted"
+        """Buyer's order transitioned out of 'open' — into accepted or beyond."""
+        # In mock mode the cascade can blow past 'accepted' into 'closed'
+        # before the fixture polls — either state proves settlement happened.
+        assert settlement_output["buyer_order"]["status"] in ("accepted", "closed")
 
     def test_buyer_order_records_oracle_address(self, settlement_output: dict):
         """The oracle_address (buyer's wallet) is recorded for later arbitration."""
