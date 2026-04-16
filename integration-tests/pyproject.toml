@@ -19,7 +19,13 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
+    # Workspace dependency: tests use the real discovery/matching logic,
+    # not a re-implementation. Keeps test behavior aligned with agent behavior.
+    "market-service",
 ]
+
+[tool.uv.sources]
+market-service = { path = "../service", editable = true }
 
 [project.optional-dependencies]
 dev = [
@@ -48,6 +54,20 @@ markers = [
     "mock_provisioning: E2E mock provisioning flow tests",
     "mock_provisioning_happy: Happy path — deal completes successfully",
     "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
+    "roles_layer_external: External layer — EVM chain + deployed contracts",
+    "roles_layer_market: Market layer — marketplace operator's registry service",
+    "roles_layer_seller: Seller layer — a seller's agent + provisioning service",
+    "roles_layer_buyer: Buyer layer — a buyer's agent",
+    "roles_discovery_seller: Discovery stage, seller perspective",
+    "roles_discovery_buyer: Discovery stage, buyer perspective",
+    "roles_negotiation_seller: Negotiation stage, seller perspective",
+    "roles_negotiation_buyer: Negotiation stage, buyer perspective",
+    "roles_settlement_seller: Settlement stage, seller perspective",
+    "roles_settlement_buyer: Settlement stage, buyer perspective",
+    "roles_provision_seller: Provision stage, seller perspective",
+    "roles_provision_buyer: Provision stage, buyer perspective",
+    "roles_post_settlement_seller: Post-settlement stage, seller perspective",
+    "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
 ]
 log_cli = true
 log_cli_level = "INFO"
