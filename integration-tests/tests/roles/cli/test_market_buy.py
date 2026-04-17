@@ -17,7 +17,13 @@ import sqlite3
 
 import pytest
 
-from tests.roles.cli.conftest import COMPUTE, PAYMENT, run_market_buy, run_market_buy_recover
+from tests.roles.cli.conftest import (
+    COMPUTE,
+    PAYMENT,
+    run_market_buy,
+    run_market_buy_abort,
+    run_market_buy_recover,
+)
 
 log = logging.getLogger(__name__)
 
@@ -206,6 +212,98 @@ class TestMarketBuyRecover:
         combined = result.stdout + result.stderr
         assert "mutually exclusive" in combined.lower() or "--max-price" in combined, (
             f"Expected mutex error\n{combined[-500:]}"
+        )
+
+
+@pytest.mark.roles_cli_buy
+class TestMarketBuyAbort:
+    """`market buy --abort <id>` cleanly cancels or acknowledges completion."""
+
+    def test_abort_unknown_id_exits_non_zero(self, buyer_node):
+        """Unknown id → exit 1 + clear message."""
+        result = run_market_buy_abort(
+            buyer_node=buyer_node,
+            abort="00000000-0000-0000-0000-000000000000",
+        )
+        assert result.returncode != 0, result.stdout[-500:]
+        combined = result.stdout + result.stderr
+        assert "No local order found" in combined or "not found" in combined.lower(), (
+            f"Expected missing-id message\n{combined[-500:]}"
+        )
+
+    def test_abort_mutex_with_recover(self, buyer_node):
+        """--abort and --recover are mutually exclusive."""
+        result = run_market_buy_abort(
+            buyer_node=buyer_node,
+            abort="00000000-0000-0000-0000-000000000000",
+            extra_args=["--recover", "11111111-1111-1111-1111-111111111111"],
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "mutually exclusive" in combined.lower(), combined[-500:]
+
+    def test_abort_mutex_with_max_price(self, buyer_node):
+        """--abort and --max-price are mutually exclusive."""
+        result = run_market_buy_abort(
+            buyer_node=buyer_node,
+            abort="00000000-0000-0000-0000-000000000000",
+            extra_args=["--max-price", "100"],
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "mutually exclusive" in combined.lower(), combined[-500:]
+
+    def test_abort_on_already_closed_order_is_idempotent(
+        self, market_buy_happy_result, buyer_node,
+    ):
+        """Aborting an already-closed order is a no-op with exit 0."""
+        assert market_buy_happy_result.returncode == 0, "Prereq happy-path must succeed"
+        m = re.search(r"Order created:\s*([0-9a-f\-]{36})", market_buy_happy_result.stdout)
+        assert m, "No order_id in happy-path stdout"
+        order_id = m.group(1)
+
+        # First abort.
+        result1 = run_market_buy_abort(buyer_node=buyer_node, abort=order_id)
+        assert result1.returncode == 0, result1.stdout[-500:]
+        # Second abort should see it's already closed.
+        result2 = run_market_buy_abort(buyer_node=buyer_node, abort=order_id)
+        assert result2.returncode == 0, result2.stdout[-500:]
+        assert "Already closed" in result2.stdout or "already closed" in result2.stdout.lower(), (
+            f"Expected 'Already closed' on second abort\n{result2.stdout[-500:]}"
+        )
+
+    def test_abort_leaves_order_closed_in_db(self, buyer_node):
+        """An aborted order's final DB status must be 'closed'.
+
+        Creates a fresh order with a non-matching spec (seller won't match
+        unrealistically cheap H200 requests), aborts it, confirms the DB row
+        is `status='closed'`. Tolerates any intermediate state before abort.
+        """
+        from tests.helpers.cli_client import cli_create_order
+
+        resp = cli_create_order(
+            agent_url=buyer_node["agent_url"],
+            env_file=buyer_node["agent_env_file"],
+            offer={"token": "MOCK", "amount": 1},
+            demand={"gpu_model": "H200", "quantity": 1, "sla": 99.9, "region": "Tokyo, JP"},
+        )
+        assert resp["status"] in ("created", "queued"), f"Order create failed: {resp}"
+        order_id = resp["order_id"]
+
+        result = run_market_buy_abort(buyer_node=buyer_node, abort=order_id)
+        assert result.returncode == 0, result.stdout[-500:]
+
+        conn = sqlite3.connect(
+            f"file:{buyer_node['agent_db_path']}?mode=ro", uri=True, timeout=5,
+        )
+        try:
+            row = conn.execute(
+                "SELECT status FROM orders WHERE order_id = ?", (order_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row and row[0] == "closed", (
+            f"Expected status=closed after abort, got {row[0] if row else 'None'}"
         )
 
 

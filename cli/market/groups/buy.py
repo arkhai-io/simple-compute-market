@@ -108,6 +108,36 @@ def _resolve_recover_order_id(db_path: str, identifier: str) -> Optional[str]:
         conn.close()
 
 
+def _load_order_state(db_path: str, order_id: str) -> dict:
+    """Return the current {status, escrow_uid, taker_attestation} for an order."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        row = conn.execute(
+            "SELECT status, escrow_uid, taker_attestation FROM orders WHERE order_id = ?",
+            (order_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return {}
+    return {
+        "status": row[0],
+        "escrow_uid": row[1],
+        "taker_attestation": row[2],
+    }
+
+
+def _close_order(
+    agent_url: str,
+    order_id: str,
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/close and return the full response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/close"
+    headers = _get_auth_headers("close_order", order_id, private_key)
+    return _post_json(url, {"order_id": order_id}, headers)
+
+
 def _credentials_present(conn: sqlite3.Connection, order_id: str) -> bool:
     try:
         row = conn.execute(
@@ -241,6 +271,7 @@ def register(app: typer.Typer) -> None:
         demand_json: Optional[str] = typer.Option(None, "--demand-json", help="Raw demand resource JSON (overrides --gpu/--quantity/--sla/--region)."),
         offer_json: Optional[str] = typer.Option(None, "--offer-json", help="Raw offer resource JSON (overrides --max-price/--token)."),
         recover: Optional[str] = typer.Option(None, "--recover", help="Resume waiting on an existing order by order_id or escrow_uid, instead of creating a new one."),
+        abort: Optional[str] = typer.Option(None, "--abort", help="Cancel an in-flight order by order_id or escrow_uid. Closes the order locally and in the registry."),
         timeout: int = typer.Option(600, "--timeout", help="Total wait budget in seconds."),
         poll_interval: float = typer.Option(2.0, "--poll-interval", help="Seconds between DB polls."),
         agent_url: Optional[str] = typer.Option(None, "--agent-url", "-a", help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE)."),
@@ -250,23 +281,36 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Buy compute with the given constraints — synchronous, one command.
 
-        Recovery mode: `market buy --recover <id>` skips order creation and
-        resumes polling an existing deal. Useful when a previous `market buy`
-        was interrupted (Ctrl-C, crash). `<id>` is either the local order_id
-        or the on-chain escrow_uid.
+        Modes:
+
+          Create (default): `market buy --gpu X --max-price Y` creates a
+          new order, blocks until the deal closes, prints credentials.
+
+          Recover: `market buy --recover <id>` skips order creation and
+          resumes polling an existing deal. Useful when a previous
+          `market buy` was interrupted (Ctrl-C, crash). `<id>` is either
+          the local order_id or the on-chain escrow_uid.
+
+          Abort: `market buy --abort <id>` cancels an in-flight order.
+          Closes the order locally and in the registry. Warns (but does
+          not roll back) if an on-chain escrow is already posted.
         """
         console = Console()
         env_path = Path(env) if env else None
 
-        # Validate mode: exactly one of (recover, creation args) is allowed.
-        if recover and max_price is not None:
+        # Exactly one mode.
+        modes = [m for m in ("recover" if recover else None, "abort" if abort else None) if m]
+        if len(modes) > 1:
             raise typer.BadParameter(
-                "--recover is mutually exclusive with --max-price. "
-                "In recovery mode the existing order's price already applies."
+                "--recover and --abort are mutually exclusive."
             )
-        if not recover and max_price is None:
+        if (recover or abort) and max_price is not None:
             raise typer.BadParameter(
-                "--max-price is required (or pass --recover <id> to resume an existing order)."
+                "--recover/--abort are mutually exclusive with --max-price."
+            )
+        if not recover and not abort and max_price is None:
+            raise typer.BadParameter(
+                "--max-price is required (or pass --recover <id> / --abort <id>)."
             )
 
         base_url = (
@@ -284,6 +328,70 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
+
+        if abort:
+            order_id = _resolve_recover_order_id(db_path, abort)
+            if not order_id:
+                typer.secho(
+                    f"No local order found for id/escrow_uid {abort!r}. "
+                    "Check the value or pass a different --db.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+
+            state = _load_order_state(db_path, order_id)
+            status = state.get("status") or "?"
+            escrow_uid = state.get("escrow_uid")
+            taker_attestation = state.get("taker_attestation")
+
+            summary = Table.grid(padding=(0, 2))
+            summary.add_column(style="bold")
+            summary.add_column()
+            summary.add_row("Mode", "abort")
+            summary.add_row("Input", abort)
+            summary.add_row("Order ID", order_id)
+            summary.add_row("Current status", status)
+            if escrow_uid:
+                summary.add_row("Escrow UID", escrow_uid)
+            summary.add_row("Agent", base_url)
+            console.print(Panel(summary, title="Buy abort", border_style="yellow"))
+
+            if status == "closed":
+                console.print("[green]Already closed — nothing to do.[/green]")
+                return
+
+            # Warn when on-chain state makes local close insufficient.
+            if escrow_uid and not taker_attestation:
+                console.print(
+                    "[yellow]Warning:[/yellow] an escrow is posted on-chain for this order "
+                    "but the seller has not yet delivered. Closing the local order will "
+                    "mark it cancelled in the registry, but the escrow refund is NOT "
+                    "automated yet — you may need to reclaim it manually.",
+                )
+            elif escrow_uid and taker_attestation:
+                console.print(
+                    "[yellow]Warning:[/yellow] this deal is already fulfilled (taker "
+                    "attestation present). Aborting now will not undo the on-chain "
+                    "settlement; credentials already in the buyer DB remain valid.",
+                )
+
+            private_key = (
+                (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+                or os.getenv("AGENT_PRIV_KEY")
+            )
+            try:
+                resp = _close_order(base_url, order_id, private_key)
+            except typer.Exit:
+                # _post_json already printed the error and exited.
+                raise
+            result_status = str(resp.get("status", "?"))
+            result_msg = str(resp.get("message") or "")
+            color = "green" if result_status in ("closed", "skipped", "queued") else "red"
+            console.print(f"[{color}]Close result:[/] {result_status}"
+                          + (f" — {result_msg}" if result_msg else ""))
+            if result_status in ("closed", "skipped", "queued"):
+                return
+            raise typer.Exit(5)
 
         if recover:
             order_id = _resolve_recover_order_id(db_path, recover)
