@@ -34,7 +34,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from ..common import read_env_value, resolve_agent_url
+from ..common import REPO_ROOT, read_env_value, resolve_agent_url
 from .logs import _derive_stage, _resolve_db_path
 from .order import (
     _get_auth_headers,
@@ -91,6 +91,16 @@ def _pick_network(runtime: str) -> Optional[str]:
     return None
 
 
+def _base_url_hostname(url: str) -> Optional[str]:
+    """Extract just the hostname from a base URL (for --network-alias)."""
+    import urllib.parse as _up
+    try:
+        parsed = _up.urlparse(url)
+        return parsed.hostname
+    except Exception:
+        return None
+
+
 def _spawn_agent_container(
     *,
     env_path: Path,
@@ -98,12 +108,16 @@ def _spawn_agent_container(
     image: str,
     network: Optional[str],
     agent_data_dir: Optional[Path],
+    shared_env_file: Optional[Path],
+    advertised_hostname: Optional[str],
     console: Console,
 ) -> tuple[str, Callable[[], None]]:
     """Launch an agent container and return (container_name, cleanup_fn).
 
     `agent_data_dir` is the host path to mount at the container-internal
     data directory so the CLI can read the same SQLite DB the agent writes.
+    `shared_env_file` is an additional env file for values the main env
+    doesn't carry (e.g. IDENTITY_REGISTRY_ADDRESS from shared-env/.env).
     """
     runtime = _docker_cmd()
     if not runtime:
@@ -118,10 +132,22 @@ def _spawn_agent_container(
         "--name", name,
         "--platform", "linux/amd64",
         "--env-file", str(env_path.resolve()),
-        "-p", f"{port}:{port}",
     ]
+    if shared_env_file and shared_env_file.exists():
+        cmd.extend(["--env-file", str(shared_env_file.resolve())])
+    # ONCHAIN_AGENT_ID must be empty in the spawn so AUTO_REGISTER reliably
+    # picks up a fresh chain registration, matching docker-compose.yml.
+    cmd.extend(["-e", "ONCHAIN_AGENT_ID="])
+    cmd.extend(["-p", f"{port}:{port}"])
     if network:
         cmd.extend(["--network", network])
+        # Claim the hostname the buyer advertises on the compose network so
+        # that the seller can dial back. Without this, BASE_URL_OVERRIDE
+        # (e.g. http://buy_agent:8000) resolves to nothing and inter-agent
+        # callbacks like 'fulfillment_completed' silently fail, leaving
+        # the buyer's thread stuck in 'active' while seller sees 'success'.
+        if advertised_hostname and advertised_hostname not in ("localhost", "127.0.0.1"):
+            cmd.extend(["--network-alias", advertised_hostname])
     if agent_data_dir:
         # Mount the host DB dir into the container so host-side polling sees
         # the agent's writes. Path layout matches docker-compose.yml.
@@ -157,17 +183,103 @@ def _spawn_agent_container(
     return name, _cleanup
 
 
-def _wait_for_agent(base_url: str, timeout_s: float, console: Console) -> bool:
-    """Poll agent readiness. Returns True if reachable before the deadline."""
+def _agent_is_registered(base_url: str, timeout_s: float = 2.0) -> bool:
+    """Agent self-reports on-chain registrations in its ERC-8004 doc.
+
+    Empty `registrations` array means the agent hasn't finished auto-register
+    yet (or registration failed). The agent can't publish orders until this
+    completes, so a bare HTTP 200 on `/.well-known/agent.json` is not enough
+    to consider it ready for real work.
+    """
+    url = base_url.rstrip("/") + "/.well-known/erc-8004-registration.json"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return False
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return False
+    regs = body.get("registrations") or []
+    return bool(regs)
+
+
+def _indexer_knows_agent(registry_url: str, wallet: str, timeout_s: float = 2.0) -> bool:
+    """Ask the registry indexer whether our wallet is listed as a registered agent.
+
+    The indexer polls the chain on an interval, so even once the agent has
+    registered on-chain (per _agent_is_registered), there can still be a
+    lag before the indexer reflects it — and order publishes require the
+    indexer to know the agent.
+    """
+    if not wallet:
+        return True  # can't check, assume ok
+    target = wallet.lower().removeprefix("0x")
+    url = registry_url.rstrip("/") + "/agents"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+            if resp.status != 200:
+                return False
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return False
+    for agent in data.get("items", []):
+        labels = agent.get("labels") or {}
+        w = (labels.get("agentWallet") or "").lower().removeprefix("0x")
+        if w == target:
+            return True
+    return False
+
+
+def _wait_for_agent(
+    base_url: str,
+    timeout_s: float,
+    console: Console,
+    *,
+    registry_url: Optional[str] = None,
+    wallet: Optional[str] = None,
+) -> bool:
+    """Poll for HTTP reachability → on-chain registration → indexer presence.
+
+    A spawned agent isn't ready to accept order creates the moment its HTTP
+    port binds — it still has to register on-chain and wait for the registry
+    indexer to pick that up, otherwise order publish returns 404 from the
+    indexer and the deal never gets off the ground.
+    """
     deadline = time.time() + timeout_s
+
+    # Stage 1: HTTP reachable.
     console.print(f"[dim]waiting for agent at {base_url}...[/dim]", end="")
     while time.time() < deadline:
         if _agent_reachable(base_url, timeout_s=1.5):
-            console.print(" [green]ready[/green]")
-            return True
+            console.print(" [green]http ok[/green]", end="")
+            break
         time.sleep(1.0)
-    console.print(" [red]timeout[/red]")
-    return False
+    else:
+        console.print(" [red]http timeout[/red]")
+        return False
+
+    # Stage 2: on-chain registration visible in the agent's own ERC-8004 doc.
+    while time.time() < deadline:
+        if _agent_is_registered(base_url, timeout_s=1.5):
+            console.print(" [green]registered[/green]", end="")
+            break
+        time.sleep(1.5)
+    else:
+        console.print(" [red]registration timeout[/red]")
+        return False
+
+    # Stage 3 (optional): registry indexer knows about us.
+    if registry_url and wallet:
+        while time.time() < deadline:
+            if _indexer_knows_agent(registry_url, wallet, timeout_s=1.5):
+                console.print(" [green]indexed[/green]")
+                return True
+            time.sleep(2.0)
+        console.print(" [red]indexer timeout[/red]")
+        return False
+
+    console.print()  # newline
+    return True
 
 
 def _build_resources(
@@ -502,18 +614,44 @@ def register(app: typer.Typer) -> None:
                     border_style="cyan",
                 )
             )
+            # Contract addresses typically live in shared-env/.env (mounted
+            # into compose containers); pass them through so the spawned
+            # agent sees IDENTITY_REGISTRY_ADDRESS et al.
+            shared_env = REPO_ROOT / "shared-env" / ".env"
+            # The agent will advertise BASE_URL_OVERRIDE to peers. Inside
+            # the compose network, that hostname must resolve to *us*.
+            advertised = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+            advertised_host = _base_url_hostname(advertised) if advertised else None
             _spawn_agent_container(
                 env_path=env_path,
                 port=port,
                 image=spawn_image,
                 network=network,
                 agent_data_dir=Path(db_path).parent if db_path else None,
+                shared_env_file=shared_env if shared_env.exists() else None,
+                advertised_hostname=advertised_host,
                 console=console,
             )
-            if not _wait_for_agent(base_url, timeout_s=spawn_timeout, console=console):
+            # Also supply the indexer URL + wallet so readiness includes the
+            # "my orders can actually be published" milestone.
+            indexer_url = (
+                read_env_value(env_path, "INDEXER_URL", default="") if env_path else ""
+            ) or "http://localhost:8080"
+            # Rewrite docker-internal hostnames so the host-side CLI can dial.
+            indexer_url = indexer_url.replace("://registry:", "://localhost:")
+            ready_wallet = (
+                (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
+                or os.getenv("AGENT_WALLET_ADDRESS")
+                or ""
+            )
+            if not _wait_for_agent(
+                base_url, timeout_s=spawn_timeout, console=console,
+                registry_url=indexer_url, wallet=ready_wallet,
+            ):
                 typer.secho(
-                    f"Spawned agent did not become reachable at {base_url} "
-                    f"within {spawn_timeout}s. See container logs for details.",
+                    f"Spawned agent did not become fully ready at {base_url} "
+                    f"within {spawn_timeout}s (HTTP → on-chain registered → "
+                    f"indexed). See container logs for details.",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(1)
