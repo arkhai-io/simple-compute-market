@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 from google.adk.agents import InvocationContext
 from google.adk.events import Event
+
+from core.agent.app.utils.stage_log import stage_event
 from google.adk.agents.remote_a2a_agent import (
     AGENT_CARD_WELL_KNOWN_PATH,
     RemoteA2aAgent,
@@ -456,6 +458,12 @@ async def execute_action(
                             await sqlite_client.update_order(order_id=_oid, status="closed")
                             await registry_client.update_order(_oid, {"status": "closed"})
                             logger.info("[TRUST] Closed buyer order %s after successful arbitration", _oid)
+                            stage_event("post_settlement", "buyer_order_closed",
+                                order_id=_oid,
+                                escrow_uid=_escrow,
+                                fulfillment_uid=fulfillment_uid,
+                                decisions=[d.get("decision") for d in (decisions or [])],
+                            )
                     except Exception as exc:
                         logger.warning("[TRUST] Failed to update/close buyer order after arbitration: %s", exc)
             if ctx:
@@ -534,6 +542,12 @@ async def execute_action(
                             registry_client = get_registry_client()
                             await registry_client.update_order(order_id, {"status": "closed"})
                             logger.info("[COLLECT_ESCROW] Closed order %s after escrow collection", order_id)
+                            stage_event("post_settlement", "seller_order_closed",
+                                order_id=order_id,
+                                escrow_uid=escrow_uid,
+                                escrow_collection_uid=result,
+                                fulfillment_uid=fulfillment_uid,
+                            )
                     except Exception as _close_err:
                         logger.warning("[COLLECT_ESCROW] Failed to close order after collection: %s", _close_err)
                 else:
@@ -1359,6 +1373,15 @@ async def _dispatch_counter_offer(
             logger.debug("[COUNTER_OFFER] Could not re-fetch negotiation session: %s", exc)
 
     asyncio.create_task(_send_and_refresh())
+    stage_event("negotiation", "counter_sent",
+        negotiation_id=neg_id,
+        our_order_id=params.our_order_id,
+        their_order_id=params.order_id,
+        our_price=params.our_price,
+        their_price=params.their_price,
+        proposed_price=params.proposed_price,
+        counterparty_url=their_agent_id,
+    )
     return {
         "status": "sent",
         "message": "Counter offer sent",
@@ -1432,6 +1455,12 @@ async def exit_negotiation(
     if negotiation_id:
         _release_negotiation_lock(negotiation_id)
 
+    stage_event("negotiation", "exited",
+        negotiation_id=negotiation_id,
+        reason=reason,
+        our_order_id=our_order_id,
+        their_order_id=their_order_id,
+    )
     return {
         "status": "exited",
         "message": f"Negotiation exited: {reason}",
@@ -1510,6 +1539,14 @@ async def accept_offer(
         canceled = await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
+            stage_event("negotiation", "accepted",
+                negotiation_id=negotiation_id,
+                our_order_id=our_order_id,
+                their_order_id=their_order_id,
+                agreed_price=their_price,
+                our_initial_price=our_initial_price,
+                counterparty_url=counterparty_url,
+            )
 
     # Multi-bilateral: notify each superseded counterparty so they can requeue their order.
     if ctx and canceled:
@@ -1639,6 +1676,13 @@ async def _accept_as_buyer(
                 escrow_uid = escrow_receipt.get("log", {}).get("uid")
                 if escrow_uid:
                     logger.info("[ALKAHEST] Created escrow; uid=%s", escrow_uid)
+                    stage_event("settlement", "escrow_created",
+                        escrow_uid=escrow_uid,
+                        buyer_order_id=our_order_id,
+                        seller_order_id=their_order_id,
+                        token_amount=token_resource.get("amount") if isinstance(token_resource, dict) else None,
+                        oracle_address=oracle_address,
+                    )
                     break
                 logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
             except Exception as e:
@@ -1816,6 +1860,12 @@ async def _accept_as_seller(
         branch=ctx.branch,
     )
     logger.info("[TOOL] Seller signalling acceptance to buyer (no escrow yet): %s", counterparty_url)
+    stage_event("settlement", "seller_accepted",
+        our_order_id=our_order_id,
+        their_order_id=their_order_id,
+        agreed_price=parameters.get("their_price"),
+        counterparty_url=counterparty_url,
+    )
     _background_send(ctx, event, agent_url=counterparty_url)
     return {
         "status": "sent",
@@ -1961,7 +2011,13 @@ async def _find_and_send_matching_offers(
             }
         
         logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
-        
+        stage_event("discovery", "matches_found",
+            our_order_id=order_dict.get("order_id"),
+            match_count=len(matching_orders),
+            matched_order_ids=[m.get("order_id") for m in matching_orders[:CONFIG.max_discovery_agents]],
+            counterparty_urls=[m.get("order_maker") for m in matching_orders[:CONFIG.max_discovery_agents]],
+        )
+
         # Extract agent URLs from matching orders
         agent_urls = []
         matched_order_ids = []
@@ -2207,6 +2263,13 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
             result = await registry_client.publish_order(agent_id_for_registry, order_dict)
             if result:
                 logger.info(f"[REGISTRY] Published order {order_id} to registry before making offer")
+                stage_event("discovery", "order_published",
+                    order_id=order_id,
+                    agent_url=BASE_URL_OVERRIDE,
+                    offer=order_dict.get("offer_resource"),
+                    demand=order_dict.get("demand_resource"),
+                    duration_hours=order_dict.get("duration_hours"),
+                )
             else:
                 logger.warning(f"[REGISTRY] Order publish returned None - agent may not be registered in registry")
         except Exception as e:
@@ -2484,6 +2547,12 @@ async def fulfill_compute_obligation(
         reserved_vm_host = reserved.get("vm_host")
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
+        stage_event("provision", "resource_reserved",
+            escrow_uid=escrow_uid,
+            resource_id=reserved_resource_id,
+            vm_host=reserved_vm_host,
+            required_attributes=required_attributes,
+        )
 
         provision_result = await _do_provision(
             ssh_public_key,
@@ -2513,6 +2582,11 @@ async def fulfill_compute_obligation(
                     release_err,
                 )
         logger.error("[ALKAHEST] Provisioning failed, skipping obligation fulfillment: %s", error)
+        stage_event("provision", "failed",
+            escrow_uid=escrow_uid,
+            resource_id=reserved_resource_id,
+            error=str(error),
+        )
         return {
             "status": "error",
             "message": f"Provisioning failed: {error}",
@@ -2621,6 +2695,16 @@ async def fulfill_compute_obligation(
             logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
+    stage_event("provision", "fulfilled",
+        escrow_uid=escrow_uid,
+        fulfillment_uid=fulfillment_uid,
+        maker_attestation=maker_attestation,
+        resource_id=reserved_resource_id,
+        vm_host=reserved_vm_host,
+        lease_end_utc=lease_end_utc,
+        seller_order_id=seller_order_id,
+        order_id=order_id,
+    )
     return {
         "status": "fulfilled",
         "message": "Compute obligation fulfilled",
