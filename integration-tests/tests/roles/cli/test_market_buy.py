@@ -17,7 +17,7 @@ import sqlite3
 
 import pytest
 
-from tests.roles.cli.conftest import COMPUTE, PAYMENT, run_market_buy
+from tests.roles.cli.conftest import COMPUTE, PAYMENT, run_market_buy, run_market_buy_recover
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +111,101 @@ class TestMarketBuyInvalidConstraints:
         combined = result.stdout + result.stderr
         assert "Agent error" in combined or "validation" in combined.lower(), (
             f"Expected an agent-error message\n{combined[-1000:]}"
+        )
+
+
+@pytest.mark.roles_cli_buy
+class TestMarketBuyRecover:
+    """`market buy --recover <id>` resumes an existing deal without creating a new order.
+
+    Piggybacks on `market_buy_happy_result`: that fixture created + closed a
+    buyer order; recovery should find it via either order_id or escrow_uid.
+    """
+
+    def _extract_order_id(self, happy_result) -> str:
+        m = re.search(r"Order created:\s*([0-9a-f\-]{36})", happy_result.stdout)
+        assert m, f"No 'Order created' line in fixture stdout:\n{happy_result.stdout[-1000:]}"
+        return m.group(1)
+
+    def test_recover_by_order_id_exits_zero_and_prints_credentials(
+        self, market_buy_happy_result, buyer_node,
+    ):
+        """Recovering a closed order surfaces credentials and exits cleanly."""
+        assert market_buy_happy_result.returncode == 0, "Prereq happy-path must succeed"
+        order_id = self._extract_order_id(market_buy_happy_result)
+
+        result = run_market_buy_recover(
+            buyer_node=buyer_node,
+            recover=order_id,
+            timeout_budget=15,
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0, got {result.returncode}\n"
+            f"stdout: {result.stdout[-1500:]}"
+        )
+        assert "Buy recovery" in result.stdout, (
+            f"Expected recovery panel in stdout\n{result.stdout[-1500:]}"
+        )
+        assert "Credentials" in result.stdout, (
+            f"Expected credentials block in stdout\n{result.stdout[-1500:]}"
+        )
+
+    def test_recover_by_escrow_uid(self, market_buy_happy_result, buyer_node):
+        """Recovery also accepts an on-chain escrow_uid (0x-prefixed hex)."""
+        assert market_buy_happy_result.returncode == 0
+        order_id = self._extract_order_id(market_buy_happy_result)
+
+        # Read the order's escrow_uid from the buyer DB.
+        conn = sqlite3.connect(
+            f"file:{buyer_node['agent_db_path']}?mode=ro", uri=True, timeout=5,
+        )
+        try:
+            row = conn.execute(
+                "SELECT escrow_uid FROM orders WHERE order_id = ?",
+                (order_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row and row[0], f"No escrow_uid on order {order_id}"
+        escrow_uid = row[0]
+
+        result = run_market_buy_recover(
+            buyer_node=buyer_node,
+            recover=escrow_uid,
+            timeout_budget=15,
+        )
+        assert result.returncode == 0, (
+            f"Expected exit 0, got {result.returncode}\n{result.stdout[-1500:]}"
+        )
+        assert order_id in result.stdout, (
+            f"Recovery panel should resolve escrow_uid → order_id\n{result.stdout[-1500:]}"
+        )
+
+    def test_recover_unknown_id_exits_non_zero_with_clear_message(self, buyer_node):
+        """A non-existent id should fail fast with an explanation — not hang or succeed."""
+        result = run_market_buy_recover(
+            buyer_node=buyer_node,
+            recover="00000000-0000-0000-0000-000000000000",
+            timeout_budget=5,
+        )
+        assert result.returncode != 0, result.stdout[-500:]
+        combined = result.stdout + result.stderr
+        assert "No local order found" in combined or "not found" in combined.lower(), (
+            f"Expected 'No local order found' message\n{combined[-500:]}"
+        )
+
+    def test_recover_with_max_price_is_rejected(self, buyer_node):
+        """--recover and --max-price are mutually exclusive."""
+        result = run_market_buy_recover(
+            buyer_node=buyer_node,
+            recover="00000000-0000-0000-0000-000000000000",
+            timeout_budget=5,
+            extra_args=["--max-price", "100"],
+        )
+        assert result.returncode != 0, result.stdout[-500:]
+        combined = result.stdout + result.stderr
+        assert "mutually exclusive" in combined.lower() or "--max-price" in combined, (
+            f"Expected mutex error\n{combined[-500:]}"
         )
 
 

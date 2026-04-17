@@ -33,6 +33,39 @@ COMPUTE = {"gpu_model": "RTX 5080", "quantity": 1, "sla": 90.0, "region": "Calif
 PAYMENT = {"token": "MOCK", "amount": 100}
 
 
+def run_market_buy_recover(
+    *,
+    buyer_node: dict,
+    recover: str,
+    timeout_budget: int = 20,
+    poll_interval: float = 1.0,
+    extra_args: Optional[list[str]] = None,
+    subprocess_grace_s: float = 30,
+) -> subprocess.CompletedProcess:
+    """Invoke `market buy --recover <id>` and return the CompletedProcess."""
+    cmd = [
+        "uv", "run", "market", "buy",
+        "-a", buyer_node["agent_url"],
+        "-e", buyer_node["agent_env_file"],
+        "--db", buyer_node["agent_db_path"],
+        "--recover", recover,
+        "--timeout", str(timeout_budget),
+        "--poll-interval", str(poll_interval),
+        "--show-password",
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+    log.info("CLI: %s", " ".join(cmd))
+    return subprocess.run(
+        cmd,
+        cwd=str(_CLI_DIR),
+        capture_output=True,
+        text=True,
+        timeout=timeout_budget + subprocess_grace_s,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+
+
 def run_market_buy(
     *,
     buyer_node: dict,

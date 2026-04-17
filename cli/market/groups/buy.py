@@ -82,6 +82,32 @@ def _find_order_negotiation(conn: sqlite3.Connection, order_id: str) -> Optional
     return row[0] if row else None
 
 
+def _resolve_recover_order_id(db_path: str, identifier: str) -> Optional[str]:
+    """Map an order_id OR escrow_uid to the buyer's local order_id.
+
+    Returns None if no match found. Accepts either:
+      - a UUID (treated as an order_id), or
+      - a 0x-prefixed hex string (treated as an escrow_uid).
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        # Try direct order_id match first.
+        row = conn.execute(
+            "SELECT order_id FROM orders WHERE order_id = ? LIMIT 1",
+            (identifier,),
+        ).fetchone()
+        if row:
+            return row[0]
+        # Try escrow_uid (the column exists on orders).
+        row = conn.execute(
+            "SELECT order_id FROM orders WHERE escrow_uid = ? LIMIT 1",
+            (identifier,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def _credentials_present(conn: sqlite3.Connection, order_id: str) -> bool:
     try:
         row = conn.execute(
@@ -209,11 +235,12 @@ def register(app: typer.Typer) -> None:
         quantity: int = typer.Option(1, "--quantity", "-q", help="Number of GPUs."),
         sla: Optional[float] = typer.Option(None, "--sla", help="Minimum SLA percentage."),
         region: Optional[str] = typer.Option(None, "--region", help="Preferred region."),
-        max_price: str = typer.Option(..., "--max-price", "-p", help="Price ceiling (human units of --token)."),
+        max_price: Optional[str] = typer.Option(None, "--max-price", "-p", help="Price ceiling (human units of --token). Required unless --recover is given."),
         token: str = typer.Option("MOCK", "--token", help="Payment token symbol."),
         duration_hours: int = typer.Option(1, "--duration-hours", "-t", help="Lease duration in hours."),
         demand_json: Optional[str] = typer.Option(None, "--demand-json", help="Raw demand resource JSON (overrides --gpu/--quantity/--sla/--region)."),
         offer_json: Optional[str] = typer.Option(None, "--offer-json", help="Raw offer resource JSON (overrides --max-price/--token)."),
+        recover: Optional[str] = typer.Option(None, "--recover", help="Resume waiting on an existing order by order_id or escrow_uid, instead of creating a new one."),
         timeout: int = typer.Option(600, "--timeout", help="Total wait budget in seconds."),
         poll_interval: float = typer.Option(2.0, "--poll-interval", help="Seconds between DB polls."),
         agent_url: Optional[str] = typer.Option(None, "--agent-url", "-a", help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE)."),
@@ -221,9 +248,26 @@ def register(app: typer.Typer) -> None:
         db: Optional[str] = typer.Option(None, "--db", help="Explicit buyer agent SQLite DB path."),
         show_password: bool = typer.Option(False, "--show-password", help="Reveal credential passwords when printing."),
     ) -> None:
-        """Buy compute with the given constraints — synchronous, one command."""
+        """Buy compute with the given constraints — synchronous, one command.
+
+        Recovery mode: `market buy --recover <id>` skips order creation and
+        resumes polling an existing deal. Useful when a previous `market buy`
+        was interrupted (Ctrl-C, crash). `<id>` is either the local order_id
+        or the on-chain escrow_uid.
+        """
         console = Console()
         env_path = Path(env) if env else None
+
+        # Validate mode: exactly one of (recover, creation args) is allowed.
+        if recover and max_price is not None:
+            raise typer.BadParameter(
+                "--recover is mutually exclusive with --max-price. "
+                "In recovery mode the existing order's price already applies."
+            )
+        if not recover and max_price is None:
+            raise typer.BadParameter(
+                "--max-price is required (or pass --recover <id> to resume an existing order)."
+            )
 
         base_url = (
             agent_url
@@ -231,15 +275,6 @@ def register(app: typer.Typer) -> None:
             or os.getenv("AGENT_URL")
             or os.getenv("BASE_URL_OVERRIDE")
             or "http://localhost:8000"
-        )
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
-        wallet_address = (
-            (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-            or os.getenv("AGENT_WALLET_ADDRESS")
-            or ""
         )
         db_path = _resolve_db_path(db, env) or _order_resolve_db_path(db, env)
         if not db_path:
@@ -250,30 +285,59 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(1)
 
-        try:
-            offer, demand = _build_resources(
-                gpu, quantity, sla, region, max_price, token, demand_json, offer_json
+        if recover:
+            order_id = _resolve_recover_order_id(db_path, recover)
+            if not order_id:
+                typer.secho(
+                    f"No local order found for id/escrow_uid {recover!r}. "
+                    "Check the value or pass a different --db.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+            summary = Table.grid(padding=(0, 2))
+            summary.add_column(style="bold")
+            summary.add_column()
+            summary.add_row("Mode", "recover")
+            summary.add_row("Input", recover)
+            summary.add_row("Order ID", order_id)
+            summary.add_row("Agent", base_url)
+            console.print(Panel(summary, title="Buy recovery", border_style="blue"))
+        else:
+            private_key = (
+                (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+                or os.getenv("AGENT_PRIV_KEY")
             )
-        except json.JSONDecodeError as exc:
-            raise typer.BadParameter(f"Invalid JSON: {exc}") from exc
+            wallet_address = (
+                (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
+                or os.getenv("AGENT_WALLET_ADDRESS")
+                or ""
+            )
+            try:
+                offer, demand = _build_resources(
+                    gpu, quantity, sla, region, max_price, token, demand_json, offer_json
+                )
+            except json.JSONDecodeError as exc:
+                raise typer.BadParameter(f"Invalid JSON: {exc}") from exc
 
-        summary = Table.grid(padding=(0, 2))
-        summary.add_column(style="bold")
-        summary.add_column()
-        summary.add_row("Agent", base_url)
-        summary.add_row("Demand", json.dumps(demand, separators=(",", ":")))
-        summary.add_row("Offer", json.dumps(offer, separators=(",", ":")))
-        summary.add_row("Duration (h)", str(duration_hours))
-        console.print(Panel(summary, title="Buy request", border_style="blue"))
+            summary = Table.grid(padding=(0, 2))
+            summary.add_column(style="bold")
+            summary.add_column()
+            summary.add_row("Agent", base_url)
+            summary.add_row("Demand", json.dumps(demand, separators=(",", ":")))
+            summary.add_row("Offer", json.dumps(offer, separators=(",", ":")))
+            summary.add_row("Duration (h)", str(duration_hours))
+            console.print(Panel(summary, title="Buy request", border_style="blue"))
 
-        order_id = _create_buy_order(base_url, offer, demand, duration_hours, wallet_address, private_key)
-        console.print(f"[green]Order created:[/green] {order_id}")
+            order_id = _create_buy_order(
+                base_url, offer, demand, duration_hours, wallet_address, private_key,
+            )
+            console.print(f"[green]Order created:[/green] {order_id}")
 
         final = _wait_for_completion(db_path, order_id, timeout, poll_interval, console)
 
         if final.get("_timed_out"):
             console.print(f"[red]Timed out after {timeout}s — order is in stage '{final.get('stage')}'.[/red]")
-            console.print(f"[dim]Resume with: market logs status {order_id}[/dim]")
+            console.print(f"[dim]Resume with: market buy --recover {order_id}[/dim]")
             raise typer.Exit(2)
         if final.get("terminal_state") in ("failure", "superseded"):
             console.print(f"[red]Negotiation ended without a deal: {final.get('terminal_state')}[/red]")
