@@ -29,8 +29,9 @@ import logging
 
 import pytest
 
+from tests.helpers.agent_client import query_registry_orders
 from tests.helpers.cli_client import cli_create_order
-from tests.helpers.polling import poll_registry_orders
+from tests.helpers.polling import poll_until
 from tests.roles.helpers.deal import Deal
 from tests.roles.helpers.erc20 import get_erc20_balance
 
@@ -66,13 +67,20 @@ def seller_publishes(seller_node: dict) -> dict:
     order_id = resp["order_id"]
     log.info("Seller published order %s", order_id)
 
-    items = poll_registry_orders(
-        seller_node["market"]["url"], status="open", min_count=1,
-        timeout_s=30, interval_s=2,
+    # Wait specifically for *this* order to land in the registry's open
+    # index. Using min_count=1 is a latent race: stale open orders from
+    # prior runs satisfy it before the new order is indexed.
+    def _this_order_visible():
+        data = query_registry_orders(seller_node["market"]["url"], status="open")
+        for item in data.get("items", []):
+            if item["order_id"] == order_id:
+                return item
+        return None
+
+    return poll_until(
+        _this_order_visible, timeout_s=30, interval_s=2,
+        description=f"seller order {order_id} indexed",
     )
-    matching = [i for i in items if i["order_id"] == order_id]
-    assert matching, f"Seller order {order_id} not indexed"
-    return matching[0]
 
 
 @pytest.fixture(scope="session")
