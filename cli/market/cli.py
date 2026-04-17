@@ -13,6 +13,7 @@ from .groups.config import config_app
 from .groups.dev import dev_app
 from .groups.portfolio import portfolio_app
 from .groups.policy import policy_app
+from .groups.logs import logs_app
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -187,6 +188,7 @@ app.add_typer(registry_app, name="registry", help="As Market Admin, manage the R
 app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
 app.add_typer(dev_app, name="dev", help="Developer utilities (local chain and contract deploy).")
 app.add_typer(policy_app, name="policy", help="RL policy lifecycle: train, eval, export.")
+app.add_typer(logs_app, name="logs", help="Inspect stage events and deal status.")
 
 if __name__ == "__main__":
     app()

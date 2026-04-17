@@ -310,6 +310,32 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_resource_transition_events_type_time ON resource_transition_events(event_type, occurred_at)"
             )
+            # Stage events — structured log of stage-boundary transitions,
+            # queryable via CLI. Each row is the functional output of one
+            # stage transition (discovery, negotiation, settlement, etc.).
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stage_events (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ts TEXT NOT NULL,
+                  stage TEXT NOT NULL,
+                  event TEXT NOT NULL,
+                  negotiation_id TEXT,
+                  order_id TEXT,
+                  escrow_uid TEXT,
+                  data TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stage_events_ts ON stage_events(ts)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stage_events_stage ON stage_events(stage)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stage_events_negotiation_id ON stage_events(negotiation_id)"
+            )
             conn.commit()
         finally:
             conn.close()
