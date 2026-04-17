@@ -195,7 +195,7 @@ def _derive_stage(
             (negotiation_id,),
         ).fetchone()[0]
         result["rounds"] = rounds
-    elif thread["terminal_state"] in ("failure", "superseded"):
+    elif thread["terminal_state"] in ("failure", "superseded", "abandoned"):
         result["stage"] = "negotiation"
         result["detail"] = f"terminated: {thread['terminal_state']}"
     elif thread["terminal_state"] == "success":

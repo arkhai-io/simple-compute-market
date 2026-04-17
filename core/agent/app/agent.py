@@ -1649,6 +1649,15 @@ async def _startup_tasks():
     logger.info("[STARTUP] Resource poller started (mode=%s, interval=%ds)",
                 CONFIG.provisioning_mode, CONFIG.resource_check_interval)
 
+    # Start negotiation watchdog (marks stale threads as abandoned)
+    from core.agent.app.negotiation_watchdog import watchdog_loop as _neg_watchdog_loop
+    asyncio.create_task(_neg_watchdog_loop())
+    logger.info(
+        "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
+        CONFIG.negotiation_watchdog_interval,
+        CONFIG.negotiation_timeout_seconds,
+    )
+
     # Preflight: in http mode, warn loudly if the provisioning service is
     # unreachable. Without this, every deal silently dies at fulfillment
     # time with a cryptic network error buried deep in a background task.

@@ -149,6 +149,11 @@ class Config:
     # resource this many seconds after lease_end_utc if the provisioning check
     # keeps failing/returning "not available". Prevents a transient outage of
     # the provisioning service from stranding leases forever.
+    negotiation_timeout_seconds: int  # NEGOTIATION_TIMEOUT_SECONDS - mark an
+    # active negotiation thread as terminal_state='abandoned' after this many
+    # seconds with no activity (updated_at not touched). Default 1800 = 30 min.
+    negotiation_watchdog_interval: int  # NEGOTIATION_WATCHDOG_INTERVAL - how
+    # often the watchdog scans the thread table. Default 60s.
     default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
     # Negotiation policy settings
     negotiation_policy_mode: str  # NEGOTIATION_POLICY_MODE - "bisection" | "rl"
@@ -255,6 +260,8 @@ def load_config() -> Config:
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
         resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
         resource_lease_grace_seconds=_get_int_env("RESOURCE_LEASE_GRACE_SECONDS", 1800),
+        negotiation_timeout_seconds=_get_int_env("NEGOTIATION_TIMEOUT_SECONDS", 1800),
+        negotiation_watchdog_interval=_get_int_env("NEGOTIATION_WATCHDOG_INTERVAL", 60),
         default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
         # Negotiation policy settings
         negotiation_policy_mode=os.getenv("NEGOTIATION_POLICY_MODE", "bisection").lower(),

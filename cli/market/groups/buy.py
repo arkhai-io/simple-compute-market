@@ -248,7 +248,7 @@ def _wait_for_completion(
 
             if info.get("credentials_ready") or info.get("stage") in READY_STAGES:
                 return info
-            if info.get("terminal_state") in ("failure", "superseded"):
+            if info.get("terminal_state") in ("failure", "superseded", "abandoned"):
                 return info
             if time.time() >= deadline:
                 info["_timed_out"] = True
@@ -447,7 +447,7 @@ def register(app: typer.Typer) -> None:
             console.print(f"[red]Timed out after {timeout}s — order is in stage '{final.get('stage')}'.[/red]")
             console.print(f"[dim]Resume with: market buy --recover {order_id}[/dim]")
             raise typer.Exit(2)
-        if final.get("terminal_state") in ("failure", "superseded"):
+        if final.get("terminal_state") in ("failure", "superseded", "abandoned"):
             console.print(f"[red]Negotiation ended without a deal: {final.get('terminal_state')}[/red]")
             raise typer.Exit(3)
 
