@@ -1601,6 +1601,40 @@ async def _start_heartbeat():
     })
 
 
+async def _preflight_provisioning() -> None:
+    """Ping the provisioning service and log a loud warning if it's down.
+
+    Runs once, ~10s after startup (to let compose dependencies settle).
+    Does not hard-fail — provisioning may come up later, and we want the
+    agent to keep serving unrelated endpoints.
+    """
+    import aiohttp
+    from core.agent.app.utils.config import CONFIG
+
+    await asyncio.sleep(10)
+    url = CONFIG.provisioning_service_url.rstrip("/") + "/health"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    logger.info("[STARTUP] Provisioning service reachable at %s",
+                                CONFIG.provisioning_service_url)
+                    return
+                logger.warning(
+                    "[STARTUP] Provisioning service at %s returned HTTP %d — "
+                    "fulfillment will fail until this is resolved",
+                    CONFIG.provisioning_service_url, resp.status,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[STARTUP] Provisioning service at %s is NOT reachable (%s: %s). "
+            "PROVISIONING_MODE=http requires a working PROVISIONING_SERVICE_URL; "
+            "fulfillment will fail until this is resolved. For tests, set "
+            "PROVISIONING_MODE=mock.",
+            CONFIG.provisioning_service_url, type(exc).__name__, exc,
+        )
+
+
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
@@ -1614,6 +1648,12 @@ async def _startup_tasks():
     asyncio.create_task(resource_poller_loop())
     logger.info("[STARTUP] Resource poller started (mode=%s, interval=%ds)",
                 CONFIG.provisioning_mode, CONFIG.resource_check_interval)
+
+    # Preflight: in http mode, warn loudly if the provisioning service is
+    # unreachable. Without this, every deal silently dies at fulfillment
+    # time with a cryptic network error buried deep in a background task.
+    if CONFIG.provisioning_mode == "http":
+        asyncio.create_task(_preflight_provisioning())
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()
