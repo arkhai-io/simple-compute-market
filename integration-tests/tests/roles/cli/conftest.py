@@ -1,4 +1,4 @@
-"""Fixtures for `market buy` / `market <future>` CLI integration tests.
+"""Fixtures for `market buy` / `market provide` CLI integration tests.
 
 These tests invoke the user-facing CLI as a subprocess against a running
 compose stack. They share the layer fixtures (external_world, market_registry,
@@ -14,6 +14,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -119,4 +120,92 @@ def seller_publishes_for_cli(seller_node: dict) -> dict:
     return poll_until(
         _this_order_visible, timeout_s=30, interval_s=2,
         description=f"seller order {order_id} indexed",
+    )
+
+
+# ---------------------------------------------------------------------------
+# `market provide` helpers
+# ---------------------------------------------------------------------------
+
+
+# Unique resource IDs used ONLY in the provide test — keeps these rows
+# distinct from any real inventory so assertions can filter precisely.
+PROVIDE_TEST_RESOURCES = [
+    {
+        "resource_id": "test-provide-ny-4090-001",
+        "gpu_model": "RTX 4090",
+        "sla": 95.0,
+        "region": "New York, US",
+        "vm_host": "test-ny",
+    },
+    {
+        "resource_id": "test-provide-ny-4090-002",
+        "gpu_model": "RTX 4090",
+        "sla": 95.0,
+        "region": "New York, US",
+        "vm_host": "test-ny",
+    },
+]
+
+
+def write_provide_test_csv(path: Path) -> Path:
+    """Emit a CSV with the test resources above, matching the import schema."""
+    header = (
+        "resource_id,resource_type,resource_subtype,unit,value,state,"
+        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+    )
+    rows = [
+        f"{r['resource_id']},compute.gpu,rtx4090,count,1,available,"
+        f"{r['gpu_model']},{r['sla']},\"{r['region']}\",{r['vm_host']}\n"
+        for r in PROVIDE_TEST_RESOURCES
+    ]
+    path.write_text(header + "".join(rows))
+    return path
+
+
+def run_market_provide(
+    *,
+    seller_node: dict,
+    inventory: Optional[Path] = None,
+    min_price: str = "150",
+    token: str = "MOCK",
+    duration_hours: int = 1,
+    timeout_s: float = 120,
+) -> subprocess.CompletedProcess:
+    """Invoke `market provide` as a subprocess."""
+    cmd = [
+        "uv", "run", "market", "provide",
+        "-a", seller_node["agent_url"],
+        "-e", seller_node["agent_env_file"],
+        "--db", seller_node["agent_db_path"],
+        "--min-price", min_price,
+        "--token", token,
+        "--duration-hours", str(duration_hours),
+    ]
+    if inventory is not None:
+        cmd.extend(["--inventory", str(inventory)])
+    log.info("CLI: %s", " ".join(cmd))
+    return subprocess.run(
+        cmd,
+        cwd=str(_CLI_DIR),
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+
+
+@pytest.fixture(scope="session")
+def market_provide_happy_result(seller_node: dict, tmp_path_factory) -> subprocess.CompletedProcess:
+    """Run `market provide` ONCE per session with a throwaway CSV.
+
+    Scoped session to avoid re-importing or re-publishing on every test —
+    three assertions read from this same CompletedProcess.
+    """
+    csv_path = tmp_path_factory.mktemp("provide") / "inventory.csv"
+    write_provide_test_csv(csv_path)
+    return run_market_provide(
+        seller_node=seller_node,
+        inventory=csv_path,
+        min_price="150",
     )

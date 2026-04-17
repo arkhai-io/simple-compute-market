@@ -69,6 +69,7 @@ markers = [
     "roles_post_settlement_seller: Post-settlement stage, seller perspective",
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
+    "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
 ]
 log_cli = true
 log_cli_level = "INFO"
