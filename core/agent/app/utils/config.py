@@ -145,6 +145,10 @@ class Config:
     frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
     frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
     resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
+    resource_lease_grace_seconds: int  # RESOURCE_LEASE_GRACE_SECONDS - force-free a leased
+    # resource this many seconds after lease_end_utc if the provisioning check
+    # keeps failing/returning "not available". Prevents a transient outage of
+    # the provisioning service from stranding leases forever.
     default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
     # Negotiation policy settings
     negotiation_policy_mode: str  # NEGOTIATION_POLICY_MODE - "bisection" | "rl"
@@ -250,6 +254,7 @@ def load_config() -> Config:
         frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
         frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
         resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
+        resource_lease_grace_seconds=_get_int_env("RESOURCE_LEASE_GRACE_SECONDS", 1800),
         default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
         # Negotiation policy settings
         negotiation_policy_mode=os.getenv("NEGOTIATION_POLICY_MODE", "bisection").lower(),

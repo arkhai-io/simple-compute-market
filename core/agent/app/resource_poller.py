@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Coroutine
 
 from core.agent.app.utils.config import CONFIG
@@ -48,6 +48,9 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
     now = datetime.now(timezone.utc)
 
     for r in resources:
+        lease_expired = False
+        force_free = False
+
         if r.get("state") == "leased":
             lease_end_str: str | None = (r.get("attributes") or {}).get("lease_end_utc")
             if lease_end_str:
@@ -61,11 +64,24 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
                         )
                         continue
                     # Lease window has passed — poll to confirm VM is down, then free.
-                    logger.info(
-                        "resource_poller: resource %s lease ended at %s — polling to confirm VM is down",
-                        r.get("resource_id"),
-                        lease_end_str,
-                    )
+                    lease_expired = True
+                    grace_deadline = lease_end + timedelta(seconds=CONFIG.resource_lease_grace_seconds)
+                    if now >= grace_deadline:
+                        force_free = True
+                        logger.warning(
+                            "resource_poller: resource %s lease ended at %s and grace "
+                            "period (%ds) elapsed — force-freeing regardless of "
+                            "provisioning response",
+                            r.get("resource_id"),
+                            lease_end_str,
+                            CONFIG.resource_lease_grace_seconds,
+                        )
+                    else:
+                        logger.info(
+                            "resource_poller: resource %s lease ended at %s — polling to confirm VM is down",
+                            r.get("resource_id"),
+                            lease_end_str,
+                        )
                 except ValueError:
                     logger.warning(
                         "resource_poller: resource %s has unparseable lease_end_utc %r — skipping poll",
@@ -88,6 +104,10 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
             )
             continue
 
+        # Ask the provisioning layer for the VM's live state. If this fails
+        # and the lease's grace period has elapsed, we still free the
+        # resource below — a provisioning outage must not strand leases.
+        result: dict[str, Any] | None = None
         try:
             result = await provisioning_fn(
                 CONFIG.provisioning_service_url,
@@ -103,23 +123,34 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
                 CONFIG.provisioning_mode,
                 exc,
             )
-            continue
+            if not force_free:
+                # Outside the grace window — keep the lease held and retry next cycle.
+                continue
+            # Otherwise fall through to force-free this resource.
 
-        available: bool = bool(result.get("available", False))
-        running_vms = result.get("running_vms", "?")
-        allocated_count = running_vms if isinstance(running_vms, (int, float)) else 0
-        # Only mark reserved if there is positive evidence of GPU allocation.
-        # When available=False but allocated_count=0, the GPU inventory check
-        # likely failed to detect capacity (e.g. libvirt/pynvml not returning
-        # data) — fall back to available so fulfillment is not blocked.
-        new_state = "available" if (available or allocated_count == 0) else "reserved"
+        if force_free and not (result or {}).get("available", False):
+            # Provisioning either failed or reported the VM still busy, but
+            # we've waited past the grace window. Treat the resource as free.
+            new_state = "available"
+            running_vms = "force_free"
+        else:
+            available: bool = bool((result or {}).get("available", False))
+            running_vms = (result or {}).get("running_vms", "?")
+            allocated_count = running_vms if isinstance(running_vms, (int, float)) else 0
+            # Only mark reserved if there is positive evidence of GPU allocation.
+            # When available=False but allocated_count=0, the GPU inventory check
+            # likely failed to detect capacity (e.g. libvirt/pynvml not returning
+            # data) — fall back to available so fulfillment is not blocked.
+            new_state = "available" if (available or allocated_count == 0) else "reserved"
+
         idempotency_key = (
             f"resource-poll-{r['resource_id']}-{running_vms}-{new_state}"
         )
 
         # When freeing a post-lease resource, clear lease_end_utc so it's clean for next use.
-        was_leased = r.get("state") == "leased"
-        clear_lease_attr = {"$.lease_end_utc": None} if (was_leased and available) else None
+        clear_lease_attr = (
+            {"$.lease_end_utc": None} if (lease_expired and new_state == "available") else None
+        )
 
         transition = await sqlite_client.apply_resource_transition(
             resource_id=r["resource_id"],
@@ -131,11 +162,12 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
 
         if transition.get("applied", True):
             logger.info(
-                "resource_poller: %s (%s) → %s (running_vms=%s)",
+                "resource_poller: %s (%s) → %s (running_vms=%s%s)",
                 r["resource_id"],
                 vm_host,
                 new_state,
                 running_vms,
+                " [force-freed]" if force_free and new_state == "available" else "",
             )
         else:
             logger.debug(
