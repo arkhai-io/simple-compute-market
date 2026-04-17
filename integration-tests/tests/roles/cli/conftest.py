@@ -28,6 +28,34 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 _CLI_DIR = _REPO_ROOT / "cli"
 
 
+def ro_query(db_path: str, sql: str, params: tuple = ()) -> list[tuple]:
+    """Read-only SQLite query that tolerates Podman's 9p write-through quirks.
+
+    Opens the DB read-only (mode=ro&nolock=1) and retries on OperationalError
+    — the agent writes concurrently, and the shared-volume layer can briefly
+    return 'attempt to write a readonly database' even without any actual
+    write from this side. 5 retries at 0.2s is enough in practice.
+    """
+    import sqlite3
+    import time as _time
+
+    last: Exception | None = None
+    for _ in range(5):
+        try:
+            conn = sqlite3.connect(
+                f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5,
+            )
+            try:
+                return conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+        except sqlite3.OperationalError as exc:
+            last = exc
+            _time.sleep(0.2)
+    assert last is not None
+    raise last
+
+
 # Canonical spec — must match seller's preloaded inventory (ww1-machine.csv).
 COMPUTE = {"gpu_model": "RTX 5080", "quantity": 1, "sla": 90.0, "region": "California, US"}
 PAYMENT = {"token": "MOCK", "amount": 100}
@@ -245,6 +273,33 @@ def run_market_provide(
     ]
     if inventory is not None:
         cmd.extend(["--inventory", str(inventory)])
+    log.info("CLI: %s", " ".join(cmd))
+    return subprocess.run(
+        cmd,
+        cwd=str(_CLI_DIR),
+        capture_output=True,
+        text=True,
+        timeout=timeout_s,
+        env={**os.environ, "NO_COLOR": "1"},
+    )
+
+
+def run_market_provide_abort_all(
+    *,
+    seller_node: dict,
+    extra_args: Optional[list[str]] = None,
+    timeout_s: float = 30,
+) -> subprocess.CompletedProcess:
+    """Invoke `market provide --abort-all` as a subprocess."""
+    cmd = [
+        "uv", "run", "market", "provide",
+        "-a", seller_node["agent_url"],
+        "-e", seller_node["agent_env_file"],
+        "--db", seller_node["agent_db_path"],
+        "--abort-all",
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
     log.info("CLI: %s", " ".join(cmd))
     return subprocess.run(
         cmd,

@@ -20,6 +20,7 @@ import sqlite3
 import pytest
 
 from market.groups.provide import (
+    _open_order_ids,
     _open_order_resource_ids,
     _publish_round,
 )
@@ -196,6 +197,17 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     assert len(published) == 1
     assert not failed
     assert not skipped
+
+
+def test_open_order_ids_returns_only_open(tmp_path):
+    """--abort-all's target set is just `status='open'` orders."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_order(db, "o1", "open", "compute-001")
+    _insert_order(db, "o2", "closed", "compute-002")
+    _insert_order(db, "o3", "open", None)  # no resource_id in offer is fine for abort
+    _insert_order(db, "o4", "accepted", "compute-004")
+    assert set(_open_order_ids(db)) == {"o1", "o3"}
 
 
 def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):

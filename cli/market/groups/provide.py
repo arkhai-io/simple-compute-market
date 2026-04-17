@@ -142,6 +142,29 @@ def _publish_offer(
     return _post_json(url, payload, headers)
 
 
+def _open_order_ids(db_path: str) -> list[str]:
+    """Return every status='open' order_id from the agent DB."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        rows = conn.execute(
+            "SELECT order_id FROM orders WHERE status = 'open' ORDER BY created_at",
+        ).fetchall()
+    finally:
+        conn.close()
+    return [r[0] for r in rows if r[0]]
+
+
+def _close_order(
+    agent_url: str,
+    order_id: str,
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/close on the seller agent; returns the response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/close"
+    headers = _get_auth_headers("close_order", order_id, private_key)
+    return _post_json(url, {"order_id": order_id}, headers)
+
+
 def _publish_round(
     *,
     db_path: str,
@@ -228,9 +251,13 @@ def register(app: typer.Typer) -> None:
             None, "--inventory", "-i",
             help="Path to a CSV file describing compute resources to import before publishing.",
         ),
-        min_price: str = typer.Option(
-            ..., "--min-price", "-p",
-            help="Minimum price per order, in human units of --token.",
+        min_price: Optional[str] = typer.Option(
+            None, "--min-price", "-p",
+            help="Minimum price per order, in human units of --token. Required unless --abort-all is given.",
+        ),
+        abort_all: bool = typer.Option(
+            False, "--abort-all",
+            help="Close every open sell order on this agent instead of publishing. Useful on shutdown.",
         ),
         token: str = typer.Option("MOCK", "--token", help="Payment token symbol."),
         duration_hours: int = typer.Option(
@@ -284,6 +311,58 @@ def register(app: typer.Typer) -> None:
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)
+
+        # Mode: abort-all is mutually exclusive with the publish flags.
+        if abort_all:
+            if inventory or watch or min_price is not None:
+                raise typer.BadParameter(
+                    "--abort-all is mutually exclusive with "
+                    "--inventory, --min-price, and --watch."
+                )
+            order_ids = _open_order_ids(db_path)
+            if not order_ids:
+                console.print("[green]No open sell orders — nothing to abort.[/green]")
+                return
+
+            console.print(
+                Panel(
+                    f"[bold]Aborting {len(order_ids)} open order(s)[/bold]\n"
+                    f"Agent: {base_url}",
+                    title="market provide --abort-all",
+                    border_style="yellow",
+                )
+            )
+            closed_count = 0
+            failed: list[tuple[str, str]] = []
+            for oid in order_ids:
+                try:
+                    resp = _close_order(base_url, oid, private_key)
+                except typer.Exit:
+                    failed.append((oid, "HTTP error (see above)"))
+                    continue
+                except Exception as exc:
+                    failed.append((oid, str(exc)))
+                    continue
+                status = str(resp.get("status", "?"))
+                if status in ("closed", "skipped", "queued"):
+                    closed_count += 1
+                    console.print(f"  [green]✓[/green] {oid} → {status}")
+                else:
+                    failed.append((oid, resp.get("message") or status))
+                    console.print(f"  [red]✗[/red] {oid} → {status}")
+
+            console.print(
+                f"\n[bold]Closed {closed_count}/{len(order_ids)} orders[/bold]"
+                + (f" [red]({len(failed)} failed)[/red]" if failed else "")
+            )
+            if failed:
+                raise typer.Exit(5)
+            return
+
+        if min_price is None:
+            raise typer.BadParameter(
+                "--min-price is required (or pass --abort-all to close open orders)."
+            )
 
         if inventory:
             csv_file = Path(inventory)

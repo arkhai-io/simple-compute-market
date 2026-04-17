@@ -14,14 +14,15 @@ from __future__ import annotations
 
 import logging
 import re
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from tests.roles.cli.conftest import (
     PROVIDE_TEST_RESOURCES,
+    ro_query,
     run_market_provide,
+    run_market_provide_abort_all,
     write_provide_test_csv,
 )
 
@@ -66,23 +67,17 @@ class TestMarketProvideHappyPath:
             market_provide_happy_result.stdout[-2000:]
         )
         # All test resources share the same spec, so one pattern matches all.
-        conn = sqlite3.connect(
-            f"file:{seller_node['agent_db_path']}?mode=ro&nolock=1",
-            uri=True, timeout=5,
+        rows = ro_query(
+            seller_node["agent_db_path"],
+            """SELECT COUNT(*) FROM orders
+               WHERE offer_resource LIKE ? AND offer_resource LIKE ?""",
+            ('%"gpu_model": "RTX 4090"%', '%"region": "New York, US"%'),
         )
-        try:
-            row = conn.execute(
-                """SELECT COUNT(*) FROM orders
-                   WHERE offer_resource LIKE ? AND offer_resource LIKE ?""",
-                ('%"gpu_model": "RTX 4090"%', '%"region": "New York, US"%'),
-            ).fetchone()
-        finally:
-            conn.close()
 
         expected = len(PROVIDE_TEST_RESOURCES)
-        assert row and row[0] >= expected, (
+        assert rows and rows[0][0] >= expected, (
             f"Expected at least {expected} orders for RTX 4090 / New York, "
-            f"got {row[0] if row else 0}"
+            f"got {rows[0][0] if rows else 0}"
         )
 
 
@@ -138,3 +133,43 @@ class TestMarketProvideRejectsInvalid:
             assert re.search(r"no available|failed|error", combined.lower()), (
                 f"Non-zero exit but no explanation\n{combined[-500:]}"
             )
+
+
+@pytest.mark.roles_cli_provide
+class TestMarketProvideAbortAll:
+    """`market provide --abort-all` closes every open sell order on the agent."""
+
+    def test_closes_open_orders_and_becomes_idempotent(
+        self, market_provide_happy_result, seller_node,
+    ):
+        """After --abort-all, a second call reports nothing to abort."""
+        assert market_provide_happy_result.returncode == 0, "Prereq publish must succeed"
+
+        first = run_market_provide_abort_all(seller_node=seller_node)
+        assert first.returncode == 0, f"First abort-all failed\n{first.stdout[-1000:]}"
+
+        # Second run: no more open orders, "nothing to abort".
+        second = run_market_provide_abort_all(seller_node=seller_node)
+        assert second.returncode == 0, second.stdout[-500:]
+        assert "No open sell orders" in second.stdout or "nothing to abort" in second.stdout.lower(), (
+            f"Second --abort-all should report empty state\n{second.stdout[-500:]}"
+        )
+
+        # DB check: no open orders remain for the agent.
+        rows = ro_query(
+            seller_node["agent_db_path"],
+            "SELECT COUNT(*) FROM orders WHERE status = 'open'",
+        )
+        assert rows and rows[0][0] == 0, (
+            f"Expected 0 open orders after --abort-all, got {rows[0][0] if rows else 'None'}"
+        )
+
+    def test_mutex_with_publish_flags(self, seller_node):
+        """--abort-all rejects publish flags."""
+        result = run_market_provide_abort_all(
+            seller_node=seller_node,
+            extra_args=["--min-price", "100"],
+        )
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "mutually exclusive" in combined.lower(), combined[-500:]
