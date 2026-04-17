@@ -9,9 +9,12 @@ flow behind a single command:
      compute and demanding the configured token amount.
   4. Print a table of published orders.
 
+`--watch` extends (3) into a loop: periodically re-scan the DB and
+publish orders for resources that are `available` and don't already
+have an open order. Runs until Ctrl-C. Safe because the resource poller
+force-frees stale leases after the configured grace window.
+
 Assumes the seller agent is already running (mirror of `market buy`).
-Assumes one order per available resource row (V1 strategy); a future
-`--watch` flag can add continuous re-publish after lease end.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ import json
 import os
 import sqlite3
 import subprocess
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -93,6 +98,35 @@ def _available_resources(db_path: str) -> list[dict]:
     return out
 
 
+def _open_order_resource_ids(db_path: str) -> set[str]:
+    """Return the set of resource_ids that currently have an open sell order.
+
+    Used in `--watch` mode to avoid re-publishing a resource that's already
+    offered on the market. Inspects the offer_resource JSON for each open
+    order and extracts its `resource_id` field.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
+    try:
+        rows = conn.execute(
+            "SELECT offer_resource FROM orders WHERE status = 'open'",
+        ).fetchall()
+    finally:
+        conn.close()
+
+    covered: set[str] = set()
+    for (raw,) in rows:
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        rid = parsed.get("resource_id") if isinstance(parsed, dict) else None
+        if rid:
+            covered.add(rid)
+    return covered
+
+
 def _publish_offer(
     agent_url: str,
     offer: dict,
@@ -106,6 +140,83 @@ def _publish_offer(
     payload = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
     headers = _get_auth_headers("create_order", wallet_address, private_key)
     return _post_json(url, payload, headers)
+
+
+def _publish_round(
+    *,
+    db_path: str,
+    base_url: str,
+    demand: dict,
+    duration_hours: int,
+    wallet_address: str,
+    private_key: Optional[str],
+    skip_ids: set[str] | None = None,
+) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
+    """Publish one order for every available resource not in `skip_ids`.
+
+    Returns (published, failed, skipped) — each a list of dicts keyed on
+    the resource.
+    """
+    resources = _available_resources(db_path)
+    skip_ids = skip_ids or set()
+
+    published: list[dict] = []
+    failed: list[tuple[dict, str]] = []
+    skipped: list[dict] = []
+
+    for res in resources:
+        if res["resource_id"] in skip_ids:
+            skipped.append(res)
+            continue
+        # Explicit resource_id pins this order to a specific DB row, so
+        # multiple identical-spec resources each get a distinct order in
+        # `--watch` mode.
+        offer = {
+            "resource_id": res["resource_id"],
+            "gpu_model": res["gpu_model"],
+            "quantity": res["quantity"],
+            "sla": res["sla"],
+            "region": res["region"],
+        }
+        try:
+            resp = _publish_offer(
+                base_url, offer, demand, duration_hours, wallet_address, private_key,
+            )
+            published.append({"resource": res, "response": resp})
+        except typer.Exit:
+            failed.append((res, "HTTP error (see above)"))
+        except Exception as exc:
+            failed.append((res, str(exc)))
+
+    return published, failed, skipped
+
+
+def _print_publish_table(console: Console, published: list[dict], failed: list[tuple[dict, str]]) -> None:
+    summary = Table(title="Published offers", box=box.SIMPLE_HEAVY, expand=True)
+    summary.add_column("Resource", style="bold")
+    summary.add_column("GPU")
+    summary.add_column("Region")
+    summary.add_column("Order ID", overflow="fold")
+    summary.add_column("Status")
+    for entry in published:
+        res = entry["resource"]
+        resp = entry["response"]
+        summary.add_row(
+            res["resource_id"],
+            f"{res['gpu_model']} x{res['quantity']}",
+            res["region"] or "-",
+            str(resp.get("order_id", "-")),
+            str(resp.get("status", "-")),
+        )
+    for res, reason in failed:
+        summary.add_row(
+            res["resource_id"],
+            f"{res['gpu_model']} x{res['quantity']}",
+            res["region"] or "-",
+            "-",
+            f"[red]failed: {reason}[/red]",
+        )
+    console.print(summary)
 
 
 def register(app: typer.Typer) -> None:
@@ -125,6 +236,14 @@ def register(app: typer.Typer) -> None:
         duration_hours: int = typer.Option(
             1, "--duration-hours", "-t",
             help="Lease duration offered per order (hours).",
+        ),
+        watch: bool = typer.Option(
+            False, "--watch", "-w",
+            help="Keep running: re-publish orders as resources free up. Ctrl-C to stop.",
+        ),
+        poll_interval: float = typer.Option(
+            30.0, "--poll-interval",
+            help="Seconds between scans in --watch mode.",
         ),
         agent_url: Optional[str] = typer.Option(
             None, "--agent-url", "-a",
@@ -177,69 +296,83 @@ def register(app: typer.Typer) -> None:
                 typer.secho(f"Inventory import failed: {exc}", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
 
-        resources = _available_resources(db_path)
-        if not resources:
-            console.print(
-                "[yellow]No available compute resources in the agent DB.[/yellow] "
-                "Pass --inventory <csv> or seed the DB first.",
-            )
-            raise typer.Exit(3)
-
         demand = {"token": token, "amount": min_price}
-        published: list[dict] = []
-        failed: list[tuple[dict, str]] = []
-        for res in resources:
-            offer = {
-                "gpu_model": res["gpu_model"],
-                "quantity": res["quantity"],
-                "sla": res["sla"],
-                "region": res["region"],
-            }
-            try:
-                resp = _publish_offer(
-                    base_url, offer, demand, duration_hours, wallet_address, private_key,
+
+        # ------------------------------------------------------------------
+        # One-shot path (original behavior)
+        # ------------------------------------------------------------------
+        if not watch:
+            published, failed, _skipped = _publish_round(
+                db_path=db_path, base_url=base_url, demand=demand,
+                duration_hours=duration_hours, wallet_address=wallet_address,
+                private_key=private_key,
+            )
+            if not published and not failed:
+                console.print(
+                    "[yellow]No available compute resources in the agent DB.[/yellow] "
+                    "Pass --inventory <csv> or seed the DB first.",
                 )
-                published.append({"resource": res, "response": resp})
-            except typer.Exit:
-                # _post_json already logged the error
-                failed.append((res, "HTTP error (see above)"))
-            except Exception as exc:
-                failed.append((res, str(exc)))
+                raise typer.Exit(3)
 
-        summary = Table(title="Published offers", box=box.SIMPLE_HEAVY, expand=True)
-        summary.add_column("Resource", style="bold")
-        summary.add_column("GPU")
-        summary.add_column("Region")
-        summary.add_column("Order ID", overflow="fold")
-        summary.add_column("Status")
-        for entry in published:
-            res = entry["resource"]
-            resp = entry["response"]
-            summary.add_row(
-                res["resource_id"],
-                f"{res['gpu_model']} x{res['quantity']}",
-                res["region"] or "-",
-                str(resp.get("order_id", "-")),
-                str(resp.get("status", "-")),
+            _print_publish_table(console, published, failed)
+            totals = Table.grid(padding=(0, 2))
+            totals.add_column(style="bold")
+            totals.add_column()
+            totals.add_row("Published", str(len(published)))
+            totals.add_row("Failed", str(len(failed)))
+            totals.add_row("Agent", base_url)
+            totals.add_row("Demand per order", f"{min_price} {token}")
+            console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
+
+            if failed and not published:
+                raise typer.Exit(4)
+            return
+
+        # ------------------------------------------------------------------
+        # --watch loop
+        # ------------------------------------------------------------------
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Demand per order", f"{min_price} {token}")
+        header.add_row("Poll interval", f"{poll_interval:.0f}s")
+        header.add_row("Duration per lease", f"{duration_hours}h")
+        console.print(Panel(header, title="market provide --watch", border_style="blue"))
+        console.print("[dim]Ctrl-C to stop.[/dim]\n")
+
+        total_published = 0
+        total_failed = 0
+        cycle = 0
+        try:
+            while True:
+                cycle += 1
+                covered = _open_order_resource_ids(db_path)
+                published, failed, skipped = _publish_round(
+                    db_path=db_path, base_url=base_url, demand=demand,
+                    duration_hours=duration_hours, wallet_address=wallet_address,
+                    private_key=private_key, skip_ids=covered,
+                )
+                total_published += len(published)
+                total_failed += len(failed)
+
+                ts = datetime.now().strftime("%H:%M:%S")
+                if published or failed:
+                    console.print(f"[dim]{ts}[/dim] cycle {cycle}: "
+                                  f"[green]+{len(published)}[/green] new"
+                                  + (f" [red]/{len(failed)} failed[/red]" if failed else "")
+                                  + (f" [dim](skipped {len(skipped)} already-open)[/dim]" if skipped else ""))
+                    _print_publish_table(console, published, failed)
+                else:
+                    available_count = len(_available_resources(db_path))
+                    console.print(
+                        f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
+                        f"(available={available_count}, already-open={len(covered)})"
+                    )
+
+                time.sleep(poll_interval)
+        except KeyboardInterrupt:
+            console.print(
+                f"\n[yellow]Stopped.[/yellow] "
+                f"Total cycles={cycle}, published={total_published}, failed={total_failed}.",
             )
-        for res, reason in failed:
-            summary.add_row(
-                res["resource_id"],
-                f"{res['gpu_model']} x{res['quantity']}",
-                res["region"] or "-",
-                "-",
-                f"[red]failed: {reason}[/red]",
-            )
-        console.print(summary)
-
-        totals = Table.grid(padding=(0, 2))
-        totals.add_column(style="bold")
-        totals.add_column()
-        totals.add_row("Published", str(len(published)))
-        totals.add_row("Failed", str(len(failed)))
-        totals.add_row("Agent", base_url)
-        totals.add_row("Demand per order", f"{min_price} {token}")
-        console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
-
-        if failed and not published:
-            raise typer.Exit(4)
