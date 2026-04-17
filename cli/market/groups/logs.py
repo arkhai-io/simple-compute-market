@@ -286,11 +286,24 @@ def deal_status(
                 border_style=color,
             ))
 
-            # Show recent stage events for this negotiation
+            # Show stage events for this deal. Events fire throughout the
+            # lifecycle; some land before a negotiation_id exists (discovery)
+            # or carry only an order_id (provision/settlement). Join on any
+            # identifier that names this deal.
+            ids_to_match = [nid]
+            for key in ("our_order_id", "their_order_id", "escrow_uid"):
+                v = info.get(key)
+                if v and v not in ids_to_match:
+                    ids_to_match.append(v)
+            placeholders = ",".join("?" * len(ids_to_match))
             try:
                 events = conn.execute(
-                    "SELECT ts, stage, event, data FROM stage_events WHERE negotiation_id = ? ORDER BY id ASC",
-                    (nid,),
+                    f"""SELECT ts, stage, event, data FROM stage_events
+                        WHERE negotiation_id IN ({placeholders})
+                           OR order_id IN ({placeholders})
+                           OR escrow_uid IN ({placeholders})
+                        ORDER BY id ASC""",
+                    ids_to_match * 3,
                 ).fetchall()
                 if events:
                     console.print(f"\n[bold]Stage events ({len(events)}):[/bold]")

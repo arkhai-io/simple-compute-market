@@ -34,7 +34,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from ..common import REPO_ROOT, read_env_value
+from ..common import REPO_ROOT, read_env_value, resolve_agent_url
 from .order import (
     _get_auth_headers,
     _normalize_registry_url,
@@ -288,13 +288,7 @@ def register(app: typer.Typer) -> None:
         console = Console()
         env_path = Path(env) if env else None
 
-        base_url = (
-            agent_url
-            or (read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None)
-            or os.getenv("AGENT_URL")
-            or os.getenv("BASE_URL_OVERRIDE")
-            or "http://localhost:8001"
-        )
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
         private_key = (
             (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
             or os.getenv("AGENT_PRIV_KEY")

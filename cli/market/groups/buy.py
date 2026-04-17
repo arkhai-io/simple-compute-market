@@ -5,17 +5,28 @@ Wraps the full buyer pipeline behind a single synchronous CLI call:
   2. Poll DB-derived stage until closed / post_settlement / failure / timeout
   3. Print credentials
 
-Assumes the buyer agent is already running (same as `order create`).
+By default, `market buy` is self-contained: if no agent is reachable at
+the target URL, it spawns one transiently (docker container) and tears
+it down on exit. Pass `--no-spawn-agent` to use an externally-managed
+agent instead.
 """
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import json
 import os
+import shutil
+import signal
 import sqlite3
+import subprocess
 import time
+import urllib.error
+import urllib.request
+import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import typer
 from rich.console import Console
@@ -23,7 +34,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from ..common import read_env_value
+from ..common import read_env_value, resolve_agent_url
 from .logs import _derive_stage, _resolve_db_path
 from .order import (
     _get_auth_headers,
@@ -36,6 +47,127 @@ from .order import (
 
 TERMINAL_STAGES = {"closed"}
 READY_STAGES = {"post_settlement", "closed"}
+
+
+DEFAULT_SPAWN_IMAGE = "arkhai:core"
+DEFAULT_SPAWN_NETWORK_CANDIDATES = (
+    "simple-market-service_market-network",
+    "market-network",
+)
+
+
+def _agent_reachable(base_url: str, timeout_s: float = 3.0) -> bool:
+    url = base_url.rstrip("/") + "/.well-known/agent.json"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
+        return False
+
+
+def _docker_cmd() -> Optional[str]:
+    """Return the preferred OCI runtime binary, or None if none is on PATH."""
+    for candidate in ("docker", "podman"):
+        if shutil.which(candidate):
+            return candidate
+    return None
+
+
+def _pick_network(runtime: str) -> Optional[str]:
+    """Return the first candidate docker network that exists locally, or None."""
+    try:
+        out = subprocess.run(
+            [runtime, "network", "ls", "--format", "{{.Name}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    if out.returncode != 0:
+        return None
+    existing = set(out.stdout.split())
+    for name in DEFAULT_SPAWN_NETWORK_CANDIDATES:
+        if name in existing:
+            return name
+    return None
+
+
+def _spawn_agent_container(
+    *,
+    env_path: Path,
+    port: int,
+    image: str,
+    network: Optional[str],
+    agent_data_dir: Optional[Path],
+    console: Console,
+) -> tuple[str, Callable[[], None]]:
+    """Launch an agent container and return (container_name, cleanup_fn).
+
+    `agent_data_dir` is the host path to mount at the container-internal
+    data directory so the CLI can read the same SQLite DB the agent writes.
+    """
+    runtime = _docker_cmd()
+    if not runtime:
+        raise typer.BadParameter(
+            "No container runtime found (docker or podman). "
+            "Install one, run the agent externally, or pass --no-spawn-agent."
+        )
+
+    name = f"market-buy-ephemeral-{uuid.uuid4().hex[:8]}"
+    cmd = [
+        runtime, "run", "--rm", "-d",
+        "--name", name,
+        "--platform", "linux/amd64",
+        "--env-file", str(env_path.resolve()),
+        "-p", f"{port}:{port}",
+    ]
+    if network:
+        cmd.extend(["--network", network])
+    if agent_data_dir:
+        # Mount the host DB dir into the container so host-side polling sees
+        # the agent's writes. Path layout matches docker-compose.yml.
+        host = str(agent_data_dir.resolve())
+        container_rel = "/app/core/agent/app/data/buy-agent"
+        cmd.extend(["-v", f"{host}:{container_rel}"])
+    cmd.append(image)
+
+    console.print(f"[dim]spawning agent:[/dim] {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise typer.BadParameter(
+            f"Failed to launch agent container: {result.stderr.strip() or result.stdout.strip()}"
+        )
+
+    def _cleanup():
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [runtime, "stop", "-t", "5", name],
+                capture_output=True, text=True, timeout=15,
+            )
+
+    atexit.register(_cleanup)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        prev = signal.getsignal(sig)
+        def _handler(signum, frame, _prev=prev):
+            _cleanup()
+            if callable(_prev):
+                _prev(signum, frame)
+            raise SystemExit(130)
+        signal.signal(sig, _handler)
+
+    return name, _cleanup
+
+
+def _wait_for_agent(base_url: str, timeout_s: float, console: Console) -> bool:
+    """Poll agent readiness. Returns True if reachable before the deadline."""
+    deadline = time.time() + timeout_s
+    console.print(f"[dim]waiting for agent at {base_url}...[/dim]", end="")
+    while time.time() < deadline:
+        if _agent_reachable(base_url, timeout_s=1.5):
+            console.print(" [green]ready[/green]")
+            return True
+        time.sleep(1.0)
+    console.print(" [red]timeout[/red]")
+    return False
 
 
 def _build_resources(
@@ -272,6 +404,22 @@ def register(app: typer.Typer) -> None:
         offer_json: Optional[str] = typer.Option(None, "--offer-json", help="Raw offer resource JSON (overrides --max-price/--token)."),
         recover: Optional[str] = typer.Option(None, "--recover", help="Resume waiting on an existing order by order_id or escrow_uid, instead of creating a new one."),
         abort: Optional[str] = typer.Option(None, "--abort", help="Cancel an in-flight order by order_id or escrow_uid. Closes the order locally and in the registry."),
+        spawn_agent: bool = typer.Option(
+            True, "--spawn-agent/--no-spawn-agent",
+            help="If no agent is reachable at the target URL, transiently spawn one (container) for the duration of this command and tear it down on exit. On by default so `market buy` feels like a one-shot.",
+        ),
+        spawn_image: str = typer.Option(
+            DEFAULT_SPAWN_IMAGE, "--spawn-image",
+            help="Container image to use when --spawn-agent must launch one.",
+        ),
+        spawn_network: Optional[str] = typer.Option(
+            None, "--spawn-network",
+            help="Container network for a spawned agent. Defaults to the first local network named 'simple-market-service_market-network' or 'market-network' if present.",
+        ),
+        spawn_timeout: int = typer.Option(
+            30, "--spawn-timeout",
+            help="Seconds to wait for a spawned agent to become reachable.",
+        ),
         timeout: int = typer.Option(600, "--timeout", help="Total wait budget in seconds."),
         poll_interval: float = typer.Option(2.0, "--poll-interval", help="Seconds between DB polls."),
         agent_url: Optional[str] = typer.Option(None, "--agent-url", "-a", help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE)."),
@@ -313,13 +461,7 @@ def register(app: typer.Typer) -> None:
                 "--max-price is required (or pass --recover <id> / --abort <id>)."
             )
 
-        base_url = (
-            agent_url
-            or (read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None)
-            or os.getenv("AGENT_URL")
-            or os.getenv("BASE_URL_OVERRIDE")
-            or "http://localhost:8000"
-        )
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
         db_path = _resolve_db_path(db, env) or _order_resolve_db_path(db, env)
         if not db_path:
             typer.secho(
@@ -328,6 +470,53 @@ def register(app: typer.Typer) -> None:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
+
+        # Ensure an agent is reachable. Spawn transiently if not.
+        if not _agent_reachable(base_url):
+            if not spawn_agent:
+                typer.secho(
+                    f"No agent reachable at {base_url} and --no-spawn-agent. "
+                    f"Start one separately (`market start`) or drop the flag.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+            if not env_path:
+                raise typer.BadParameter(
+                    "--spawn-agent requires --env so the spawned container knows "
+                    "its identity, keys, and chain/registry endpoints."
+                )
+            port_str = read_env_value(env_path, "PORT", default="8000")
+            try:
+                port = int(port_str)
+            except ValueError:
+                port = 8000
+            runtime = _docker_cmd()
+            network = spawn_network or (_pick_network(runtime) if runtime else None)
+            console.print(
+                Panel(
+                    f"[bold]image[/bold]    {spawn_image}\n"
+                    f"[bold]port[/bold]     {port}\n"
+                    f"[bold]network[/bold]  {network or '(default)'}\n"
+                    f"[bold]env[/bold]      {env_path}",
+                    title="Spawning transient agent",
+                    border_style="cyan",
+                )
+            )
+            _spawn_agent_container(
+                env_path=env_path,
+                port=port,
+                image=spawn_image,
+                network=network,
+                agent_data_dir=Path(db_path).parent if db_path else None,
+                console=console,
+            )
+            if not _wait_for_agent(base_url, timeout_s=spawn_timeout, console=console):
+                typer.secho(
+                    f"Spawned agent did not become reachable at {base_url} "
+                    f"within {spawn_timeout}s. See container logs for details.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
 
         if abort:
             order_id = _resolve_recover_order_id(db_path, abort)

@@ -57,6 +57,39 @@ def container_db_to_host(db_path: str) -> Path:
     return REPO_ROOT / rel
 
 
+def resolve_agent_url(
+    agent_url: str | None,
+    env_file: str | Path | None,
+    default_port: int = 8000,
+) -> str:
+    """Resolve the URL the CLI should dial to reach the agent.
+
+    Precedence:
+      1. Explicit --agent-url flag (passed in as `agent_url`).
+      2. If the env file declares AGENT_MODE=container: `http://localhost:{PORT}`.
+         BASE_URL_OVERRIDE in container env files points at the docker-internal
+         hostname (e.g. `http://buy_agent:8000/`), which is unreachable from
+         the host — never use it as a CLI target.
+      3. Env-file BASE_URL_OVERRIDE (host mode).
+      4. Process-env AGENT_URL / BASE_URL_OVERRIDE.
+      5. `http://localhost:{default_port}`.
+    """
+    if agent_url:
+        return agent_url
+    env_path = Path(env_file) if env_file else None
+    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host") if env_path else "host"
+    port = read_env_value(env_path, "PORT", default=str(default_port)) if env_path else str(default_port)
+    if agent_mode == "container":
+        return f"http://localhost:{port}"
+    env_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    return (
+        env_url
+        or os.getenv("AGENT_URL")
+        or os.getenv("BASE_URL_OVERRIDE")
+        or f"http://localhost:{default_port}"
+    )
+
+
 def run_step(
     label: str,
     cmd: list[str],
