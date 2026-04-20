@@ -1,0 +1,32 @@
+# Default values for test-env.
+# These are overridden by the parent chart's test-env: block in values.yaml.
+# The RPC port and host are authoritative in global.rpc (parent values.yaml)
+# and are not duplicated here.
+
+image:
+  repository: ""
+  name: arkhai
+  tag: test-env
+  pullPolicy: IfNotPresent
+
+service:
+  type: NodePort
+
+env:
+  ANVIL_IP_ADDR: "0.0.0.0"
+
+# Number of replicas. Anvil is stateful so this should stay at 1.
+replicaCount: 1
+
+# Resource requests/limits – tune per environment.
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

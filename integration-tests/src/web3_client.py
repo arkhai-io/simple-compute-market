@@ -12,7 +12,7 @@ from functools import lru_cache
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
 
-from arkhai_e2e_tests.settings import settings
+from src.settings import settings
 
 log = logging.getLogger(__name__)
 

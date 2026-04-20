@@ -1,0 +1,96 @@
+# Default values for provisioning.
+# These are overridden by the parent chart's provisioning: block in values.yaml.
+# The registry URL is sourced from global.registry.host/port and is not
+# duplicated here.
+
+# ---------------------------------------------------------------------------
+# API server — exposes the provisioning REST API
+# ---------------------------------------------------------------------------
+apiServer:
+  image:
+    repository: ""
+    name: arkhai
+    tag: provisioning-api
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 8081
+  type: ClusterIP
+  host: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# Worker — pulls jobs from Redis and executes Ansible playbooks.
+# Also runs the worker API server on workerServer.port.
+# ---------------------------------------------------------------------------
+worker:
+  image:
+    repository: ""
+    name: arkhai
+    tag: provisioning-worker
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # Multiple worker pods each run their own BRPOP loop; Redis ensures
+  # each job is dequeued exactly once. Total concurrency is
+  # replicaCount × max_concurrent_jobs (set via config).
+  port: 8082
+
+# ---------------------------------------------------------------------------
+# SSH private key used by the worker to authenticate against hypervisors.
+#
+# createSecret: true  — chart creates a Secret from sshPrivateKey below.
+#                       Use only for dev/test; do not commit real keys.
+# createSecret: false — chart expects a pre-existing Secret named secretName.
+#                       Create it manually:
+#                         kubectl create secret generic <name> \
+#                           --from-literal=sshPrivateKey="$(cat ~/.ssh/id_ed25519)"
+# ---------------------------------------------------------------------------
+sshKey:
+  createSecret: true
+  secretName: ""        # auto-generated from fullname when empty
+  sshPrivateKey: ""     # raw PEM or base64-encoded private key
+
+# ---------------------------------------------------------------------------
+# Shared application settings — map directly to env vars in both containers.
+# ---------------------------------------------------------------------------
+config:
+  logLevel: "info"
+  databaseUrl: "sqlite:///provisioning.db"
+
+  # Redis queue
+  redisQueueName: "provisioning_jobs"
+
+  # Ansible
+  ansibleTimeoutSeconds: 1800
+  defaultVmHost: "ww1"
+
+  # ZeroTier
+  zerotierNetwork: "88c5b1f339bbf5ab"
+
+  # Authentication — disabled for local dev
+  enableAuth: false
+  registryCacheTtlSeconds: 300
+  registryCacheMaxSize: 256
+
+  # Rate limiting — disabled for local dev
+  enableRateLimiting: false
+  rateLimitRequestsPerMinute: 30
+
+# ---------------------------------------------------------------------------
+# Redis — internal job queue, private to this subchart
+# ---------------------------------------------------------------------------
+redis:
+  image: "redis:7-alpine"
+  port: 6379
+  pullPolicy: IfNotPresent
+
+# Resource requests/limits applied to all containers – tune per environment.
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

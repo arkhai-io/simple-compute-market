@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8081
+    worker_health_port: int = 8082  # Health endpoint for the worker process
     log_level: str = "info"
 
     database_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/provisioning"

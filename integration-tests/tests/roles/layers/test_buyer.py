@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from arkhai_e2e_tests.settings import settings
+from src.settings import settings
 
 log = logging.getLogger(__name__)
 

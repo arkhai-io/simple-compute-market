@@ -1,15 +1,12 @@
 """
-tests/test_contracts.py
------------------------
 Test suite: validate on-chain contract state.
 
 Tests
 -----
-test_registry_contracts_exist_with_correct_owner
-    For each registry address (identity, reputation, validation) verify that:
-      1. There is deployed bytecode at the address (i.e. it IS a contract).
-      2. The contract exposes an owner() function whose return value equals
-         the configured ownerAddress.
+For each registry address (identity, reputation, validation) verify that:
+	1. There is deployed bytecode at the address (i.e. it IS a contract).
+	2. The contract exposes an owner() function whose return value equals
+		the configured ownerAddress.
 """
 
 from __future__ import annotations

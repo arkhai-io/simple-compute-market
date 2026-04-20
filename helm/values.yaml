@@ -1,0 +1,193 @@
+# Global image settings shared across subcharts.
+# imageRepository can be set to a registry prefix, e.g. "registry.example.com/arkhai"
+# Leave empty ("") to use bare image names (matches local Docker builds).
+global:
+  imageRepository: ""
+
+  # ---------------------------------------------------------------------------
+  # Chain / network configuration shared across all subcharts.
+  # rpc.host and rpc.port are the single source of truth for the Anvil node's
+  # in-cluster service coordinates.
+  # ---------------------------------------------------------------------------
+  rpc:
+    chainId: 31337
+    host: "arkhai-node-operator-test-env"
+    port: 8545
+
+  # ---------------------------------------------------------------------------
+  # Registry service coordinates and contract addresses shared across all subcharts.
+  # Defaults to the service name produced by the registry subchart under a
+  # release named "arkhai-node-operator".
+  # ---------------------------------------------------------------------------
+  registry:
+    host: "arkhai-node-operator-registry"
+    port: 8080
+    identity_address:   "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+    validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
+
+# ---------------------------------------------------------------------------
+# test-env subchart
+# ---------------------------------------------------------------------------
+test-env:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: test-env
+    pullPolicy: IfNotPresent
+
+  service:
+    type: NodePort
+
+  env:
+    ANVIL_IP_ADDR: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# registry subchart
+# ---------------------------------------------------------------------------
+registry:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: registry
+    pullPolicy: IfNotPresent
+
+  service:
+    type: NodePort
+    port: 8080
+
+  config:
+    databaseUrl: "sqlite:///./indexer.db"
+    host: "0.0.0.0"
+    enableHealthChecks: true
+    healthCheckInterval: 60
+    endpointCheckTimeout: 10
+    heartbeatTtlSecs: 60
+    logLevel: "info"
+
+# ---------------------------------------------------------------------------
+# agents subchart
+# ---------------------------------------------------------------------------
+agents:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: core
+    pullPolicy: IfNotPresent
+
+  buyer:
+    port: 8000
+    agentId: "alice"
+    baseUrlOverride: "http://market-agent-buy:8000/"
+    agentDbPath: "./agent.db"
+    logFilePath: "./logs/alice.log"
+    autoRegister: true
+    enableEventQueue: false
+    chainName: "anvil"
+    alkahestAddressConfigPath: "/app/core/agent/app/data/alkahest_anvil_addresses.json"
+    tokenRegistryPath: "/app/core/agent/app/data/token_registry_docker_compose.json"
+    provisioningMode: "mock"
+    negotiationPolicyMode: "bisection"
+    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
+    geminiApiKey: ""
+    secret:
+      createSecret: true
+      secretName: ""
+      privKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+  seller:
+    port: 8001
+    agentId: "bob"
+    baseUrlOverride: "http://market-agent-sell:8001/"
+    agentDbPath: "./agent.db"
+    logFilePath: "./logs/bob.log"
+    autoRegister: true
+    enableEventQueue: false
+    chainName: "anvil"
+    alkahestAddressConfigPath: "/app/core/agent/app/data/alkahest_anvil_addresses.json"
+    tokenRegistryPath: "/app/core/agent/app/data/token_registry_docker_compose.json"
+    provisioningMode: "mock"
+    negotiationPolicyMode: "bisection"
+    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+    geminiApiKey: ""
+    secret:
+      createSecret: true
+      secretName: ""
+      privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+      walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+# ---------------------------------------------------------------------------
+# provisioning subchart
+# ---------------------------------------------------------------------------
+provisioning:
+  enabled: true
+
+  apiServer:
+    image:
+      repository: ""
+      name: arkhai
+      tag: provisioning-api
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8081
+    type: ClusterIP
+    host: "0.0.0.0"
+
+  worker:
+    image:
+      repository: ""
+      name: arkhai
+      tag: provisioning-worker
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8082
+
+  sshKey:
+    createSecret: true
+    secretName: ""
+    sshPrivateKey: ""
+
+  config:
+    logLevel: "info"
+    databaseUrl: "sqlite:///provisioning.db"
+    redisQueueName: "provisioning_jobs"
+    ansibleTimeoutSeconds: 1800
+    defaultVmHost: "ww1"
+    zerotierNetwork: "88c5b1f339bbf5ab"
+    enableAuth: false
+    registryCacheTtlSeconds: 300
+    registryCacheMaxSize: 256
+    enableRateLimiting: false
+    rateLimitRequestsPerMinute: 30
+
+  redis:
+    image: "redis:7-alpine"
+    port: 6379
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# validate-contracts subchart
+# Runs the contract validation helm test.
+# When test-env is enabled, tests run against that deployment via global.rpc.
+# When test-env is disabled, set rpcUrl to point at your target endpoint.
+# ---------------------------------------------------------------------------
+validate-contracts:
+  enabled: true
+  # Override the RPC endpoint. Leave empty to use global.rpc.host:port
+  # (i.e. the test-env service when that subchart is enabled).
+  rpcUrl: ""
+
+integrationTests:
+  image:
+    repository: ""
+    name: arkhai
+    tag: integration-tests
+    pullPolicy: IfNotPresent

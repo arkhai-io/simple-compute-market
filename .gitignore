@@ -199,3 +199,6 @@ pr-message-puffer.md
 */uv.lock
 test-env/state/state.json
 shared-env/*
+helm/Chart.lock
+helm/charts/*.tgz
+helm/.port-forward.pids

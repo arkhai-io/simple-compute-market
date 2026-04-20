@@ -6,7 +6,6 @@
 # -----------------------------------------------------------------------
 
 PYTHON      ?= python3
-ARKHAI_TEST := .venv/bin/arkhai-test
 
 # Default profile if none supplied
 ACTIVE_PROFILES ?= local
@@ -26,6 +25,21 @@ init: init-venv
 	uv sync
 
 # -----------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------
+
+IMAGE_NAME ?= arkhai
+IMAGE_TAG  ?= integration-tests
+GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+PYTHON_VERSION := 3.13
+
+build: build-images
+
+build-images:
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile .
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+
+# -----------------------------------------------------------------------
 # Tests — local
 # -----------------------------------------------------------------------
 
@@ -38,6 +52,15 @@ test-module:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
 	.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+
+test-container-module:
+	docker run --rm -it \
+		--network=market \
+		-e ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
+		-e CONFIG_DIRECTORY=/app/config \
+		-v $(CONFIG_DIRECTORY):/app/config:ro \
+		$(IMAGE_NAME):$(IMAGE_TAG) \
+		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
 # Tests — CI (HTML report, no colour, exit-on-first-fail)

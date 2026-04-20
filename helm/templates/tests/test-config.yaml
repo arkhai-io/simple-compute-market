@@ -1,0 +1,36 @@
+{{/*
+Shared helm-test configuration mounted by all test pods.
+All values are sourced from global.* and per-subchart values so subcharts
+do not need to generate their own copies of this data.
+*/}}
+{{- $rpcUrl := (index .Values "validate-contracts").rpcUrl -}}
+{{- if not $rpcUrl -}}
+  {{- $rpcUrl = printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-test-config
+  labels:
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  config-helm.yml: |
+    rpc:
+      url: {{ $rpcUrl | quote }}
+      chain_id: {{ .Values.global.rpc.chainId }}
+
+    registry:
+      identity_address:   {{ .Values.global.registry.identity_address | quote }}
+      reputation_address: {{ .Values.global.registry.reputation_address | quote }}
+      validation_address: {{ .Values.global.registry.validation_address | quote }}
+      owner_address:      {{ .Values.global.registry.owner_address | quote }}
+      api_url:            {{ printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) | quote }}
+
+    buyer:
+      api_url:           {{ printf "http://%s-agents-buyer:%d" .Release.Name (int .Values.agents.buyer.port) | quote }}
+      base_url_override: {{ .Values.agents.buyer.baseUrlOverride | quote }}
+
+    seller:
+      api_url:           {{ printf "http://%s-agents-seller:%d" .Release.Name (int .Values.agents.seller.port) | quote }}
+      base_url_override: {{ .Values.agents.seller.baseUrlOverride | quote }}

@@ -12,8 +12,8 @@ from decimal import Decimal
 import pytest
 from web3 import Web3
 
-from arkhai_e2e_tests.settings import active_profiles, config_directory, settings
-from arkhai_e2e_tests.web3_client import OWNABLE_ABI, get_web3
+from src.settings import active_profiles, config_directory, settings
+from src.web3_client import OWNABLE_ABI, get_web3
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,8 @@ def rpc_settings() -> dict:
 @pytest.fixture(scope="session")
 def registry_settings() -> dict:
     return {
-        "identity_address": settings.REGISTRY.IDENTITY_ADDRESS,
+        "api_url": settings.REGISTRY.API_URL,
+		"identity_address": settings.REGISTRY.IDENTITY_ADDRESS,
         "reputation_address": settings.REGISTRY.REPUTATION_ADDRESS,
         "validation_address": settings.REGISTRY.VALIDATION_ADDRESS,
         "owner_address": settings.REGISTRY.OWNER_ADDRESS,
@@ -53,6 +54,8 @@ def registry_settings() -> dict:
 @pytest.fixture(scope="session")
 def buyer_settings() -> dict:
     return {
+        "api_url": settings.BUYER.API_URL,
+        "base_url_override": settings.BUYER.BASE_URL_OVERRIDE,
         "private_key": settings.BUYER.PRIVATE_KEY,
         "wallet_address": settings.BUYER.WALLET_ADDRESS,
     }
@@ -61,6 +64,8 @@ def buyer_settings() -> dict:
 @pytest.fixture(scope="session")
 def seller_settings() -> dict:
     return {
+        "api_url": settings.SELLER.API_URL,
+        "base_url_override": settings.SELLER.BASE_URL_OVERRIDE,
         "private_key": settings.SELLER.PRIVATE_KEY,
         "wallet_address": settings.SELLER.WALLET_ADDRESS,
     }
@@ -102,6 +107,4 @@ def log_test_session_info() -> None:
     log.info("Arkhai E2E Test Session")
     log.info("  Config directory : %s", config_directory())
     log.info("  Active profiles  : %s", active_profiles() or ["(none)"])
-    log.info("  RPC URL          : %s", settings.RPC.URL)
-    log.info("  Chain ID         : %s", settings.RPC.CHAIN_ID)
     log.info("=" * 60)

@@ -13,11 +13,21 @@ registry:
   reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
   validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
   owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
+  api_url:            "http://localhost:8080"
 
 buyer:
+  api_url:        "http://localhost:8000"
+  base_url_override: "http://buy_agent:8000/"
   private_key:    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
   wallet_address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 seller:
+  api_url:        "http://localhost:8001"
+  base_url_override: "http://sell_agent:8001/"
   private_key:    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
   wallet_address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+tests:
+  order_create_timeout: 3 #time in seconds
+  order_match_timeout: 30
+  order_close_timeout: 1

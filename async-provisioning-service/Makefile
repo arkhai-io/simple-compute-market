@@ -1,4 +1,4 @@
-.PHONY: help install serve worker clean docker-build docker-run docker-run-dev
+.PHONY: help install serve worker clean build build-images deploy deploy-redis deploy-provisioning deploy-worker docker-run-dev
 
 .DEFAULT_GOAL := help
 
@@ -9,10 +9,10 @@ install: ## Install dependencies using uv
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Install from https://docs.astral.sh/uv/"; exit 1; }
 	uv sync --dev
 
-serve: ## Start the API server
+serve: ## Start the API server locally
 	PYTHONPATH=src uv run python -m async_provisioning_service.main
 
-worker: ## Start the background worker
+worker: ## Start the background worker locally
 	PYTHONPATH=src uv run python -m async_provisioning_service.worker
 
 clean: ## Remove generated files
@@ -24,15 +24,23 @@ clean: ## Remove generated files
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= provisioning
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
-ENV_FILE ?= .env.docker-compose
+ENV_FILE   ?= .env.docker-compose
 
 build: build-images
 
 build-images:
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile ..
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+	docker build \
+		--build-arg ENTRYPOINT_SCRIPT=start-api.sh \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-api \
+		-f Dockerfile ..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG)-api $(IMAGE_NAME):$(IMAGE_TAG)-api-$(GIT_SUFFIX)
+	docker build \
+		--build-arg ENTRYPOINT_SCRIPT=start-worker.sh \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)-worker \
+		-f Dockerfile ..
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG)-worker $(IMAGE_NAME):$(IMAGE_TAG)-worker-$(GIT_SUFFIX)
 
-deploy: deploy-redis deploy-provisioning
+deploy: deploy-redis deploy-provisioning deploy-worker ## Deploy redis, API, and worker containers
 
 deploy-redis:
 	docker run -d --rm --name redis \
@@ -44,12 +52,23 @@ deploy-provisioning:
 	docker run -d --rm --name provisioning \
 	--env-file $(ENV_FILE) \
 	--network market -p 8081:8081 \
-	$(IMAGE_NAME):$(IMAGE_TAG)
+	$(IMAGE_NAME):$(IMAGE_TAG)-api
 
-docker-run-dev: ## Run with host IaC + SSH keys mounted
+deploy-worker:
+	docker run -d --rm --name provisioning-worker \
+	--env-file $(ENV_FILE) \
+	--network market -p 8082:8082 \
+	$(IMAGE_NAME):$(IMAGE_TAG)-worker
+
+docker-run-dev: ## Run API + worker with host IaC + SSH keys mounted
 	docker run --rm --env-file $(ENV_FILE) -p 8081:8081 \
 	--add-host=host.docker.internal:host-gateway \
 	-e REDIS_URL=redis://host.docker.internal:6379/0 \
 	-v "$$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac" \
+	$(IMAGE_NAME):$(IMAGE_TAG)-api &
+	docker run --rm --env-file $(ENV_FILE) \
+	--add-host=host.docker.internal:host-gateway \
+	-e REDIS_URL=redis://host.docker.internal:6379/0 \
+	-v "$$(cd .. && pwd)/compute-provisioning-iac:/app/compute-provisioning-iac" \
 	-v "$$HOME/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro" \
-	$(IMAGE_NAME):$(IMAGE_TAG)
+	$(IMAGE_NAME):$(IMAGE_TAG)-worker
