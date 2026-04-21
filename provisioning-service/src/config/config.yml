@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# config.yml — base environment config layer
+# Placed in the directory pointed to by CONFIG_DIRECTORY.
+# Profile-specific overrides go in config-<profile>.yml in the same directory.
+#
+# This file is intentionally empty of values. It exists so the config
+# directory is committed and the loader has a stable base file to include.
+#
+# Available keys (all optional — omit to fall back to settings.toml defaults):
+#   database_url, playbook_path, inventory_path, management_vars_path
+#   ansible_cfg, ansible_timeout_seconds, default_vm_host
+#   golden_root_ssh_filename, golden_root_ssh_password, golden_image_name
+#   golden_gcs_bucket, golden_gcs_project
+#   frp_server_addr, frp_domain, frp_dashboard_password
+#   enable_auth, registry_url, registry_cache_ttl_seconds, registry_cache_max_size
+#   enable_rate_limiting, rate_limit_requests_per_minute, log_level
+# ---------------------------------------------------------------------------

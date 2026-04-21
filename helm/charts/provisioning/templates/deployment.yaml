@@ -4,35 +4,40 @@ metadata:
   name: {{ include "provisioning.fullname" . }}
   labels:
     {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
 spec:
-  replicas: {{ .Values.apiServer.replicaCount }}
+  replicas: {{ .Values.server.replicaCount }}
   selector:
     matchLabels:
       {{- include "provisioning.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: api
   template:
     metadata:
       labels:
         {{- include "provisioning.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: api
+      annotations:
+        # Force pod rollout when the config changes
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
-      initContainers:
-        {{- include "provisioning.waitForRedis" . | nindent 8 }}
       containers:
-        - name: api
-          image: {{ include "provisioning.apiImage" . }}
-          imagePullPolicy: {{ .Values.apiServer.image.pullPolicy }}
+        - name: provisioning
+          image: {{ include "provisioning.image" . }}
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: {{ .Values.apiServer.port }}
+              containerPort: {{ .Values.server.port }}
               protocol: TCP
           env:
-            - name: HOST
-              value: {{ .Values.apiServer.host | quote }}
-            - name: PORT
-              value: {{ .Values.apiServer.port | quote }}
-            {{- include "provisioning.commonEnv" . | nindent 12 }}
+            - name: ACTIVE_PROFILES
+              value: "production"
+            - name: CONFIG_DIRECTORY
+              value: "/app/config"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+            - name: ssh-key
+              mountPath: /home/appuser/.ssh/id_ed25519
+              subPath: id_ed25519
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
@@ -49,6 +54,14 @@ spec:
             timeoutSeconds: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "provisioning.configMapName" . }}
+        - name: ssh-key
+          secret:
+            secretName: {{ include "provisioning.sshKeySecretName" . }}
+            defaultMode: 0400
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -61,116 +74,3 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "provisioning.fullname" . }}-worker
-  labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-spec:
-  replicas: {{ .Values.worker.replicaCount }}
-  selector:
-    matchLabels:
-      {{- include "provisioning.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: worker
-  template:
-    metadata:
-      labels:
-        {{- include "provisioning.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: worker
-    spec:
-      initContainers:
-        {{- include "provisioning.waitForRedis" . | nindent 8 }}
-      containers:
-        - name: worker
-          image: {{ include "provisioning.workerImage" . }}
-          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
-          ports:
-            - name: worker-api
-              containerPort: {{ .Values.worker.port }}
-              protocol: TCP
-          env:
-            - name: WORKER_HEALTH_PORT
-              value: {{ .Values.worker.port | quote }}
-            # SSH private key is written to ~/.ssh/id_ed25519 by start-worker.sh
-            - name: SSH_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "provisioning.sshKeySecretName" . }}
-                  key: sshPrivateKey
-            {{- include "provisioning.commonEnv" . | nindent 12 }}
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: worker-api
-            initialDelaySeconds: 10
-            periodSeconds: 15
-            timeoutSeconds: 3
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: worker-api
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
----
-{{/*
-Redis — internal job queue. Always a single replica; not exposed outside this subchart.
-*/}}
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "provisioning.fullname" . }}-redis
-  labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      {{- include "provisioning.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: redis
-  template:
-    metadata:
-      labels:
-        {{- include "provisioning.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: redis
-    spec:
-      containers:
-        - name: redis
-          image: {{ .Values.redis.image }}
-          imagePullPolicy: {{ .Values.redis.pullPolicy }}
-          ports:
-            - name: redis
-              containerPort: {{ .Values.redis.port }}
-              protocol: TCP
-          livenessProbe:
-            exec:
-              command: [redis-cli, ping]
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-          readinessProbe:
-            exec:
-              command: [redis-cli, ping]
-            initialDelaySeconds: 3
-            periodSeconds: 5
-            timeoutSeconds: 3
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}

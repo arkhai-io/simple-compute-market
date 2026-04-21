@@ -4,52 +4,12 @@ metadata:
   name: {{ include "provisioning.fullname" . }}
   labels:
     {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: api
 spec:
-  type: {{ .Values.apiServer.type }}
+  type: {{ .Values.server.type }}
   selector:
     {{- include "provisioning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: api
   ports:
     - name: http
-      port: {{ .Values.apiServer.port }}
+      port: {{ .Values.server.port }}
       targetPort: http
-      protocol: TCP
----
-# Worker API server — exposes health, inventory, and connectivity endpoints.
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "provisioning.fullname" . }}-worker
-  labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-spec:
-  type: ClusterIP
-  selector:
-    {{- include "provisioning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
-  ports:
-    - name: worker-api
-      port: {{ .Values.worker.port }}
-      targetPort: worker-api
-      protocol: TCP
----
-# Redis is internal to the provisioning subchart — ClusterIP only.
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "provisioning.fullname" . }}-redis
-  labels:
-    {{- include "provisioning.labels" . | nindent 4 }}
-    app.kubernetes.io/component: redis
-spec:
-  type: ClusterIP
-  selector:
-    {{- include "provisioning.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: redis
-  ports:
-    - name: redis
-      port: {{ .Values.redis.port }}
-      targetPort: redis
       protocol: TCP

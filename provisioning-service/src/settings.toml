@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Provisioning service base defaults.
+# This file documents all supported configuration keys and their defaults.
+# Do NOT put environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. PROVISIONING_* environment variables
+#   2. config/config-<profile>.yml  (selected by ACTIVE_PROFILES)
+#   3. config/config.yml
+#   4. This file
+#
+# For local development: copy config/config-local.yml.example to
+# config/config-local.yml and set ACTIVE_PROFILES=local in .env.
+# ---------------------------------------------------------------------------
+
+# HTTP server
+host = "0.0.0.0"
+port = 8081
+log_level = "info"
+
+# Database
+# Defaults to SQLite so a fresh checkout works without any setup.
+# Override to PostgreSQL for production via config-production.yml.
+database_url = "sqlite:///provisioning.db"
+
+# Ansible
+ansible_cfg = ""  # Path to ansible.cfg; set via active profile (e.g. config-docker.yml)
+ansible_timeout_seconds = 1800
+default_vm_host = "ww1"
+
+# Ansible filesystem paths.
+# Set to absolute paths via your active profile or PROVISIONING_* env vars.
+# The Dockerfile bakes in the /opt paths; local dev overrides via config-local.yml.
+playbook_path = "/opt/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+inventory_path = "/opt/compute-provisioning-iac/ansible/inventory/hosts"
+management_vars_path = "/opt/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
+
+# Golden image credentials.
+# Used when image_setup_type=golden. Set via config-production.yml or env vars.
+# Never commit real values here.
+golden_root_ssh_filename = ""
+golden_root_ssh_password = ""
+golden_image_name = ""
+golden_gcs_bucket = ""
+golden_gcs_project = ""
+
+# Worker concurrency
+max_concurrent_jobs = 5
+
+# Retry
+default_max_retries = 3
+retry_backoff_initial_seconds = 60
+retry_backoff_multiplier = 2.0
+retry_backoff_max_seconds = 3600
+
+# Errors that bypass retry logic
+non_retryable_errors = [
+    "Invalid SSH key",
+    "VM target not found",
+    "Permission denied",
+    "Authentication failed",
+    "Host unreachable",
+    "Operation timed out",
+    "Connection refused",
+    "UNREACHABLE",
+    "Failed to get \"resize\" lock",
+    "Is another process using the image",
+    "Cannot determine IP address for VM",
+    "failed to get domain",
+    "Domain not found",
+]
+
+# FRP tunneling defaults (per-request values take precedence)
+frp_server_addr = ""
+frp_domain = ""
+frp_dashboard_password = ""
+
+# Authentication
+enable_auth = false
+registry_url = ""
+registry_cache_ttl_seconds = 300
+registry_cache_max_size = 256
+
+# Rate limiting
+enable_rate_limiting = false
+rate_limit_requests_per_minute = 30

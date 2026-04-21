@@ -1,0 +1,21 @@
+# ---------------------------------------------------------------------------
+# Profile: local
+# Copy this file to config-local.yml and set ACTIVE_PROFILES=local in .env.
+# config-local.yml is gitignored and never committed.
+# ---------------------------------------------------------------------------
+
+# Uncomment to use PostgreSQL instead of the default SQLite:
+# database_url: "postgresql+psycopg2://postgres:postgres@localhost:5432/provisioning"
+
+# Override Ansible paths to your local checkout of compute-provisioning-iac:
+# playbook_path: "/home/you/code/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+# inventory_path: "/home/you/code/compute-provisioning-iac/ansible/inventory/hosts"
+# management_vars_path: "/home/you/code/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
+
+# Enable auth against a local registry instance:
+# enable_auth: true
+# registry_url: "http://localhost:8080"
+
+# Golden image credentials for local testing:
+# golden_root_ssh_filename: "id_ed25519"
+# golden_root_ssh_password: "yourpassword"

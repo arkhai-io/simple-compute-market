@@ -1,0 +1,25 @@
+# BuildKit per-Dockerfile ignore (requires DOCKER_BUILDKIT=1)
+# Deny everything, then allowlist what the build needs.
+
+*
+
+# ── provisioning-service ───────────────────────────────────────
+!provisioning-service/pyproject.toml
+!provisioning-service/uv.lock
+!provisioning-service/src/
+
+# ── compute-provisioning-iac (Ansible only, no Terraform) ───────────
+!compute-provisioning-iac/ansible/
+
+# Exclude sensitive / generated files inside ansible/
+compute-provisioning-iac/ansible/inventory/management-vars.yaml
+compute-provisioning-iac/ansible/keys/
+compute-provisioning-iac/ansible/ansible.log
+
+# ── Global excludes ─────────────────────────────────────────────────
+**/.git
+**/.venv
+**/__pycache__
+**/.env*
+**/terraform/
+**/.DS_Store

@@ -39,7 +39,7 @@ build-core:
 	cd core && make build
 
 build-provisioning:
-	cd async-provisioning-service && make build
+	cd provisioning-service && make build
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
@@ -83,7 +83,7 @@ deploy-agents:
 	cd core && make deploy
 
 deploy-provisioning:
-	cd async-provisioning-service && make deploy
+	cd provisioning-service && make deploy
 
 test-deployment:
 	cd integration-tests && make test

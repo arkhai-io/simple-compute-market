@@ -20,7 +20,7 @@ The stack is designed so that in production, multiple independent seller nodes e
 | Agent runtime framework | Google ADK (`google.adk`) |
 | Services framework | FastAPI + uvicorn |
 | VM automation | Ansible (via `compute-provisioning-iac` submodule) |
-| Job queue | Redis |
+| Job queue | In-process `asyncio.Queue` (no external queue dependency) |
 | Overlay networking (optional) | ZeroTier |
 | Local dev chain | Anvil (Foundry) |
 
@@ -45,9 +45,9 @@ The stack is designed so that in production, multiple independent seller nodes e
                                  ┌────────▼────────────────┐
                                  │ async-provisioning-svc  │
                                  │   API  :8081  (FastAPI) │
-                                 │   Worker (separate proc)│
+                                 │   Job loop (in-process) │
                                  └────────┬────────────────┘
-                                          │ Redis queue
+                                          │ asyncio.Queue
                                  ┌────────▼────────────────┐
                                  │  Ansible playbooks      │
                                  │  (compute-provisioning- │
@@ -185,29 +185,31 @@ The agent maintains a SQLite database (`AGENT_DB_PATH`) containing policy config
 
 ---
 
-### `async-provisioning-service`
+### `provisioning-service`
 
 **Role:** Physical settlement layer. Converts completed on-chain agreements into running VMs.
 
-Split into two processes sharing a Redis queue and a SQLite/PostgreSQL database:
+A unified single-process service: the FastAPI app and the background job processing loop run together in one uvicorn process.
 
 ```
-Agent ──HTTP──▶ Provisioning API :8081 ──Redis──▶ Worker ──ansible-playbook──▶ KVM host
-                      │                               │
-                      └── job DB (SQLite/Postgres) ───┘
-                                                      │
-                                              Worker Admin API :8082
+Agent ──HTTP──▶ Provisioning API :8081
+                      │         │
+                      │    asyncio.Queue (in-process)
+                      │         │
+                      └── job DB (SQLite/Postgres)
+                                │
+                         Job Processing Loop
+                                │
+                         ansible-playbook──▶ KVM host
 ```
 
-**Why Redis + two processes instead of a single process?**
-
-The split exists because Ansible playbooks run as blocking subprocesses that can take up to 30 minutes (`ANSIBLE_TIMEOUT_SECONDS=1800`). Running them inside the same process as the FastAPI request handler would block the event loop. Redis provides the decoupling: the API process stays responsive to new job submissions, status queries, and cancellations while the worker handles long-running Ansible executions. The worker itself runs up to `MAX_CONCURRENT_JOBS` (default 5) jobs concurrently using asyncio tasks + a semaphore. An alternative would have been a thread pool or a separate async process per job, but a named queue also opens the door to multiple worker instances (though shared state in the DB would need care). There is no documented justification in the codebase for why this wasn't implemented as a single process with SQLite, as the agent uses — it appears to have been a deliberate architectural choice for scalability headroom rather than a current necessity.
+Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launched as non-blocking subprocesses via `asyncio.create_task`. The event loop stays responsive to new requests while playbooks run. Up to `max_concurrent_jobs` (default 5) jobs run in parallel, controlled by an `asyncio.Semaphore`. The in-process `asyncio.Queue` replaces the former Redis queue; the service has no external queue dependency.
 
 ---
 
 #### Job Lifecycle
 
-Jobs are tracked in the `provisioning_jobs` database table. Status transitions:
+Jobs are tracked in the `ansible_jobs` database table. Status transitions:
 
 ```
 queued ──▶ running ──▶ succeeded
@@ -307,7 +309,7 @@ Useful for pre-flight capacity checking before a `create` job.
 
 #### Provisioning API Endpoints (`main.py` / `api/routes.py`, port `8081`)
 
-- `GET  /health` — checks API, database, and Redis connectivity; returns `{"status": "ok"|"degraded", "checks": {...}}`
+- `GET  /health` — checks API, database connectivity, and job processing loop liveness; returns `{"status": "ok"|"degraded", "checks": {...}}`
 - `POST /jobs` — submit a provisioning job; returns `{"job_id": "...", "status": "queued"}`; accepts `X-Agent-ID` header (required when auth is enabled)
 - `GET  /jobs` — list jobs with pagination (`offset`/`limit`), status filter, sort; authenticated agents see only their own jobs (seller or buyer role)
 - `GET  /jobs/{job_id}` — full job status including params, result, error, and retry metadata
@@ -315,11 +317,11 @@ Useful for pre-flight capacity checking before a `create` job.
 - `GET  /jobs/{job_id}/logs` — raw Ansible stdout+stderr for the job; credentials are redacted in storage but paths/keys may appear; logs update in near-real-time while job is running
 - `POST /jobs/{job_id}/cancel` — cancels a queued job, or sends `SIGTERM` to the Ansible PID if the job is running
 
-#### Worker Admin API Endpoints (`worker.py`, port `8082`)
+#### Ansible Diagnostic Endpoints (unified API, port `8081`)
 
-Runs as a second FastAPI server inside the worker process. Exposed as a separate Kubernetes Service in the Helm chart (`worker-api`). Port-forwarded to `localhost:8082` by `make forward`.
+Previously a separate worker admin API on port 8082; now folded into the main API under `/api/v1/ansible/`.
 
-- `GET /health` — checks worker process is alive and Redis is reachable
+- `GET /health` — checks API, database, and job processing loop liveness
 - `GET /inventory` — parses the Ansible INI inventory file and returns all hosts with their `ansible_host` values and inline vars; supports `?search=<substring>` for hostname filtering
 - `GET /inventory/{host}/connectivity` — runs `ansible -m ping` against a single named host, exercising the complete auth path (inventory parse → SSH key → Ansible execute); returns `{"reachable": true/false, "detail": "..."}` — returns HTTP 200 either way, only 404 if host not in inventory
 
@@ -338,32 +340,68 @@ Runs as a second FastAPI server inside the worker process. Exposed as a separate
 | What are the resource usage stats for a running VM? | Submit a `monitor` job |
 | Did the lease-end cleanup actually run? | SSH to KVM host: `cat /var/log/vm-lease-end/<vm_name>/lease_end_*.log` — no API visibility |
 | What `at` jobs are pending on the host? | SSH to KVM host: `atq` — no API visibility |
-| Is a VM stuck in `running` state in Ansible mid-job? | `GET /jobs/{id}` — `process_id` field gives the Ansible PID on the worker container |
+| Is a VM stuck in `running` state in Ansible mid-job? | `GET /api/v1/jobs/{id}` — `process_id` field gives the Ansible PID (same container as the API) |
 
 ---
 
 **Key source layout:**
 ```
-async-provisioning-service/src/async_provisioning_service/
-├── api/
-│   ├── routes.py           # FastAPI endpoints (provisioning API, port 8081)
-│   ├── schemas.py          # ProvisionRequest, ProvisionStatusResponse, Credential schemas
-│   ├── auth.py             # Agent auth (ENABLE_AUTH)
-│   └── rate_limit.py
+provisioning-service/src/
+├── controllers/
+│   ├── jobs_controller.py      # POST/GET /api/v1/jobs — submit, list, status, credentials, logs, cancel
+│   ├── ansible_controller.py   # GET /api/v1/ansible/inventory, /inventory/{host}/connectivity
+│   └── health_controller.py    # GET /health — DB probe + job loop liveness
 ├── services/
-│   ├── provisioning.py     # Ansible invocation: start_playbook, wait_for_playbook, output parsing
-│   ├── job_processor.py    # Worker loop, retry logic, credential extraction, log streaming
-│   ├── queue.py            # Redis LPUSH/BRPOP queue (simple list, job IDs only)
-│   └── management_vars.py  # Golden image credential helper (management-vars.yaml)
+│   ├── ansible_service.py      # Sole subprocess boundary — all ansible/ansible-playbook invocations
+│   ├── provisioning_service.py # VM-ops playbook orchestration: vars file build + output parsing
+│   └── job_service.py          # AnsibleJobService — full job lifecycle + background processing loop
+├── models/
+│   ├── jobs.py                 # ProvisionRequest, ProvisionStatusResponse, CredentialListResponse, etc.
+│   └── ansible.py              # InventoryHost, InventoryResponse, ConnectivityResult
+├── middleware/
+│   ├── auth.py                 # AgentAuthMiddleware (ERC-8004 X-Agent-ID enforcement)
+│   └── rate_limit.py           # AgentRateLimitMiddleware (sliding window per agent)
 ├── db/
-│   ├── models.py           # ProvisioningJob + Credential SQLAlchemy models
+│   ├── models.py               # AnsibleJob + Credential SQLAlchemy models (table: ansible_jobs)
 │   └── database.py
-├── config.py               # All settings (ports, paths, retry config, non-retryable errors)
-├── main.py                 # Provisioning API entrypoint (port 8081)
-└── worker.py               # Worker entrypoint — job loop + admin API (port 8082)
+├── config/
+│   ├── config.yml              # Environment schema (mostly empty — structure documentation)
+│   ├── config-docker.yml       # IaC paths + ansible_cfg for standalone container runs
+│   └── config-local.yml.example  # Developer override template (copy to config-local.yml)
+├── container.py                # dependency-injector DeclarativeContainer
+├── config.py                   # Profile-aware dynaconf loader
+├── settings.toml               # Committed base defaults
+└── main.py                     # FastAPI app + lifespan (starts job processing loop)
 ```
 
 > **TODO:** Document FRP topology in detail — where does the FRP server live, how does the buyer reach their VM's SSH port through it.
+
+---
+
+#### Configuration System
+
+The provisioning service uses a profile-based configuration system. Resolution order (highest priority first):
+
+1. `PROVISIONING_*` environment variables — last-resort escape hatch only
+2. `config/config-<profile>.yml` files (one per entry in `ACTIVE_PROFILES`)
+3. `config/config.yml` (environment schema — mostly empty, documents structure)
+4. `settings.toml` (committed base defaults)
+
+**Available profiles:**
+- `local` — developer overrides; copy `config/config-local.yml.example` to `config/config-local.yml` (gitignored) and set `ACTIVE_PROFILES=local` in `.env`
+- `docker` — baked into the image via `ENV ACTIVE_PROFILES="docker"`; supplies IaC paths and `ansible_cfg` for standalone container runs
+- `production` — used in Kubernetes; rendered from Helm `values.yaml` into a ConfigMap mounted at `CONFIG_DIRECTORY`
+
+**Why `ENV` vars are not used for application config:**
+
+Environment variables are the highest-priority override layer. Baking application config into `ENV` instructions in a Dockerfile means any operator trying to change a value via a ConfigMap or profile file is silently overridden — the opposite of the intended behaviour. The Dockerfile therefore only sets `ACTIVE_PROFILES` and `CONFIG_DIRECTORY`, which tell the loader *where* to find config. All application settings travel through the profile file layer.
+
+The one exception is `ANSIBLE_CONFIG`: this is consumed by the `ansible-playbook` subprocess via `os.environ` rather than by Python code, so it cannot travel through dynaconf. It is read from `settings.ansible_cfg` at lifespan startup and written to `os.environ` before the first playbook run.
+
+**Helm ConfigMap approach:**
+
+The Helm chart renders the entire `config:` block from `values.yaml` directly into `config-production.yml` using `{{ .Values.config | toYaml }}`. The Deployment sets only `ACTIVE_PROFILES=production` and `CONFIG_DIRECTORY=/app/config`. Adding a new config key requires only a `values.yaml` change — no Deployment template changes needed.
+
 
 ---
 
@@ -386,27 +424,25 @@ There are three distinct inputs the provisioning service needs from outside the 
 
 **1. SSH private key** (`~/.ssh/id_ed25519`)
 
-The worker needs this to authenticate when Ansible opens SSH connections to KVM hosts. Two delivery mechanisms exist:
+The provisioning service needs this to authenticate when Ansible opens SSH connections to KVM hosts. The key is always delivered via **bind mount or volume mount** — never via env var:
 
-- **`SSH_PRIVATE_KEY` env var** — `start-worker.sh` decodes it (base64 or raw PEM) and writes it to `~/.ssh/id_ed25519` at startup. The Helm chart uses this: key is in a Kubernetes `Secret` (loaded via `--set-file provisioning.sshKey.sshPrivateKey=~/.ssh/id_ed25519` at deploy time), injected as an env var. The mechanism is adequate for a single shared key.
-- **Volume mount** — compose bind-mounts `${HOME}/.ssh/id_ed25519` directly. No env var needed.
+- **Local / compose** — `docker run -v ~/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro` (wired in `make docker-run-dev` and `make deploy-provisioning`)
+- **Kubernetes** — the key is stored in a Kubernetes `Secret` (created via `--set-file provisioning.sshKey.sshPrivateKey=~/.ssh/id_ed25519` or a pre-existing Secret) and mounted as a volume at `/home/appuser/.ssh/id_ed25519` with `defaultMode: 0400`
+
+The `start-worker.sh` script that previously decoded `SSH_PRIVATE_KEY` from an env var and wrote the file has been removed. The `start-api.sh` entrypoint has been removed too; the Dockerfile uses a direct `CMD ["uvicorn", ...]`.
 
 The current design assumes a single SSH key for all KVM hosts. A real seller fleet will have hosts added at different times under different keys. The database-backed host registry in the TODO below should store a key reference per host rather than one global key.
 
-The provisioning service config uses `pydantic-settings` with env vars directly. The integration test suite uses a more composable `dynaconf`-based pattern: `settings.toml` for defaults, profile YAML files layered on top (`config-<profile>.yml`), and `ARKHAI_*` env var overrides — with a Helm `ConfigMap` rendering the active profile file from `global.*` values and mounting it into pods. Adopting this pattern for the provisioning service would cleanly replace the current startup-script-writes-files approach with mounted config files and a proper profile system.
-
 ---
 
-**2. `management-vars.yaml`** (`compute-provisioning-iac/ansible/inventory/management-vars.yaml`)
+**2. Golden image credentials**
 
-Contains golden image credentials (`root_ssh_filename`, `root_ssh_password`) and GCS/Packer variables (`gcs_bucket_url`, `gcs_project_id`, image names). These are **singleton values applying to the entire deployment** — every KVM host uses the same golden image configuration. There is no per-host variation.
+Golden image credentials (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`, `golden_gcs_bucket`, `golden_gcs_project`) are first-class keys in `settings.toml` and the config profile system.
 
-Current delivery:
-- **`MANAGEMENT_VARS_YAML` env var** — decoded and written to the fixed path by `start-worker.sh`. Same pattern as the SSH key.
-- **Helm gap** — the env var exists in the Dockerfile but is not wired in the Helm template. If unset, the container falls back to whatever was baked in from the submodule at build time (typically empty).
-- **In-process cache** — `management_vars.py` caches on first load with no invalidation path. Updates require a process restart.
+- **Locally** — set in `config/config-local.yml`
+- **In Kubernetes** — set in the `config:` block of Helm `values.yaml`; rendered into `config-production.yml` by the ConfigMap and mounted at `CONFIG_DIRECTORY`
 
-Since these are singleton non-inventory variables, there is no reason for them to live in a separate YAML file at all. They should be first-class Helm values: non-secret fields (GCS bucket, image names, Packer config) rendered into a `ConfigMap`; secret fields (root SSH password, golden image credentials) into a Kubernetes `Secret`. The ConfigMap would be mounted as a YAML file at the path `management_vars_path` expects — exactly the pattern the integration tests already use with `config-helm.yml` generated from `global.*` Helm values and mounted into test pods. This eliminates the `MANAGEMENT_VARS_YAML` env-var-to-file injection entirely and removes the dependency on the submodule's directory structure for runtime configuration.
+The `management-vars.yaml` file and `ManagementVarsService` class have been removed. Golden image config no longer has a separate YAML file or service class.
 
 ---
 
@@ -414,7 +450,7 @@ Since these are singleton non-inventory variables, there is no reason for them t
 
 This is the central problem. The inventory lists all KVM hosts with their IPs, SSH users, and key paths. **There is no mechanism for updating it at runtime:**
 
-- No `INVENTORY_INI` env var that `start-worker.sh` could write to disk (unlike the SSH key and management vars, which both have this).
+- No mechanism to inject inventory content at runtime — the file is baked into the image from the IaC submodule at build time.
 - The Helm chart has no Secret, ConfigMap, or volume mount for the hosts file.
 - `INVENTORY_PATH` redirects where the file is read from but provides no way to get content there.
 - In compose the entire `compute-provisioning-iac` directory is bind-mounted (live-editable). In Kubernetes it is baked into the image.
@@ -428,10 +464,9 @@ A provisioning worker belongs to a single seller whose inventory changes dynamic
 
 **Near-term (unblock operators without a full database redesign):**
 
-1. Add `INVENTORY_INI` env var support to `start-worker.sh`, parallel to the existing `SSH_PRIVATE_KEY` and `MANAGEMENT_VARS_YAML` patterns. The script writes the value to the inventory path on startup.
-2. Wire a `--set-file provisioning.inventory.hostsFile=./hosts` option in the Helm chart, stored as a Kubernetes `Secret` (the file contains IPs and SSH usernames), injected as `INVENTORY_INI` into the worker pod — parallel to what was done for `sshKey.sshPrivateKey`.
-3. Add a `PUT /inventory` endpoint to the worker admin API that accepts an INI-format body and atomically overwrites the on-disk inventory file. This gives operators a REST path to update the hosts list without a redeploy. The existing `GET /inventory` already serves the read side.
-4. Promote `management-vars` fields to first-class Helm values using the `config-helm.yml` ConfigMap pattern from the integration test suite. Eliminate the `MANAGEMENT_VARS_YAML` env-var-to-file injection.
+1. Add a `PROVISIONING_INVENTORY_INI` env var (or a ConfigMap key in `config-production.yml`) whose value is written to a temp file and passed to Ansible via `-i`. This gives Kubernetes operators a path to inject inventory without rebuilding the image.
+2. Wire a `--set-file provisioning.inventory.hostsFile=./hosts` option in the Helm chart, stored as a Kubernetes `Secret` (the file contains IPs and SSH usernames), mounted at the `inventory_path` location.
+3. Add a `PUT /api/v1/ansible/inventory` endpoint that accepts an INI-format body and atomically overwrites the on-disk inventory file. The existing `GET /api/v1/ansible/inventory` already serves the read side.
 
 **Long-term (database-backed host registry):**
 
@@ -608,7 +643,7 @@ Config is schema-validated against YAML schemas in `cli/config/` (agent, provisi
 
 ```
 compose/market.yml   — test-env (Anvil) + erc-8004-registry
-compose/seller.yml   — seller agent + provisioning API + provisioning worker + Redis
+compose/seller.yml   — seller agent + provisioning service (unified)
 compose/buyer.yml    — buyer agent
 compose/external.yml — (unclear — TODO)
 ```
@@ -632,7 +667,7 @@ helm/
     ├── test-env/           # Anvil node (condition: test-env.enabled)
     ├── registry/           # erc-8004-registry-py (condition: registry.enabled)
     ├── agents/             # buyer + seller agents (condition: agents.enabled)
-    ├── provisioning/       # API + worker + Redis (condition: provisioning.enabled)
+    ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
 ```
 
@@ -643,15 +678,15 @@ helm/
 | `test-env` | 1 (Anvil) | 1 NodePort :8545 |
 | `registry` | 1 | 1 NodePort :8080 |
 | `agents` | 2 (buyer, seller) | 2 ClusterIP (buyer :8000, seller :8001) |
-| `provisioning` | 3 (API, worker, Redis) | 3 ClusterIP (API :8081, worker :8082, Redis :6379) |
+| `provisioning` | 1 (unified API + job loop) | 1 ClusterIP (:8081) |
 
 **Startup ordering** is enforced by init containers:
 - Both agents wait on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
-- Both provisioning containers (API and worker) wait on Redis (`redis-cli ping`) before starting
+- The provisioning container has no init containers or startup dependencies
 
 **Secrets:**
 - Agent private keys + wallet addresses → `Secret` per agent (buyer/seller), sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
-- SSH private key for Ansible → `Secret` injected via `--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE)` at deploy time; written to `~/.ssh/id_ed25519` inside the worker container by `start-worker.sh`
+- SSH private key for Ansible → `Secret` mounted as a volume at `/home/appuser/.ssh/id_ed25519` (mode 0400); set via `--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE)` at deploy time or by providing a pre-existing Secret
 
 **Global values** propagated to all subcharts:
 - `global.imageRepository` — optional registry prefix for all images
@@ -677,7 +712,7 @@ localhost:8080  → registry
 localhost:8000  → buyer agent
 localhost:8001  → seller agent
 localhost:8081  → provisioning API
-localhost:8082  → provisioning worker admin API
+localhost:8081  → provisioning API (also handles ansible inventory + connectivity endpoints)
 ```
 
 **Helm test suite:**
@@ -729,7 +764,8 @@ make build
 | `AGENT_DB_PATH` | core | SQLite path for policy/order/resource state |
 | `PROVISIONING_MODE` | core | `http` / `mock` / `ansible` |
 | `PROVISIONING_URL` | core | URL of async-provisioning-service API |
-| `REDIS_URL` | provisioning | Redis connection for job queue |
+| `ACTIVE_PROFILES` | provisioning | Comma-separated profile names; selects `config/config-<profile>.yml` files |
+| `CONFIG_DIRECTORY` | provisioning | Directory containing config YAML files (default: `/app/src/config`) |
 | `ALKAHEST_ADDRESS_CONFIG_PATH` | core | JSON with Alkahest contract addresses (anvil only) |
 
 ---
@@ -746,7 +782,7 @@ make build
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
 
-- **Provisioning SQLite split-brain in Kubernetes:** The API and worker run in separate pods with no shared volume. Both default to `sqlite:///provisioning.db`, which resolves to a local file inside each pod. The API pod writes new job rows; the worker pod reads from its own separate file and never sees them. This is silently broken in the current Helm deployment. Requires switching to PostgreSQL (already scaffolded in `DATABASE_URL`) or a shared PersistentVolumeClaim before Kubernetes deployment is viable.
+- ~~**Provisioning SQLite split-brain in Kubernetes:**~~ **Resolved.** The API and worker are now a single process in one pod; there is no inter-process shared state. SQLite is safe for single-pod use. Switching to PostgreSQL remains straightforward via `database_url` in the production config profile.
 
 ---
 
@@ -754,15 +790,7 @@ make build
 
 The following items represent known architectural deficiencies in `async-provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.
 
-### 1. Collapse Redis queue + worker into a single process
-
-**Problem:** The current two-process design (API + worker communicating through a Redis queue and a shared database) was built for scalability headroom that doesn't exist yet, at the cost of significant operational complexity. The database is currently SQLite, which cannot actually be shared between processes in Kubernetes, making the architecture simultaneously over-engineered for its current scale and silently broken in its deployment target. Using a database as a message-passing mechanism between processes is also poor design independent of the SQLite problem.
-
-**Planned fix:** Collapse the worker into the API process. The job processing loop runs as a background asyncio task inside the same uvicorn process. Redis is eliminated entirely. The job queue becomes an in-process asyncio queue or simply a DB poll. SQLite continues to be used for job state persistence, with a clear path to PostgreSQL if horizontal scaling is ever needed — at that point, an external DB makes the shared-state problem trivially solvable.
-
-**Impact:** Eliminates Redis as a dependency, removes the split-brain SQLite problem, simplifies the Helm chart (one Deployment, one Service instead of three), simplifies local development, and removes the need for the worker admin API to exist as a separate port. The worker admin endpoints (`/inventory`, `/inventory/{host}/connectivity`) should be folded into the main API.
-
-### 2. Replace the generic `ProvisionRequest` design with a typed REST API per operation
+### 1. Replace the generic `ProvisionRequest` design with a typed REST API per operation
 
 **Problem:** All twelve Ansible operations are submitted through a single `POST /jobs` endpoint that accepts a generic `ProvisionRequest` with a `vm_action` string field. This has several consequences:
 
@@ -794,18 +822,18 @@ Each endpoint has its own typed request and response schema, its own OpenAPI doc
 
 **Scope note:** This does not require changing the Ansible layer at all — `vm-operations.yaml` with its `vm_action` dispatch continues to work unchanged. The change is entirely in the Python API surface.
 
-### 3. Implement reliable lease expiry detection
+### 2. Implement reliable lease expiry detection
 
 **Problem:** The current lease mechanism schedules a Unix `at` daemon job on the KVM host at the moment `lease_end` is called. After that, the provisioning service has no further awareness of whether the lease timer fired, whether the cleanup script ran, or whether the VM was actually destroyed. There is no polling, no callback, no record in the provisioning database. If the `at` daemon is not running, if the KVM host reboots before the lease time, or if the agent never calls `lease_end` at all (e.g., due to a crash), the VM runs indefinitely.
 
-**Planned fix:** Implement a lease expiry watchdog inside the provisioning service (collapsed into the single process per item 1 above). Design options to evaluate:
+**Planned fix:** Implement a lease expiry watchdog inside the provisioning service. Design options to evaluate:
 
 - **Option A — DB-driven polling loop:** When a `lease_end` job succeeds, write the `vm_name`, `vm_host`, and `lease_end_utc` to a `vm_leases` table. A background task wakes periodically (e.g., every minute), queries for leases past their expiry time, and submits a destroy + cleanup job for each. This makes the provisioning service the authoritative lease timer rather than the KVM host's `at` daemon. The `at`-based scheduling in the Ansible playbook would be retired.
 - **Option B — polling the `at` queue:** Submit a `check` job against the host periodically to verify that expected `at` jobs are still pending. This is fragile and doesn't solve the "agent never called lease_end" case.
 
 Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
 
-### 4. Full VM lifecycle visibility and operator intervention API
+### 3. Full VM lifecycle visibility and operator intervention API
 
 **Problem:** The current API gives operators no way to understand or intervene in the full lifecycle of a VM without SSH access to the KVM host. The data center admin UX requirement is:
 
@@ -819,12 +847,127 @@ The specific gaps in the current implementation:
 - The worker admin API's `/inventory` and `/inventory/{host}/connectivity` endpoints expose Ansible-level diagnostics but not VM-level state.
 - Cancellation exists at the job level (SIGTERM to the Ansible process) but not at the VM level (there is no "tear down this VM regardless of what state it's in").
 
-**Planned fix:** The typed REST API from item 2 addresses most of the discovery and operation gaps. Additionally:
+**Planned fix:** The typed REST API from item 1 addresses most of the discovery and operation gaps. Additionally:
 
 - **VM state cache:** After each successful job, write the resulting VM state to a `vms` table (name, host, status, lease_end, last_job_id, updated_at). The VM list endpoint reads from this table for fast queries without submitting a new Ansible job. A periodic reconciliation job (via the watchdog from item 3) can submit `monitor` jobs to verify cached state against ground truth.
-- **Lease table:** Per item 3, leases are tracked in the DB with their full lifecycle (scheduled, confirmed-running, expired, cleanup-succeeded, cleanup-failed).
+- **Lease table:** Per item 2, leases are tracked in the DB with their full lifecycle (scheduled, confirmed-running, expired, cleanup-succeeded, cleanup-failed).
 - **Per-VM job history:** `GET /vms/{vm_name}/jobs` returns all jobs that have ever touched a VM, with their status, params, result, and Ansible logs. This gives an operator the complete history to diagnose any stuck or unexpected state.
 - **Mock provisioning parity:** The mock provisioning implementation used in development and testing should implement the same state machine as the real Ansible path, so lifecycle testing can be done without hardware. The current mock (`mock_provisioning.py`) is a stub that returns success immediately; it should model state transitions (creating → running → lease-expiring → destroyed) so full lifecycle scenarios can be exercised via REST against a local deployment.
+
+---
+
+
+## Testing Strategy
+
+This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
+
+### Four-Level Hierarchy
+
+#### 1. Unit Tests
+
+**What they cover:** Classes in isolation. A unit test instantiates one class, passes in mocked collaborators for all injected dependencies, and asserts on the return value or side effects of a specific method.
+
+**What they do not cover:** Orchestration — if a function's sole purpose is to call other functions in sequence, that function does not have meaningful unit tests. The correctness of the sequence is an integration test concern. Lower-level functions that are the final abstraction before an external boundary (a database write, a subprocess invocation) are similarly not meaningful to unit test in isolation; their behaviour is validated by integration tests against the real boundary or a well-defined mock of it.
+
+**What to focus on in this codebase:**
+- `ProvisioningService`: the `_build_vm_vars` method (YAML serialisation of every field combination), the `_extract_ssh_port` / `_extract_tenant_user` / `_extract_ansible_json` output parsers (regex and JSON extraction logic against representative playbook output strings).
+- `AnsibleJobService`: `_build_params` (dict → `ProvisioningParams` mapping), `_redact_logs` (regex redaction of passwords and key paths), `_calculate_retry_delay` (backoff arithmetic), `_should_retry_error` (error string matching), `_build_result_payload` (structured result assembly from `ProvisioningResult`).
+- `AnsibleService`: `parse_inventory` / `lookup_host_ip` (INI parsing logic against synthetic inventory strings).
+- `models/jobs.py`: `ProvisionRequest` Pydantic validation — the `@model_validator` cross-field rules (action-specific required fields, FRP password requirement).
+
+**Mocking convention:** Use `unittest.mock.MagicMock` / `AsyncMock` for injected collaborators. Do not patch module-level imports; instead, pass mocks in via the constructor (the DI design makes this natural).
+
+#### 2. Integration Tests
+
+**What they cover:** End-to-end HTTP request → response paths with the full application stack running (FastAPI app, real SQLite DB, DI container wired) and a controlled mock at the external I/O boundary. Orchestration logic, the job processing loop, retry behaviour, and error propagation are all validated here.
+
+**What they do not cover:** Every edge case of data transformation logic — that belongs in unit tests. Integration tests need one representative case per external mock behaviour, not exhaustive parametrisation.
+
+**External boundary definition:** Any I/O that crosses a process boundary. In this codebase that means:
+- Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
+- The ERC-8004 registry HTTP call in `AgentAuthMiddleware` — mocked via `httpx` response injection or by disabling auth (`PROVISIONING_ENABLE_AUTH=false` in test config)
+
+**Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance. Override container providers for `AnsibleService` before the test and restore them after:
+
+```python
+@pytest.fixture
+def mock_ansible(app):
+    mock = MagicMock(spec=AnsibleService)
+    mock.start_playbook.return_value = AnsibleRun(...)
+    mock.wait_for_playbook = AsyncMock(return_value=AnsibleResult(...))
+    app.container.ansible_service.override(mock)
+    yield mock
+    app.container.ansible_service.reset_override()
+```
+
+**State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions only for state that is not expressible through any API endpoint — this keeps integration tests honest about the API contract.
+
+**Async test discipline — no sleeps:** Tests that exercise the background job processing loop must never use `asyncio.sleep` or `await asyncio.wait_for(..., timeout=...)` to wait for side effects. These approaches always produce intermittent failures. The correct pattern is an `asyncio.Event` signalled from inside the mock:
+
+```python
+job_started = asyncio.Event()
+
+async def fake_start_playbook(*args, **kwargs):
+    job_started.set()
+    return AnsibleRun(...)
+
+mock_ansible.start_playbook = fake_start_playbook
+
+# Submit job via HTTP, then await the event — not a sleep
+await client.post("/api/v1/jobs", json={...})
+await job_started.wait()
+# Now assert on DB state, response, etc.
+```
+
+If the production class needs a small hook added (e.g., an optional `on_job_started` callback) to make a seam available for tests, that is acceptable and preferable to any sleep-based workaround. Seam hooks should be typed `Optional[Callable]` defaulting to `None` so they are invisible in production paths.
+
+#### 3. Smoke Tests (Deployment Validation)
+
+**What they cover:** Stateless, idempotent verification that a deployed stack is wired correctly — services can reach each other, authentication headers are enforced, health endpoints return 200, expected routes exist. These run as Helm test hooks in Kubernetes.
+
+**What they do not cover:** Service semantics. By the time a smoke test runs, the semantics have already been validated by integration tests. A smoke test for the provisioning service should verify that `GET /health` returns 200 and that `POST /api/v1/jobs` returns 401 without an `X-Agent-ID` header — it should not submit a real provisioning job and poll for completion.
+
+**Current location:** `helm/templates/tests/` as Kubernetes Job resources executed by `helm test`.
+
+#### 4. System Integration Tests (End-to-End)
+
+**What they cover:** Cross-service contracts — scenarios that require two or more services to interact over the network to produce a meaningful result. Examples: a buyer agent successfully negotiating with a seller agent and reaching a settled on-chain state; a provisioning job triggered by an agent completing and the buyer receiving credentials.
+
+**What they do not cover:** Anything already covered by the three levels above. System integration tests are expensive to run and brittle to maintain; they should be minimal in count and cover only the cross-service contract, not any service's internal logic.
+
+**Current location:** `integration-tests/tests/test_agents.py`. This is planned to move to a separate project as the stack matures.
+
+### Coverage Contract Between Levels
+
+Each level has a defined jurisdiction. Duplicating coverage across levels creates maintenance burden without safety benefit:
+
+| Concern | Unit | Integration | Smoke | System |
+|---|---|---|---|---|
+| Data transformation / parsing logic | ✅ exhaustive | one happy path | ❌ | ❌ |
+| Pydantic validation rules | ✅ exhaustive | ❌ | ❌ | ❌ |
+| Orchestration / job lifecycle | ❌ | ✅ exhaustive | ❌ | ❌ |
+| Retry / backoff arithmetic | ✅ | one case | ❌ | ❌ |
+| Auth middleware enforcement | ❌ | ✅ | one case | ❌ |
+| Service-to-service wiring | ❌ | ❌ | ✅ | ❌ |
+| Cross-service negotiation flow | ❌ | ❌ | ❌ | ✅ |
+
+### Test File Layout
+
+```
+async-provisioning-service/
+└── tests/
+    ├── unit/
+    │   ├── services/
+    │   │   ├── test_provisioning_service.py
+    │   │   ├── test_job_service.py
+    │   │   └── test_ansible_service.py
+    │   └── models/
+    │       └── test_jobs_models.py
+    └── integration/
+        ├── conftest.py          # app fixture, container overrides, DB setup
+        ├── test_jobs_api.py     # submit, list, get, cancel, credentials, logs
+        └── test_ansible_api.py  # inventory, connectivity endpoints
+```
 
 ---
 

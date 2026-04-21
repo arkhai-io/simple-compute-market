@@ -1,88 +1,81 @@
-# Default values for provisioning.
-# These are overridden by the parent chart's provisioning: block in values.yaml.
-# The registry URL is sourced from global.registry.host/port and is not
-# duplicated here.
+# Default values for the provisioning subchart.
+# These are overridden by the parent chart's provisioning: block.
 
 # ---------------------------------------------------------------------------
-# API server — exposes the provisioning REST API
+# Server
 # ---------------------------------------------------------------------------
-apiServer:
+server:
   image:
     repository: ""
     name: arkhai
-    tag: provisioning-api
+    tag: provisioning
     pullPolicy: IfNotPresent
   replicaCount: 1
   port: 8081
   type: ClusterIP
-  host: "0.0.0.0"
 
 # ---------------------------------------------------------------------------
-# Worker — pulls jobs from Redis and executes Ansible playbooks.
-# Also runs the worker API server on workerServer.port.
-# ---------------------------------------------------------------------------
-worker:
-  image:
-    repository: ""
-    name: arkhai
-    tag: provisioning-worker
-    pullPolicy: IfNotPresent
-  replicaCount: 1
-  # Multiple worker pods each run their own BRPOP loop; Redis ensures
-  # each job is dequeued exactly once. Total concurrency is
-  # replicaCount × max_concurrent_jobs (set via config).
-  port: 8082
-
-# ---------------------------------------------------------------------------
-# SSH private key used by the worker to authenticate against hypervisors.
+# SSH private key — used by Ansible to authenticate against hypervisors.
+#
+# The key is mounted as a Secret volume at /home/appuser/.ssh/id_ed25519.
 #
 # createSecret: true  — chart creates a Secret from sshPrivateKey below.
 #                       Use only for dev/test; do not commit real keys.
 # createSecret: false — chart expects a pre-existing Secret named secretName.
-#                       Create it manually:
-#                         kubectl create secret generic <name> \
-#                           --from-literal=sshPrivateKey="$(cat ~/.ssh/id_ed25519)"
+#                         kubectl create secret generic <n> \
+#                           --from-file=id_ed25519=~/.ssh/id_ed25519
 # ---------------------------------------------------------------------------
 sshKey:
   createSecret: true
-  secretName: ""        # auto-generated from fullname when empty
-  sshPrivateKey: ""     # raw PEM or base64-encoded private key
+  secretName: ""
+  sshPrivateKey: ""
 
 # ---------------------------------------------------------------------------
-# Shared application settings — map directly to env vars in both containers.
+# Application config — rendered into a ConfigMap as config-production.yml
+# and mounted at CONFIG_DIRECTORY inside the container.
+#
+# Keys use snake_case to match settings.toml directly. Only keys listed here
+# are rendered; omitted keys fall back to settings.toml defaults.
 # ---------------------------------------------------------------------------
 config:
-  logLevel: "info"
-  databaseUrl: "sqlite:///provisioning.db"
+  database_url: "sqlite:///provisioning.db"
 
-  # Redis queue
-  redisQueueName: "provisioning_jobs"
+  # Ansible paths — set to the IaC submodule location inside the container.
+  # Override here for environments that mount the IaC at a different path.
+  playbook_path: "/opt/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+  inventory_path: "/opt/compute-provisioning-iac/ansible/inventory/hosts"
+  management_vars_path: "/opt/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
 
-  # Ansible
-  ansibleTimeoutSeconds: 1800
-  defaultVmHost: "ww1"
+  # Ansible runtime
+  ansible_timeout_seconds: 1800
+  default_vm_host: "ww1"
 
-  # ZeroTier
-  zerotierNetwork: "88c5b1f339bbf5ab"
+  # Golden image credentials (leave empty unless using golden mode)
+  golden_root_ssh_filename: ""
+  golden_root_ssh_password: ""
+  golden_image_name: ""
+  golden_gcs_bucket: ""
+  golden_gcs_project: ""
 
-  # Authentication — disabled for local dev
-  enableAuth: false
-  registryCacheTtlSeconds: 300
-  registryCacheMaxSize: 256
+  # FRP tunneling
+  frp_server_addr: ""
+  frp_domain: ""
+  frp_dashboard_password: ""
 
-  # Rate limiting — disabled for local dev
-  enableRateLimiting: false
-  rateLimitRequestsPerMinute: 30
+  # Authentication
+  enable_auth: false
+  registry_url: ""
+  registry_cache_ttl_seconds: 300
+  registry_cache_max_size: 256
 
-# ---------------------------------------------------------------------------
-# Redis — internal job queue, private to this subchart
-# ---------------------------------------------------------------------------
-redis:
-  image: "redis:7-alpine"
-  port: 6379
-  pullPolicy: IfNotPresent
+  # Rate limiting
+  enable_rate_limiting: false
+  rate_limit_requests_per_minute: 30
 
-# Resource requests/limits applied to all containers – tune per environment.
+  # Logging
+  log_level: "info"
+
+# Resource requests/limits — tune per environment
 resources: {}
 #  requests:
 #    cpu: 100m
