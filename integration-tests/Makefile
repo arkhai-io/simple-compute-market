@@ -36,7 +36,7 @@ PYTHON_VERSION := 3.13
 build: build-images
 
 build-images:
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f Dockerfile .
+	cd .. && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) -f integration-tests/Dockerfile .
 	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
 
 # -----------------------------------------------------------------------

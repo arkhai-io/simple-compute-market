@@ -8,9 +8,13 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY src ./src
-COPY tests ./tests
-COPY pyproject.toml uv.lock ./
+# Workspace dependency: pyproject.toml references ../service via
+# [tool.uv.sources], so the service package must be present at the
+# parent-of-/app path (resolved as /service inside the image) before uv sync.
+COPY service /service
+COPY integration-tests/src ./src
+COPY integration-tests/tests ./tests
+COPY integration-tests/pyproject.toml integration-tests/uv.lock ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen
@@ -23,10 +27,11 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tests ./tests
-COPY config ./config
-COPY conftest.py .
-COPY pyproject.toml .
-COPY settings.toml .
+COPY --from=builder /service /service
+COPY integration-tests/config ./config
+COPY integration-tests/conftest.py .
+COPY integration-tests/pyproject.toml .
+COPY integration-tests/settings.toml .
 
 ENV PATH="/app/.venv/bin:$PATH"
 
