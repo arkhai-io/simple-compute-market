@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import sqlite3
 import uuid
 from datetime import datetime
@@ -10,11 +12,28 @@ from typing import Any
 from .config import CONFIG
 from .resource_csv_importer import upsert_resources_from_csv
 
+logger = logging.getLogger(__name__)
+
 
 class SQLiteClient:
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._ensure_parent_dir()
         self._ensure_tables_sync()
+
+    def _ensure_parent_dir(self) -> None:
+        # Resolve to absolute so log messages name the actual on-disk location,
+        # not something relative to a cwd the caller may not have set.
+        abs_path = os.path.abspath(self.db_path)
+        parent = os.path.dirname(abs_path) or "."
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Cannot create SQLite parent directory {parent!r} "
+                f"(resolved from db_path={self.db_path!r}): {exc}"
+            ) from exc
+        logger.info("SQLite db path resolved to %s", abs_path)
 
     def _ensure_tables_sync(self) -> None:
         conn = sqlite3.connect(self.db_path)
