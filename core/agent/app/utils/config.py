@@ -114,7 +114,6 @@ class Config:
     agent_priv_key: str
     agent_wallet_address: str
     alkahest_address_config_path: str | None
-    use_vertex_ai: bool
     agent_db_path: str
     event_validation_mode: str  # "warn" or "strict"
     enable_redis_ingest: bool
@@ -223,7 +222,6 @@ def load_config() -> Config:
         agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
         agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
         alkahest_address_config_path=os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"),
-        use_vertex_ai=_get_bool_env("GOOGLE_GENAI_USE_VERTEXAI", False),
         agent_db_path=os.getenv("AGENT_DB_PATH", "/tmp/agent.db"),
         event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),
         enable_redis_ingest=_get_bool_env("ENABLE_REDIS_INGEST", False),
@@ -276,23 +274,5 @@ def load_config() -> Config:
     )
 
 
-def ensure_google_defaults_if_needed(cfg: Config) -> None:
-    if not cfg.use_vertex_ai:
-        return
-    # Ensure GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are set if using Vertex AI.
-    if not os.getenv("GOOGLE_CLOUD_PROJECT"):
-        try:
-            import google.auth  # local import to avoid hard dep when not needed
-
-            _, project_id = google.auth.default()
-            if project_id:
-                os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project_id)
-        except Exception:
-            # Best-effort; downstream code can still rely on explicit envs.
-            pass
-    os.environ.setdefault("GOOGLE_CLOUD_LOCATION", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
-
-
 # Module-level singleton for convenience
 CONFIG = load_config()
-ensure_google_defaults_if_needed(CONFIG)

@@ -23,7 +23,6 @@ from typing import Any, Dict, Optional, Tuple
 from enum import Enum
 
 
-import google.auth
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
