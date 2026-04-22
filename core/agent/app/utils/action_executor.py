@@ -17,22 +17,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 from google.adk.agents import InvocationContext
-from google.adk.events import Event
 
 from core.agent.app.utils.stage_log import stage_event
-from google.adk.agents.remote_a2a_agent import (
-    AGENT_CARD_WELL_KNOWN_PATH,
-    RemoteA2aAgent,
-)
 
 from alkahest_py import (
     AlkahestClient,
     ArbitrationMode,
-    TrustedOracleArbiterDemandData,
 )
 import json
-
-from google.genai import types as genai_types
 
 from core.agent.app.schema.pydantic_models import (
     Action,
@@ -73,22 +65,95 @@ SSH_PUBLIC_KEY = CONFIG.ssh_public_key
 
 logger = logging.getLogger(__name__)
 
-# Fix 3: Per-negotiation dispatch lock — prevent parallel fan-out when both agents
-# respond synchronously (each A2A round-trip triggers a concurrent inbound invocation).
+# Per-negotiation dispatch lock — drops truly concurrent duplicate setups
+# when both agents respond to the same round in parallel.
 _negotiation_locks: dict[str, asyncio.Lock] = {}
-
-# Fix 4: Per-negotiation ADK session — we create one dedicated Session per negotiation
-# and reuse it every round. ADK's RemoteA2aAgent._construct_message_parts_from_session
-# reads a2a:context_id from session event history (not from ctx.session.id), so we must:
-# (a) reuse the same Session object each round to preserve event history, and
-# (b) append the response event to the session so the context_id is available next round.
-_negotiation_sessions: dict[str, Any] = {}  # negotiation_id → Session object
 
 
 def _release_negotiation_lock(negotiation_id: str) -> None:
-    """Release dispatch lock and session cache for a terminal negotiation."""
+    """Release the dispatch lock for a terminal negotiation."""
     _negotiation_locks.pop(negotiation_id, None)
-    _negotiation_sessions.pop(negotiation_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Outbound message dispatch (HTTP; replaces A2A send_to_remote_agent)
+# ---------------------------------------------------------------------------
+
+
+def _route_for_event(event_type_value: str, *, message_type: str | None = None) -> tuple[str, str]:
+    """Look up (schema_id, path) for an outbound event.
+
+    NegotiationEvent has two flavors (counter/exit), disambiguated here
+    via the `message_type` field on the event payload. All other events
+    map 1:1 from event_type.
+    """
+    from core.agent.app.utils.message_routes import OUTBOUND_ROUTING
+
+    if event_type_value == "negotiation":
+        key = f"negotiation.{message_type}" if message_type else "negotiation.counter"
+        if key not in OUTBOUND_ROUTING:
+            raise ValueError(
+                f"NegotiationEvent message_type={message_type!r} has no outbound route"
+            )
+        return OUTBOUND_ROUTING[key]
+
+    if event_type_value not in OUTBOUND_ROUTING:
+        raise ValueError(f"No outbound route for event_type={event_type_value!r}")
+    return OUTBOUND_ROUTING[event_type_value]
+
+
+async def dispatch_message(
+    *,
+    peer_url: str,
+    event_type: str,
+    payload: dict[str, Any],
+    message_type: str | None = None,
+) -> dict[str, Any]:
+    """Send an agent-to-agent message via HTTP. Awaits peer response.
+
+    `event_type` is the DomainEvent.event_type value (e.g. "make_offer").
+    `payload` becomes the envelope's payload field and should be JSON-safe
+    (no Pydantic models). Returns the peer's JSON ack.
+    """
+    from core.agent.app.schema.messages import build_envelope
+    from service.clients.agent_http import send_message
+
+    schema_id, path = _route_for_event(event_type, message_type=message_type)
+    # Ensure event_type is carried in the payload so the receiver's
+    # _parse_domain_event picks the right subclass.
+    payload = {**payload, "event_type": event_type}
+    envelope = build_envelope(
+        schema_id=schema_id,
+        payload=payload,
+        sender=BASE_URL_OVERRIDE or "",
+    )
+    return await send_message(peer_url=peer_url, path=path, envelope=envelope)
+
+
+def dispatch_message_background(
+    *,
+    peer_url: str,
+    event_type: str,
+    payload: dict[str, Any],
+    message_type: str | None = None,
+) -> None:
+    """Fire-and-forget version of dispatch_message.
+
+    Use from inside an inbound request handler (execute_action /
+    _run_async_impl) where awaiting the peer's response would deadlock
+    if both sides try to respond in-line.
+    """
+    from core.agent.app.schema.messages import build_envelope
+    from service.clients.agent_http import send_and_forget
+
+    schema_id, path = _route_for_event(event_type, message_type=message_type)
+    payload = {**payload, "event_type": event_type}
+    envelope = build_envelope(
+        schema_id=schema_id,
+        payload=payload,
+        sender=BASE_URL_OVERRIDE or "",
+    )
+    send_and_forget(peer_url=peer_url, path=path, envelope=envelope)
 
 
 def _serialize_decision(decision: Any) -> Any:
@@ -505,40 +570,28 @@ async def execute_action(
                             )
                     except Exception as exc:
                         logger.warning("[TRUST] Failed to update/close buyer order after arbitration: %s", exc)
-            if ctx:
-                # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
-                counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
-                counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-                if not counterparty_url:
-                    raise ValueError(
-                        f"trust_compute_obligation_fulfillment: cannot send arbitration result — "
-                        f"unresolved counterparty reference={counterparty_ref!r}"
-                    )
-                try:
-                    event = Event(
-                        author=AGENT_ID,
-                        content=genai_types.Content(
-                            role="model",
-                            parts=[
-                                genai_types.Part.from_function_response(
-                                    name=EventType.ARBITRATION_COMPLETE.value,
-                                    response={
-                                        "event_type": EventType.ARBITRATION_COMPLETE.value,
-                                        "decisions": decisions,
-                                        "fulfillment_uid": result.get("fulfillment_uid"),
-                                        "oracle_address": result.get("oracle_address"),
-                                        "escrow_uid": result.get("escrow_uid"),
-                                        "status": result.get("status"),
-                                    },
-                                )
-                            ],
-                        ),
-                        invocation_id=ctx.invocation_id,
-                        branch=ctx.branch,
-                    )
-                    _background_send(ctx, event, agent_url=counterparty_url)
-                except Exception as send_err:
-                    logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
+            # Counterparty to notify is whoever sent the fulfillment (source of the trust action).
+            counterparty_ref = parameters.get("counterparty_url") or parameters.get("agent_url")
+            counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
+            if not counterparty_url:
+                raise ValueError(
+                    f"trust_compute_obligation_fulfillment: cannot send arbitration result — "
+                    f"unresolved counterparty reference={counterparty_ref!r}"
+                )
+            try:
+                dispatch_message_background(
+                    peer_url=counterparty_url,
+                    event_type=EventType.ARBITRATION_COMPLETE.value,
+                    payload={
+                        "decisions": decisions,
+                        "fulfillment_uid": result.get("fulfillment_uid"),
+                        "oracle_address": result.get("oracle_address"),
+                        "escrow_uid": result.get("escrow_uid"),
+                        "status": result.get("status"),
+                    },
+                )
+            except Exception as send_err:
+                logger.warning("[ACTION] Failed to send arbitration result to remote agent: %s", send_err)
             outcome["result"] = result
             outcome["message"] = "Fulfillment trusted; arbitration completed"
 
@@ -694,131 +747,6 @@ async def execute_action(
     return outcome
 
 
-def connect_to_remote_agent(agent_url: str | None = None):
-    """Connect to a remote agent by URL."""
-    if agent_url is None:
-        raise ValueError("[A2A] send_to_remote_agent called with no agent_url")
-    resolved_agent_url = _coerce_agent_reference_to_url(agent_url)
-    if not resolved_agent_url or not _is_http_url(resolved_agent_url):
-        raise ValueError(f"Unable to resolve valid remote agent URL from reference '{agent_url}'")
-    agent_url = resolved_agent_url
-    agent_card_url = f"{agent_url.rstrip('/')}{AGENT_CARD_WELL_KNOWN_PATH}"
-    
-    # Sanitize URL to create valid identifier (remove protocol, slashes, colons)
-    # e.g., "http://localhost:8000/" -> "localhost_8000"
-    sanitized_name = agent_url.replace("http://", "").replace("https://", "").replace("/", "_").replace(":", "_").replace(".", "_")
-    # Remove trailing underscores and ensure it starts with letter/underscore
-    sanitized_name = sanitized_name.rstrip("_")
-    if sanitized_name and sanitized_name[0].isdigit():
-        sanitized_name = f"agent_{sanitized_name}"
-    if not sanitized_name:
-        sanitized_name = "remote_agent"
-    
-    remote_agent = RemoteA2aAgent(
-        name=sanitized_name,
-        description="A helpful AI assistant trading compute resources with others.",
-        agent_card=agent_card_url,
-    )
-    return remote_agent
-
-async def send_to_remote_agent(
-    ctx: InvocationContext,
-    event: Event,
-    remote_agent: RemoteA2aAgent = None,
-    agent_url: str | None = None
-):
-    """Takes an event and sends it to a specified remote agent via A2A.
-
-    Args:
-        ctx: Invocation context
-        event: Event to send
-        remote_agent: Pre-constructed RemoteA2aAgent (optional)
-        agent_url: Agent URL to connect to (optional, used if remote_agent is None)
-
-    Examples of Events:
-        Text:
-            Event(
-                author=self.name,
-                content=genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part.from_text(text="Offer successfully received.")],
-                ),
-                invocation_id=ctx.invocation_id,
-                branch=ctx.branch,
-            )
-
-        Structured:
-            Event(
-                author=self.name,
-                content=genai_types.Content(
-                    role="model",
-                    parts=[
-                        genai_types.Part.from_function_response(
-                            name="make_offer",
-                            response={
-                                "event_type": EventType.MAKE_OFFER,
-                                "offer": order
-                            })
-                        ],
-                ),
-                invocation_id=ctx.invocation_id,
-                branch=ctx.branch,
-            )
-    """
-    if remote_agent is None:
-        remote_agent = connect_to_remote_agent(agent_url)
-
-    logger.info(f"[A2A] Sending event to remote agent: {event}")
-
-    await ctx.session_service.append_event(ctx.session, event)
-    async for event in remote_agent.run_async(ctx):
-        if event.is_final_response():
-            logger.info(f"[A2A] Received from remote agent: {event}")
-            # Append the response so ADK's _construct_message_parts_from_session
-            # can read a2a:context_id from event.custom_metadata on the next round,
-            # enabling the remote task_manager to route to the existing A2A task.
-            try:
-                await ctx.session_service.append_event(ctx.session, event)
-            except Exception as e:
-                logger.debug("[A2A] Could not append response event to session: %s", e)
-            return event
-
-
-def _background_send(
-    ctx: InvocationContext,
-    event: Event,
-    agent_url: str,
-) -> None:
-    """Schedule send_to_remote_agent as a background asyncio task.
-
-    Use this whenever an outbound A2A send is triggered from *within* an incoming
-    A2A request handler (execute_action / _run_async_impl).  Awaiting
-    send_to_remote_agent in that context blocks the handler until the peer
-    responds — when both sides do this simultaneously the result is a 600-second
-    deadlock while each waits for the other.
-    """
-    async def _safe_send() -> None:
-        try:
-            # Use a fresh session so the background send is not contaminated by
-            # the current handler's session history.  By the time this task runs
-            # the original handler has already returned and appended its response
-            # event to ctx.session — reusing that session causes ADK to replay the
-            # full exchange history to the peer instead of just the new event,
-            # resulting in "Cannot parse empty payload as DomainEvent" on the
-            # receiver because the last part is the old response text, not the
-            # new function_response payload.
-            fresh_session = await ctx.session_service.create_session(
-                app_name=ctx.session.app_name,
-                user_id=ctx.session.user_id,
-            )
-            fresh_ctx = ctx.model_copy(update={"session": fresh_session})
-            await send_to_remote_agent(fresh_ctx, event, agent_url=agent_url)
-        except Exception as exc:
-            logger.warning("[A2A] Background send to %s failed: %s", agent_url, exc)
-
-    asyncio.create_task(_safe_send())
-
-
 async def _fulfill_in_background(
     *,
     alkahest_client,
@@ -903,24 +831,13 @@ async def _fulfill_in_background(
                 logger.warning("[FULFILL_BG] Could not mark negotiation thread terminal after fulfillment: %s", _term_err)
 
         # Send fulfillment to buyer
-        result["event_type"] = EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value
-        if ctx and counterparty_url:
+        if counterparty_url:
             try:
-                event = Event(
-                    author=AGENT_ID,
-                    content=genai_types.Content(
-                        role="model",
-                        parts=[
-                            genai_types.Part.from_function_response(
-                                name=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-                                response=result,
-                            )
-                        ],
-                    ),
-                    invocation_id=ctx.invocation_id,
-                    branch=ctx.branch,
+                dispatch_message_background(
+                    peer_url=counterparty_url,
+                    event_type=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
+                    payload={k: v for k, v in result.items() if k != "event_type"},
                 )
-                _background_send(ctx, event, agent_url=counterparty_url)
             except Exception as send_err:
                 logger.warning("[FULFILL_BG] Failed to send fulfillment to remote agent: %s", send_err)
     else:
@@ -965,30 +882,18 @@ async def _fulfill_in_background(
                 logger.warning("[FULFILL_BG] Failed to reopen seller order %s: %s", matched_order_id, reopen_err)
 
         # 3. Notify buyer of failure
-        if ctx and counterparty_url:
+        if counterparty_url:
             try:
-                failure_payload = {
-                    "event_type": EventType.FULFILLMENT_FAILED.value,
-                    "escrow_uid": escrow_uid,
-                    "reason": error_msg,
-                    "seller_order_id": matched_order_id,
-                    "buyer_order_id": buyer_order_id,
-                }
-                event = Event(
-                    author=AGENT_ID,
-                    content=genai_types.Content(
-                        role="model",
-                        parts=[
-                            genai_types.Part.from_function_response(
-                                name=EventType.FULFILLMENT_FAILED.value,
-                                response=failure_payload,
-                            )
-                        ],
-                    ),
-                    invocation_id=ctx.invocation_id,
-                    branch=ctx.branch,
+                dispatch_message_background(
+                    peer_url=counterparty_url,
+                    event_type=EventType.FULFILLMENT_FAILED.value,
+                    payload={
+                        "escrow_uid": escrow_uid,
+                        "reason": error_msg,
+                        "seller_order_id": matched_order_id,
+                        "buyer_order_id": buyer_order_id,
+                    },
                 )
-                _background_send(ctx, event, agent_url=counterparty_url)
                 logger.info("[FULFILL_BG] Sent fulfillment_failed notification to buyer at %s", counterparty_url)
             except Exception as send_err:
                 logger.warning("[FULFILL_BG] Failed to send failure notification to buyer: %s", send_err)
@@ -1212,13 +1117,12 @@ def _extract_initial_price_from_order(order: MarketOrder | dict) -> int:
 
 async def counter_offer(
     *,
-    ctx: InvocationContext | None,
+    ctx: InvocationContext | None = None,
     parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Send a counter offer in a negotiation."""
     parameters = parameters or {}
 
-    # Use type-safe parameter extraction
     params = CounterOfferParams.from_dict(parameters)
     if not params:
         return {
@@ -1226,17 +1130,9 @@ async def counter_offer(
             "message": "Missing required counter_offer parameters (negotiation_id, order_id, proposed_price, our_price, their_price)",
         }
 
-    if ctx is None:
-        return {
-            "status": "error",
-            "message": "No invocation context available for counter_offer",
-        }
-
-    # Per-negotiation dispatch lock — drop truly concurrent duplicate setups.
-    # The lock is held ONLY during the setup phase (DB write + event build + session
-    # lookup). It is released BEFORE the blocking A2A dispatch so that when the remote
-    # agent fires back synchronously (within the same call stack), the next legitimate
-    # round can acquire the lock and proceed without being suppressed.
+    # Per-negotiation dispatch lock — drop truly concurrent duplicate
+    # setups. Held only during the setup phase (DB write + payload build),
+    # released before the fire-and-forget dispatch.
     neg_id = params.negotiation_id
     lock = _negotiation_locks.setdefault(neg_id, asyncio.Lock())
     if lock.locked():
@@ -1247,27 +1143,22 @@ async def counter_offer(
             "negotiation_id": neg_id,
         }
 
-    # Phase 1: setup — hold lock for DB write + event build + session lookup only
     async with lock:
-        dispatch_args = await _prepare_counter_offer(ctx=ctx, params=params)
+        prepared = await _prepare_counter_offer(params=params)
 
-    if dispatch_args is None:
+    if prepared is None:
         return {"status": "error", "message": "counter_offer setup failed"}
 
-    # Phase 2: A2A dispatch — lock already released; remote may fire back immediately
-    return await _dispatch_counter_offer(**dispatch_args)
+    return await _dispatch_counter_offer(**prepared)
 
 
 async def _prepare_counter_offer(
     *,
-    ctx: InvocationContext,
     params: CounterOfferParams,
 ) -> dict[str, Any] | None:
-    """Setup phase for counter_offer (executed under the negotiation lock).
+    """Setup phase: registry lookup + thread DB write + payload construction.
 
-    Performs all work that must be atomic: registry lookup, DB write, event construction,
-    and ADK session lookup/creation. Returns a dict of args for _dispatch_counter_offer,
-    or None on error.
+    Returns a dict of args for _dispatch_counter_offer, or None on error.
     """
     try:
         registry_client = get_registry_client()
@@ -1277,7 +1168,6 @@ async def _prepare_counter_offer(
             return None
 
         their_agent_id = order.get("order_maker")
-
         if not their_agent_id:
             logger.warning(f"[ACTION] Order {params.order_id} missing 'order_maker' field.")
         elif not their_agent_id.startswith(("http://", "https://")):
@@ -1318,7 +1208,6 @@ async def _prepare_counter_offer(
 
         event_payload = {
             "event_id": f"neg_{uuid.uuid4()}",
-            "event_type": EventType.NEGOTIATION.value,
             "negotiation_id": params.negotiation_id,
             "message_type": "counter_proposal",
             "sender": _sender_id(),
@@ -1330,43 +1219,8 @@ async def _prepare_counter_offer(
             },
         }
 
-        event = Event(
-            author=AGENT_ID,
-            content=genai_types.Content(
-                role="model",
-                parts=[
-                    genai_types.Part.from_function_response(
-                        name="counter_offer",
-                        response=event_payload,
-                    )
-                ],
-            ),
-            invocation_id=ctx.invocation_id,
-            branch=ctx.branch,
-        )
-
-        # Fix 4: Use a dedicated long-lived ADK session per negotiation.
-        # ADK's RemoteA2aAgent reads a2a:context_id from session event history
-        # (_construct_message_parts_from_session). Reusing the same Session object
-        # preserves that history, so each round carries the correct contextId and the
-        # remote task_manager routes to the existing task (avoids O(n²) accumulation).
-        neg_session = _negotiation_sessions.get(params.negotiation_id)
-        if neg_session is None:
-            neg_session = await ctx.session_service.create_session(
-                app_name=ctx.session.app_name,
-                user_id=ctx.session.user_id,
-            )
-            _negotiation_sessions[params.negotiation_id] = neg_session
-            logger.info(
-                "[COUNTER_OFFER] Created dedicated negotiation session %s for negotiation %s",
-                neg_session.id,
-                params.negotiation_id,
-            )
-
-        neg_ctx = ctx.model_copy(update={"session": neg_session})
         return {
-            "neg_ctx": neg_ctx,
-            "event": event,
+            "event_payload": event_payload,
             "their_agent_id": their_agent_id,
             "params": params,
         }
@@ -1377,41 +1231,19 @@ async def _prepare_counter_offer(
 
 async def _dispatch_counter_offer(
     *,
-    neg_ctx: InvocationContext,
-    event: Event,
+    event_payload: dict[str, Any],
     their_agent_id: str | None,
     params: CounterOfferParams,
 ) -> dict[str, Any]:
-    """Dispatch phase for counter_offer: send the A2A message (no lock held)."""
+    """Dispatch phase: fire-and-forget HTTP send."""
     neg_id = params.negotiation_id
-
-    async def _send_and_refresh() -> None:
-        try:
-            await send_to_remote_agent(neg_ctx, event, agent_url=their_agent_id)
-        except Exception as exc:
-            logger.warning("[A2A] Background send to %s failed: %s", their_agent_id, exc)
-            return
-        # Re-fetch session after dispatch so _negotiation_sessions holds a live reference.
-        # InMemorySessionService.append_event may produce a new Session object internally,
-        # making the stored reference stale and causing _construct_message_parts_from_session
-        # to miss the a2a:context_id on the next round (Fix 4).
-        try:
-            updated = await neg_ctx.session_service.get_session(
-                app_name=neg_ctx.session.app_name,
-                user_id=neg_ctx.session.user_id,
-                session_id=neg_ctx.session.id,
-            )
-            if updated:
-                _negotiation_sessions[neg_id] = updated
-                logger.debug(
-                    "[COUNTER_OFFER] Re-fetched session %s after background send: %d events",
-                    neg_ctx.session.id,
-                    len(updated.events),
-                )
-        except Exception as exc:
-            logger.debug("[COUNTER_OFFER] Could not re-fetch negotiation session: %s", exc)
-
-    asyncio.create_task(_send_and_refresh())
+    if their_agent_id:
+        dispatch_message_background(
+            peer_url=their_agent_id,
+            event_type=EventType.NEGOTIATION.value,
+            payload=event_payload,
+            message_type="counter",
+        )
     stage_event("negotiation", "counter_sent",
         negotiation_id=neg_id,
         our_order_id=params.our_order_id,
@@ -1457,7 +1289,7 @@ async def exit_negotiation(
             await txn.mark_terminal(negotiation_id, "failure")
         logger.info("[ACTION] Marked negotiation %s as failed (reason: %s)", negotiation_id, reason)
 
-    if ctx and their_order_id:
+    if their_order_id:
         try:
             registry_client = get_registry_client()
             order = await registry_client.get_order(their_order_id)
@@ -1466,26 +1298,18 @@ async def exit_negotiation(
                 if their_agent_id:
                     exit_payload = {
                         "event_id": f"exit_{uuid.uuid4()}",
-                        "event_type": EventType.NEGOTIATION.value,
                         "negotiation_id": negotiation_id,
                         "message_type": "exit",
                         "sender": _sender_id(),
                         "source": BASE_URL_OVERRIDE,
                         "data": {"reason": reason},
                     }
-                    event = Event(
-                        author=AGENT_ID,
-                        content=genai_types.Content(
-                            role="model",
-                            parts=[genai_types.Part.from_function_response(
-                                name="exit_negotiation",
-                                response=exit_payload,
-                            )],
-                        ),
-                        invocation_id=ctx.invocation_id,
-                        branch=ctx.branch,
+                    dispatch_message_background(
+                        peer_url=their_agent_id,
+                        event_type=EventType.NEGOTIATION.value,
+                        payload=exit_payload,
+                        message_type="exit",
                     )
-                    await send_to_remote_agent(ctx, event, agent_url=their_agent_id)
                     logger.info("[ACTION] Notified counterparty of negotiation exit: %s", their_agent_id)
         except Exception as e:
             logger.warning("[ACTION] Failed to notify counterparty of exit: %s", e)
@@ -1588,7 +1412,7 @@ async def accept_offer(
             )
 
     # Multi-bilateral: notify each superseded counterparty so they can requeue their order.
-    if ctx and canceled:
+    if canceled:
         for entry in canceled:
             try:
                 their_agent_url = entry.get("their_agent_id")
@@ -1598,28 +1422,20 @@ async def accept_offer(
                     continue
                 exit_payload = {
                     "event_id": f"exit_{uuid.uuid4()}",
-                    "event_type": EventType.NEGOTIATION.value,
                     "negotiation_id": competing_neg_id,
                     "message_type": "exit",
                     "sender": _sender_id(),
                     "source": BASE_URL_OVERRIDE,
                     "data": {"reason": "order_accepted_elsewhere"},
                 }
-                exit_event = Event(
-                    author=AGENT_ID,
-                    content=genai_types.Content(
-                        role="model",
-                        parts=[genai_types.Part.from_function_response(
-                            name="exit_negotiation",
-                            response=exit_payload,
-                        )],
-                    ),
-                    invocation_id=ctx.invocation_id,
-                    branch=ctx.branch,
-                )
                 competing_url = _coerce_agent_reference_to_url(their_agent_url)
                 if competing_url:
-                    await send_to_remote_agent(ctx, exit_event, agent_url=competing_url)
+                    dispatch_message_background(
+                        peer_url=competing_url,
+                        event_type=EventType.NEGOTIATION.value,
+                        payload=exit_payload,
+                        message_type="exit",
+                    )
                     logger.info(
                         "[ACCEPT_OFFER] Sent exit_negotiation to competing counterparty %s "
                         "(negotiation=%s, their_order=%s)",
@@ -1838,21 +1654,12 @@ async def _accept_as_buyer(
     if not counterparty_url:
         raise ValueError(f"accept_offer (buyer): cannot send acceptance — unresolved counterparty={counterparty_ref!r}")
 
-    if ctx is None:
-        logger.warning("[TOOL] No invocation context; acceptance not sent.")
-        return {**event_payload, "status": "pending", "message": "No invocation context available"}
-
-    event = Event(
-        author=AGENT_ID,
-        content=genai_types.Content(
-            role="model",
-            parts=[genai_types.Part.from_function_response(name="accept_offer", response=event_payload)],
-        ),
-        invocation_id=ctx.invocation_id,
-        branch=ctx.branch,
-    )
     logger.info("[TOOL] Buyer accepting offer, notifying seller: %s", counterparty_url)
-    _background_send(ctx, event, agent_url=counterparty_url)
+    dispatch_message_background(
+        peer_url=counterparty_url,
+        event_type=EventType.ACCEPT_OFFER.value,
+        payload=event_payload,
+    )
     return {
         "status": "sent",
         "message": "Offer matched.",
@@ -1904,19 +1711,6 @@ async def _accept_as_seller(
     if not counterparty_url:
         raise ValueError(f"accept_offer (seller): cannot notify buyer — unresolved counterparty={counterparty_ref!r}")
 
-    if ctx is None:
-        logger.warning("[TOOL] No invocation context; seller acceptance not sent.")
-        return {**event_payload, "status": "pending", "message": "No invocation context available"}
-
-    event = Event(
-        author=AGENT_ID,
-        content=genai_types.Content(
-            role="model",
-            parts=[genai_types.Part.from_function_response(name="accept_offer", response=event_payload)],
-        ),
-        invocation_id=ctx.invocation_id,
-        branch=ctx.branch,
-    )
     logger.info("[TOOL] Seller signalling acceptance to buyer (no escrow yet): %s", counterparty_url)
     stage_event("settlement", "seller_accepted",
         our_order_id=our_order_id,
@@ -1924,7 +1718,11 @@ async def _accept_as_seller(
         agreed_price=parameters.get("their_price"),
         counterparty_url=counterparty_url,
     )
-    _background_send(ctx, event, agent_url=counterparty_url)
+    dispatch_message_background(
+        peer_url=counterparty_url,
+        event_type=EventType.ACCEPT_OFFER.value,
+        payload=event_payload,
+    )
     return {
         "status": "sent",
         "message": "Order matched.",
@@ -1993,20 +1791,13 @@ def create_order(
 
 async def _find_and_send_matching_offers(
     order_dict: dict,
-    ctx: InvocationContext | None = None,
-    event: Event | None = None,
 ) -> dict:
-    """Helper function to find matching orders and send offers.
-    
-    This function is used by both make_offer() and the retry mechanism.
-    
-    Args:
-        order_dict: Order dictionary to match against
-        ctx: Invocation context (optional, for retries)
-        event: Event object (optional, will be created if not provided)
-    
-    Returns:
-        Result dictionary with status and details
+    """Find matching orders and HTTP-POST offers to each.
+
+    Transport is always agent_http now (no more A2A session plumbing), so
+    the function no longer takes ctx/event. Callers still receive the
+    same result shape for backward compatibility with the make_offer
+    return path.
     """
     if not CONFIG.enable_registry_discovery:
         return {
@@ -2091,26 +1882,7 @@ async def _find_and_send_matching_offers(
         # For retries without context, we just log matches - actual offers will be sent
         # when other agents query the registry and find our orders
         results = []
-        if ctx and event:
-            # Create event if not provided
-            if event is None:
-                event = Event(
-                    author=AGENT_ID,
-                    content=genai_types.Content(
-                        role="model",
-                        parts=[
-                            genai_types.Part.from_function_response(
-                                name="make_offer",
-                                response={
-                                    "event_type": EventType.MAKE_OFFER.value,
-                                    "offer": order_dict
-                                })
-                        ],
-                    ),
-                    invocation_id=ctx.invocation_id,
-                    branch=ctx.branch,
-                )
-            
+        if agent_urls:
             # Send offer to each matching agent
             for idx, agent_url in enumerate(agent_urls):
                 try:
@@ -2169,45 +1941,21 @@ async def _find_and_send_matching_offers(
                             logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
 
                     logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
-                    # Build a per-agent event that includes buyer_order_id so the
-                    # buyer can update their local record without a fuzzy DB lookup.
-                    if matched_order_id:
-                        offer_with_ref = {**order_dict, "buyer_order_id": matched_order_id}
-                        per_agent_event = Event(
-                            author=AGENT_ID,
-                            content=genai_types.Content(
-                                role="model",
-                                parts=[
-                                    genai_types.Part.from_function_response(
-                                        name="make_offer",
-                                        response={
-                                            "event_type": EventType.MAKE_OFFER.value,
-                                            "offer": offer_with_ref,
-                                        },
-                                    )
-                                ],
-                            ),
-                            invocation_id=ctx.invocation_id,
-                            branch=ctx.branch,
+                    # Build a per-agent payload that echoes buyer_order_id so the
+                    # receiver can update its local record without a fuzzy DB lookup.
+                    offer_with_ref = {**order_dict, "buyer_order_id": matched_order_id} if matched_order_id else order_dict
+                    try:
+                        result = await dispatch_message(
+                            peer_url=agent_url,
+                            event_type=EventType.MAKE_OFFER.value,
+                            payload={"offer": offer_with_ref},
                         )
-                    else:
-                        per_agent_event = event
-                    result = await send_to_remote_agent(ctx, per_agent_event, agent_url=agent_url)
-                    if result:
-                        results.append({"agent_url": agent_url, "result": result})
+                        if result:
+                            results.append({"agent_url": agent_url, "result": result})
+                    except Exception as send_exc:
+                        logger.warning("[REGISTRY] Offer dispatch to %s failed: %s", agent_url, send_exc)
                 except Exception as e:
                     logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
-        elif agent_urls:
-            # For retries without context, just log that matches were found
-            # The bidirectional matching means other agents will discover our order
-            logger.info(f"[REGISTRY] Found {len(agent_urls)} matching agents for order {order_id} (retry mode - matches logged)")
-            return {
-                "status": "matches_found",
-                "message": f"Found {len(agent_urls)} matching orders (retry mode - offers will be sent when other agents query)",
-                "order": order_dict,
-                "targets": agent_urls,
-                "matched_order_ids": matched_order_ids,
-            }
         
         if results:
             logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
@@ -2333,27 +2081,9 @@ async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest
         except Exception as e:
             logger.warning(f"[REGISTRY] Failed to publish order to registry: {e}")
     
-    # Create the event
-    event = Event(
-        author=AGENT_ID,
-        content=genai_types.Content(
-            role="model",
-            parts=[
-                genai_types.Part.from_function_response(
-                    name="make_offer",
-                    response={
-                        "event_type": EventType.MAKE_OFFER.value,
-                        "offer": order_dict
-                    })
-            ],
-        ),
-        invocation_id=ctx.invocation_id,
-        branch=ctx.branch,
-    )
-    
     # Try registry discovery if enabled
     if CONFIG.enable_registry_discovery:
-        result = await _find_and_send_matching_offers(order_dict, ctx, event)
+        result = await _find_and_send_matching_offers(order_dict)
         
         # Return appropriate result based on status
         if result.get("status") == "success":

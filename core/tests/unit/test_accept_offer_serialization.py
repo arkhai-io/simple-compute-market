@@ -59,17 +59,23 @@ class TestAcceptOfferSerialization:
     async def test_event_payload_is_json_serializable_when_order_contains_pydantic_objects(
         self, order_dict_with_pydantic_objects
     ):
-        """accept_offer must send a JSON-serializable event payload even when
-        parameters['order'] is a dict containing Pydantic model instances."""
+        """accept_offer must send a JSON-serializable payload even when
+        parameters['order'] is a dict containing Pydantic model instances.
+
+        Regression intent: Pydantic reprs like `ComputeResource(...)` or
+        `GPUModel.H200` used to leak into the outbound payload and break
+        `ast.literal_eval` on the receiving agent. With HTTP transport
+        the payload is `json.dumps`-ed directly, so non-JSON-safe values
+        would crash the send rather than confuse the receiver — but the
+        invariant is the same: everything must be primitive.
+        """
         from core.agent.app.utils.action_executor import accept_offer
 
-        captured_events = []
+        captured_payloads = []
 
-        def mock_fire_and_forget(ctx, event, *, agent_url):
-            captured_events.append(event)
+        def mock_fire_and_forget(*, peer_url, event_type, payload, message_type=None):
+            captured_payloads.append({"peer_url": peer_url, "event_type": event_type, "payload": payload})
 
-        # seller-as-maker: order_maker == BASE_URL_OVERRIDE and offer_resource is compute
-        # → _we_are_compute_buyer returns False → goes through _accept_as_seller (no alkahest)
         our_url = "http://seller:8001"
         parameters = {
             "order_id": order_dict_with_pydantic_objects["order_id"],
@@ -88,38 +94,31 @@ class TestAcceptOfferSerialization:
         mock_txn.add_message = AsyncMock()
         mock_txn.mark_terminal = AsyncMock()
 
-        mock_ctx = MagicMock()
-        mock_ctx.invocation_id = "test-invocation-id"
-        mock_ctx.branch = "test-branch"
-
         with (
             patch("core.agent.app.utils.action_executor.NegotiationThreadTransaction", return_value=mock_txn),
             patch("core.agent.app.utils.action_executor.get_sqlite_client", return_value=AsyncMock()),
             patch("core.agent.app.utils.action_executor.get_registry_client", return_value=AsyncMock()),
-            patch("core.agent.app.utils.action_executor._background_send", side_effect=mock_fire_and_forget),
+            patch("core.agent.app.utils.action_executor.dispatch_message_background", side_effect=mock_fire_and_forget),
             patch("core.agent.app.utils.action_executor.BASE_URL_OVERRIDE", our_url),
             patch("core.agent.app.utils.action_executor.AGENT_ID", "arkhai_seller_agent"),
             patch("core.agent.app.utils.action_executor.SSH_PUBLIC_KEY", None),
             patch("core.agent.app.utils.action_executor.CONFIG", MagicMock(enable_registry_discovery=False)),
         ):
-            await accept_offer(alkahest_client=None, ctx=mock_ctx, parameters=parameters)
+            await accept_offer(alkahest_client=None, ctx=None, parameters=parameters)
 
-        assert len(captured_events) == 1, "Expected exactly one A2A event to be sent"
-        response = captured_events[0].content.parts[0].function_response.response
+        assert len(captured_payloads) == 1, "Expected exactly one HTTP dispatch"
+        payload = captured_payloads[0]["payload"]
 
-        # Must be fully JSON-serializable — this is what ADK will str()-format into the
-        # text part that the receiving agent parses with safe_literal_eval.
         try:
-            json.dumps(response)
+            json.dumps(payload)
         except (TypeError, ValueError) as exc:
-            pytest.fail(f"Event response is not JSON-serializable: {exc}\nresponse={response}")
+            pytest.fail(f"Payload is not JSON-serializable: {exc}\npayload={payload}")
 
-        # Specifically no Python class repr strings that break ast.literal_eval on the receiver.
-        response_str = str(response)
-        assert "ComputeResource(" not in response_str, "ComputeResource repr leaked into payload"
-        assert "TokenResource(" not in response_str, "TokenResource repr leaked into payload"
-        assert "GPUModel." not in response_str, "GPUModel enum repr leaked into payload"
-        assert "Region." not in response_str, "Region enum repr leaked into payload"
+        payload_str = str(payload)
+        assert "ComputeResource(" not in payload_str, "ComputeResource repr leaked into payload"
+        assert "TokenResource(" not in payload_str, "TokenResource repr leaked into payload"
+        assert "GPUModel." not in payload_str, "GPUModel enum repr leaked into payload"
+        assert "Region." not in payload_str, "Region enum repr leaked into payload"
 
     @pytest.mark.asyncio
     async def test_event_payload_preserves_values_after_serialization(
@@ -128,10 +127,10 @@ class TestAcceptOfferSerialization:
         """Serialization must not drop or corrupt values."""
         from core.agent.app.utils.action_executor import accept_offer
 
-        captured_events = []
+        captured_payloads = []
 
-        def mock_fire_and_forget(ctx, event, *, agent_url):
-            captured_events.append(event)
+        def mock_fire_and_forget(*, peer_url, event_type, payload, message_type=None):
+            captured_payloads.append(payload)
 
         our_url = "http://seller:8001"
         parameters = {
@@ -150,24 +149,20 @@ class TestAcceptOfferSerialization:
         mock_txn.add_message = AsyncMock()
         mock_txn.mark_terminal = AsyncMock()
 
-        mock_ctx = MagicMock()
-        mock_ctx.invocation_id = "test-invocation-id"
-        mock_ctx.branch = "test-branch"
-
         with (
             patch("core.agent.app.utils.action_executor.NegotiationThreadTransaction", return_value=mock_txn),
             patch("core.agent.app.utils.action_executor.get_sqlite_client", return_value=AsyncMock()),
             patch("core.agent.app.utils.action_executor.get_registry_client", return_value=AsyncMock()),
-            patch("core.agent.app.utils.action_executor._background_send", side_effect=mock_fire_and_forget),
+            patch("core.agent.app.utils.action_executor.dispatch_message_background", side_effect=mock_fire_and_forget),
             patch("core.agent.app.utils.action_executor.BASE_URL_OVERRIDE", our_url),
             patch("core.agent.app.utils.action_executor.AGENT_ID", "arkhai_seller_agent"),
             patch("core.agent.app.utils.action_executor.SSH_PUBLIC_KEY", None),
             patch("core.agent.app.utils.action_executor.CONFIG", MagicMock(enable_registry_discovery=False)),
         ):
-            await accept_offer(alkahest_client=None, ctx=mock_ctx, parameters=parameters)
+            await accept_offer(alkahest_client=None, ctx=None, parameters=parameters)
 
-        response = captured_events[0].content.parts[0].function_response.response
-        offer = response["offer"]
+        payload = captured_payloads[0]
+        offer = payload["offer"]
 
         assert offer["order_id"] == "f44d70df-9745-4c3b-b59a-9fc1cffc8a56"
         assert offer["offer_resource"]["gpu_model"] == "H200"

@@ -18,12 +18,10 @@ import os
 import random
 import uuid
 from datetime import datetime
-import ast
 from alkahest_py import AlkahestClient
 from typing import AsyncGenerator, Any, Dict, Optional, Tuple
 from typing_extensions import override
 from enum import Enum
-import re
 
 
 import google.auth
@@ -135,49 +133,6 @@ MAX_OUTCOME_JSON_CHARS = 100_000
 MAX_PAST_EXPERIENCES = 5
 
 
-INCOMING_A2A_PATTERN = re.compile(
-    r"""\[(?P<agent>[^\]]+)\] `(?P<tool>[^`]+)` tool returned result: (?P<payload>\{.*\})*$""",
-    re.DOTALL
-)
-
-# Convert "<EventType.MAKE_OFFER: 'make_offer'>" → "'make_offer'"
-ENUM_REPR_PATTERN = re.compile(
-    r"<[A-Za-z_][\w.]*:\s*'([^'\\]*(?:\\.[^'\\]*)*)'>"
-)
-
-def normalize_enums(payload_text: str) -> str:
-    """
-    Replace enum reprs like <Enum.Member: 'value'> with just 'value'.
-    Handles escaped quotes inside the value.
-    """
-    return ENUM_REPR_PATTERN.sub(r"'\1'", payload_text)
-
-
-def safe_literal_eval(payload_text: str, *, max_len: int = 50_000) -> Any:
-    """
-    Safely parse a Python-literal string (dict/list/tuple/set/str/num/bool/None).
-    Guards against large inputs and rejects non-literals.
-
-    Raises:
-        TypeError, ValueError on invalid input or policy violations.
-    """
-    if not isinstance(payload_text, str):
-        raise TypeError("payload must be a string")
-
-    if len(payload_text) > max_len:
-        raise ValueError(f"payload too large (>{max_len} bytes)")
-
-    leading_trimmed = payload_text.lstrip()
-    trailing_trimmed = payload_text.rstrip()
-    if not leading_trimmed.startswith("{") or not trailing_trimmed.endswith("}"):
-        raise ValueError("payload is not a dict literal (must start with '{' and end with '}')")
-
-    try:
-        return ast.literal_eval(payload_text)
-    except (SyntaxError, ValueError, MemoryError, RecursionError) as exc:
-        raise ValueError(f"failed to parse payload: {exc}") from exc
-
-
 def _extract_order_id(outcome: dict | None) -> str | None:
     if not isinstance(outcome, dict):
         return None
@@ -192,85 +147,28 @@ def _extract_order_id(outcome: dict | None) -> str | None:
 def _extract_content_payload(
     content: Optional[genai_types.Content],
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Parse functionResponse and A2A communications.
+    """Extract (tool_name, response_dict) from a genai Content.
 
-    Interim solution for issue https://github.com/google/adk-python/issues/3260
-    with WIP PR https://github.com/google/adk-python/pull/3262
+    Used by the REST `/orders/create` and `/orders/close` endpoints that
+    drive the root_agent via the ADK Runner; those handlers package the
+    request as a `Part.from_function_response(name=..., response=...)`.
+
+    Agent-to-agent messages no longer flow through this path — they ride
+    plain HTTP via the message_routes module.
     """
-    if not content:
+    if not content or not content.parts:
         return None, None
 
-    if len(content.parts) == 0:
-        return None, None
-
-    tool_name = None
-    response_dict = None
-
-    # Get the most recent part
     part = content.parts[-1]
+    function_response = getattr(part, "function_response", None)
+    if not function_response:
+        return None, None
 
-    logger.info(f"[CONTENT PART]: {part}")
-
-    # Skip context messages
-    text = getattr(part, "text", None)
-
-    if text:
-        tool_pattern_match = INCOMING_A2A_PATTERN.search(text)
-        if tool_pattern_match:
-            logger.info("[CONTENT PART] Received A2A message:")
-
-            agent_str = tool_pattern_match.group("agent").strip()
-            tool_name = tool_pattern_match.group("tool").strip()
-            payload_str = tool_pattern_match.group("payload").strip()
-
-            try:
-                enum_normalized_payload = normalize_enums(payload_str)
-                payload_dict = safe_literal_eval(enum_normalized_payload)
-            except (ValueError, TypeError) as e:
-                logger.error(f"Failed to parse A2A payload: {e}")
-                return None, None
-
-            logger.info(f"[EXTRACT CONTENT PAYLOAD]   [AGENT]: {agent_str}")
-            logger.info(f"[EXTRACT CONTENT PAYLOAD]    [TOOL]: {tool_name}")
-            logger.info(f"[EXTRACT CONTENT PAYLOAD] [PAYLOAD]: {payload_str}")
-            # Tool names that carry event_type inside their payload — not EventType values themselves.
-            # _parse_domain_event already recovers the correct event_type via nested data fallback.
-            _TOOL_NAME_ALIASES = {"counter_offer", "exit_negotiation", "make_offer", "accept_offer"}
-            try:
-                EventType(tool_name)
-            except ValueError:
-                if tool_name not in _TOOL_NAME_ALIASES:
-                    logger.warning(
-                        f"Unknown event_type from tool '{tool_name}'. "
-                        f"Known types: {[e.value for e in EventType]}"
-                    )
-            response_dict = {
-                "source": agent_str,
-                "source_url": payload_dict.get("source")
-                if isinstance(payload_dict.get("source"), str)
-                and payload_dict.get("source", "").startswith(("http://", "https://"))
-                else None,
-                "event_type": tool_name,
-                "message": None,
-                "data": payload_dict
-            }
-            return tool_name, response_dict
-        else:
-            logger.error(f"Unknown text message received: {text}")
-            return None, None
-    else:
-        function_response = getattr(part, "function_response", None)
-
-        if function_response:
-            # function_response has .name and .response (dict-like)
-            this_part_tool_name = getattr(function_response, "name", None)
-            this_part_response = getattr(function_response, "response", None)
-
-            if this_part_tool_name and this_part_response:
-                tool_name = this_part_tool_name
-                response_dict = this_part_response
-
-    return tool_name, response_dict
+    tool_name = getattr(function_response, "name", None)
+    response_dict = getattr(function_response, "response", None)
+    if tool_name and response_dict:
+        return tool_name, response_dict
+    return None, None
 
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
@@ -843,67 +741,21 @@ class TraderAgent(BaseAgent):
         logger.info(f"{outcome} {outcome_message}")
         return outcome_message or fallback_message
 
-    async def _check_orphan(
-        self, domain_event: Any, ctx: InvocationContext
-    ) -> str | None:
-        """Return a message string if the event is an orphaned negotiation round
-        (agent restarted, lost in-memory session). Returns None otherwise."""
-        from core.agent.app.utils.action_executor import (
-            _negotiation_sessions,
-            _negotiation_locks,
-            exit_negotiation,
-        )
-        from core.agent.app.policy.negotiation_thread import get_thread_store
-
-        event_data = getattr(domain_event, "data", None) or {}
-        msg_type = event_data.get("message_type") or getattr(domain_event, "message_type", None)
-        if msg_type not in ("counter_proposal", "initial_proposal"):
-            return None
-
-        neg_id = event_data.get("negotiation_id") or getattr(domain_event, "negotiation_id", None)
-        if not neg_id:
-            return None
-
-        # Not orphaned if we have an active session or lock for this negotiation
-        if neg_id in _negotiation_sessions or neg_id in _negotiation_locks:
-            return None
-
-        # Confirm orphan: thread must have prior messages (rules out genuine round-0 arrivals)
-        try:
-            ts = get_thread_store()
-            history = await ts.get_thread(neg_id)
-        except Exception:
-            history = []
-
-        # make_offer writes a round-0 "offer" record to the DB before any ADK session
-        # is created. Filter those out — they don't indicate a prior active session.
-        session_history = [m for m in history if m.get("message_type") not in ("offer",)]
-        if len(session_history) == 0:
-            return None  # Only make_offer round-0 record — session was never created, not an orphan
-
-        logger.warning(
-            "[AGENT] Orphaned negotiation %s detected after restart "
-            "(%d prior messages, no ADK session). Sending exit.",
-            neg_id, len(session_history),
-        )
-        their_order_id = event_data.get("their_order_id") or event_data.get("order_id")
-        await exit_negotiation(
-            ctx=ctx,
-            parameters={
-                "negotiation_id": neg_id,
-                "order_id": their_order_id,
-                "reason": "agent_restarted",
-            },
-        )
-        return f"Orphaned negotiation {neg_id} terminated: agent_restarted."
-
     @override
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
+        """Handle events dispatched through the ADK Runner.
+
+        After the A2A → HTTP migration, this path is only exercised by
+        the local REST endpoints (`/orders/create`, `/orders/close`, and
+        `/alerts/*`) that wrap their request as a `Part.from_function_response`
+        and invoke `runner.run_async(new_message=...)`. Agent-to-agent
+        messages have their own routes in `message_routes.py` and do not
+        go through here.
+        """
         last_event = ctx.session.events[-1]
         logger.info(f"[RUN ASYNC]: Last Event {last_event}")
-        logger.info("[RUN ASYNC] CONTENT:")
 
         if last_event.content is None:
             yield Event(
@@ -918,22 +770,28 @@ class TraderAgent(BaseAgent):
             return
 
         name, content = _extract_content_payload(last_event.content)
-        logger.info(f"{name}: {content}")
+        if not content:
+            yield Event(
+                author=self.name,
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part.from_text(
+                        text="Expected a function_response payload; got none.",
+                    )],
+                ),
+                invocation_id=ctx.invocation_id,
+                branch=ctx.branch,
+            )
+            return
 
-        # Process through full reactive pipeline
         domain_event = _parse_domain_event(content)
-
-        # Orphan guard: detect counter/initial proposals for negotiations whose ADK session
-        # was lost on restart. Respond with exit so the counterparty can requeue.
-        _orphan_msg = await self._check_orphan(domain_event, ctx)
-        if _orphan_msg is not None:
-            policy_recommendation = _orphan_msg
-        else:
-            policy_recommendation = await self._process_event_with_pipeline(domain_event, ctx=ctx)
+        policy_recommendation = await self._process_event_with_pipeline(
+            domain_event, ctx=ctx,
+        )
 
         logger.info(f"Policy recommendation: {policy_recommendation}")
 
-        # Emit A2A artifact if action executor attached one (e.g. accept_offer settlement)
+        # Emit artifact if action executor attached one (e.g. accept_offer settlement)
         _outcome = self._last_action_outcomes.get(domain_event.event_id, {})
         _artifact = _outcome.get("artifact") if isinstance(_outcome, dict) else None
         if _artifact:
@@ -1946,6 +1804,10 @@ a2a_app.routes.append(agent_order_refund_route)
 a2a_app.routes.append(agent_order_claim_route)
 a2a_app.routes.append(agent_order_reclaim_route)
 a2a_app.routes.append(agent_order_arbitrate_route)
+# Agent-to-agent negotiation + settlement messages (HTTP replaces A2A)
+from core.agent.app.utils.message_routes import all_message_routes as _all_message_routes
+for _msg_route in _all_message_routes():
+    a2a_app.routes.append(_msg_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
