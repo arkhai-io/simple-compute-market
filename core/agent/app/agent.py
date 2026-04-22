@@ -19,22 +19,11 @@ import random
 import uuid
 from datetime import datetime
 from alkahest_py import AlkahestClient
-from typing import AsyncGenerator, Any, Dict, Optional, Tuple
-from typing_extensions import override
+from typing import Any, Dict, Optional, Tuple
 from enum import Enum
 
 
 import google.auth
-from a2a.types import AgentCapabilities, AgentCard, AgentSkill
-from fastapi import HTTPException
-from google.adk.a2a.utils.agent_to_a2a import to_a2a
-from google.adk.agents import BaseAgent,  InvocationContext
-from google.adk.events import Event
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools.agent_tool import AgentTool
-from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
-from google.genai import types as genai_types
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -105,7 +94,6 @@ from service.clients.alkahest import (
 from core.agent.app.utils.serializer import json_serializer
 from service.clients.token import TOKEN_REGISTRY
 from core.agent.app.utils.zerotier import get_zerotier_ip
-from pydantic import PrivateAttr
 
 
 def _is_known_event_type(event_type: Any) -> bool:
@@ -142,33 +130,6 @@ def _extract_order_id(outcome: dict | None) -> str | None:
     if isinstance(result, dict):
         return result.get("order_id") or (result.get("order") or {}).get("order_id")
     return None
-
-
-def _extract_content_payload(
-    content: Optional[genai_types.Content],
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Extract (tool_name, response_dict) from a genai Content.
-
-    Used by the REST `/orders/create` and `/orders/close` endpoints that
-    drive the root_agent via the ADK Runner; those handlers package the
-    request as a `Part.from_function_response(name=..., response=...)`.
-
-    Agent-to-agent messages no longer flow through this path — they ride
-    plain HTTP via the message_routes module.
-    """
-    if not content or not content.parts:
-        return None, None
-
-    part = content.parts[-1]
-    function_response = getattr(part, "function_response", None)
-    if not function_response:
-        return None, None
-
-    tool_name = getattr(function_response, "name", None)
-    response_dict = getattr(function_response, "response", None)
-    if tool_name and response_dict:
-        return tool_name, response_dict
-    return None, None
 
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
@@ -390,33 +351,20 @@ def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
             }
         )
     return outcome_json
-class TraderAgent(BaseAgent):
-    """
-    Custom agent for trading computational resources.
-    """
-    resource_portfolio: dict
-    _policy_store: PolicyStore = PrivateAttr()
-    _policy_manager: PolicyManager = PrivateAttr()
-    _policy_seeder: ComputePolicySeeder = PrivateAttr()
-    _sqlite_client: SQLiteClient = PrivateAttr()
-    _alkahest_client: Any = PrivateAttr()
-    _last_action_outcomes: dict[str, dict] = PrivateAttr()
+class TraderAgent:
+    """Reactive policy-driven trader for compute resources.
 
-    def __init__(
-        self,
-        name: str,
-    ):
-        """
-        Initializes the Trader Agent.
-        """
+    No longer a google.adk.BaseAgent subclass — that inheritance existed
+    only to plug into the ADK Runner, which is no longer in the request
+    path. Every inbound endpoint constructs a DomainEvent and calls
+    `_process_event_with_pipeline` directly.
+    """
 
+    def __init__(self, name: str):
         logger.info("Starting TraderAgent.")
-
-        super().__init__(
-            name=name,
-            resource_portfolio={}
-        )
-        self._last_action_outcomes = {}
+        self.name = name
+        self.resource_portfolio: dict = {}
+        self._last_action_outcomes: dict[str, dict] = {}
 
         # Log ZeroTier IP if available for the configured network
         zerotier_network = os.getenv("ZEROTIER_NETWORK")
@@ -513,42 +461,13 @@ class TraderAgent(BaseAgent):
 
         return {"resources": resources}
 
-    async def _build_domain_context(self, event: Event | DomainEvent) -> Tuple[DomainEvent, dict]:
-        """Build domain context from ADK Event, converting to DomainEvent.
-        
-        Includes: event, agent state, past experiences, market conditions.
-        """
-        # Handle both ADK Event and DomainEvent
-        if isinstance(event, DomainEvent):
-            domain_event = event
-        else:
-            # Extract domain event payload
-            # A2A messages come in as text
-            content = _extract_content_payload(event.content)
-            # content = _extract_tool_payload(event.content)
-            _, domain_event_payload = content
-            
-            # Convert payload dict to DomainEvent instance
-            if domain_event_payload:
-                try:
-                    domain_event = _parse_domain_event(domain_event_payload)
-                except (ValueError, KeyError) as e:
-                    logger.warning(f"Failed to parse domain event: {e}, creating default")
-                    # Create a basic DomainEvent as fallback
-                    domain_event = DomainEvent(
-                        event_id=f"evt_{uuid.uuid4()}",
-                        event_type=EventType.MAKE_OFFER,
-                        source="unknown",
-                        data=domain_event_payload or {},
-                    )
-            else:
-                # No payload, create default event
-                domain_event = DomainEvent(
-                    event_id=f"evt_{uuid.uuid4()}",
-                    event_type=EventType.MAKE_OFFER,
-                    source="unknown",
-                    data={},
-                )
+    async def _build_domain_context(self, event: DomainEvent) -> tuple[DomainEvent, dict]:
+        """Enrich a DomainEvent with agent state, past experiences, market conditions."""
+        if not isinstance(event, DomainEvent):
+            raise TypeError(
+                f"_build_domain_context expects a DomainEvent, got {type(event).__name__}"
+            )
+        domain_event = event
         
         # Get resource portfolio
         resource_portfolio = await self.get_resource_portfolio()
@@ -659,7 +578,7 @@ class TraderAgent(BaseAgent):
 
         logger.info(f"[ALKAHEST]: Hash: {hash}")
 
-    async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: InvocationContext | None = None) -> str:
+    async def _process_event_with_pipeline(self, domain_event: DomainEvent, *, ctx: Any | None = None) -> str:
         """Process event through full reactive pipeline: context -> policy -> action -> execution -> recording."""
         # [1] Event detection - already done (domain_event received)
         # [2] Context building
@@ -741,178 +660,36 @@ class TraderAgent(BaseAgent):
         logger.info(f"{outcome} {outcome_message}")
         return outcome_message or fallback_message
 
-    @override
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
-        """Handle events dispatched through the ADK Runner.
-
-        After the A2A → HTTP migration, this path is only exercised by
-        the local REST endpoints (`/orders/create`, `/orders/close`, and
-        `/alerts/*`) that wrap their request as a `Part.from_function_response`
-        and invoke `runner.run_async(new_message=...)`. Agent-to-agent
-        messages have their own routes in `message_routes.py` and do not
-        go through here.
-        """
-        last_event = ctx.session.events[-1]
-        logger.info(f"[RUN ASYNC]: Last Event {last_event}")
-
-        if last_event.content is None:
-            yield Event(
-                author=self.name,
-                content=genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part.from_text(text="No content provided.")],
-                ),
-                invocation_id=ctx.invocation_id,
-                branch=ctx.branch,
-            )
-            return
-
-        name, content = _extract_content_payload(last_event.content)
-        if not content:
-            yield Event(
-                author=self.name,
-                content=genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part.from_text(
-                        text="Expected a function_response payload; got none.",
-                    )],
-                ),
-                invocation_id=ctx.invocation_id,
-                branch=ctx.branch,
-            )
-            return
-
-        domain_event = _parse_domain_event(content)
-        policy_recommendation = await self._process_event_with_pipeline(
-            domain_event, ctx=ctx,
-        )
-
-        logger.info(f"Policy recommendation: {policy_recommendation}")
-
-        # Emit artifact if action executor attached one (e.g. accept_offer settlement)
-        _outcome = self._last_action_outcomes.get(domain_event.event_id, {})
-        _artifact = _outcome.get("artifact") if isinstance(_outcome, dict) else None
-        if _artifact:
-            yield Event(
-                author=self.name,
-                content=genai_types.Content(
-                    role="model",
-                    parts=[genai_types.Part.from_function_response(
-                        name="negotiation_outcome",
-                        response=_artifact,
-                    )],
-                ),
-                invocation_id=ctx.invocation_id,
-                branch=ctx.branch,
-            )
-
-        yield Event(
-            author=self.name,
-            content=genai_types.Content(
-                role="model",
-                parts=[genai_types.Part.from_text(text=f"{policy_recommendation}")],
-            ),
-            invocation_id=ctx.invocation_id,
-            branch=ctx.branch,
-        )
 
 root_agent = TraderAgent(
     name=CONFIG.agent_id,
 )
 
-# Create a2a app
-
-# Define the skill for the root agent
-# In the future, we prefer to use agent-card.json to define the skills and capabilities of the agent. https://google.github.io/adk-docs/a2a/quickstart-exposing/#getting-the-sample-code
-
-# Build agent card from config (shared with registration script)
+# Agent card metadata (served read-only at /.well-known/erc-8004-registration.json).
+# No longer wrapped in an a2a.types.AgentCard — this agent does not speak A2A.
 from core.agent.app.utils.agent_card import build_agent_card_data
 agent_card_data = build_agent_card_data(
     agent_name=CONFIG.agent_name,
     base_url=BASE_URL_OVERRIDE,
     agent_wallet_address=CONFIG.agent_wallet_address,
 )
-public_agent_card = AgentCard(
-    name=agent_card_data["name"],
-    description=agent_card_data["description"],
-    url=agent_card_data["url"],
-    version=agent_card_data["version"],
-    defaultInputModes=agent_card_data["defaultInputModes"],
-    defaultOutputModes=agent_card_data["defaultOutputModes"],
-    skills=agent_card_data["skills"],
-    capabilities=AgentCapabilities(**agent_card_data["capabilities"]),
-)
 
-ALERTS_APP_NAME = "alerts"
 ALERTS_USER_ID = "resource-monitor"
 
 
 async def _run_alert_conversation(alert_request: ResourceAlertRequest) -> str:
-    """Route alert details through the root agent so it can decide on next steps."""
-    # Convert alert to ResourceImbalanceEvent
+    """Route a resource-imbalance alert through the reactive pipeline."""
     resource_event = alert_request.to_resource_imbalance_event(
         event_id=f"alert_{uuid.uuid4()}",
         source=ALERTS_USER_ID,
     )
-    
-    # Validate and queue event if enabled
+
     if CONFIG.enable_event_queue:
-        queue_event(resource_event.model_dump(mode='json'))
+        queue_event(resource_event.model_dump(mode="json"))
         return "Alert processing queued."
-    
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=ALERTS_APP_NAME,
-        user_id=ALERTS_USER_ID,
-    )
-    runner = Runner(
-        agent=root_agent,
-        app_name=ALERTS_APP_NAME,
-        session_service=session_service,
-    )
 
-    # Convert ResourceImbalanceEvent to function response format
-    alert_payload = {
-        "event_type": EventType.RESOURCE_IMBALANCE.value,
-        "event_id": resource_event.event_id,
-        "source": resource_event.source,
-        "data": resource_event.model_dump(mode='json'),
-    }
-    
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="get_alert",
-                response=alert_payload
-            )
-        ],
-    )
-
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=ALERTS_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the resource alert.",
-        )
-    return final_response
+    message = await root_agent._process_event_with_pipeline(resource_event, ctx=None)
+    return message or "Alert processed."
 
 
 async def handle_resource_alert(request: Request) -> JSONResponse:
@@ -988,9 +765,6 @@ async def handle_resource_alert(request: Request) -> JSONResponse:
 
 # Create Starlette route for the alert endpoint
 alert_route = Route("/alerts/resource", handle_resource_alert, methods=["POST"])
-
-AGENT_REST_API_APP_NAME = "agent-rest-api"
-AGENT_REST_API_USER_ID = "agent-rest-api"
 
 _MAX_TIMESTAMP_SKEW = 300  # seconds
 
@@ -1147,50 +921,9 @@ async def _run_create_order_flow(request: Request) -> dict:
             "order_request": order_create_event.model_dump(mode="json"),
         }
 
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=AGENT_REST_API_APP_NAME,
-        user_id=AGENT_REST_API_USER_ID,
+    final_response = await root_agent._process_event_with_pipeline(
+        order_create_event, ctx=None,
     )
-    runner = Runner(
-        agent=root_agent,
-        app_name=AGENT_REST_API_APP_NAME,
-        session_service=session_service,
-    )
-
-    event_payload = order_create_event.model_dump(mode="json")
-
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="create_order",
-                response=event_payload
-            )
-        ],
-    )
-
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=AGENT_REST_API_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the order creation request.",
-        )
 
     outcome = root_agent._last_action_outcomes.pop(event_id, None)
     order_id = _extract_order_id(outcome)
@@ -1199,7 +932,7 @@ async def _run_create_order_flow(request: Request) -> dict:
         "status": "created" if order_id else "no_action",
         "event_id": event_id,
         "order_request": order_create_event.model_dump(mode="json"),
-        "root_agent_response": final_response,
+        "root_agent_response": final_response or "",
     }
     if order_id:
         response_payload["order_id"] = order_id
@@ -1239,56 +972,15 @@ async def _run_close_order_flow(request: Request) -> dict:
             "order_request": order_close_event.model_dump(mode="json"),
         }
 
-    session_service = InMemorySessionService()
-    session = session_service.create_session_sync(
-        app_name=AGENT_REST_API_APP_NAME,
-        user_id=AGENT_REST_API_USER_ID,
+    final_response = await root_agent._process_event_with_pipeline(
+        order_close_event, ctx=None,
     )
-    runner = Runner(
-        agent=root_agent,
-        app_name=AGENT_REST_API_APP_NAME,
-        session_service=session_service,
-    )
-
-    event_payload = order_close_event.model_dump(mode="json")
-
-    message = genai_types.Content(
-        role="user",
-        parts=[
-            genai_types.Part.from_function_response(
-                name="close_order",
-                response=event_payload
-            )
-        ],
-    )
-
-    final_response: str | None = None
-    async for event in runner.run_async(
-        user_id=AGENT_REST_API_USER_ID,
-        session_id=session.id,
-        new_message=message,
-    ):
-        if event.is_final_response() and event.content and event.content.parts:
-            text_parts = [
-                part.text
-                for part in event.content.parts
-                if hasattr(part, "text") and part.text
-            ]
-            if text_parts:
-                final_response = "".join(text_parts)
-                break
-
-    if not final_response:
-        raise HTTPException(
-            status_code=500,
-            detail="root_agent did not provide a response to the order close request.",
-        )
 
     return {
         "status": "closed",
         "event_id": event_id,
         "order_request": order_close_event.model_dump(mode="json"),
-        "root_agent_response": final_response,
+        "root_agent_response": final_response or "",
     }
 
 async def create_market_order_endpoint(request: Request) -> JSONResponse:
@@ -1790,24 +1482,22 @@ agent_order_claim_route = Route("/orders/claim", claim_market_order_endpoint, me
 agent_order_reclaim_route = Route("/orders/reclaim", reclaim_market_order_endpoint, methods=["POST"])
 agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
 
-a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
-
-# Add the alert route to the A2A app
-a2a_app.routes.append(alert_route)
-# Add the order creation route to the A2A app
-a2a_app.routes.append(agent_order_creation_route)
-# Add the order close route to the A2A app
-a2a_app.routes.append(agent_order_close_route)
-# Add the order refund route (provider direct-transfer recovery path)
-a2a_app.routes.append(agent_order_refund_route)
-# Escrow recovery routes: seller collect, buyer reclaim, buyer-as-oracle arbitrate
-a2a_app.routes.append(agent_order_claim_route)
-a2a_app.routes.append(agent_order_reclaim_route)
-a2a_app.routes.append(agent_order_arbitrate_route)
-# Agent-to-agent negotiation + settlement messages (HTTP replaces A2A)
+# Plain Starlette ASGI app. Named `a2a_app` historically — kept for
+# import compatibility with server.py. There is no A2A protocol running
+# underneath anymore; every endpoint is a regular HTTP handler.
+from starlette.applications import Starlette
 from core.agent.app.utils.message_routes import all_message_routes as _all_message_routes
-for _msg_route in _all_message_routes():
-    a2a_app.routes.append(_msg_route)
+
+a2a_app = Starlette(routes=[
+    alert_route,
+    agent_order_creation_route,
+    agent_order_close_route,
+    agent_order_refund_route,
+    agent_order_claim_route,
+    agent_order_reclaim_route,
+    agent_order_arbitrate_route,
+    *_all_message_routes(),
+])
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file

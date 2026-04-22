@@ -16,8 +16,6 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-from google.adk.agents import InvocationContext
-
 from core.agent.app.utils.stage_log import stage_event
 
 from alkahest_py import (
@@ -298,7 +296,7 @@ def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
 async def execute_action(
     action: Action,
     alkahest_client: Any,
-    ctx: InvocationContext | None = None,
+    ctx: Any | None = None,
 ) -> dict[str, Any]:
     """Execute an action and return outcome. Currently simulated/logged only.
     
@@ -750,7 +748,7 @@ async def execute_action(
 async def _fulfill_in_background(
     *,
     alkahest_client,
-    ctx: InvocationContext | None,
+    ctx: Any | None,
     escrow_uid: str,
     ssh_public_key: str,
     oracle_address: str | None,
@@ -1117,7 +1115,7 @@ def _extract_initial_price_from_order(order: MarketOrder | dict) -> int:
 
 async def counter_offer(
     *,
-    ctx: InvocationContext | None = None,
+    ctx: Any | None = None,
     parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Send a counter offer in a negotiation."""
@@ -1263,7 +1261,7 @@ async def _dispatch_counter_offer(
 
 async def exit_negotiation(
     *,
-    ctx: InvocationContext | None,
+    ctx: Any | None,
     parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Exit a negotiation: mark thread terminal and notify the counterparty."""
@@ -1335,7 +1333,7 @@ async def exit_negotiation(
 async def accept_offer(
     *,
     alkahest_client: Any | None,
-    ctx: InvocationContext | None,
+    ctx: Any | None,
     parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Accept a received offer and send acceptance to the counterparty via A2A."""
@@ -1489,7 +1487,7 @@ async def accept_offer(
 async def _accept_as_buyer(
     *,
     alkahest_client: Any | None,
-    ctx: InvocationContext | None,
+    ctx: Any | None,
     parameters: dict[str, Any],
     order_dict: dict[str, Any],
     our_order_id: str | None,
@@ -1670,7 +1668,7 @@ async def _accept_as_buyer(
 
 async def _accept_as_seller(
     *,
-    ctx: InvocationContext | None,
+    ctx: Any | None,
     parameters: dict[str, Any],
     order_dict: dict[str, Any],
     our_order_id: str | None,
@@ -1986,7 +1984,7 @@ async def _find_and_send_matching_offers(
         }
 
 
-async def make_offer(ctx: InvocationContext, order: MarketOrder | dict, alkahest_client: Any | None = None):
+async def make_offer(ctx: Any | None, order: MarketOrder | dict, alkahest_client: Any | None = None):
     """Propagate an offer to the network using registry discovery.
     
     Queries the registry for matching orders and sends offers to discovered agents.
