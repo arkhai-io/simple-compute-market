@@ -356,3 +356,58 @@ def get_trusted_oracle_arbiter() -> str:
         "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
         "with deployed local addresses."
     )
+
+
+def get_recipient_arbiter() -> str:
+    """Resolve the RecipientArbiter address for the selected network.
+
+    Mirrors get_trusted_oracle_arbiter(). Used when the escrow demand is
+    "the fulfillment attestation's recipient must equal X" — the simplest
+    non-oracle gating scheme available. For compute deals, X is the
+    seller's wallet, because StringObligation.doObligation sets the
+    fulfillment attestation's recipient to msg.sender (the seller).
+    """
+    selected = get_alkahest_network(os.getenv("CHAIN_NAME", "ethereum_sepolia"))
+    override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
+    if override is not None:
+        return str(override["arbiters_addresses"]["recipient_arbiter"])
+    if selected in NETWORK_ADDRESS_CONFIGS:
+        return str(
+            NETWORK_ADDRESS_CONFIGS[selected]["arbiters_addresses"][
+                "recipient_arbiter"
+            ]
+        )
+
+    raise ValueError(
+        "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
+        "with deployed local addresses."
+    )
+
+
+def encode_recipient_demand(recipient_address: str) -> bytes:
+    """ABI-encode RecipientArbiter.DemandData{address recipient}.
+
+    alkahest_py exposes TrustedOracleArbiterDemandData but no analogous
+    encoder for RecipientArbiter, so we encode the tuple directly. The
+    solidity struct is a single-field struct, which abi.encodes as a
+    padded 32-byte address (same as abi.encode(address)).
+    """
+    from eth_abi import encode as _abi_encode
+    from eth_abi.exceptions import EncodingError
+
+    if (
+        not isinstance(recipient_address, str)
+        or not recipient_address.startswith("0x")
+        or len(recipient_address) != 42
+    ):
+        raise ValueError(
+            f"recipient_address must be a 0x-prefixed 20-byte hex string, got {recipient_address!r}"
+        )
+    # Catch eth_abi's own errors (malformed hex characters, checksum issues)
+    # and re-raise as ValueError so callers have a single exception type.
+    try:
+        return _abi_encode(["address"], [recipient_address])
+    except EncodingError as exc:
+        raise ValueError(
+            f"recipient_address {recipient_address!r} is not valid hex: {exc}"
+        ) from exc

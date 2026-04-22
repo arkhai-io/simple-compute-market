@@ -500,8 +500,160 @@ def _wait_for_completion(
             time.sleep(poll_interval)
 
 
+def _submit_reclaim(
+    agent_url: str,
+    order_id: str,
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/reclaim; returns the agent's response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/reclaim"
+    headers = _get_auth_headers("reclaim_order", order_id, private_key)
+    return _post_json(url, {"order_id": order_id}, headers)
+
+
+def _submit_arbitrate(
+    agent_url: str,
+    order_id: str,
+    decision: bool,
+    fulfillment_uid: Optional[str],
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/arbitrate; returns the agent's response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/arbitrate"
+    payload: dict = {"order_id": order_id, "decision": decision}
+    if fulfillment_uid:
+        payload["fulfillment_uid"] = fulfillment_uid
+    headers = _get_auth_headers("arbitrate_order", order_id, private_key)
+    return _post_json(url, payload, headers)
+
+
 def register(app: typer.Typer) -> None:
     """Register the top-level `market buy` command on the given Typer app."""
+
+    @app.command("reclaim")
+    def reclaim(
+        order_id: str = typer.Argument(..., help="Buyer order ID with an expired escrow."),
+        agent_url: Optional[str] = typer.Option(
+            None, "--agent-url", "-a",
+            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+        ),
+    ) -> None:
+        """Reclaim an expired escrow as the buyer.
+
+        Calls `escrow.reclaim_expired(escrow_uid)` on-chain. Only succeeds
+        if the escrow's expiration has passed (1 hour by default). If the
+        tx reverts, the on-chain error is surfaced verbatim — the most
+        common cause is "not yet expired."
+        """
+        console = Console()
+        env_path = Path(env) if env else None
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
+        private_key = (
+            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+            or os.getenv("AGENT_PRIV_KEY")
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Order", order_id)
+        console.print(Panel(header, title="market reclaim", border_style="yellow"))
+
+        try:
+            resp = _submit_reclaim(base_url, order_id, private_key)
+        except typer.Exit:
+            raise
+
+        status = str(resp.get("status", "?"))
+        if status != "reclaimed":
+            typer.secho(
+                f"Reclaim did not succeed: status={status} detail={resp}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(8)
+
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", "reclaimed")
+        result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
+        result.add_row("Result", str(resp.get("reclaim_result", "-")))
+        console.print(Panel(result, title="Reclaim complete", border_style="green"))
+
+    @app.command("arbitrate")
+    def arbitrate(
+        order_id: str = typer.Argument(..., help="Buyer order ID to arbitrate."),
+        approve: bool = typer.Option(
+            True, "--approve/--reject",
+            help="Decision recorded on-chain as the oracle. Default: approve.",
+        ),
+        fulfillment_uid: Optional[str] = typer.Option(
+            None, "--fulfillment-uid",
+            help="Override the maker_attestation UID from local state.",
+        ),
+        agent_url: Optional[str] = typer.Option(
+            None, "--agent-url", "-a",
+            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+        ),
+    ) -> None:
+        """Record an oracle decision for a fulfillment (no-op under RecipientArbiter).
+
+        Under the current escrow arbiter, this decision does NOT gate
+        collection — the seller can claim purely from their fulfillment
+        attestation. Kept for debugging and for future validation-gated
+        arbiters. To actually release funds, the seller uses `market claim`.
+        """
+        console = Console()
+        env_path = Path(env) if env else None
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
+        private_key = (
+            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+            or os.getenv("AGENT_PRIV_KEY")
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Order", order_id)
+        header.add_row("Decision", "approve" if approve else "reject")
+        console.print(Panel(header, title="market arbitrate", border_style="magenta"))
+        console.print(
+            "[dim]Note: under RecipientArbiter, this records an oracle decision but does "
+            "not unlock the escrow. Use `market claim` (seller) or `market reclaim` (buyer) "
+            "to move funds.[/dim]"
+        )
+
+        try:
+            resp = _submit_arbitrate(base_url, order_id, approve, fulfillment_uid, private_key)
+        except typer.Exit:
+            raise
+
+        status = str(resp.get("status", "?"))
+        if status != "arbitrated":
+            typer.secho(
+                f"Arbitrate did not succeed: status={status} detail={resp}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(9)
+
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", "arbitrated")
+        result.add_row("Fulfillment UID", str(resp.get("fulfillment_uid", "-")))
+        result.add_row("Decision", "approve" if resp.get("decision") else "reject")
+        result.add_row("Decisions processed", str(resp.get("decisions_count", "-")))
+        console.print(Panel(result, title="Arbitration recorded", border_style="green"))
 
     @app.command("buy")
     def buy(
@@ -691,9 +843,13 @@ def register(app: typer.Typer) -> None:
             if escrow_uid and not taker_attestation:
                 console.print(
                     "[yellow]Warning:[/yellow] an escrow is posted on-chain for this order "
-                    "but the seller has not yet delivered. Closing the local order will "
-                    "mark it cancelled in the registry, but the escrow refund is NOT "
-                    "automated yet — you may need to reclaim it manually.",
+                    "but the seller has not yet delivered. Closing the local order marks "
+                    "it cancelled in the registry, but does NOT release the on-chain "
+                    "escrow. Options:\n"
+                    "  • wait for the escrow's 1h expiration, then run "
+                    f"`market reclaim {order_id}` to pull the tokens back on-chain.\n"
+                    "  • ask the provider to run `market refund <their-order-id> --buyer "
+                    "<your-wallet>` for an immediate direct token transfer.",
                 )
             elif escrow_uid and taker_attestation:
                 console.print(

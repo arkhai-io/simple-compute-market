@@ -9,21 +9,26 @@ from typing import Optional
 def build_agent_card_data(
     agent_name: str,
     base_url: str,
-    description: Optional[str] = None
+    description: Optional[str] = None,
+    agent_wallet_address: Optional[str] = None,
 ) -> dict:
     """
     Build agent card JSON data from configuration.
     Shared function used by both server (agent.py) and registration script.
-    
+
     Args:
         agent_name: Agent display name (from AGENT_NAME env var, or AGENT_ID as fallback)
         base_url: Base URL of the agent (e.g., http://localhost:8000)
         description: Optional description (defaults to standard description)
-    
+        agent_wallet_address: Optional 0x-prefixed wallet. When present, it's
+            exposed so counterparties can resolve the wallet before on-chain
+            actions (e.g. the buyer needs the seller's wallet to demand it as
+            the recipient in the escrow arbiter).
+
     Returns:
         Agent card JSON dict matching A2A AgentCard format
     """
-    return {
+    card = {
         "name": agent_name,
         "description": description or "A helpful AI assistant designed to trade compute resources with others.",
         "url": base_url,
@@ -35,6 +40,9 @@ def build_agent_card_data(
             "streaming": True
         }
     }
+    if agent_wallet_address:
+        card["agent_wallet_address"] = agent_wallet_address
+    return card
 
 
 def build_erc8004_registration_file(

@@ -242,8 +242,189 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     console.print(summary)
 
 
+def _submit_refund(
+    agent_url: str,
+    order_id: str,
+    buyer_address: str,
+    amount: Optional[str],
+    token: Optional[str],
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/refund; returns the agent's response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/refund"
+    payload: dict = {"order_id": order_id, "buyer_address": buyer_address}
+    if amount is not None:
+        payload["amount"] = amount
+    if token is not None:
+        payload["token"] = token
+    headers = _get_auth_headers("refund_order", order_id, private_key)
+    return _post_json(url, payload, headers)
+
+
+def _submit_claim(
+    agent_url: str,
+    order_id: str,
+    fulfillment_uid: Optional[str],
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/claim; returns the agent's response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/claim"
+    payload: dict = {"order_id": order_id}
+    if fulfillment_uid:
+        payload["fulfillment_uid"] = fulfillment_uid
+    headers = _get_auth_headers("claim_order", order_id, private_key)
+    return _post_json(url, payload, headers)
+
+
 def register(app: typer.Typer) -> None:
     """Register the top-level `market provide` command."""
+
+    @app.command("claim")
+    def claim(
+        order_id: str = typer.Argument(..., help="Local order ID on the provider agent."),
+        fulfillment_uid: Optional[str] = typer.Option(
+            None, "--fulfillment-uid",
+            help="Override the fulfillment_uid from local state. Use this if the seller's "
+                 "StringObligation attestation landed on-chain but the agent DB is out of sync.",
+        ),
+        agent_url: Optional[str] = typer.Option(
+            None, "--agent-url", "-a",
+            help="Provider agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+        ),
+    ) -> None:
+        """Collect an escrow on-chain after fulfillment.
+
+        This is the seller's normal settlement path: once the fulfillment
+        attestation is on-chain, calling `market claim <order>` tells the
+        agent to run `escrow.collect(escrow_uid, fulfillment_uid)` and
+        close the order locally. Useful when the automatic post-fulfillment
+        collection path failed or was never triggered (agent restart, RPC
+        outage, etc.).
+        """
+        console = Console()
+        env_path = Path(env) if env else None
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
+        private_key = (
+            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+            or os.getenv("AGENT_PRIV_KEY")
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Order", order_id)
+        if fulfillment_uid:
+            header.add_row("Fulfillment UID override", fulfillment_uid)
+        console.print(Panel(header, title="market claim", border_style="cyan"))
+
+        try:
+            resp = _submit_claim(base_url, order_id, fulfillment_uid, private_key)
+        except typer.Exit:
+            raise  # _post_json already reported the error
+
+        status = str(resp.get("status", "?"))
+        if status != "claimed":
+            typer.secho(
+                f"Claim did not succeed: status={status} detail={resp}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(7)
+
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", "claimed (order closed)")
+        result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
+        result.add_row("Fulfillment UID", str(resp.get("fulfillment_uid", "-")))
+        result.add_row("Collect result", str(resp.get("collect_result", "-")))
+        console.print(Panel(result, title="Claim complete", border_style="green"))
+
+    @app.command("refund")
+    def refund(
+        order_id: str = typer.Argument(..., help="Local order ID on the provider agent."),
+        buyer_address: str = typer.Option(
+            ..., "--buyer", "-b",
+            help="0x-prefixed wallet address to receive the refund.",
+        ),
+        amount: Optional[str] = typer.Option(
+            None, "--amount", "-n",
+            help="Refund amount in human token units. Defaults to the order's "
+                 "demanded payment (demand.amount * duration_hours).",
+        ),
+        token: Optional[str] = typer.Option(
+            None, "--token",
+            help="Override the refund token symbol. Defaults to the token on the order.",
+        ),
+        agent_url: Optional[str] = typer.Option(
+            None, "--agent-url", "-a",
+            help="Provider agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+        ),
+    ) -> None:
+        """Refund a deal via direct ERC-20 transfer from the provider wallet.
+
+        This bypasses the escrow contract: the provider pays the buyer out of
+        their own balance. Use when provisioning failed or the deal otherwise
+        can't settle through the normal escrow release path.
+        """
+        console = Console()
+        env_path = Path(env) if env else None
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
+        private_key = (
+            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+            or os.getenv("AGENT_PRIV_KEY")
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Order", order_id)
+        header.add_row("Buyer", buyer_address)
+        if amount:
+            header.add_row("Amount", f"{amount} {token or '(order default)'}")
+        else:
+            header.add_row("Amount", "[dim]default from order[/dim]")
+        console.print(Panel(header, title="market refund", border_style="yellow"))
+
+        try:
+            resp = _submit_refund(
+                base_url, order_id, buyer_address, amount, token, private_key,
+            )
+        except typer.Exit:
+            raise  # _post_json already printed the error
+
+        status = str(resp.get("status", "?"))
+        if status != "refunded":
+            typer.secho(
+                f"Refund did not succeed: status={status} detail={resp}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(6)
+
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", "refunded")
+        result.add_row("Tx hash", str(resp.get("tx_hash", "-")))
+        result.add_row("From", str(resp.get("from_address", "-")))
+        result.add_row("To", str(resp.get("to_address", "-")))
+        tok = resp.get("token") or {}
+        result.add_row(
+            "Token",
+            f"{tok.get('symbol', '-')} ({tok.get('contract_address', '-')})",
+        )
+        result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
+        result.add_row("Block", str(resp.get("block_number", "-")))
+        console.print(Panel(result, title="Refund complete", border_style="green"))
 
     @app.command("provide")
     def provide(

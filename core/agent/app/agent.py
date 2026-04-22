@@ -973,7 +973,8 @@ root_agent = TraderAgent(
 from core.agent.app.utils.agent_card import build_agent_card_data
 agent_card_data = build_agent_card_data(
     agent_name=CONFIG.agent_name,
-    base_url=BASE_URL_OVERRIDE
+    base_url=BASE_URL_OVERRIDE,
+    agent_wallet_address=CONFIG.agent_wallet_address,
 )
 public_agent_card = AgentCard(
     name=agent_card_data["name"],
@@ -1497,8 +1498,439 @@ async def close_market_order_endpoint(request: Request) -> JSONResponse:
             status_code=500
         )
 
+
+async def _run_refund_flow(request: Request) -> tuple[int, dict]:
+    """Provider-initiated direct token-transfer refund.
+
+    Body:
+      {
+        "order_id":      "<required>",
+        "buyer_address": "0x...  (required; the provider explicitly names the recipient)",
+        "amount":        "<optional decimal; defaults to order.demand_resource.amount * duration_hours>",
+        "token":         "<optional symbol; defaults to order.demand_resource.token>"
+      }
+
+    Does NOT touch the escrow contract. This is a side-channel make-whole
+    transfer out of the provider's own wallet, for cases where the deal
+    cannot be settled through the normal escrow release path (provisioning
+    failed, hardware went down, buyer abandoned but escrow remains, etc.).
+
+    Returns (status_code, body_dict).
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    if not AGENT_PRIV_KEY or not AGENT_PRIV_KEY.strip():
+        return 500, {"error": "AGENT_PRIV_KEY not configured on agent"}
+    if not CHAIN_RPC_URL or not CHAIN_RPC_URL.strip():
+        return 500, {"error": "CHAIN_RPC_URL not configured on agent"}
+
+    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    order = None
+    if isinstance(order_id_peek, str) and order_id_peek.strip():
+        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+
+    def _resolve_token(ident: str) -> dict:
+        try:
+            meta = TOKEN_REGISTRY.require(ident)
+        except Exception as exc:
+            raise ValueError(f"Unknown token: {ident}") from exc
+        return meta.model_dump() if hasattr(meta, "model_dump") else dict(meta)
+
+    from core.agent.app.utils.refund import derive_refund_params
+    outcome = derive_refund_params(order=order, payload=payload, resolve_token=_resolve_token)
+    if outcome[0] == "error":
+        _, status, body = outcome
+        return status, body
+    params = outcome[1]
+
+    from core.agent.app.utils.token_transfer import transfer_erc20
+    try:
+        result = await transfer_erc20(
+            private_key=AGENT_PRIV_KEY,
+            rpc_url=CHAIN_RPC_URL,
+            token_address=params["token_address"],
+            to_address=params["buyer_address"],
+            amount_raw=params["amount_raw"],
+        )
+    except RuntimeError as exc:
+        logger.error("[REFUND] Transfer failed for order %s: %s", params["order_id"], exc)
+        return 502, {"error": "Token transfer failed", "detail": str(exc)}
+
+    updated_at = datetime.now().isoformat()
+    await root_agent._sqlite_client.update_order(
+        order_id=params["order_id"],
+        status="refunded",
+        updated_at=updated_at,
+    )
+
+    from core.agent.app.utils.stage_log import stage_event
+    stage_event(
+        "post_settlement",
+        "refund_transferred",
+        order_id=params["order_id"],
+        escrow_uid=params.get("escrow_uid"),
+        tx_hash=result["tx_hash"],
+        token_symbol=params["token_meta"].get("symbol"),
+        token_address=params["token_meta"].get("contract_address"),
+        to_address=result["to_address"],
+        amount_raw=params["amount_raw"],
+    )
+
+    return 200, {
+        "status": "refunded",
+        "order_id": params["order_id"],
+        "tx_hash": result["tx_hash"],
+        "from_address": result["from_address"],
+        "to_address": result["to_address"],
+        "token": {
+            "symbol": params["token_meta"].get("symbol"),
+            "contract_address": params["token_meta"].get("contract_address"),
+            "decimals": params["decimals"],
+        },
+        "amount_raw": params["amount_raw"],
+        "block_number": result["block_number"],
+    }
+
+
+async def refund_market_order_endpoint(request: Request) -> JSONResponse:
+    """Expose an endpoint for providers to refund a deal via direct token transfer."""
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "refund_order", order_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status_code, body_out = await _run_refund_flow(request)
+        return JSONResponse(body_out, status_code=status_code)
+    except ValueError as exc:
+        logger.error(f"[REFUND] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Refund request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[REFUND] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process refund", "detail": str(exc)},
+            status_code=500,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Escrow recovery endpoints: claim / reclaim / arbitrate
+# ---------------------------------------------------------------------------
+
+
+def _require_alkahest_client() -> tuple[int, dict] | None:
+    """Return an error tuple if the alkahest client is not configured, else None."""
+    if root_agent._alkahest_client is None:
+        return 500, {
+            "error": "Alkahest client not configured",
+            "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set",
+        }
+    return None
+
+
+async def _run_claim_flow(request: Request) -> tuple[int, dict]:
+    """Seller collects an escrow on-chain after fulfillment."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    cfg_err = _require_alkahest_client()
+    if cfg_err:
+        return cfg_err
+
+    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    order = None
+    if isinstance(order_id_peek, str) and order_id_peek.strip():
+        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+
+    from core.agent.app.utils.recovery import derive_claim_params
+    outcome = derive_claim_params(order=order, payload=payload)
+    if outcome[0] == "error":
+        _, status, body = outcome
+        return status, body
+    params = outcome[1]
+
+    try:
+        collect_result = await root_agent._alkahest_client.erc20.escrow.non_tierable.collect(
+            params["escrow_uid"],
+            params["fulfillment_uid"],
+        )
+    except Exception as exc:
+        logger.error("[CLAIM] collect failed for order %s: %s", params["order_id"], exc)
+        return 502, {
+            "error": "Escrow collect failed on-chain",
+            "detail": str(exc),
+            "order_id": params["order_id"],
+            "escrow_uid": params["escrow_uid"],
+        }
+
+    await root_agent._sqlite_client.update_order(
+        order_id=params["order_id"],
+        status="closed",
+        updated_at=datetime.now().isoformat(),
+    )
+    from core.agent.app.utils.stage_log import stage_event
+    stage_event(
+        "post_settlement",
+        "escrow_claimed",
+        order_id=params["order_id"],
+        escrow_uid=params["escrow_uid"],
+        fulfillment_uid=params["fulfillment_uid"],
+        collect_result=str(collect_result),
+    )
+
+    return 200, {
+        "status": "claimed",
+        "order_id": params["order_id"],
+        "escrow_uid": params["escrow_uid"],
+        "fulfillment_uid": params["fulfillment_uid"],
+        "collect_result": str(collect_result),
+    }
+
+
+async def claim_market_order_endpoint(request: Request) -> JSONResponse:
+    """POST /orders/claim — seller-side escrow collect."""
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "claim_order", order_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status, body_out = await _run_claim_flow(request)
+        return JSONResponse(body_out, status_code=status)
+    except ValueError as exc:
+        logger.error(f"[CLAIM] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Claim request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[CLAIM] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process claim", "detail": str(exc)},
+            status_code=500,
+        )
+
+
+async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
+    """Buyer reclaims an expired escrow on-chain."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    cfg_err = _require_alkahest_client()
+    if cfg_err:
+        return cfg_err
+
+    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    order = None
+    if isinstance(order_id_peek, str) and order_id_peek.strip():
+        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+
+    from core.agent.app.utils.recovery import derive_reclaim_params
+    outcome = derive_reclaim_params(order=order, payload=payload)
+    if outcome[0] == "error":
+        _, status, body = outcome
+        return status, body
+    params = outcome[1]
+
+    try:
+        reclaim_result = await root_agent._alkahest_client.erc20.escrow.non_tierable.reclaim_expired(
+            params["escrow_uid"],
+        )
+    except Exception as exc:
+        logger.error("[RECLAIM] reclaim_expired failed for order %s: %s", params["order_id"], exc)
+        # Most common cause: expiration hasn't passed yet. Surface the
+        # on-chain error verbatim; the CLI displays it to the operator.
+        return 502, {
+            "error": "Escrow reclaim failed on-chain",
+            "detail": str(exc),
+            "order_id": params["order_id"],
+            "escrow_uid": params["escrow_uid"],
+        }
+
+    await root_agent._sqlite_client.update_order(
+        order_id=params["order_id"],
+        status="reclaimed",
+        updated_at=datetime.now().isoformat(),
+    )
+    from core.agent.app.utils.stage_log import stage_event
+    stage_event(
+        "post_settlement",
+        "escrow_reclaimed",
+        order_id=params["order_id"],
+        escrow_uid=params["escrow_uid"],
+        reclaim_result=str(reclaim_result),
+    )
+
+    return 200, {
+        "status": "reclaimed",
+        "order_id": params["order_id"],
+        "escrow_uid": params["escrow_uid"],
+        "reclaim_result": str(reclaim_result),
+    }
+
+
+async def reclaim_market_order_endpoint(request: Request) -> JSONResponse:
+    """POST /orders/reclaim — buyer-side reclaim of an expired escrow."""
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "reclaim_order", order_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status, body_out = await _run_reclaim_flow(request)
+        return JSONResponse(body_out, status_code=status)
+    except ValueError as exc:
+        logger.error(f"[RECLAIM] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Reclaim request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[RECLAIM] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process reclaim", "detail": str(exc)},
+            status_code=500,
+        )
+
+
+async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
+    """Buyer-as-oracle records an arbitration decision for a fulfillment.
+
+    Under the current RecipientArbiter-based escrow this has NO effect on
+    collection — escrow release is gated purely on the fulfillment
+    attestation's recipient matching the demanded seller address. Kept
+    for debugging and for the day we reintroduce oracle-gated arbiters.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    cfg_err = _require_alkahest_client()
+    if cfg_err:
+        return cfg_err
+
+    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    order = None
+    if isinstance(order_id_peek, str) and order_id_peek.strip():
+        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+
+    from core.agent.app.utils.recovery import derive_arbitrate_params
+    outcome = derive_arbitrate_params(order=order, payload=payload)
+    if outcome[0] == "error":
+        _, status, body = outcome
+        return status, body
+    params = outcome[1]
+
+    # Drive one arbitration pass using a fixed decision. This matches the
+    # simulation mode in `arbitrate_compute_fulfillment`: approve=True.
+    try:
+        from alkahest_py import ArbitrationMode
+        decision_value = bool(params["decision"])
+
+        async def decision_function(_attestation, _demand):
+            return decision_value
+
+        def callback(_decision):
+            pass
+
+        decisions = await root_agent._alkahest_client.oracle.arbitrate_many(
+            decision_function,
+            callback,
+            ArbitrationMode.PastUnarbitrated,
+            timeout_seconds=5.0,
+        )
+    except Exception as exc:
+        logger.error(
+            "[ARBITRATE] arbitrate_many failed for order %s: %s",
+            params["order_id"], exc,
+        )
+        return 502, {
+            "error": "Oracle arbitration failed on-chain",
+            "detail": str(exc),
+            "order_id": params["order_id"],
+        }
+
+    from core.agent.app.utils.stage_log import stage_event
+    stage_event(
+        "post_settlement",
+        "oracle_arbitrated",
+        order_id=params["order_id"],
+        fulfillment_uid=params["fulfillment_uid"],
+        escrow_uid=params["escrow_uid"],
+        decision=params["decision"],
+        decisions_count=len(decisions or []) if decisions is not None else 0,
+    )
+
+    return 200, {
+        "status": "arbitrated",
+        "order_id": params["order_id"],
+        "fulfillment_uid": params["fulfillment_uid"],
+        "decision": params["decision"],
+        "decisions_count": len(decisions or []) if decisions is not None else 0,
+        "note": (
+            "Under RecipientArbiter this decision does not gate escrow collection; "
+            "use /orders/claim to release funds."
+        ),
+    }
+
+
+async def arbitrate_market_order_endpoint(request: Request) -> JSONResponse:
+    """POST /orders/arbitrate — buyer-as-oracle records a decision (no-op under RecipientArbiter)."""
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "arbitrate_order", order_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status, body_out = await _run_arbitrate_flow(request)
+        return JSONResponse(body_out, status_code=status)
+    except ValueError as exc:
+        logger.error(f"[ARBITRATE] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Arbitrate request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[ARBITRATE] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process arbitration", "detail": str(exc)},
+            status_code=500,
+        )
+
+
 agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
 agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
+agent_order_refund_route = Route("/orders/refund", refund_market_order_endpoint, methods=["POST"])
+agent_order_claim_route = Route("/orders/claim", claim_market_order_endpoint, methods=["POST"])
+agent_order_reclaim_route = Route("/orders/reclaim", reclaim_market_order_endpoint, methods=["POST"])
+agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
 
 a2a_app = to_a2a(root_agent, port=PORT, agent_card=public_agent_card)
 
@@ -1508,6 +1940,12 @@ a2a_app.routes.append(alert_route)
 a2a_app.routes.append(agent_order_creation_route)
 # Add the order close route to the A2A app
 a2a_app.routes.append(agent_order_close_route)
+# Add the order refund route (provider direct-transfer recovery path)
+a2a_app.routes.append(agent_order_refund_route)
+# Escrow recovery routes: seller collect, buyer reclaim, buyer-as-oracle arbitrate
+a2a_app.routes.append(agent_order_claim_route)
+a2a_app.routes.append(agent_order_reclaim_route)
+a2a_app.routes.append(agent_order_arbitrate_route)
 
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
@@ -1561,6 +1999,22 @@ async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
 # Add registration file route
 registration_file_route = Route("/.well-known/erc-8004-registration.json", serve_erc8004_registration_file, methods=["GET"])
 a2a_app.routes.append(registration_file_route)
+
+
+async def serve_agent_wallet(request: Request) -> JSONResponse:
+    """Serve the agent's on-chain wallet address.
+
+    Published so counterparties can resolve this agent's wallet without a
+    full ERC-8004 identity-registry lookup. The buyer reads this before
+    creating an escrow so it can demand `RecipientArbiter(recipient=seller_wallet)`.
+    Empty `agent_wallet_address` indicates this agent is not configured
+    for on-chain action — callers should refuse the deal.
+    """
+    return JSONResponse({"agent_wallet_address": CONFIG.agent_wallet_address or ""})
+
+
+agent_wallet_route = Route("/.well-known/agent-wallet.json", serve_agent_wallet, methods=["GET"])
+a2a_app.routes.append(agent_wallet_route)
 
 
 # Background task to process queued events

@@ -45,7 +45,11 @@ from core.agent.app.schema.pydantic_models import (
 from core.agent.app.resources import parse_resource_from_dict
 
 from core.agent.app.utils.config import CONFIG
-from service.clients.alkahest import get_trusted_oracle_arbiter
+from service.clients.alkahest import (
+    encode_recipient_demand,
+    get_recipient_arbiter,
+    get_trusted_oracle_arbiter,
+)
 from service.clients.indexer import get_registry_client
 from service.clients.token import TOKEN_REGISTRY
 from core.agent.app.utils.sqlite_client import get_sqlite_client
@@ -170,6 +174,41 @@ def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | No
     if _agent_urls_match(maker, BASE_URL_OVERRIDE):
         return taker
     return maker
+
+
+async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) -> str | None:
+    """Fetch an agent's on-chain wallet via its /.well-known/agent-wallet.json.
+
+    Returns the 0x-prefixed wallet or None on any failure. This is what the
+    buyer calls before escrow creation to name the seller as the demanded
+    recipient under RecipientArbiter.
+    """
+    import aiohttp
+
+    url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning(
+                        "[WALLET_LOOKUP] %s returned HTTP %d", url, resp.status
+                    )
+                    return None
+                body = await resp.json()
+    except Exception as exc:
+        logger.warning("[WALLET_LOOKUP] Failed to fetch %s: %s", url, exc)
+        return None
+
+    wallet = body.get("agent_wallet_address") if isinstance(body, dict) else None
+    if not wallet or not isinstance(wallet, str):
+        return None
+    wallet = wallet.strip()
+    if not (wallet.startswith("0x") and len(wallet) == 42):
+        logger.warning(
+            "[WALLET_LOOKUP] %s returned malformed wallet %r", url, wallet
+        )
+        return None
+    return wallet
 
 
 def _coerce_agent_reference_to_url(agent_ref: str | None) -> str | None:
@@ -1641,9 +1680,26 @@ async def _accept_as_buyer(
     their_order_id: str | None,
 ) -> dict[str, Any]:
     """Buyer path: create on-chain escrow and send AcceptOfferEvent with escrow_uid."""
+    # `oracle_address` is retained on the order record for audit / future
+    # re-introduction of an oracle-gated arbiter, but the current escrow
+    # uses RecipientArbiter and does not consult it for collection.
     oracle_address = CONFIG.agent_wallet_address
     if not oracle_address:
         raise ValueError("Agent wallet address is required for buyer accept_offer but not configured")
+
+    # Resolve the seller's on-chain wallet from their agent card. The
+    # escrow will demand this exact address as the recipient of the
+    # fulfillment attestation, so misidentifying it strands the funds.
+    counterparty_url = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
+    counterparty_url = _coerce_agent_reference_to_url(counterparty_url) if counterparty_url else None
+    if not counterparty_url:
+        raise ValueError("Cannot create escrow: counterparty URL is unknown")
+    seller_wallet_address = await fetch_agent_wallet_address(counterparty_url)
+    if not seller_wallet_address:
+        raise RuntimeError(
+            f"Cannot create escrow: could not resolve seller wallet from {counterparty_url}"
+            " (missing /.well-known/agent-wallet.json or AGENT_WALLET_ADDRESS)"
+        )
 
     escrow_uid = None
     escrow_receipt = None
@@ -1670,7 +1726,7 @@ async def _accept_as_buyer(
                     compute_resource=compute_resource,
                     token_resource=token_resource,
                     duration_hours=order_dict.get("duration_hours", 1),
-                    oracle_address=oracle_address,
+                    seller_wallet_address=seller_wallet_address,
                     client=alkahest_client,
                 )
                 escrow_uid = escrow_receipt.get("log", {}).get("uid")
@@ -1682,6 +1738,8 @@ async def _accept_as_buyer(
                         seller_order_id=their_order_id,
                         token_amount=token_resource.get("amount") if isinstance(token_resource, dict) else None,
                         oracle_address=oracle_address,
+                        arbiter="RecipientArbiter",
+                        seller_wallet_address=seller_wallet_address,
                     )
                     break
                 logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
@@ -2402,37 +2460,36 @@ async def buy_compute_with_erc20(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
     duration_hours: int,
-    oracle_address: str,
+    seller_wallet_address: str,
     client: AlkahestClient,
+    expiration_seconds: int = 3600,
 ) -> Any:
     """Create an ERC20 escrow for a compute lease using Alkahest.
 
-    This is from the point of view of someone with a TokenResource who
-    wishes to trade it for a ComputeResource.
+    Buyer-side: demands `RecipientArbiter(recipient=seller_wallet_address)`
+    so the seller's fulfillment attestation (StringObligation.doObligation
+    sets the attestation's recipient to msg.sender = the seller) satisfies
+    the demand. Oracle-gated arbitration is deliberately not used — the
+    current implementation collects immediately on fulfillment, so the
+    extra oracle hop buys nothing until a real validation system exists.
 
-    Encodes the compute lease as a JSON demand payload, approves the ERC20 amount,
-    and creates escrow via the non-tierable escrow client. Expiration is set to 0
-    (non-expiring) for now.
+    Expiration defaults to 1 hour from now (`expiration_seconds`). Any
+    positive value sets a real deadline after which the buyer can call
+    escrow.reclaim_expired() to reclaim the tokens unilaterally.
     """
     if not client:
         raise RuntimeError("buy_with_erc20 requires an AlkahestClient instance")
 
     logger.info(f"[ALKAHEST]: Buying compute with Client {client}")
 
-    trusted_oracle_arbiter = get_trusted_oracle_arbiter()
-    arbiter_address = trusted_oracle_arbiter
+    arbiter_address = get_recipient_arbiter()
 
-    # 1) Encode lease terms into demand bytes
-    demand_data = TrustedOracleArbiterDemandData(
-        oracle_address,
-        encode_compute_lease(
-            compute_resource=compute_resource,
-            token_resource=token_resource,
-            duration_hours=duration_hours,
-        )
-    )
-
-    demand_bytes = demand_data.encode_self()
+    # 1) Encode the demand: RecipientArbiter wants a single address.
+    # The per-deal lease details (gpu_model/region/duration/price) are
+    # exchanged off-chain in the negotiation messages and recorded locally
+    # on both sides; they are no longer packed into the on-chain demand
+    # because RecipientArbiter does not inspect them.
+    demand_bytes = encode_recipient_demand(seller_wallet_address)
 
     # 2) Build price data from token resource, computing duration * rate
     if isinstance(token_resource, TokenResource):
@@ -2452,12 +2509,15 @@ async def buy_compute_with_erc20(
 
     # 4) Buy with ERC20, tying demand to arbiter data
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
-    expiration = 0  # non-expiring escrow for now; may become time-limited later
+    # Absolute unix timestamp deadline. `reclaim_expired()` only succeeds
+    # after this point, so it doubles as the buyer's unilateral exit.
+    import time as _time
+    expiration = int(_time.time()) + int(expiration_seconds)
 
     logger.info(
-        "[ALKAHEST] escrow.create price_data=%s arbiter=%s expiration=%s",
+        "[ALKAHEST] escrow.create price_data=%s arbiter=RecipientArbiter recipient=%s expiration=%s",
         price_data,
-        arbiter_address,
+        seller_wallet_address,
         expiration,
     )
 
