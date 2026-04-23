@@ -8,7 +8,13 @@ dependencies = [
   "rich>=13.7.0",
   "PyYAML>=6.0.0",
   "pyinstaller>=6.19.0",
-  "eth-account>=0.13.0"
+  "eth-account>=0.13.0",
+  # Needed by the buyer orchestrator (market buy-sync) for in-process
+  # on-chain escrow creation. Imported lazily from market.escrow_client
+  # so loading the CLI does not pay the native-binary cost unless the
+  # orchestrator actually runs.
+  "alkahest-py",
+  "market-service",
 ]
 
 [project.optional-dependencies]
@@ -18,6 +24,12 @@ test = [
 
 [project.scripts]
 market = "market.cli:app"
+
+# Workspace resolution for the sibling `service` package — used by the
+# buyer orchestrator (buy-sync) for token registry + alkahest address
+# resolution.
+[tool.uv.sources]
+market-service = { path = "../service", editable = true }
 
 [build-system]
 requires = ["hatchling"]
