@@ -804,6 +804,49 @@ def _check_agent_request_auth(request: Request, operation: str, resource_id: str
 
     return None
 
+
+def _check_buyer_signature(
+    request: Request, operation: str, resource_id: str, claimed_address: str,
+) -> JSONResponse | None:
+    """Verify X-Signature / X-Timestamp headers against a buyer-supplied address.
+
+    Sibling to `_check_agent_request_auth`, which checks against *our*
+    wallet. This one checks against the address the buyer claims in the
+    request body — proving they control the corresponding private key
+    without requiring the seller to know buyer wallets in advance.
+
+    Returns a JSONResponse (403) on failure, or None to allow through.
+    """
+    from service.clients.erc8004.signing import verify_eip191
+
+    if not claimed_address or not claimed_address.startswith("0x") or len(claimed_address) != 42:
+        return JSONResponse({"error": "Missing or malformed buyer_address"}, status_code=400)
+
+    sig = request.headers.get("X-Signature")
+    ts_raw = request.headers.get("X-Timestamp")
+    if not sig or not ts_raw:
+        return JSONResponse({"error": "Missing auth headers"}, status_code=403)
+
+    try:
+        ts = int(ts_raw)
+    except ValueError:
+        return JSONResponse({"error": "Invalid X-Timestamp"}, status_code=403)
+
+    import time as _time
+    if abs(_time.time() - ts) > _MAX_TIMESTAMP_SKEW:
+        return JSONResponse({"error": "Timestamp out of range"}, status_code=403)
+
+    message = f"{operation}:{resource_id}:{ts}"
+    if not verify_eip191(message, sig, claimed_address):
+        logger.warning(
+            "[AUTH] Buyer signature invalid for %s resource=%s claimed=%s",
+            operation, resource_id, claimed_address,
+        )
+        return JSONResponse({"error": "Invalid signature for claimed buyer_address"},
+                            status_code=403)
+    return None
+
+
 async def _run_create_order_flow(request: Request) -> dict:
     """
     Internal helper to run the create order flow.
@@ -1633,6 +1676,157 @@ agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_
 agent_order_settle_route = Route("/orders/settle", settle_market_order_endpoint, methods=["POST"])
 agent_order_discover_route = Route("/orders/discover", discover_market_orders_endpoint, methods=["POST"])
 
+
+# ---------------------------------------------------------------------------
+# Synchronous negotiation endpoints (buyer drives, seller responds in-line)
+# ---------------------------------------------------------------------------
+
+
+async def negotiate_new_endpoint(request: Request) -> JSONResponse:
+    """POST /negotiate/new — start a new negotiation, return first seller decision.
+
+    Body:
+      {
+        "seller_order_id": "...",
+        "buyer_order_id": "...",
+        "buyer_address":  "0x...",
+        "initial_price":  <int, raw token units>
+      }
+
+    Signed by buyer_address via X-Signature over
+    "negotiate_new:{seller_order_id}:{timestamp}".
+
+    Returns:
+      {"negotiation_id": "...",
+       "action": "counter"|"accept"|"exit"|"reject",
+       "price"?: int,
+       "reason"?: str}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    seller_order_id = body.get("seller_order_id")
+    buyer_order_id = body.get("buyer_order_id")
+    buyer_address = body.get("buyer_address")
+    initial_price_raw = body.get("initial_price")
+
+    for name, val in (("seller_order_id", seller_order_id),
+                      ("buyer_order_id", buyer_order_id),
+                      ("buyer_address", buyer_address)):
+        if not isinstance(val, str) or not val.strip():
+            return JSONResponse({"error": f"Missing or empty '{name}'"}, status_code=400)
+    try:
+        initial_price = int(initial_price_raw)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "initial_price must be an integer"}, status_code=400)
+
+    auth_error = _check_buyer_signature(
+        request, operation="negotiate_new",
+        resource_id=seller_order_id, claimed_address=buyer_address,
+    )
+    if auth_error:
+        return auth_error
+
+    buyer_agent_url = body.get("buyer_agent_url", "")  # informational
+
+    from core.agent.app.utils.sync_negotiation import start_sync_negotiation
+    try:
+        result = await start_sync_negotiation(
+            sqlite_client=root_agent._sqlite_client,
+            our_order_id=seller_order_id,
+            their_order_id=buyer_order_id,
+            buyer_address=buyer_address,
+            their_proposed_price=initial_price,
+            our_base_url=BASE_URL_OVERRIDE or "",
+            their_agent_url=buyer_agent_url or buyer_address,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        logger.error("[NEGOTIATE/new] Unexpected error: %s", exc, exc_info=True)
+        return JSONResponse({"error": "Negotiation start failed", "detail": str(exc)},
+                            status_code=500)
+    return JSONResponse(result)
+
+
+async def negotiate_continue_endpoint(request: Request) -> JSONResponse:
+    """POST /negotiate/{neg_id} — one further round against an existing thread.
+
+    Body:
+      {
+        "action":        "counter"|"accept"|"exit",
+        "price"?:        <int for counter/accept>,
+        "reason"?:       <str for exit>,
+        "buyer_address": "0x..."
+      }
+
+    Signed by buyer_address via X-Signature over
+    "negotiate_continue:{neg_id}:{timestamp}".
+
+    Returns the seller's decision for this round:
+      {"action": "counter"|"accept"|"exit"|"reject",
+       "price"?: int, "reason"?: str}
+    """
+    neg_id = request.path_params.get("neg_id", "")
+    if not neg_id:
+        return JSONResponse({"error": "Missing negotiation id in path"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    buyer_action = body.get("action")
+    if buyer_action not in ("counter", "accept", "exit"):
+        return JSONResponse({"error": "action must be 'counter'|'accept'|'exit'"},
+                            status_code=400)
+
+    buyer_address = body.get("buyer_address")
+    if not isinstance(buyer_address, str) or not buyer_address.strip():
+        return JSONResponse({"error": "Missing or empty 'buyer_address'"}, status_code=400)
+
+    buyer_price_raw = body.get("price")
+    buyer_price: int | None = None
+    if buyer_action == "counter":
+        try:
+            buyer_price = int(buyer_price_raw)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "'price' required as int for counter"},
+                                status_code=400)
+
+    auth_error = _check_buyer_signature(
+        request, operation="negotiate_continue",
+        resource_id=neg_id, claimed_address=buyer_address,
+    )
+    if auth_error:
+        return auth_error
+
+    from core.agent.app.utils.sync_negotiation import continue_sync_negotiation
+    try:
+        result = await continue_sync_negotiation(
+            sqlite_client=root_agent._sqlite_client,
+            neg_id=neg_id,
+            buyer_action=buyer_action,
+            buyer_price=buyer_price,
+            buyer_reason=body.get("reason"),
+            buyer_address=buyer_address,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        logger.error("[NEGOTIATE/{id}] Unexpected error: %s", exc, exc_info=True)
+        return JSONResponse({"error": "Negotiation continue failed", "detail": str(exc)},
+                            status_code=500)
+    return JSONResponse(result)
+
+
+agent_negotiate_new_route = Route("/negotiate/new", negotiate_new_endpoint, methods=["POST"])
+agent_negotiate_continue_route = Route(
+    "/negotiate/{neg_id}", negotiate_continue_endpoint, methods=["POST"],
+)
+
 # Plain Starlette ASGI app. Named `a2a_app` historically — kept for
 # import compatibility with server.py. There is no A2A protocol running
 # underneath anymore; every endpoint is a regular HTTP handler.
@@ -1649,6 +1843,8 @@ a2a_app = Starlette(routes=[
     agent_order_arbitrate_route,
     agent_order_settle_route,
     agent_order_discover_route,
+    agent_negotiate_new_route,
+    agent_negotiate_continue_route,
     *_all_message_routes(),
 ])
 
