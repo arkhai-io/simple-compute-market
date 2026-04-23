@@ -15,6 +15,7 @@ from .groups.portfolio import portfolio_app
 from .groups.policy import policy_app
 from .groups.logs import logs_app
 from .groups import buy as buy_module
+from .groups import negotiate as negotiate_module
 from .groups import provide as provide_module
 
 app = typer.Typer(no_args_is_help=True)
@@ -194,6 +195,7 @@ app.add_typer(logs_app, name="logs", help="Inspect stage events and deal status.
 
 buy_module.register(app)
 provide_module.register(app)
+negotiate_module.register(app)
 
 if __name__ == "__main__":
     app()
