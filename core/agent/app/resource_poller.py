@@ -27,14 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_resources_fn() -> Callable[..., Coroutine[Any, Any, dict[str, Any]]]:
-    """Return the ``get_vm_available_resources`` coroutine for the active provisioning mode."""
-    mode = CONFIG.provisioning_mode
-    if mode == "ansible":
-        from service.clients.ansible_provisioning import get_vm_available_resources
-    elif mode == "mock":
-        from service.clients.mock_provisioning import get_vm_available_resources
-    else:
-        from service.clients.provisioning import get_vm_available_resources  # type: ignore[assignment]
+    """Return the ``get_vm_available_resources`` function from the provisioning client."""
+    from service.clients.provisioning import get_vm_available_resources
     return get_vm_available_resources  # type: ignore[return-value]
 
 
@@ -118,9 +112,8 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
             )
         except Exception as exc:
             logger.warning(
-                "resource_poller: failed to check %s via %s: %s",
+                "resource_poller: failed to check %s via provisioning service: %s",
                 vm_host,
-                CONFIG.provisioning_mode,
                 exc,
             )
             if not force_free:
@@ -187,21 +180,9 @@ async def resource_poller_loop() -> None:
     await asyncio.sleep(10)  # let agent finish startup
     sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
     logger.info(
-        "resource_poller_loop: started (interval=%ds, mode=%s)",
+        "resource_poller_loop: started (interval=%ds)",
         CONFIG.resource_check_interval,
-        CONFIG.provisioning_mode,
     )
-    if CONFIG.provisioning_mode == "ansible":
-        from service.clients.ansible_provisioning import validate_ansible_prerequisites
-        errors = validate_ansible_prerequisites()
-        if errors:
-            for err in errors:
-                logger.error("resource_poller [ansible pre-flight]: %s", err)
-            logger.error(
-                "resource_poller [ansible pre-flight]: FAILED — provisioning will not work until the above are resolved"
-            )
-        else:
-            logger.info("resource_poller [ansible pre-flight]: all prerequisites found")
     while True:
         try:
             await asyncio.sleep(CONFIG.resource_check_interval)

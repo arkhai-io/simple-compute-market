@@ -1,28 +1,23 @@
 from __future__ import annotations
 
-import asyncio
-
 from dependency_injector import containers, providers
 
 from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
+from services.async_job_queue import AsyncJobQueue
 from services.job_service import AnsibleJobService
-from services.provisioning_service import ProvisioningService
+from services.system_service import SystemService
 
 
-async def _init_job_queue():
-    """Async resource initialiser — creates the asyncio.Queue inside the event loop.
-
-    Using a Resource provider (rather than Singleton) ensures the Queue is
-    created after the event loop is running, which is required by asyncio.
-    The generator protocol lets dependency-injector manage the lifecycle:
-    ``await container.init_resources()`` creates it,
-    ``await container.shutdown_resources()`` tears it down.
-    """
-    queue: asyncio.Queue = asyncio.Queue()
-    yield queue
-    # No teardown required for an in-memory queue.
+def _make_ansible_service(cfg):
+    """Return MockAnsibleService when ACTIVE_PROFILES includes 'mock'."""
+    import os
+    active = [p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
+    if "mock" in active:
+        from services.mock_ansible_service import MockAnsibleService
+        return MockAnsibleService(cfg)
+    return AnsibleService(cfg)
 
 
 def _make_engine():
@@ -36,8 +31,11 @@ def _make_session_factory(engine):
 class Container(containers.DeclarativeContainer):
     """Application-level DI container.
 
-    Wires providers into controller ``__init__`` methods annotated with
-    ``@inject`` and ``Depends(Provide[Container.<provider>])``.
+    The ``job_queue`` Resource provider is intentionally absent: ``AsyncJobQueue``
+    is a plain synchronous object (no async initialiser needed) and is
+    instantiated directly in the FastAPI lifespan after ``init_resources()``.
+    This avoids the ``asyncio.get_event_loop()`` issue that affects async
+    Resource providers inside AnyIO worker threads.
     """
 
     # ------------------------------------------------------------------
@@ -56,30 +54,24 @@ class Container(containers.DeclarativeContainer):
     )
 
     # ------------------------------------------------------------------
-    # In-process job queue  (replaces Redis)
-    # ------------------------------------------------------------------
-    job_queue = providers.Resource(_init_job_queue)
-
-    # ------------------------------------------------------------------
     # Services
     # ------------------------------------------------------------------
     ansible_service = providers.Singleton(
-        AnsibleService,
-        settings=config,
-    )
-
-    provisioning_service = providers.Singleton(
-        ProvisioningService,
-        settings=config,
-        ansible_service=ansible_service,
+        _make_ansible_service,
+        cfg=config,
     )
 
     job_service = providers.Singleton(
         AnsibleJobService,
         settings=config,
         session_factory=session_factory,
-        job_queue=job_queue,
-        provisioning_service=provisioning_service,
+        ansible_service=ansible_service,
+    )
+
+    system_service = providers.Singleton(
+        SystemService,
+        ansible_service=ansible_service,
+        settings=config,
     )
 
 
@@ -88,7 +80,7 @@ container = Container()
 
 # ---------------------------------------------------------------------------
 # Resolved service instances.
-# Populated once during FastAPI lifespan startup after init_resources().
+# Populated once during FastAPI lifespan startup.
 # Controllers reference these via Depends(lambda: resolved_X) so that
 # dependency-injector's provider machinery is never invoked on the request
 # path — avoiding asyncio.get_event_loop() calls inside AnyIO worker threads.
@@ -98,3 +90,5 @@ from sqlalchemy.orm import sessionmaker, Session  # noqa: E402
 resolved_job_service: "AnsibleJobService | None" = None
 resolved_session_factory: "sessionmaker[Session] | None" = None
 resolved_ansible_service: "AnsibleService | None" = None
+resolved_job_queue: "AsyncJobQueue | None" = None
+resolved_system_service: "SystemService | None" = None

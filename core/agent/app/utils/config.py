@@ -136,7 +136,6 @@ class Config:
     enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
     order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
     # Provisioning settings
-    provisioning_mode: str  # PROVISIONING_MODE - "http" | "ansible" | "mock"
     provisioning_service_url: str  # PROVISIONING_SERVICE_URL
     provisioning_timeout: int  # PROVISIONING_TIMEOUT
     provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL
@@ -164,12 +163,6 @@ DEFAULT_TOKEN_REGISTRY_PATH = (
 )
 
 
-def _resolve_provisioning_mode() -> str:
-    """Resolve PROVISIONING_MODE: "http" | "ansible" | "mock". Defaults to "http"."""
-    mode = os.getenv("PROVISIONING_MODE", "").lower()
-    if mode in ("http", "ansible", "mock"):
-        return mode
-    return "http"
 
 
 def load_config() -> Config:
@@ -249,7 +242,6 @@ def load_config() -> Config:
         enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
         order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
         # Provisioning settings
-        provisioning_mode=_resolve_provisioning_mode(),
         provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8085"),
         provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),
         provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),

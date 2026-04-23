@@ -8,6 +8,9 @@
 !provisioning-service/uv.lock
 !provisioning-service/src/
 
+# ── Internal package wheels (built by make dist before docker build) ────────
+!.dist/
+
 # ── compute-provisioning-iac (Ansible only, no Terraform) ───────────
 !compute-provisioning-iac/ansible/
 

@@ -9,8 +9,43 @@ FOUNDRY_VERSION := v1.5.1
 # build-runtime-images parallelizes the three independent service images.
 build: build-cli build-market-contract-deployer build-test-env build-runtime-images
 
-build-runtime-images:
+build-runtime-images: dist
 	$(MAKE) -j3 build-registry build-core build-provisioning
+
+# ---------------------------------------------------------------------------
+# Dist — build pure-Python wheels for internal packages before image builds.
+#
+# These wheels are placed in .dist/ (gitignored) and consumed by downstream
+# Docker images via --find-links.  Only pure-Python packages (py3-none-any
+# wheels) should be built here; packages with native extensions must be built
+# inside the Docker build context.
+#
+# Upgrade path: replace --find-links with a PEP 503 index served from .dist/
+# by running gen_simple_index.py and passing --index file://${PWD}/.dist/index
+# to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
+# Registry and switch to --index https://...gar.../simple.
+# ---------------------------------------------------------------------------
+
+DIST_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/.dist
+
+.PHONY: dist dist-provisioning dist-service dist-clean
+
+dist: dist-provisioning dist-service
+
+dist-provisioning: ## Build provisioning-service wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd provisioning-service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: provisioning-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-service: ## Build market-service wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-clean: ## Remove .dist/ directory
+	rm -rf $(DIST_DIR)
 
 build-cli: init-prerequisites init-dependencies
 	cd cli && make build

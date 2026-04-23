@@ -1,4 +1,4 @@
-.PHONY: help install serve test test-unit clean build build-image deploy docker-run-dev
+.PHONY: help install serve test test-unit test-integration clean build build-image deploy docker-run-dev
 
 .DEFAULT_GOAL := help
 
@@ -26,10 +26,13 @@ serve: ## Start the unified API + job processing server locally
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-unit ## Run all tests
+test: test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
-	PYTHONPATH=src uv run pytest -v
+	PYTHONPATH=src uv run pytest src/tests/unit/ -v
+
+test-integration: ## Run integration tests (no real Ansible or DB required — mocked at boundary)
+	PYTHONPATH=src uv run pytest src/tests/integration/ -v
 
 clean: ## Remove generated files
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

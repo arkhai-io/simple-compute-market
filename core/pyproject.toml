@@ -10,10 +10,15 @@ authors = [
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "market-service",
+    "provisioning-service",
     "market-cli",
+    "google-adk[a2a] @ git+https://github.com/google/adk-python@5eca72f9bfd05c7c28a3d738391138a59a31167d",
+    "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
+    "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
+    "a2a-sdk>=0.3.9",
     "alkahest-py",
     "web3>=7.14.0",
     "websockets>=15.0.1",
@@ -55,6 +60,7 @@ pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
+provisioning-service = { path = "../provisioning-service", editable = true }
 market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },
@@ -121,6 +127,7 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 pythonpath = [".", ".."]
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.hatch.metadata]

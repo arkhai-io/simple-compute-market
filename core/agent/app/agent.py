@@ -2029,10 +2029,10 @@ async def _preflight_provisioning() -> None:
                 )
     except Exception as exc:
         logger.warning(
-            "[STARTUP] Provisioning service at %s is NOT reachable (%s: %s). "
-            "PROVISIONING_MODE=http requires a working PROVISIONING_SERVICE_URL; "
-            "fulfillment will fail until this is resolved. For tests, set "
-            "PROVISIONING_MODE=mock.",
+            "A working PROVISIONING_SERVICE_URL is required; "
+            "fulfillment will fail until this is resolved. "
+            "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
+            "provisioning-service container.",
             CONFIG.provisioning_service_url, type(exc).__name__, exc,
         )
 
@@ -2046,10 +2046,10 @@ async def _startup_tasks():
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
 
-    # Start resource availability poller (all provisioning modes)
+    # Start resource availability poller
     asyncio.create_task(resource_poller_loop())
-    logger.info("[STARTUP] Resource poller started (mode=%s, interval=%ds)",
-                CONFIG.provisioning_mode, CONFIG.resource_check_interval)
+    logger.info("[STARTUP] Resource poller started (interval=%ds)",
+            CONFIG.resource_check_interval)
 
     # Start negotiation watchdog (marks stale threads as abandoned)
     from core.agent.app.negotiation_watchdog import watchdog_loop as _neg_watchdog_loop
@@ -2060,11 +2060,8 @@ async def _startup_tasks():
         CONFIG.negotiation_timeout_seconds,
     )
 
-    # Preflight: in http mode, warn loudly if the provisioning service is
-    # unreachable. Without this, every deal silently dies at fulfillment
-    # time with a cryptic network error buried deep in a background task.
-    if CONFIG.provisioning_mode == "http":
-        asyncio.create_task(_preflight_provisioning())
+    # Preflight: warn loudly if the provisioning service is unreachable.
+    asyncio.create_task(_preflight_provisioning())
 
     if CONFIG.enable_redis_ingest:
         await start_redis_subscriber()

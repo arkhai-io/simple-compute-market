@@ -33,12 +33,8 @@ from core.agent.app.utils.config import CONFIG
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
-from service.clients.provisioning import provision_machine_async
-from service.clients.provisioning import schedule_vm_shutdown_async as http_schedule_vm_shutdown_async
-from service.clients.mock_provisioning import provision_machine_async as mock_provision_machine_async
-from service.clients.mock_provisioning import schedule_vm_shutdown_async as mock_schedule_vm_shutdown_async
-from service.clients.ansible_provisioning import provision_machine_async as ansible_provision_machine_async
-from service.clients.ansible_provisioning import schedule_vm_shutdown_async as ansible_schedule_vm_shutdown_async
+from service.clients.provisioning import provision_machine_async, provision_machine_async_with_id, get_job_credentials_async, ProvisioningError
+from service.clients.provisioning import schedule_vm_expiry_async
 from core.agent.app.policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
@@ -359,21 +355,11 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 
 
 def _get_provision_fn():
-    mode = CONFIG.provisioning_mode
-    if mode == "mock":
-        return mock_provision_machine_async
-    if mode == "ansible":
-        return ansible_provision_machine_async
     return provision_machine_async
 
 
 def _get_shutdown_fn():
-    mode = CONFIG.provisioning_mode
-    if mode == "mock":
-        return mock_schedule_vm_shutdown_async
-    if mode == "ansible":
-        return ansible_schedule_vm_shutdown_async
-    return http_schedule_vm_shutdown_async
+    return schedule_vm_expiry_async
 
 
 @functools.lru_cache(maxsize=1)
@@ -422,7 +408,7 @@ def _sender_id() -> str:
 
 
 async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
-    """Dispatch to the configured provisioning client."""
+    """Submit a create VM job to the provisioning service and return the result."""
     params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
     if CONFIG.frp_server_addr:
         params["frp_server_addr"] = CONFIG.frp_server_addr
@@ -430,36 +416,26 @@ async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) ->
         params["frp_domain"] = CONFIG.frp_domain
     if CONFIG.frp_dashboard_password:
         params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
-    if CONFIG.provisioning_mode == "http":
-        from service.clients.provisioning import provision_machine_async_with_id, get_job_credentials_async
-        canonical_id = _canonical_agent_id()
-        job_id, result = await provision_machine_async_with_id(
-            CONFIG.provisioning_service_url,
-            params,
-            timeout=CONFIG.provisioning_timeout,
-            poll_interval=CONFIG.provisioning_poll_interval,
-            agent_id=canonical_id,
-        )
-        if job_id and canonical_id:
-            auth = await get_job_credentials_async(
-                CONFIG.provisioning_service_url, job_id, canonical_id
-            )
-            if auth:
-                result["authentication"] = auth
-        return result
-    return await _get_provision_fn()(
+    canonical_id = _canonical_agent_id()
+    job_id, result = await provision_machine_async_with_id(
         CONFIG.provisioning_service_url,
         params,
         timeout=CONFIG.provisioning_timeout,
         poll_interval=CONFIG.provisioning_poll_interval,
-        agent_id=CONFIG.onchain_agent_id,
+        agent_id=canonical_id,
     )
+    if job_id and canonical_id:
+        auth = await get_job_credentials_async(
+            CONFIG.provisioning_service_url, job_id, canonical_id
+        )
+        if auth:
+            result["authentication"] = auth
+    return result
 
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
-    """Dispatch VM shutdown to the configured provisioning client."""
-    shutdown_fn = _get_shutdown_fn()
-    return await shutdown_fn(
+    """Schedule VM expiry via the provisioning service."""
+    return await schedule_vm_expiry_async(
         CONFIG.provisioning_service_url,
         lease_end_utc,
         vm_host,
@@ -1042,4 +1018,3 @@ async def fulfill_compute_obligation(
             "key_type": tenant_auth.get("key_type"),
         },
     }
-

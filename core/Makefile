@@ -2,11 +2,23 @@ IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= core
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
+.PHONY: build build-images deploy deploy-buyer-agent deploy-seller-agent test test-unit test-integration
+
 build: build-images
 
 build-images:
 	docker build -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+
+test: test-unit test-integration ## Run all tests
+
+test-unit: ## Run unit tests
+	uv run pytest tests/unit/ -v
+
+test-integration: ## Run integration tests (no real infrastructure required — event queue seam)
+	ENABLE_EVENT_QUEUE=true \
+	AGENT_WALLET_ADDRESS="" \
+	uv run pytest tests/integration/ -v
 
 deploy: deploy-buyer-agent deploy-seller-agent
 

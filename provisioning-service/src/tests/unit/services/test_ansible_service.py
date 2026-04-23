@@ -1,160 +1,396 @@
 """
 Unit tests for AnsibleService.
 
-Covers: INI inventory parsing and lookup_host_ip.
-subprocess-level methods (start_playbook, wait_for_playbook, check_connectivity)
-are the external boundary — they are exercised in integration tests, not here.
+Covers: _build_vm_vars (YAML serialisation), _extract_ssh_port,
+_extract_tenant_user, _extract_ansible_json, _inject_golden_image_credentials.
+
+start_playbook / wait_for_playbook / check_connectivity are thin subprocess
+wrappers and are exercised in integration tests against a mock boundary.
 """
 from __future__ import annotations
 
-from pathlib import Path
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
+from models.jobs_model import AnsibleJobParams
 from services.ansible_service import AnsibleService
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_service(inventory_text: str) -> tuple[AnsibleService, Path]:
-    """Return an AnsibleService whose resolved_inventory_path points to a
-    tmp file containing *inventory_text*."""
+
+def _make_service(
+    golden_root_ssh_filename: str = "",
+    golden_root_ssh_password: str = "",
+    golden_image_name: str = "",
+) -> AnsibleService:
     settings = MagicMock()
-    tmp = Path("/tmp/_test_inventory.ini")
-    tmp.write_text(inventory_text, encoding="utf-8")
-    settings.resolved_inventory_path = tmp
-    settings.ansible_timeout_seconds = 30
-    return AnsibleService(settings), tmp
+    settings.resolved_playbook_path = "/playbooks/vm-operations.yaml"
+    settings.resolved_inventory_path = "/inventory/hosts"
+    settings.ansible_timeout_seconds = 1800
+    settings.golden_root_ssh_filename = golden_root_ssh_filename
+    settings.golden_root_ssh_password = golden_root_ssh_password
+    settings.golden_image_name = golden_image_name
+    return AnsibleService(settings)
+
+
+def _base_params(**overrides) -> AnsibleJobParams:
+    defaults = dict(
+        vm_host="ww1",
+        vm_target="test-vm",
+        vm_action="create",
+    )
+    defaults.update(overrides)
+    return AnsibleJobParams(**defaults)
+
+
+def _build(svc: AnsibleService, **overrides) -> str:
+    """Shorthand: build vars YAML and return as string."""
+    return svc._build_vm_vars(_base_params(**overrides))
+
+
+def _lines(yaml_str: str) -> dict[str, str]:
+    """Parse simple key: value lines into a dict for easy assertion."""
+    result = {}
+    for line in yaml_str.strip().splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            result[k.strip()] = v.strip()
+    return result
 
 
 # ---------------------------------------------------------------------------
-# parse_inventory
+# _build_vm_vars -- required fields always present
 # ---------------------------------------------------------------------------
 
-INVENTORY_BASIC = """\
-[kvm_hosts]
-ww1 ansible_host=10.0.0.1 ansible_user=root ansible_port=22
-ww2 ansible_host=10.0.0.2 ansible_user=root
+
+class TestBuildVmVarsRequired:
+    def test_vm_host_always_present(self):
+        svc = _make_service()
+        assert "vm_host: ww1" in _build(svc)
+
+    def test_vm_action_always_present(self):
+        svc = _make_service()
+        assert "vm_action: create" in _build(svc)
+
+    def test_vm_target_present_when_set(self):
+        svc = _make_service()
+        assert "vm_target: test-vm" in _build(svc)
+
+    def test_vm_target_absent_when_none(self):
+        svc = _make_service()
+        yaml = svc._build_vm_vars(AnsibleJobParams(vm_host="ww1", vm_target=None, vm_action="list"))
+        assert "vm_target" not in yaml
+
+    def test_scratch_mode_adds_not_provided_credentials(self):
+        svc = _make_service()
+        yaml = _build(svc, image_setup_type="scratch")
+        assert "root_ssh_filename: not_provided" in yaml
+        assert "root_ssh_password: not_provided" in yaml
+
+    def test_ends_with_newline(self):
+        svc = _make_service()
+        assert _build(svc).endswith("\n")
+
+
+# ---------------------------------------------------------------------------
+# _build_vm_vars -- create-specific fields
+# ---------------------------------------------------------------------------
+
+
+class TestBuildVmVarsCreate:
+    def test_image_setup_type_only_on_create(self):
+        svc = _make_service()
+        create_yaml = _build(svc, vm_action="create", image_setup_type="scratch")
+        monitor_yaml = _build(svc, vm_action="monitor")
+        assert "image_setup_type" in create_yaml
+        assert "image_setup_type" not in monitor_yaml
+
+    def test_vm_sizing_fields(self):
+        svc = _make_service()
+        yaml = _build(svc, vm_ram=4096, vm_vcpus=4, vm_disk_size="20G")
+        lines = _lines(yaml)
+        assert lines["vm_ram"] == "4096"
+        assert lines["vm_vcpus"] == "4"
+        assert lines["vm_disk_size"] == "20G"
+
+    def test_sizing_fields_absent_when_none(self):
+        svc = _make_service()
+        yaml = _build(svc)
+        assert "vm_ram" not in yaml
+        assert "vm_vcpus" not in yaml
+        assert "vm_disk_size" not in yaml
+
+    def test_ssh_pubkey_quoted_and_escaped(self):
+        svc = _make_service()
+        key = 'ssh-ed25519 AAAA "quoted" rest'
+        yaml = _build(svc, ssh_pubkey=key)
+        assert 'vm_tenant_pubkey: "ssh-ed25519 AAAA \\"quoted\\" rest"' in yaml
+
+    def test_ssh_pubkey_absent_when_none(self):
+        svc = _make_service()
+        assert "vm_tenant_pubkey" not in _build(svc)
+
+    def test_gpu_provisioned_true(self):
+        svc = _make_service()
+        assert "gpu_provisioned: true" in _build(svc, gpu_provisioned=True)
+
+    def test_gpu_provisioned_false(self):
+        svc = _make_service()
+        assert "gpu_provisioned: false" in _build(svc, gpu_provisioned=False)
+
+    def test_gpu_provisioned_absent_when_none(self):
+        svc = _make_service()
+        assert "gpu_provisioned" not in _build(svc)
+
+    def test_gpu_devices_serialised_as_json(self):
+        svc = _make_service()
+        devices = ["0000:03:00.0", "0000:04:00.0"]
+        yaml = _build(svc, vm_gpu_devices=devices)
+        assert f"vm_gpu_devices: {json.dumps(devices)}" in yaml
+
+    def test_frp_fields_present_when_set(self):
+        svc = _make_service()
+        yaml = _build(
+            svc,
+            frp_server_addr="1.2.3.4",
+            frp_domain="example.com",
+            frp_dashboard_password="secret",
+        )
+        assert 'frp_server_addr: "1.2.3.4"' in yaml
+        assert 'frp_domain: "example.com"' in yaml
+        assert 'frp_dashboard_password: "secret"' in yaml
+
+    def test_frp_fields_absent_when_none(self):
+        svc = _make_service()
+        yaml = _build(svc)
+        assert "frp_server_addr" not in yaml
+        assert "frp_domain" not in yaml
+        assert "frp_dashboard_password" not in yaml
+
+    def test_gcs_fields_included_when_set(self):
+        svc = _make_service()
+        yaml = _build(svc, gcs_bucket_url="gs://bucket", gcs_image_path="images/img.qcow2")
+        assert "gcs_bucket_url: gs://bucket" in yaml
+        assert "gcs_image_path: images/img.qcow2" in yaml
+
+
+# ---------------------------------------------------------------------------
+# _build_vm_vars -- lease / expiry
+# ---------------------------------------------------------------------------
+
+
+class TestBuildVmVarsExpiry:
+    def test_vm_expiry_at_written_as_vm_lease_end(self):
+        """API field vm_expiry_at is passed to Ansible as vm_lease_end."""
+        svc = _make_service()
+        yaml = svc._build_vm_vars(
+            AnsibleJobParams(
+                vm_host="ww1",
+                vm_target="test-vm",
+                vm_action="lease_end",
+                vm_expiry_at="2025-12-31T23:59:00",
+            )
+        )
+        assert 'vm_lease_end: "2025-12-31T23:59:00"' in yaml
+
+    def test_vm_expiry_absent_when_none(self):
+        svc = _make_service()
+        assert "vm_lease_end" not in _build(svc, vm_action="shutdown")
+
+
+# ---------------------------------------------------------------------------
+# _inject_golden_image_credentials
+# ---------------------------------------------------------------------------
+
+
+class TestInjectGoldenImageCredentials:
+    def test_golden_credentials_injected_when_available(self):
+        svc = _make_service(
+            golden_root_ssh_filename="id_ed25519",
+            golden_root_ssh_password="hunter2",
+        )
+        yaml = _build(svc, image_setup_type="golden")
+        assert "root_ssh_filename: id_ed25519" in yaml
+        assert "root_ssh_password: hunter2" in yaml
+        assert "not_provided" not in yaml
+
+    def test_golden_image_name_included_when_set(self):
+        svc = _make_service(
+            golden_root_ssh_filename="id_ed25519",
+            golden_root_ssh_password="hunter2",
+            golden_image_name="base-image-v3",
+        )
+        yaml = _build(svc, image_setup_type="golden")
+        assert "golden_image_name: base-image-v3" in yaml
+
+    def test_golden_image_name_absent_when_empty(self):
+        svc = _make_service(
+            golden_root_ssh_filename="id_ed25519",
+            golden_root_ssh_password="hunter2",
+            golden_image_name="",
+        )
+        yaml = _build(svc, image_setup_type="golden")
+        assert "golden_image_name" not in yaml
+
+    def test_fallback_when_credentials_not_configured(self):
+        svc = _make_service(
+            golden_root_ssh_filename="",
+            golden_root_ssh_password="",
+        )
+        yaml = _build(svc, image_setup_type="golden")
+        assert "root_ssh_filename: not_provided" in yaml
+        assert "root_ssh_password: not_provided" in yaml
+
+
+# ---------------------------------------------------------------------------
+# _extract_ssh_port
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSshPort:
+    def test_extracts_from_json_field(self):
+        svc = _make_service()
+        output = 'some text "external_ssh_port": "54321" more text'
+        assert svc._extract_ssh_port(output) == "54321"
+
+    def test_extracts_from_ssh_command_with_host(self):
+        svc = _make_service()
+        output = "ssh -i key -p 2222 root@ww1"
+        assert svc._extract_ssh_port(output, vm_host="ww1") == "2222"
+
+    def test_fallback_to_generic_pattern_without_host(self):
+        svc = _make_service()
+        output = "connect using: ssh -p 9000 user@some.host.com"
+        assert svc._extract_ssh_port(output) == "9000"
+
+    def test_json_field_takes_precedence_over_ssh_command(self):
+        svc = _make_service()
+        output = '"external_ssh_port": "1111" and also ssh -p 2222 root@ww1'
+        assert svc._extract_ssh_port(output, vm_host="ww1") == "1111"
+
+    def test_returns_none_when_no_port_found(self):
+        svc = _make_service()
+        assert svc._extract_ssh_port("no port info here") is None
+
+    def test_returns_none_for_empty_string(self):
+        svc = _make_service()
+        assert svc._extract_ssh_port("") is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_tenant_user
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTenantUser:
+    def test_extracts_from_json_field(self):
+        svc = _make_service()
+        output = '"tenant_user": "agentuser" and other stuff'
+        assert svc._extract_tenant_user(output) == "agentuser"
+
+    def test_extracts_from_ssh_command_with_host(self):
+        svc = _make_service()
+        output = "ssh -p 2222 myuser@ww1"
+        assert svc._extract_tenant_user(output, vm_host="ww1") == "myuser"
+
+    def test_json_field_takes_precedence(self):
+        svc = _make_service()
+        output = '"tenant_user": "fromjson" and ssh -p 22 fromcmd@ww1'
+        assert svc._extract_tenant_user(output, vm_host="ww1") == "fromjson"
+
+    def test_returns_none_when_no_user_found(self):
+        svc = _make_service()
+        assert svc._extract_tenant_user("nothing useful") is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_ansible_json
+# ---------------------------------------------------------------------------
+
+
+PLAYBOOK_OUTPUT_CREATE = """\
+TASK [debug] ***
+ok: [ww1] => {
+    "vm_creation_data": {
+        "action": "create",
+        "vm_name": "test-vm",
+        "status": "running"
+    }
+}
 """
 
-INVENTORY_WITH_COMMENTS = """\
-# This is a comment
-[production]
-prod1 ansible_host=192.168.1.10
-
-# Another comment
-[staging]
-staging1 ansible_host=192.168.1.20 some_var=some_val
+PLAYBOOK_OUTPUT_LIST = """\
+ok: [ww1] => {
+    "vm_list_data": {
+        "action": "list",
+        "vms": [{"name": "vm-a"}, {"name": "vm-b"}],
+        "vm_count": 2
+    }
+}
 """
 
-INVENTORY_EMPTY = ""
-
-INVENTORY_ONLY_GROUPS = """\
-[group_a]
-[group_b]
+PLAYBOOK_OUTPUT_CHECK = """\
+ok: [ww1] => {
+    "check_data": {
+        "action": "check",
+        "resources": {"vcpus_total": 32}
+    }
+}
 """
 
 
-class TestParseInventory:
-    def test_parses_host_name(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        hosts = svc.parse_inventory()
-        assert {h.name for h in hosts} == {"ww1", "ww2"}
+class TestExtractAnsibleJson:
+    def test_extracts_create_data(self):
+        svc = _make_service()
+        result = svc._extract_ansible_json(PLAYBOOK_OUTPUT_CREATE, "create")
+        assert result is not None
+        assert result["action"] == "create"
+        assert result["vm_name"] == "test-vm"
 
-    def test_parses_ansible_host(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        hosts = {h.name: h for h in svc.parse_inventory()}
-        assert hosts["ww1"].ansible_host == "10.0.0.1"
-        assert hosts["ww2"].ansible_host == "10.0.0.2"
+    def test_extracts_list_data(self):
+        svc = _make_service()
+        result = svc._extract_ansible_json(PLAYBOOK_OUTPUT_LIST, "list")
+        assert result is not None
+        assert result["vm_count"] == 2
 
-    def test_ansible_host_not_in_vars(self):
-        """ansible_host is promoted to its own field and removed from vars."""
-        svc, _ = _make_service(INVENTORY_BASIC)
-        hosts = {h.name: h for h in svc.parse_inventory()}
-        assert "ansible_host" not in hosts["ww1"].vars
+    def test_extracts_check_data(self):
+        svc = _make_service()
+        result = svc._extract_ansible_json(PLAYBOOK_OUTPUT_CHECK, "check")
+        assert result is not None
+        assert result["action"] == "check"
 
-    def test_remaining_vars_captured(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        hosts = {h.name: h for h in svc.parse_inventory()}
-        assert hosts["ww1"].vars["ansible_user"] == "root"
-        assert hosts["ww1"].vars["ansible_port"] == "22"
+    def test_returns_none_for_unknown_action(self):
+        svc = _make_service()
+        assert svc._extract_ansible_json("anything", "unknown_action") is None
 
-    def test_skips_group_headers(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        hosts = svc.parse_inventory()
-        assert all("[" not in h.name for h in hosts)
+    def test_returns_none_when_marker_absent(self):
+        svc = _make_service()
+        assert svc._extract_ansible_json("no json here", "create") is None
 
-    def test_skips_comment_lines(self):
-        svc, _ = _make_service(INVENTORY_WITH_COMMENTS)
-        hosts = svc.parse_inventory()
-        assert all(not h.name.startswith("#") for h in hosts)
-
-    def test_empty_inventory_returns_empty_list(self):
-        svc, _ = _make_service(INVENTORY_EMPTY)
-        assert svc.parse_inventory() == []
-
-    def test_only_group_headers_returns_empty_list(self):
-        svc, _ = _make_service(INVENTORY_ONLY_GROUPS)
-        assert svc.parse_inventory() == []
-
-    def test_search_filters_by_substring_case_insensitive(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        results = svc.parse_inventory(search="WW1")
-        assert len(results) == 1
-        assert results[0].name == "ww1"
-
-    def test_search_no_match_returns_empty(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        assert svc.parse_inventory(search="nonexistent") == []
-
-    def test_search_none_returns_all(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        assert len(svc.parse_inventory(search=None)) == 2
-
-    def test_host_without_vars(self):
-        svc, _ = _make_service("barehost\n")
-        hosts = svc.parse_inventory()
-        assert len(hosts) == 1
-        assert hosts[0].name == "barehost"
-        assert hosts[0].ansible_host is None
-        assert hosts[0].vars == {}
-
-    def test_raises_file_not_found_when_inventory_missing(self):
-        settings = MagicMock()
-        settings.resolved_inventory_path = Path("/tmp/__nonexistent_inventory__.ini")
-        svc = AnsibleService(settings)
-        with pytest.raises(FileNotFoundError):
-            svc.parse_inventory()
-
-    def test_multiline_vars(self):
-        svc, _ = _make_service(INVENTORY_WITH_COMMENTS)
-        hosts = {h.name: h for h in svc.parse_inventory()}
-        assert hosts["staging1"].vars["some_var"] == "some_val"
-
-
-# ---------------------------------------------------------------------------
-# lookup_host_ip
-# ---------------------------------------------------------------------------
-
-class TestLookupHostIp:
-    def test_returns_ip_for_known_host(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        assert svc.lookup_host_ip("ww1") == "10.0.0.1"
-        assert svc.lookup_host_ip("ww2") == "10.0.0.2"
-
-    def test_returns_none_for_unknown_host(self):
-        svc, _ = _make_service(INVENTORY_BASIC)
-        assert svc.lookup_host_ip("unknown") is None
-
-    def test_returns_none_when_inventory_missing(self):
-        settings = MagicMock()
-        settings.resolved_inventory_path = Path("/tmp/__nonexistent__.ini")
-        svc = AnsibleService(settings)
-        assert svc.lookup_host_ip("ww1") is None
-
-    def test_returns_none_for_host_without_ansible_host(self):
-        svc, _ = _make_service("barehost ansible_user=root\n")
-        assert svc.lookup_host_ip("barehost") is None
+    def test_all_action_names_have_mappings(self):
+        """Every supported vm_action must resolve to a non-None extraction."""
+        svc = _make_service()
+        actions = [
+            ("create", "vm_creation_data"),
+            ("list", "vm_list_data"),
+            ("start", "vm_start_data"),
+            ("shutdown", "vm_shutdown_data"),
+            ("destroy", "vm_destroy_data"),
+            ("reboot", "vm_reboot_data"),
+            ("undefine", "vm_undefine_data"),
+            ("monitor", "vm_monitoring_data"),
+            ("reset_password", "vm_password_reset_data"),
+            ("lease_end", "vm_lease_end_data"),
+            ("lease_remove", "vm_lease_remove_data"),
+            ("check", "check_data"),
+        ]
+        for action, fact_name in actions:
+            output = f'"{fact_name}": {{"action": "{action}"}}'
+            result = svc._extract_ansible_json(output, action)
+            assert result is not None, f"Failed to extract for action={action}"
+            assert result["action"] == action

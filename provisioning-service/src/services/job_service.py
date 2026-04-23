@@ -1,16 +1,30 @@
+"""Ansible job lifecycle management.
+
+``AnsibleJobService`` owns:
+  - Job submission (HTTP layer -> DB -> queue).
+  - Job read operations (list, get, credentials, logs).
+  - Job cancellation.
+  - The ``_process_job`` coroutine: DB state transitions, playbook dispatch,
+    retry logic, log streaming, and credential storage.
+
+It does **not** own queue mechanics (concurrency, task dispatch).  That belongs
+to ``AsyncJobQueue``, which is injected and started separately in the FastAPI
+lifespan.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import logging
 import os
 import re
 import signal
 import uuid
 from datetime import datetime, timedelta
-from typing import Set
 
-from sqlalchemy import or_, text
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import Settings
@@ -20,21 +34,17 @@ from db.models import (
     CredentialRole,
     JobStatus,
 )
-from models.jobs import (
+from models.jobs_model import (
+    AnsibleJobParams,
+    AnsibleRunResult,
     CredentialListResponse,
     CredentialResponse,
     JobListResponse,
-    ProvisionLogsResponse,
-    ProvisionRequest,
-    ProvisionResponse,
-    ProvisionStatusResponse,
+    JobLogsResponse,
+    JobStatusResponse,
+    JobSubmitResponse,
 )
-from services.provisioning_service import (
-    PlaybookError,
-    ProvisioningParams,
-    ProvisioningService,
-)
-
+from services.ansible_service import AnsibleError, AnsibleService
 
 logger = logging.getLogger(__name__)
 
@@ -42,66 +52,52 @@ logger = logging.getLogger(__name__)
 class AnsibleJobService:
     """Manages the full lifecycle of Ansible jobs.
 
-    Responsibilities:
-    - Accept job submissions from the HTTP layer and enqueue them.
-    - Run the background job processing loop (replaces the former separate
-      worker process and Redis queue).
-    - Expose read/write operations used by the HTTP layer (list, status,
-      credentials, logs, cancel).
+    The in-process ``AsyncJobQueue`` is injected separately and started in the
+    FastAPI lifespan via::
 
-    The in-process ``asyncio.Queue`` passed via the container replaces the
-    Redis-backed queue from the previous two-process design.
+        await job_queue.start(job_service._process_job)
+
+    ``AnsibleJobService`` does not hold a reference to the queue; the controller
+    layer passes it into ``submit()`` for enqueuing.
     """
 
     def __init__(
         self,
         settings: Settings,
         session_factory: sessionmaker[Session],
-        job_queue: asyncio.Queue,
-        provisioning_service: ProvisioningService,
+        ansible_service: AnsibleService,
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
-        self._queue = job_queue
-        self._provisioning = provisioning_service
-
-        self._running_tasks: Set[asyncio.Task] = set()
-        self._semaphore: asyncio.Semaphore | None = None
-        self._processing_task: asyncio.Task | None = None
-
-    # ------------------------------------------------------------------
-    # Processing loop health
-    # ------------------------------------------------------------------
-
-    def is_processing_loop_alive(self) -> bool:
-        """Return True if the background processing task is running."""
-        return (
-            self._processing_task is not None
-            and not self._processing_task.done()
-        )
+        self._ansible = ansible_service
 
     # ------------------------------------------------------------------
     # HTTP-layer operations
     # ------------------------------------------------------------------
 
     async def submit(
-        self, request: ProvisionRequest, agent_id: str | None
-    ) -> ProvisionResponse:
+        self,
+        params: AnsibleJobParams,
+        agent_id: str | None,
+        job_queue,
+    ) -> JobSubmitResponse:
         """Persist a new job and place it on the in-process queue."""
         job_id = str(uuid.uuid4())
         max_retries = (
-            request.max_retries
-            if request.max_retries is not None
+            params.max_retries
+            if params.max_retries is not None
             else self._settings.default_max_retries
         )
+
+        raw_params = dataclasses.asdict(params)
 
         with self._session_factory() as db:
             job = AnsibleJob(
                 id=job_id,
                 status=JobStatus.queued.value,
-                params=request.model_dump(),
+                params=raw_params,
                 agent_id=agent_id,
-                buyer_agent_id=request.buyer_agent_id,
+                buyer_agent_id=params.buyer_agent_id,
                 retry_count=0,
                 max_retries=max_retries,
                 next_retry_at=None,
@@ -109,9 +105,8 @@ class AnsibleJobService:
             db.add(job)
             db.commit()
 
-        # Enqueue after the commit so the worker always finds the row.
-        await self._queue.put(job_id)
-        return ProvisionResponse(job_id=job_id, status=JobStatus.queued.value)
+        await job_queue.enqueue(job_id)
+        return JobSubmitResponse(job_id=job_id, status=JobStatus.queued.value)
 
     def list_jobs(
         self,
@@ -146,8 +141,8 @@ class AnsibleJobService:
                 limit=limit,
             )
 
-    def get_job(self, job_id: str, agent_id: str | None) -> ProvisionStatusResponse:
-        """Return full job status. Raises ValueError for 403, LookupError for 404."""
+    def get_job(self, job_id: str, agent_id: str | None) -> JobStatusResponse:
+        """Return full job status. Raises LookupError for 404, PermissionError for 403."""
         with self._session_factory() as db:
             job = (
                 db.query(AnsibleJob)
@@ -161,15 +156,11 @@ class AnsibleJobService:
                 is_seller = job.agent_id == agent_id
                 is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
                 if not is_seller and not is_buyer:
-                    raise PermissionError(
-                        f"Job {job_id} belongs to another agent"
-                    )
+                    raise PermissionError(f"Job {job_id} belongs to another agent")
 
             return self._to_status_response(job)
 
-    def get_credentials(
-        self, job_id: str, agent_id: str
-    ) -> CredentialListResponse:
+    def get_credentials(self, job_id: str, agent_id: str) -> CredentialListResponse:
         """Return credentials for the requesting agent. Raises on auth failures."""
         with self._session_factory() as db:
             job = (
@@ -209,7 +200,7 @@ class AnsibleJobService:
                 ],
             )
 
-    def get_logs(self, job_id: str, agent_id: str | None) -> ProvisionLogsResponse:
+    def get_logs(self, job_id: str, agent_id: str | None) -> JobLogsResponse:
         """Return raw Ansible logs for a job."""
         with self._session_factory() as db:
             job = (
@@ -224,13 +215,9 @@ class AnsibleJobService:
                 is_seller = job.agent_id == agent_id
                 is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
                 if not is_seller and not is_buyer:
-                    raise PermissionError(
-                        f"Job {job_id} belongs to another agent"
-                    )
+                    raise PermissionError(f"Job {job_id} belongs to another agent")
 
-            return ProvisionLogsResponse(
-                job_id=job.id, status=job.status, logs=job.logs
-            )
+            return JobLogsResponse(job_id=job.id, status=job.status, logs=job.logs)
 
     def cancel_job(self, job_id: str, agent_id: str | None) -> dict:
         """Cancel a queued or running job. Sends SIGTERM if Ansible is running."""
@@ -257,9 +244,7 @@ class AnsibleJobService:
                 try:
                     pid = int(job.process_id)
                     os.kill(pid, signal.SIGTERM)
-                    logger.info(
-                        "Sent SIGTERM to process %d for job %s", pid, job_id
-                    )
+                    logger.info("Sent SIGTERM to process %d for job %s", pid, job_id)
                 except ProcessLookupError:
                     logger.warning(
                         "Process %d for job %s not found (already terminated)",
@@ -283,68 +268,17 @@ class AnsibleJobService:
         }
 
     # ------------------------------------------------------------------
-    # Background processing loop (replaces separate worker process)
+    # Job processor -- passed as handler to AsyncJobQueue.start()
     # ------------------------------------------------------------------
-
-    async def start_processing_loop(self) -> None:
-        """Dequeue and process jobs concurrently.
-
-        This coroutine is intended to run as a long-lived ``asyncio.Task``
-        started in the FastAPI lifespan.  It replaces the former separate
-        worker process and Redis ``BRPOP`` loop.
-        """
-        self._processing_task = asyncio.current_task()
-        self._semaphore = asyncio.Semaphore(self._settings.max_concurrent_jobs)
-
-        logger.info(
-            "Job processing loop started (max_concurrent_jobs=%d, max_retries=%d)",
-            self._settings.max_concurrent_jobs,
-            self._settings.default_max_retries,
-        )
-
-        while True:
-            try:
-                try:
-                    job_id = await asyncio.wait_for(self._queue.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    self._cleanup_done_tasks()
-                    continue
-
-                task = asyncio.create_task(
-                    self._process_with_semaphore(job_id),
-                    name=f"job-{job_id[:8]}",
-                )
-                self._running_tasks.add(task)
-                self._cleanup_done_tasks()
-
-                if self._running_tasks:
-                    logger.debug(
-                        "Worker concurrency: %d active jobs",
-                        len(self._running_tasks),
-                    )
-
-            except asyncio.CancelledError:
-                logger.info("Job processing loop cancelled")
-                break
-            except Exception as exc:
-                logger.exception("Error in job processing loop: %s", exc)
-                await asyncio.sleep(1)
-
-    # ------------------------------------------------------------------
-    # Private processing helpers
-    # ------------------------------------------------------------------
-
-    def _cleanup_done_tasks(self) -> None:
-        done = {t for t in self._running_tasks if t.done()}
-        self._running_tasks.difference_update(done)
-
-    async def _process_with_semaphore(self, job_id: str) -> None:
-        assert self._semaphore is not None  # set before loop starts
-        async with self._semaphore:
-            await self._process_job(job_id)
 
     async def _process_job(self, job_id: str) -> None:
-        """Execute a single provisioning job end-to-end."""
+        """Execute a single Ansible job end-to-end.
+
+        This is the ``handler`` argument to ``AsyncJobQueue.start()``.
+        ``AsyncJobQueue`` owns concurrency and task dispatch; this method
+        owns all DB state transitions, playbook invocation, retry scheduling,
+        log streaming, and credential storage.
+        """
         db = self._session_factory()
         try:
             job = (
@@ -356,10 +290,9 @@ class AnsibleJobService:
                 logger.warning("Job %s not found", job_id)
                 return
 
-            # Respect scheduled retry delay.
+            # Respect scheduled retry delay: if the job's next_retry_at is in
+            # the future just return; the retry-scheduler TODO will re-enqueue it.
             if job.next_retry_at and datetime.utcnow() < job.next_retry_at:
-                await asyncio.sleep(1)
-                await self._queue.put(job_id)
                 return
 
             logger.info(
@@ -371,12 +304,15 @@ class AnsibleJobService:
 
             self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
-            run = self._provisioning.start_playbook(params)
+            vars_path = self._ansible.build_vars_file(params)
+            run = self._ansible.start_playbook(
+                playbook_path=self._settings.resolved_playbook_path,
+                inventory_path=self._settings.resolved_inventory_path,
+                extra_vars_path=vars_path,
+                limit=params.vm_host,
+            )
             self._update_job(
-                db,
-                job,
-                status=JobStatus.running.value,
-                process_id=str(run.process_id),
+                db, job, status=JobStatus.running.value, process_id=str(run.process_id)
             )
             logger.info("Job %s running with PID=%d", job_id, run.process_id)
 
@@ -398,19 +334,22 @@ class AnsibleJobService:
                     finally:
                         callback_db.close()
                 except Exception as e:
-                    logger.warning(
-                        "Failed to update logs for job %s: %s", job_id, e
-                    )
+                    logger.warning("Failed to update logs for job %s: %s", job_id, e)
 
             try:
-                result = await self._provisioning.wait_for_playbook(
-                    run, params, log_callback=log_callback
+                ansible_result = await self._ansible.wait_for_playbook(
+                    run,
+                    timeout_seconds=self._settings.ansible_timeout_seconds,
+                    log_callback=log_callback,
                 )
-                logs = result.stdout + (
-                    "\n\nSTDERR:\n" + result.stderr if result.stderr else ""
+                run_result: AnsibleRunResult = self._ansible.parse_playbook_result(
+                    ansible_result, params
+                )
+                logs = run_result.stdout + (
+                    "\n\nSTDERR:\n" + run_result.stderr if run_result.stderr else ""
                 )
                 logs = self._redact_logs(logs)
-                result_payload = self._build_result_payload(result)
+                result_payload = self._build_result_payload(run_result)
                 sanitized_payload = self._extract_and_store_credentials(
                     db, job, result_payload
                 )
@@ -424,7 +363,7 @@ class AnsibleJobService:
                 )
                 logger.info("Job %s succeeded", job_id)
 
-            except PlaybookError as exc:
+            except AnsibleError as exc:
                 logs = exc.stdout + (
                     "\n\nSTDERR:\n" + exc.stderr if exc.stderr else ""
                 )
@@ -438,9 +377,7 @@ class AnsibleJobService:
 
                 if should_retry:
                     retry_delay = self._calculate_retry_delay(job.retry_count)
-                    next_retry_at = datetime.utcnow() + timedelta(
-                        seconds=retry_delay
-                    )
+                    next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
                     job.retry_count += 1
                     job.next_retry_at = next_retry_at
                     job.status = JobStatus.queued.value
@@ -451,13 +388,15 @@ class AnsibleJobService:
                     job.logs = logs
                     db.add(job)
                     db.commit()
-                    await self._queue.put(job_id)
+                    # TODO(retry-scheduler): add a dedicated retry-scheduler task
+                    # that polls for queued jobs with next_retry_at < now and
+                    # re-enqueues them via job_queue.enqueue(job_id).
                     logger.warning(
-                        "Job %s failed (attempt %d/%d), retrying in %ds: %s",
+                        "Job %s failed (attempt %d/%d), retry at %s: %s",
                         job_id,
                         job.retry_count,
                         job.max_retries + 1,
-                        retry_delay,
+                        next_retry_at,
                         error_message,
                     )
                 else:
@@ -537,8 +476,9 @@ class AnsibleJobService:
                 return False
         return True
 
-    def _build_params(self, params: dict) -> ProvisioningParams:
-        return ProvisioningParams(
+    def _build_params(self, params: dict) -> AnsibleJobParams:
+        """Reconstruct an ``AnsibleJobParams`` from the DB JSON params column."""
+        return AnsibleJobParams(
             vm_host=params.get("vm_host", self._settings.default_vm_host),
             vm_target=params.get("vm_target"),
             vm_action=params.get("vm_action", "create"),
@@ -559,7 +499,9 @@ class AnsibleJobService:
             golden_image_name=params.get("golden_image_name"),
             gcs_bucket_url=params.get("gcs_bucket_url"),
             gcs_image_path=params.get("gcs_image_path"),
-            vm_lease_end=params.get("vm_lease_end"),
+            vm_expiry_at=params.get("vm_expiry_at"),
+            buyer_agent_id=params.get("buyer_agent_id"),
+            max_retries=params.get("max_retries"),
         )
 
     def _redact_logs(self, logs: str) -> str:
@@ -620,7 +562,7 @@ class AnsibleJobService:
 
         return sanitized
 
-    def _build_result_payload(self, result: ProvisioningResult) -> dict:
+    def _build_result_payload(self, result: AnsibleRunResult) -> dict:
         ar = result.ansible_result or {}
         payload: dict = {
             "ssh_port": result.ssh_port,
@@ -667,23 +609,15 @@ class AnsibleJobService:
             if frp.get("remote_port"):
                 payload["ssh_port"] = frp["remote_port"]
 
-        if ar.get("gpu"):
-            payload["gpu"] = ar["gpu"]
-        if ar.get("network"):
-            payload["network"] = ar["network"]
-        if ar.get("vm_ip_internal"):
-            payload["vm_ip_internal"] = ar["vm_ip_internal"]
-        if ar.get("vm_state"):
-            payload["vm_state"] = ar["vm_state"]
-        if ar.get("result_message"):
-            payload["result_message"] = ar["result_message"]
-        if ar.get("note"):
-            payload["note"] = ar["note"]
-        if ar.get("operation_initiated"):
-            payload["operation_initiated"] = ar["operation_initiated"]
+        for key in ("gpu", "network", "vm_ip_internal", "vm_state",
+                    "result_message", "note", "operation_initiated"):
+            if ar.get(key):
+                payload[key] = ar[key]
+
         if ar.get("vms"):
             payload["vms"] = ar["vms"]
             payload["vm_count"] = ar.get("vm_count")
+
         if ar.get("resources"):
             payload["resources"] = ar["resources"]
         elif ar.get("cpu_usage_percent") is not None or ar.get("memory_used_mb") is not None:
@@ -713,8 +647,8 @@ class AnsibleJobService:
         return payload
 
     @staticmethod
-    def _to_status_response(job: AnsibleJob) -> ProvisionStatusResponse:
-        return ProvisionStatusResponse(
+    def _to_status_response(job: AnsibleJob) -> JobStatusResponse:
+        return JobStatusResponse(
             job_id=job.id,
             status=job.status,
             params=job.params,

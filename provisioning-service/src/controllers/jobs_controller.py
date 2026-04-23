@@ -1,16 +1,32 @@
+"""Job read/cancel controller.
+
+Handles all GET and cancel operations on the ``/api/v1/jobs`` resource.
+
+Job *submission* is handled by the typed VM and host controllers
+(``vms_controller.py``, ``hosts_controller.py``), which accept typed request
+models and translate them to ``AnsibleJobParams`` before calling
+``AnsibleJobService.submit()``.
+
+Polling pattern
+---------------
+All job-creating endpoints return a ``JobSubmitResponse`` containing a
+``job_id``.  Clients poll ``GET /api/v1/jobs/{job_id}`` for status.
+The provisioning service may sit behind an API gateway; callers should
+not assume any particular base URL and must construct the polling path
+from the job_id alone.
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
-from models.jobs import (
+from models.jobs_model import (
     CredentialListResponse,
     JobListResponse,
-    ProvisionLogsResponse,
-    ProvisionRequest,
-    ProvisionResponse,
-    ProvisionStatusResponse,
+    JobLogsResponse,
+    JobStatusResponse,
 )
 from services.job_service import AnsibleJobService
 
@@ -21,33 +37,11 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 class AnsibleJobsController:
     def __init__(
         self,
-        job_service: AnsibleJobService = Depends(lambda: _container_module.resolved_job_service),
+        job_service: AnsibleJobService = Depends(
+            lambda: _container_module.resolved_job_service
+        ),
     ) -> None:
         self._job_service = job_service
-
-    # ------------------------------------------------------------------
-    # Submit
-    # ------------------------------------------------------------------
-
-    @router.post(
-        "/",
-        response_model=ProvisionResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        summary="Submit a provisioning job",
-        response_description="Job ID and initial queued status",
-    )
-    async def submit_job(
-        self, body: ProvisionRequest, request: Request
-    ) -> ProvisionResponse:
-        """Enqueue a new VM provisioning job.
-
-        The request is validated, persisted to the database, and pushed onto the
-        in-process queue.  The background worker picks it up asynchronously.
-
-        Requires ``X-Agent-ID`` header when auth is enabled.
-        """
-        agent_id: str | None = getattr(request.state, "agent_id", None)
-        return await self._job_service.submit(body, agent_id)
 
     # ------------------------------------------------------------------
     # List
@@ -56,7 +50,7 @@ class AnsibleJobsController:
     @router.get(
         "/",
         response_model=JobListResponse,
-        summary="List provisioning jobs",
+        summary="List Ansible jobs",
         response_description="Paginated list of jobs",
     )
     def list_jobs(
@@ -74,7 +68,7 @@ class AnsibleJobsController:
             description="Sort order: created_at_asc or created_at_desc",
         ),
     ) -> JobListResponse:
-        """List provisioning jobs with pagination, filtering, and sorting.
+        """List Ansible jobs with pagination, filtering, and sorting.
 
         Authenticated agents only see jobs where they are the seller or buyer.
         Unauthenticated requests (when auth is disabled) see all jobs.
@@ -94,12 +88,16 @@ class AnsibleJobsController:
 
     @router.get(
         "/{job_id}",
-        response_model=ProvisionStatusResponse,
+        response_model=JobStatusResponse,
         summary="Get job status",
         response_description="Full job status with params, result, and retry info",
     )
-    def get_job(self, job_id: str, request: Request) -> ProvisionStatusResponse:
-        """Return the full status of a single provisioning job."""
+    def get_job(self, job_id: str, request: Request) -> JobStatusResponse:
+        """Return the full status of a single Ansible job.
+
+        Poll this endpoint after submitting any job-creating request.
+        Terminal statuses: ``succeeded``, ``failed``, ``cancelled``.
+        """
         agent_id: str | None = getattr(request.state, "agent_id", None)
         try:
             return self._job_service.get_job(job_id, agent_id)
@@ -144,11 +142,11 @@ class AnsibleJobsController:
 
     @router.get(
         "/{job_id}/logs",
-        response_model=ProvisionLogsResponse,
+        response_model=JobLogsResponse,
         summary="Get Ansible playbook logs",
         response_description="Raw Ansible stdout/stderr for the job",
     )
-    def get_logs(self, job_id: str, request: Request) -> ProvisionLogsResponse:
+    def get_logs(self, job_id: str, request: Request) -> JobLogsResponse:
         """Return raw Ansible playbook output captured during job execution."""
         agent_id: str | None = getattr(request.state, "agent_id", None)
         try:
@@ -164,11 +162,11 @@ class AnsibleJobsController:
 
     @router.post(
         "/{job_id}/cancel",
-        summary="Cancel a provisioning job",
+        summary="Cancel a job",
         response_description="Cancellation confirmation with final job status",
     )
     def cancel_job(self, job_id: str, request: Request) -> dict:
-        """Cancel a queued or running provisioning job.
+        """Cancel a queued or running Ansible job.
 
         Sends SIGTERM to the Ansible process if the job is running.
         """
