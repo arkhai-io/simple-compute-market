@@ -1474,12 +1474,92 @@ async def arbitrate_market_order_endpoint(request: Request) -> JSONResponse:
         )
 
 
+async def _run_settle_flow(request: Request) -> tuple[int, dict]:
+    """Run buyer-side settlement for an already-agreed negotiation.
+
+    Body: {"negotiation_id": "..."}
+
+    Reads committed terms from negotiation_threads (agreed_price,
+    agreed_duration_hours) and runs the on-chain escrow creation + order
+    updates + downstream ACCEPT_OFFER send. Idempotent on escrow_uid.
+
+    Typical callers:
+      - `market settle <negotiation_id>` after a negotiation succeeded
+        but settlement failed (RPC outage, funds not yet approved, etc).
+      - Automation on top of /logs/status that detects terminal_state=success
+        without escrow_uid and retries.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    negotiation_id = payload.get("negotiation_id")
+    if not isinstance(negotiation_id, str) or not negotiation_id.strip():
+        raise ValueError("Request must include non-empty 'negotiation_id'")
+    negotiation_id = negotiation_id.strip()
+
+    if root_agent._alkahest_client is None:
+        return 500, {
+            "error": "Alkahest client not configured",
+            "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set",
+        }
+
+    from core.agent.app.utils.action_executor import settle_negotiation
+    try:
+        result = await settle_negotiation(
+            negotiation_id=negotiation_id,
+            alkahest_client=root_agent._alkahest_client,
+        )
+    except ValueError as exc:
+        # Missing / wrong terminal_state / no agreed_price — client error.
+        return 400, {"error": "Cannot settle negotiation", "detail": str(exc),
+                     "negotiation_id": negotiation_id}
+    except RuntimeError as exc:
+        # Chain call or registry failure.
+        logger.error("[SETTLE] failed for %s: %s", negotiation_id, exc)
+        return 502, {"error": "Settlement failed on-chain",
+                     "detail": str(exc),
+                     "negotiation_id": negotiation_id}
+
+    return 200, {"negotiation_id": negotiation_id, **result}
+
+
+async def settle_market_order_endpoint(request: Request) -> JSONResponse:
+    """POST /orders/settle — buyer-side escrow creation from committed terms."""
+    try:
+        body = await request.json()
+        negotiation_id = body.get("negotiation_id", "")
+    except Exception:
+        negotiation_id = ""
+    auth_error = _check_agent_request_auth(request, "settle_order", negotiation_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status, body_out = await _run_settle_flow(request)
+        return JSONResponse(body_out, status_code=status)
+    except ValueError as exc:
+        logger.error(f"[SETTLE] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Settle request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[SETTLE] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process settle", "detail": str(exc)},
+            status_code=500,
+        )
+
+
 agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
 agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
 agent_order_refund_route = Route("/orders/refund", refund_market_order_endpoint, methods=["POST"])
 agent_order_claim_route = Route("/orders/claim", claim_market_order_endpoint, methods=["POST"])
 agent_order_reclaim_route = Route("/orders/reclaim", reclaim_market_order_endpoint, methods=["POST"])
 agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
+agent_order_settle_route = Route("/orders/settle", settle_market_order_endpoint, methods=["POST"])
 
 # Plain Starlette ASGI app. Named `a2a_app` historically — kept for
 # import compatibility with server.py. There is no A2A protocol running
@@ -1495,6 +1575,7 @@ a2a_app = Starlette(routes=[
     agent_order_claim_route,
     agent_order_reclaim_route,
     agent_order_arbitrate_route,
+    agent_order_settle_route,
     *_all_message_routes(),
 ])
 

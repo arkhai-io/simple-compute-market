@@ -1400,11 +1400,29 @@ async def accept_offer(
         canceled = await txn.cancel_competing(order_id, their_order_id, negotiation_id)
         if negotiation_id:
             await txn.mark_terminal(negotiation_id, "success")
+            # Commit the agreement as its own artifact before any settlement
+            # step runs. This is the seam that lets settlement be retried
+            # independently — once these columns are set, `settle_negotiation`
+            # can run (or re-run) with only a negotiation_id in hand.
+            _agreed_duration = int(order_dict.get("duration_hours") or 1) if isinstance(order_dict, dict) else 1
+            if their_price is not None:
+                try:
+                    await get_sqlite_client().commit_agreed_terms(
+                        negotiation_id=negotiation_id,
+                        agreed_price=int(their_price),
+                        agreed_duration_hours=_agreed_duration,
+                    )
+                except Exception as commit_err:
+                    logger.warning(
+                        "[ACCEPT OFFER] Could not commit agreed terms for %s: %s",
+                        negotiation_id, commit_err,
+                    )
             stage_event("negotiation", "accepted",
                 negotiation_id=negotiation_id,
                 our_order_id=our_order_id,
                 their_order_id=their_order_id,
                 agreed_price=their_price,
+                agreed_duration_hours=_agreed_duration,
                 our_initial_price=our_initial_price,
                 counterparty_url=counterparty_url,
             )
@@ -1493,21 +1511,165 @@ async def _accept_as_buyer(
     our_order_id: str | None,
     their_order_id: str | None,
 ) -> dict[str, Any]:
-    """Buyer path: create on-chain escrow and send AcceptOfferEvent with escrow_uid."""
-    # `oracle_address` is retained on the order record for audit / future
-    # re-introduction of an oracle-gated arbiter, but the current escrow
-    # uses RecipientArbiter and does not consult it for collection.
+    """Buyer path: delegates to settle_negotiation, which reads committed
+    terms and does the escrow work. Kept thin so the settlement step is
+    reusable (retry endpoint, manual CLI, later orchestrator).
+    """
+    negotiation_id = parameters.get("negotiation_id")
+    if not negotiation_id:
+        # Legacy / non-negotiated path: skip thread lookup, pass everything
+        # inline. This preserves the existing behaviour for callsites that
+        # don't go through the NegotiationThreadTransaction.
+        return await _post_escrow_and_notify(
+            alkahest_client=alkahest_client,
+            order_dict=order_dict,
+            our_order_id=our_order_id,
+            their_order_id=their_order_id,
+            agreed_price=parameters.get("their_price"),
+            duration_hours=int(order_dict.get("duration_hours") or 1),
+            counterparty_url=parameters.get("counterparty_url")
+                or _resolve_counterparty_url_from_order(order_dict),
+            matched_order_id=parameters.get("matched_order_id") or their_order_id,
+        )
+
+    return await settle_negotiation(
+        negotiation_id=negotiation_id,
+        alkahest_client=alkahest_client,
+        # Pass the in-flight order_dict to avoid a redundant registry lookup
+        # on the happy path; settle_negotiation falls back to the registry
+        # when this is absent (retry case).
+        order_dict_hint=order_dict,
+        parameters_hint=parameters,
+    )
+
+
+async def settle_negotiation(
+    *,
+    negotiation_id: str,
+    alkahest_client: Any | None,
+    order_dict_hint: dict[str, Any] | None = None,
+    parameters_hint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run the buyer-side settlement step for a negotiation.
+
+    Reads the committed agreement from `negotiation_threads` (agreed_price,
+    agreed_duration_hours, our_order_id, their_agent_id) and does:
+      1. Resolve the seller's on-chain wallet (via /.well-known/agent-wallet.json).
+      2. Create the ERC-20 escrow on-chain.
+      3. Update the local order + registry with the escrow_uid.
+      4. Send the downstream AcceptOfferEvent with escrow_uid to the seller.
+
+    Idempotent on `orders.escrow_uid` — if the order already has one,
+    returns {"status": "already_settled", ...} without re-touching the chain.
+
+    Callable in two modes:
+      - Inline from accept_offer: pass `order_dict_hint` + `parameters_hint`
+        to skip registry lookups on the happy path.
+      - Cold from a retry endpoint: pass only `negotiation_id` and the
+        function hydrates everything from DB + registry.
+    """
+    sqlite_client = get_sqlite_client()
+    thread = await sqlite_client.load_negotiation_thread_row(negotiation_id=negotiation_id)
+    if not thread:
+        raise ValueError(f"No negotiation thread {negotiation_id}")
+    if thread.get("terminal_state") != "success":
+        raise ValueError(
+            f"Cannot settle negotiation {negotiation_id}: terminal_state="
+            f"{thread.get('terminal_state')!r} (expected 'success')"
+        )
+    agreed_price = thread.get("agreed_price")
+    if agreed_price is None:
+        raise ValueError(
+            f"Cannot settle negotiation {negotiation_id}: no agreed_price committed"
+        )
+    agreed_duration_hours = int(thread.get("agreed_duration_hours") or 1)
+    our_order_id = thread.get("our_order_id") or None
+    their_order_id = thread.get("their_order_id") or None
+    counterparty_url = thread.get("their_agent_id") or None
+
+    # Idempotence guard: if our order already has an escrow_uid, the
+    # settlement chain call has already succeeded. Return the recorded state
+    # so retries are safe.
+    if our_order_id:
+        existing = await sqlite_client.load_order(order_id=our_order_id)
+        if existing and existing.get("escrow_uid"):
+            logger.info(
+                "[SETTLE] Negotiation %s already settled with escrow_uid=%s; no-op",
+                negotiation_id, existing["escrow_uid"],
+            )
+            return {
+                "status": "already_settled",
+                "message": "Order already has an escrow_uid",
+                "escrow_uid": existing["escrow_uid"],
+                "negotiation_id": negotiation_id,
+            }
+
+    # Assemble the seller's order. On the happy path we already have it
+    # from the incoming ACCEPT_OFFER event; on retry we fetch it from the
+    # registry by their_order_id.
+    order_dict = order_dict_hint if isinstance(order_dict_hint, dict) else None
+    if not order_dict and their_order_id:
+        try:
+            registry_client = get_registry_client()
+            order_dict = await registry_client.get_order(their_order_id)
+        except Exception as exc:
+            raise RuntimeError(
+                f"[SETTLE] Could not fetch order {their_order_id} from registry: {exc}"
+            ) from exc
+    if not isinstance(order_dict, dict):
+        raise RuntimeError(
+            f"[SETTLE] Could not reconstruct seller order for negotiation {negotiation_id}"
+        )
+
+    matched_order_id = (
+        (parameters_hint or {}).get("matched_order_id") or their_order_id
+    )
+    if not counterparty_url:
+        counterparty_url = (
+            (parameters_hint or {}).get("counterparty_url")
+            or _resolve_counterparty_url_from_order(order_dict)
+        )
+
+    return await _post_escrow_and_notify(
+        alkahest_client=alkahest_client,
+        order_dict=order_dict,
+        our_order_id=our_order_id,
+        their_order_id=their_order_id,
+        agreed_price=agreed_price,
+        duration_hours=agreed_duration_hours,
+        counterparty_url=counterparty_url,
+        matched_order_id=matched_order_id,
+    )
+
+
+async def _post_escrow_and_notify(
+    *,
+    alkahest_client: Any | None,
+    order_dict: dict[str, Any],
+    our_order_id: str | None,
+    their_order_id: str | None,
+    agreed_price: int | float | None,
+    duration_hours: int,
+    counterparty_url: str | None,
+    matched_order_id: str | None,
+) -> dict[str, Any]:
+    """Internal: create escrow + update state + notify peer.
+
+    Raises on unrecoverable errors (no alkahest, no counterparty, chain
+    failure after retries). Callers (_accept_as_buyer, settle_negotiation,
+    the /orders/settle endpoint) handle the exception shape.
+    """
+    if not alkahest_client:
+        raise RuntimeError("AlkahestClient is required for settlement. Cannot proceed without on-chain escrow.")
+
     oracle_address = CONFIG.agent_wallet_address
     if not oracle_address:
-        raise ValueError("Agent wallet address is required for buyer accept_offer but not configured")
+        raise ValueError("Agent wallet address is required for settlement but not configured")
 
-    # Resolve the seller's on-chain wallet from their agent card. The
-    # escrow will demand this exact address as the recipient of the
-    # fulfillment attestation, so misidentifying it strands the funds.
-    counterparty_url = parameters.get("counterparty_url") or _resolve_counterparty_url_from_order(order_dict)
     counterparty_url = _coerce_agent_reference_to_url(counterparty_url) if counterparty_url else None
     if not counterparty_url:
         raise ValueError("Cannot create escrow: counterparty URL is unknown")
+
     seller_wallet_address = await fetch_agent_wallet_address(counterparty_url)
     if not seller_wallet_address:
         raise RuntimeError(
@@ -1515,75 +1677,64 @@ async def _accept_as_buyer(
             " (missing /.well-known/agent-wallet.json or AGENT_WALLET_ADDRESS)"
         )
 
+    try:
+        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        if agreed_price is not None:
+            token_resource = {**token_resource, "amount": int(agreed_price)}
+    except ValueError as exc:
+        logger.error(
+            "[SETTLE] Cannot identify compute/token resources in order: %s | order_dict keys=%s",
+            exc, list(order_dict.keys()),
+        )
+        return {"status": "error", "message": str(exc)}
+
     escrow_uid = None
     escrow_receipt = None
-
-    if alkahest_client:
+    max_retries = 3
+    base_delay = 1.0
+    for attempt in range(max_retries):
         try:
-            compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
-            their_price = parameters.get("their_price")
-            if their_price is not None:
-                token_resource = {**token_resource, "amount": their_price}
-        except ValueError as exc:
-            logger.error(
-                "[ACCEPT OFFER] Cannot identify compute/token resources in order — skipping escrow: %s | order_dict keys=%s",
-                exc,
-                list(order_dict.keys()),
+            logger.info("[ALKAHEST] Attempting to put tokens in escrow (attempt %d/%d)", attempt + 1, max_retries)
+            escrow_receipt = await buy_compute_with_erc20(
+                compute_resource=compute_resource,
+                token_resource=token_resource,
+                duration_hours=duration_hours,
+                seller_wallet_address=seller_wallet_address,
+                client=alkahest_client,
             )
-            return {"status": "error", "message": str(exc)}
-        max_retries = 3
-        base_delay = 1.0
-        for attempt in range(max_retries):
-            try:
-                logger.info("[ALKAHEST] Attempting to put tokens in escrow (attempt %d/%d)", attempt + 1, max_retries)
-                escrow_receipt = await buy_compute_with_erc20(
-                    compute_resource=compute_resource,
-                    token_resource=token_resource,
-                    duration_hours=order_dict.get("duration_hours", 1),
+            escrow_uid = escrow_receipt.get("log", {}).get("uid")
+            if escrow_uid:
+                logger.info("[ALKAHEST] Created escrow; uid=%s", escrow_uid)
+                stage_event("settlement", "escrow_created",
+                    escrow_uid=escrow_uid,
+                    buyer_order_id=our_order_id,
+                    seller_order_id=their_order_id,
+                    token_amount=token_resource.get("amount") if isinstance(token_resource, dict) else None,
+                    oracle_address=oracle_address,
+                    arbiter="RecipientArbiter",
                     seller_wallet_address=seller_wallet_address,
-                    client=alkahest_client,
                 )
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-                if escrow_uid:
-                    logger.info("[ALKAHEST] Created escrow; uid=%s", escrow_uid)
-                    stage_event("settlement", "escrow_created",
-                        escrow_uid=escrow_uid,
-                        buyer_order_id=our_order_id,
-                        seller_order_id=their_order_id,
-                        token_amount=token_resource.get("amount") if isinstance(token_resource, dict) else None,
-                        oracle_address=oracle_address,
-                        arbiter="RecipientArbiter",
-                        seller_wallet_address=seller_wallet_address,
-                    )
-                    break
-                logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
-            except Exception as e:
-                logger.warning("[ALKAHEST] Failed to create escrow on attempt %d/%d: %s", attempt + 1, max_retries, e)
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(base_delay * (2 ** attempt))
-                else:
-                    raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
+                break
+            logger.warning("[ALKAHEST] Escrow receipt missing uid on attempt %d", attempt + 1)
+        except Exception as e:
+            logger.warning("[ALKAHEST] Failed to create escrow on attempt %d/%d: %s", attempt + 1, max_retries, e)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+            else:
+                raise RuntimeError(f"Failed to create escrow after {max_retries} attempts: {e}") from e
 
+    if not escrow_uid:
+        if isinstance(escrow_receipt, dict):
+            escrow_uid = escrow_receipt.get("log", {}).get("uid")
         if not escrow_uid:
-            if isinstance(escrow_receipt, dict):
-                escrow_uid = escrow_receipt.get("log", {}).get("uid")
-            if not escrow_uid:
-                raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
-    else:
-        raise RuntimeError("AlkahestClient is required for accept_offer. Cannot proceed without on-chain escrow.")
+            raise RuntimeError("Failed to obtain escrow_uid from Alkahest response")
 
-    counterparty_url = parameters.get("counterparty_url")
     we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
     taker_url = counterparty_url if we_are_maker else BASE_URL_OVERRIDE
     order_dict["order_taker"] = taker_url
     # Buyer is always maker of own order → escrow goes in maker_attestation
     order_dict["maker_attestation"] = escrow_uid
     order_dict["oracle_address"] = oracle_address
-
-    # Echo the seller's order_id back so they can update their local DB without a lookup.
-    # Fall back to their_order_id when matched_order_id is absent (direct-match path where
-    # the policy passes their_order_id but not matched_order_id explicitly).
-    matched_order_id = parameters.get("matched_order_id") or their_order_id
 
     event_payload = {
         "event_type": EventType.ACCEPT_OFFER.value,
@@ -1592,13 +1743,8 @@ async def _accept_as_buyer(
         "escrow_uid": escrow_uid,
         "ssh_public_key": SSH_PUBLIC_KEY,
         "matched_order_id": matched_order_id,
-        # Echo our own order_id so the seller can reconstruct make_negotiation_id(seller, buyer)
-        # when the seller initiated the MakeOfferEvent (Case B: offer field contains seller's order,
-        # so order.order_id would be wrong without this echo).
         "buyer_order_id": our_order_id,
-        # Carry the negotiated price forward so the counterparty can use it for
-        # fulfillment encoding / escrow creation (Reactive Decision Pattern).
-        "agreed_price": parameters.get("their_price"),
+        "agreed_price": agreed_price,
     }
 
     try:
@@ -1619,7 +1765,6 @@ async def _accept_as_buyer(
     if CONFIG.enable_registry_discovery:
         try:
             registry_client = get_registry_client()
-            # Update counterparty's (seller's) order — buyer is taker there
             their_id = order_dict.get("order_id")
             if their_id:
                 their_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
@@ -1628,7 +1773,6 @@ async def _accept_as_buyer(
                     logger.info("[REGISTRY] Updated seller's order %s to accepted", their_id)
                 else:
                     logger.warning("[REGISTRY] Failed to update seller's order %s", their_id)
-            # Also update our own order — buyer is maker, contributed escrow
             if our_order_id:
                 our_updates = {"status": "accepted", "order_taker": counterparty_url, "maker_attestation": escrow_uid, "oracle_address": oracle_address}
                 result = await registry_client.update_order(our_order_id, our_updates)
@@ -1636,7 +1780,6 @@ async def _accept_as_buyer(
                     logger.info("[REGISTRY] Updated buyer's own order %s with maker_attestation", our_order_id)
                 else:
                     logger.warning("[REGISTRY] Failed to update buyer's order %s", our_order_id)
-            # In seller-as-maker flow, also update the matched order if different
             if matched_order_id and matched_order_id != their_id:
                 matched_updates = {"status": "accepted", "order_taker": taker_url, "taker_attestation": escrow_uid, "oracle_address": oracle_address}
                 result = await registry_client.update_order(matched_order_id, matched_updates)
@@ -1647,12 +1790,7 @@ async def _accept_as_buyer(
         except Exception as e:
             logger.warning("[REGISTRY] Failed to update order in registry: %s", e)
 
-    counterparty_ref = parameters.get("counterparty_url") or order_dict.get("order_maker")
-    counterparty_url = _coerce_agent_reference_to_url(counterparty_ref)
-    if not counterparty_url:
-        raise ValueError(f"accept_offer (buyer): cannot send acceptance — unresolved counterparty={counterparty_ref!r}")
-
-    logger.info("[TOOL] Buyer accepting offer, notifying seller: %s", counterparty_url)
+    logger.info("[SETTLE] Buyer settlement complete, notifying seller: %s", counterparty_url)
     dispatch_message_background(
         peer_url=counterparty_url,
         event_type=EventType.ACCEPT_OFFER.value,

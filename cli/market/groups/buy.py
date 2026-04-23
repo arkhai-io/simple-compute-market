@@ -527,8 +527,79 @@ def _submit_arbitrate(
     return _post_json(url, payload, headers)
 
 
+def _submit_settle(
+    agent_url: str,
+    negotiation_id: str,
+    private_key: Optional[str],
+) -> dict:
+    """POST /orders/settle; returns the agent's response dict."""
+    url = f"{_normalize_registry_url(agent_url)}/orders/settle"
+    headers = _get_auth_headers("settle_order", negotiation_id, private_key)
+    return _post_json(url, {"negotiation_id": negotiation_id}, headers)
+
+
 def register(app: typer.Typer) -> None:
     """Register the top-level `market buy` command on the given Typer app."""
+
+    @app.command("settle")
+    def settle(
+        negotiation_id: str = typer.Argument(
+            ..., help="Negotiation ID whose committed terms to settle.",
+        ),
+        agent_url: Optional[str] = typer.Option(
+            None, "--agent-url", "-a",
+            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+        ),
+    ) -> None:
+        """Run buyer-side settlement for an already-agreed negotiation.
+
+        Reads the committed agreed_price / agreed_duration_hours from the
+        negotiation_threads row, creates the on-chain escrow, and pushes
+        the ACCEPT_OFFER to the seller. Use this when a negotiation
+        succeeded but settlement failed (RPC outage, insufficient
+        approval, etc.) — retry is safe (idempotent on escrow_uid).
+        """
+        console = Console()
+        env_path = Path(env) if env else None
+        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
+        private_key = (
+            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+            or os.getenv("AGENT_PRIV_KEY")
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Agent", base_url)
+        header.add_row("Negotiation", negotiation_id)
+        console.print(Panel(header, title="market settle", border_style="cyan"))
+
+        try:
+            resp = _submit_settle(base_url, negotiation_id, private_key)
+        except typer.Exit:
+            raise
+
+        status = str(resp.get("status", "?"))
+        if status not in ("sent", "already_settled"):
+            typer.secho(
+                f"Settle did not succeed: status={status} detail={resp}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(10)
+
+        result = Table.grid(padding=(0, 2))
+        result.add_column(style="bold")
+        result.add_column()
+        result.add_row("Status", status)
+        result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
+        if status == "already_settled":
+            console.print(Panel(result, title="Already settled (no-op)", border_style="yellow"))
+        else:
+            console.print(Panel(result, title="Settlement complete", border_style="green"))
 
     @app.command("reclaim")
     def reclaim(

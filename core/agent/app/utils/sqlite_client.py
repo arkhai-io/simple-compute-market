@@ -102,7 +102,13 @@ class SQLiteClient:
                   status TEXT DEFAULT 'active',
                   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                  terminal_state TEXT
+                  terminal_state TEXT,
+                  -- Committed agreement artifact: populated when terminal_state='success'.
+                  -- Captures the negotiation's output as queryable state so settlement
+                  -- can run (or be retried) as a separate step without replaying rounds.
+                  agreed_price INTEGER,
+                  agreed_duration_hours INTEGER,
+                  agreed_at TEXT
                 )
                 """
             )
@@ -137,6 +143,19 @@ class SQLiteClient:
                 pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN terminal_state TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Committed-agreement columns (see CREATE TABLE above for semantics).
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_price INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_duration_hours INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_at TEXT")
             except sqlite3.OperationalError:
                 pass
             cur.execute(
@@ -1539,8 +1558,84 @@ class SQLiteClient:
                 conn.commit()
             finally:
                 conn.close()
-        
+
         await asyncio.to_thread(_update)
+
+    async def commit_agreed_terms(
+        self,
+        *,
+        negotiation_id: str,
+        agreed_price: int,
+        agreed_duration_hours: int,
+    ) -> None:
+        """Record the agreement artifact that comes out of a successful negotiation.
+
+        Called before any settlement step touches the chain. Lets settlement
+        run (or be retried) as a separate step by reading these columns,
+        without replaying the round-by-round message history.
+        """
+        def _save() -> None:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE negotiation_threads
+                    SET agreed_price = ?,
+                        agreed_duration_hours = ?,
+                        agreed_at = ?,
+                        updated_at = ?
+                    WHERE negotiation_id = ?
+                    """,
+                    (
+                        int(agreed_price),
+                        int(agreed_duration_hours),
+                        now,
+                        now,
+                        negotiation_id,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_negotiation_thread_row(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the negotiation_threads row as a dict, or None if absent."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id,
+                           our_agent_id, their_agent_id, status,
+                           created_at, updated_at, terminal_state,
+                           agreed_price, agreed_duration_hours, agreed_at
+                    FROM negotiation_threads WHERE negotiation_id = ?
+                    """,
+                    (negotiation_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                keys = [
+                    "negotiation_id", "our_order_id", "their_order_id",
+                    "our_agent_id", "their_agent_id", "status",
+                    "created_at", "updated_at", "terminal_state",
+                    "agreed_price", "agreed_duration_hours", "agreed_at",
+                ]
+                return dict(zip(keys, row))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
 
     async def delete_negotiation_thread(
         self,
