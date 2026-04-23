@@ -162,6 +162,71 @@ def order_close(
     console.print(Panel(table, title="Order Close", border_style="green"))
 
 
+@order_app.command("discover")
+def order_discover(
+    order_id: str = typer.Argument(
+        ...,
+        help="Our local order ID whose matches to list.",
+    ),
+    include_active: bool = typer.Option(
+        False,
+        "--include-active",
+        help="Include matches already in active negotiations with us. "
+             "Default is to filter them out.",
+    ),
+    agent_url: str | None = typer.Option(
+        None, "--agent-url", "-a",
+        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
+    ),
+    env: str | None = typer.Option(
+        None, "--env", "-e",
+        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
+    ),
+) -> None:
+    """List registry orders that match this order — pure query, no side effects.
+
+    Runs the discovery step without initiating any negotiations. Use as
+    the first step of a sequential buy/sell flow, or ad-hoc to inspect
+    what a given order would match against today.
+    """
+    env_path = Path(env) if env else None
+    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
+    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = _normalize_registry_url(base_url)
+    private_key = (
+        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
+        or os.getenv("AGENT_PRIV_KEY")
+    )
+
+    payload = {"order_id": order_id, "include_active": include_active}
+    url = f"{base_url}/orders/discover"
+    response = _post_json(url, payload, _get_auth_headers("discover_orders", order_id, private_key))
+
+    console = Console()
+    matches = response.get("matches", []) or []
+    header = Table.grid(padding=(0, 2))
+    header.add_column(style="bold")
+    header.add_column()
+    header.add_row("Order", order_id)
+    header.add_row("Agent", base_url)
+    header.add_row("Matches", str(response.get("match_count", len(matches))))
+    console.print(Panel(header, title="market order discover", border_style="cyan"))
+
+    if not matches:
+        console.print("[dim]No matches.[/dim]")
+        return
+
+    table = Table(title="Matches", show_lines=False)
+    table.add_column("Their Order ID", overflow="fold")
+    table.add_column("Their Agent URL", overflow="fold")
+    for m in matches:
+        table.add_row(
+            str(m.get("their_order_id", "-")),
+            str(m.get("their_agent_url", "-")),
+        )
+    console.print(table)
+
+
 @order_app.command("history")
 def order_history(
     env: str | None = typer.Option(

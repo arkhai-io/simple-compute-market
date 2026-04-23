@@ -1525,6 +1525,77 @@ async def _run_settle_flow(request: Request) -> tuple[int, dict]:
     return 200, {"negotiation_id": negotiation_id, **result}
 
 
+async def _run_discover_flow(request: Request) -> tuple[int, dict]:
+    """List registry orders that match a given local order.
+
+    Body: {"order_id": "...", "include_active": bool?}
+
+    Pure query: no thread writes, no outbound sends. The orchestrator
+    uses this as the first step of a sequential buy/sell flow, then
+    decides which matches to start negotiations with.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON in request body: {exc}") from exc
+
+    order_id = payload.get("order_id")
+    if not isinstance(order_id, str) or not order_id.strip():
+        raise ValueError("Request must include non-empty 'order_id'")
+    order_id = order_id.strip()
+
+    include_active = bool(payload.get("include_active", False))
+
+    from core.agent.app.utils.action_executor import discover
+    try:
+        matches = await discover(
+            order_id=order_id,
+            include_active_negotiations=include_active,
+        )
+    except ValueError as exc:
+        return 400, {"error": "Discover request invalid",
+                     "detail": str(exc),
+                     "order_id": order_id}
+    except RuntimeError as exc:
+        return 500, {"error": "Discovery unavailable",
+                     "detail": str(exc),
+                     "order_id": order_id}
+
+    return 200, {
+        "order_id": order_id,
+        "match_count": len(matches),
+        "matches": matches,
+    }
+
+
+async def discover_market_orders_endpoint(request: Request) -> JSONResponse:
+    """POST /orders/discover — pure registry-query step."""
+    try:
+        body = await request.json()
+        order_id = body.get("order_id", "")
+    except Exception:
+        order_id = ""
+    auth_error = _check_agent_request_auth(request, "discover_orders", order_id)
+    if auth_error:
+        return auth_error
+
+    try:
+        status, body_out = await _run_discover_flow(request)
+        return JSONResponse(body_out, status_code=status)
+    except ValueError as exc:
+        logger.error(f"[DISCOVER] Validation error: {exc}")
+        return JSONResponse(
+            {"error": "Discover request invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
+        logger.error(f"[DISCOVER] Unexpected error: {exc}")
+        return JSONResponse(
+            {"error": "Failed to process discover", "detail": str(exc)},
+            status_code=500,
+        )
+
+
 async def settle_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/settle — buyer-side escrow creation from committed terms."""
     try:
@@ -1560,6 +1631,7 @@ agent_order_claim_route = Route("/orders/claim", claim_market_order_endpoint, me
 agent_order_reclaim_route = Route("/orders/reclaim", reclaim_market_order_endpoint, methods=["POST"])
 agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
 agent_order_settle_route = Route("/orders/settle", settle_market_order_endpoint, methods=["POST"])
+agent_order_discover_route = Route("/orders/discover", discover_market_orders_endpoint, methods=["POST"])
 
 # Plain Starlette ASGI app. Named `a2a_app` historically — kept for
 # import compatibility with server.py. There is no A2A protocol running
@@ -1576,6 +1648,7 @@ a2a_app = Starlette(routes=[
     agent_order_reclaim_route,
     agent_order_arbitrate_route,
     agent_order_settle_route,
+    agent_order_discover_route,
     *_all_message_routes(),
 ])
 

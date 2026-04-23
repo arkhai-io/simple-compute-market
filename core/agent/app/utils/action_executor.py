@@ -1925,174 +1925,238 @@ def create_order(
     return order_dict
 
 
-async def _find_and_send_matching_offers(
-    order_dict: dict,
-) -> dict:
-    """Find matching orders and HTTP-POST offers to each.
+async def discover(
+    *,
+    order_id: str,
+    include_active_negotiations: bool = False,
+) -> list[dict[str, Any]]:
+    """Query the registry for orders matching `order_id` and return them.
 
-    Transport is always agent_http now (no more A2A session plumbing), so
-    the function no longer takes ctx/event. Callers still receive the
-    same result shape for backward compatibility with the make_offer
-    return path.
+    Pure query — no thread writes, no outbound sends. Intended as the
+    first closed-function step of a sequential buy/sell flow.
+
+    Returns a list of match records:
+        {"their_order_id": str,
+         "their_agent_url": str,
+         "their_order": dict}
+
+    Filters applied:
+      - only `status='open'` rows from the registry
+      - bidirectional resource compatibility (via registry_client.match_orders)
+      - our own orders removed
+      - orders already in active negotiations with us removed, unless
+        `include_active_negotiations=True` (useful for debugging / forced
+        re-propose flows)
+
+    Callers that also want to *initiate* negotiations against the result
+    should pair this with `start_negotiations(order_id, matches)`.
     """
     if not CONFIG.enable_registry_discovery:
-        return {
-            "status": "disabled",
-            "message": "Registry discovery is disabled",
-        }
-    
-    try:
-        registry_client = get_registry_client()
-        
-        # Determine resource types for filtering
-        offer_res = order_dict.get("offer_resource", {})
-        demand_res = order_dict.get("demand_resource", {})
-        
-        # Determine resource types
-        offer_type = "compute" if "gpu_model" in offer_res else ("token" if "token" in offer_res else "unknown")
-        demand_type = "compute" if "gpu_model" in demand_res else ("token" if "token" in demand_res else "unknown")
-        
-        # Query registry for matching orders (bidirectional)
-        filters = {
-            "status": "open",
-        }
-        
-        matching_orders = await registry_client.query_orders(
-            filters=filters,
-            bidirectional=True,
-            limit=CONFIG.max_discovery_agents
-        )
-        
-        # Use match_orders helper to filter more precisely
-        matching_orders = registry_client.match_orders(
-            order_dict,
-            matching_orders,
-            bidirectional=True
-        )
-        
-        # Filter out our own orders (don't match with ourselves)
-        order_id = order_dict.get("order_id")
-        matching_orders = [
-            m for m in matching_orders
-            if m.get("order_id") != order_id
-            and not _agent_urls_match(m.get("order_maker"), BASE_URL_OVERRIDE)
-        ]
+        raise RuntimeError("Registry discovery is disabled (CONFIG.enable_registry_discovery=False)")
 
-        # Filter out orders that are already in active negotiations with us
-        async with NegotiationThreadTransaction("MAKE_OFFER") as txn:
+    registry_client = get_registry_client()
+    our_order_dict = await registry_client.get_order(order_id)
+    if not our_order_dict:
+        raise ValueError(f"Order {order_id} not found in registry")
+
+    matching_orders = await registry_client.query_orders(
+        filters={"status": "open"},
+        bidirectional=True,
+        limit=CONFIG.max_discovery_agents,
+    )
+    matching_orders = registry_client.match_orders(
+        our_order_dict,
+        matching_orders,
+        bidirectional=True,
+    )
+    # Drop our own orders.
+    matching_orders = [
+        m for m in matching_orders
+        if m.get("order_id") != order_id
+        and not _agent_urls_match(m.get("order_maker"), BASE_URL_OVERRIDE)
+    ]
+
+    if not include_active_negotiations:
+        async with NegotiationThreadTransaction("DISCOVER") as txn:
             active_order_ids = await txn.filter_active(order_id)
             if active_order_ids:
                 matching_orders = [
                     m for m in matching_orders
                     if m.get("order_id") not in active_order_ids
                 ]
-                logger.info(f"[REGISTRY] Filtered out {len(active_order_ids)} orders already in active negotiations")
-        
-        if not matching_orders:
-            return {
-                "status": "no_match",
-                "message": "No matching market orders found in registry",
-                "order": order_dict,
-            }
-        
-        logger.info(f"[REGISTRY] Found {len(matching_orders)} matching orders, sending offers")
-        stage_event("discovery", "matches_found",
-            our_order_id=order_dict.get("order_id"),
-            match_count=len(matching_orders),
-            matched_order_ids=[m.get("order_id") for m in matching_orders[:CONFIG.max_discovery_agents]],
-            counterparty_urls=[m.get("order_maker") for m in matching_orders[:CONFIG.max_discovery_agents]],
+                logger.info(
+                    "[DISCOVER] Filtered out %d orders already in active negotiations",
+                    len(active_order_ids),
+                )
+
+    matches: list[dict[str, Any]] = []
+    for m in matching_orders[:CONFIG.max_discovery_agents]:
+        their_order_id = m.get("order_id")
+        their_agent_url = m.get("order_maker")
+        if not their_order_id or not their_agent_url:
+            continue
+        matches.append({
+            "their_order_id": their_order_id,
+            "their_agent_url": their_agent_url,
+            "their_order": m,
+        })
+
+    stage_event(
+        "discovery", "matches_found",
+        our_order_id=order_id,
+        match_count=len(matches),
+        matched_order_ids=[m["their_order_id"] for m in matches],
+        counterparty_urls=[m["their_agent_url"] for m in matches],
+    )
+    return matches
+
+
+async def start_negotiations(
+    *,
+    our_order: dict[str, Any],
+    matches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Initiate one negotiation thread per match and send the round-0 offer.
+
+    Takes the output of `discover()` plus our order dict, and for each
+    match:
+      - computes the canonical negotiation_id
+      - ensures the thread exists with our_initial_price + strategy
+      - records round-0 (our make_offer) in the message log
+      - skips if a thread already exists (counterparty-initiated duplicate)
+      - dispatches a MAKE_OFFER message to the counterparty's /negotiation/offer
+
+    Returns the list of successfully-dispatched send records. Matches for
+    which dispatch failed are not included in the return value but are
+    logged. Caller can diff against `matches` to identify failures.
+
+    Split out of the legacy make_offer path so the sequential orchestrator
+    can call discover → start_negotiations with explicit inputs.
+    """
+    order_id = our_order.get("order_id")
+    if not order_id:
+        raise ValueError("start_negotiations requires our_order.order_id")
+
+    registry_client = get_registry_client()
+    results: list[dict[str, Any]] = []
+
+    for match in matches:
+        matched_order_id = match["their_order_id"]
+        agent_url = match["their_agent_url"]
+        matched_order = match["their_order"]
+        try:
+            async with NegotiationThreadTransaction("MAKE_OFFER") as txn:
+                is_duplicate = await txn.check_duplicate(order_id, matched_order_id)
+
+                # Always derive our local state — even for the duplicate case,
+                # because check_duplicate is bidirectional and the counterparty
+                # may have created the thread first without our_initial_price.
+                negotiation_id = make_negotiation_id(order_id, matched_order_id)
+                our_order_dict = await registry_client.get_order(order_id)
+                if not our_order_dict:
+                    raise ValueError(f"Order {order_id} not found in registry")
+                our_order_model = MarketOrder.model_validate(our_order_dict)
+                strategy = determine_strategy_from_order(our_order_model)
+                our_initial_price = _extract_initial_price_from_order(our_order_model)
+
+                await txn.ensure_thread(
+                    negotiation_id=negotiation_id,
+                    our_order_id=order_id,
+                    their_order_id=matched_order_id,
+                    our_agent_id=BASE_URL_OVERRIDE,
+                    their_agent_id=agent_url,
+                    our_initial_price=our_initial_price,
+                    our_strategy=strategy,
+                )
+
+                if is_duplicate:
+                    logger.info(
+                        "[NEGOTIATION] Skipping duplicate with order %s",
+                        matched_order_id,
+                    )
+                    continue
+
+                their_initial_price = _extract_initial_price_from_order(matched_order)
+                await txn.add_message(
+                    negotiation_id=negotiation_id,
+                    sender=_sender_id(),
+                    our_price=our_initial_price,
+                    their_price=their_initial_price,
+                    proposed_price=our_initial_price,
+                    action_taken=ActionType.MAKE_OFFER.value,
+                    message_type="offer",
+                )
+                logger.debug(
+                    "[NEGOTIATION] Round-0 recorded for %s (peer=%s)",
+                    negotiation_id, agent_url,
+                )
+
+            offer_with_ref = {**our_order, "buyer_order_id": matched_order_id}
+            try:
+                send_result = await dispatch_message(
+                    peer_url=agent_url,
+                    event_type=EventType.MAKE_OFFER.value,
+                    payload={"offer": offer_with_ref},
+                )
+                if send_result:
+                    results.append({
+                        "negotiation_id": negotiation_id,
+                        "agent_url": agent_url,
+                        "matched_order_id": matched_order_id,
+                        "result": send_result,
+                    })
+            except Exception as send_exc:
+                logger.warning(
+                    "[NEGOTIATION] Offer dispatch to %s failed: %s",
+                    agent_url, send_exc,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[NEGOTIATION] Failed to start negotiation with %s (order %s): %s",
+                agent_url, matched_order_id, exc,
+            )
+
+    return results
+
+
+async def _find_and_send_matching_offers(
+    order_dict: dict,
+) -> dict:
+    """Legacy orchestrator: discover + start negotiations in one call.
+
+    Kept for the MAKE_OFFER action path, which still wires discovery and
+    initial-round dispatch together (policy-driven). For the sequential
+    orchestrator use `discover()` then `start_negotiations()` directly.
+    """
+    if not CONFIG.enable_registry_discovery:
+        return {
+            "status": "disabled",
+            "message": "Registry discovery is disabled",
+        }
+
+    order_id = order_dict.get("order_id")
+    try:
+        matches = await discover(order_id=order_id)
+    except ValueError as exc:
+        logger.error("[REGISTRY] discover failed: %s", exc)
+        return {"status": "error", "message": str(exc), "order": order_dict}
+    except Exception as exc:
+        logger.error("[REGISTRY] discover error: %s", exc)
+        return {"status": "error", "message": f"Error during matching: {exc}", "order": order_dict}
+
+    if not matches:
+        return {
+            "status": "no_match",
+            "message": "No matching market orders found in registry",
+            "order": order_dict,
+        }
+
+    try:
+        results = await start_negotiations(
+            our_order=order_dict,
+            matches=matches,
         )
 
-        # Extract agent URLs from matching orders
-        agent_urls = []
-        matched_order_ids = []
-        for match_order in matching_orders[:CONFIG.max_discovery_agents]:
-            maker_url = match_order.get("order_maker")
-            matched_order_id = match_order.get("order_id")
-            if maker_url and maker_url not in agent_urls:
-                agent_urls.append(maker_url)
-            if matched_order_id:
-                matched_order_ids.append(matched_order_id)
-        
-        # Send offers only if we have a context (for initial make_offer calls)
-        # For retries without context, we just log matches - actual offers will be sent
-        # when other agents query the registry and find our orders
-        results = []
-        if agent_urls:
-            # Send offer to each matching agent
-            for idx, agent_url in enumerate(agent_urls):
-                try:
-                    matched_order = matching_orders[idx] if idx < len(matching_orders) else None
-                    matched_order_id = matched_order.get("order_id") if matched_order else None
-                    
-                    # Check for duplicate negotiation before sending
-                    negotiation_id = None
-                    if matched_order_id:
-                        async with NegotiationThreadTransaction("MAKE_OFFER") as txn:
-                            is_duplicate = await txn.check_duplicate(order_id, matched_order_id)
-
-                            # Always derive our local state — even when a duplicate thread
-                            # exists (created by the counterparty).  check_duplicate is
-                            # bidirectional, so the responding agent (e.g. buyer replying to
-                            # seller's MAKE_OFFER) sees the thread as a duplicate and would
-                            # skip ensure_thread, leaving our_initial_price NULL in
-                            # negotiation_local_state.  That causes safe_default_reject to
-                            # fire with "missing price data" on the very next counter.
-                            negotiation_id = make_negotiation_id(order_id, matched_order_id)
-                            our_order_dict = await registry_client.get_order(order_id)
-                            if not our_order_dict:
-                                raise ValueError(f"Order {order_id} not found in registry")
-                            our_order = MarketOrder.model_validate(our_order_dict)
-                            strategy = determine_strategy_from_order(our_order)
-                            our_initial_price = _extract_initial_price_from_order(our_order)
-
-                            await txn.ensure_thread(
-                                negotiation_id=negotiation_id,
-                                our_order_id=order_id,
-                                their_order_id=matched_order_id,
-                                our_agent_id=BASE_URL_OVERRIDE,
-                                their_agent_id=agent_url,
-                                our_initial_price=our_initial_price,
-                                our_strategy=strategy,
-                            )
-
-                            if is_duplicate:
-                                logger.info(
-                                    f"[REGISTRY] Skipping duplicate negotiation with order {matched_order_id}"
-                                )
-                                continue
-
-                            # Record round 0 in our thread so the seller side has a
-                            # full message history matching the buyer's thread.
-                            their_initial_price = _extract_initial_price_from_order(matched_order) if matched_order else None
-                            await txn.add_message(
-                                negotiation_id=negotiation_id,
-                                sender=_sender_id(),
-                                our_price=our_initial_price,
-                                their_price=their_initial_price,
-                                proposed_price=our_initial_price,
-                                action_taken=ActionType.MAKE_OFFER.value,
-                                message_type="offer",
-                            )
-                            logger.debug(f"[REGISTRY] Created negotiation thread {negotiation_id} for offer to {agent_url}")
-
-                    logger.info(f"[REGISTRY] Sending offer to agent at {agent_url}")
-                    # Build a per-agent payload that echoes buyer_order_id so the
-                    # receiver can update its local record without a fuzzy DB lookup.
-                    offer_with_ref = {**order_dict, "buyer_order_id": matched_order_id} if matched_order_id else order_dict
-                    try:
-                        result = await dispatch_message(
-                            peer_url=agent_url,
-                            event_type=EventType.MAKE_OFFER.value,
-                            payload={"offer": offer_with_ref},
-                        )
-                        if result:
-                            results.append({"agent_url": agent_url, "result": result})
-                    except Exception as send_exc:
-                        logger.warning("[REGISTRY] Offer dispatch to %s failed: %s", agent_url, send_exc)
-                except Exception as e:
-                    logger.warning(f"[REGISTRY] Failed to send offer to {agent_url}: {e}")
-        
         if results:
             logger.info(f"[REGISTRY] Successfully sent offers to {len(results)} agents")
             return {
@@ -2100,19 +2164,12 @@ async def _find_and_send_matching_offers(
                 "message": f"Sent offers to {len(results)} agents",
                 "results": results,
             }
-        elif agent_urls:
-            return {
-                "status": "no_delivery",
-                "message": "Matching orders found but no offers could be delivered",
-                "order": order_dict,
-                "targets": agent_urls,
-            }
-        else:
-            return {
-                "status": "no_match",
-                "message": "No matching market orders found in registry",
-                "order": order_dict,
-            }
+        return {
+            "status": "no_delivery",
+            "message": "Matching orders found but no offers could be delivered",
+            "order": order_dict,
+            "targets": [m["their_agent_url"] for m in matches],
+        }
     except Exception as e:
         logger.error(f"[REGISTRY] Error finding/sending matching offers: {e}")
         return {
