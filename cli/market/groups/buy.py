@@ -1,1009 +1,274 @@
-"""Top-level `market buy` command.
+"""`market buy` — pure-client sequential buy.
 
-Wraps the full buyer pipeline behind a single synchronous CLI call:
-  1. POST /orders/create with {offer: token, demand: compute}
-  2. Poll DB-derived stage until closed / post_settlement / failure / timeout
-  3. Print credentials
+No buyer agent, no event pipeline. Drives the deal end-to-end from the
+CLI process:
 
-By default, `market buy` is self-contained: if no agent is reachable at
-the target URL, it spawns one transiently (docker container) and tears
-it down on exit. Pass `--no-spawn-agent` to use an externally-managed
-agent instead.
+    discover (registry) →
+    negotiate each match (sync HTTP rounds) →
+    pick agreed match →
+    create escrow on-chain (alkahest-py in-process) →
+    POST /settle/{uid} on seller →
+    poll /settle/{uid}/status until ready/failed.
+
+Expects the buyer's order to already exist in the registry — create it
+with `market order create` first. The orchestrator itself is in
+market.buy_orchestrator; this command just wires env → config → call.
 """
 
 from __future__ import annotations
 
-import atexit
-import contextlib
 import json
 import os
-import shutil
-import signal
-import sqlite3
-import subprocess
-import time
-import urllib.error
-import urllib.request
-import uuid
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
-from ..common import REPO_ROOT, read_env_value, resolve_agent_url
-from .logs import _derive_stage, _resolve_db_path
-from .order import (
-    _get_auth_headers,
-    _normalize_registry_url,
-    _post_json,
-    _print_credentials_table,
-    _resolve_db_path as _order_resolve_db_path,
+from ..buy_orchestrator import (
+    BuyConfig,
+    BuyConstraints,
+    run_buy,
 )
-
-
-TERMINAL_STAGES = {"closed"}
-READY_STAGES = {"post_settlement", "closed"}
-
-
-DEFAULT_SPAWN_IMAGE = "arkhai:core"
-DEFAULT_SPAWN_NETWORK_CANDIDATES = (
-    "simple-market-service_market-network",
-    "market-network",
-)
-
-
-def _agent_reachable(base_url: str, timeout_s: float = 3.0) -> bool:
-    url = base_url.rstrip("/") + "/.well-known/agent.json"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
-        return False
-
-
-def _docker_cmd() -> Optional[str]:
-    """Return the preferred OCI runtime binary, or None if none is on PATH."""
-    for candidate in ("docker", "podman"):
-        if shutil.which(candidate):
-            return candidate
-    return None
-
-
-def _pick_network(runtime: str) -> Optional[str]:
-    """Return the first candidate docker network that exists locally, or None."""
-    try:
-        out = subprocess.run(
-            [runtime, "network", "ls", "--format", "{{.Name}}"],
-            capture_output=True, text=True, timeout=5,
-        )
-    except Exception:
-        return None
-    if out.returncode != 0:
-        return None
-    existing = set(out.stdout.split())
-    for name in DEFAULT_SPAWN_NETWORK_CANDIDATES:
-        if name in existing:
-            return name
-    return None
-
-
-def _base_url_hostname(url: str) -> Optional[str]:
-    """Extract just the hostname from a base URL (for --network-alias)."""
-    import urllib.parse as _up
-    try:
-        parsed = _up.urlparse(url)
-        return parsed.hostname
-    except Exception:
-        return None
-
-
-def _spawn_agent_container(
-    *,
-    env_path: Path,
-    port: int,
-    image: str,
-    network: Optional[str],
-    agent_data_dir: Optional[Path],
-    shared_env_file: Optional[Path],
-    advertised_hostname: Optional[str],
-    console: Console,
-) -> tuple[str, Callable[[], None]]:
-    """Launch an agent container and return (container_name, cleanup_fn).
-
-    `agent_data_dir` is the host path to mount at the container-internal
-    data directory so the CLI can read the same SQLite DB the agent writes.
-    `shared_env_file` is an additional env file for values the main env
-    doesn't carry (e.g. IDENTITY_REGISTRY_ADDRESS from shared-env/.env).
-    """
-    runtime = _docker_cmd()
-    if not runtime:
-        raise typer.BadParameter(
-            "No container runtime found (docker or podman). "
-            "Install one, run the agent externally, or pass --no-spawn-agent."
-        )
-
-    name = f"market-buy-ephemeral-{uuid.uuid4().hex[:8]}"
-    cmd = [
-        runtime, "run", "--rm", "-d",
-        "--name", name,
-        "--platform", "linux/amd64",
-        "--env-file", str(env_path.resolve()),
-    ]
-    if shared_env_file and shared_env_file.exists():
-        cmd.extend(["--env-file", str(shared_env_file.resolve())])
-    # ONCHAIN_AGENT_ID must be empty in the spawn so AUTO_REGISTER reliably
-    # picks up a fresh chain registration, matching docker-compose.yml.
-    cmd.extend(["-e", "ONCHAIN_AGENT_ID="])
-    cmd.extend(["-p", f"{port}:{port}"])
-    if network:
-        cmd.extend(["--network", network])
-        # Claim the hostname the buyer advertises on the compose network so
-        # that the seller can dial back. Without this, BASE_URL_OVERRIDE
-        # (e.g. http://buy_agent:8000) resolves to nothing and inter-agent
-        # callbacks like 'fulfillment_completed' silently fail, leaving
-        # the buyer's thread stuck in 'active' while seller sees 'success'.
-        if advertised_hostname and advertised_hostname not in ("localhost", "127.0.0.1"):
-            cmd.extend(["--network-alias", advertised_hostname])
-    if agent_data_dir:
-        # Mount the host DB dir into the container so host-side polling sees
-        # the agent's writes. Path layout matches docker-compose.yml.
-        host = str(agent_data_dir.resolve())
-        container_rel = "/app/core/agent/app/data/buy-agent"
-        cmd.extend(["-v", f"{host}:{container_rel}"])
-    cmd.append(image)
-
-    console.print(f"[dim]spawning agent:[/dim] {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise typer.BadParameter(
-            f"Failed to launch agent container: {result.stderr.strip() or result.stdout.strip()}"
-        )
-
-    def _cleanup():
-        with contextlib.suppress(Exception):
-            subprocess.run(
-                [runtime, "stop", "-t", "5", name],
-                capture_output=True, text=True, timeout=15,
-            )
-
-    atexit.register(_cleanup)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        prev = signal.getsignal(sig)
-        def _handler(signum, frame, _prev=prev):
-            _cleanup()
-            if callable(_prev):
-                _prev(signum, frame)
-            raise SystemExit(130)
-        signal.signal(sig, _handler)
-
-    return name, _cleanup
-
-
-def _agent_is_registered(base_url: str, timeout_s: float = 2.0) -> bool:
-    """Agent self-reports on-chain registrations in its ERC-8004 doc.
-
-    Empty `registrations` array means the agent hasn't finished auto-register
-    yet (or registration failed). The agent can't publish orders until this
-    completes, so a bare HTTP 200 on `/.well-known/agent.json` is not enough
-    to consider it ready for real work.
-    """
-    url = base_url.rstrip("/") + "/.well-known/erc-8004-registration.json"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
-            if resp.status != 200:
-                return False
-            body = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return False
-    regs = body.get("registrations") or []
-    return bool(regs)
-
-
-def _indexer_knows_agent(registry_url: str, wallet: str, timeout_s: float = 2.0) -> bool:
-    """Ask the registry indexer whether our wallet is listed as a registered agent.
-
-    The indexer polls the chain on an interval, so even once the agent has
-    registered on-chain (per _agent_is_registered), there can still be a
-    lag before the indexer reflects it — and order publishes require the
-    indexer to know the agent.
-    """
-    if not wallet:
-        return True  # can't check, assume ok
-    target = wallet.lower().removeprefix("0x")
-    url = registry_url.rstrip("/") + "/agents"
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
-            if resp.status != 200:
-                return False
-            data = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return False
-    for agent in data.get("items", []):
-        labels = agent.get("labels") or {}
-        w = (labels.get("agentWallet") or "").lower().removeprefix("0x")
-        if w == target:
-            return True
-    return False
-
-
-def _wait_for_agent(
-    base_url: str,
-    timeout_s: float,
-    console: Console,
-    *,
-    registry_url: Optional[str] = None,
-    wallet: Optional[str] = None,
-) -> bool:
-    """Poll for HTTP reachability → on-chain registration → indexer presence.
-
-    A spawned agent isn't ready to accept order creates the moment its HTTP
-    port binds — it still has to register on-chain and wait for the registry
-    indexer to pick that up, otherwise order publish returns 404 from the
-    indexer and the deal never gets off the ground.
-    """
-    deadline = time.time() + timeout_s
-
-    # Stage 1: HTTP reachable.
-    console.print(f"[dim]waiting for agent at {base_url}...[/dim]", end="")
-    while time.time() < deadline:
-        if _agent_reachable(base_url, timeout_s=1.5):
-            console.print(" [green]http ok[/green]", end="")
-            break
-        time.sleep(1.0)
-    else:
-        console.print(" [red]http timeout[/red]")
-        return False
-
-    # Stage 2: on-chain registration visible in the agent's own ERC-8004 doc.
-    while time.time() < deadline:
-        if _agent_is_registered(base_url, timeout_s=1.5):
-            console.print(" [green]registered[/green]", end="")
-            break
-        time.sleep(1.5)
-    else:
-        console.print(" [red]registration timeout[/red]")
-        return False
-
-    # Stage 3 (optional): registry indexer knows about us.
-    if registry_url and wallet:
-        while time.time() < deadline:
-            if _indexer_knows_agent(registry_url, wallet, timeout_s=1.5):
-                console.print(" [green]indexed[/green]")
-                return True
-            time.sleep(2.0)
-        console.print(" [red]indexer timeout[/red]")
-        return False
-
-    console.print()  # newline
-    return True
-
-
-def _build_resources(
-    gpu: Optional[str],
-    quantity: int,
-    sla: Optional[float],
-    region: Optional[str],
-    max_price: str,
-    token: str,
-    demand_json: Optional[str],
-    offer_json: Optional[str],
-) -> tuple[dict, dict]:
-    """Build (offer, demand) resource dicts for the /orders/create payload.
-
-    Buyer semantics: offer = token (what they pay), demand = compute (what they want).
-    """
-    if demand_json:
-        demand = json.loads(demand_json)
-    else:
-        if not gpu:
-            raise typer.BadParameter("--gpu is required (or pass --demand-json)")
-        demand = {"gpu_model": gpu, "quantity": quantity}
-        if sla is not None:
-            demand["sla"] = sla
-        if region:
-            demand["region"] = region
-
-    if offer_json:
-        offer = json.loads(offer_json)
-    else:
-        offer = {"token": token, "amount": max_price}
-
-    return offer, demand
-
-
-def _find_order_negotiation(conn: sqlite3.Connection, order_id: str) -> Optional[str]:
-    """Return the negotiation_id associated with a local order, if one exists yet."""
-    row = conn.execute(
-        """SELECT negotiation_id FROM negotiation_threads
-           WHERE our_order_id = ? OR their_order_id = ?
-           ORDER BY created_at DESC LIMIT 1""",
-        (order_id, order_id),
-    ).fetchone()
-    return row[0] if row else None
-
-
-def _resolve_recover_order_id(db_path: str, identifier: str) -> Optional[str]:
-    """Map an order_id OR escrow_uid to the buyer's local order_id.
-
-    Returns None if no match found. Accepts either:
-      - a UUID (treated as an order_id), or
-      - a 0x-prefixed hex string (treated as an escrow_uid).
-    """
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        # Try direct order_id match first.
-        row = conn.execute(
-            "SELECT order_id FROM orders WHERE order_id = ? LIMIT 1",
-            (identifier,),
-        ).fetchone()
-        if row:
-            return row[0]
-        # Try escrow_uid (the column exists on orders).
-        row = conn.execute(
-            "SELECT order_id FROM orders WHERE escrow_uid = ? LIMIT 1",
-            (identifier,),
-        ).fetchone()
-        return row[0] if row else None
-    finally:
-        conn.close()
-
-
-def _load_order_state(db_path: str, order_id: str) -> dict:
-    """Return the current {status, escrow_uid, taker_attestation} for an order."""
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
-    try:
-        row = conn.execute(
-            "SELECT status, escrow_uid, taker_attestation FROM orders WHERE order_id = ?",
-            (order_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        return {}
-    return {
-        "status": row[0],
-        "escrow_uid": row[1],
-        "taker_attestation": row[2],
-    }
-
-
-def _close_order(
-    agent_url: str,
-    order_id: str,
-    private_key: Optional[str],
-) -> dict:
-    """POST /orders/close and return the full response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/close"
-    headers = _get_auth_headers("close_order", order_id, private_key)
-    return _post_json(url, {"order_id": order_id}, headers)
-
-
-def _credentials_present(conn: sqlite3.Connection, order_id: str) -> bool:
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM credentials WHERE order_id = ?",
-            (order_id,),
-        ).fetchone()
-        return bool(row and row[0])
-    except sqlite3.OperationalError:
-        return False
-
-
-def _poll_snapshot(db_path: str, order_id: str) -> dict:
-    """Single read: returns {stage, detail, negotiation_id, credentials_ready}.
-
-    Opens the DB read-only with nolock=1 so a busy writer on the other side
-    (e.g. the agent doing WAL checkpoints) does not surface as a spurious
-    'attempt to write a readonly database'. Retries briefly on transient I/O.
-    """
-    last_err: Exception | None = None
-    for _ in range(5):
-        try:
-            conn = sqlite3.connect(
-                f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5,
-            )
-            conn.row_factory = sqlite3.Row
-            try:
-                nid = _find_order_negotiation(conn, order_id)
-                creds_ready = _credentials_present(conn, order_id)
-                if not nid:
-                    return {
-                        "stage": "discovery",
-                        "detail": "matching seller",
-                        "negotiation_id": None,
-                        "credentials_ready": creds_ready,
-                    }
-                info = _derive_stage(conn, nid)
-                info["credentials_ready"] = creds_ready
-                info["negotiation_id"] = nid
-                return info
-            finally:
-                conn.close()
-        except sqlite3.OperationalError as exc:
-            last_err = exc
-            time.sleep(0.2)
-    # Final attempt failed — surface a snapshot that represents "we can't read".
-    return {
-        "stage": "unknown",
-        "detail": f"db read error: {last_err}",
-        "negotiation_id": None,
-        "credentials_ready": False,
-    }
-
-
-def _create_buy_order(
-    agent_url: str,
-    offer: dict,
-    demand: dict,
-    duration_hours: int,
-    wallet_address: str,
-    private_key: Optional[str],
-) -> str:
-    """POST /orders/create and return the new order_id."""
-    payload = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-    url = f"{_normalize_registry_url(agent_url)}/orders/create"
-    headers = _get_auth_headers("create_order", wallet_address, private_key)
-    response = _post_json(url, payload, headers)
-    order_id = response.get("order_id")
-    if not order_id:
-        raise typer.BadParameter(f"Agent did not return order_id: {response}")
-    return order_id
-
-
-def _wait_for_completion(
-    db_path: str,
-    order_id: str,
-    timeout: int,
-    poll_interval: float,
-    console: Console,
-) -> dict:
-    """Block until credentials ready / closed / failure / timeout. Returns final snapshot."""
-    deadline = time.time() + timeout
-
-    def render(info: dict) -> Panel:
-        color = {
-            "discovery": "blue",
-            "negotiation": "yellow",
-            "settlement": "green",
-            "provision": "cyan",
-            "post_settlement": "magenta",
-            "closed": "bold green",
-            "unknown": "red",
-        }.get(info.get("stage", ""), "white")
-        lines = [f"[bold]Order:[/bold] {order_id}"]
-        lines.append(f"[bold]Stage:[/bold] [{color}]{info.get('stage', '?')}[/{color}]")
-        if info.get("detail"):
-            lines.append(f"[bold]Detail:[/bold] {info['detail']}")
-        for key in ("negotiation_id", "escrow_uid", "rounds"):
-            val = info.get(key)
-            if val is not None:
-                lines.append(f"[dim]{key}:[/dim] {val}")
-        lines.append(f"[dim]timeout in {max(0, int(deadline - time.time()))}s[/dim]")
-        return Panel("\n".join(lines), title="[bold]market buy[/bold]", border_style=color)
-
-    with Live(console=console, refresh_per_second=2) as live:
-        while True:
-            info = _poll_snapshot(db_path, order_id)
-            live.update(render(info))
-
-            if info.get("credentials_ready") or info.get("stage") in READY_STAGES:
-                return info
-            if info.get("terminal_state") in ("failure", "superseded", "abandoned"):
-                return info
-            if time.time() >= deadline:
-                info["_timed_out"] = True
-                return info
-            time.sleep(poll_interval)
-
-
-def _submit_reclaim(
-    agent_url: str,
-    order_id: str,
-    private_key: Optional[str],
-) -> dict:
-    """POST /orders/reclaim; returns the agent's response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/reclaim"
-    headers = _get_auth_headers("reclaim_order", order_id, private_key)
-    return _post_json(url, {"order_id": order_id}, headers)
-
-
-def _submit_arbitrate(
-    agent_url: str,
-    order_id: str,
-    decision: bool,
-    fulfillment_uid: Optional[str],
-    private_key: Optional[str],
-) -> dict:
-    """POST /orders/arbitrate; returns the agent's response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/arbitrate"
-    payload: dict = {"order_id": order_id, "decision": decision}
-    if fulfillment_uid:
-        payload["fulfillment_uid"] = fulfillment_uid
-    headers = _get_auth_headers("arbitrate_order", order_id, private_key)
-    return _post_json(url, payload, headers)
-
-
-def _submit_settle(
-    agent_url: str,
-    negotiation_id: str,
-    private_key: Optional[str],
-) -> dict:
-    """POST /orders/settle; returns the agent's response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/settle"
-    headers = _get_auth_headers("settle_order", negotiation_id, private_key)
-    return _post_json(url, {"negotiation_id": negotiation_id}, headers)
+from ..common import read_env_value
 
 
 def register(app: typer.Typer) -> None:
-    """Register the top-level `market buy` command on the given Typer app."""
-
-    @app.command("settle")
-    def settle(
-        negotiation_id: str = typer.Argument(
-            ..., help="Negotiation ID whose committed terms to settle.",
-        ),
-        agent_url: Optional[str] = typer.Option(
-            None, "--agent-url", "-a",
-            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
-        ),
-    ) -> None:
-        """Run buyer-side settlement for an already-agreed negotiation.
-
-        Reads the committed agreed_price / agreed_duration_hours from the
-        negotiation_threads row, creates the on-chain escrow, and pushes
-        the ACCEPT_OFFER to the seller. Use this when a negotiation
-        succeeded but settlement failed (RPC outage, insufficient
-        approval, etc.) — retry is safe (idempotent on escrow_uid).
-        """
-        console = Console()
-        env_path = Path(env) if env else None
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
-
-        header = Table.grid(padding=(0, 2))
-        header.add_column(style="bold")
-        header.add_column()
-        header.add_row("Agent", base_url)
-        header.add_row("Negotiation", negotiation_id)
-        console.print(Panel(header, title="market settle", border_style="cyan"))
-
-        try:
-            resp = _submit_settle(base_url, negotiation_id, private_key)
-        except typer.Exit:
-            raise
-
-        status = str(resp.get("status", "?"))
-        if status not in ("sent", "already_settled"):
-            typer.secho(
-                f"Settle did not succeed: status={status} detail={resp}",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(10)
-
-        result = Table.grid(padding=(0, 2))
-        result.add_column(style="bold")
-        result.add_column()
-        result.add_row("Status", status)
-        result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
-        if status == "already_settled":
-            console.print(Panel(result, title="Already settled (no-op)", border_style="yellow"))
-        else:
-            console.print(Panel(result, title="Settlement complete", border_style="green"))
-
-    @app.command("reclaim")
-    def reclaim(
-        order_id: str = typer.Argument(..., help="Buyer order ID with an expired escrow."),
-        agent_url: Optional[str] = typer.Option(
-            None, "--agent-url", "-a",
-            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
-        ),
-    ) -> None:
-        """Reclaim an expired escrow as the buyer.
-
-        Calls `escrow.reclaim_expired(escrow_uid)` on-chain. Only succeeds
-        if the escrow's expiration has passed (1 hour by default). If the
-        tx reverts, the on-chain error is surfaced verbatim — the most
-        common cause is "not yet expired."
-        """
-        console = Console()
-        env_path = Path(env) if env else None
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
-
-        header = Table.grid(padding=(0, 2))
-        header.add_column(style="bold")
-        header.add_column()
-        header.add_row("Agent", base_url)
-        header.add_row("Order", order_id)
-        console.print(Panel(header, title="market reclaim", border_style="yellow"))
-
-        try:
-            resp = _submit_reclaim(base_url, order_id, private_key)
-        except typer.Exit:
-            raise
-
-        status = str(resp.get("status", "?"))
-        if status != "reclaimed":
-            typer.secho(
-                f"Reclaim did not succeed: status={status} detail={resp}",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(8)
-
-        result = Table.grid(padding=(0, 2))
-        result.add_column(style="bold")
-        result.add_column()
-        result.add_row("Status", "reclaimed")
-        result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
-        result.add_row("Result", str(resp.get("reclaim_result", "-")))
-        console.print(Panel(result, title="Reclaim complete", border_style="green"))
-
-    @app.command("arbitrate")
-    def arbitrate(
-        order_id: str = typer.Argument(..., help="Buyer order ID to arbitrate."),
-        approve: bool = typer.Option(
-            True, "--approve/--reject",
-            help="Decision recorded on-chain as the oracle. Default: approve.",
-        ),
-        fulfillment_uid: Optional[str] = typer.Option(
-            None, "--fulfillment-uid",
-            help="Override the maker_attestation UID from local state.",
-        ),
-        agent_url: Optional[str] = typer.Option(
-            None, "--agent-url", "-a",
-            help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
-        ),
-    ) -> None:
-        """Record an oracle decision for a fulfillment (no-op under RecipientArbiter).
-
-        Under the current escrow arbiter, this decision does NOT gate
-        collection — the seller can claim purely from their fulfillment
-        attestation. Kept for debugging and for future validation-gated
-        arbiters. To actually release funds, the seller uses `market claim`.
-        """
-        console = Console()
-        env_path = Path(env) if env else None
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
-
-        header = Table.grid(padding=(0, 2))
-        header.add_column(style="bold")
-        header.add_column()
-        header.add_row("Agent", base_url)
-        header.add_row("Order", order_id)
-        header.add_row("Decision", "approve" if approve else "reject")
-        console.print(Panel(header, title="market arbitrate", border_style="magenta"))
-        console.print(
-            "[dim]Note: under RecipientArbiter, this records an oracle decision but does "
-            "not unlock the escrow. Use `market claim` (seller) or `market reclaim` (buyer) "
-            "to move funds.[/dim]"
-        )
-
-        try:
-            resp = _submit_arbitrate(base_url, order_id, approve, fulfillment_uid, private_key)
-        except typer.Exit:
-            raise
-
-        status = str(resp.get("status", "?"))
-        if status != "arbitrated":
-            typer.secho(
-                f"Arbitrate did not succeed: status={status} detail={resp}",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(9)
-
-        result = Table.grid(padding=(0, 2))
-        result.add_column(style="bold")
-        result.add_column()
-        result.add_row("Status", "arbitrated")
-        result.add_row("Fulfillment UID", str(resp.get("fulfillment_uid", "-")))
-        result.add_row("Decision", "approve" if resp.get("decision") else "reject")
-        result.add_row("Decisions processed", str(resp.get("decisions_count", "-")))
-        console.print(Panel(result, title="Arbitration recorded", border_style="green"))
+    """Register the top-level `market buy` command."""
 
     @app.command("buy")
     def buy(
-        gpu: Optional[str] = typer.Option(None, "--gpu", "-g", help="GPU model, e.g. 'RTX 5080'."),
-        quantity: int = typer.Option(1, "--quantity", "-q", help="Number of GPUs."),
-        sla: Optional[float] = typer.Option(None, "--sla", help="Minimum SLA percentage."),
-        region: Optional[str] = typer.Option(None, "--region", help="Preferred region."),
-        max_price: Optional[str] = typer.Option(None, "--max-price", "-p", help="Price ceiling (human units of --token). Required unless --recover is given."),
-        token: str = typer.Option("MOCK", "--token", help="Payment token symbol."),
-        duration_hours: int = typer.Option(1, "--duration-hours", "-t", help="Lease duration in hours."),
-        demand_json: Optional[str] = typer.Option(None, "--demand-json", help="Raw demand resource JSON (overrides --gpu/--quantity/--sla/--region)."),
-        offer_json: Optional[str] = typer.Option(None, "--offer-json", help="Raw offer resource JSON (overrides --max-price/--token)."),
-        recover: Optional[str] = typer.Option(None, "--recover", help="Resume waiting on an existing order by order_id or escrow_uid, instead of creating a new one."),
-        abort: Optional[str] = typer.Option(None, "--abort", help="Cancel an in-flight order by order_id or escrow_uid. Closes the order locally and in the registry."),
-        spawn_agent: bool = typer.Option(
-            True, "--spawn-agent/--no-spawn-agent",
-            help="If no agent is reachable at the target URL, transiently spawn one (container) for the duration of this command and tear it down on exit. On by default so `market buy` feels like a one-shot.",
+        buyer_order_id: str = typer.Argument(
+            ..., help="The buyer's order_id (must exist in the registry).",
         ),
-        spawn_image: str = typer.Option(
-            DEFAULT_SPAWN_IMAGE, "--spawn-image",
-            help="Container image to use when --spawn-agent must launch one.",
+        initial_price: int = typer.Option(
+            ..., "--initial-price",
+            help="Opening bid per negotiation (raw token units).",
         ),
-        spawn_network: Optional[str] = typer.Option(
-            None, "--spawn-network",
-            help="Container network for a spawned agent. Defaults to the first local network named 'simple-market-service_market-network' or 'market-network' if present.",
+        max_price: int = typer.Option(
+            ..., "--max-price",
+            help="Ceiling per negotiation (raw token units).",
         ),
-        spawn_timeout: int = typer.Option(
-            30, "--spawn-timeout",
-            help="Seconds to wait for a spawned agent to become reachable.",
+        registry_url: Optional[str] = typer.Option(
+            None, "--registry-url",
+            help="Registry base URL. Default: INDEXER_URL env / env file.",
         ),
-        timeout: int = typer.Option(600, "--timeout", help="Total wait budget in seconds."),
-        poll_interval: float = typer.Option(2.0, "--poll-interval", help="Seconds between DB polls."),
-        agent_url: Optional[str] = typer.Option(None, "--agent-url", "-a", help="Buyer agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE)."),
-        env: Optional[str] = typer.Option(None, "--env", "-e", help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY, AGENT_DB_PATH)."),
-        db: Optional[str] = typer.Option(None, "--db", help="Explicit buyer agent SQLite DB path."),
-        show_password: bool = typer.Option(False, "--show-password", help="Reveal credential passwords when printing."),
+        token_contract: Optional[str] = typer.Option(
+            None, "--token-contract",
+            help="ERC-20 token contract address used for payment. "
+                 "Default: resolve 'MOCK' via the token registry.",
+        ),
+        token_decimals: int = typer.Option(
+            18, "--token-decimals",
+            help="ERC-20 token decimals (default 18).",
+        ),
+        chain_name: Optional[str] = typer.Option(
+            None, "--chain-name",
+            help="Chain name for alkahest address resolution "
+                 "(env: CHAIN_NAME).",
+        ),
+        alkahest_addr_config: Optional[str] = typer.Option(
+            None, "--alkahest-addr-config",
+            help="Path to alkahest address config JSON "
+                 "(env: ALKAHEST_ADDRESS_CONFIG_PATH).",
+        ),
+        expiration_seconds: int = typer.Option(
+            3600, "--expiration",
+            help="Escrow deadline (seconds from now) for the "
+                 "reclaim_expired escape hatch. Default 1h.",
+        ),
+        max_matches: int = typer.Option(
+            5, "--max-matches",
+            help="How many matching seller orders to try before giving up.",
+        ),
+        max_rounds: int = typer.Option(
+            10, "--max-rounds",
+            help="Per-negotiation round cap.",
+        ),
+        poll_interval: float = typer.Option(
+            5.0, "--poll-interval",
+            help="Seconds between /settle/status polls.",
+        ),
+        settlement_timeout: float = typer.Option(
+            600.0, "--settlement-timeout",
+            help="Max seconds to wait for provisioning before giving up.",
+        ),
+        env: Optional[str] = typer.Option(
+            None, "--env", "-e",
+            help="Env file for AGENT_WALLET_ADDRESS, AGENT_PRIV_KEY, "
+                 "CHAIN_RPC_URL, INDEXER_URL, CHAIN_NAME, etc.",
+        ),
+        buyer_address: Optional[str] = typer.Option(
+            None, "--buyer-address",
+            help="Override buyer wallet (default: AGENT_WALLET_ADDRESS).",
+        ),
+        buyer_private_key: Optional[str] = typer.Option(
+            None, "--buyer-priv-key",
+            help="Override buyer private key (default: AGENT_PRIV_KEY).",
+        ),
+        ssh_public_key: Optional[str] = typer.Option(
+            None, "--ssh-public-key",
+            help="SSH public key for provisioning (default: SSH_PUBLIC_KEY env).",
+        ),
+        rpc_url: Optional[str] = typer.Option(
+            None, "--rpc-url",
+            help="Chain RPC URL (default: CHAIN_RPC_URL env).",
+        ),
     ) -> None:
-        """Buy compute with the given constraints — synchronous, one command.
+        """Run a buy end-to-end as a pure HTTP/web3 client.
 
-        Modes:
-
-          Create (default): `market buy --gpu X --max-price Y` creates a
-          new order, blocks until the deal closes, prints credentials.
-
-          Recover: `market buy --recover <id>` skips order creation and
-          resumes polling an existing deal. Useful when a previous
-          `market buy` was interrupted (Ctrl-C, crash). `<id>` is either
-          the local order_id or the on-chain escrow_uid.
-
-          Abort: `market buy --abort <id>` cancels an in-flight order.
-          Closes the order locally and in the registry. Warns (but does
-          not roll back) if an on-chain escrow is already posted.
+        No buyer agent is started or consulted; every step is either a
+        signed HTTP call to a seller, a registry query, or a direct
+        on-chain call.
         """
         console = Console()
         env_path = Path(env) if env else None
 
-        # Exactly one mode.
-        modes = [m for m in ("recover" if recover else None, "abort" if abort else None) if m]
-        if len(modes) > 1:
-            raise typer.BadParameter(
-                "--recover and --abort are mutually exclusive."
-            )
-        if (recover or abort) and max_price is not None:
-            raise typer.BadParameter(
-                "--recover/--abort are mutually exclusive with --max-price."
-            )
-        if not recover and not abort and max_price is None:
-            raise typer.BadParameter(
-                "--max-price is required (or pass --recover <id> / --abort <id>)."
-            )
+        def _resolve(name: str, override: Optional[str] = None, default: str = "") -> str:
+            if override:
+                return override
+            v = read_env_value(env_path, name) if env_path else None
+            return v or os.getenv(name) or default
 
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8000)
-        db_path = _resolve_db_path(db, env) or _order_resolve_db_path(db, env)
-        if not db_path:
+        addr = _resolve("AGENT_WALLET_ADDRESS", buyer_address)
+        pk = _resolve("AGENT_PRIV_KEY", buyer_private_key)
+        ssh = _resolve("SSH_PUBLIC_KEY", ssh_public_key)
+        reg = registry_url or _resolve("INDEXER_URL")
+        rpc = rpc_url or _resolve("CHAIN_RPC_URL")
+        chain = chain_name or _resolve("CHAIN_NAME", default="ethereum_sepolia")
+        addr_cfg = alkahest_addr_config or _resolve("ALKAHEST_ADDRESS_CONFIG_PATH")
+
+        missing = [n for n, v in (
+            ("buyer_address", addr), ("buyer_priv_key", pk),
+            ("ssh_public_key", ssh), ("registry_url", reg),
+            ("rpc_url", rpc),
+        ) if not v]
+        if missing:
             typer.secho(
-                "Could not resolve buyer agent DB. Pass --db or --env with AGENT_DB_PATH set.",
-                err=True,
-                fg=typer.colors.RED,
+                f"Missing required config: {', '.join(missing)}. "
+                "Pass --flags or set corresponding env vars.",
+                err=True, fg=typer.colors.RED,
             )
-            raise typer.Exit(1)
-
-        # Ensure an agent is reachable. Spawn transiently if not.
-        if not _agent_reachable(base_url):
-            if not spawn_agent:
-                typer.secho(
-                    f"No agent reachable at {base_url} and --no-spawn-agent. "
-                    f"Start one separately (`market start`) or drop the flag.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(1)
-            if not env_path:
-                raise typer.BadParameter(
-                    "--spawn-agent requires --env so the spawned container knows "
-                    "its identity, keys, and chain/registry endpoints."
-                )
-            port_str = read_env_value(env_path, "PORT", default="8000")
-            try:
-                port = int(port_str)
-            except ValueError:
-                port = 8000
-            runtime = _docker_cmd()
-            network = spawn_network or (_pick_network(runtime) if runtime else None)
-            console.print(
-                Panel(
-                    f"[bold]image[/bold]    {spawn_image}\n"
-                    f"[bold]port[/bold]     {port}\n"
-                    f"[bold]network[/bold]  {network or '(default)'}\n"
-                    f"[bold]env[/bold]      {env_path}",
-                    title="Spawning transient agent",
-                    border_style="cyan",
-                )
-            )
-            # Contract addresses typically live in shared-env/.env (mounted
-            # into compose containers); pass them through so the spawned
-            # agent sees IDENTITY_REGISTRY_ADDRESS et al.
-            shared_env = REPO_ROOT / "shared-env" / ".env"
-            # The agent will advertise BASE_URL_OVERRIDE to peers. Inside
-            # the compose network, that hostname must resolve to *us*.
-            advertised = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-            advertised_host = _base_url_hostname(advertised) if advertised else None
-            _spawn_agent_container(
-                env_path=env_path,
-                port=port,
-                image=spawn_image,
-                network=network,
-                agent_data_dir=Path(db_path).parent if db_path else None,
-                shared_env_file=shared_env if shared_env.exists() else None,
-                advertised_hostname=advertised_host,
-                console=console,
-            )
-            # Also supply the indexer URL + wallet so readiness includes the
-            # "my orders can actually be published" milestone.
-            indexer_url = (
-                read_env_value(env_path, "INDEXER_URL", default="") if env_path else ""
-            ) or "http://localhost:8080"
-            # Rewrite docker-internal hostnames so the host-side CLI can dial.
-            indexer_url = indexer_url.replace("://registry:", "://localhost:")
-            ready_wallet = (
-                (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-                or os.getenv("AGENT_WALLET_ADDRESS")
-                or ""
-            )
-            if not _wait_for_agent(
-                base_url, timeout_s=spawn_timeout, console=console,
-                registry_url=indexer_url, wallet=ready_wallet,
-            ):
-                typer.secho(
-                    f"Spawned agent did not become fully ready at {base_url} "
-                    f"within {spawn_timeout}s (HTTP → on-chain registered → "
-                    f"indexed). See container logs for details.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(1)
-
-        if abort:
-            order_id = _resolve_recover_order_id(db_path, abort)
-            if not order_id:
-                typer.secho(
-                    f"No local order found for id/escrow_uid {abort!r}. "
-                    "Check the value or pass a different --db.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(1)
-
-            state = _load_order_state(db_path, order_id)
-            status = state.get("status") or "?"
-            escrow_uid = state.get("escrow_uid")
-            taker_attestation = state.get("taker_attestation")
-
-            summary = Table.grid(padding=(0, 2))
-            summary.add_column(style="bold")
-            summary.add_column()
-            summary.add_row("Mode", "abort")
-            summary.add_row("Input", abort)
-            summary.add_row("Order ID", order_id)
-            summary.add_row("Current status", status)
-            if escrow_uid:
-                summary.add_row("Escrow UID", escrow_uid)
-            summary.add_row("Agent", base_url)
-            console.print(Panel(summary, title="Buy abort", border_style="yellow"))
-
-            if status == "closed":
-                console.print("[green]Already closed — nothing to do.[/green]")
-                return
-
-            # Warn when on-chain state makes local close insufficient.
-            if escrow_uid and not taker_attestation:
-                console.print(
-                    "[yellow]Warning:[/yellow] an escrow is posted on-chain for this order "
-                    "but the seller has not yet delivered. Closing the local order marks "
-                    "it cancelled in the registry, but does NOT release the on-chain "
-                    "escrow. Options:\n"
-                    "  • wait for the escrow's 1h expiration, then run "
-                    f"`market reclaim {order_id}` to pull the tokens back on-chain.\n"
-                    "  • ask the provider to run `market refund <their-order-id> --buyer "
-                    "<your-wallet>` for an immediate direct token transfer.",
-                )
-            elif escrow_uid and taker_attestation:
-                console.print(
-                    "[yellow]Warning:[/yellow] this deal is already fulfilled (taker "
-                    "attestation present). Aborting now will not undo the on-chain "
-                    "settlement; credentials already in the buyer DB remain valid.",
-                )
-
-            private_key = (
-                (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-                or os.getenv("AGENT_PRIV_KEY")
-            )
-            try:
-                resp = _close_order(base_url, order_id, private_key)
-            except typer.Exit:
-                # _post_json already printed the error and exited.
-                raise
-            result_status = str(resp.get("status", "?"))
-            result_msg = str(resp.get("message") or "")
-            color = "green" if result_status in ("closed", "skipped", "queued") else "red"
-            console.print(f"[{color}]Close result:[/] {result_status}"
-                          + (f" — {result_msg}" if result_msg else ""))
-            if result_status in ("closed", "skipped", "queued"):
-                return
-            raise typer.Exit(5)
-
-        if recover:
-            order_id = _resolve_recover_order_id(db_path, recover)
-            if not order_id:
-                typer.secho(
-                    f"No local order found for id/escrow_uid {recover!r}. "
-                    "Check the value or pass a different --db.",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(1)
-            summary = Table.grid(padding=(0, 2))
-            summary.add_column(style="bold")
-            summary.add_column()
-            summary.add_row("Mode", "recover")
-            summary.add_row("Input", recover)
-            summary.add_row("Order ID", order_id)
-            summary.add_row("Agent", base_url)
-            console.print(Panel(summary, title="Buy recovery", border_style="blue"))
-        else:
-            private_key = (
-                (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-                or os.getenv("AGENT_PRIV_KEY")
-            )
-            wallet_address = (
-                (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-                or os.getenv("AGENT_WALLET_ADDRESS")
-                or ""
-            )
-            try:
-                offer, demand = _build_resources(
-                    gpu, quantity, sla, region, max_price, token, demand_json, offer_json
-                )
-            except json.JSONDecodeError as exc:
-                raise typer.BadParameter(f"Invalid JSON: {exc}") from exc
-
-            summary = Table.grid(padding=(0, 2))
-            summary.add_column(style="bold")
-            summary.add_column()
-            summary.add_row("Agent", base_url)
-            summary.add_row("Demand", json.dumps(demand, separators=(",", ":")))
-            summary.add_row("Offer", json.dumps(offer, separators=(",", ":")))
-            summary.add_row("Duration (h)", str(duration_hours))
-            console.print(Panel(summary, title="Buy request", border_style="blue"))
-
-            order_id = _create_buy_order(
-                base_url, offer, demand, duration_hours, wallet_address, private_key,
-            )
-            console.print(f"[green]Order created:[/green] {order_id}")
-
-        final = _wait_for_completion(db_path, order_id, timeout, poll_interval, console)
-
-        if final.get("_timed_out"):
-            console.print(f"[red]Timed out after {timeout}s — order is in stage '{final.get('stage')}'.[/red]")
-            console.print(f"[dim]Resume with: market buy --recover {order_id}[/dim]")
             raise typer.Exit(2)
-        if final.get("terminal_state") in ("failure", "superseded", "abandoned"):
-            console.print(f"[red]Negotiation ended without a deal: {final.get('terminal_state')}[/red]")
+
+        # Resolve token contract if not explicitly given. Deferred import
+        # so users without the token registry file can still pass --token-contract.
+        tc = token_contract
+        if not tc:
+            try:
+                from service.clients.token import TOKEN_REGISTRY
+                meta = TOKEN_REGISTRY.require("MOCK")
+                tc = meta.contract_address
+                token_decimals = meta.decimals
+            except Exception as exc:
+                typer.secho(
+                    f"Could not resolve default token 'MOCK' — pass "
+                    f"--token-contract and --token-decimals. ({exc})",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+
+        # Build the escrow hook.
+        from ..escrow_client import make_create_escrow_fn
+        create_escrow = make_create_escrow_fn(
+            private_key=pk,
+            rpc_url=rpc,
+            chain_name=chain,
+            addr_config_path=addr_cfg or None,
+            token_contract_address=tc,
+            token_decimals=token_decimals,
+            expiration_seconds=expiration_seconds,
+        )
+
+        config = BuyConfig(
+            registry_url=reg,
+            buyer_address=addr,
+            buyer_private_key=pk,
+            buyer_order_id=buyer_order_id,
+            ssh_public_key=ssh,
+        )
+        constraints = BuyConstraints(
+            max_price=max_price, initial_price=initial_price,
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Registry", reg)
+        header.add_row("Buyer order", buyer_order_id)
+        header.add_row("Buyer wallet", addr)
+        header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
+        header.add_row("Max matches", str(max_matches))
+        console.print(Panel(header, title="market buy-sync", border_style="cyan"))
+
+        def _observe(stage: str, body: dict) -> None:
+            # Keep the UI simple: just one line per event.
+            if stage == "discover":
+                console.print(f"[dim]discover[/dim]  {body.get('match_count', 0)} match(es)")
+            elif stage == "negotiate_start":
+                console.print(f"[dim]negotiate →[/dim] {body.get('seller_url')}")
+            elif stage == "negotiate_end":
+                oc = body.get("outcome", {})
+                color = "green" if oc.get("status") == "agreed" else "yellow"
+                price = oc.get("agreed_price", "-")
+                rounds = oc.get("rounds", "-")
+                console.print(
+                    f"[{color}]negotiate ←[/{color}] {oc.get('status')} "
+                    f"@ {price}  ({rounds} rounds)"
+                )
+            elif stage == "escrow_created":
+                console.print(f"[green]escrow[/green]    {body.get('escrow_uid')}")
+            elif stage == "settlement_submitted":
+                console.print(f"[dim]settle →[/dim]  {body.get('escrow_uid')}")
+            elif stage == "settlement_poll":
+                st = (body.get("body") or {}).get("status")
+                console.print(f"[dim]poll #{body.get('attempt')}[/dim]  status={st}")
+
+        try:
+            result = run_buy(
+                config=config,
+                constraints=constraints,
+                create_escrow=create_escrow,
+                max_matches_to_try=max_matches,
+                max_negotiation_rounds=max_rounds,
+                settlement_poll_interval=poll_interval,
+                settlement_total_timeout=settlement_timeout,
+                on_event=_observe,
+            )
+        except RuntimeError as exc:
+            typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
 
-        console.print()
-        _print_credentials_table(console, db_path, order_id, show_password=show_password)
+        # Render the final outcome.
+        tbl = Table.grid(padding=(0, 2))
+        tbl.add_column(style="bold")
+        tbl.add_column()
+        tbl.add_row("Status", result.status)
+        for label, val in (
+            ("Seller", result.seller_url),
+            ("Negotiation", result.negotiation_id),
+            ("Agreed price", result.agreed_price),
+            ("Escrow UID", result.escrow_uid),
+            ("Attestation", result.attestation_uid),
+            ("Reason", result.reason),
+        ):
+            if val:
+                tbl.add_row(label, str(val))
+        if result.connection_details:
+            tbl.add_row("Connection", result.connection_details)
+        if result.tenant_credentials:
+            tbl.add_row("Tenant creds", json.dumps(result.tenant_credentials))
+
+        border = {
+            "ready": "green",
+            "failed": "red",
+            "timeout": "red",
+            "exited": "yellow",
+            "no_matches": "yellow",
+        }.get(result.status, "white")
+        console.print(Panel(tbl, title="Buy complete", border_style=border))
+
+        if result.status != "ready":
+            raise typer.Exit(4)

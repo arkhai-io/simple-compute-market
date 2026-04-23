@@ -11,15 +11,27 @@ logger = logging.getLogger(__name__)
 
 
 class ComputePolicySeeder:
-    """Compute-domain policy seeding logic."""
+    """Compute-domain policy seeding.
+
+    After the A2A removal and the buyer-as-client refactor, the surviving
+    policy triggers are the *local* events a seller still reacts to via
+    `_process_event_with_pipeline`:
+
+        ORDER_CREATE       — POST /orders/create → policy → make_offer
+                             action (registry publish, no fan-out)
+        ORDER_CLOSE        — POST /orders/close  → policy → close_order
+                             action (local + registry unpublish)
+        RESOURCE_IMBALANCE — POST /alerts/resource → policy → rebalance
+                             (resource poller / reactive rebalance path)
+
+    Everything else (negotiation, settlement, fulfillment, claim) is now
+    handled by dedicated sync endpoints (/negotiate/*, /settle/*,
+    /orders/{claim,reclaim,refund,arbitrate}) without going through the
+    policy engine.
+    """
 
     DEFAULT_POLICY_TRIGGERS = {
         EventType.RESOURCE_IMBALANCE.value,
-        EventType.MAKE_OFFER.value,
-        EventType.ACCEPT_OFFER.value,
-        EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-        EventType.FULFILLMENT_FAILED.value,
-        EventType.ARBITRATION_COMPLETE.value,
         EventType.ORDER_CREATE.value,
         EventType.ORDER_CLOSE.value,
     }
@@ -80,104 +92,7 @@ class ComputePolicySeeder:
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save order_close policy: {e}")
 
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="make_offer_default_v1",
-                trigger_type=EventType.MAKE_OFFER.value,
-                callable_ref="make_offer.default.v1",
-            )
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self._agent_id,
-                policy_name="make_offer.default.v1",
-                components=[
-                    "mo.guard.trigger_is_make_offer",
-                    "negotiation.respond_to_make_offer",
-                ],
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save make_offer policy: {e}")
-
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="accept_offer_default_v1",
-                trigger_type=EventType.ACCEPT_OFFER.value,
-                callable_ref="ao.action.fulfill_after_accept",
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save accept_offer policy: {e}")
-
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="receive_fulfillment_default_v1",
-                trigger_type=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT.value,
-                callable_ref="rcf.action.trust_fulfillment",
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save receive_fulfillment policy: {e}")
-
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="fulfillment_failed_default_v1",
-                trigger_type=EventType.FULFILLMENT_FAILED.value,
-                callable_ref="ff.action.handle_fulfillment_failure",
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save fulfillment_failed policy: {e}")
-
-        try:
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name="arbitration_complete_default_v1",
-                trigger_type=EventType.ARBITRATION_COMPLETE.value,
-                callable_ref="arb.action.collect_escrow_after_arbitration",
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save arbitration_complete policy: {e}")
-
-    async def ensure_negotiation_policy(self) -> None:
-        from core.agent.app.utils.config import CONFIG
-
-        if CONFIG.negotiation_policy_mode == "rl":
-            action_callable = "negotiation.action.torch_arkhai_negotiator"
-        else:
-            action_callable = "negotiation.action.price_interval_concession"
-
-        try:
-            policy_name = "negotiation_default_v1"
-            trigger_type = EventType.NEGOTIATION.value
-            await self._policy_store.save_policy(
-                agent_id=self._agent_id,
-                policy_name=policy_name,
-                trigger_type=trigger_type,
-                callable_ref=policy_name,
-            )
-            await self._sqlite_client.save_policy_composite(
-                agent_id=self._agent_id,
-                policy_name=policy_name,
-                components=[
-                    "negotiation.action.handle_exit",
-                    "negotiation.guard.always_negotiate_on_price_diff",
-                    "negotiation.guard.bounded_rounds_and_timeout",
-                    action_callable,
-                    "negotiation.action.safe_default_reject",
-                ],
-            )
-            logger.info(
-                "[POLICY SEED] Negotiation policy seeded with action_callable=%s "
-                "(mode=%s)",
-                action_callable,
-                CONFIG.negotiation_policy_mode,
-            )
-        except Exception as e:
-            logger.warning(f"[POLICY SEED] Failed to save negotiation policy: {e}")
-
     async def ensure_for_event_type(self, event_type: str | Any) -> None:
         trigger_type = event_type.value if hasattr(event_type, "value") else str(event_type)
-        if trigger_type == EventType.NEGOTIATION.value:
-            await self.ensure_negotiation_policy()
-        elif trigger_type in self.DEFAULT_POLICY_TRIGGERS:
+        if trigger_type in self.DEFAULT_POLICY_TRIGGERS:
             await self.ensure_default_policies()
