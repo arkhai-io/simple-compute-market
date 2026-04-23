@@ -1827,6 +1827,134 @@ agent_negotiate_continue_route = Route(
     "/negotiate/{neg_id}", negotiate_continue_endpoint, methods=["POST"],
 )
 
+
+# ---------------------------------------------------------------------------
+# Seller-side polling settle: POST to kick off, GET to poll status
+# ---------------------------------------------------------------------------
+
+
+async def settle_escrow_endpoint(request: Request) -> JSONResponse:
+    """POST /settle/{escrow_uid} — kick off provisioning for this escrow.
+
+    Body:
+      {"negotiation_id": "...", "ssh_public_key": "...",
+       "buyer_address": "0x..."}
+
+    Signed by buyer_address via X-Signature over
+    "settle_escrow:{escrow_uid}:{timestamp}". The seller verifies the
+    signature matches the claimed address; on-chain escrow validation
+    is the alkahest client's job during fulfillment.
+
+    Returns the current job state. 202 on first kick-off; 200 if a job
+    already exists for this escrow (idempotent).
+    """
+    escrow_uid = request.path_params.get("escrow_uid", "")
+    if not escrow_uid:
+        return JSONResponse({"error": "Missing escrow_uid in path"}, status_code=400)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    negotiation_id = body.get("negotiation_id")
+    ssh_public_key = body.get("ssh_public_key")
+    buyer_address = body.get("buyer_address")
+
+    for name, val in (("negotiation_id", negotiation_id),
+                      ("ssh_public_key", ssh_public_key),
+                      ("buyer_address", buyer_address)):
+        if not isinstance(val, str) or not val.strip():
+            return JSONResponse({"error": f"Missing or empty '{name}'"}, status_code=400)
+
+    auth_error = _check_buyer_signature(
+        request, operation="settle_escrow",
+        resource_id=escrow_uid, claimed_address=buyer_address,
+    )
+    if auth_error:
+        return auth_error
+
+    if root_agent._alkahest_client is None:
+        return JSONResponse(
+            {"error": "Alkahest client not configured",
+             "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must be set"},
+            status_code=500,
+        )
+
+    from core.agent.app.utils.settlement_jobs import start_settlement_job, serialize_settlement_job
+    try:
+        result = await start_settlement_job(
+            escrow_uid=escrow_uid,
+            negotiation_id=negotiation_id,
+            ssh_public_key=ssh_public_key,
+            sqlite_client=root_agent._sqlite_client,
+            alkahest_client=root_agent._alkahest_client,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except Exception as exc:
+        logger.error("[SETTLE] start_settlement_job failed: %s", exc, exc_info=True)
+        return JSONResponse(
+            {"error": "Settlement start failed", "detail": str(exc)},
+            status_code=500,
+        )
+
+    # If this was the first call, the row has no extra fields yet — 202.
+    # If idempotent (row already existed), return 200 with the current state.
+    status_code = 200 if result.get("status") in ("ready", "failed") else 202
+    return JSONResponse(
+        serialize_settlement_job(result) if "created_at" in result else result,
+        status_code=status_code,
+    )
+
+
+async def settle_status_endpoint(request: Request) -> JSONResponse:
+    """GET /settle/{escrow_uid}/status — poll provisioning status.
+
+    Query params: none. Requires X-Signature/X-Timestamp headers from
+    buyer_address (passed as `buyer_address` query param, since GET has
+    no body). Prevents random third parties from reading provisioning
+    details (connection_details, tenant_credentials).
+
+    Returns the serialized settlement_jobs row. 404 if no job for this
+    escrow_uid.
+    """
+    escrow_uid = request.path_params.get("escrow_uid", "")
+    if not escrow_uid:
+        return JSONResponse({"error": "Missing escrow_uid in path"}, status_code=400)
+
+    buyer_address = request.query_params.get("buyer_address", "")
+    if not buyer_address:
+        return JSONResponse(
+            {"error": "Missing 'buyer_address' query param for signed poll"},
+            status_code=400,
+        )
+
+    auth_error = _check_buyer_signature(
+        request, operation="settle_status",
+        resource_id=escrow_uid, claimed_address=buyer_address,
+    )
+    if auth_error:
+        return auth_error
+
+    from core.agent.app.utils.settlement_jobs import serialize_settlement_job
+    job = await root_agent._sqlite_client.load_settlement_job(escrow_uid=escrow_uid)
+    if not job:
+        return JSONResponse(
+            {"error": f"No settlement job for escrow {escrow_uid}",
+             "escrow_uid": escrow_uid},
+            status_code=404,
+        )
+    return JSONResponse(serialize_settlement_job(job))
+
+
+agent_settle_escrow_route = Route(
+    "/settle/{escrow_uid}", settle_escrow_endpoint, methods=["POST"],
+)
+agent_settle_status_route = Route(
+    "/settle/{escrow_uid}/status", settle_status_endpoint, methods=["GET"],
+)
+
 # Plain Starlette ASGI app. Named `a2a_app` historically — kept for
 # import compatibility with server.py. There is no A2A protocol running
 # underneath anymore; every endpoint is a regular HTTP handler.
@@ -1845,6 +1973,8 @@ a2a_app = Starlette(routes=[
     agent_order_discover_route,
     agent_negotiate_new_route,
     agent_negotiate_continue_route,
+    agent_settle_escrow_route,
+    agent_settle_status_route,
     *_all_message_routes(),
 ])
 

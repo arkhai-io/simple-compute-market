@@ -374,6 +374,35 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stage_events_negotiation_id ON stage_events(negotiation_id)"
             )
+            # Settlement jobs — per-escrow provisioning status row. The
+            # buyer creates an escrow on-chain then posts escrow_uid to
+            # the seller's /settle/{uid} endpoint; that inserts a row
+            # here with status='provisioning' and kicks off the async
+            # provisioning task. When done, the task updates this row
+            # with status='ready' (+ attestation/connection) or 'failed'
+            # (+ reason). Buyer polls /settle/{uid}/status which reads
+            # this row.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settlement_jobs (
+                  escrow_uid TEXT PRIMARY KEY,
+                  negotiation_id TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  attestation_uid TEXT,
+                  connection_details TEXT,
+                  tenant_credentials TEXT,
+                  reason TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_status ON settlement_jobs(status)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_negotiation ON settlement_jobs(negotiation_id)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -1630,6 +1659,116 @@ class SQLiteClient:
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
                     "agreed_price", "agreed_duration_hours", "agreed_at",
+                ]
+                return dict(zip(keys, row))
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    # ------------------------------------------------------------------
+    # settlement_jobs — polling-mode provisioning status per escrow.
+    # ------------------------------------------------------------------
+
+    async def insert_settlement_job(
+        self,
+        *,
+        escrow_uid: str,
+        negotiation_id: str,
+        status: str = "provisioning",
+    ) -> bool:
+        """Create a new settlement_jobs row. Returns True if inserted,
+        False if a row for this escrow already existed (idempotent)."""
+        def _insert() -> bool:
+            now = datetime.now().isoformat()
+            conn = sqlite3.connect(self.db_path)
+            try:
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO settlement_jobs
+                          (escrow_uid, negotiation_id, status, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (escrow_uid, negotiation_id, status, now, now),
+                    )
+                    conn.commit()
+                    return True
+                except sqlite3.IntegrityError:
+                    # PRIMARY KEY conflict — job already exists.
+                    return False
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_insert)
+
+    async def update_settlement_job(
+        self,
+        *,
+        escrow_uid: str,
+        status: str | None = None,
+        attestation_uid: str | None = None,
+        connection_details: str | None = None,
+        tenant_credentials: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """Patch a settlement_jobs row. Any None field is skipped."""
+        def _update() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+
+            def add(col: str, val: Any) -> None:
+                if val is None:
+                    return
+                updates.append(f"{col} = ?")
+                values.append(val)
+
+            add("status", status)
+            add("attestation_uid", attestation_uid)
+            add("connection_details", connection_details)
+            add("tenant_credentials", tenant_credentials)
+            add("reason", reason)
+            if not updates:
+                return
+            updates.append("updated_at = ?")
+            values.append(datetime.now().isoformat())
+
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    f"UPDATE settlement_jobs SET {', '.join(updates)} WHERE escrow_uid = ?",
+                    (*values, escrow_uid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_update)
+
+    async def load_settlement_job(
+        self,
+        *,
+        escrow_uid: str,
+    ) -> dict[str, Any] | None:
+        """Return the settlement_jobs row as a dict, or None if absent."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT escrow_uid, negotiation_id, status,
+                           attestation_uid, connection_details, tenant_credentials,
+                           reason, created_at, updated_at
+                    FROM settlement_jobs WHERE escrow_uid = ?
+                    """,
+                    (escrow_uid,),
+                ).fetchone()
+                if not row:
+                    return None
+                keys = [
+                    "escrow_uid", "negotiation_id", "status",
+                    "attestation_uid", "connection_details", "tenant_credentials",
+                    "reason", "created_at", "updated_at",
                 ]
                 return dict(zip(keys, row))
             finally:
