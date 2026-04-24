@@ -309,18 +309,141 @@ def config_init(
         )
 
 
+@config_app.command("path")
+def config_path() -> None:
+    """Print the path of the user config.toml (whether or not it exists)."""
+    from ..config_loader import user_config_file
+    p = user_config_file()
+    typer.echo(str(p))
+    if not p.exists():
+        typer.secho("(not present — run `market config init-user` to scaffold it)",
+                    fg=typer.colors.YELLOW)
+
+
+@config_app.command("show")
+def config_show(
+    raw: bool = typer.Option(
+        False, "--raw",
+        help="Print the TOML file verbatim instead of the loaded mapping.",
+    ),
+) -> None:
+    """Show the current user config."""
+    from ..config_loader import load_user_config, user_config_file
+    p = user_config_file()
+    if not p.exists():
+        typer.secho(f"No user config at {p}.", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    if raw:
+        typer.echo(p.read_text())
+        return
+    cfg = load_user_config(p)
+    import json
+    typer.echo(json.dumps(cfg, indent=2, sort_keys=True))
+
+
 @config_app.command("set")
 def config_set(
-    attr: str = typer.Argument(..., help="Config attribute to set."),
-    value: str = typer.Argument(..., help="Value to assign."),
+    key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
+    value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
 ) -> None:
-    """Set a market config value (stub)."""
-    typer.echo(f"Not implemented: market config set {attr} {value}")
+    """Set a single value in the user config.toml.
+
+    Values are coerced: 'true' / 'false' → bool, integer-looking strings → int,
+    float-looking strings → float, otherwise left as strings. Use quotes around
+    strings that look numeric if you want to keep them as text.
+    """
+    from ..config_loader import load_user_config, set_dotted, user_config_file, write_user_config
+
+    coerced: object = value
+    low = value.strip().lower()
+    if low in ("true", "false"):
+        coerced = (low == "true")
+    else:
+        try:
+            coerced = int(value)
+        except ValueError:
+            try:
+                coerced = float(value)
+            except ValueError:
+                coerced = value
+
+    path = user_config_file()
+    doc = load_user_config(path)
+    set_dotted(doc, key, coerced)
+    written = write_user_config(doc, path)
+    typer.echo(f"Set {key} = {coerced!r} in {written}")
 
 
 @config_app.command("get")
 def config_get(
-    attr: str = typer.Argument(..., help="Config attribute to read."),
+    key: str = typer.Argument(..., help="Dotted config key, e.g. 'chain.rpc_url'."),
 ) -> None:
-    """Get a market config value (stub)."""
-    typer.echo(f"Not implemented: market config get {attr}")
+    """Print the value of a single config key from the user config.toml."""
+    from ..config_loader import get_dotted, load_user_config, user_config_file
+    doc = load_user_config()
+    val = get_dotted(doc, key)
+    if val is None:
+        typer.secho(
+            f"Key {key!r} not set in {user_config_file()}.",
+            fg=typer.colors.YELLOW,
+        )
+        raise typer.Exit(1)
+    if isinstance(val, (dict, list)):
+        import json
+        typer.echo(json.dumps(val, indent=2, sort_keys=True))
+    else:
+        typer.echo(str(val))
+
+
+@config_app.command("init-user")
+def config_init_user(
+    overwrite: bool = typer.Option(
+        False, "--overwrite",
+        help="Replace an existing config.toml instead of refusing.",
+    ),
+) -> None:
+    """Scaffold the user config.toml with placeholders for every known key.
+
+    Writes only the commented-out skeleton so nothing breaks on first
+    load. Fill in the values you need; the resolver treats missing keys
+    as 'fall back to env / default' so a partial file is fine.
+    """
+    from ..config_loader import user_config_file, user_config_dir
+
+    path = user_config_file()
+    if path.exists() and not overwrite:
+        typer.secho(
+            f"{path} already exists. Pass --overwrite to replace it.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    template = """\
+# arkhai user config — see `market config path` for this file's location.
+# Every key here is optional: if a key is missing, the resolver falls
+# back to the matching env var, then to built-in defaults.
+# Precedence: CLI flag > env var > this file > default.
+
+[wallet]
+# address = "0x0000000000000000000000000000000000000000"
+# private_key = "0x..."                        # prefer env AGENT_PRIV_KEY
+# ssh_public_key = "ssh-ed25519 AAAA... user@host"
+
+[chain]
+# name = "ethereum_sepolia"                    # ethereum_sepolia | base_sepolia | anvil
+# rpc_url = "https://sepolia.base.org"
+# alkahest_address_config_path = "/path/to/alkahest.json"  # required for anvil
+
+[registry]
+# url = "http://localhost:8080"
+
+# Seller-only overrides (optional; ignored on buyer-only installs).
+# [seller]
+# port = 8000
+# agent_id = "alice"
+# provisioning_service_url = "http://localhost:8085"
+"""
+    user_config_dir().mkdir(parents=True, exist_ok=True)
+    path.write_text(template)
+    typer.echo(f"Wrote {path}")
+    typer.echo("Edit it, or use `market config set <key> <value>` to populate.")

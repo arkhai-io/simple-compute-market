@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-from ..common import REPO_ROOT, read_env_value, container_db_to_host
+from ..common import REPO_ROOT, container_db_to_host, read_env_value, resolve_config_value
 
 order_app = typer.Typer(no_args_is_help=True)
 
@@ -55,8 +55,11 @@ def order_create(
 ) -> None:
     """Create a new order via the Agent endpoint."""
     env_path = Path(env) if env else None
-    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = agent_url or resolve_config_value(
+        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
+    ) or resolve_config_value(
+        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
+    ) or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     duration = duration_hours if duration_hours is not None else 1
     if duration < 1:
@@ -71,14 +74,11 @@ def order_create(
     if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
         raise typer.BadParameter("Offer and demand must be JSON objects")
 
-    private_key = (
-        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-        or os.getenv("AGENT_PRIV_KEY")
-    )
-    wallet_address = (
-        (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-        or os.getenv("AGENT_WALLET_ADDRESS")
-        or ""
+    private_key = resolve_config_value(
+        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
+    ) or None
+    wallet_address = resolve_config_value(
+        "AGENT_WALLET_ADDRESS", env_file=env_path, toml_path="wallet.address",
     )
     payload = {
         "offer": offer_data,
@@ -134,16 +134,18 @@ def order_close(
 ) -> None:
     """Close an order via the Agent endpoint."""
     env_path = Path(env) if env else None
-    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = agent_url or resolve_config_value(
+        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
+    ) or resolve_config_value(
+        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
+    ) or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
     if not order_id.strip():
         raise typer.BadParameter("order-id must be a non-empty string")
 
-    private_key = (
-        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-        or os.getenv("AGENT_PRIV_KEY")
-    )
+    private_key = resolve_config_value(
+        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
+    ) or None
     payload = {"order_id": order_id}
     url = f"{base_url}/orders/close"
     response = _post_json(url, payload, _get_auth_headers("close_order", order_id, private_key))
@@ -190,13 +192,15 @@ def order_discover(
     what a given order would match against today.
     """
     env_path = Path(env) if env else None
-    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
+    base_url = agent_url or resolve_config_value(
+        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
+    ) or resolve_config_value(
+        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
+    ) or "http://localhost:8000"
     base_url = _normalize_registry_url(base_url)
-    private_key = (
-        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-        or os.getenv("AGENT_PRIV_KEY")
-    )
+    private_key = resolve_config_value(
+        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
+    ) or None
 
     payload = {"order_id": order_id, "include_active": include_active}
     url = f"{base_url}/orders/discover"
@@ -363,7 +367,12 @@ def order_match(
     if not order_id.strip():
         raise typer.BadParameter("order-id must be a non-empty string")
 
-    base_registry_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_registry_url = (
+        registry_url
+        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
+        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
+        or "http://localhost:8080"
+    )
     base_registry_url = _normalize_registry_url(base_registry_url)
     target_url = f"{base_registry_url}/orders/{order_id}"
     target_payload = _fetch_json(target_url)
@@ -395,10 +404,9 @@ def order_match(
     env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
     base_agent_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
     base_agent_url = _normalize_registry_url(base_agent_url)
-    private_key = (
-        (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-        or os.getenv("AGENT_PRIV_KEY")
-    )
+    private_key = resolve_config_value(
+        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
+    ) or None
     create_url = f"{base_agent_url}/orders/create"
     response = _post_json(create_url, payload, _get_auth_headers("create_order", base_agent_url, private_key))
 
@@ -626,7 +634,12 @@ def order_list(
     ),
 ) -> None:
     """List open orders from the Registry Indexer."""
-    base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_url = (
+        registry_url
+        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
+        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
+        or "http://localhost:8080"
+    )
     base_url = _normalize_registry_url(base_url)
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
@@ -712,7 +725,12 @@ def order_show(
     ),
 ) -> None:
     """Show a single order by ID."""
-    base_url = registry_url or os.getenv("INDEXER_URL") or os.getenv("REGISTRY_URL") or "http://localhost:8080"
+    base_url = (
+        registry_url
+        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
+        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
+        or "http://localhost:8080"
+    )
     base_url = _normalize_registry_url(base_url)
     url = f"{base_url}/orders/{order_id}"
     payload = _fetch_json(url)

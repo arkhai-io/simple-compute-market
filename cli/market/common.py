@@ -39,6 +39,44 @@ def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> 
     return default
 
 
+def resolve_config_value(
+    env_name: str,
+    *,
+    override: str | None = None,
+    env_file: str | Path | None = None,
+    toml_path: str | None = None,
+    default: str = "",
+) -> str:
+    """One-stop lookup for a scalar config value across all our sources.
+
+    Precedence:
+      1. Explicit `override` (CLI flag)
+      2. `env_file` (e.g. core/agent/.env passed via --env)
+      3. Shell `env_name` environment variable
+      4. Dotted `toml_path` key in the user config.toml
+      5. `default`
+
+    Centralized so every CLI command gets the same hierarchy without
+    duplicating a _resolve block. Keeps the existing --env file flow
+    working while adding the TOML-config fallback beneath it.
+    """
+    if override:
+        return override
+    if env_file:
+        v = read_env_value(env_file, env_name)
+        if v:
+            return v
+    v = os.environ.get(env_name)
+    if v:
+        return v
+    if toml_path:
+        from .config_loader import get_dotted, load_user_config
+        v = get_dotted(load_user_config(), toml_path)
+        if v not in (None, ""):
+            return str(v)
+    return default
+
+
 def container_db_to_host(db_path: str) -> Path:
     """Resolve a container-side AGENT_DB_PATH to its host-side equivalent under REPO_ROOT.
 

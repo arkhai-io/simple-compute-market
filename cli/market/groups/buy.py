@@ -32,7 +32,7 @@ from ..buy_orchestrator import (
     BuyConstraints,
     run_buy,
 )
-from ..common import read_env_value
+from ..common import read_env_value, resolve_config_value
 
 
 def register(app: typer.Typer) -> None:
@@ -126,19 +126,37 @@ def register(app: typer.Typer) -> None:
         console = Console()
         env_path = Path(env) if env else None
 
-        def _resolve(name: str, override: Optional[str] = None, default: str = "") -> str:
-            if override:
-                return override
-            v = read_env_value(env_path, name) if env_path else None
-            return v or os.getenv(name) or default
-
-        addr = _resolve("AGENT_WALLET_ADDRESS", buyer_address)
-        pk = _resolve("AGENT_PRIV_KEY", buyer_private_key)
-        ssh = _resolve("SSH_PUBLIC_KEY", ssh_public_key)
-        reg = registry_url or _resolve("INDEXER_URL")
-        rpc = rpc_url or _resolve("CHAIN_RPC_URL")
-        chain = chain_name or _resolve("CHAIN_NAME", default="ethereum_sepolia")
-        addr_cfg = alkahest_addr_config or _resolve("ALKAHEST_ADDRESS_CONFIG_PATH")
+        # Resolution hierarchy (see common.resolve_config_value):
+        #   CLI flag > --env file > shell env var > user config.toml > default
+        addr = resolve_config_value(
+            "AGENT_WALLET_ADDRESS", override=buyer_address,
+            env_file=env_path, toml_path="wallet.address",
+        )
+        pk = resolve_config_value(
+            "AGENT_PRIV_KEY", override=buyer_private_key,
+            env_file=env_path, toml_path="wallet.private_key",
+        )
+        ssh = resolve_config_value(
+            "SSH_PUBLIC_KEY", override=ssh_public_key,
+            env_file=env_path, toml_path="wallet.ssh_public_key",
+        )
+        reg = resolve_config_value(
+            "INDEXER_URL", override=registry_url,
+            env_file=env_path, toml_path="registry.url",
+        )
+        rpc = resolve_config_value(
+            "CHAIN_RPC_URL", override=rpc_url,
+            env_file=env_path, toml_path="chain.rpc_url",
+        )
+        chain = resolve_config_value(
+            "CHAIN_NAME", override=chain_name,
+            env_file=env_path, toml_path="chain.name",
+            default="ethereum_sepolia",
+        )
+        addr_cfg = resolve_config_value(
+            "ALKAHEST_ADDRESS_CONFIG_PATH", override=alkahest_addr_config,
+            env_file=env_path, toml_path="chain.alkahest_address_config_path",
+        )
 
         missing = [n for n, v in (
             ("buyer_address", addr), ("buyer_priv_key", pk),

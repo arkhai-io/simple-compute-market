@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..common import read_env_value
+from ..common import read_env_value, resolve_config_value
 from ..buyer_client import negotiate_with_seller
 
 
@@ -75,15 +75,14 @@ def register(app: typer.Typer) -> None:
         console = Console()
         env_path = Path(env) if env else None
 
-        addr = buyer_address or (
-            (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-            or os.getenv("AGENT_WALLET_ADDRESS")
-            or ""
+        # Same hierarchy as `market buy` — see common.resolve_config_value.
+        addr = resolve_config_value(
+            "AGENT_WALLET_ADDRESS", override=buyer_address,
+            env_file=env_path, toml_path="wallet.address",
         )
-        pk = buyer_private_key or (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-            or ""
+        pk = resolve_config_value(
+            "AGENT_PRIV_KEY", override=buyer_private_key,
+            env_file=env_path, toml_path="wallet.private_key",
         )
         if not addr or not pk:
             typer.secho(
