@@ -37,6 +37,13 @@ from typing import Any, Optional
 
 import aiohttp
 
+from models.host_model import (
+    HostCreate,
+    HostImportRequest,
+    HostListResponse,
+    HostResponse,
+    HostUpdate,
+)
 from models.jobs_model import (
     CredentialListResponse,
     JobListResponse,
@@ -275,8 +282,83 @@ class ProvisioningClient:
         return self._submit_response(data)
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Host operations
     # ------------------------------------------------------------------
+
+    async def list_hosts(
+        self,
+        session: aiohttp.ClientSession,
+        *,
+        search: Optional[str] = None,
+        include_disabled: bool = False,
+    ) -> HostListResponse:
+        """``GET /api/v1/hosts/``"""
+        params: dict[str, Any] = {}
+        if search:
+            params["search"] = search
+        if include_disabled:
+            params["include_disabled"] = "true"
+        data = await self._get(session, "/api/v1/hosts/", params=params or None)
+        return HostListResponse(**data)
+
+    async def get_host(
+        self,
+        session: aiohttp.ClientSession,
+        name: str,
+    ) -> HostResponse:
+        """``GET /api/v1/hosts/{name}``"""
+        data = await self._get(session, f"/api/v1/hosts/{name}")
+        return HostResponse(**data)
+
+    async def register_host(
+        self,
+        session: aiohttp.ClientSession,
+        body: HostCreate,
+    ) -> HostResponse:
+        """``POST /api/v1/hosts/``"""
+        data = await self._post(session, "/api/v1/hosts/", body)
+        return HostResponse(**data)
+
+    async def update_host(
+        self,
+        session: aiohttp.ClientSession,
+        name: str,
+        body: HostUpdate,
+    ) -> HostResponse:
+        """``PUT /api/v1/hosts/{name}``"""
+        url = f"{self._base}/api/v1/hosts/{name}"
+        payload = body.model_dump(exclude_none=True)
+        async with session.put(url, json=payload, headers=self._headers()) as resp:
+            resp.raise_for_status()
+            return HostResponse(**(await resp.json()))
+
+    async def enable_host(
+        self,
+        session: aiohttp.ClientSession,
+        name: str,
+    ) -> HostResponse:
+        """``POST /api/v1/hosts/{name}/enable``"""
+        data = await self._post(session, f"/api/v1/hosts/{name}/enable", {})
+        return HostResponse(**data)
+
+    async def disable_host(
+        self,
+        session: aiohttp.ClientSession,
+        name: str,
+    ) -> HostResponse:
+        """``POST /api/v1/hosts/{name}/disable``"""
+        data = await self._post(session, f"/api/v1/hosts/{name}/disable", {})
+        return HostResponse(**data)
+
+    async def import_hosts_ini(
+        self,
+        session: aiohttp.ClientSession,
+        body: HostImportRequest,
+    ) -> HostListResponse:
+        """``POST /api/v1/hosts/import``"""
+        data = await self._post(session, "/api/v1/hosts/import", body)
+        return HostListResponse(**data)
 
     async def check_capacity(
         self,

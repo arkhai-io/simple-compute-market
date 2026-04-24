@@ -34,3 +34,7 @@ data:
     seller:
       api_url:           {{ printf "http://%s-agents-seller:%d" .Release.Name (int .Values.agents.seller.port) | quote }}
       base_url_override: {{ .Values.agents.seller.baseUrlOverride | quote }}
+
+    provisioning:
+      api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}
+      enable_auth: {{ .Values.provisioning.config.enable_auth }}

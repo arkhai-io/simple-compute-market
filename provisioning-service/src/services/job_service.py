@@ -66,10 +66,12 @@ class AnsibleJobService:
         settings: Settings,
         session_factory: sessionmaker[Session],
         ansible_service: AnsibleService,
+        host_service=None,  # services.host_service.HostService | None
     ) -> None:
         self._settings = settings
         self._session_factory = session_factory
         self._ansible = ansible_service
+        self._host_service = host_service
 
     # ------------------------------------------------------------------
     # HTTP-layer operations
@@ -305,9 +307,30 @@ class AnsibleJobService:
             self._update_job(db, job, status=JobStatus.running.value)
             params = self._build_params(job.params)
             vars_path = self._ansible.build_vars_file(params)
+
+            # Resolve inventory: prefer DB-backed rendering when HostService
+            # is wired and has a row for this host. rendered_inv_path is
+            # initialised here so the outer finally block can always clean it up.
+            rendered_inv_path = None
+            if self._host_service is not None:
+                host = self._host_service.get_host(params.vm_host)
+                if host is not None:
+                    rendered_inv_path = self._ansible.write_inventory([host])
+                    logger.debug(
+                        "Job %s: using DB-rendered inventory at %s",
+                        job_id,
+                        rendered_inv_path,
+                    )
+
+            inventory_path = (
+                rendered_inv_path
+                if rendered_inv_path is not None
+                else self._settings.resolved_inventory_path
+            )
+
             run = self._ansible.start_playbook(
                 playbook_path=self._settings.resolved_playbook_path,
-                inventory_path=self._settings.resolved_inventory_path,
+                inventory_path=inventory_path,
                 extra_vars_path=vars_path,
                 limit=params.vm_host,
             )
@@ -432,6 +455,12 @@ class AnsibleJobService:
             except Exception:
                 pass
         finally:
+            # Clean up the DB-rendered temp inventory file if one was created.
+            if rendered_inv_path is not None:
+                try:
+                    rendered_inv_path.unlink(missing_ok=True)
+                except Exception as _exc:
+                    logger.warning("Failed to remove temp inventory %s: %s", rendered_inv_path, _exc)
             db.close()
 
     # ------------------------------------------------------------------

@@ -1,16 +1,16 @@
-# Makefile — arkhai-e2e-tests
-# -----------------------------------------------------------------------
-# Targets are designed to work both locally and inside CI pipelines.
-# Set CONFIG_DIRECTORY and ACTIVE_PROFILES before running test targets,
-# or rely on the .env file for local development.
-# -----------------------------------------------------------------------
-
 PYTHON      ?= python3
 
 # Default profile if none supplied
 ACTIVE_PROFILES ?= local
 CONFIG_DIRECTORY ?= $(PWD)/config
 MODULE ?= contracts
+
+# Path to the monorepo .dist/ wheel directory, relative to integration-tests/.
+# Used by uv when resolving pure-Python internal packages (market-service,
+# provisioning-service) that are distributed as wheels rather than editable
+# source installs.  The Dockerfile passes --find-links /dist on the uv sync
+# CLI instead; this variable is for local development only.
+DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
 .PHONY: build venv test
 
@@ -22,7 +22,7 @@ init-venv:
 	uv venv --allow-existing
 
 init: init-venv
-	uv sync
+	UV_FIND_LINKS=$(DIST_DIR) uv sync
 
 # -----------------------------------------------------------------------
 # Build
@@ -118,4 +118,3 @@ e2e-mock-failure: e2e-clean-dbs
 	PROVISIONING_MODE=mock MOCK_PROVISIONING_SUCCESS=false $(COMPOSE) up -d
 	$(MAKE) e2e-wait-ready
 	ACTIVE_PROFILES=$(E2E_PROFILE) uv run pytest -m mock_provisioning_failure -v --tb=long
-

@@ -190,3 +190,20 @@ class MockAnsibleService:
             reachable=True,
             detail="mock: connectivity check always succeeds",
         )
+
+    async def check_connectivity_with_inventory(self, host: str, inventory_path) -> ConnectivityResult:
+        """Always reports reachable in mock mode (ignores inventory_path)."""
+        await asyncio.sleep(0)
+        return ConnectivityResult(
+            host=host,
+            reachable=True,
+            detail="mock: connectivity check always succeeds",
+        )
+
+    def write_inventory(self, hosts: list) -> "Path":
+        """Return a minimal temp file in mock mode; Ansible is never called."""
+        import tempfile
+        from pathlib import Path
+        p = Path(tempfile.gettempdir()) / "mock_inventory.ini"
+        p.write_text("[kvm_hosts]\n", encoding="utf-8")
+        return p

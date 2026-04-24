@@ -19,31 +19,31 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "registry.fullname" . }}-smoke-test
+  name: {{ include "provisioning.fullname" . }}-smoke-test
   labels:
-    {{- include "registry.labels" . | nindent 4 }}
+    {{- include "provisioning.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   restartPolicy: Never
   containers:
-    - name: {{ include "registry.fullname" . }}-smoke-test
+    - name: {{ include "provisioning.fullname" . }}-smoke-test
       image: {{ $itImage }}
       imagePullPolicy: {{ $itPull }}
       command:
         - .venv/bin/pytest
         - -m
-        - registry
+        - provisioning_smoke
       env:
         - name: ACTIVE_PROFILES
           value: "helm"
       volumeMounts:
-        - name: helm-config
+        - name: test-config
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
           readOnly: true
   volumes:
-    - name: helm-config
+    - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config

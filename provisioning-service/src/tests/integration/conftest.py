@@ -43,6 +43,7 @@ from db.models import Base
 from main import app
 from services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from services.async_job_queue import AsyncJobQueue
+from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.system_service import SystemService
 
@@ -159,15 +160,18 @@ def fake_ansible(fake_inventory_path) -> MagicMock:
     real_ansible_impl = AnsibleService(real_settings)
     mock.parse_playbook_result.side_effect = real_ansible_impl.parse_playbook_result
 
-    # Inventory — return one host from the temp file
-    from models.ansible import InventoryHost
-    mock.parse_inventory.return_value = [
-        InventoryHost(
-            name="ww1",
-            ansible_host="10.0.0.1",
-            vars={"ansible_ssh_private_key_file": "~/.ssh/id_ed25519"},
-        )
-    ]
+    # write_inventory — return a temp path (content irrelevant; Ansible never runs)
+    import tempfile
+    fake_inv_tmp = Path(tempfile.gettempdir()) / "test_inventory.ini"
+    fake_inv_tmp.write_text("[kvm_hosts]\nww1  ansible_host=10.0.0.1  ansible_user=root\n")
+    mock.write_inventory.return_value = fake_inv_tmp
+
+    # check_connectivity_with_inventory — synchronous mock returning reachable
+    from models.ansible import ConnectivityResult
+    from unittest.mock import AsyncMock as _AsyncMock
+    mock.check_connectivity_with_inventory = _AsyncMock(
+        return_value=ConnectivityResult(host="ww1", reachable=True, detail="mock ping ok")
+    )
 
     return mock
 
@@ -191,31 +195,39 @@ async def client_and_queue(
     """
     # Build services directly — bypass the container's DB singleton so we use
     # the fresh per-test in-memory DB.
+    mock_settings = MagicMock(
+        default_vm_host="ww1",
+        default_max_retries=3,
+        retry_backoff_initial_seconds=60,
+        retry_backoff_multiplier=2.0,
+        retry_backoff_max_seconds=3600,
+        ansible_timeout_seconds=30,
+        non_retryable_errors=["UNREACHABLE", "Domain not found"],
+        frp_server_addr="",
+        frp_domain="",
+        frp_dashboard_password="",
+        resolved_playbook_path=Path("/fake/playbook.yml"),
+        resolved_inventory_path=Path("/fake/hosts"),
+        ssh_decryption_key="",
+        database_url="sqlite:///:memory:",
+    )
+
+    host_service = HostService(
+        session_factory=session_factory,
+        settings=mock_settings,
+    )
+
     job_service = AnsibleJobService(
-        settings=MagicMock(
-            default_vm_host="ww1",
-            default_max_retries=3,
-            retry_backoff_initial_seconds=60,
-            retry_backoff_multiplier=2.0,
-            retry_backoff_max_seconds=3600,
-            ansible_timeout_seconds=30,
-            non_retryable_errors=["UNREACHABLE", "Domain not found"],
-            frp_server_addr="",
-            frp_domain="",
-            frp_dashboard_password="",
-            resolved_playbook_path=Path("/fake/playbook.yml"),
-            resolved_inventory_path=Path("/fake/hosts"),
-        ),
+        settings=mock_settings,
         session_factory=session_factory,
         ansible_service=fake_ansible,
+        host_service=host_service,
     )
 
     system_service = SystemService(
         ansible_service=fake_ansible,
-        settings=MagicMock(
-            resolved_inventory_path=Path("/fake/hosts"),
-            resolved_playbook_path=Path("/fake/playbook.yml"),
-        ),
+        settings=mock_settings,
+        host_service=host_service,
     )
 
     # Override container providers
@@ -223,12 +235,14 @@ async def client_and_queue(
     app.container.job_service.override(job_service)
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
+    app.container.host_service.override(host_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
     _container_module.resolved_session_factory = session_factory
     _container_module.resolved_ansible_service = fake_ansible
     _container_module.resolved_system_service = system_service
+    _container_module.resolved_host_service = host_service
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
@@ -254,3 +268,4 @@ async def client_and_queue(
     app.container.job_service.reset_override()
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
+    app.container.host_service.reset_override()

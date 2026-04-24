@@ -23,10 +23,10 @@ dependencies = [
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with agent behavior.
     "market-service",
+    "provisioning-service",
 ]
 
-[tool.uv.sources]
-market-service = { path = "../service", editable = true }
+[tool.uv]
 
 [project.optional-dependencies]
 dev = [
@@ -73,6 +73,7 @@ markers = [
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
     "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
+    "provisioning_smoke: Smoke tests for the deployed provisioning service REST API",
 ]
 log_cli = true
 log_cli_level = "INFO"

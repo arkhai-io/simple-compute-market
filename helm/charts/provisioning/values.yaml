@@ -18,6 +18,7 @@ server:
 # SSH private key — used by Ansible to authenticate against hypervisors.
 #
 # The key is mounted as a Secret volume at /home/appuser/.ssh/id_ed25519.
+# This is the default key for path-type hosts that reference this path.
 #
 # createSecret: true  — chart creates a Secret from sshPrivateKey below.
 #                       Use only for dev/test; do not commit real keys.
@@ -29,6 +30,33 @@ sshKey:
   createSecret: true
   secretName: ""
   sshPrivateKey: ""
+
+# ---------------------------------------------------------------------------
+# Provisioning secrets — injected as a dynaconf config profile file mounted
+# at /app/config/config-provisioning-secrets.yml.
+#
+# sshDecryptionKey.key: Fernet key for embedded-type SSH keys in the DB.
+#   Required when any host is registered with ssh_key_type='embedded'.
+#   Generate:
+#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#
+# inventory.hostsIni: Ansible INI inventory content. Upserted into the hosts
+#   table on every pod startup (idempotent via seed_from_ini).
+#   Example:
+#     [kvm_hosts]
+#     ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
+#
+# createSecret: true  — chart creates a Secret from the values below.
+# createSecret: false — chart expects a pre-existing Secret named secretName
+#                       containing a config-provisioning-secrets.yml key.
+# ---------------------------------------------------------------------------
+sshDecryptionKey:
+  createSecret: true
+  secretName: ""
+  key: ""
+
+inventory:
+  hostsIni: ""
 
 # ---------------------------------------------------------------------------
 # Application config — rendered into a ConfigMap as config-production.yml

@@ -46,13 +46,26 @@ Supports an optional global.imageRepository passed down from the parent chart.
 {{- end }}
 
 {{/*
-Resolve the Secret name for the SSH private key.
+Resolve the Secret name for the SSH private key (default mounted key).
 */}}
 {{- define "provisioning.sshKeySecretName" -}}
 {{- if .Values.sshKey.secretName -}}
 {{- .Values.sshKey.secretName -}}
 {{- else -}}
 {{- printf "%s-ssh-key" (include "provisioning.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the Secret name for the provisioning-secrets profile file.
+This Secret contains config-provisioning-secrets.yml, which is mounted as a
+dynaconf profile and carries ssh_decryption_key and inventory_ini.
+*/}}
+{{- define "provisioning.sshDecryptionKeySecretName" -}}
+{{- if .Values.sshDecryptionKey.secretName -}}
+{{- .Values.sshDecryptionKey.secretName -}}
+{{- else -}}
+{{- printf "%s-provisioning-secrets" (include "provisioning.fullname" .) -}}
 {{- end -}}
 {{- end }}
 

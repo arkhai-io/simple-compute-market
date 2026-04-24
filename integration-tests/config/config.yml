@@ -40,3 +40,7 @@ tests:
   order_create_timeout: 30 #time in seconds
   order_match_timeout: 60
   order_close_timeout: 30
+
+provisioning:
+  api_url: ""          # injected from environment profile file or ARKHAI_PROVISIONING__API_URL
+  enable_auth: false   # set to true if the deployed service has auth enabled

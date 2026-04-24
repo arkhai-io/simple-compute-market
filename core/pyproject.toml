@@ -59,8 +59,6 @@ no-build-isolation-package = ["pufferlib"]
 pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
-market-service = { path = "../service", editable = true }
-provisioning-service = { path = "../provisioning-service", editable = true }
 market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },

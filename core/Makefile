@@ -2,6 +2,13 @@ IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= core
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 
+# Path to the monorepo .dist/ wheel directory, relative to core/.
+# Used by uv when resolving pure-Python internal packages (market-service,
+# provisioning-service) that are distributed as wheels rather than editable
+# source installs.  The Dockerfile passes --find-links /dist on the uv sync
+# CLI instead; this variable is for local development only.
+DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+
 .PHONY: build build-images deploy deploy-buyer-agent deploy-seller-agent test test-unit test-integration
 
 build: build-images
@@ -13,12 +20,12 @@ build-images:
 test: test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
-	uv run pytest tests/unit/ -v
+	UV_FIND_LINKS=$(DIST_DIR) uv run pytest tests/unit/ -v
 
 test-integration: ## Run integration tests (no real infrastructure required — event queue seam)
 	ENABLE_EVENT_QUEUE=true \
 	AGENT_WALLET_ADDRESS="" \
-	uv run pytest tests/integration/ -v
+	UV_FIND_LINKS=$(DIST_DIR) uv run pytest tests/integration/ -v
 
 deploy: deploy-buyer-agent deploy-seller-agent
 

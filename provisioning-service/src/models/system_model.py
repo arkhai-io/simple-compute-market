@@ -31,19 +31,47 @@ class FileInfo(BaseModel):
     )
 
 
-class InventoryInfo(FileInfo):
+class InventoryInfo(BaseModel):
+    """Host inventory diagnostics.
+
+    ``source`` is ``'database'`` when inventory is read from the ``hosts``
+    table (normal operation) or ``'file'`` for a legacy INI path.
+    ``host_count`` is the number of enabled hosts found.
+    ``path`` is the DB URL or file path, for informational purposes.
+    """
+
+    source: str = Field(description="'database' or 'file'")
+    path: str = Field(description="DB URL or inventory file path")
+    exists: bool = Field(description="True if the source is reachable")
     host_count: Optional[int] = Field(
         default=None,
-        description="Number of hosts parsed from the inventory (None if unreadable)",
+        description="Number of enabled hosts (None if source is unreadable)",
     )
 
 
-class SshKeyInfo(FileInfo):
+class SshKeyInfo(BaseModel):
+    key_type: str = Field(description="'path' or 'embedded'")
     raw_path: str = Field(
-        description="Path as written in the inventory (may contain ~)",
+        description=(
+            "For 'path': the configured key path. "
+            "For 'embedded': '<encrypted>' sentinel."
+        ),
+    )
+    path: str = Field(description="Expanded path (path-type) or '<encrypted>'")
+    exists: bool = Field(
+        description=(
+            "For 'path': whether the key file exists on disk. "
+            "For 'embedded': always True (key is stored in DB)."
+        )
+    )
+    sha256: Optional[str] = Field(
+        default=None,
+        description=(
+            "SHA-256 of the key file (path-type only; None for embedded or absent files)."
+        ),
     )
     referenced_by: list[str] = Field(
-        description="Host aliases that reference this key path",
+        description="Host aliases that use this key configuration.",
     )
 
 
@@ -56,7 +84,6 @@ class AnsibleReadinessResponse(BaseModel):
     playbook: FileInfo
     ssh_keys: list[SshKeyInfo] = Field(
         description=(
-            "Unique SSH key paths referenced by inventory hosts, "
-            "with existence and integrity information."
+            "SSH key diagnostics per unique key reference across all enabled hosts."
         )
     )

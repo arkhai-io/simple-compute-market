@@ -6,6 +6,7 @@ from config import settings
 from db.database import create_db_engine, create_session_factory
 from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
+from services.host_service import HostService
 from services.job_service import AnsibleJobService
 from services.system_service import SystemService
 
@@ -61,17 +62,25 @@ class Container(containers.DeclarativeContainer):
         cfg=config,
     )
 
+    host_service = providers.Singleton(
+        HostService,
+        session_factory=session_factory,
+        settings=config,
+    )
+
     job_service = providers.Singleton(
         AnsibleJobService,
         settings=config,
         session_factory=session_factory,
         ansible_service=ansible_service,
+        host_service=host_service,
     )
 
     system_service = providers.Singleton(
         SystemService,
         ansible_service=ansible_service,
         settings=config,
+        host_service=host_service,
     )
 
 
@@ -92,3 +101,4 @@ resolved_session_factory: "sessionmaker[Session] | None" = None
 resolved_ansible_service: "AnsibleService | None" = None
 resolved_job_queue: "AsyncJobQueue | None" = None
 resolved_system_service: "SystemService | None" = None
+resolved_host_service: "HostService | None" = None

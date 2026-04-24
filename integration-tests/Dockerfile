@@ -8,16 +8,18 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-# Workspace dependency: pyproject.toml references ../service via
-# [tool.uv.sources], so the service package must be present at the
-# parent-of-/app path (resolved as /service inside the image) before uv sync.
-COPY service /service
+# Copy the pre-built wheels from the monorepo .dist/ directory.
+# These are built on the host by `make dist` before `docker build`.
+# The Dockerfile is built from the monorepo root:
+#   cd .. && docker build -t arkhai:integration-tests -f integration-tests/Dockerfile .
+COPY .dist/ /dist/
+
 COPY integration-tests/src ./src
 COPY integration-tests/tests ./tests
-COPY integration-tests/pyproject.toml integration-tests/uv.lock ./
+COPY integration-tests/pyproject.toml ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+    uv sync --find-links /dist
 
 # Stage 2: Lean runtime image
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -27,7 +29,6 @@ WORKDIR /app
 COPY --from=builder /app/.venv ./.venv
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tests ./tests
-COPY --from=builder /service /service
 COPY integration-tests/config ./config
 COPY integration-tests/conftest.py .
 COPY integration-tests/pyproject.toml .
@@ -38,4 +39,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV ACTIVE_PROFILES="docker"
 ENV CONFIG_DIRECTORY="/app/config/"
 
-CMD .venv/bin/pytest 
+CMD .venv/bin/pytest

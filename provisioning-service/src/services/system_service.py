@@ -3,15 +3,21 @@
 Provides the business logic for the ``SystemController`` endpoints:
 health checks, version resolution, and Ansible readiness inspection.
 
-This service is intentionally free of FastAPI, SQLAlchemy, and any HTTP
-concerns — those live in the controller.  It can be instantiated and tested
-without starting the application.
+This service is intentionally free of FastAPI and any HTTP concerns — those
+live in the controller.  It can be instantiated and tested without starting
+the application.
+
+The ``ansible_readiness`` method reads host inventory from the ``HostService``
+(DB table), not from the Ansible INI file on disk.  SSH key diagnostics:
+  - ``path`` hosts: stat the key file and compute its SHA-256.
+  - ``embedded`` hosts: report ``exists=True``; no SHA-256 (key is encrypted
+    at rest).
 
 Version resolution order
 ------------------------
 1. ``importlib.metadata`` — works when the package is installed
    (``pip install -e .`` in Docker / production).
-2. ``tomllib`` (stdlib ≥ 3.11) — reads ``pyproject.toml`` relative to this
+2. ``tomllib`` (stdlib >= 3.11) — reads ``pyproject.toml`` relative to this
    file, works in local dev without a package install.
 3. ``"unknown"`` — defensive fallback so the endpoint never raises.
 """
@@ -23,7 +29,7 @@ import os
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from models.system_model import (
     AnsibleReadinessResponse,
@@ -33,6 +39,9 @@ from models.system_model import (
 )
 from services.ansible_service import AnsibleService
 
+if TYPE_CHECKING:
+    from services.host_service import HostService
+
 
 # ---------------------------------------------------------------------------
 # Version
@@ -40,11 +49,7 @@ from services.ansible_service import AnsibleService
 
 
 def _read_version() -> str:
-    """Return the service version string.
-
-    Tries ``importlib.metadata`` first (installed package), then parses
-    ``pyproject.toml`` relative to this file, then returns ``"unknown"``.
-    """
+    """Return the service version string."""
     try:
         from importlib.metadata import version, PackageNotFoundError
         try:
@@ -55,8 +60,6 @@ def _read_version() -> str:
         pass
 
     try:
-        # This file lives at src/services/system_service.py.
-        # pyproject.toml is two levels up.
         pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
         if pyproject.exists():
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
@@ -67,7 +70,6 @@ def _read_version() -> str:
     return "unknown"
 
 
-# Resolved once at import time; stable for the lifetime of the process.
 SERVICE_VERSION: str = _read_version()
 
 
@@ -85,13 +87,7 @@ def sha256_file(path: Path) -> Optional[str]:
 
 
 def ansible_version() -> Optional[str]:
-    """Run ``ansible --version`` and return the first output line, or ``None``.
-
-    Returns ``None`` if the ``ansible`` binary is not on ``PATH``, the
-    invocation times out, or any other OS error occurs.  A ``None`` return
-    is itself diagnostic information — it means Ansible is not installed or
-    not reachable from the service's ``PATH``.
-    """
+    """Run ``ansible --version`` and return the first output line, or ``None``."""
     try:
         result = subprocess.run(
             ["ansible", "--version"],
@@ -106,33 +102,32 @@ def ansible_version() -> Optional[str]:
     return None
 
 
-def collect_ssh_keys(ansible_service: AnsibleService) -> list[SshKeyInfo]:
-    """Parse the Ansible inventory and return SSH key diagnostics.
+def collect_ssh_keys_from_hosts(hosts: list) -> list[SshKeyInfo]:
+    """Build SSH key diagnostics from DB host rows.
 
-    Collects every unique ``ansible_ssh_private_key_file`` value found in
-    host entries, expands ``~``, and returns one ``SshKeyInfo`` per unique
-    path with existence, SHA-256, and a list of the host aliases that
-    reference it.
+    Groups hosts by their effective key reference:
+      - ``path`` hosts: grouped by path string; the file is stat'd.
+      - ``embedded`` hosts: each appears as a distinct ``<encrypted>`` entry.
 
-    Returns an empty list if the inventory is unreadable.
+    Returns one ``SshKeyInfo`` per unique key reference.
     """
-    try:
-        hosts = ansible_service.parse_inventory()
-    except Exception:
-        return []
+    path_to_hosts: dict[str, list[str]] = {}
+    embedded_hosts: list[str] = []
 
-    key_to_hosts: dict[str, list[str]] = {}
     for host in hosts:
-        raw = host.vars.get("ansible_ssh_private_key_file", "")
-        if raw:
-            key_to_hosts.setdefault(raw, []).append(host.name)
+        if host.ssh_key_type == "path":
+            path_to_hosts.setdefault(host.ssh_key_value, []).append(host.name)
+        else:
+            embedded_hosts.append(host.name)
 
     results: list[SshKeyInfo] = []
-    for raw_path, host_names in key_to_hosts.items():
+
+    for raw_path, host_names in path_to_hosts.items():
         expanded = Path(os.path.expanduser(raw_path))
         exists = expanded.exists()
         results.append(
             SshKeyInfo(
+                key_type="path",
                 raw_path=raw_path,
                 path=str(expanded),
                 exists=exists,
@@ -140,6 +135,19 @@ def collect_ssh_keys(ansible_service: AnsibleService) -> list[SshKeyInfo]:
                 referenced_by=sorted(host_names),
             )
         )
+
+    for host_name in embedded_hosts:
+        results.append(
+            SshKeyInfo(
+                key_type="embedded",
+                raw_path="<encrypted>",
+                path="<encrypted>",
+                exists=True,
+                sha256=None,
+                referenced_by=[host_name],
+            )
+        )
+
     return results
 
 
@@ -151,14 +159,21 @@ def collect_ssh_keys(ansible_service: AnsibleService) -> list[SshKeyInfo]:
 class SystemService:
     """Diagnostics operations for the system controller.
 
-    Depends only on ``AnsibleService`` and ``Settings`` — no DB, no HTTP.
-    All public methods are synchronous; callers that need to run them from
-    an async context should use ``asyncio.to_thread``.
+    Depends on ``AnsibleService`` and ``Settings``; optionally accepts a
+    ``HostService`` for DB-backed inventory diagnostics.  All public methods
+    are synchronous; callers that need to run them from an async context
+    should use ``asyncio.to_thread``.
     """
 
-    def __init__(self, ansible_service: AnsibleService, settings) -> None:
+    def __init__(
+        self,
+        ansible_service: AnsibleService,
+        settings,
+        host_service: "Optional[HostService]" = None,
+    ) -> None:
         self._ansible = ansible_service
         self._settings = settings
+        self._host_service = host_service
 
     def get_version(self) -> str:
         """Return the service version string."""
@@ -171,33 +186,54 @@ class SystemService:
     def ansible_readiness(self) -> AnsibleReadinessResponse:
         """Collect full Ansible readiness information synchronously.
 
+        Inventory data is sourced from the ``hosts`` DB table via
+        ``HostService``.  SSH key diagnostics iterate DB rows instead of
+        parsing the INI file.
+
         This method performs filesystem and subprocess I/O; callers in an
         async context should invoke it via ``asyncio.to_thread``.
         """
-        inventory_path = self._settings.resolved_inventory_path
-        inventory_exists = inventory_path.exists()
-        host_count: Optional[int] = None
-        if inventory_exists:
+        # --- Inventory info (from DB) ---
+        if self._host_service is not None:
             try:
-                host_count = len(self._ansible.parse_inventory())
-            except Exception:
-                host_count = None
+                enabled_hosts = self._host_service.list_hosts(enabled_only=True)
+                host_count = len(enabled_hosts)
+                inventory_info = InventoryInfo(
+                    source="database",
+                    path=str(self._settings.database_url),
+                    exists=True,
+                    host_count=host_count,
+                )
+                ssh_keys = collect_ssh_keys_from_hosts(enabled_hosts)
+            except Exception as exc:
+                inventory_info = InventoryInfo(
+                    source="database",
+                    path=str(self._settings.database_url),
+                    exists=False,
+                    host_count=None,
+                )
+                ssh_keys = []
+        else:
+            # Fallback: no HostService wired (e.g. during early startup or tests)
+            inventory_info = InventoryInfo(
+                source="database",
+                path=str(self._settings.database_url),
+                exists=False,
+                host_count=None,
+            )
+            ssh_keys = []
 
+        # --- Playbook info (filesystem) ---
         playbook_path = self._settings.resolved_playbook_path
         playbook_exists = playbook_path.exists()
 
         return AnsibleReadinessResponse(
             ansible_version=ansible_version(),
-            inventory=InventoryInfo(
-                path=str(inventory_path),
-                exists=inventory_exists,
-                sha256=sha256_file(inventory_path) if inventory_exists else None,
-                host_count=host_count,
-            ),
+            inventory=inventory_info,
             playbook=FileInfo(
                 path=str(playbook_path),
                 exists=playbook_exists,
                 sha256=sha256_file(playbook_path) if playbook_exists else None,
             ),
-            ssh_keys=collect_ssh_keys(self._ansible),
+            ssh_keys=ssh_keys,
         )

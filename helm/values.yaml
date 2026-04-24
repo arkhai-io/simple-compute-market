@@ -130,7 +130,7 @@ agents:
 provisioning:
   enabled: true
 
-  apiServer:
+  server:
     image:
       repository: ""
       name: arkhai
@@ -140,15 +140,6 @@ provisioning:
     port: 8081
     type: ClusterIP
     host: "0.0.0.0"
-
-  worker:
-    image:
-      repository: ""
-      name: arkhai
-      tag: provisioning-worker
-      pullPolicy: IfNotPresent
-    replicaCount: 1
-    port: 8082
 
   sshKey:
     createSecret: true

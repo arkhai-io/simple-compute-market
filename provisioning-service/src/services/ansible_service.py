@@ -263,6 +263,65 @@ class AnsibleService:
         )
 
     # ------------------------------------------------------------------
+    # Inventory rendering
+    # ------------------------------------------------------------------
+
+    def write_inventory(self, hosts: list) -> Path:
+        """Write a temporary Ansible INI inventory file from DB host rows.
+
+        Accepts a list of ``Host`` ORM objects (from ``HostService``).
+        ``embedded``-key hosts have their key material decrypted and written
+        to additional temp files; the INI references those temp paths.
+
+        The returned ``Path`` is a temp file that the caller must delete in
+        a ``finally`` block — identical contract to ``build_vars_file``.
+
+        For ``embedded`` hosts, companion key files are written alongside
+        the inventory file (same temp directory, named
+        ``<host_name>_key``).  They are also deleted when the caller deletes
+        the inventory file's parent directory, or the caller may choose to
+        clean them up individually.
+        """
+        import tempfile
+        from pathlib import Path as _Path
+
+        nonce = uuid.uuid4().hex
+        inv_path = _Path(tempfile.gettempdir()) / f"inventory_{nonce}.ini"
+
+        lines = ["[kvm_hosts]"]
+        companion_key_paths: list[_Path] = []
+
+        for host in hosts:
+            if host.ssh_key_type == "path":
+                key_ref = host.ssh_key_value
+            else:
+                # Decrypt and write a companion temp key file
+                from crypto import decrypt_key
+                secret = getattr(self._settings, "ssh_decryption_key", "")
+                plaintext = decrypt_key(host.ssh_key_value, secret)
+                key_file = _Path(tempfile.gettempdir()) / f"{host.name}_key_{nonce}"
+                key_file.write_text(plaintext, encoding="utf-8")
+                key_file.chmod(0o400)
+                companion_key_paths.append(key_file)
+                key_ref = str(key_file)
+
+            lines.append(
+                f"{host.name}"
+                f"  ansible_host={host.kvm_host}"
+                f"  ansible_user={host.ssh_user}"
+                f"  ansible_ssh_private_key_file={key_ref}"
+            )
+
+        inv_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        logger.debug(
+            "Wrote inventory to %s (%d host(s), %d companion key file(s))",
+            inv_path,
+            len(hosts),
+            len(companion_key_paths),
+        )
+        return inv_path
+
+    # ------------------------------------------------------------------
     # Vars file construction (formerly ProvisioningService._write_vars_file)
     # ------------------------------------------------------------------
 
@@ -564,13 +623,29 @@ class AnsibleService:
     async def check_connectivity(self, host: str) -> ConnectivityResult:
         """Run ``ansible -m ping`` against a single named inventory host.
 
+        Uses the inventory path from settings (legacy path).
+        Prefer ``check_connectivity_with_inventory`` when a DB-rendered
+        inventory path is available.
+
         Returns a ``ConnectivityResult`` with ``reachable=False`` if the
         host is unreachable — not a 404.  The caller should verify the
         host exists in the inventory before calling this.
         """
+        return await self.check_connectivity_with_inventory(
+            host, self._settings.resolved_inventory_path
+        )
+
+    async def check_connectivity_with_inventory(
+        self, host: str, inventory_path: Path
+    ) -> ConnectivityResult:
+        """Run ``ansible -m ping`` using the supplied *inventory_path*.
+
+        Used by ``HostController`` after rendering a temp inventory from DB rows.
+        The caller is responsible for cleaning up any temp file.
+        """
         cmd = [
             "ansible",
-            "-i", str(self._settings.resolved_inventory_path),
+            "-i", str(inventory_path),
             host,
             "-m", "ping",
         ]

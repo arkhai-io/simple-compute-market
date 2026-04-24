@@ -14,8 +14,9 @@ spec:
       labels:
         {{- include "provisioning.selectorLabels" . | nindent 8 }}
       annotations:
-        # Force pod rollout when the config changes
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Force pod rollout when config or secrets change
+        checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
       containers:
         - name: provisioning
@@ -27,12 +28,17 @@ spec:
               protocol: TCP
           env:
             - name: ACTIVE_PROFILES
-              value: "production"
+              value: "production,provisioning-secrets"
             - name: CONFIG_DIRECTORY
               value: "/app/config"
           volumeMounts:
             - name: config
-              mountPath: /app/config
+              mountPath: /app/config/config-production.yml
+              subPath: config-production.yml
+              readOnly: true
+            - name: provisioning-secrets
+              mountPath: /app/config/config-provisioning-secrets.yml
+              subPath: config-provisioning-secrets.yml
               readOnly: true
             - name: ssh-key
               mountPath: /home/appuser/.ssh/id_ed25519
@@ -58,6 +64,9 @@ spec:
         - name: config
           configMap:
             name: {{ include "provisioning.configMapName" . }}
+        - name: provisioning-secrets
+          secret:
+            secretName: {{ include "provisioning.sshDecryptionKeySecretName" . }}
         - name: ssh-key
           secret:
             secretName: {{ include "provisioning.sshKeySecretName" . }}

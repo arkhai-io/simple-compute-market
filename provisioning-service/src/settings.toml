@@ -84,3 +84,13 @@ registry_cache_max_size = 256
 # Rate limiting
 enable_rate_limiting = false
 rate_limit_requests_per_minute = 30
+# SSH key encryption
+# Required when registering hosts with ssh_key_type='embedded'.
+# Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ssh_decryption_key = ""
+
+# Inventory seeding
+# When set, this INI content is parsed and upserted into the hosts table
+# at every service startup (idempotent).  Used by the Helm chart to inject
+# inventory via a Kubernetes Secret without requiring a POST /hosts/import call.
+inventory_ini = ""

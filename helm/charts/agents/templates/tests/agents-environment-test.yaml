@@ -19,7 +19,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "agents.fullname" . }}-agents-environment-test
+  name: {{ include "agents.fullname" . }}-agents-smoke-test
   labels:
     {{- include "agents.labels" . | nindent 4 }}
   annotations:
@@ -28,7 +28,7 @@ metadata:
 spec:
   restartPolicy: Never
   containers:
-    - name: {{ include "agents.fullname" . }}-environment-test
+    - name: {{ include "agents.fullname" . }}-smoke-test
       image: {{ $itImage }}
       imagePullPolicy: {{ $itPull }}
       command:

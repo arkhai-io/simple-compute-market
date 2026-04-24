@@ -54,6 +54,22 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_session_factory = container.session_factory()
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
+    _container_module.resolved_host_service = container.host_service()
+
+    # ------------------------------------------------------------------
+    # Inventory seeding from PROVISIONING_INVENTORY_INI env var.
+    # When set (e.g. injected by the Helm chart via a Kubernetes Secret),
+    # the INI content is upserted into the hosts table at every startup.
+    # This is idempotent — repeated restarts with the same INI are safe.
+    # ------------------------------------------------------------------
+    inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
+    if inventory_ini:
+        host_service = _container_module.resolved_host_service
+        try:
+            seeded = host_service.seed_from_ini(inventory_ini)
+            logger.info("Inventory seeding: upserted %d host(s) from PROVISIONING_INVENTORY_INI", len(seeded))
+        except Exception as exc:
+            logger.error("Inventory seeding failed: %s", exc)
 
     # AsyncJobQueue is a plain object; instantiate inside the running event loop.
     job_queue = AsyncJobQueue(max_concurrent=settings.max_concurrent_jobs)
@@ -106,7 +122,7 @@ app = FastAPI(
         },
         {
             "name": "hosts",
-            "description": "KVM host inventory, capacity checks, and connectivity tests.",
+            "description": "KVM host registry — CRUD, capacity checks, and connectivity tests.",
         },
         {
             "name": "jobs",
@@ -143,17 +159,13 @@ app.add_middleware(
 # Routers
 #
 # URL hierarchy:
-#   /health                          ← bare liveness probe (no prefix)
-#   /api/v1/system/health            ← versioned alias
+#   /health                          <- bare liveness probe (no prefix)
+#   /api/v1/system/health            <- versioned alias
 #   /api/v1/system/version
 #   /api/v1/system/ansible/readiness
-#   /api/v1/jobs/*                   ← job read + cancel
-#   /api/v1/hosts/*                  ← host inventory, capacity, connectivity
-#   /api/v1/hosts/{host}/vms/*       ← VM lifecycle (VmController composes here)
-#
-# VmController and HostController are registered independently at /api/v1.
-# Their prefixes (/hosts/{host}/vms and /hosts) assemble the full hierarchy
-# explicitly in this file rather than via router nesting.
+#   /api/v1/jobs/*                   <- job read + cancel
+#   /api/v1/hosts/*                  <- host registry CRUD, capacity, connectivity
+#   /api/v1/hosts/{host}/vms/*       <- VM lifecycle (VmController composes here)
 # ---------------------------------------------------------------------------
 app.include_router(SystemController.make_health_router())                          # /health
 app.include_router(SystemController.make_system_router(), prefix="/api/v1")        # /api/v1/system/*

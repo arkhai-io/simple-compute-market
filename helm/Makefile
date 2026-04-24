@@ -51,13 +51,13 @@ test:
 ##
 ## Test pod names per module:
 ##   validate-contracts → $(RELEASE)-validate-contracts-chain-environment-test
-##   registry           → $(RELEASE)-registry-registry-environment-test
-##   agents             → $(RELEASE)-agents-agents-environment-test
-##   provisioning       → $(RELEASE)-provisioning-provisioning-environment-test
+##   registry           → $(RELEASE)-registry-smoke-test
+##   agents             → $(RELEASE)-agents-smoke-test
+##   provisioning       → $(RELEASE)-provisioning-smoke-test
 TEST_POD_SUFFIX_validate-contracts := chain-environment-test
-TEST_POD_SUFFIX_registry           := registry-environment-test
-TEST_POD_SUFFIX_agents             := agents-environment-test
-TEST_POD_SUFFIX_provisioning       := provisioning-environment-test
+TEST_POD_SUFFIX_registry           := smoke-test
+TEST_POD_SUFFIX_agents             := smoke-test
+TEST_POD_SUFFIX_provisioning       := smoke-test
  
 test-module:
 ifndef MODULE

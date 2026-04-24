@@ -12,6 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git g++ && rm -
 
 WORKDIR /app
 
+# Copy the pre-built wheels from the monorepo .dist/ directory.
+# These are built on the host by `make dist` before `docker build`.
+COPY .dist/ /dist/
+
 COPY core/pyproject.toml core/uv.lock ./
 COPY core/agent/packages/ ./agent/packages/
 COPY service/ ../service/
@@ -28,9 +32,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         export UV_INDEX_ALKAHEST_GAR_PASSWORD="$(echo "${GAR_STG_READER_KEY}" | tr -d '\n' | python3 -c 'import sys,json; print(json.dumps(json.loads(sys.stdin.read())))' 2>/dev/null || echo "${GAR_STG_READER_KEY}")"; \
     fi && \
     if [ "${INSTALL_RL_DEPS}" = "true" ]; then \
-        uv sync --frozen --no-dev --no-install-project --extra rl; \
+        uv sync --no-dev --no-install-project --extra rl --find-links /dist; \
     else \
-        uv sync --frozen --no-dev --no-install-project; \
+        uv sync --no-dev --no-install-project --find-links /dist; \
     fi
 
 # Stage 2: Lean runtime image

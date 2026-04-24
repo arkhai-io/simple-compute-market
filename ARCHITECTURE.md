@@ -410,17 +410,37 @@ The provisioning service uses a profile-based configuration system. Resolution o
 - `local` — developer overrides; copy `config/config-local.yml.example` to `config/config-local.yml` (gitignored) and set `ACTIVE_PROFILES=local` in `.env`
 - `docker` — baked into the image via `ENV ACTIVE_PROFILES="docker"`; supplies IaC paths and `ansible_cfg` for standalone container runs
 - `production` — used in Kubernetes; rendered from Helm `values.yaml` into a ConfigMap mounted at `CONFIG_DIRECTORY`
-- `mock` - used to initialize a MockAnsibleService which implements deterministic fake results with no subprocess calls. Intended for docker-compose and e2e tests where no real KVM hardware is available.
+- `provisioning-secrets` — used in Kubernetes alongside `production`; rendered from a Helm Secret into `config-provisioning-secrets.yml` mounted at `CONFIG_DIRECTORY`. Carries sensitive keys that must not appear in a ConfigMap plaintext (`ssh_decryption_key`, `inventory_ini`).
+- `mock` — initializes `MockAnsibleService` with deterministic fake results and no subprocess calls. Intended for docker-compose and e2e tests where no real KVM hardware is available.
+
+**Helm configuration policy — all config travels through the profile system:**
+
+Pods set only `ACTIVE_PROFILES` and `CONFIG_DIRECTORY` as environment variables. All application settings travel through mounted ConfigMap or Secret files, never as individual `env` entries in the pod spec. This rule applies equally to the application Deployment and to helm test pods.
+
+The reasoning: environment variables are the highest-priority override layer in dynaconf. Injecting individual settings as env vars silently overrides anything an operator configures in a profile file, defeating the purpose of the profile system. The only acceptable env vars on a pod are the profile resolver variables (`ACTIVE_PROFILES`, `CONFIG_DIRECTORY`) and the subprocess-required `ANSIBLE_CONFIG`.
+
+**Pattern for secrets in Kubernetes:**
+
+Secrets that cannot be placed in a ConfigMap (key material, sensitive credentials) are stored as a Kubernetes Secret whose data contains a `config-<profile>.yml` key. The Secret is mounted as a volume at `CONFIG_DIRECTORY`; the profile name is added to `ACTIVE_PROFILES`. This is identical to the ConfigMap approach — the dynaconf loader sees no difference between a file mounted from a ConfigMap and one mounted from a Secret.
+
+Example — the provisioning-secrets profile:
+```
+Secret data key:  config-provisioning-secrets.yml
+Mount path:       /app/config/config-provisioning-secrets.yml
+ACTIVE_PROFILES:  production,provisioning-secrets
+```
+
+The same pattern applies to helm test pods. The shared `test-config` ConfigMap provides non-secret values (service URLs, feature flags) merged by the `helm` profile. Test pods that need secret material mount an additional Secret volume as a second profile.
 
 **Why `ENV` vars are not used for application config:**
 
-Environment variables are the highest-priority override layer. Baking application config into `ENV` instructions in a Dockerfile means any operator trying to change a value via a ConfigMap or profile file is silently overridden — the opposite of the intended behaviour. The Dockerfile therefore only sets `ACTIVE_PROFILES` and `CONFIG_DIRECTORY`, which tell the loader *where* to find config. All application settings travel through the profile file layer.
+Environment variables are the highest-priority override layer. Baking application config into `ENV` instructions in a Dockerfile means any operator trying to change a value via a profile file is silently overridden — the opposite of the intended behaviour. The Dockerfile therefore only sets `ACTIVE_PROFILES` and `CONFIG_DIRECTORY`.
 
 The one exception is `ANSIBLE_CONFIG`: this is consumed by the `ansible-playbook` subprocess via `os.environ` rather than by Python code, so it cannot travel through dynaconf. It is read from `settings.ansible_cfg` at lifespan startup and written to `os.environ` before the first playbook run.
 
 **Helm ConfigMap approach:**
 
-The Helm chart renders the entire `config:` block from `values.yaml` directly into `config-production.yml` using `{{ .Values.config | toYaml }}`. The Deployment sets only `ACTIVE_PROFILES=production` and `CONFIG_DIRECTORY=/app/config`. Adding a new config key requires only a `values.yaml` change — no Deployment template changes needed.
+The Helm chart renders the entire `config:` block from `values.yaml` directly into `config-production.yml` using `{{ .Values.config | toYaml }}`. Adding a new non-secret config key requires only a `values.yaml` change — no Deployment template changes needed. Secret keys go into the `sshDecryptionKey` Secret block in `values.yaml`, which renders into `config-provisioning-secrets.yml`.
 
 ---
 
@@ -430,27 +450,20 @@ There are three distinct inputs the provisioning service needs from outside the 
 
 **Ansible inventory vs. KVM hosts — these are different things:**
 
-- **Ansible inventory** (`compute-provisioning-iac/ansible/inventory/hosts`) — an INI file telling Ansible *how to connect* to machines: aliases, IPs, SSH users, key paths, and group memberships. This is a provisioning-service-layer concept owned by the seller operator.
-  ```ini
-  [kvm_hosts]
-  ww1  ansible_host=10.161.42.195  ansible_user=ww_bm  ansible_ssh_private_key_file=~/.ssh/id_ed25519
-  btc1 ansible_host=12.150.85.70   ansible_user=ubuntu  ansible_ssh_private_key_file=~/.ssh/id_ed25519
-  ```
+- **Ansible inventory** — an INI file telling Ansible *how to connect* to machines: aliases, IPs, SSH users, key paths, and group memberships. In the implemented design this is a *rendered artifact* produced from the `hosts` DB table immediately before each playbook run, not a file maintained on disk.
 
-- **KVM/libvirt host** — a bare-metal machine running the KVM hypervisor and `libvirt` daemon. Libvirt's own state lives on each machine in `/etc/libvirt/` and is managed via `virsh`. The provisioning service never talks to libvirt directly — Ansible SSHes into the KVM machine and runs `virsh` commands there. There is no separate "KVM hosts file"; the Ansible inventory is the only external registry of KVM machines that the provisioning service maintains.
+- **KVM/libvirt host** — a bare-metal machine running the KVM hypervisor and `libvirt` daemon. Libvirt's own state lives on each machine in `/etc/libvirt/` and is managed via `virsh`. The provisioning service never talks to libvirt directly — Ansible SSHes into the KVM machine and runs `virsh` commands there.
 
 ---
 
 **1. SSH private key** (`~/.ssh/id_ed25519`)
 
-The provisioning service needs this to authenticate when Ansible opens SSH connections to KVM hosts. The key is always delivered via **bind mount or volume mount** — never via env var:
+The provisioning service authenticates Ansible SSH connections using keys stored per host in the `hosts` table. Two key storage modes are supported:
 
-- **Local / compose** — `docker run -v ~/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro` (wired in `make docker-run-dev` and `make deploy-provisioning`)
-- **Kubernetes** — the key is stored in a Kubernetes `Secret` (created via `--set-file provisioning.sshKey.sshPrivateKey=~/.ssh/id_ed25519` or a pre-existing Secret) and mounted as a volume at `/home/appuser/.ssh/id_ed25519` with `defaultMode: 0400`
+- **`path`** — `ssh_key_value` is a filesystem path (e.g. `/home/appuser/.ssh/id_ed25519`). The default Helm chart mounts the operator's key at this path via a Kubernetes Secret volume. Hosts sharing the same physical key all reference the same path.
+- **`embedded`** — `ssh_key_value` stores Fernet-encrypted PEM key material in the database. Requires `ssh_decryption_key` delivered via the `provisioning-secrets` config profile. At job execution time `AnsibleService.write_inventory()` decrypts the key and writes it to a temp file alongside the rendered inventory; both are cleaned up in the `finally` block.
 
-The `start-worker.sh` script that previously decoded `SSH_PRIVATE_KEY` from an env var and wrote the file has been removed. The `start-api.sh` entrypoint has been removed too; the Dockerfile uses a direct `CMD ["uvicorn", ...]`.
-
-The current design assumes a single SSH key for all KVM hosts. A real seller fleet will have hosts added at different times under different keys. The database-backed host registry in the TODO below should store a key reference per host rather than one global key.
+The Dockerfile uses a direct `CMD ["uvicorn", ...]` entrypoint.
 
 ---
 
@@ -459,54 +472,40 @@ The current design assumes a single SSH key for all KVM hosts. A real seller fle
 Golden image credentials (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`, `golden_gcs_bucket`, `golden_gcs_project`) are first-class keys in `settings.toml` and the config profile system.
 
 - **Locally** — set in `config/config-local.yml`
-- **In Kubernetes** — set in the `config:` block of Helm `values.yaml`; rendered into `config-production.yml` by the ConfigMap and mounted at `CONFIG_DIRECTORY`
-
-The `management-vars.yaml` file and `ManagementVarsService` class have been removed. Golden image config no longer has a separate YAML file or service class.
+- **In Kubernetes** — set in the `config:` block of Helm `values.yaml`; rendered into `config-production.yml` by the ConfigMap
 
 ---
 
-**3. Ansible hosts inventory** (`compute-provisioning-iac/ansible/inventory/hosts`)
+**3. Host registry**
 
-This is the central problem. The inventory lists all KVM hosts with their IPs, SSH users, and key paths. **There is no mechanism for updating it at runtime:**
+The `hosts` DB table is the single source of truth for KVM host inventory. The Ansible INI file is an *input format only* — it is never read at runtime except as input to `POST /hosts/import` or the `inventory_ini` startup seeder.
 
-- No mechanism to inject inventory content at runtime — the file is baked into the image from the IaC submodule at build time.
-- The Helm chart has no Secret, ConfigMap, or volume mount for the hosts file.
-- `INVENTORY_PATH` redirects where the file is read from but provides no way to get content there.
-- In compose the entire `compute-provisioning-iac` directory is bind-mounted (live-editable). In Kubernetes it is baked into the image.
-- `GET /inventory` on the worker admin API reads and returns it; no write path exists.
+**`hosts` table columns:** `name` (PK, Ansible alias), `kvm_host` (IP), `ssh_user`, `ssh_key_type` (`"path"` | `"embedded"`), `ssh_key_value`, `gpu_count`, `enabled`, `created_at`, `updated_at`.
 
-A provisioning worker belongs to a single seller whose inventory changes dynamically — machines come online, go offline for maintenance, get IP or SSH credential changes, or are added as the seller expands capacity. **Rebuilding and redeploying the container image to register a KVM host is not an acceptable operational model.**
+**Column naming:** `kvm_host` and `ssh_user` — decoupled from Ansible's own variable names (`ansible_host`, `ansible_user`). Ansible variables are only introduced when the INI is rendered for a playbook run.
 
----
-
-#### TODO — Inventory Management: Near-term and Long-term
-
-**Near-term (unblock operators without a full database redesign):**
-
-1. Add a `PROVISIONING_INVENTORY_INI` env var (or a ConfigMap key in `config-production.yml`) whose value is written to a temp file and passed to Ansible via `-i`. This gives Kubernetes operators a path to inject inventory without rebuilding the image.
-2. Wire a `--set-file provisioning.inventory.hostsFile=./hosts` option in the Helm chart, stored as a Kubernetes `Secret` (the file contains IPs and SSH usernames), mounted at the `inventory_path` location.
-3. Add a `PUT /api/v1/ansible/inventory` endpoint that accepts an INI-format body and atomically overwrites the on-disk inventory file. The existing `GET /api/v1/ansible/inventory` already serves the read side.
-
-**Long-term (database-backed host registry):**
-
-A `hosts` table in the provisioning database makes the inventory a first-class API entity. Columns: hostname (Ansible alias), `ansible_host` (IP), `ansible_user`, `ssh_key_id` (reference to stored key), `gpu_count`, `enabled`, `created_at`, `updated_at`.
-
-REST API for host lifecycle (fitting the typed API rework from TODO item 2):
+**REST API:**
 ```
-GET    /hosts                      # list registered KVM hosts
-POST   /hosts                      # register a host (accepts INI snippet or JSON)
-GET    /hosts/{host}               # host details
-PUT    /hosts/{host}               # update connection details
-DELETE /hosts/{host}               # deregister
-GET    /hosts/{host}/capacity      # run vm_action=check
-GET    /hosts/{host}/connectivity  # run ansible -m ping
+GET    /api/v1/hosts/               List enabled hosts (DB query)
+POST   /api/v1/hosts/               Register a host (JSON body)
+POST   /api/v1/hosts/import         Bulk-import from Ansible INI block (upsert, append-only)
+GET    /api/v1/hosts/{host}         Host details
+PUT    /api/v1/hosts/{host}         Update connection details
+POST   /api/v1/hosts/{host}/enable  Re-enable a disabled host
+POST   /api/v1/hosts/{host}/disable Soft-delete (sets enabled=False)
+GET    /api/v1/hosts/{host}/capacity       Submit capacity check job
+GET    /api/v1/hosts/{host}/connectivity   Run ansible -m ping
 ```
 
-`POST /hosts` should accept an Ansible INI snippet as an input format for operators migrating existing inventory files, but store as structured rows internally — not as raw INI.
+**Upsert / append-only semantics:** `POST /hosts/import` upserts rows — hosts present in the INI are inserted or updated; hosts absent from the INI are never disabled or removed. This preserves job history FK integrity (jobs reference `vm_host` by name string).
 
-**Rendering inventory for Ansible:** Ansible's `-i` flag accepts inline content for simple cases, but for the playbook's `hosts: kvm_hosts` group declaration the cleanest approach is to render a temporary INI file from database rows before each playbook run — the same pattern already used for the `vm_vars_{nonce}.yml` job vars file — and delete it in the `finally` block. This avoids any dependency on Ansible's Python API.
+**Disable vs. delete:** There is no hard delete endpoint. `POST /hosts/{host}/disable` sets `enabled=False`. Disabled hosts are excluded from `GET /hosts/` (default) and from inventory rendering.
 
-**SSH key storage across environments:** Kubernetes Secrets are the right store in-cluster, but the service also runs in compose and on bare metal. A practical cross-environment approach: store key material in the database encrypted at rest (using a `SECRET_KEY` env var for the encryption key), with a `key_type` flag on each host record (`embedded` vs. `path`). In Kubernetes, the key is loaded from a Secret at deploy time and written into the database as `embedded`. In compose/local mode, the host record stores a filesystem path reference instead. The service resolves whichever type is present at job execution time. This avoids coupling key storage to Kubernetes while working cleanly in it.
+**Inventory rendering for Ansible:** `AnsibleService.write_inventory(hosts)` renders a temp INI file from DB rows immediately before each playbook run, deleted in the `finally` block — the same contract as `build_vars_file`. The rendered group is always `[kvm_hosts]`.
+
+**Kubernetes inventory injection:** The `provisioning-secrets` config profile carries `inventory_ini`. On every pod startup, `main.py` calls `host_service.seed_from_ini()` when `inventory_ini` is non-empty, upserting hosts into the DB (idempotent).
+
+**`SystemService.ansible_readiness`** reads host count and SSH key diagnostics from the `hosts` DB table. `SshKeyInfo` has a `key_type` field: `path`-type hosts have their key file stat'd and SHA-256'd; `embedded`-type hosts report `exists=True` with no SHA-256 (key is encrypted at rest).
 
 ---
 
@@ -810,7 +809,7 @@ The following items represent known architectural deficiencies in `provisioning-
 
 #### Golden image configuration (`management-vars.yaml`)
 
-**Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. Previously a now-deleted `ManagementVarsService` class loaded this file. The current approach loads golden credentials through the standard dynaconf profile system (`settings.toml` + `config-production.yml`).
+**Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
 
 **What the provisioning service needs from `management-vars.yaml`:**
 - `golden_root_ssh_filename` → maps to `settings.golden_root_ssh_filename`
@@ -818,7 +817,7 @@ The following items represent known architectural deficiencies in `provisioning-
 - `golden_image_name` → maps to `settings.golden_image_name`
 - `golden_gcs_bucket` and `golden_gcs_project` → in `settings.toml`
 
-**Decision:** Change the Ansible role to write `management-vars.yaml` keys using the exact names that dynaconf expects (matching `settings.toml`). The operator then copies this file into the Kubernetes Secret that backs `config-production.yml`, or includes the relevant keys in the Helm `values.yaml` `config:` block. No separate loader class or file-format adapter is needed.
+**Decision:** The Ansible role should write `management-vars.yaml` keys using the exact names that dynaconf expects (matching `settings.toml`). The operator then includes the relevant keys in the Helm `values.yaml` `config:` block. No separate loader class or file-format adapter is needed.
 
 > **TODO(management-vars):** Update `golden-image-build.yml` in `compute-provisioning-iac` to write key names matching `settings.toml` (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`). Document the operator workflow for getting `management-vars.yaml` into the Kubernetes Secret in `compute-provisioning-iac/README.md`.
 
@@ -834,12 +833,12 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 | `GET /hosts/{host}/vms/{vm}/monitor` | Submits Ansible `monitor` job | Live stats / time-series cache, possibly gRPC (Item 2) |
 | `POST /hosts/{host}/vms/{vm}/expiry` | Submits `lease_end` Ansible job | Writes to `vm_leases` DB table (Item 1) |
 | `DELETE /hosts/{host}/vms/{vm}/expiry` | Submits `lease_remove` Ansible job | Deletes from `vm_leases` DB table (Item 1) |
-| `GET /hosts` | Parses inventory file | `hosts` DB table query (Item 1 long-term) |
-| `GET /hosts/{host}/capacity` | Submits Ansible `check` job | DB cache with staleness fallback (Item 1 long-term) |
+| `GET /hosts` | ~~Parses inventory file~~ **→ queries `hosts` DB table** | Done |
+| `GET /hosts/{host}/capacity` | Submits Ansible `check` job | DB cache with staleness fallback (future) |
 
-**`GET /hosts` (NYI-Item2-long-term):** once the database-backed host registry is implemented, this endpoint queries the `hosts` table. The `HostController.list_hosts` method will be updated; response shape stays compatible with `InventoryResponse`.
+**`GET /hosts/` — implemented:** queries the `hosts` DB table directly. `HostController.list_hosts` returns `HostListResponse(hosts: list[HostResponse])`. The old `InventoryResponse` shape (which included `inventory_path`) has been replaced.
 
-**`HostController.check_capacity` (NYI-Item2-long-term):** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
+**`HostController.check_capacity` — future:** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
 
 ### 1. Implement reliable lease expiry detection
 
@@ -853,6 +852,8 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
 
 ### 2. Full VM lifecycle visibility and operator intervention API
+
+**Status:** Host management (host registry CRUD, INI import, `SystemService` readiness, Helm chart wiring, smoke tests) **implemented**. VM state cache, lease table, and per-VM job history remain planned.
 
 **Problem:** The current API gives operators no way to understand or intervene in the full lifecycle of a VM without SSH access to the KVM host. The data center admin UX requirement is:
 
@@ -892,6 +893,7 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 - `AnsibleService`: `_build_vm_vars` (YAML serialisation of every field combination), `_extract_ssh_port` / `_extract_tenant_user` / `_extract_ansible_json` (output parsers against representative playbook output strings).
 - `AnsibleJobService`: `_build_params` (dict → `AnsibleJobParams` mapping), `_redact_logs` (regex redaction), `_calculate_retry_delay` (backoff arithmetic), `_should_retry_error` (error string matching), `_build_result_payload` (structured result assembly from `AnsibleRunResult`).
 - `models/vm_request_model.py`: `CreateVmRequest` Pydantic validation (FRP cross-field rule, field constraints), `ScheduleVmExpiryRequest` required field, `build_simple_params` action routing.
+- `HostService`: `seed_from_ini` (INI parsing, upsert idempotency), `register_host` with `embedded` key (Fernet encryption round-trip), `render_inventory_ini` (correct `[kvm_hosts]` group + variable output), `list_hosts(enabled_only=True)` filter.
 
 **Mocking convention:** Use `unittest.mock.MagicMock` / `AsyncMock` for injected collaborators. Do not patch module-level imports; instead, pass mocks in via the constructor (the DI design makes this natural).
 
@@ -981,13 +983,13 @@ Python packages in this monorepo need to consume each other (e.g. the agent impo
 
 ### Current Approach: `--find-links` flat wheel directory
 
-Pure Python internal packages are built as wheels and placed in `.dist/` at the monorepo root before Docker images are built. Docker images consume them via `uv sync --find-links .dist`.
+Pure Python internal packages are built as wheels and placed in `.dist/` at the monorepo root before Docker images are built. Docker images consume them via `uv sync --find-links /dist`.
 
 **Build sequence:**
 
 ```
 make dist          →  uv build for each pure-Python package  →  .dist/*.whl
-make build-core    →  docker build (COPY .dist/, uv sync --find-links .dist)
+make build-core    →  docker build (COPY .dist/ /dist/, uv sync --find-links /dist)
 ```
 
 `make dist` runs automatically as a prerequisite of `make build-runtime-images`.
@@ -1007,7 +1009,18 @@ simple-market-service/   ← monorepo root
 
 **Guard:** `make dist-provisioning` asserts the output wheel filename ends in `-none-any.whl`. If a C extension or Rust crate is ever added to a package, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
 
-**Why not relative path installs (`uv.sources`):** Relative path references encode monorepo layout assumptions and are considered fragile at this stage of the project. The goal is for each service to be independently installable from the wheel index.
+**Why `--find-links` is passed on the CLI, not in `pyproject.toml`:**
+
+`find-links` encodes a filesystem path. The path differs between environments:
+
+- **Docker:** `.dist/` is copied to `/dist/` inside the image; `uv sync --find-links /dist` is passed in the `RUN` instruction.
+- **Local dev:** `.dist/` lives at the monorepo root; `uv sync` or `uv run` must be invoked with `UV_FIND_LINKS=../.dist` (set in each sub-project's Makefile targets).
+
+Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
+
+**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service` or `provisioning-service`. These packages are resolved exclusively from wheels in `.dist/`.
+
+**Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker the relative path no longer exists, causing resolution failures. The wheel approach avoids this by making both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Upgrade path
 
