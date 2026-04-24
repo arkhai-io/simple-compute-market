@@ -111,6 +111,16 @@ class HostController:
             host = self._host_service.register_host(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            # Catch IntegrityError (duplicate name / PK conflict) and any other
+            # DB-level error so they surface as 409 rather than 500.
+            err = str(exc).lower()
+            if "unique" in err or "primary key" in err or "duplicate" in err or "integrity" in err:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Host '{body.name}' already exists. Use PUT /hosts/{body.name} to update or POST /hosts/{body.name}/enable to re-enable.",
+                )
+            raise
         return HostResponse.model_validate(host)
 
     # ------------------------------------------------------------------

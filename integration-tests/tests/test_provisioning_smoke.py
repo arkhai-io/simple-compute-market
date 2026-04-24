@@ -128,7 +128,12 @@ class TestProvisioningSmoke:
         log.info("Connectivity for %s: reachable=%s", first, data["reachable"])
 
     def test_host_crud_round_trip(self):
-        """Register → GET → disable → re-enable → cleanup a transient test host."""
+        """Register → GET → disable → re-enable → cleanup a transient test host.
+
+        Idempotent against a persistent DB: if smoke-test-host already exists
+        from a prior run (disable left the row in place), we update it rather
+        than attempting a duplicate INSERT.
+        """
         test_host = {
             "name": "smoke-test-host",
             "kvm_host": "192.0.2.1",   # TEST-NET — never routes
@@ -139,9 +144,20 @@ class TestProvisioningSmoke:
             "enabled": True,
         }
         with _client() as client:
-            # Register
+            # Upsert: try to register; if the host already exists (409) from a
+            # prior test run, update it instead so the test is idempotent.
             reg = client.post("/api/v1/hosts/", json=test_host)
-            assert reg.status_code == 201, f"Register failed: {reg.text}"
+            if reg.status_code == 409:
+                log.info("smoke-test-host already exists — updating instead of inserting")
+                reg = client.put("/api/v1/hosts/smoke-test-host", json={
+                    "kvm_host": test_host["kvm_host"],
+                    "ssh_user": test_host["ssh_user"],
+                })
+                assert reg.status_code == 200, f"Update failed: {reg.text}"
+                # Re-enable in case it was left disabled
+                client.post("/api/v1/hosts/smoke-test-host/enable")
+            else:
+                assert reg.status_code == 201, f"Register failed: {reg.text}"
             assert reg.json()["name"] == "smoke-test-host"
             assert "ssh_key_value" not in reg.json(), "ssh_key_value must never be returned"
 

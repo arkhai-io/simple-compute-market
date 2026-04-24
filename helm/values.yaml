@@ -134,7 +134,7 @@ provisioning:
     image:
       repository: ""
       name: arkhai
-      tag: provisioning-api
+      tag: provisioning
       pullPolicy: IfNotPresent
     replicaCount: 1
     port: 8081
@@ -147,17 +147,15 @@ provisioning:
     sshPrivateKey: ""
 
   config:
-    logLevel: "info"
-    databaseUrl: "sqlite:///provisioning.db"
-    redisQueueName: "provisioning_jobs"
-    ansibleTimeoutSeconds: 1800
-    defaultVmHost: "ww1"
-    zerotierNetwork: "88c5b1f339bbf5ab"
-    enableAuth: false
-    registryCacheTtlSeconds: 300
-    registryCacheMaxSize: 256
-    enableRateLimiting: false
-    rateLimitRequestsPerMinute: 30
+    log_level: "info"
+    database_url: "sqlite:////app/data/provisioning.db"
+    ansible_timeout_seconds: 1800
+    default_vm_host: "ww1"
+    enable_auth: false
+    registry_cache_ttl_seconds: 300
+    registry_cache_max_size: 256
+    enable_rate_limiting: false
+    rate_limit_requests_per_minute: 30
 
   redis:
     image: "redis:7-alpine"

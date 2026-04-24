@@ -66,7 +66,7 @@ inventory:
 # are rendered; omitted keys fall back to settings.toml defaults.
 # ---------------------------------------------------------------------------
 config:
-  database_url: "sqlite:///provisioning.db"
+  database_url: "sqlite:////app/data/provisioning.db"
 
   # Ansible paths — set to the IaC submodule location inside the container.
   # Override here for environments that mount the IaC at a different path.

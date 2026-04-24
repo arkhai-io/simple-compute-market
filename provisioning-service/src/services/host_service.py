@@ -69,12 +69,18 @@ class HostService:
                 q = q.filter(Host.enabled.is_(True))
             if search:
                 q = q.filter(Host.name.ilike(f"%{search}%"))
-            return q.order_by(Host.name).all()
+            hosts = q.order_by(Host.name).all()
+            for h in hosts:
+                db.expunge(h)
+            return hosts
 
     def get_host(self, name: str) -> Optional[Host]:
         """Return the host row for *name*, or ``None`` if not found."""
         with self._session_factory() as db:
-            return db.query(Host).filter(Host.name == name).one_or_none()
+            host = db.query(Host).filter(Host.name == name).one_or_none()
+            if host is not None:
+                db.expunge(host)
+            return host
 
     def _require_host(self, db: Session, name: str) -> Host:
         host = db.query(Host).filter(Host.name == name).one_or_none()

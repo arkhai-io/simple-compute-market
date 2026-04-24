@@ -35,6 +35,7 @@ COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
 COPY --from=builder --chown=appuser:appuser /app/.venv ./.venv
 COPY --from=builder --chown=appuser:appuser /home/appuser/.ansible /home/appuser/.ansible
 
+RUN mkdir -p /app/data
 COPY --chown=appuser:appuser provisioning-service/src ./src
 COPY --chown=appuser:appuser compute-provisioning-iac /opt/compute-provisioning-iac
 
