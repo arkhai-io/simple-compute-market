@@ -80,6 +80,7 @@ from core.agent.app.utils.event_ingestion import (
     queue_event,
     pop_event,
     has_queued_events,
+    is_event_queue_enabled,
     start_redis_subscriber,
     stop_redis_subscriber,
 )
@@ -683,7 +684,7 @@ async def _run_alert_conversation(alert_request: ResourceAlertRequest) -> str:
         source=ALERTS_USER_ID,
     )
 
-    if CONFIG.enable_event_queue:
+    if is_event_queue_enabled():
         queue_event(resource_event.model_dump(mode="json"))
         return "Alert processing queued."
 
@@ -955,7 +956,7 @@ async def _run_create_order_flow(request: Request) -> dict:
         },
     )
 
-    if CONFIG.enable_event_queue:
+    if is_event_queue_enabled():
         queue_event(order_create_event.model_dump(mode="json"))
         return {
             "status": "queued",
@@ -1006,7 +1007,7 @@ async def _run_close_order_flow(request: Request) -> dict:
         data={"order_id": order_id},
     )
 
-    if CONFIG.enable_event_queue:
+    if is_event_queue_enabled():
         queue_event(order_close_event.model_dump(mode="json"))
         return {
             "status": "queued",
@@ -2067,7 +2068,7 @@ async def _startup_tasks():
         await start_redis_subscriber()
         logger.info("[STARTUP] Redis subscriber started")
 
-    if CONFIG.enable_event_queue:
+    if is_event_queue_enabled():
         # Start queue processor in background
         task = asyncio.create_task(process_queued_events())
         logger.info("[STARTUP] Event queue processor started")

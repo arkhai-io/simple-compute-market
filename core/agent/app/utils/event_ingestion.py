@@ -39,6 +39,9 @@ class EventIngestion:
     def get_event_queue(self) -> deque[dict[str, Any]]:
         return self._event_queue
 
+    def is_event_queue_enabled(self) -> bool:
+        return self._enable_event_queue
+
     def _validate_event(self, payload: dict[str, Any]) -> tuple[bool, str | None]:
         mode = self._event_validation_mode
 
@@ -237,3 +240,16 @@ def pop_event() -> dict[str, Any] | None:
 
 def has_queued_events() -> bool:
     return _require_default_ingestion().has_queued_events()
+
+
+def is_event_queue_enabled() -> bool:
+    """True if the configured ingestion has the queue enabled.
+
+    Used by request handlers to pick between the queued fast-path and
+    the inline ADK-runner slow-path. Reads the *current* ingestion
+    singleton, so calling ``configure_default_ingestion(enable_event_queue=True)``
+    in a test flips this without having to rebuild ``CONFIG``.
+    """
+    if _DEFAULT_INGESTION is None:
+        return False
+    return _DEFAULT_INGESTION.is_event_queue_enabled()
