@@ -1,189 +1,209 @@
+"""Seller agent configuration.
+
+Load order for every value is:
+
+    shell env var  >  $XDG_CONFIG_HOME/arkhai/config.toml  >  default
+
+The TOML file is the same one `market` CLI uses; shared keys live under
+[wallet], [chain], [registry] and map to the buyer-facing names. Seller-
+only overrides live under [seller] and are all optional — a machine
+running only the seller agent never needs to set more than the values
+that differ from the defaults.
+
+Env vars still win so docker-compose / .env files / ops shells behave
+exactly as before. The TOML fill-in happens only when nothing is set.
+"""
+
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
 # Load .env file if it exists (before loading any config values)
 try:
     from dotenv import load_dotenv
-    # Load .env from the project root (parent of app directory)
     env_path = Path(__file__).resolve().parents[2] / ".env"
     if env_path.exists():
         load_dotenv(env_path)
 except ImportError:
-    # python-dotenv not available, skip
     pass
 
 
 logger = logging.getLogger(__name__)
 
 
-def _get_bool_env(var_name: str, default: bool = False) -> bool:
-    value = os.getenv(var_name)
-    if value is None:
-        return default
-    return value.lower() in ("true", "1", "yes")
+# ---------------------------------------------------------------------------
+# TOML fallback: read once at import, use for any env var that's unset.
+# ---------------------------------------------------------------------------
+
+try:
+    from market.config_loader import get_dotted, load_user_config  # type: ignore[import-not-found]
+    _USER_CFG: dict[str, Any] = load_user_config()
+except Exception:  # module missing or path issues — degrade to env-only
+    _USER_CFG = {}
+
+    def get_dotted(_doc: dict, _path: str) -> Any | None:  # type: ignore[no-redef]
+        return None
 
 
-def _get_int_env(var_name: str, default: int) -> int:
-    value = os.getenv(var_name)
-    if value is None:
-        return default
+def _resolve(
+    env_name: str,
+    toml_path: str,
+    default: Any = None,
+    coerce: Callable[[str], Any] | None = None,
+) -> Any:
+    """Env var → TOML → default. Empty strings count as unset."""
+    raw = os.environ.get(env_name)
+    if raw is not None and raw != "":
+        try:
+            return coerce(raw) if coerce else raw
+        except Exception:
+            return default
+    val = get_dotted(_USER_CFG, toml_path)
+    if val is not None and val != "":
+        return val
+    return default
+
+
+def _resolve_int(env_name: str, toml_path: str, default: int) -> int:
+    v = _resolve(env_name, toml_path, default, coerce=int)
     try:
-        return int(value)
-    except ValueError:
+        return int(v) if v is not None else default
+    except (TypeError, ValueError):
         return default
 
 
-# Default agent ID used when AGENT_ID env var is not set
+def _resolve_bool(env_name: str, toml_path: str, default: bool) -> bool:
+    v = _resolve(env_name, toml_path, default)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return bool(v)
+
+
+# ---------------------------------------------------------------------------
+
+
 DEFAULT_AGENT_ID = "root_agent"
 
 
 def get_agent_name() -> str:
+    """Display name for agent card / on-chain metadata.
+
+    Prefers env AGENT_NAME, then [seller] agent_name in TOML, then
+    falls back to agent_id. Can contain spaces / hyphens, unlike
+    agent_id which must be a valid Python identifier.
     """
-    Get agent display name from AGENT_NAME env var, falling back to AGENT_ID if not set.
-    
-    AGENT_NAME is the user-friendly display name used in:
-    - Agent card name (A2A protocol)
-    - On-chain metadata (agentName field)
-    
-    Unlike AGENT_ID, AGENT_NAME can contain spaces, hyphens, and other characters.
-    
-    Returns:
-        Agent name string (from AGENT_NAME env var, or AGENT_ID if not set, or DEFAULT_AGENT_ID)
-    """
-    agent_name = os.getenv("AGENT_NAME")
-    if agent_name:
-        return agent_name
-    
-    # Fallback to AGENT_ID if AGENT_NAME not set
+    name = _resolve("AGENT_NAME", "seller.agent_name", None)
+    if name:
+        return str(name)
     return get_agent_id()
 
 
 def get_agent_id(env_value: str | None = None) -> str:
+    """Validated agent ID. Must be a Python identifier.
+
+    Source order:
+        explicit `env_value` > AGENT_ID env > [seller].agent_id TOML > DEFAULT_AGENT_ID
     """
-    Get and validate agent ID from environment variable or provided value.
-    
-    Agent ID must be a valid Python identifier:
-    - Must start with a letter (a-z, A-Z) or underscore (_)
-    - Can only contain letters, digits, and underscores
-    - Cannot be empty
-    
-    This restriction exists because:
-    - Agent ID is used as BaseAgent.name parameter (may need to be valid identifier)
-    - Used in database queries and as identifiers throughout the codebase
-    - Prevents issues with special characters in URLs, filenames, SQL queries, etc.
-    
-    Args:
-        env_value: Optional value to use (if None, reads from AGENT_ID env var)
-    
-    Returns:
-        Validated agent ID string (defaults to DEFAULT_AGENT_ID if not set)
-    
-    Raises:
-        ValueError: If agent_id contains invalid characters or doesn't start with letter/underscore
-    """
-    agent_id = env_value if env_value is not None else os.getenv("AGENT_ID")
-    
+    if env_value is not None:
+        agent_id = env_value
+    else:
+        agent_id = _resolve("AGENT_ID", "seller.agent_id", None)
+
     if not agent_id:
         return DEFAULT_AGENT_ID
-    
-    # Validate: must be a valid Python identifier
-    if not agent_id.isidentifier():
+
+    if not str(agent_id).isidentifier():
         raise ValueError(
             f"AGENT_ID '{agent_id}' is not a valid identifier. "
             f"Must start with a letter or underscore, and only contain letters, digits, and underscores. "
             f"Examples: 'my_agent', 'agent_123', '_internal_agent'"
         )
-    
-    return agent_id
+    return str(agent_id)
 
 
 @dataclass(frozen=True)
 class Config:
-    agent_id: str  # Internal identifier (must be valid Python identifier)
-    agent_name: str  # Display name (can be any string, used in agent card and on-chain metadata)
+    agent_id: str
+    agent_name: str
     mcp_server_url: str
     base_url_override_raw: str
     base_url_override: str
     port: int
-    chain_name: str  # anvil, ethereum_sepolia, base_sepolia, ethereum_mainnet
+    chain_name: str
     chain_rpc_url: str
     agent_priv_key: str
     agent_wallet_address: str
     alkahest_address_config_path: str | None
     agent_db_path: str
-    event_validation_mode: str  # "warn" or "strict"
+    event_validation_mode: str
     enable_redis_ingest: bool
     redis_url: str
-    redis_channels: str  # comma-separated
+    redis_channels: str
     enable_event_queue: bool
-    log_file_path: str | None  # Path to log file, None for default
-    log_level: str  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_file_path: str | None
+    log_level: str
     token_registry_path: str
     ssh_public_key: str
     # Indexer/Registry settings
-    indexer_url: str  # INDEXER_URL - ERC-8004 Indexer API URL
-    identity_registry_address: str | None  # IDENTITY_REGISTRY_ADDRESS - contract address (on-chain)
-    onchain_agent_id: str | None  # ONCHAIN_AGENT_ID - Explicit on-chain agent ID (set by make register)
+    indexer_url: str
+    identity_registry_address: str | None
+    onchain_agent_id: str | None
     # Registry discovery settings
-    enable_registry_discovery: bool  # ENABLE_REGISTRY_DISCOVERY - enable registry-based agent discovery
-    registry_order_timeout: int  # REGISTRY_ORDER_TIMEOUT - timeout for registry API calls in seconds
-    max_discovery_agents: int  # MAX_DISCOVERY_AGENTS - maximum number of agents to contact
+    enable_registry_discovery: bool
+    registry_order_timeout: int
+    max_discovery_agents: int
     # Order retry settings
-    enable_order_retry: bool  # ENABLE_ORDER_RETRY - enable periodic retry of unmatched orders
-    order_retry_interval: int  # ORDER_RETRY_INTERVAL - interval between retry attempts in seconds
+    enable_order_retry: bool
+    order_retry_interval: int
     # Provisioning settings
-    provisioning_service_url: str  # PROVISIONING_SERVICE_URL
-    provisioning_timeout: int  # PROVISIONING_TIMEOUT
-    provisioning_poll_interval: int  # PROVISIONING_POLL_INTERVAL
-    frp_server_addr: str | None  # FRP_SERVER_ADDR - FRP server address for direct provisioning
-    frp_domain: str | None  # FRP_DOMAIN - FRP domain for direct provisioning
-    frp_dashboard_password: str | None  # FRP_DASHBOARD_PASSWORD - FRP dashboard password
-    resource_check_interval: int  # RESOURCE_CHECK_INTERVAL - seconds between availability polls
-    resource_lease_grace_seconds: int  # RESOURCE_LEASE_GRACE_SECONDS - force-free a leased
-    # resource this many seconds after lease_end_utc if the provisioning check
-    # keeps failing/returning "not available". Prevents a transient outage of
-    # the provisioning service from stranding leases forever.
-    negotiation_timeout_seconds: int  # NEGOTIATION_TIMEOUT_SECONDS - mark an
-    # active negotiation thread as terminal_state='abandoned' after this many
-    # seconds with no activity (updated_at not touched). Default 1800 = 30 min.
-    negotiation_watchdog_interval: int  # NEGOTIATION_WATCHDOG_INTERVAL - how
-    # often the watchdog scans the thread table. Default 60s.
-    default_vm_host: str  # DEFAULT_VM_HOST - KVM host name from ansible inventory
+    provisioning_service_url: str
+    provisioning_timeout: int
+    provisioning_poll_interval: int
+    frp_server_addr: str | None
+    frp_domain: str | None
+    frp_dashboard_password: str | None
+    resource_check_interval: int
+    resource_lease_grace_seconds: int
+    # Negotiation watchdog
+    negotiation_timeout_seconds: int
+    negotiation_watchdog_interval: int
+    default_vm_host: str
     # Negotiation policy settings
-    negotiation_policy_mode: str  # NEGOTIATION_POLICY_MODE - "bisection" | "rl"
-    arkhai_negotiator_seller_model_path: str  # ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH
-    arkhai_negotiator_buyer_model_path: str  # ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH
+    negotiation_policy_mode: str
+    arkhai_negotiator_seller_model_path: str
+    arkhai_negotiator_buyer_model_path: str
+
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
     Path(__file__).resolve().parents[1] / "data" / "token_registry_docker_compose.json"
 )
-
-
+_DEFAULT_SSH_PUBLIC_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
+)
 
 
 def load_config() -> Config:
-    # Get agent_id from environment variable with validation
     agent_id = get_agent_id()
-    
     if agent_id == DEFAULT_AGENT_ID and not os.getenv("AGENT_ID"):
-        # Only warn if using default (not if user explicitly set it to "root_agent")
         import warnings
         warnings.warn(
             f"AGENT_ID environment variable not set. Using default '{DEFAULT_AGENT_ID}'. "
             f"Please set AGENT_ID to a valid identifier (letters, digits, underscores only).",
-            UserWarning
+            UserWarning,
         )
-    
-    # Get agent_name (display name) - can be any string, falls back to agent_id
     agent_name = get_agent_name()
 
-    # BASE_URL_OVERRIDE handling with optional ZeroTier placeholder
-    base_url_override_raw = os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
-    zerotier_network = os.getenv("ZEROTIER_NETWORK")
+    # BASE_URL_OVERRIDE handling with optional ZeroTier placeholder.
+    base_url_override_raw = str(
+        _resolve("BASE_URL_OVERRIDE", "seller.base_url", "http://localhost:8000")
+    )
+    zerotier_network = _resolve("ZEROTIER_NETWORK", "seller.zerotier_network", None)
 
     try:
         base_url_override_resolved = resolve_base_url_best_effort(
@@ -198,7 +218,7 @@ def load_config() -> Config:
             )
     except BaseUrlResolutionError as exc:
         logger.warning(
-            "[CONFIG] BASE_URL_OVERRIDE is invalid (%s); using raw value from env",
+            "[CONFIG] BASE_URL_OVERRIDE is invalid (%s); using raw value",
             exc,
         )
         base_url_override_resolved = base_url_override_raw
@@ -206,65 +226,147 @@ def load_config() -> Config:
     return Config(
         agent_id=agent_id,
         agent_name=agent_name,
-        mcp_server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp"),
+        mcp_server_url=str(_resolve(
+            "MCP_SERVER_URL", "seller.mcp_server_url", "http://localhost:8080/mcp",
+        )),
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
-        port=_get_int_env("PORT", 8000),
-        chain_name=os.getenv("CHAIN_NAME", "ethereum_sepolia"),
-        chain_rpc_url=os.getenv("CHAIN_RPC_URL"),
-        agent_priv_key=os.getenv("AGENT_PRIV_KEY"),
-        agent_wallet_address=os.getenv("AGENT_WALLET_ADDRESS"),
-        alkahest_address_config_path=os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"),
-        agent_db_path=os.getenv("AGENT_DB_PATH", "/tmp/agent.db"),
-        event_validation_mode=os.getenv("EVENT_VALIDATION_MODE", "warn"),
-        enable_redis_ingest=_get_bool_env("ENABLE_REDIS_INGEST", False),
-        redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
-        redis_channels=os.getenv("REDIS_CHANNELS", "events:*"),
-        enable_event_queue=_get_bool_env("ENABLE_EVENT_QUEUE", False),
-        log_file_path=os.getenv("LOG_FILE_PATH"),  # None if not set
-        log_level=os.getenv("LOG_LEVEL", "INFO"),
-        token_registry_path=os.getenv(
-            "TOKEN_REGISTRY_PATH", str(DEFAULT_TOKEN_REGISTRY_PATH)
+        port=_resolve_int("PORT", "seller.port", 8000),
+
+        # Shared with buyer via [chain].
+        chain_name=str(_resolve("CHAIN_NAME", "chain.name", "ethereum_sepolia")),
+        chain_rpc_url=_resolve("CHAIN_RPC_URL", "chain.rpc_url", None),
+        alkahest_address_config_path=_resolve(
+            "ALKAHEST_ADDRESS_CONFIG_PATH", "chain.alkahest_address_config_path", None,
         ),
-        ssh_public_key=os.getenv(
-            "SSH_PUBLIC_KEY",
-            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example",
+
+        # Shared with buyer via [wallet].
+        agent_priv_key=_resolve("AGENT_PRIV_KEY", "wallet.private_key", None),
+        agent_wallet_address=_resolve("AGENT_WALLET_ADDRESS", "wallet.address", None),
+        ssh_public_key=str(_resolve(
+            "SSH_PUBLIC_KEY", "wallet.ssh_public_key", _DEFAULT_SSH_PUBLIC_KEY,
+        )),
+
+        # Shared with buyer via [registry].
+        indexer_url=str(_resolve(
+            "INDEXER_URL",
+            "registry.url",
+            os.getenv("REGISTRY_URL", "http://localhost:8080"),
+        )),
+        identity_registry_address=_resolve(
+            "IDENTITY_REGISTRY_ADDRESS", "registry.identity_registry_address", None,
         ),
-        # Indexer/Registry settings
-        indexer_url=os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080")),  # Support both for backward compatibility
-        identity_registry_address=os.getenv("IDENTITY_REGISTRY_ADDRESS"),
-        onchain_agent_id=os.getenv("ONCHAIN_AGENT_ID"),  # Explicit on-chain agent ID (optional)
-        # Registry discovery settings
-        enable_registry_discovery=_get_bool_env("ENABLE_REGISTRY_DISCOVERY", True),
-        registry_order_timeout=_get_int_env("REGISTRY_ORDER_TIMEOUT", 30),
-        max_discovery_agents=_get_int_env("MAX_DISCOVERY_AGENTS", 10),
-        # Order retry settings
-        enable_order_retry=_get_bool_env("ENABLE_ORDER_RETRY", True),
-        order_retry_interval=_get_int_env("ORDER_RETRY_INTERVAL", 300),  # Default: 5 minutes
-        # Provisioning settings
-        provisioning_service_url=os.getenv("PROVISIONING_SERVICE_URL", "http://localhost:8085"),
-        provisioning_timeout=_get_int_env("PROVISIONING_TIMEOUT", 3600),
-        provisioning_poll_interval=_get_int_env("PROVISIONING_POLL_INTERVAL", 15),
-        frp_server_addr=os.getenv("FRP_SERVER_ADDR") or os.getenv("frp_server_addr"),
-        frp_domain=os.getenv("FRP_DOMAIN") or os.getenv("frp_domain"),
-        frp_dashboard_password=os.getenv("FRP_DASHBOARD_PASSWORD") or os.getenv("frp_dashboard_password"),
-        resource_check_interval=_get_int_env("RESOURCE_CHECK_INTERVAL", 300),
-        resource_lease_grace_seconds=_get_int_env("RESOURCE_LEASE_GRACE_SECONDS", 1800),
-        negotiation_timeout_seconds=_get_int_env("NEGOTIATION_TIMEOUT_SECONDS", 1800),
-        negotiation_watchdog_interval=_get_int_env("NEGOTIATION_WATCHDOG_INTERVAL", 60),
-        default_vm_host=os.getenv("DEFAULT_VM_HOST", "ww1"),
-        # Negotiation policy settings
-        negotiation_policy_mode=os.getenv("NEGOTIATION_POLICY_MODE", "bisection").lower(),
-        arkhai_negotiator_seller_model_path=os.getenv(
+
+        # Seller-only bookkeeping.
+        agent_db_path=str(_resolve("AGENT_DB_PATH", "seller.db_path", "/tmp/agent.db")),
+        event_validation_mode=str(_resolve(
+            "EVENT_VALIDATION_MODE", "seller.event_validation_mode", "warn",
+        )),
+        enable_event_queue=_resolve_bool(
+            "ENABLE_EVENT_QUEUE", "seller.enable_event_queue", False,
+        ),
+        log_file_path=_resolve("LOG_FILE_PATH", "seller.log_file_path", None),
+        log_level=str(_resolve("LOG_LEVEL", "seller.log_level", "INFO")),
+        token_registry_path=str(_resolve(
+            "TOKEN_REGISTRY_PATH",
+            "seller.token_registry_path",
+            str(DEFAULT_TOKEN_REGISTRY_PATH),
+        )),
+
+        onchain_agent_id=_resolve("ONCHAIN_AGENT_ID", "seller.onchain_agent_id", None),
+
+        # Registry discovery settings (seller-side).
+        enable_registry_discovery=_resolve_bool(
+            "ENABLE_REGISTRY_DISCOVERY", "seller.enable_registry_discovery", True,
+        ),
+        registry_order_timeout=_resolve_int(
+            "REGISTRY_ORDER_TIMEOUT", "seller.registry_order_timeout", 30,
+        ),
+        max_discovery_agents=_resolve_int(
+            "MAX_DISCOVERY_AGENTS", "seller.max_discovery_agents", 10,
+        ),
+        enable_order_retry=_resolve_bool(
+            "ENABLE_ORDER_RETRY", "seller.enable_order_retry", True,
+        ),
+        order_retry_interval=_resolve_int(
+            "ORDER_RETRY_INTERVAL", "seller.order_retry_interval", 300,
+        ),
+
+        # Provisioning — sub-table [seller.provisioning].
+        provisioning_service_url=str(_resolve(
+            "PROVISIONING_SERVICE_URL",
+            "seller.provisioning.service_url",
+            "http://localhost:8085",
+        )),
+        provisioning_timeout=_resolve_int(
+            "PROVISIONING_TIMEOUT", "seller.provisioning.timeout", 3600,
+        ),
+        provisioning_poll_interval=_resolve_int(
+            "PROVISIONING_POLL_INTERVAL", "seller.provisioning.poll_interval", 15,
+        ),
+        frp_server_addr=(
+            _resolve("FRP_SERVER_ADDR", "seller.provisioning.frp_server_addr", None)
+            or os.getenv("frp_server_addr")
+        ),
+        frp_domain=(
+            _resolve("FRP_DOMAIN", "seller.provisioning.frp_domain", None)
+            or os.getenv("frp_domain")
+        ),
+        frp_dashboard_password=(
+            _resolve(
+                "FRP_DASHBOARD_PASSWORD",
+                "seller.provisioning.frp_dashboard_password",
+                None,
+            )
+            or os.getenv("frp_dashboard_password")
+        ),
+
+        # Resource poller.
+        resource_check_interval=_resolve_int(
+            "RESOURCE_CHECK_INTERVAL", "seller.resource_check_interval", 300,
+        ),
+        resource_lease_grace_seconds=_resolve_int(
+            "RESOURCE_LEASE_GRACE_SECONDS", "seller.resource_lease_grace_seconds", 1800,
+        ),
+
+        # Negotiation watchdog.
+        negotiation_timeout_seconds=_resolve_int(
+            "NEGOTIATION_TIMEOUT_SECONDS", "seller.negotiation_timeout_seconds", 1800,
+        ),
+        negotiation_watchdog_interval=_resolve_int(
+            "NEGOTIATION_WATCHDOG_INTERVAL", "seller.negotiation_watchdog_interval", 60,
+        ),
+        default_vm_host=str(_resolve(
+            "DEFAULT_VM_HOST", "seller.default_vm_host", "ww1",
+        )),
+
+        # Redis — sub-table [seller.redis].
+        enable_redis_ingest=_resolve_bool(
+            "ENABLE_REDIS_INGEST", "seller.redis.enable", False,
+        ),
+        redis_url=str(_resolve(
+            "REDIS_URL", "seller.redis.url", "redis://localhost:6379",
+        )),
+        redis_channels=str(_resolve(
+            "REDIS_CHANNELS", "seller.redis.channels", "events:*",
+        )),
+
+        # Negotiation policy.
+        negotiation_policy_mode=str(_resolve(
+            "NEGOTIATION_POLICY_MODE", "seller.negotiation.policy_mode", "bisection",
+        )).lower(),
+        arkhai_negotiator_seller_model_path=str(_resolve(
             "ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH",
+            "seller.negotiation.seller_model_path",
             "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt",
-        ),
-        arkhai_negotiator_buyer_model_path=os.getenv(
+        )),
+        arkhai_negotiator_buyer_model_path=str(_resolve(
             "ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH",
+            "seller.negotiation.buyer_model_path",
             "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
-        ),
+        )),
     )
 
 
-# Module-level singleton for convenience
+# Module-level singleton for convenience.
 CONFIG = load_config()

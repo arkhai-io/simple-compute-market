@@ -424,6 +424,10 @@ def config_init_user(
 # back to the matching env var, then to built-in defaults.
 # Precedence: CLI flag > env var > this file > default.
 
+# ---------------------------------------------------------------------------
+# Shared (buyer + seller read these)
+# ---------------------------------------------------------------------------
+
 [wallet]
 # address = "0x0000000000000000000000000000000000000000"
 # private_key = "0x..."                        # prefer env AGENT_PRIV_KEY
@@ -436,12 +440,53 @@ def config_init_user(
 
 [registry]
 # url = "http://localhost:8080"
+# identity_registry_address = "0x..."          # ERC-8004 registry contract
 
-# Seller-only overrides (optional; ignored on buyer-only installs).
+# ---------------------------------------------------------------------------
+# Seller-only (ignored if you're only running a buyer CLI)
+# Every value below is optional; defaults apply when absent.
+# ---------------------------------------------------------------------------
+
 # [seller]
+# agent_id = "alice"                           # must be a valid Python identifier
+# agent_name = "Alice"                         # display name (any string)
 # port = 8000
-# agent_id = "alice"
-# provisioning_service_url = "http://localhost:8085"
+# base_url = "http://alice:8000"               # what peers dial; auto-resolved with ZeroTier if set
+# db_path = "/var/lib/arkhai/agent.db"
+# log_level = "INFO"                           # DEBUG | INFO | WARNING | ERROR
+# log_file_path = "/var/log/arkhai/agent.log"
+# token_registry_path = "/etc/arkhai/tokens.json"
+# onchain_agent_id = ""                        # set by `market install --seller` + `market register`
+# default_vm_host = "ww1"                      # KVM host name from ansible inventory
+# zerotier_network = ""
+# enable_registry_discovery = true
+# max_discovery_agents = 10
+# enable_order_retry = true
+# order_retry_interval = 300
+# resource_check_interval = 300
+# resource_lease_grace_seconds = 1800
+# negotiation_timeout_seconds = 1800           # mark stale threads terminal after this
+# negotiation_watchdog_interval = 60
+# event_validation_mode = "warn"
+# enable_event_queue = false
+
+# [seller.provisioning]
+# service_url = "http://localhost:8085"
+# timeout = 3600
+# poll_interval = 15
+# frp_server_addr = ""
+# frp_domain = ""
+# frp_dashboard_password = ""
+
+# [seller.redis]
+# enable = false
+# url = "redis://localhost:6379"
+# channels = "events:*"
+
+# [seller.negotiation]
+# policy_mode = "bisection"                    # bisection | rl
+# seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
+# buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 """
     user_config_dir().mkdir(parents=True, exist_ok=True)
     path.write_text(template)
