@@ -204,3 +204,4 @@ helm/charts/*.tgz
 helm/.port-forward.pids
 provisioning-service/settings.local.toml
 provisioning-service/src/config/config-local.yml
+.snapshot/*

@@ -126,3 +126,11 @@ stop:
 stop-compose:
 	docker compose down
 	docker compose rm
+
+code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+	@mkdir -p .snapshot
+	@OUTFILE="$(CURDIR)/.snapshot/code-$(GIT_SUFFIX).zip"; \
+	echo "Creating $$OUTFILE ..."; \
+	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
+	echo "Done: $$OUTFILE ($$SIZE)"

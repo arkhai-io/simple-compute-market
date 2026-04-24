@@ -56,18 +56,17 @@ build-image: ## Build a single unified image
 
 deploy: deploy-provisioning ## Deploy the provisioning service container
 
-deploy-provisioning: ## Run the provisioning container (production-like)
+deploy-provisioning: ## Run the provisioning container (mock provisioning)
 	docker run -d --rm --name provisioning \
-	--env-file $(ENV_FILE) \
+	-e ACTIVE_PROFILES=docker,mock
 	--network market -p 8081:8081 \
 	-v "$(SSH_KEY):/home/appuser/.ssh/id_ed25519:ro" \
 	$(IMAGE_NAME):$(IMAGE_TAG)
 
 docker-run-dev: ## Run the service with host IaC + SSH key mounted (local dev)
 	docker run --rm \
-	--env-file $(ENV_FILE) \
-	-p 8081:8081 \
-	--add-host=host.docker.internal:host-gateway \
+	-e ACTIVE_PROFILES=docker,mock
+	--network market -p 8081:8081 \
 	-v "$(IAC_DIR):/opt/compute-provisioning-iac" \
 	-v "$(SSH_KEY):/home/appuser/.ssh/id_ed25519:ro" \
 	$(IMAGE_NAME):$(IMAGE_TAG)

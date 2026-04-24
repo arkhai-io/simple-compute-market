@@ -15,14 +15,8 @@ Client ──▶ FastAPI (port 8081) ──▶ Redis queue ──▶ Worker ─�
 # Install dependencies
 make install
 
-# Copy and configure environment
-cp .env.sample .env.local
-
 # Start API server
 make serve
-
-# Start background worker (separate terminal)
-make worker
 ```
 
 ## Docker
@@ -38,10 +32,10 @@ git submodule update --init compute-provisioning-iac
 ### Build
 
 ```bash
-make docker-build
+make build
 ```
 
-This runs from the repo root so both `async-provisioning-service/` and `compute-provisioning-iac/` are in the build context.
+This runs from the repo root so both `provisioning-service/` and `compute-provisioning-iac/` are in the build context.
 
 ### Run
 
