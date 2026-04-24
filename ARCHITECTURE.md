@@ -173,15 +173,6 @@ Policies are named callables registered with `@policy_callable("name")` and stor
 **Local state — SQLite:**
 The agent maintains a SQLite database (`AGENT_DB_PATH`) containing policy configuration, order history, negotiation threads, and resource portfolio. This is a known area of complexity — see Known Issues below.
 
-#### Provisioning modes
-
-The provisioning service supports two modes, selected by `ACTIVE_PROFILES` on the provisioning service container:
-
-- **Default (no mock profile):** Uses `AnsibleService` — real `ansible-playbook` subprocess invocations against KVM hosts.
-- **`ACTIVE_PROFILES=mock`:** Uses `MockAnsibleService` — deterministic fake results with no subprocess calls. Intended for docker-compose e2e tests where no real KVM hardware is available.
-
-The agent always calls the provisioning service HTTP API regardless of which mode is active. Mock behaviour is a provisioning service deployment concern, not an agent concern.
-
 > **TODO(mock-provisioning-fidelity):** `MockAnsibleService` currently returns static fake results. For full lifecycle testing (Item 3 — VM state cache, expiry watchdog), it should model state transitions (`creating → running → lease-expiring → destroyed`) so scenarios can be exercised via REST without hardware. See Architecture.md — Item 3.
 
 > **TODO:** Document the full negotiation message flow: how an offer is initiated, countered, and accepted between two agent instances.
@@ -210,6 +201,36 @@ Agent ──HTTP──▶ Provisioning API :8081
 ```
 
 Long-running Ansible playbooks (up to `ANSIBLE_TIMEOUT_SECONDS=1800`) are launched as non-blocking subprocesses via `asyncio.create_task`. The event loop stays responsive to new requests while playbooks run. Up to `max_concurrent_jobs` (default 5) jobs run in parallel, controlled by an `asyncio.Semaphore`. The in-process `asyncio.Queue` replaces the former Redis queue; the service has no external queue dependency.
+
+#### Service layer architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Controllers (FastAPI layer)                                │
+│  VmController, HostController, JobController (read-only)    │
+│  Accepts typed per-operation requests                       │
+│  Returns job_id; OpenAPI docs describe polling pattern      │
+└─────────────────────────┬───────────────────────────────────┘
+                          │ AnsibleJobParams (internal DTO)
+┌─────────────────────────▼───────────────────────────────────┐
+│  AnsibleJobService                                          │
+│  - submit(AnsibleJobParams, agent_id, job_queue) → job_id   │
+│  - list/get/cancel/credentials/logs (read ops)              │
+│  - _process_job(job_id) — handler passed to AsyncJobQueue   │
+└──────────────┬──────────────────┬──────────────────────────┘
+               │ handler dispatch │ direct call
+┌──────────────▼──────┐  ┌───────▼──────────────────────────┐
+│  AsyncJobQueue      │  │  AnsibleService                  │
+│  (queue mgmt only)  │  │  - start_playbook()              │
+│  - enqueue(job_id)  │  │  - wait_for_playbook()           │
+│  - start(handler)   │  │  - build_vars_file()  ← absorbed │
+│  - is_alive()       │  │  - parse_playbook_result() ←     │
+│  No Ansible/DB      │  │  - _inject_golden_image_creds()  │
+│  knowledge          │  │  - parse_inventory()             │
+└─────────────────────┘  │  - lookup_host_ip()              │
+                         │  - check_connectivity()          │
+                         └──────────────────────────────────┘
+```
 
 ---
 
@@ -353,17 +374,9 @@ Previously a separate worker admin API on port 8082; now folded into the main AP
 **Key source layout:**
 ```
 provisioning-service/src/
-├── controllers/
-│   ├── jobs_controller.py      # POST/GET /api/v1/jobs — submit, list, status, credentials, logs, cancel
-│   ├── ansible_controller.py   # GET /api/v1/ansible/inventory, /inventory/{host}/connectivity
-│   └── health_controller.py    # GET /health — DB probe + job loop liveness
-├── services/
-│   ├── ansible_service.py      # Sole subprocess boundary — all ansible/ansible-playbook invocations
-│   ├── provisioning_service.py # VM-ops playbook orchestration: vars file build + output parsing
-│   └── job_service.py          # AnsibleJobService — full job lifecycle + background processing loop
-├── models/
-│   ├── jobs.py                 # ProvisionRequest, ProvisionStatusResponse, CredentialListResponse, etc.
-│   └── ansible.py              # InventoryHost, InventoryResponse, ConnectivityResult
+├── controllers/                # Handles Http Routing concerns.
+├── services/                   # For internal business logic
+├── models/                     # Request and Response objects for controllers
 ├── middleware/
 │   ├── auth.py                 # AgentAuthMiddleware (ERC-8004 X-Agent-ID enforcement)
 │   └── rate_limit.py           # AgentRateLimitMiddleware (sliding window per agent)
@@ -397,6 +410,7 @@ The provisioning service uses a profile-based configuration system. Resolution o
 - `local` — developer overrides; copy `config/config-local.yml.example` to `config/config-local.yml` (gitignored) and set `ACTIVE_PROFILES=local` in `.env`
 - `docker` — baked into the image via `ENV ACTIVE_PROFILES="docker"`; supplies IaC paths and `ansible_cfg` for standalone container runs
 - `production` — used in Kubernetes; rendered from Helm `values.yaml` into a ConfigMap mounted at `CONFIG_DIRECTORY`
+- `mock` - used to initialize a MockAnsibleService which implements deterministic fake results with no subprocess calls. Intended for docker-compose and e2e tests where no real KVM hardware is available.
 
 **Why `ENV` vars are not used for application config:**
 
@@ -407,7 +421,6 @@ The one exception is `ANSIBLE_CONFIG`: this is consumed by the `ansible-playbook
 **Helm ConfigMap approach:**
 
 The Helm chart renders the entire `config:` block from `values.yaml` directly into `config-production.yml` using `{{ .Values.config | toYaml }}`. The Deployment sets only `ACTIVE_PROFILES=production` and `CONFIG_DIRECTORY=/app/config`. Adding a new config key requires only a `values.yaml` change — no Deployment template changes needed.
-
 
 ---
 
@@ -791,72 +804,7 @@ make build
 
 ## Provisioning Service — Planned Rework
 
-The following items represent known architectural deficiencies in `async-provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.
-
-### 1. Replace the generic `ProvisionRequest` design with a typed REST API per operation
-
-**Status: In progress — service layer and models complete; VM/host controllers pending.**
-
-#### Service layer architecture (decided and implemented)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Controllers (FastAPI layer)                                │
-│  VmController, HostController, JobController (read-only)    │
-│  Accepts typed per-operation requests                       │
-│  Returns job_id; OpenAPI docs describe polling pattern      │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ AnsibleJobParams (internal DTO)
-┌─────────────────────────▼───────────────────────────────────┐
-│  AnsibleJobService                                          │
-│  - submit(AnsibleJobParams, agent_id, job_queue) → job_id   │
-│  - list/get/cancel/credentials/logs (read ops)              │
-│  - _process_job(job_id) — handler passed to AsyncJobQueue   │
-└──────────────┬──────────────────┬──────────────────────────┘
-               │ handler dispatch │ direct call
-┌──────────────▼──────┐  ┌───────▼──────────────────────────┐
-│  AsyncJobQueue      │  │  AnsibleService                  │
-│  (queue mgmt only)  │  │  - start_playbook()              │
-│  - enqueue(job_id)  │  │  - wait_for_playbook()           │
-│  - start(handler)   │  │  - build_vars_file()  ← absorbed │
-│  - is_alive()       │  │  - parse_playbook_result() ←     │
-│  No Ansible/DB      │  │  - _inject_golden_image_creds()  │
-│  knowledge          │  │  - parse_inventory()             │
-└─────────────────────┘  │  - lookup_host_ip()              │
-                         │  - check_connectivity()          │
-                         └──────────────────────────────────┘
-```
-
-#### Nomenclature decisions (implemented)
-
-| Old name | New name | File |
-|---|---|---|
-| `ProvisionRequest` | `AnsibleJobParams` (internal DTO) | `models/jobs_model.py` |
-| `ProvisioningParams` | Folded into `AnsibleJobParams` | — |
-| `ProvisionResponse` | `JobSubmitResponse` | `models/jobs_model.py` |
-| `ProvisionStatusResponse` | `JobStatusResponse` | `models/jobs_model.py` |
-| `ProvisionLogsResponse` | `JobLogsResponse` | `models/jobs_model.py` |
-| `ProvisioningResult` | `AnsibleRunResult` | `models/jobs_model.py` |
-| `ProvisioningService` | *(dissolved)* | methods absorbed into `AnsibleService` |
-| `vm_lease_end` field | `vm_expiry_at` | `models/vm_request_model.py` |
-
-Model files follow the `_model` suffix convention: `jobs_model.py`, `vm_request_model.py`, `ansible.py`.
-
-#### Typed request models (implemented, in `models/vm_request_model.py`)
-
-`CreateVmRequest`, `StartVmRequest`, `ShutdownVmRequest`, `RebootVmRequest`, `DestroyVmRequest`, `UndefineVmRequest`, `MonitorVmRequest`, `ResetPasswordRequest`, `ScheduleVmExpiryRequest`, `CancelVmExpiryRequest`, `ListVmsRequest`, `CheckHostCapacityRequest`.
-
-Each exposes `to_ansible_job_params() -> AnsibleJobParams`.
-
-#### `AsyncJobQueue` (implemented, in `services/async_job_queue.py`)
-
-Extracted from `AnsibleJobService`. Owns the `asyncio.Queue`, `asyncio.Semaphore`, and running-task bookkeeping. `AnsibleJobService._process_job` is passed as the `handler` coroutine to `AsyncJobQueue.start()`. `AsyncJobQueue` is instantiated in the FastAPI lifespan (not via DI) to avoid the async Resource provider `asyncio.get_event_loop()` issue.
-
-Optional `on_job_started: Callable[[str], None]` test-seam on `AsyncJobQueue.__init__` — allows integration tests to signal when a job enters dispatch without any `asyncio.sleep` polling.
-
-#### Legacy endpoint removal
-
-`POST /api/v1/jobs` has been removed. The agent client (`service/src/service/clients/provisioning.py`) has been updated to call typed endpoints. `schedule_vm_shutdown_async` is deprecated in favour of `schedule_vm_expiry_async`; a shim remains with a deprecation warning.
+The following items represent known architectural deficiencies in `provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.
 
 > **TODO(client-compat): The provisioning-service package currently exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`). Until that refactor is done, `service/clients/provisioning.py` imports from `client.provisioning_client` rather than `provisioning_service.client.provisioning_client`.
 
@@ -874,51 +822,6 @@ Optional `on_job_started: Callable[[str], None]` test-seam on `AsyncJobQueue.__i
 
 > **TODO(management-vars):** Update `golden-image-build.yml` in `compute-provisioning-iac` to write key names matching `settings.toml` (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`). Document the operator workflow for getting `management-vars.yaml` into the Kubernetes Secret in `compute-provisioning-iac/README.md`.
 
-#### Implemented API surface
-
-VMs are scoped to a KVM host in the URL. `{host}` is the Ansible inventory alias. `{vm}` is the libvirt domain name. `vm_host` does not appear in request bodies — it comes from the path.
-
-```
-# VM operations (VmController — prefix /api/v1/hosts/{host}/vms)
-POST   /api/v1/hosts/{host}/vms                  Create a VM
-GET    /api/v1/hosts/{host}/vms                  List VMs (NYI-Item3: currently async job)
-POST   /api/v1/hosts/{host}/vms/{vm}/start
-POST   /api/v1/hosts/{host}/vms/{vm}/shutdown
-POST   /api/v1/hosts/{host}/vms/{vm}/reboot
-POST   /api/v1/hosts/{host}/vms/{vm}/destroy
-POST   /api/v1/hosts/{host}/vms/{vm}/undefine
-GET    /api/v1/hosts/{host}/vms/{vm}/monitor     Stats snapshot (NYI-Item3: currently async job)
-POST   /api/v1/hosts/{host}/vms/{vm}/reset-password
-POST   /api/v1/hosts/{host}/vms/{vm}/expiry      Schedule expiry (NYI-Item2: currently at-daemon)
-DELETE /api/v1/hosts/{host}/vms/{vm}/expiry      Cancel expiry   (NYI-Item2: currently at-daemon)
-
-# Host operations (HostController — prefix /api/v1/hosts)
-GET    /api/v1/hosts                             List inventory hosts (synchronous, inventory file)
-GET    /api/v1/hosts/{host}/capacity             Host resource check (async job)
-GET    /api/v1/hosts/{host}/connectivity         Ansible -m ping (synchronous)
-
-# System diagnostics (SystemController)
-GET    /health                                   Liveness probe (Kubernetes convention, no prefix)
-GET    /api/v1/system/health                     Same handler, versioned alias
-GET    /api/v1/system/version                    Service version + active dynaconf profiles
-GET    /api/v1/system/ansible/readiness          Ansible binary, inventory, playbook, SSH key check
-```
-
-**Controller file structure:**
-
-```
-controllers/
-  system_controller.py   ← health, version, ansible/readiness
-                            Replaces health_controller.py and ansible_controller.py
-  jobs_controller.py     ← GET/POST-cancel /jobs/* (read + cancel only)
-  hosts_controller.py    ← /hosts, /hosts/{host}/capacity, /hosts/{host}/connectivity
-  vms_controller.py      ← /hosts/{host}/vms/* (all VM operations)
-```
-
-**Router composition (Alternative 2 — independent registration in `main.py`):**
-
-`VmController` and `HostController` are registered independently at `/api/v1`. Their prefixes (`/hosts/{host}/vms` and `/hosts`) assemble into the full `hosts/{host}/...` hierarchy explicitly in `main.py`. This keeps each controller file self-contained with no cross-file coupling.
-
 **`VmActionRequest` — shared optional body:**
 
 Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
@@ -927,18 +830,18 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 | Endpoint | Current | Planned |
 |---|---|---|
-| `GET /hosts/{host}/vms` | Submits Ansible `list` job | Synchronous `vms` DB cache (Item 3) |
-| `GET /hosts/{host}/vms/{vm}/monitor` | Submits Ansible `monitor` job | Live stats / time-series cache, possibly gRPC (Item 3) |
-| `POST /hosts/{host}/vms/{vm}/expiry` | Submits `lease_end` Ansible job | Writes to `vm_leases` DB table (Item 2) |
-| `DELETE /hosts/{host}/vms/{vm}/expiry` | Submits `lease_remove` Ansible job | Deletes from `vm_leases` DB table (Item 2) |
-| `GET /hosts` | Parses inventory file | `hosts` DB table query (Item 2 long-term) |
-| `GET /hosts/{host}/capacity` | Submits Ansible `check` job | DB cache with staleness fallback (Item 2 long-term) |
+| `GET /hosts/{host}/vms` | Submits Ansible `list` job | Synchronous `vms` DB cache (Item 2) |
+| `GET /hosts/{host}/vms/{vm}/monitor` | Submits Ansible `monitor` job | Live stats / time-series cache, possibly gRPC (Item 2) |
+| `POST /hosts/{host}/vms/{vm}/expiry` | Submits `lease_end` Ansible job | Writes to `vm_leases` DB table (Item 1) |
+| `DELETE /hosts/{host}/vms/{vm}/expiry` | Submits `lease_remove` Ansible job | Deletes from `vm_leases` DB table (Item 1) |
+| `GET /hosts` | Parses inventory file | `hosts` DB table query (Item 1 long-term) |
+| `GET /hosts/{host}/capacity` | Submits Ansible `check` job | DB cache with staleness fallback (Item 1 long-term) |
 
 **`GET /hosts` (NYI-Item2-long-term):** once the database-backed host registry is implemented, this endpoint queries the `hosts` table. The `HostController.list_hosts` method will be updated; response shape stays compatible with `InventoryResponse`.
 
 **`HostController.check_capacity` (NYI-Item2-long-term):** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
 
-### 2. Implement reliable lease expiry detection
+### 1. Implement reliable lease expiry detection
 
 **Problem:** The current lease mechanism schedules a Unix `at` daemon job on the KVM host at the moment `lease_end` is called. After that, the provisioning service has no further awareness of whether the lease timer fired, whether the cleanup script ran, or whether the VM was actually destroyed. There is no polling, no callback, no record in the provisioning database. If the `at` daemon is not running, if the KVM host reboots before the lease time, or if the agent never calls `lease_end` at all (e.g., due to a crash), the VM runs indefinitely.
 
@@ -949,7 +852,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
 
-### 3. Full VM lifecycle visibility and operator intervention API
+### 2. Full VM lifecycle visibility and operator intervention API
 
 **Problem:** The current API gives operators no way to understand or intervene in the full lifecycle of a VM without SSH access to the KVM host. The data center admin UX requirement is:
 
@@ -1059,18 +962,13 @@ Each level has a defined jurisdiction. Duplicating coverage across levels create
 ### Test File Layout
 
 ```
-provisioning-service/src/tests/
+{service}/src/tests/
 ├── unit/
 │   ├── conftest.py              # mock_settings fixture
-│   ├── models/
-│   │   └── test_jobs_models.py  # CreateVmRequest, VmActionRequest, build_simple_params
 │   └── services/
-│       ├── test_ansible_service.py   # _build_vm_vars, _extract_*, _inject_golden_*
-│       ├── test_job_service.py       # _build_params, _redact_logs, _calculate_retry_delay
-│       └── test_provisioning_service.py  # legacy — retained for coverage, maps to AnsibleService
 └── integration/
     ├── conftest.py              # app fixture, container overrides, DB setup, fake_ansible
-    └── test_vms_api.py          # create VM: HTTP path, job lifecycle, client contract
+    └── test_{controller}.py 
 ```
 
 ---
@@ -1132,8 +1030,6 @@ The provisioning service's integration tests import `ProvisioningClient` directl
 > **TODO(action_executor_refactor):** `core/agent/app/utils/action_executor.py` uses module-level wrapper functions from the shim rather than `ProvisioningClient` directly. The functions `_do_provision` and `_do_shutdown` should be refactored to instantiate `ProvisioningClient` and call `create_vm` / `schedule_expiry` with typed request models. This removes the raw `params` dict and `vm_host` extraction hacks, and makes provisioning calls fully typed end-to-end.
 
 ### Agent client
-
-The agent exposes Arkhai-specific REST routes on top of the A2A protocol. The canonical client for these routes lives at `agent/client/agent_client.py` and is importable as `from agent.client.agent_client import AgentClient`. It covers `POST /alerts/resource`, `POST /orders/create`, `POST /orders/close`, and `GET /.well-known/erc-8004-registration.json`. A2A protocol endpoints are handled by the `a2a-sdk` client library directly.
 
 `AgentClient._auth_headers` documents the intended EIP-191 signing interface but raises `NotImplementedError` because signing requires the caller's private key, not just the wallet address. Callers requiring auth should subclass `AgentClient` and override `_auth_headers`, or set `AGENT_WALLET_ADDRESS` to empty on the target agent to skip auth during testing.
 

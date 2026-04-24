@@ -1,7 +1,8 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
+DIST_DIR := $(CURDIR)/.dist
 
-.PHONY: build build-runtime-images
+.PHONY: build build-runtime-images dist dist-provisioning dist-service dist-clean
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
@@ -25,11 +26,6 @@ build-runtime-images: dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-
-DIST_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/.dist
-
-.PHONY: dist dist-provisioning dist-service dist-clean
-
 dist: dist-provisioning dist-service
 
 dist-provisioning: ## Build provisioning-service wheel into .dist/
