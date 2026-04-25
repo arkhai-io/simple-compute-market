@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from client.provisioning_client import ProvisioningClient
-from models.host_model import HostCreate, HostImportRequest, HostUpdate
+from models.host_model import HostCreate, HostUpdate
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -216,8 +216,11 @@ class TestEnableDisableHost:
 class TestImportHosts:
     async def test_import_ini_upserts_hosts(self, client_and_queue):
         http, _ = client_and_queue
-        body = HostImportRequest(ini_content=_SAMPLE_INI, ssh_key_type="path")
-        resp = await http.post("/api/v1/hosts/import", json=body.model_dump())
+        resp = await http.post(
+            "/api/v1/hosts/import",
+            files={"file": ("hosts", _SAMPLE_INI.encode(), "text/plain")},
+            data={"ssh_key_type": "path"},
+        )
         assert resp.status_code == 200
         data = resp.json()
         names = [h["name"] for h in data["hosts"]]
@@ -226,9 +229,12 @@ class TestImportHosts:
 
     async def test_import_is_idempotent(self, client_and_queue):
         http, _ = client_and_queue
-        body = HostImportRequest(ini_content=_SAMPLE_INI, ssh_key_type="path")
-        await http.post("/api/v1/hosts/import", json=body.model_dump())
-        await http.post("/api/v1/hosts/import", json=body.model_dump())
+        for _ in range(2):
+            await http.post(
+                "/api/v1/hosts/import",
+                files={"file": ("hosts", _SAMPLE_INI.encode(), "text/plain")},
+                data={"ssh_key_type": "path"},
+            )
         resp = await http.get("/api/v1/hosts/")
         names = [h["name"] for h in resp.json()["hosts"]]
         # No duplicates
@@ -247,8 +253,11 @@ class TestImportHosts:
             "ww2  ansible_host=10.0.0.2  ansible_user=ubuntu  "
             "ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519\n"
         )
-        body = HostImportRequest(ini_content=ini_ww2_only, ssh_key_type="path")
-        await http.post("/api/v1/hosts/import", json=body.model_dump())
+        await http.post(
+            "/api/v1/hosts/import",
+            files={"file": ("hosts", ini_ww2_only.encode(), "text/plain")},
+            data={"ssh_key_type": "path"},
+        )
         # ww1 should still be enabled
         resp = await http.get("/api/v1/hosts/ww1")
         assert resp.status_code == 200

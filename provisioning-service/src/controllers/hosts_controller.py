@@ -18,13 +18,12 @@ VM operations scoped to a host live in ``VmController``
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi_utils.cbv import cbv
 
 import container as _container_module
 from models.host_model import (
     HostCreate,
-    HostImportRequest,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -131,23 +130,37 @@ class HostController:
         "/import",
         response_model=HostListResponse,
         status_code=status.HTTP_200_OK,
-        summary="Bulk-import hosts from an Ansible INI inventory block",
+        summary="Bulk-import hosts from an Ansible INI inventory file",
     )
-    def import_hosts(self, body: HostImportRequest) -> HostListResponse:
-        """Parse an Ansible INI inventory block and upsert host rows.
+    async def import_hosts(
+        self,
+        file: UploadFile = File(..., description="Ansible INI inventory file."),
+        ssh_key_type: str = Form(
+            default="path",
+            description=(
+                "'path' — ansible_ssh_private_key_file stored as-is. "
+                "'embedded' — path is read from disk and key material encrypted before storage."
+            ),
+        ),
+    ) -> HostListResponse:
+        """Upload an Ansible INI inventory file and upsert host rows.
 
-        Upsert semantics (append-only): hosts present in the INI are inserted
-        or updated; hosts absent from the INI are not touched.
+        Only entries under the ``[kvm_hosts]`` group are imported.
+        Upsert semantics (append-only): hosts present in the file are inserted
+        or updated; hosts absent from the file are not touched.
 
-        The ``[kvm_hosts]`` group and any ungrouped lines are parsed.
-        Lines missing ``ansible_host`` or ``ansible_user`` are skipped.
+        Example::
 
-        Returns the full list of upserted hosts.
+            curl -X POST /api/v1/hosts/import \
+                 -F "file=@/path/to/hosts" \
+                 -F "ssh_key_type=path"
         """
         try:
-            hosts = self._host_service.seed_from_ini(
-                body.ini_content, ssh_key_type=body.ssh_key_type
-            )
+            ini_text = (await file.read()).decode("utf-8")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
+        try:
+            hosts = self._host_service.seed_from_ini(ini_text, ssh_key_type=ssh_key_type)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return HostListResponse(hosts=[HostResponse.model_validate(h) for h in hosts])

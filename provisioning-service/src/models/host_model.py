@@ -73,28 +73,3 @@ class HostListResponse(BaseModel):
     """Response body for ``GET /api/v1/hosts/``."""
 
     hosts: list[HostResponse]
-
-
-class HostImportRequest(BaseModel):
-    """Body accepted by ``POST /api/v1/hosts/import``.
-
-    ``ini_content`` must be a valid Ansible INI inventory block.
-    Hosts are upserted (append-only); existing hosts not present in the
-    INI are left untouched.
-
-    Example::
-
-        [kvm_hosts]
-        ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
-        ww2  ansible_host=10.0.0.2  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
-    """
-
-    ini_content: str = Field(description="Ansible INI inventory block.")
-    ssh_key_type: Literal["path", "embedded"] = Field(
-        default="path",
-        description=(
-            "Key type applied to all hosts imported from this INI. "
-            "For 'path', ansible_ssh_private_key_file is stored as-is. "
-            "For 'embedded', it is treated as a path to read and embed."
-        ),
-    )

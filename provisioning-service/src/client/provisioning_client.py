@@ -31,6 +31,8 @@ or call ``get_job`` yourself for custom polling logic.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 import logging
 from typing import Any, Optional
@@ -39,7 +41,6 @@ import aiohttp
 
 from models.host_model import (
     HostCreate,
-    HostImportRequest,
     HostListResponse,
     HostResponse,
     HostUpdate,
@@ -351,14 +352,53 @@ class ProvisioningClient:
         data = await self._post(session, f"/api/v1/hosts/{name}/disable", {})
         return HostResponse(**data)
 
-    async def import_hosts_ini(
+    async def import_hosts_from_path(
         self,
         session: aiohttp.ClientSession,
-        body: HostImportRequest,
+        path: "Path",
+        ssh_key_type: str = "path",
     ) -> HostListResponse:
-        """``POST /api/v1/hosts/import``"""
-        data = await self._post(session, "/api/v1/hosts/import", body)
-        return HostListResponse(**data)
+        """``POST /api/v1/hosts/import`` — upload an INI file from disk.
+
+        Args:
+            path: Filesystem path to an Ansible INI inventory file.
+            ssh_key_type: ``'path'`` or ``'embedded'`` (see endpoint docs).
+        """
+        url = f"{self._base}/api/v1/hosts/import"
+        with open(path, "rb") as f:
+            form = aiohttp.FormData()
+            form.add_field("file", f, filename=path.name, content_type="text/plain")
+            form.add_field("ssh_key_type", ssh_key_type)
+            async with session.post(url, data=form, headers=self._headers()) as resp:
+                resp.raise_for_status()
+                return HostListResponse(**(await resp.json()))
+
+    async def import_hosts_from_text(
+        self,
+        session: aiohttp.ClientSession,
+        ini_text: str,
+        ssh_key_type: str = "path",
+        filename: str = "hosts",
+    ) -> HostListResponse:
+        """``POST /api/v1/hosts/import`` — upload INI content from a string.
+
+        Args:
+            ini_text: Raw Ansible INI inventory content.
+            ssh_key_type: ``'path'`` or ``'embedded'`` (see endpoint docs).
+            filename: Filename to use in the multipart upload (informational only).
+        """
+        url = f"{self._base}/api/v1/hosts/import"
+        form = aiohttp.FormData()
+        form.add_field(
+            "file",
+            ini_text.encode("utf-8"),
+            filename=filename,
+            content_type="text/plain",
+        )
+        form.add_field("ssh_key_type", ssh_key_type)
+        async with session.post(url, data=form, headers=self._headers()) as resp:
+            resp.raise_for_status()
+            return HostListResponse(**(await resp.json()))
 
     async def check_capacity(
         self,
