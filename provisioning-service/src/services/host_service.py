@@ -214,7 +214,7 @@ class HostService:
         upserted_names: list[str] = []
         with self._session_factory() as db:
             for entry in parsed:
-                key_value = entry.get("ansible_ssh_private_key_file", _DEFAULT_KEY_PATH)
+                key_value = entry["ansible_ssh_private_key_file"]
 
                 if ssh_key_type == "embedded":
                     from pathlib import Path
@@ -228,6 +228,7 @@ class HostService:
                     existing.ssh_user = entry["ssh_user"]
                     existing.ssh_key_type = ssh_key_type
                     existing.ssh_key_value = key_value
+                    existing.gpu_count = entry["gpu_count"]
                 else:
                     db.add(Host(
                         name=entry["name"],
@@ -235,7 +236,7 @@ class HostService:
                         ssh_user=entry["ssh_user"],
                         ssh_key_type=ssh_key_type,
                         ssh_key_value=key_value,
-                        gpu_count=0,
+                        gpu_count=entry["gpu_count"],
                         enabled=True,
                     ))
 
@@ -314,15 +315,33 @@ class HostService:
 def _parse_ini(ini_text: str) -> list[dict]:
     """Parse an Ansible INI inventory block into a list of host dicts.
 
-    Returns a list of ``{"name", "kvm_host", "ssh_user", **extra_vars}``
-    dicts.  Lines that are blank, comments, or group headers are skipped.
-    Entries missing ``ansible_host`` or ``ansible_user`` are also skipped
-    with a warning.
+    Only entries under the ``[kvm_hosts]`` group are imported.  Other groups
+    (e.g. ``[frp_servers]``, ``[provisioning_servers]``) are skipped — they
+    describe infrastructure that manages the provisioning service itself, not
+    VMs the provisioning service manages.
+
+    Returns a list of ``{"name", "kvm_host", "ssh_user", "gpu_count",
+    "ansible_ssh_private_key_file"}`` dicts.  Entries missing
+    ``ansible_host`` or ``ansible_user`` are skipped with a warning.
+
+    Variable mapping:
+        ``gpus=``                         → ``gpu_count`` (int, default 0)
+        ``ansible_ssh_private_key_file=`` → preserved verbatim
+        All other variables              → ignored
     """
     results = []
+    in_kvm_hosts = False
+
     for line in ini_text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("#") or stripped.startswith("["):
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if stripped.startswith("["):
+            in_kvm_hosts = stripped.startswith("[kvm_hosts]")
+            continue
+
+        if not in_kvm_hosts:
             continue
 
         parts = stripped.split()
@@ -334,8 +353,8 @@ def _parse_ini(ini_text: str) -> list[dict]:
                 k, _, v = part.partition("=")
                 host_vars[k] = v
 
-        kvm_host = host_vars.pop("ansible_host", None)
-        ssh_user = host_vars.pop("ansible_user", None)
+        kvm_host = host_vars.get("ansible_host")
+        ssh_user = host_vars.get("ansible_user")
 
         if not kvm_host or not ssh_user:
             logger.warning(
@@ -344,6 +363,19 @@ def _parse_ini(ini_text: str) -> list[dict]:
             )
             continue
 
-        results.append({"name": name, "kvm_host": kvm_host, "ssh_user": ssh_user, **host_vars})
+        try:
+            gpu_count = int(host_vars.get("gpus", 0))
+        except ValueError:
+            gpu_count = 0
+
+        results.append({
+            "name": name,
+            "kvm_host": kvm_host,
+            "ssh_user": ssh_user,
+            "gpu_count": gpu_count,
+            "ansible_ssh_private_key_file": host_vars.get(
+                "ansible_ssh_private_key_file", _DEFAULT_KEY_PATH
+            ),
+        })
 
     return results

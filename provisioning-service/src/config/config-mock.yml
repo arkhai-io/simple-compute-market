@@ -17,4 +17,8 @@
 
 ansible_cfg: ""
 playbook_path: "/dev/null"
-inventory_path: "/dev/null"
+# inventory_path is intentionally not overridden in mock mode.
+# MockAnsibleService never calls ansible-playbook so the path is unused
+# for job execution. Leaving it unset allows the startup seeder to read
+# the real inventory file (docker profile) or inventory_ini (helm profile)
+# and populate the hosts table normally.

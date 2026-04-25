@@ -57,19 +57,48 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_host_service = container.host_service()
 
     # ------------------------------------------------------------------
-    # Inventory seeding from PROVISIONING_INVENTORY_INI env var.
-    # When set (e.g. injected by the Helm chart via a Kubernetes Secret),
-    # the INI content is upserted into the hosts table at every startup.
-    # This is idempotent — repeated restarts with the same INI are safe.
+    # Inventory seeding — runs once at startup if the hosts table is empty.
+    #
+    # Source priority:
+    #   1. inventory_ini setting (non-empty string) — used by the Helm chart,
+    #      injected via the provisioning-secrets config profile.
+    #   2. inventory_path on disk — used by the Docker profile, which points
+    #      at the IAC hosts file baked into the image.
+    #
+    # Seeding is skipped when the hosts table already has rows, so that
+    # operator changes made via the API (POST /hosts, PUT /hosts/{host}, etc.)
+    # are not overwritten on pod restart.  To force a re-seed, use
+    # POST /api/v1/hosts/import which always upserts regardless of table state.
     # ------------------------------------------------------------------
-    inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
-    if inventory_ini:
-        host_service = _container_module.resolved_host_service
-        try:
-            seeded = host_service.seed_from_ini(inventory_ini)
-            logger.info("Inventory seeding: upserted %d host(s) from PROVISIONING_INVENTORY_INI", len(seeded))
-        except Exception as exc:
-            logger.error("Inventory seeding failed: %s", exc)
+    host_service = _container_module.resolved_host_service
+    existing_hosts = host_service.list_hosts(enabled_only=False)
+    if existing_hosts:
+        logger.info("Inventory seeding: skipped — %d host(s) already registered", len(existing_hosts))
+    else:
+        inventory_ini = str(getattr(settings, "inventory_ini", "") or "").strip()
+        inventory_path = getattr(settings, "resolved_inventory_path", None)
+
+        ini_text: str | None = None
+        source: str | None = None
+
+        if inventory_ini:
+            ini_text = inventory_ini
+            source = "inventory_ini setting (provisioning-secrets profile)"
+        elif inventory_path and inventory_path.exists():
+            try:
+                ini_text = inventory_path.read_text(encoding="utf-8")
+                source = str(inventory_path)
+            except OSError as exc:
+                logger.warning("Inventory seeding: could not read %s: %s", inventory_path, exc)
+
+        if ini_text:
+            try:
+                seeded = host_service.seed_from_ini(ini_text)
+                logger.info("Inventory seeding: registered %d host(s) from %s", len(seeded), source)
+            except Exception as exc:
+                logger.error("Inventory seeding failed (source: %s): %s", source, exc)
+        else:
+            logger.info("Inventory seeding: no inventory source configured — starting with empty host registry")
 
     # AsyncJobQueue is a plain object; instantiate inside the running event loop.
     job_queue = AsyncJobQueue(max_concurrent=settings.max_concurrent_jobs)

@@ -503,7 +503,15 @@ GET    /api/v1/hosts/{host}/connectivity   Run ansible -m ping
 
 **Inventory rendering for Ansible:** `AnsibleService.write_inventory(hosts)` renders a temp INI file from DB rows immediately before each playbook run, deleted in the `finally` block — the same contract as `build_vars_file`. The rendered group is always `[kvm_hosts]`.
 
-**Kubernetes inventory injection:** The `provisioning-secrets` config profile carries `inventory_ini`. On every pod startup, `main.py` calls `host_service.seed_from_ini()` when `inventory_ini` is non-empty, upserting hosts into the DB (idempotent).
+**Inventory seeding at startup:** `main.py` seeds the hosts table once during lifespan startup using the following logic:
+
+- **Skip if the table is non-empty.** If any hosts are already registered (from a previous startup or via the API), seeding is skipped entirely. Operator changes made through the API are never overwritten on pod restart. To force a re-import, use `POST /api/v1/hosts/import` which always upserts regardless of table state.
+- **Source 1 — `inventory_ini` setting** (Helm/Kubernetes): the `provisioning-secrets` config profile carries this value. Used when deploying via Helm.
+- **Source 2 — `inventory_path` on disk** (Docker): the `docker` config profile sets `inventory_path` to the IAC hosts file baked into the image. Used when running the container standalone without a Helm-injected INI.
+
+**`[kvm_hosts]` group only:** `_parse_ini` imports only entries under the `[kvm_hosts]` INI group. Other groups in the IAC inventory (e.g. `[frp_servers]`, `[provisioning_servers]`) describe infrastructure that manages the provisioning service itself and are not relevant to VM provisioning.
+
+**`gpus=` variable mapping:** The IAC inventory uses `gpus=N` to declare GPU count. `_parse_ini` maps this to the `gpu_count` column. `ansible_ssh_private_key_file=` is stored verbatim as the key path. All other Ansible variables are ignored.
 
 **`SystemService.ansible_readiness`** reads host count and SSH key diagnostics from the `hosts` DB table. `SshKeyInfo` has a `key_type` field: `path`-type hosts have their key file stat'd and SHA-256'd; `embedded`-type hosts report `exists=True` with no SHA-256 (key is encrypted at rest).
 
