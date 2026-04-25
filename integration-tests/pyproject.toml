@@ -22,6 +22,7 @@ dependencies = [
     "httpx>=0.27",            # synchronous HTTP client for REST API tests
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with agent behavior.
+    "arkhai-agent-client>=0.1.0",
     "market-service",
     "provisioning-service",
 ]

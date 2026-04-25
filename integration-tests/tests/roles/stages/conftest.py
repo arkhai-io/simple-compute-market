@@ -29,7 +29,7 @@ import logging
 
 import pytest
 
-from tests.helpers.agent_client import query_registry_orders
+from tests.helpers.registry_helpers import query_registry_orders
 from tests.helpers.cli_client import cli_create_order
 from tests.helpers.polling import poll_until
 from tests.roles.helpers.deal import Deal

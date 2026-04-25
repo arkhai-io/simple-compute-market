@@ -21,7 +21,7 @@ import logging
 import pytest
 
 from service.clients.indexer import RegistryClient
-from tests.helpers.agent_client import query_registry_orders
+from tests.helpers.registry_helpers import query_registry_orders
 
 log = logging.getLogger(__name__)
 

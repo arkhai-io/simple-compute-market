@@ -9,6 +9,7 @@ authors = [
 #pufferlib requires numpy<2. So we're stuck with python 3.12
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "arkhai-agent-client>=0.1.0",
     "market-service",
     "provisioning-service",
     "market-cli",
@@ -53,6 +54,16 @@ lint = [
 
 [tool.uv]
 no-build-isolation-package = ["pufferlib"]
+# Restrict resolution to platforms that have alkahest_py wheels.
+# Without this, uv attempts to solve for all platforms and fails to
+# find provisioning-service / market-service wheels for platforms
+# where it has no local find-links path to check.
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
 
 # requirement for pufferlib 3.0.0
 [tool.uv.extra-build-dependencies]

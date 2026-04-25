@@ -79,7 +79,7 @@ def buyer_client(buyer_api_url: str, buyer_settings: dict) -> AgentClient:  # ty
     client = AgentClient(
         base_url=buyer_api_url,
         private_key=buyer_settings["private_key"],
-		agent_base_url_override=buyer_settings["base_url_override"]
+        agent_wallet_address=buyer_settings["wallet_address"],
     )
     yield client
     client.close()
@@ -90,7 +90,7 @@ def seller_client(seller_api_url: str, seller_settings: dict) -> AgentClient:  #
     client = AgentClient(
         base_url=seller_api_url,
         private_key=seller_settings["private_key"],
-        agent_base_url_override=seller_settings["base_url_override"]
+        agent_wallet_address=seller_settings["wallet_address"],
     )
     yield client
     client.close()

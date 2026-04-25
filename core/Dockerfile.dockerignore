@@ -1,0 +1,29 @@
+# BuildKit per-Dockerfile ignore (requires DOCKER_BUILDKIT=1).
+# Deny everything, then allowlist what the build needs.
+
+*
+
+# ── Internal package wheels (built by make dist before docker build) ─
+!.dist/
+
+# ── core ─────────────────────────────────────────────────────────────
+!core/pyproject.toml
+!core/uv.lock
+!core/agent/
+!core/schemas.py
+!core/entrypoint.sh
+
+# ── service / cli / domain (imported by agent at runtime) ────────────
+!service/
+!cli/
+!domain/
+
+# ── Global excludes ──────────────────────────────────────────────────
+**/.git
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.env*
+**/.DS_Store
+**/.pytest_cache
+**/*.db

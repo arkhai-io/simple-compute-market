@@ -22,7 +22,7 @@ init-venv:
 	uv venv --allow-existing
 
 init: init-venv
-	UV_FIND_LINKS=$(DIST_DIR) uv sync
+	uv sync --find-links $(DIST_DIR)
 
 # -----------------------------------------------------------------------
 # Build

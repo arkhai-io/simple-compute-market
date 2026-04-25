@@ -1022,13 +1022,37 @@ simple-market-service/   ← monorepo root
 `find-links` encodes a filesystem path. The path differs between environments:
 
 - **Docker:** `.dist/` is copied to `/dist/` inside the image; `uv sync --find-links /dist` is passed in the `RUN` instruction.
-- **Local dev:** `.dist/` lives at the monorepo root; `uv sync` or `uv run` must be invoked with `UV_FIND_LINKS=../.dist` (set in each sub-project's Makefile targets).
+- **Local dev:** `.dist/` lives at the monorepo root; `uv sync` and `uv run` must be invoked with `--find-links ../.dist` (set in each sub-project's Makefile targets). Note: `UV_FIND_LINKS` is **not** equivalent — it is not read by `uv sync` or `uv lock`; only the `--find-links` CLI flag works for dependency resolution.
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service` or `provisioning-service`. These packages are resolved exclusively from wheels in `.dist/`.
+**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, or `arkhai-agent-client`. These packages are resolved exclusively from wheels in `.dist/`.
 
 **Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker the relative path no longer exists, causing resolution failures. The wheel approach avoids this by making both the path and the mechanism context-specific (CLI flag, not lockfile entry).
+
+### Internal wheel packages
+
+Three pure-Python internal packages are distributed as wheels:
+
+| Package | Wheel name | Source | Primary consumers |
+|---------|-----------|--------|-------------------|
+| `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
+| `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
+| `arkhai-agent-client` | `arkhai_agent_client-*.whl` | `agent-client/` | `integration-tests`, `core` |
+
+`arkhai-agent-client` exists as a separate lightweight package to avoid pulling `market-core`'s heavyweight dependencies (`google-adk`, `pufferlib`, native RL wheels) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `agent-client/src/agent_client/client.py`; `core/agent/client/agent_client.py` is a re-export shim that preserves the historical import path for callers inside `core/`.
+
+**`arkhai-agent-client` versioning policy:**
+
+`arkhai-agent-client` encodes two contracts with the agent server (`core/agent/app/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
+
+1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
+   - `create_order` → `"create_order:<agent_wallet_address>:<timestamp>"`
+   - `close_order` → `"close_order:<order_id>:<timestamp>"`
+
+2. **Endpoint signatures** — `/orders/create`, `/orders/close`, `/alerts/resource` request/response shapes.
+
+When either contract changes: bump `version` in `agent-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-agent-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `agent-client/README.md` for the full checklist.
 
 ### Upgrade path
 

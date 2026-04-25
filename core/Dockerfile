@@ -68,7 +68,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy application code preserving the import path (from core.agent.app.*)
 COPY core/agent/app ./core/agent/app
 COPY core/agent/scripts ./core/agent/scripts
-COPY core/agent/.env.sample .
 COPY core/schemas.py ./core/schemas.py
 COPY domain/ ./domain/
 COPY service/ ../service/

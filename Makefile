@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := $(CURDIR)/.dist
 
-.PHONY: build build-runtime-images dist dist-provisioning dist-service dist-clean
+.PHONY: build build-runtime-images dist dist-agent-client dist-core dist-provisioning dist-service dist-clean
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
@@ -26,7 +26,19 @@ build-runtime-images: dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-provisioning dist-service
+dist: dist-agent-client dist-core dist-provisioning dist-service
+
+dist-agent-client: ## Build arkhai-agent-client wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd agent-client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_agent_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-agent-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-core: ## Build market-core wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd core && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_core-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-core produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-provisioning: ## Build provisioning-service wheel into .dist/
 	@mkdir -p $(DIST_DIR)

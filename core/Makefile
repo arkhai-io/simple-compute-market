@@ -9,7 +9,11 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # CLI instead; this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
-.PHONY: build build-images deploy deploy-buyer-agent deploy-seller-agent test test-unit test-integration
+.PHONY: build build-images deploy deploy-buyer-agent deploy-seller-agent init test test-unit test-integration
+
+init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
+	uv sync --find-links $(DIST_DIR)
+
 
 build: build-images
 
@@ -20,12 +24,12 @@ build-images:
 test: test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
-	UV_FIND_LINKS=$(DIST_DIR) uv run pytest tests/unit/ -v
+	uv run --find-links $(DIST_DIR) pytest tests/unit/ -v
 
 test-integration: ## Run integration tests (no real infrastructure required — event queue seam)
 	ENABLE_EVENT_QUEUE=true \
 	AGENT_WALLET_ADDRESS="" \
-	UV_FIND_LINKS=$(DIST_DIR) uv run pytest tests/integration/ -v
+	uv run --find-links $(DIST_DIR) pytest tests/integration/ -v
 
 deploy: deploy-buyer-agent deploy-seller-agent
 

@@ -1,50 +1,72 @@
-"""
-The agent validates X-Signature / X-Timestamp headers using EIP-191.
-Message format:
-  create_order  →  "create_order:<BASE_URL_OVERRIDE>:<timestamp>"
-  close_order   →  "close_order:<order_id>:<timestamp>"
+"""Synchronous HTTP client for the Arkhai agent REST API.
 
-The resource_id for create_order is the agent's own BASE_URL_OVERRIDE
-(its public base URL), not the caller's URL.  We pass it as a constructor
-argument so it can be read from config alongside the agent's api_url.
+This is the integration-test shim over the canonical async client in
+``agent.client.agent_client``.  It uses httpx for synchronous I/O but
+delegates EIP-191 signing to the canonical ``_build_auth_headers``
+helper so both clients stay in sync with the server's auth protocol.
+
+Auth
+----
+The signed message format (from agent.py ``_check_agent_request_auth``):
+
+    create_order  →  "create_order:<agent_wallet_address>:<timestamp>"
+    close_order   →  "close_order:<order_id>:<timestamp>"
+
+``agent_wallet_address`` is the ``AGENT_WALLET_ADDRESS`` setting on the
+target agent, available in test config as ``buyer.wallet_address`` /
+``seller.wallet_address``.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 import httpx
 
-from src.eip191_http_client import ApiError, build_auth_headers, sign_eip191
-from src.models.agent import (
-    AgentOrderCloseRequest,
-    AgentOrderCloseResponse,
-    AgentOrderCreateRequest,
-    AgentOrderCreateResponse,
-    ERC8004RegistrationFile,
-    ResourceAlertRequest,
-)
+from agent_client.client import AgentClientError, _build_auth_headers
+from src.models.agent import ERC8004RegistrationFile
+from src.eip191_http_client import ApiError
 
 log = logging.getLogger(__name__)
 
 
+class _OrderResponse:
+    """Thin wrapper around the raw JSON response from /orders/create and /orders/close."""
+
+    def __init__(self, data: dict[str, Any]) -> None:
+        self._data = data
+
+    @property
+    def status(self) -> str:
+        return self._data.get("status", "")
+
+    @property
+    def order_id(self) -> str | None:
+        return self._data.get("order_id")
+
+    @property
+    def event_id(self) -> str | None:
+        return self._data.get("event_id")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+
 class AgentClient:
-    """
-    Synchronous HTTP client for the Agent REST API.
+    """Synchronous HTTP client for the Arkhai agent REST API.
 
     Parameters
     ----------
     base_url:
-        Publicly-reachable URL of the agent (e.g. ``http://buy_agent:8000``).
-    agent_base_url_override:
-        The value of BASE_URL_OVERRIDE configured inside the agent process.
-        This is used as the resource_id when building the create_order auth
-        message: ``"create_order:<agent_base_url_override>:<timestamp>"``.
-        If None, ``base_url`` is used as a fallback.
+        Publicly-reachable URL of the agent.
     private_key:
-        Caller's private key used to sign auth headers.
+        Caller's EIP-191 private key used to sign ``X-Signature`` headers.
+    agent_wallet_address:
+        Wallet address of the target agent.  Used as ``resource_id`` in
+        the ``create_order`` signed message.  Falls back to ``base_url``
+        if not supplied (backward-compat — agents without
+        ``AGENT_WALLET_ADDRESS`` set skip auth).
     timeout:
         HTTP timeout in seconds.
     """
@@ -54,21 +76,22 @@ class AgentClient:
         base_url: str,
         private_key: str,
         *,
+        agent_wallet_address: str | None = None,
+        # Legacy kwarg name kept for backward compat with existing test fixtures
         agent_base_url_override: str | None = None,
         timeout: float = 60.0,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
+        self._base = base_url.rstrip("/")
         self._private_key = private_key
-        # The agent checks the signature against its own wallet address,
-        # and the signed message uses BASE_URL_OVERRIDE as the resource_id
-        # for create_order.  Fall back to base_url if not explicitly provided.
-        self._agent_base_url = (agent_base_url_override or base_url).rstrip("/")
+        # Prefer explicit wallet_address; fall back to legacy base_url_override
+        # (which was wrong — kept only to avoid breaking callers mid-refactor).
+        self._agent_wallet_address = agent_wallet_address or agent_base_url_override or base_url
         self._http = httpx.Client(
-            base_url=self._base_url,
+            base_url=self._base,
             timeout=timeout,
             headers={"Accept": "application/json"},
         )
-        log.info("AgentClient initialised — base_url=%s", self._base_url)
+        log.info("AgentClient initialised — base_url=%s", self._base)
 
     def close(self) -> None:
         self._http.close()
@@ -83,66 +106,59 @@ class AgentClient:
         path: str,
         *,
         json: Any = None,
-        headers: dict | None = None,
+        extra_headers: dict[str, str] | None = None,
         expected_statuses: tuple[int, ...] = (200, 201),
-    ) -> httpx.Response:
-        log.debug("%s %s", method, path)
+    ) -> dict[str, Any]:
+        headers = dict(extra_headers or {})
         resp = self._http.request(method, path, json=json, headers=headers)
         if resp.status_code not in expected_statuses:
-            raise ApiError(method, f"{self._base_url}{path}", resp.status_code, resp.text)
-        return resp
+            raise ApiError(method, f"{self._base}{path}", resp.status_code, resp.text)
+        return resp.json()
 
     # ------------------------------------------------------------------
-    # ERC-8004 registration file
+    # ERC-8004 registration
     # ------------------------------------------------------------------
 
-    def get_registration_file(self) -> ERC8004RegistrationFile:
+    def get_registration_file(self) -> "ERC8004RegistrationFile":
         """GET /.well-known/erc-8004-registration.json"""
-        resp = self._request("GET", "/.well-known/erc-8004-registration.json")
-        return ERC8004RegistrationFile.from_dict(resp.json())
+        data = self._request("GET", "/.well-known/erc-8004-registration.json")
+        return ERC8004RegistrationFile.from_dict(data)
 
     # ------------------------------------------------------------------
     # Orders
     # ------------------------------------------------------------------
 
-    def create_order(self, order: AgentOrderCreateRequest) -> AgentOrderCreateResponse:
-        """
-        POST /orders/create
+    def create_order(self, order: Any) -> _OrderResponse:
+        """POST /orders/create with EIP-191 signed headers.
 
-        Auth message: ``"create_order:<agent_base_url_override>:<timestamp>"``
+        ``order`` may be an ``AgentOrderCreateRequest`` (with ``.to_dict()``)
+        or a plain dict.
         """
-        headers = build_auth_headers(self._private_key, "create_order", self._agent_base_url)
-        resp = self._request("POST", "/orders/create", json=order.to_dict(), headers=headers)
-        return AgentOrderCreateResponse.from_dict(resp.json())
+        headers = _build_auth_headers(
+            self._private_key, "create_order", self._agent_wallet_address
+        )
+        body = order.to_dict() if hasattr(order, "to_dict") else dict(order)
+        data = self._request("POST", "/orders/create", json=body, extra_headers=headers)
+        return _OrderResponse(data)
 
-    def close_order(self, order_id: str) -> AgentOrderCloseResponse:
-        """
-        POST /orders/close
-
-        Auth message: ``"close_order:<order_id>:<timestamp>"``
-        """
-        headers = build_auth_headers(self._private_key, "close_order", order_id)
-        body = AgentOrderCloseRequest(order_id=order_id)
-        resp = self._request("POST", "/orders/close", json=body.to_dict(), headers=headers)
-        return AgentOrderCloseResponse.from_dict(resp.json())
+    def close_order(self, order_id: str) -> _OrderResponse:
+        """POST /orders/close with EIP-191 signed headers."""
+        headers = _build_auth_headers(self._private_key, "close_order", order_id)
+        data = self._request(
+            "POST", "/orders/close", json={"order_id": order_id}, extra_headers=headers
+        )
+        return _OrderResponse(data)
 
     # ------------------------------------------------------------------
     # Alerts
     # ------------------------------------------------------------------
 
-    def send_resource_alert(self, alert: ResourceAlertRequest) -> dict[str, Any]:
-        """
-        POST /alerts/resource
-
-        No auth is required on this route (the agent does not call
-        _check_agent_request_auth before handle_resource_alert).
-        Returns the raw response dict which echoes the alert plus
-        ``root_agent_response``.
-        """
-        resp = self._request(
+    def send_resource_alert(self, alert: Any) -> dict[str, Any]:
+        """POST /alerts/resource (no auth required)."""
+        body = alert.to_dict() if hasattr(alert, "to_dict") else dict(alert)
+        return self._request(
             "POST",
             "/alerts/resource",
-            json=alert.to_dict(),
-            headers={"Content-Type": "application/json"},
+            json=body,
+            extra_headers={"Content-Type": "application/json"},
         )
-        return resp.json()
