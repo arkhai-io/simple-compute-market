@@ -581,11 +581,6 @@ bootstrap.
 - Does the buyer ever need persistence for negotiation rounds (to
   resume after CLI restart)? If yes, step 4 needs a SQLite store; if
   no, in-memory is fine.
-- Is `agent-client/` going to merge into `market-infra`, or stay as
-  its own package? Today it's the buyer-side HTTP client to the
-  provider's storefront. If we expect it to grow, leave it; if not,
-  it could fold into infra. (Naming: would be renamed away from
-  "agent" too — e.g., `market-storefront-client`.)
 - The `[rl]` extras boundary: should buyer-side learned-policy use
   call for a separate `[inference]` extra (Torch but no Pufferlib /
   Wandb)? Defer until we actually have a buyer-side trained policy.
@@ -593,6 +588,36 @@ bootstrap.
   `arkhai/` and the GitHub org is `arkhai-io`, but the existing
   packages are `market-cli`, `market-core`, `market-service`. Plan
   uses `market-*` for continuity. Worth aligning later.
+
+## Resolved questions
+
+### `agent-client/` — keep separate, bundle into provider side later
+
+Investigation (2026-04-27) found that `agent-client/` is effectively a
+provider's admin SDK for its own storefront, not a general-purpose
+agent client. Three of its four methods (`send_resource_alert`,
+`create_order`, `close_order`) sign with the storefront's own private
+key — only the storefront owner can call them. The fourth
+(`get_registration`) is a public unauthenticated discovery GET, but
+nothing in the buyer CLI imports it today; buyer discovery flows go
+through `service.clients.indexer` against the off-chain registry
+server, not against individual storefronts.
+
+Real call sites today: storefront's own integration tests, and the
+black-box `integration-tests/` harness that simulates both sides each
+running their own storefront. Zero buyer-CLI consumers.
+
+Decision:
+- **Keep `agent-client/` as a standalone package for now.** Don't
+  fold it into `market-infra` (it's not infra) and don't fold it
+  into `market-buyer` (the buyer doesn't use it).
+- **In Step 5, bundle it with the storefront admin surface.** When
+  `core/` becomes `market-storefront`, `agent-client/` can either
+  merge into it or stay sibling-but-explicitly-paired. Naming should
+  also move away from "agent" — `storefront-admin-client` or similar.
+- This is being communicated to the coworker who introduced the
+  package (commit `8f1f256`); he's still doing follow-up shim
+  cleanup, and the rename / re-pairing can ride alongside Step 5.
 
 ## Things explicitly out of scope
 
