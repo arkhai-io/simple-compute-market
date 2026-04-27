@@ -833,19 +833,6 @@ The following items represent known architectural deficiencies in `provisioning-
 
 Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
 
-**NYI placeholders:**
-
-| Endpoint | Current | Planned |
-|---|---|---|
-| `GET /hosts/{host}/vms` | Submits Ansible `list` job | Synchronous `vms` DB cache (Item 2) |
-| `GET /hosts/{host}/vms/{vm}/monitor` | Submits Ansible `monitor` job | Live stats / time-series cache, possibly gRPC (Item 2) |
-| `POST /hosts/{host}/vms/{vm}/expiry` | Submits `lease_end` Ansible job | Writes to `vm_leases` DB table (Item 1) |
-| `DELETE /hosts/{host}/vms/{vm}/expiry` | Submits `lease_remove` Ansible job | Deletes from `vm_leases` DB table (Item 1) |
-| `GET /hosts` | ~~Parses inventory file~~ **→ queries `hosts` DB table** | Done |
-| `GET /hosts/{host}/capacity` | Submits Ansible `check` job | DB cache with staleness fallback (future) |
-
-**`GET /hosts/` — implemented:** queries the `hosts` DB table directly. `HostController.list_hosts` returns `HostListResponse(hosts: list[HostResponse])`. The old `InventoryResponse` shape (which included `inventory_path`) has been replaced.
-
 **`HostController.check_capacity` — future:** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
 
 ### 1. Implement reliable lease expiry detection
@@ -859,34 +846,11 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
 
-### 2. Full VM lifecycle visibility and operator intervention API
-
-**Status:** Host management (host registry CRUD, INI import, `SystemService` readiness, Helm chart wiring, smoke tests) **implemented**. VM state cache, lease table, and per-VM job history remain planned.
-
-**Problem:** The current API gives operators no way to understand or intervene in the full lifecycle of a VM without SSH access to the KVM host. The data center admin UX requirement is:
-
-> At every step of the VM lifecycle, an operator should be able to see the current status, pull the Ansible logs of the last relevant job, and submit corrective actions — all through the REST API, without direct SSH to any host. Direct SSH creates side effects on the host that Ansible doesn't understand and can't reason about.
-
-The specific gaps in the current implementation:
-
-- No VM inventory — you cannot list VMs and their states from the API. You have to submit a `list` job and poll for its result.
-- No lease visibility — there is no API record of which VMs have active leases, when they expire, or whether the expiry was confirmed.
-- No lifecycle state machine — the API doesn't model the concept of a VM that is "created but lease-not-yet-scheduled" or "lease-scheduled but not-yet-expired" or "expired but cleanup-pending".
-- The worker admin API's `/inventory` and `/inventory/{host}/connectivity` endpoints expose Ansible-level diagnostics but not VM-level state.
-- Cancellation exists at the job level (SIGTERM to the Ansible process) but not at the VM level (there is no "tear down this VM regardless of what state it's in").
-
-**Planned fix:** The typed REST API from item 1 addresses most of the discovery and operation gaps. Additionally:
-
-- **VM state cache:** After each successful job, write the resulting VM state to a `vms` table (name, host, status, lease_end, last_job_id, updated_at). The VM list endpoint reads from this table for fast queries without submitting a new Ansible job. A periodic reconciliation job (via the watchdog from item 3) can submit `monitor` jobs to verify cached state against ground truth.
-- **Lease table:** Per item 2, leases are tracked in the DB with their full lifecycle (scheduled, confirmed-running, expired, cleanup-succeeded, cleanup-failed).
-- **Per-VM job history:** `GET /vms/{vm_name}/jobs` returns all jobs that have ever touched a VM, with their status, params, result, and Ansible logs. This gives an operator the complete history to diagnose any stuck or unexpected state.
-- **Mock provisioning parity:** `MockAnsibleService` returns static fake results immediately. For full lifecycle testing (VM state cache, expiry watchdog), it should model state transitions (`creating → running → lease-expiring → destroyed`) so scenarios can be exercised via REST without hardware. See the `mock-provisioning-fidelity` TODO.
-
 ---
 
-### 3. Registry native client
+### 2. Registry native client
 
-**Status:** Planned.
+**Status:** Needs discussion.
 
 **Problem:** `service/src/service/clients/indexer.py` is a 250-line `RegistryClient` inside `market-service`. The `erc-8004-registry-py` submodule owns the registry API but has no client package. The agent imports `get_registry_client()` from `service.clients.indexer`, coupling the agent to `market-service` for registry access.
 
@@ -896,7 +860,7 @@ The specific gaps in the current implementation:
 3. Replace `service/src/service/clients/indexer.py` with a re-export shim.
 4. Update `core/agent/app/utils/action_executor.py` to import from the new wheel directly.
 
-### 4. Provisioning service README and root Makefile
+### 3. Provisioning service README and root Makefile
 
 **Status:** Planned.
 
@@ -904,7 +868,7 @@ The specific gaps in the current implementation:
 
 **Planned fix:** Review and rewrite both files to reflect current architecture, Makefile targets (`dist`, `init`, `build-*`), and the Helm deployment workflow.
 
-### 5. Helm deploy Makefile target
+### 4. Helm deploy Makefile target
 
 **Status:** Planned.
 
