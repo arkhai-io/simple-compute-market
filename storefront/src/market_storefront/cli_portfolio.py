@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from ..common import REPO_ROOT, read_env_value, container_db_to_host, run_step, DEFAULT_AGENT_ENV
+from .cli_common import REPO_ROOT, read_env_value, container_db_to_host, run_step, DEFAULT_AGENT_ENV
 
 portfolio_app = typer.Typer(no_args_is_help=True)
 

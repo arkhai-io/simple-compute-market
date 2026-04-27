@@ -34,28 +34,25 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from ..common import REPO_ROOT, read_env_value, resolve_agent_url
-from .order import (
-    _get_auth_headers,
-    _normalize_registry_url,
-    _post_json,
-)
-from .logs import _resolve_db_path
+from .cli_common import REPO_ROOT, read_env_value, resolve_agent_url
+from .cli_common import _get_auth_headers, _normalize_registry_url, _post_json
+from .cli_common import _resolve_db_path
 
 
 def _import_csv(csv_path: str, env: Optional[str], db: Optional[str]) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
-    Uses `core/.venv/bin/python` rather than `uv run` — the latter fails
-    cleanly from outside the core project, and the core venv is a stable
-    dependency of the seller-side deployment anyway.
+    Uses `storefront/.venv/bin/python` rather than `uv run` — the
+    latter fails cleanly from outside the storefront project, and the
+    storefront venv is a stable dependency of the provider-side
+    deployment anyway.
     """
-    script = REPO_ROOT / "core" / "agent" / "scripts" / "import_resources_csv.py"
-    python = REPO_ROOT / "core" / ".venv" / "bin" / "python"
+    script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
+    python = REPO_ROOT / "storefront" / ".venv" / "bin" / "python"
     if not python.exists():
         raise typer.BadParameter(
-            f"Core venv not found at {python}. "
-            "Run `market install` (or `cd core && uv sync`) first."
+            f"Storefront venv not found at {python}. "
+            "Run `cd storefront && uv sync` first."
         )
     cmd = [
         str(python), str(script),

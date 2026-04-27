@@ -16,7 +16,7 @@ from typing import Optional
 
 import typer
 
-from ..common import REPO_ROOT, run_step
+from .cli_common import REPO_ROOT, run_step
 
 policy_app = typer.Typer(no_args_is_help=True)
 
