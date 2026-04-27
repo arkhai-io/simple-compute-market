@@ -5,20 +5,20 @@ Mirrors: docker run --cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/t
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "agents.fullname" . }}-buyer
+  name: {{ include "storefront.fullname" . }}-buyer
   labels:
-    {{- include "agents.labels" . | nindent 4 }}
+    {{- include "storefront.labels" . | nindent 4 }}
     app.kubernetes.io/component: buyer
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "agents.selectorLabels" . | nindent 6 }}
+      {{- include "storefront.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: buyer
   template:
     metadata:
       labels:
-        {{- include "agents.selectorLabels" . | nindent 8 }}
+        {{- include "storefront.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: buyer
     spec:
       initContainers:
@@ -52,7 +52,7 @@ spec:
               echo "Registry ready."
       containers:
         - name: market-agent-buy
-          image: {{ include "agents.image" . }}
+          image: {{ include "storefront.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -114,12 +114,12 @@ spec:
             - name: AGENT_PRIV_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agents.buyer.secretName" . }}
+                  name: {{ include "storefront.buyer.secretName" . }}
                   key: private_key
             - name: AGENT_WALLET_ADDRESS
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agents.buyer.secretName" . }}
+                  name: {{ include "storefront.buyer.secretName" . }}
                   key: wallet_address
           # TODO: add liveness/readiness probes once agent health endpoint is defined.
           resources:
@@ -147,20 +147,20 @@ Seller agent deployment (Bob / market-agent-sell)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "agents.fullname" . }}-seller
+  name: {{ include "storefront.fullname" . }}-seller
   labels:
-    {{- include "agents.labels" . | nindent 4 }}
+    {{- include "storefront.labels" . | nindent 4 }}
     app.kubernetes.io/component: seller
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "agents.selectorLabels" . | nindent 6 }}
+      {{- include "storefront.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: seller
   template:
     metadata:
       labels:
-        {{- include "agents.selectorLabels" . | nindent 8 }}
+        {{- include "storefront.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: seller
     spec:
       initContainers:
@@ -194,7 +194,7 @@ spec:
               echo "Registry ready."
       containers:
         - name: market-agent-sell
-          image: {{ include "agents.image" . }}
+          image: {{ include "storefront.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
@@ -255,12 +255,12 @@ spec:
             - name: AGENT_PRIV_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agents.seller.secretName" . }}
+                  name: {{ include "storefront.seller.secretName" . }}
                   key: private_key
             - name: AGENT_WALLET_ADDRESS
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "agents.seller.secretName" . }}
+                  name: {{ include "storefront.seller.secretName" . }}
                   key: wallet_address
           # TODO: add liveness/readiness probes once agent health endpoint is defined.
           resources:

@@ -1,5 +1,5 @@
-# Default values for agents.
-# These are overridden by the parent chart's agents: block in values.yaml.
+# Default values for storefront.
+# These are overridden by the parent chart's storefront: block in values.yaml.
 # Values sourced from global (rpc, indexer, registry addresses) are injected
 # in deployment templates and do not appear here.
 

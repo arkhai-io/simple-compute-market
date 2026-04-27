@@ -591,6 +591,37 @@ bootstrap.
 
 ## Resolved questions
 
+### Step 5 — done as of 2026-04-27
+
+- 5a `c8140df` — `cli/` → `buyer/`, `market` → `market_buyer`.
+- 5b `013fe36` — `core/` → `storefront/`, src-layout, `agent.X` /
+  `core.agent.app.X` → `market_storefront.X` (151 lines, 40 files).
+- 5b fixup `58705d0` — submodule cleanup (`erc-8004-contracts`
+  registered, `compute-provisioning-iac` pointer reverted).
+- 5c `a48ffb1` — split provider subcommands out of buyer CLI.
+  New `market-storefront` console script driving
+  `market_storefront.cli` (register / start / provide / portfolio /
+  policy / network / registry). Buyer CLI trimmed to order /
+  config / dev / logs / buy / negotiate. Both wheels carry a small
+  duplicated CLI helper module (cli_common.py); factoring into a
+  shared package can come later.
+- 5d — `agent-client/` rename + bundling deferred to coordination
+  with the coworker who introduced the package (commit `8f1f256`).
+  See "Resolved questions" below for the analysis.
+- 5e — helm chart `agents/` → `storefront/` (template helpers
+  `agents.X` → `storefront.X` chart-wide, parent values key
+  `agents:` → `storefront:`); `install.sh` retargets the buyer venv
+  to `$INSTALL_DIR/buyer/.venv`; root README updated to reflect new
+  package layout.
+
+Test coverage at end of Step 5: buyer 41, policy 22, service 96 —
+all passing. The provider-side register/start/portfolio command
+tests were dropped from buyer/tests/ when the implementations moved;
+need to be re-added in `storefront/tests/unit/test_cli_admin.py`
+covering `market_storefront.cli` (the docker-run / make-target
+invocation paths haven't behaviorally changed; mechanical port).
+Tracked with an inline TODO.
+
 ### `agent-client/` — keep separate, bundle into provider side later
 
 Investigation (2026-04-27) found that `agent-client/` is effectively a

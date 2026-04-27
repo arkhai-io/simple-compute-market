@@ -2,20 +2,22 @@
 
 Simple Market Service (SMS) is a reference implementation of Arkhai's vision for generalized agent-driven marketplaces. The goal is to support open markets for assets and services such as compute, storage, bandwidth, energy, information, real-world assets, and, in practice, almost anything that can be described, negotiated, and exchanged by autonomous buyers and sellers over open network infrastructure instead of a centralized marketplace.
 
-More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, an A2A-capable market agent, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
+More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, a market storefront, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
 
 ## Technology Stack
 
 - [Alkahest](https://github.com/arkhai-io/alkahest) for programmable peer-to-peer agreements and escrow-backed settlement flows used by the market agent.
 - [Compositional Game Theory (CGT)](https://github.com/arkhai-io/cgt) as design inspiration for the marketplace, negotiation, and distributed-systems patterns in this repo; the docs and implementation are CGT-inspired rather than strict formalizations.
 - [ZeroTier](https://www.zerotier.com/) for optional overlay networking between agents and supporting services.
-- [A2A](https://a2a-protocol.org/latest/) for agent-to-agent communication in the market agent runtime.
 - [FastAPI](https://fastapi.tiangolo.com/) for the registry/indexer and async provisioning HTTP services.
 - [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) for on-chain agent identity, metadata, and discovery.
 
 ## Repository Layout
 
-- `agent/` — A2A agent server and local test-chain helper
+- `buyer/` — Buyer-side CLI (`market` console script)
+- `storefront/` — Provider-side server + admin CLI (`market-storefront` console script)
+- `service/` — Shared infra clients (chain, alkahest, registry indexer)
+- `policy/` — Domain-agnostic negotiation policy engine
 - `erc-8004-contracts/` — ERC-8004 Identity/Reputation/Validation registries (Hardhat)
 - `erc-8004-registry-py/` — Registry/indexer API (FastAPI) for on-chain/off-chain sync
 - `infra/zerotier/` — ZeroTier controller scripts
@@ -33,10 +35,10 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 To build the CLI and add `market` to your PATH:
 
 ```bash
-make build-cli
+make build-buyer
 ```
 
-This will make the cli at ./cli/dist/market
+This will make the cli at ./buyer/dist/market
 
 You can then run it using e.g. market -v
 
@@ -69,13 +71,13 @@ market portfolio import-csv path/to/resources.csv
 Try the bundled sample:
 
 ```bash
-market portfolio import-csv core/agent/app/data/resources.sample.csv --dry-run
+market portfolio import-csv storefront/src/market_storefront/data/resources.sample.csv --dry-run
 ```
 
 Optional flags:
 
 - `--dry-run` validate and report without writing to DB
-- `--env` path to env file used by core agent import script (defaults to `core/agent/.env`)
+- `--env` path to env file used by storefront import script (defaults to `storefront/.env`)
 - `--db-path` override target SQLite DB path (otherwise uses `AGENT_DB_PATH` from env)
 
 CSV columns:

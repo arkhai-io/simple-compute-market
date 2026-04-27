@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "agents.fullname" . }}-buyer
+  name: {{ include "storefront.fullname" . }}-buyer
   labels:
-    {{- include "agents.labels" . | nindent 4 }}
+    {{- include "storefront.labels" . | nindent 4 }}
     app.kubernetes.io/component: buyer
 spec:
   type: ClusterIP
   selector:
-    {{- include "agents.selectorLabels" . | nindent 4 }}
+    {{- include "storefront.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: buyer
   ports:
     - name: http
@@ -19,14 +19,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "agents.fullname" . }}-seller
+  name: {{ include "storefront.fullname" . }}-seller
   labels:
-    {{- include "agents.labels" . | nindent 4 }}
+    {{- include "storefront.labels" . | nindent 4 }}
     app.kubernetes.io/component: seller
 spec:
   type: ClusterIP
   selector:
-    {{- include "agents.selectorLabels" . | nindent 4 }}
+    {{- include "storefront.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: seller
   ports:
     - name: http

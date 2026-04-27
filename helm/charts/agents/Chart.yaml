@@ -1,6 +1,0 @@
-apiVersion: v2
-name: agents
-description: Buyer and seller market agents for the Arkhai stack
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

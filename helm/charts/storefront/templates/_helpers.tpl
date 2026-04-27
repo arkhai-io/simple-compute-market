@@ -2,11 +2,11 @@
 charts/agents/templates/_helpers.tpl
 */}}
 
-{{- define "agents.name" -}}
+{{- define "storefront.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{- define "agents.fullname" -}}
+{{- define "storefront.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -19,17 +19,17 @@ charts/agents/templates/_helpers.tpl
 {{- end }}
 {{- end }}
 
-{{- define "agents.labels" -}}
+{{- define "storefront.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "agents.selectorLabels" . }}
+{{ include "storefront.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "agents.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "agents.name" . }}
+{{- define "storefront.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "storefront.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
@@ -37,7 +37,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Resolve the full image reference for the agents container.
 Supports an optional global.imageRepository passed down from the parent.
 */}}
-{{- define "agents.image" -}}
+{{- define "storefront.image" -}}
 {{- $repo := .Values.image.repository -}}
 {{- if and (not $repo) .Values.global -}}
   {{- $repo = .Values.global.imageRepository -}}
@@ -77,11 +77,11 @@ Mirrors the rpc.url pattern.
 Resolve the Secret name for the buyer agent.
 Uses .Values.buyer.secret.secretName when set, otherwise auto-generates from fullname.
 */}}
-{{- define "agents.buyer.secretName" -}}
+{{- define "storefront.buyer.secretName" -}}
 {{- if .Values.buyer.secret.secretName -}}
 {{- .Values.buyer.secret.secretName -}}
 {{- else -}}
-{{- printf "%s-buyer" (include "agents.fullname" .) -}}
+{{- printf "%s-buyer" (include "storefront.fullname" .) -}}
 {{- end -}}
 {{- end }}
 
@@ -89,10 +89,10 @@ Uses .Values.buyer.secret.secretName when set, otherwise auto-generates from ful
 Resolve the Secret name for the seller agent.
 Uses .Values.seller.secret.secretName when set, otherwise auto-generates from fullname.
 */}}
-{{- define "agents.seller.secretName" -}}
+{{- define "storefront.seller.secretName" -}}
 {{- if .Values.seller.secret.secretName -}}
 {{- .Values.seller.secret.secretName -}}
 {{- else -}}
-{{- printf "%s-seller" (include "agents.fullname" .) -}}
+{{- printf "%s-seller" (include "storefront.fullname" .) -}}
 {{- end -}}
 {{- end }}

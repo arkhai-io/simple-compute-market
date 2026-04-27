@@ -71,15 +71,15 @@ registry:
     logLevel: "info"
 
 # ---------------------------------------------------------------------------
-# agents subchart
+# storefront subchart
 # ---------------------------------------------------------------------------
-agents:
+storefront:
   enabled: true
 
   image:
     repository: ""
     name: arkhai
-    tag: core
+    tag: storefront
     pullPolicy: IfNotPresent
 
   buyer:

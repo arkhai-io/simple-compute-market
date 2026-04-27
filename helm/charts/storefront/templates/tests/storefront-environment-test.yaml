@@ -19,16 +19,16 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "agents.fullname" . }}-agents-smoke-test
+  name: {{ include "storefront.fullname" . }}-agents-smoke-test
   labels:
-    {{- include "agents.labels" . | nindent 4 }}
+    {{- include "storefront.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   restartPolicy: Never
   containers:
-    - name: {{ include "agents.fullname" . }}-smoke-test
+    - name: {{ include "storefront.fullname" . }}-smoke-test
       image: {{ $itImage }}
       imagePullPolicy: {{ $itPull }}
       command:
@@ -57,7 +57,7 @@ spec:
         name: {{ .Release.Name }}-test-config
     - name: buyer-secret-config
       secret:
-        secretName: {{ include "agents.buyer.secretName" . }}
+        secretName: {{ include "storefront.buyer.secretName" . }}
     - name: seller-secret-config
       secret:
-        secretName: {{ include "agents.seller.secretName" . }}
+        secretName: {{ include "storefront.seller.secretName" . }}

@@ -392,19 +392,19 @@ install_repo() {
 # ── Set up venv and install CLI ───────────────────────────────
 
 install_cli() {
-    local core_dir="$INSTALL_DIR/core"
-    local core_venv="$core_dir/.venv"
+    local buyer_dir="$INSTALL_DIR/buyer"
+    local buyer_venv="$buyer_dir/.venv"
 
-    info "Installing CLI into core venv..."
-    uv --project "$core_dir" sync --no-dev -q
+    info "Installing buyer CLI into venv..."
+    uv --project "$buyer_dir" sync --no-dev -q
 
-    ok "CLI installed into $core_venv"
+    ok "Buyer CLI installed into $buyer_venv"
 }
 
 # ── Create symlink and set up PATH ────────────────────────────
 
 setup_path() {
-    local market_bin="$INSTALL_DIR/core/.venv/bin/market"
+    local market_bin="$INSTALL_DIR/buyer/.venv/bin/market"
 
     mkdir -p "$BIN_DIR"
 
