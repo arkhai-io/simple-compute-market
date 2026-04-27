@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.agent.app.utils.sync_negotiation import (
+from market_policy.negotiation_round import (
     DEFAULT_MAX_ROUNDS,
     SellerDecision,
     decide_response,

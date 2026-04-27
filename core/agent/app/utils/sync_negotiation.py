@@ -18,92 +18,20 @@ Shape:
 `action` in the response is the seller's resulting decision.
 
 Negotiation state is persisted in the existing `negotiation_threads` +
-`negotiation_messages` tables. The decision logic (decide_response) is
-a pure function extracted from negotiation_respond_to_make_offer in
-domain/compute/agent/app/policy/store.py, with no dependency on the
-event pipeline, DecisionContext, or InvocationContext.
+`negotiation_messages` tables. The per-round decision lives in
+`market_policy.negotiation_round` so both buyer and storefront drive
+rounds through the same engine.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
 from typing import Any
 
+from market_policy.negotiation_round import SellerDecision, decide_response
+
 logger = logging.getLogger(__name__)
-
-
-# Same constants as the legacy policy path. Keeping them local so the
-# sync path is self-contained; when we eventually delete the legacy
-# respond_to_make_offer function we can pull any tuned values forward.
-DEFAULT_MAX_ROUNDS = 10
-DEFAULT_CONVERGENCE_RATIO = 0.01  # accept when peer price is within 1% of ours
-
-
-@dataclass(frozen=True)
-class SellerDecision:
-    """Pure result of one negotiation round from the seller's POV."""
-    action: str  # "counter" | "accept" | "exit" | "reject"
-    price: int | None = None        # set when action in {counter, accept}
-    reason: str | None = None       # set when action in {exit, reject, accept}
-
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"action": self.action}
-        if self.price is not None:
-            d["price"] = self.price
-        if self.reason is not None:
-            d["reason"] = self.reason
-        return d
-
-
-def decide_response(
-    *,
-    strategy: str,
-    our_price: int,
-    their_proposed_price: int,
-    our_previous_counters: list[int],
-    max_rounds: int = DEFAULT_MAX_ROUNDS,
-    convergence_ratio: float = DEFAULT_CONVERGENCE_RATIO,
-) -> SellerDecision:
-    """Pure policy decision for a single negotiation round.
-
-    `strategy` is "minimize" when we're buying compute (want lower peer
-    price) and "maximize" when we're selling compute (want higher peer
-    price) — mirrors determine_strategy_from_order in action_executor.
-
-    `our_previous_counters` is the prices we've counter-proposed so far
-    in this thread, in order. Used for round + stale guards.
-    """
-    # Round guard: walk away if we've hit the cap.
-    if len(our_previous_counters) >= max_rounds:
-        return SellerDecision(action="exit", reason="max_rounds")
-    # Stale-price guard: if our last two counters were identical we've
-    # converged on an offer the peer won't move off — end the thread.
-    if len(our_previous_counters) >= 2 and our_previous_counters[-1] == our_previous_counters[-2]:
-        return SellerDecision(action="exit", reason="stale_negotiation")
-
-    if strategy == "minimize":
-        if their_proposed_price <= our_price * (1 + convergence_ratio):
-            return SellerDecision(
-                action="accept", price=their_proposed_price, reason="convergence",
-            )
-        if their_proposed_price <= our_price * 1.5:
-            proposed = (our_price + their_proposed_price) // 2
-            return SellerDecision(action="counter", price=proposed)
-        return SellerDecision(action="exit", reason="price_unreasonable")
-
-    if strategy == "maximize":
-        if their_proposed_price >= our_price * (1 - convergence_ratio):
-            return SellerDecision(
-                action="accept", price=their_proposed_price, reason="convergence",
-            )
-        if their_proposed_price >= our_price / 1.5:
-            proposed = (our_price + their_proposed_price) // 2
-            return SellerDecision(action="counter", price=proposed)
-        return SellerDecision(action="exit", reason="price_unreasonable")
-
-    return SellerDecision(action="reject", reason=f"unknown_strategy:{strategy!r}")
 
 
 # ---------------------------------------------------------------------------
