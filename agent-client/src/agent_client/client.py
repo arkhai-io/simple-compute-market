@@ -1,14 +1,11 @@
-"""HTTP client for the Arkhai agent's custom REST API.
+"""HTTP client for the Arkhai storefront's REST API.
 
-Covers the Arkhai-specific routes added on top of the A2A protocol:
+Covers the routes the storefront exposes:
 
     POST /alerts/resource
     POST /orders/create
     POST /orders/close
     GET  /.well-known/erc-8004-registration.json
-
-A2A protocol endpoints (agent card, task management) are part of the
-``a2a-sdk`` and are not duplicated here.
 
 Auth
 ----

@@ -354,9 +354,7 @@ def _serialize_outcome_for_storage(outcome: dict[str, Any]) -> str:
 class TraderAgent:
     """Reactive policy-driven trader for compute resources.
 
-    No longer a google.adk.BaseAgent subclass — that inheritance existed
-    only to plug into the ADK Runner, which is no longer in the request
-    path. Every inbound endpoint constructs a DomainEvent and calls
+    Inbound endpoints construct a DomainEvent and call
     `_process_event_with_pipeline` directly.
     """
 
