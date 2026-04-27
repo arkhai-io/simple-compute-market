@@ -6,7 +6,7 @@ from importlib.metadata import version, PackageNotFoundError
 import typer
 
 from .common import REPO_ROOT, DEFAULT_AGENT_ENV, read_env_value, container_db_to_host, run_step
-from .role import ROLE_FILE, clear_role, get_role, set_role
+from service.role import ROLE_FILE, clear_role, get_role, set_role
 from .groups.order import order_app
 from .groups.registry import registry_app
 from .groups.network import network_app

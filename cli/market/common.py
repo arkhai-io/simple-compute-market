@@ -70,7 +70,7 @@ def resolve_config_value(
     if v:
         return v
     if toml_path:
-        from .config_loader import get_dotted, load_user_config
+        from service.config_loader import get_dotted, load_user_config
         v = get_dotted(load_user_config(), toml_path)
         if v not in (None, ""):
             return str(v)

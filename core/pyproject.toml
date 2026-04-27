@@ -12,7 +12,6 @@ dependencies = [
     "arkhai-agent-client>=0.1.0",
     "market-service",
     "provisioning-service",
-    "market-cli",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
@@ -68,7 +67,6 @@ environments = [
 pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
-market-cli = { path = "../cli", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]

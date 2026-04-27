@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 try:
-    from market.config_loader import get_dotted, load_user_config  # type: ignore[import-not-found]
+    from service.config_loader import get_dotted, load_user_config  # type: ignore[import-not-found]
     _USER_CFG: dict[str, Any] = load_user_config()
 except Exception:  # module missing or path issues — degrade to env-only
     _USER_CFG = {}
