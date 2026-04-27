@@ -71,7 +71,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     env_file:
-      - ./core/agent/.env.alice.docker-compose
+      - ./storefront/.env.alice.docker-compose
     environment:
       # Force re-registration on every fresh Anvil — clear stale IDs from env file
       - ONCHAIN_AGENT_ID=
@@ -79,7 +79,7 @@ services:
     volumes:
       - ./shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
-      - ./core/agent/app/data/buy-agent:/app/core/agent/app/data/buy-agent
+      - ./storefront/src/market_storefront/data/buy-agent:/app/src/market_storefront/data/buy-agent
     networks:
       - market-network
     deploy:
@@ -111,7 +111,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     env_file:
-      - ./core/agent/.env.bob.docker-compose
+      - ./storefront/.env.bob.docker-compose
     environment:
       # Force re-registration on every fresh Anvil — clear stale IDs from env file
       - ONCHAIN_AGENT_ID=
@@ -122,7 +122,7 @@ services:
     volumes:
       - ./shared-env:/app/shared-env
       - zerotier-sell:/var/lib/zerotier-one
-      - ./core/agent/app/data/sell-agent:/app/core/agent/app/data/sell-agent
+      - ./storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
     networks:
       - market-network
     deploy:
@@ -137,8 +137,8 @@ services:
         . /app/shared-env/.env
         set +a
         echo "Importing seller resources..."
-        PYTHONPATH="/:/app:/app/core/agent" uv run python core/agent/scripts/import_resources_csv.py \
-          --csv core/agent/app/data/ww1-machine.csv
+        PYTHONPATH="/:/app:/app/src" uv run python scripts/import_resources_csv.py \
+          --csv src/market_storefront/data/ww1-machine.csv
         exec ./entrypoint.sh
 
   # 6. Redis (job queue for provisioning service)

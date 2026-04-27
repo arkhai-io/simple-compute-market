@@ -24,7 +24,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     env_file:
-      - ../core/agent/.env.alice.docker-compose
+      - ../storefront/.env.alice.docker-compose
     environment:
       # Force re-registration on every fresh Anvil — clear stale IDs
       - ONCHAIN_AGENT_ID=
@@ -32,7 +32,7 @@ services:
     volumes:
       - ../shared-env:/app/shared-env
       - zerotier-buy:/var/lib/zerotier-one
-      - ../core/agent/app/data/buy-agent:/app/core/agent/app/data/buy-agent
+      - ../storefront/src/market_storefront/data/buy-agent:/app/src/market_storefront/data/buy-agent
     networks:
       - market-network
     deploy:

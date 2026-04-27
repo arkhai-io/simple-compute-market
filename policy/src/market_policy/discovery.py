@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def discover_and_register(package: str) -> None:
     """Import all submodules under the given package so decorators run.
 
-    Example: discover_and_register("core.agent.app.policy")
+    Example: discover_and_register("market_storefront.policy")
     """
     try:
         pkg = importlib.import_module(package)

@@ -1,6 +1,6 @@
 """Buyer-side on-chain escrow creation via alkahest-py.
 
-Mirrors core/agent/app/utils/action_executor.buy_compute_with_erc20 but
+Mirrors market_storefront/utils/action_executor.buy_compute_with_erc20 but
 runs in the CLI process. This is the `create_escrow` hook for
 buy_orchestrator.run_buy — it takes AgreedTerms, does the approve +
 escrow.create on-chain, and returns the escrow_uid.

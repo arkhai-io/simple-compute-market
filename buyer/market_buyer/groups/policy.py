@@ -81,7 +81,7 @@ def policy_train(
       arkhai_negotiator_buyer.pt
 
     Requires the core venv (pufferlib installed there):
-      cd core && uv sync --dev
+      cd storefront && uv sync --dev
     """
     config_path = Path(config).resolve() if config else _CONFIG_DIR / "bilateral.ini"
 

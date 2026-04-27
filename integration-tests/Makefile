@@ -90,7 +90,7 @@ COMPOSE         := docker compose -f "$(REPO_ROOT)/docker-compose.yml"
 E2E_PROFILE     ?= local,e2e-mock
 
 e2e-clean-dbs:
-	rm -f "$(REPO_ROOT)/core/agent/app/data/buy-agent/agent.db" "$(REPO_ROOT)/core/agent/app/data/sell-agent/agent.db"
+	rm -f "$(REPO_ROOT)/src/market_storefront/data/buy-agent/agent.db" "$(REPO_ROOT)/src/market_storefront/data/sell-agent/agent.db"
 
 e2e-wait-ready:
 	@echo "Waiting for registry healthcheck..."

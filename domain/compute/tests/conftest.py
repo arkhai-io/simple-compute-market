@@ -2,7 +2,8 @@
 
 Ensures the repo root is on sys.path so that imports like
 ``from domain.compute.agent.app.policy.arkhai_common import ...`` and
-``from core.agent.app...`` resolve correctly from any working directory.
+``from market_storefront...`` resolve correctly from any working
+directory.
 """
 import sys
 from pathlib import Path

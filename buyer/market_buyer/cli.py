@@ -70,7 +70,7 @@ def install(
         False,
         "--seller",
         help=(
-            "Full install for running a seller agent (adds core/agent, "
+            "Full install for running a seller agent (adds storefront, "
             "registry indexer, and contracts on top of the base buyer install)."
         ),
     ),

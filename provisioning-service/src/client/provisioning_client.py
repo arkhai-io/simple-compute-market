@@ -515,7 +515,7 @@ class ProvisioningClient:
 # internally, mirroring the old behaviour.
 #
 # TODO(action_executor_refactor): Replace these wrappers with direct use of
-# ProvisioningClient in core/agent/app/utils/action_executor.py.  The class
+# ProvisioningClient in market_storefront/utils/action_executor.py.  The class
 # interface is cleaner: caller controls session lifecycle, and the typed
 # create_vm / schedule_expiry methods replace the raw params dict.
 # ---------------------------------------------------------------------------

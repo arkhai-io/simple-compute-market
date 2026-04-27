@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := $(CURDIR)/.dist
 
-.PHONY: build build-runtime-images dist dist-agent-client dist-core dist-provisioning dist-service dist-clean
+.PHONY: build build-runtime-images dist dist-agent-client dist-storefront dist-policy dist-provisioning dist-service dist-clean
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
@@ -11,7 +11,7 @@ DIST_DIR := $(CURDIR)/.dist
 build: build-buyer build-market-contract-deployer build-test-env build-runtime-images
 
 build-runtime-images: dist
-	$(MAKE) -j3 build-registry build-core build-provisioning
+	$(MAKE) -j3 build-registry build-storefront build-provisioning
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -26,7 +26,7 @@ build-runtime-images: dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-agent-client dist-core dist-provisioning dist-service
+dist: dist-agent-client dist-storefront dist-policy dist-provisioning dist-service
 
 dist-agent-client: ## Build arkhai-agent-client wheel into .dist/
 	@mkdir -p $(DIST_DIR)
@@ -34,11 +34,17 @@ dist-agent-client: ## Build arkhai-agent-client wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_agent_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-agent-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-core: ## Build market-core wheel into .dist/
+dist-storefront: ## Build market-storefront wheel into .dist/
 	@mkdir -p $(DIST_DIR)
-	cd core && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/market_core-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: market-core produced a platform-specific wheel -- must build inside Docker" && exit 1)
+	cd storefront && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-policy: ## Build market-policy wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd policy && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_policy-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-provisioning: ## Build provisioning-service wheel into .dist/
 	@mkdir -p $(DIST_DIR)
@@ -78,8 +84,8 @@ build-test-env: build-anvil-state
 build-registry:
 	cd erc-8004-registry-py && make build
 
-build-core:
-	cd core && make build
+build-storefront:
+	cd storefront && make build
 
 build-provisioning:
 	cd provisioning-service && make build
@@ -113,7 +119,7 @@ deploy-compose:
 	docker compose ps
 
 #Ideally a helm chart eventually replaces the different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-test-env deploy-registry deploy-agents deploy-provisioning
+deploy: deploy-test-env deploy-registry deploy-storefront deploy-provisioning
 
 #docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
 deploy-test-env:
@@ -122,8 +128,8 @@ deploy-test-env:
 deploy-registry:
 	cd erc-8004-registry-py && make deploy
 
-deploy-agents:
-	cd core && make deploy
+deploy-storefront:
+	cd storefront && make deploy
 
 deploy-provisioning:
 	cd provisioning-service && make deploy

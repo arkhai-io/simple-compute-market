@@ -16,7 +16,7 @@ def portfolio_import_csv(
         None,
         "--env",
         "-e",
-        help="Path to env file used by core/agent script (default: core/agent/.env).",
+        help="Path to env file used by core/agent script (default: storefront/.env).",
     ),
     db_path: str | None = typer.Option(
         None,

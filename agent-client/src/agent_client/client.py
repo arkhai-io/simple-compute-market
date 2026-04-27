@@ -23,7 +23,7 @@ configured, and the signed headers are sent but ignored.
 
 Usage::
 
-    from agent.client.agent_client import AgentClient
+    from market_storefront.client.agent_client import AgentClient
     import aiohttp
 
     client = AgentClient(

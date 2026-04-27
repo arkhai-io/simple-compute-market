@@ -3,7 +3,7 @@
 The engine doesn't read agent identity from any global config; callers
 construct an `Identity` and hand it to the negotiation thread store at
 init. This keeps the engine free of dependencies on
-`core.agent.app.utils.config.CONFIG` (or any other party's runtime
+`market_storefront.utils.config.CONFIG` (or any other party's runtime
 config) and lets buyer-side and provider-side callers each construct
 their own.
 """

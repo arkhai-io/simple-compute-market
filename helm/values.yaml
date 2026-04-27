@@ -91,8 +91,8 @@ agents:
     autoRegister: true
     enableEventQueue: false
     chainName: "anvil"
-    alkahestAddressConfigPath: "/app/core/agent/app/data/alkahest_anvil_addresses.json"
-    tokenRegistryPath: "/app/core/agent/app/data/token_registry_docker_compose.json"
+    alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+    tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
     provisioningMode: "mock"
     negotiationPolicyMode: "bisection"
     sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
@@ -112,8 +112,8 @@ agents:
     autoRegister: true
     enableEventQueue: false
     chainName: "anvil"
-    alkahestAddressConfigPath: "/app/core/agent/app/data/alkahest_anvil_addresses.json"
-    tokenRegistryPath: "/app/core/agent/app/data/token_registry_docker_compose.json"
+    alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+    tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
     provisioningMode: "mock"
     negotiationPolicyMode: "bisection"
     sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"

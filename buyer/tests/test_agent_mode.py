@@ -128,7 +128,7 @@ def test_start_defaults_to_host_when_mode_absent(tmp_path: Path):
 
 def test_start_includes_volume_mount_when_db_path_set(tmp_path: Path):
     env = tmp_path / ".env"
-    env.write_text("AGENT_MODE=container\nPORT=8000\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    env.write_text("AGENT_MODE=container\nPORT=8000\nAGENT_DB_PATH=./src/market_storefront/data/buy-agent/agent.db\n")
     with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
@@ -137,8 +137,8 @@ def test_start_includes_volume_mount_when_db_path_set(tmp_path: Path):
     v_index = cmd.index("-v")
     mount = cmd[v_index + 1]
     host_part, container_part = mount.split(":")
-    assert host_part == str(REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent")
-    assert container_part == "/app/core/agent/app/data/buy-agent"
+    assert host_part == str(REPO_ROOT / "src" / "market_storefront" / "data" / "buy-agent")
+    assert container_part == "/app/src/market_storefront/data/buy-agent"
 
 
 def test_start_no_volume_mount_when_db_path_absent(tmp_path: Path):
@@ -156,13 +156,13 @@ def test_start_no_volume_mount_when_db_path_absent(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 def test_container_db_to_host_strips_dot_slash():
-    p = container_db_to_host("./core/agent/app/data/buy-agent/agent.db")
-    assert p == REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent" / "agent.db"
+    p = container_db_to_host("./src/market_storefront/data/buy-agent/agent.db")
+    assert p == REPO_ROOT / "src" / "market_storefront" / "data" / "buy-agent" / "agent.db"
 
 
 def test_container_db_to_host_strips_app_prefix():
-    p = container_db_to_host("/app/core/agent/app/data/buy-agent/agent.db")
-    assert p == REPO_ROOT / "core" / "agent" / "app" / "data" / "buy-agent" / "agent.db"
+    p = container_db_to_host("/app/src/market_storefront/data/buy-agent/agent.db")
+    assert p == REPO_ROOT / "src" / "market_storefront" / "data" / "buy-agent" / "agent.db"
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ def test_order_history_resolves_host_path_in_container_mode(tmp_path: Path):
     conn.close()
 
     env = tmp_path / ".env"
-    env.write_text(f"AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    env.write_text(f"AGENT_MODE=container\nAGENT_DB_PATH=./src/market_storefront/data/buy-agent/agent.db\n")
 
     with patch("market_buyer.groups.order.container_db_to_host", return_value=db_file):
         result = runner.invoke(app, ["order", "history", "--env", str(env)])
@@ -219,7 +219,7 @@ def test_order_show_resolves_host_path_in_container_mode(tmp_path: Path):
     conn.close()
 
     env = tmp_path / ".env"
-    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./src/market_storefront/data/buy-agent/agent.db\n")
 
     with patch("market_buyer.groups.order.container_db_to_host", return_value=db_file):
         result = runner.invoke(app, ["order", "show", "nonexistent-id", "--env", str(env)])
@@ -253,7 +253,7 @@ def test_portfolio_import_csv_passes_host_db_path_in_container_mode(tmp_path: Pa
     csv_file = tmp_path / "resources.csv"
     csv_file.write_text("name,value\n")
     env = tmp_path / ".env"
-    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./src/market_storefront/data/buy-agent/agent.db\n")
 
     with patch("market_buyer.groups.portfolio.run_step") as mock_run:
         runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env)])
@@ -261,7 +261,7 @@ def test_portfolio_import_csv_passes_host_db_path_in_container_mode(tmp_path: Pa
     cmd = mock_run.call_args[0][1]
     db_args = [a for a in cmd if a.startswith("DB_PATH=")]
     assert len(db_args) == 1
-    assert db_args[0] == f"DB_PATH={REPO_ROOT}/core/agent/app/data/buy-agent/agent.db"
+    assert db_args[0] == f"DB_PATH={REPO_ROOT}/src/market_storefront/data/buy-agent/agent.db"
 
 
 def test_portfolio_import_csv_no_db_path_override_in_host_mode(tmp_path: Path):
@@ -284,7 +284,7 @@ def test_portfolio_import_csv_explicit_db_path_takes_precedence(tmp_path: Path):
     csv_file = tmp_path / "resources.csv"
     csv_file.write_text("name,value\n")
     env = tmp_path / ".env"
-    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
+    env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./src/market_storefront/data/buy-agent/agent.db\n")
 
     with patch("market_buyer.groups.portfolio.run_step") as mock_run:
         runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env), "--db-path", "/explicit/agent.db"])

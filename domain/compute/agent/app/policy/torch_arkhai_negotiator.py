@@ -20,7 +20,7 @@ from domain.compute.agent.app.policy.arkhai_common import (
 )
 from market_policy.action_builders import NegotiationActionBuilder
 from market_policy.registry import policy_callable
-from core.agent.app.schema.pydantic_models import (
+from market_storefront.schema.pydantic_models import (
     Action as DomainAction,
     DecisionContext,
     NegotiationEvent,

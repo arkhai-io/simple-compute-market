@@ -51,7 +51,7 @@ class PolicyManager:
             return
 
         # Auto-discover and bulk-register callable policies
-        discover_and_register("core.agent.app.policy")
+        discover_and_register("market_storefront.policy")
         discover_and_register("domain.compute.agent.app.policy")
         self._policy_store.register_callables(CALLABLE_REGISTRY)
         self._initialized = True

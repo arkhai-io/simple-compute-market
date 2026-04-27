@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.agent.app.schema.pydantic_models import (
+from market_storefront.schema.pydantic_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
     AcceptOfferEvent,
@@ -21,12 +21,12 @@ from core.agent.app.schema.pydantic_models import (
 from market_policy.registry import policy_callable
 from market_policy.action_builders import NegotiationActionBuilder, make_negotiation_id
 from market_policy.negotiation_thread import get_thread_store, NegotiationThreadTransaction
-from core.agent.app.utils.validation import (
+from market_storefront.utils.validation import (
     extract_resources_from_make_offer_event,
     determine_strategy_from_order,
 )
 from service.clients.indexer import get_registry_client
-from core.agent.app.utils.action_executor import _extract_initial_price_from_order
+from market_storefront.utils.action_executor import _extract_initial_price_from_order
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("oc.action.make_offer_from_order_create")
 def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAction | None:
-    from core.agent.app.schema.pydantic_models import ActionType, OrderCreateEvent
+    from market_storefront.schema.pydantic_models import ActionType, OrderCreateEvent
 
     if not isinstance(context.event, OrderCreateEvent):
         return None
@@ -123,7 +123,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
 
 @policy_callable("oc.action.close_order")
 def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
-    from core.agent.app.schema.pydantic_models import ActionType, OrderCloseEvent
+    from market_storefront.schema.pydantic_models import ActionType, OrderCloseEvent
 
     if not isinstance(context.event, OrderCloseEvent):
         return None
@@ -137,7 +137,7 @@ def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("ri.action.make_offer_from_resource")
 def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction | None:
-    from core.agent.app.schema.pydantic_models import ActionType
+    from market_storefront.schema.pydantic_models import ActionType
 
     res = getattr(context.event, "resource", None)
     if not res:
@@ -158,7 +158,7 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
     if not isinstance(context.event, AcceptOfferEvent):
         return None
 
-    from core.agent.app.utils.config import CONFIG
+    from market_storefront.utils.config import CONFIG
 
     order = context.event.order
     escrow_uid = context.event.escrow_uid
@@ -649,7 +649,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         incoming_order = order_obj
 
     # Don't negotiate with our own orders (can arrive via self-send if registry returns them)
-    from core.agent.app.utils.config import CONFIG as _CONFIG
+    from market_storefront.utils.config import CONFIG as _CONFIG
     _our_url = (_CONFIG.base_url_override or "").strip().rstrip("/").lower()
     _their_url = (incoming_order.get("order_maker") or "").strip().rstrip("/").lower()
     if _our_url and _our_url == _their_url:
@@ -704,7 +704,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
     # the counterparty hadn't published yet), fall through and respond to their offer.
     canonical_first = min(our_order_id, their_order_id)
     if our_order_id == canonical_first:
-        from core.agent.app.utils.config import CONFIG
+        from market_storefront.utils.config import CONFIG
         thread_store = get_thread_store()
         existing_thread = await thread_store.get_thread_info(
             negotiation_id=negotiation_id,

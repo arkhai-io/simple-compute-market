@@ -8,7 +8,7 @@ import typer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEFAULT_AGENT_ENV = REPO_ROOT / "core" / "agent" / ".env"
+DEFAULT_AGENT_ENV = REPO_ROOT / "storefront" / ".env"
 
 
 def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> str:
@@ -51,7 +51,7 @@ def resolve_config_value(
 
     Precedence:
       1. Explicit `override` (CLI flag)
-      2. `env_file` (e.g. core/agent/.env passed via --env)
+      2. `env_file` (e.g. storefront/.env passed via --env)
       3. Shell `env_name` environment variable
       4. Dotted `toml_path` key in the user config.toml
       5. `default`
@@ -81,11 +81,11 @@ def container_db_to_host(db_path: str) -> Path:
     """Resolve a container-side AGENT_DB_PATH to its host-side equivalent under REPO_ROOT.
 
     Container paths are relative to the container WORKDIR (/app), e.g.:
-      ./core/agent/app/data/buy-agent/agent.db  →  REPO_ROOT/core/agent/app/data/buy-agent/agent.db
-      /app/core/agent/app/data/buy-agent/agent.db  →  same
+      ./src/market_storefront/data/buy-agent/agent.db  →  REPO_ROOT/src/market_storefront/data/buy-agent/agent.db
+      /app/src/market_storefront/data/buy-agent/agent.db  →  same
 
-    With the -v mount added by `market start`, the file is accessible at this
-    host path without needing docker exec.
+    With the -v mount added by `market start`, the file is accessible
+    at this host path without needing docker exec.
     """
     rel = db_path
     if rel.startswith("/app/"):
@@ -137,12 +137,13 @@ def run_step(
     typer.echo(f"==> {label} at {cwd}")
     env = os.environ.copy()
     venv_path = cwd / ".venv"
-    # TODO(refactor): After migration completes, always prefer core/.venv.
-    # Transitional rule: commands run from core/agent should use core/.venv.
-    if cwd.resolve() == (REPO_ROOT / "core" / "agent").resolve():
-        core_venv = REPO_ROOT / "core" / ".venv"
-        if core_venv.exists():
-            venv_path = core_venv
+    # When running storefront-side commands (e.g. registration scripts)
+    # the working dir is the storefront package, but uv created the
+    # venv at the storefront package root.
+    if cwd.resolve() == (REPO_ROOT / "storefront").resolve():
+        storefront_venv = REPO_ROOT / "storefront" / ".venv"
+        if storefront_venv.exists():
+            venv_path = storefront_venv
     venv_bin = venv_path / "bin"
     if venv_bin.exists():
         env["VIRTUAL_ENV"] = str(venv_path)

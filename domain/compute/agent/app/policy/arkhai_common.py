@@ -16,7 +16,7 @@ from typing import Any, Optional
 import gymnasium as gym
 from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
 
-from core.agent.app.schema.pydantic_models import (
+from market_storefront.schema.pydantic_models import (
     Action as DomainAction,
     ActionType,
     ComputeResource,
