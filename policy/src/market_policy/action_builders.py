@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 import logging
 
-from core.agent.app.schema.pydantic_models import Action as DomainAction, ActionType
+from service.schemas import DomainAction, ActionType
 
 logger = logging.getLogger(__name__)
 

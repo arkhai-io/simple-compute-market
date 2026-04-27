@@ -19,9 +19,9 @@ NOTE: Policy requires strategy to be specified. If no strategy, passes to next p
 
 import pytest
 from core.agent.app.schema.pydantic_models import DecisionContext, NegotiationEvent
-from core.agent.app.policy.store import PolicyStore
+from market_policy.store import PolicyStore
 from core.agent.app.utils.sqlite_client import SQLiteClient
-from core.agent.app.policy.evaluator import CallableEvaluator
+from market_policy.evaluator import CallableEvaluator
 import tempfile
 import os
 
@@ -39,7 +39,7 @@ def temp_db():
 @pytest.fixture
 def policy_store(temp_db):
     """Create a PolicyStore with registered policies for testing."""
-    from core.agent.app.policy.registry import CALLABLE_REGISTRY
+    from market_policy.registry import CALLABLE_REGISTRY
 
     # Clear registry to ensure clean state
     CALLABLE_REGISTRY.clear()
@@ -458,7 +458,7 @@ class TestMultipleBilateralNegotiations:
     @pytest.fixture
     def thread_store(self, temp_db):
         """Create a NegotiationThreadStore for multi-party tests."""
-        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.negotiation_thread import NegotiationThreadStore
         sqlite_client = SQLiteClient(db_path=temp_db)
         return NegotiationThreadStore(sqlite_client=sqlite_client)
 
@@ -909,7 +909,7 @@ class TestMakeOfferRoundGuard:
 
     @pytest.fixture
     def thread_store(self, temp_db):
-        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.negotiation_thread import NegotiationThreadStore
         return NegotiationThreadStore(SQLiteClient(db_path=temp_db))
 
     def _make_event_and_context(self, their_price: int = 150):
@@ -953,7 +953,7 @@ class TestMakeOfferRoundGuard:
     async def test_make_offer_exits_at_max_rounds(self, thread_store, temp_db):
         """Round guard exits with EXIT_NEGOTIATION / max_rounds after MAX_ROUNDS counter-offers."""
         from unittest.mock import AsyncMock, patch
-        from core.agent.app.policy.action_builders import make_negotiation_id
+        from market_policy.action_builders import make_negotiation_id
         import core.agent.app.utils.config as cfg_mod
         from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 
@@ -997,7 +997,7 @@ class TestMakeOfferRoundGuard:
     async def test_make_offer_exits_on_stale_price(self, thread_store, temp_db):
         """Round guard exits with EXIT_NEGOTIATION / stale_negotiation when last 2 counters have same price."""
         from unittest.mock import AsyncMock, patch
-        from core.agent.app.policy.action_builders import make_negotiation_id
+        from market_policy.action_builders import make_negotiation_id
         from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 
         neg_id = make_negotiation_id(self.OUR_ORDER_ID, self.THEIR_ORDER_ID)

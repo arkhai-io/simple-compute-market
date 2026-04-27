@@ -17,7 +17,7 @@ from core.agent.app.schema.pydantic_models import (
     GPUModel,
     Region,
 )
-from core.agent.app.policy.store import PolicyStore
+from market_policy.store import PolicyStore
 from domain.compute.agent.app.policy.store import negotiation_respond_to_make_offer
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.utils.action_executor import _extract_initial_price_from_order
@@ -129,13 +129,13 @@ class TestRespondToMakeOffer:
 
     @pytest.fixture
     def thread_store(self, temp_db):
-        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.negotiation_thread import NegotiationThreadStore
         return NegotiationThreadStore(sqlite_client=SQLiteClient(db_path=temp_db))
 
     @pytest.fixture
     def policy_store(self, temp_db, thread_store):
         from unittest.mock import patch
-        from core.agent.app.policy.registry import CALLABLE_REGISTRY
+        from market_policy.registry import CALLABLE_REGISTRY
 
         CALLABLE_REGISTRY.clear()
 
@@ -638,7 +638,7 @@ class TestThreadCreationWithInitialPriceAndStrategy:
 
     @pytest.fixture
     def thread_store(self, temp_db):
-        from core.agent.app.policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.negotiation_thread import NegotiationThreadStore
         sqlite_client = SQLiteClient(db_path=temp_db)
         return NegotiationThreadStore(sqlite_client=sqlite_client)
 

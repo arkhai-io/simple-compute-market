@@ -4,9 +4,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core.agent.app.policy.discovery import discover_and_register
-from core.agent.app.policy.registry import CALLABLE_REGISTRY
-from core.agent.app.policy.store import PolicyStore
+from market_policy.discovery import discover_and_register
+from market_policy.registry import CALLABLE_REGISTRY
+from market_policy.store import PolicyStore
 
 logger = logging.getLogger(__name__)
 

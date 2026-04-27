@@ -68,9 +68,10 @@ from core.agent.app.resources import (
     get_supported_resource_types,
     parse_resource_from_dict,
 )
-from core.agent.app.policy.store import PolicyStore
-from core.agent.app.policy.manager import PolicyManager
-from core.agent.app.policy.negotiation_thread import get_thread_store
+from market_policy.store import PolicyStore
+from market_policy.manager import PolicyManager
+from market_policy.negotiation_thread import get_thread_store
+from market_policy.identity import Identity
 from core.agent.app.policy.seeding import ComputePolicySeeder
 from core.agent.app.utils.sqlite_client import SQLiteClient
 from core.agent.app.schema.pydantic_models import DecisionContext, Action, Decision
@@ -378,9 +379,14 @@ class TraderAgent:
 
         # Initialize SQLite client (shared for policies and decisions)
         self._sqlite_client = SQLiteClient(db_path=AGENT_DB_PATH)
-        
-        # Initialize negotiation thread store
-        get_thread_store(sqlite_client=self._sqlite_client)
+
+        # Initialize negotiation thread store with our local identity.
+        # The engine is identity-agnostic; we hand it the storefront's
+        # url + agent id at boot.
+        get_thread_store(
+            sqlite_client=self._sqlite_client,
+            identity=Identity(agent_url=BASE_URL_OVERRIDE, agent_id=self.name),
+        )
         
         # Initialize PolicyStore (private attribute to avoid Pydantic field requirements)
         self._policy_store = PolicyStore(self._sqlite_client)

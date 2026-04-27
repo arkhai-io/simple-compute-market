@@ -1,34 +1,19 @@
 from enum import Enum
 from datetime import datetime
-import sys
-from pathlib import Path
 from typing import Any, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
-try:
-    from core.schemas import (
-        Attestation as CoreAttestation,
-        Decision as CoreDecision,
-        DecisionContext as CoreDecisionContext,
-        DomainAction as CoreDomainAction,
-        DomainEvent as CoreDomainEvent,
-        Resource as CoreResource,
-        TokenResource as CoreTokenResource,
-    )
-except ModuleNotFoundError:
-    repo_root = Path(__file__).resolve().parents[3]
-    if str(repo_root) not in sys.path:
-        sys.path.append(str(repo_root))
-    from core.schemas import (  # type: ignore[no-redef]
-        Attestation as CoreAttestation,
-        Decision as CoreDecision,
-        DecisionContext as CoreDecisionContext,
-        DomainAction as CoreDomainAction,
-        DomainEvent as CoreDomainEvent,
-        Resource as CoreResource,
-        TokenResource as CoreTokenResource,
-    )
+from service.schemas import (
+    ActionType,
+    Attestation as CoreAttestation,
+    Decision as CoreDecision,
+    DecisionContext as CoreDecisionContext,
+    DomainAction as CoreDomainAction,
+    DomainEvent as CoreDomainEvent,
+    Resource as CoreResource,
+    TokenResource as CoreTokenResource,
+)
 
 from service.clients.token import ERC20TokenMetadata
 
@@ -682,34 +667,7 @@ class NegotiationEvent(DomainEvent):
 # =============================
 # Decision and Action domain models for reactive agents
 # =============================
-
-
-class ActionType(str, Enum):
-    """Types of actions an agent can take."""
-
-    # Market entry actions
-    RESPOND_TO_ORDER = "respond_to_order"
-    IGNORE_ORDER = "ignore_order"
-    MAKE_OFFER = "make_offer"
-
-    # Negotiation actions
-    ACCEPT_OFFER = "accept_offer"
-    REJECT_OFFER = "reject_offer"
-    COUNTER_OFFER = "counter_offer"
-    EXIT_NEGOTIATION = "exit_negotiation"
-    CLOSE_ORDER = "close_order"
-
-    # Resource management actions
-    RESOLVE_INTERNALLY = "resolve_internally"
-    OUTSOURCE = "outsource"
-    FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
-    TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
-    COLLECT_ESCROW = "collect_escrow"
-    HANDLE_FULFILLMENT_FAILURE = "handle_fulfillment_failure"
-    VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
-
-    # No-op
-    NOOP = "noop"
+# ActionType moved to service.schemas (imported at module top).
 
 
 Action = CoreDomainAction

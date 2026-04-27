@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Dict, List
 
-from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
+from service.schemas import DomainAction, DecisionContext
 
 if TYPE_CHECKING:
-    from core.agent.app.policy.store import PolicyStore
+    from market_policy.store import PolicyStore
 
 
 def chain_callables(

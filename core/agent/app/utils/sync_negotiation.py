@@ -130,8 +130,8 @@ async def start_sync_negotiation(
     """
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
-    from core.agent.app.policy.negotiation_thread import NegotiationThreadTransaction
-    from core.agent.app.policy.action_builders import make_negotiation_id
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
+    from market_policy.action_builders import make_negotiation_id
     from core.agent.app.schema.pydantic_models import MarketOrder
     from core.agent.app.utils.action_executor import (
         _extract_initial_price_from_order,
@@ -210,7 +210,7 @@ async def continue_sync_negotiation(
         commit agreed_terms and return action=accept in response.
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
-    from core.agent.app.policy.negotiation_thread import NegotiationThreadTransaction
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
     from core.agent.app.schema.pydantic_models import MarketOrder
     from core.agent.app.utils.action_executor import (
         _extract_initial_price_from_order,
@@ -349,7 +349,7 @@ async def _record_seller_decision(
     decision: SellerDecision,
 ) -> None:
     """Persist the seller's decision as a message + terminal state if applicable."""
-    from core.agent.app.policy.negotiation_thread import NegotiationThreadTransaction
+    from market_policy.negotiation_thread import NegotiationThreadTransaction
     from core.agent.app.utils.config import CONFIG
 
     sender = CONFIG.base_url_override or "seller"

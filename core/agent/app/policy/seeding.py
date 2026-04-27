@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from core.agent.app.policy.store import PolicyStore
+from market_policy.store import PolicyStore
 from core.agent.app.schema.pydantic_models import EventType
 from core.agent.app.utils.sqlite_client import SQLiteClient
 

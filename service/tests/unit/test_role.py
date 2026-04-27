@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from market import role
+from service import role
 
 
 @pytest.fixture

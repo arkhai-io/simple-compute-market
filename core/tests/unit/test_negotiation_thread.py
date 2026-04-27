@@ -7,7 +7,11 @@ import os
 from pathlib import Path
 
 from core.agent.app.utils.sqlite_client import SQLiteClient
-from core.agent.app.policy.negotiation_thread import get_thread_store, NegotiationThreadStore
+from market_policy.identity import Identity
+from market_policy.negotiation_thread import get_thread_store, NegotiationThreadStore
+
+
+_TEST_IDENTITY = Identity(agent_url="test-agent-url", agent_id="test-agent-id")
 
 
 @pytest.fixture
@@ -30,7 +34,7 @@ def sqlite_client(temp_db):
 @pytest.fixture
 def thread_store(sqlite_client):
     """Create a NegotiationThreadStore instance."""
-    return NegotiationThreadStore(sqlite_client=sqlite_client)
+    return NegotiationThreadStore(sqlite_client=sqlite_client, identity=_TEST_IDENTITY)
 
 
 class TestNegotiationThreadStore:
@@ -222,40 +226,44 @@ class TestGetThreadStore:
     """Tests for get_thread_store() function."""
     
     def test_get_thread_store_requires_sqlite_client(self, sqlite_client):
-        """Test that get_thread_store() requires sqlite_client on first call."""
+        """Test that get_thread_store() requires sqlite_client and identity on first call."""
         # Reset global state by importing fresh
         import importlib
-        import core.agent.app.policy.negotiation_thread as nthread_module
+        import market_policy.negotiation_thread as nthread_module
         importlib.reload(nthread_module)
-        
+
         # Get the NegotiationThreadStore class from the reloaded module
         ReloadedNegotiationThreadStore = nthread_module.NegotiationThreadStore
-        
-        # First call without sqlite_client should raise ValueError
-        with pytest.raises(ValueError, match="SQLiteClient must be provided"):
+
+        # First call without args should raise ValueError
+        with pytest.raises(ValueError, match="must be provided"):
             nthread_module.get_thread_store()
-        
-        # First call with sqlite_client should work
-        store = nthread_module.get_thread_store(sqlite_client=sqlite_client)
+
+        # First call with both args should work
+        store = nthread_module.get_thread_store(
+            sqlite_client=sqlite_client, identity=_TEST_IDENTITY
+        )
         assert isinstance(store, ReloadedNegotiationThreadStore)
-        
-        # Subsequent calls can omit parameter
+
+        # Subsequent calls can omit parameters
         store2 = nthread_module.get_thread_store()
         assert store2 is store  # Same instance
-    
+
     def test_get_thread_store_singleton(self, sqlite_client):
         """Test that get_thread_store() returns singleton instance."""
         import importlib
-        import core.agent.app.policy.negotiation_thread as nthread_module
+        import market_policy.negotiation_thread as nthread_module
         importlib.reload(nthread_module)
-        
+
         # Get the NegotiationThreadStore class from the reloaded module
         ReloadedNegotiationThreadStore = nthread_module.NegotiationThreadStore
-        
-        store1 = nthread_module.get_thread_store(sqlite_client=sqlite_client)
+
+        store1 = nthread_module.get_thread_store(
+            sqlite_client=sqlite_client, identity=_TEST_IDENTITY
+        )
         store2 = nthread_module.get_thread_store()
         store3 = nthread_module.get_thread_store()
-        
+
         assert isinstance(store1, ReloadedNegotiationThreadStore)
         assert store1 is store2
         assert store2 is store3

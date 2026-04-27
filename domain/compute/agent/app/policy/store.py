@@ -18,9 +18,9 @@ from core.agent.app.schema.pydantic_models import (
     TokenResource,
     ComputeResourcePortfolio,
 )
-from core.agent.app.policy.registry import policy_callable
-from core.agent.app.policy.action_builders import NegotiationActionBuilder, make_negotiation_id
-from core.agent.app.policy.negotiation_thread import get_thread_store, NegotiationThreadTransaction
+from market_policy.registry import policy_callable
+from market_policy.action_builders import NegotiationActionBuilder, make_negotiation_id
+from market_policy.negotiation_thread import get_thread_store, NegotiationThreadTransaction
 from core.agent.app.utils.validation import (
     extract_resources_from_make_offer_event,
     determine_strategy_from_order,

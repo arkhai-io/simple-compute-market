@@ -1,12 +1,14 @@
-"""Domain-agnostic core schemas.
+"""Domain-agnostic shared schemas.
 
-These models are intentionally minimal and stable so current agent code can
-map in/out without immediate domain extraction.
+These models are intentionally minimal and stable. Both the policy
+engine (market-policy) and the storefront/buyer runtimes import from
+here, so any change is a cross-package break.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import Enum
 
 UTC = timezone.utc
 from typing import Any
@@ -14,6 +16,39 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
+
+
+class ActionType(str, Enum):
+    """The full vocabulary of actions the policy engine can emit.
+
+    Lives here (next to DomainAction / DecisionContext) rather than in
+    the engine package because both the engine and the runtimes that
+    execute actions need to agree on the values.
+    """
+
+    # Market entry
+    RESPOND_TO_ORDER = "respond_to_order"
+    IGNORE_ORDER = "ignore_order"
+    MAKE_OFFER = "make_offer"
+
+    # Negotiation
+    ACCEPT_OFFER = "accept_offer"
+    REJECT_OFFER = "reject_offer"
+    COUNTER_OFFER = "counter_offer"
+    EXIT_NEGOTIATION = "exit_negotiation"
+    CLOSE_ORDER = "close_order"
+
+    # Resource management
+    RESOLVE_INTERNALLY = "resolve_internally"
+    OUTSOURCE = "outsource"
+    FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
+    TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
+    COLLECT_ESCROW = "collect_escrow"
+    HANDLE_FULFILLMENT_FAILURE = "handle_fulfillment_failure"
+    VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
+
+    # No-op
+    NOOP = "noop"
 
 
 class Resource(BaseModel):

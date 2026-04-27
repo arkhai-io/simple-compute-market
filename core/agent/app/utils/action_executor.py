@@ -35,11 +35,11 @@ from service.clients.indexer import get_registry_client
 from core.agent.app.utils.sqlite_client import get_sqlite_client
 from service.clients.provisioning import provision_machine_async, provision_machine_async_with_id, get_job_credentials_async, ProvisioningError
 from service.clients.provisioning import schedule_vm_expiry_async
-from core.agent.app.policy.negotiation_thread import (
+from market_policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
 )
-from core.agent.app.policy.action_builders import make_negotiation_id
+from market_policy.action_builders import make_negotiation_id
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override

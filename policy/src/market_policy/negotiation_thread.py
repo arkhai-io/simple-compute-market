@@ -5,15 +5,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
-from core.agent.app.ports.persistence import NegotiationThreadPersistencePort
-from core.agent.app.policy.action_builders import make_negotiation_id
-from core.agent.app.utils.config import CONFIG
+from market_policy.ports.persistence import NegotiationThreadPersistencePort
+from market_policy.action_builders import make_negotiation_id
+from market_policy.identity import Identity
 
 logger = logging.getLogger(__name__)
-
-# Agent identity constants for negotiation tracking
-AGENT_ID = CONFIG.agent_id
-AGENT_URL = CONFIG.base_url_override
 
 
 @dataclass
@@ -216,10 +212,11 @@ class NegotiationThreadTransaction:
             logger.warning(f"[{self.component}] No thread store available")
             return
 
-        # Pass owner_id=AGENT_URL to identify which agent's private state to access
+        # owner_id identifies which agent's private state to access
+        owner_id = self.thread_store._identity.agent_url
         existing = await self.thread_store.get_thread_info(
             negotiation_id=negotiation_id,
-            owner_id=AGENT_URL
+            owner_id=owner_id,
         )
         if not existing:
             await self.thread_store.create_thread(
@@ -228,7 +225,7 @@ class NegotiationThreadTransaction:
                 their_order_id=their_order_id,
                 our_agent_id=our_agent_id,
                 their_agent_id=their_agent_id,
-                owner_id=AGENT_URL,  # We are the owner of this private state
+                owner_id=owner_id,
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
             )
@@ -280,13 +277,21 @@ class NegotiationThreadStore:
     - Thread history for policy evaluation
     """
     
-    def __init__(self, sqlite_client: NegotiationThreadPersistencePort):
-        """Initialize thread store with SQLite client.
-        
+    def __init__(
+        self,
+        sqlite_client: NegotiationThreadPersistencePort,
+        identity: Identity,
+    ):
+        """Initialize thread store with persistence client and local identity.
+
         Args:
-            sqlite_client: Persistence client implementing negotiation thread operations
+            sqlite_client: Persistence client implementing negotiation thread operations.
+            identity: Local participant identity. Used as the `owner_id`
+                tag on private thread state, and as our_agent_id when
+                the engine creates threads for incoming offers.
         """
         self._sqlite = sqlite_client
+        self._identity = identity
     
     async def create_thread(
         self,
@@ -481,7 +486,7 @@ class NegotiationThreadStore:
         existing = await self._sqlite.check_existing_negotiation(
             our_order_id=our_order_id or "",
             their_order_id=their_order_id,
-            our_agent_id=AGENT_URL if our_order_id else None,
+            our_agent_id=self._identity.agent_url if our_order_id else None,
             their_agent_id=their_agent_id,
         )
         if existing:
@@ -498,8 +503,9 @@ class NegotiationThreadStore:
                 negotiation_id=negotiation_id,
                 our_order_id=our_order_id or "",
                 their_order_id=their_order_id,
-                our_agent_id=AGENT_URL,
+                our_agent_id=self._identity.agent_url,
                 their_agent_id=their_agent_id,
+                owner_id=self._identity.agent_url,
             )
             logger.info(
                 f"[NEGOTIATION THREAD] Created thread {negotiation_id} for incoming offer "
@@ -517,23 +523,28 @@ _thread_store: Optional[NegotiationThreadStore] = None
 
 def get_thread_store(
     sqlite_client: NegotiationThreadPersistencePort | None = None,
+    identity: Identity | None = None,
 ) -> NegotiationThreadStore:
-    """Get or create global negotiation thread store.
-    
+    """Get or create the global negotiation thread store.
+
+    Both `sqlite_client` and `identity` must be provided on the first
+    call. Subsequent calls return the cached singleton.
+
     Args:
-        sqlite_client: Persistence client instance. If None, uses the global instance.
-                      Must be provided on first call.
-    
+        sqlite_client: Persistence client implementation.
+        identity: Local participant identity. Stored on the thread
+            store and used wherever the engine needs to tag the local
+            owner of private state.
+
     Returns:
-        NegotiationThreadStore instance
+        NegotiationThreadStore singleton.
     """
     global _thread_store
     if _thread_store is None:
-        if sqlite_client is None:
+        if sqlite_client is None or identity is None:
             raise ValueError(
-                "SQLiteClient must be provided on first call to get_thread_store(). "
-                "Persistence client must be provided on first call to get_thread_store(). "
-                "Call from agent initialization with sqlite_client parameter."
+                "Both sqlite_client and identity must be provided on the "
+                "first call to get_thread_store()."
             )
-        _thread_store = NegotiationThreadStore(sqlite_client)
+        _thread_store = NegotiationThreadStore(sqlite_client, identity)
     return _thread_store

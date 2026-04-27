@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, List, Tuple
 
-from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
-from core.agent.app.ports.persistence import PolicyPersistencePort
+from service.schemas import DomainAction, DecisionContext
+from market_policy.ports.persistence import PolicyPersistencePort
 
-from core.agent.app.policy.evaluator import CallableEvaluator
+from market_policy.evaluator import CallableEvaluator
 
 CacheKey = Tuple[str, str]  # (agent_id, trigger_type)
 logger = logging.getLogger(__name__)

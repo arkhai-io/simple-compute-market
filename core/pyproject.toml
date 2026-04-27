@@ -11,6 +11,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "arkhai-agent-client>=0.1.0",
     "market-service",
+    "market-policy",
     "provisioning-service",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
@@ -67,6 +68,7 @@ environments = [
 pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
+market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]

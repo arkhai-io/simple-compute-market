@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from typing import Callable, Dict
-from core.agent.app.schema.pydantic_models import Action as DomainAction, DecisionContext
+from service.schemas import DomainAction, DecisionContext
 
 logger = logging.getLogger(__name__)
 

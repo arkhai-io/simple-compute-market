@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from market import config_loader
+from service import config_loader
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +209,7 @@ def test_write_creates_parent_directory(tmp_path):
 
 
 def test_write_serializes_bool_int_float():
-    from market.config_loader import _serialize_toml
+    from service.config_loader import _serialize_toml
     text = _serialize_toml({
         "seller": {"port": 8000, "enabled": True, "ratio": 0.5},
         "nested": {"inner": {"flag": False}},
