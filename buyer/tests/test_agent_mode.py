@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from market.cli import app
-from market.common import read_env_value, container_db_to_host, REPO_ROOT
+from market_buyer.cli import app
+from market_buyer.common import read_env_value, container_db_to_host, REPO_ROOT
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +56,7 @@ runner = CliRunner()
 def test_register_is_noop_when_container_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["register", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_not_called()
@@ -66,7 +66,7 @@ def test_register_is_noop_when_container_mode(tmp_path: Path):
 def test_register_runs_make_when_host_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=host\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["register", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_called_once()
@@ -78,7 +78,7 @@ def test_register_runs_make_when_host_mode(tmp_path: Path):
 def test_register_defaults_to_host_when_mode_absent(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("PORT=8000\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["register", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_called_once()
@@ -91,7 +91,7 @@ def test_register_defaults_to_host_when_mode_absent(tmp_path: Path):
 def test_start_runs_docker_when_container_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nPORT=8001\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_called_once()
@@ -107,7 +107,7 @@ def test_start_runs_docker_when_container_mode(tmp_path: Path):
 def test_start_runs_make_when_host_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=host\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
     mock_run.assert_called_once()
@@ -119,7 +119,7 @@ def test_start_runs_make_when_host_mode(tmp_path: Path):
 def test_start_defaults_to_host_when_mode_absent(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("PORT=8000\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
     cmd = mock_run.call_args[0][1]
@@ -129,7 +129,7 @@ def test_start_defaults_to_host_when_mode_absent(tmp_path: Path):
 def test_start_includes_volume_mount_when_db_path_set(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nPORT=8000\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
     cmd = mock_run.call_args[0][1]
@@ -144,7 +144,7 @@ def test_start_includes_volume_mount_when_db_path_set(tmp_path: Path):
 def test_start_no_volume_mount_when_db_path_absent(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nPORT=8000\n")
-    with patch("market.cli.run_step") as mock_run:
+    with patch("market_buyer.cli.run_step") as mock_run:
         result = runner.invoke(app, ["start", "--env", str(env)])
     assert result.exit_code == 0
     cmd = mock_run.call_args[0][1]
@@ -182,7 +182,7 @@ def test_order_history_resolves_host_path_in_container_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text(f"AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
 
-    with patch("market.groups.order.container_db_to_host", return_value=db_file):
+    with patch("market_buyer.groups.order.container_db_to_host", return_value=db_file):
         result = runner.invoke(app, ["order", "history", "--env", str(env)])
     assert result.exit_code == 0
     assert "No local orders found." in result.output
@@ -221,7 +221,7 @@ def test_order_show_resolves_host_path_in_container_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
 
-    with patch("market.groups.order.container_db_to_host", return_value=db_file):
+    with patch("market_buyer.groups.order.container_db_to_host", return_value=db_file):
         result = runner.invoke(app, ["order", "show", "nonexistent-id", "--env", str(env)])
     # DB resolves correctly; fails on missing order, not missing DB
     assert "not found" in result.output.lower() or result.exit_code != 0
@@ -255,7 +255,7 @@ def test_portfolio_import_csv_passes_host_db_path_in_container_mode(tmp_path: Pa
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
 
-    with patch("market.groups.portfolio.run_step") as mock_run:
+    with patch("market_buyer.groups.portfolio.run_step") as mock_run:
         runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env)])
 
     cmd = mock_run.call_args[0][1]
@@ -271,7 +271,7 @@ def test_portfolio_import_csv_no_db_path_override_in_host_mode(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=host\nAGENT_DB_PATH=./agent.db\n")
 
-    with patch("market.groups.portfolio.run_step") as mock_run:
+    with patch("market_buyer.groups.portfolio.run_step") as mock_run:
         runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env)])
 
     cmd = mock_run.call_args[0][1]
@@ -286,7 +286,7 @@ def test_portfolio_import_csv_explicit_db_path_takes_precedence(tmp_path: Path):
     env = tmp_path / ".env"
     env.write_text("AGENT_MODE=container\nAGENT_DB_PATH=./core/agent/app/data/buy-agent/agent.db\n")
 
-    with patch("market.groups.portfolio.run_step") as mock_run:
+    with patch("market_buyer.groups.portfolio.run_step") as mock_run:
         runner.invoke(app, ["portfolio", "import-csv", str(csv_file), "--env", str(env), "--db-path", "/explicit/agent.db"])
 
     cmd = mock_run.call_args[0][1]

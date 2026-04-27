@@ -1,7 +1,7 @@
 [project]
-name = "market-cli"
+name = "market-buyer"
 version = "0.1.0"
-description = "CLI for the market components"
+description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
 requires-python = ">=3.12"
 dependencies = [
   "typer>=0.12.0",
@@ -10,9 +10,9 @@ dependencies = [
   "pyinstaller>=6.19.0",
   "eth-account>=0.13.0",
   # Needed by the buyer orchestrator (market buy-sync) for in-process
-  # on-chain escrow creation. Imported lazily from market.escrow_client
-  # so loading the CLI does not pay the native-binary cost unless the
-  # orchestrator actually runs.
+  # on-chain escrow creation. Imported lazily from
+  # market_buyer.escrow_client so loading the CLI does not pay the
+  # native-binary cost unless the orchestrator actually runs.
   "alkahest-py",
   "market-service",
   "market-policy",
@@ -24,7 +24,7 @@ test = [
 ]
 
 [project.scripts]
-market = "market.cli:app"
+market = "market_buyer.cli:app"
 
 # Workspace resolution for sibling packages.
 # market-service: token registry + alkahest address resolution for the
@@ -40,4 +40,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["market"]
+packages = ["market_buyer"]

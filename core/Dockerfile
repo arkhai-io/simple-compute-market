@@ -19,7 +19,6 @@ COPY .dist/ /dist/
 COPY core/pyproject.toml core/uv.lock ./
 COPY core/agent/packages/ ./agent/packages/
 COPY service/ ../service/
-COPY cli/ ../cli/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.

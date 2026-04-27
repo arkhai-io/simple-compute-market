@@ -8,7 +8,7 @@ DIST_DIR := $(CURDIR)/.dist
 #Build should construct all deployment and runtime arifacts locally.
 # build-test-env must run after build-market-contract-deployer (uses the image).
 # build-runtime-images parallelizes the three independent service images.
-build: build-cli build-market-contract-deployer build-test-env build-runtime-images
+build: build-buyer build-market-contract-deployer build-test-env build-runtime-images
 
 build-runtime-images: dist
 	$(MAKE) -j3 build-registry build-core build-provisioning
@@ -55,8 +55,8 @@ dist-service: ## Build market-service wheel into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
-build-cli: init-prerequisites init-dependencies
-	cd cli && make build
+build-buyer: init-prerequisites init-dependencies
+	cd buyer && make build
 
 build-market-contract-deployer:
 	cd market-contract-deployer && make build
@@ -86,7 +86,7 @@ build-provisioning:
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-init: init-submodules init-cli init-images
+init: init-submodules init-buyer init-images
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -94,14 +94,14 @@ init-prerequisites:
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
 
-init-dependencies: init-zero-tier init-cli
+init-dependencies: init-zero-tier init-buyer
 
 #requires sudo
 init-zero-tier:
 	cd infra && make install
 
-# Initializing the cli should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
-init-cli:
+# Initializing the buyer CLI should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
+init-buyer:
 	echo "NYI"
 
 # This will eventually download the docker images
