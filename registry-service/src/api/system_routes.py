@@ -1,0 +1,198 @@
+"""System diagnostics routes for the registry service.
+
+Exposes four endpoint groups:
+
+  ``GET /health``                   Kubernetes liveness/readiness probe.
+                                    Returns 200 (ok) or 503 (degraded) — never
+                                    masks failures with a 200 that lies to k8s.
+  ``GET /api/v1/system/config``     Active chain and contract configuration.
+  ``GET /api/v1/system/sync``       Background service liveness (event sync,
+                                    health check service).
+  ``GET /api/v1/system/stats``      DB population counts by entity type and
+                                    order status.
+
+All ``/api/v1/system/*`` endpoints return 200 regardless of the values they
+report — they are diagnostic, not probes.  Only ``/health`` uses 503.
+
+Registration in ``routes.py``
+------------------------------
+Two routers are exported::
+
+    make_health_router()   → registers GET /health (no prefix)
+    make_system_router()   → registers GET /api/v1/system/*
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from sqlalchemy import func, text
+from sqlalchemy.orm import Session
+
+from src.api.system_model import (
+    ConfigResponse,
+    EventSyncStatus,
+    HealthCheckServiceStatus,
+    HealthChecks,
+    HealthResponse,
+    OrderStatusCounts,
+    StatsResponse,
+    SyncResponse,
+)
+from src.config import settings
+from src.db.database import get_db
+from src.db.models import Agent, MarketOrder, OrderStatusEnum
+
+_health_router = APIRouter(tags=["system"])
+_system_router = APIRouter(prefix="/api/v1/system", tags=["system"])
+
+
+# ---------------------------------------------------------------------------
+# /health  — liveness / readiness probe
+# ---------------------------------------------------------------------------
+
+
+@_health_router.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Service health check (liveness/readiness probe)",
+    description=(
+        "Checks API reachability and database connectivity via SELECT 1. "
+        "Returns HTTP 200 with status='ok' when all checks pass, "
+        "HTTP 503 with status='degraded' on any failure."
+    ),
+)
+async def health_check(db: Session = Depends(get_db)) -> JSONResponse:
+    checks: dict[str, str] = {"api": "ok"}
+
+    try:
+        db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    payload = {
+        "status": "ok" if all_ok else "degraded",
+        "checks": checks,
+    }
+    return JSONResponse(content=payload, status_code=200 if all_ok else 503)
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/system/config  — active chain and contract configuration
+# ---------------------------------------------------------------------------
+
+
+@_system_router.get(
+    "/config",
+    response_model=ConfigResponse,
+    summary="Active chain and contract configuration",
+    description=(
+        "Returns the chain ID, RPC URL, and contract addresses currently "
+        "loaded from environment variables. Useful for confirming that a "
+        "deployment is pointed at the correct chain without inspecting pod "
+        "env vars directly."
+    ),
+)
+def system_config() -> ConfigResponse:
+    return ConfigResponse(
+        chain_id=settings.chain_id,
+        rpc_url=settings.rpc_url,
+        identity_registry_address=settings.identity_registry_address,
+        reputation_registry_address=settings.reputation_registry_address,
+        validation_registry_address=settings.validation_registry_address,
+        enable_health_checks=settings.enable_health_checks,
+        heartbeat_ttl_secs=settings.heartbeat_ttl_secs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/system/sync  — background service liveness
+# ---------------------------------------------------------------------------
+
+
+@_system_router.get(
+    "/sync",
+    response_model=SyncResponse,
+    summary="Background service liveness",
+    description=(
+        "Reports whether the event sync and health check background services "
+        "started during application lifespan are still running. "
+        "A stopped event_sync means on-chain agent registration events are "
+        "no longer being indexed."
+    ),
+)
+def system_sync() -> SyncResponse:
+    # Import here to avoid a circular import at module load time — main.py
+    # imports from src.api.routes which imports this module.
+    import src.main as _main
+
+    event_sync = _main.event_sync
+    health_check_svc = _main.health_check
+
+    return SyncResponse(
+        event_sync=EventSyncStatus(
+            running=event_sync.is_running if event_sync is not None else False,
+            last_synced_block=(
+                event_sync.last_synced_block if event_sync is not None else 0
+            ),
+        ),
+        health_check=HealthCheckServiceStatus(
+            running=(
+                health_check_svc.is_running if health_check_svc is not None else False
+            ),
+            enabled=settings.enable_health_checks,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/system/stats  — DB population counts
+# ---------------------------------------------------------------------------
+
+
+@_system_router.get(
+    "/stats",
+    response_model=StatsResponse,
+    summary="Database population counts",
+    description=(
+        "Returns agent count and per-status order counts. "
+        "Intended for quick operator diagnosis and smoke-test assertions "
+        "without needing to parse paginated list responses."
+    ),
+)
+def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
+    agent_count: int = db.query(func.count(Agent.id)).scalar() or 0
+
+    order_counts: dict[str, int] = {s.value: 0 for s in OrderStatusEnum}
+    rows = (
+        db.query(MarketOrder.status, func.count(MarketOrder.order_id))
+        .group_by(MarketOrder.status)
+        .all()
+    )
+    for status, count in rows:
+        order_counts[status.value if hasattr(status, "value") else status] = count
+
+    total_orders = sum(order_counts.values())
+
+    return StatsResponse(
+        agent_count=agent_count,
+        order_count=total_orders,
+        orders_by_status=OrderStatusCounts(**order_counts),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Router factories
+# ---------------------------------------------------------------------------
+
+
+def make_health_router() -> APIRouter:
+    """Returns the bare ``/health`` router (registered without prefix)."""
+    return _health_router
+
+
+def make_system_router() -> APIRouter:
+    """Returns the ``/api/v1/system`` router."""
+    return _system_router

@@ -19,7 +19,8 @@ from typing import Any
 import pytest
 
 from src.agent_client import AgentClient
-from registry_client import RegistryClient, RegistryClientError
+from src.registry_client import RegistryClient
+from registry_client import RegistryClientError
 from src.models.agent import (
     AgentOrderCreateRequest,
 )

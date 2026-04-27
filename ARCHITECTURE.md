@@ -968,19 +968,51 @@ Each level has a defined jurisdiction. Duplicating coverage across levels create
 
 ### Test File Layout
 
+**provisioning-service** (reference layout):
 ```
-{service}/src/tests/
+provisioning-service/src/tests/
 ├── unit/
 │   ├── conftest.py              # mock_settings fixture
 │   └── services/
 └── integration/
     ├── conftest.py              # app fixture, container overrides, DB setup, fake_ansible
-    └── test_{controller}.py 
+    └── test_{controller}.py
 ```
 
----
+**registry-service**:
+```
+registry-service/tests/
+├── conftest.py                  # db_session fixture (in-memory SQLite), sign_order_auth helper
+├── unit/
+│   ├── test_agent_id_lookup.py  # find_agent_by_id — canonical ID parsing, case folding
+│   ├── test_event_sync.py       # EventSyncService — chain event processing, error handling
+│   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
+│   ├── test_resource_filters.py # matches_resource_filters — compute/token/region/GPU/SLA
+│   └── test_symmetric_orders.py # find_symmetric_order — bidirectional order matching
+└── integration/
+    ├── conftest.py              # RegistryClient wired to in-process app via httpx WSGITransport;
+    │                            # shared agent/order fixtures; Hardhat key constants
+    ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
+    │                            # POST /agents/register, POST /agents/{id}/heartbeat
+    ├── test_orders.py           # GET /orders, GET /orders/{id}, POST /agents/{id}/orders,
+    │                            # GET /agents/{id}/orders, DELETE /orders/{id}, full lifecycle
+    └── test_system.py           # GET /health (including 503 on DB failure),
+                                 # GET /api/v1/system/config, /sync, /stats
+```
 
-## Internal Package Distribution
+**Client contract enforcement in registry-service integration tests:**
+
+All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and
+exercise the API exclusively through it.  The transport is `httpx.WSGITransport(app=app)` —
+real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or
+changes a response shape, the client's `from_dict` parser will either raise or silently drop
+the field, and the assertion will fail immediately.  The `get_db` dependency is overridden
+per-test to yield the fixture's isolated in-memory SQLite session.
+
+Routes not yet surfaced on `RegistryClient` (PUT /orders/{id}, POST /agents/register details)
+are exercised via `registry_client._http` — the raw httpx client — which still traverses the
+full stack.  These are marked as candidates for client extension in follow-on work.
+
 
 ### Problem
 

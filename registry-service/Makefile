@@ -1,11 +1,21 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 PYTHON_VERSION := 3.13
+
+# Path to the monorepo .dist/ wheel directory, relative to registry-service/.
+# Used by uv when resolving pure-Python internal packages distributed as wheels
+# (arkhai-registry-client).  The Dockerfile passes --find-links /dist on the
+# uv sync CLI instead; this variable is for local development only.
+DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
+
 # ==============================================================================
 # Installation & Setup
 # ==============================================================================
 
 init: init-uv
-	uv sync --dev --python $(PYTHON_VERSION)
+	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR)
+
+reinit: init-uv
+	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) --reinstall-package arkhai-registry-client
 
 init-uv:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -97,6 +107,12 @@ create-migration:
 # Run tests
 test:
 	uv run pytest
+
+test-unit:
+	uv run pytest tests/unit/ -v
+
+test-integration:
+	uv run pytest tests/integration/ -v
 
 # Run code quality checks
 lint:

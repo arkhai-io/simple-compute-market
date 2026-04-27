@@ -28,12 +28,12 @@ data:
       api_url:            {{ printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) | quote }}
 
     buyer:
-      api_url:           {{ printf "http://%s-agents-buyer:%d" .Release.Name (int .Values.agents.buyer.port) | quote }}
-      base_url_override: {{ .Values.agents.buyer.baseUrlOverride | quote }}
+      api_url:           {{ printf "http://%s-storefront-buyer:%d" .Release.Name (int .Values.storefront.buyer.port) | quote }}
+      base_url_override: {{ .Values.storefront.buyer.baseUrlOverride | quote }}
 
     seller:
-      api_url:           {{ printf "http://%s-agents-seller:%d" .Release.Name (int .Values.agents.seller.port) | quote }}
-      base_url_override: {{ .Values.agents.seller.baseUrlOverride | quote }}
+      api_url:           {{ printf "http://%s-storefront-seller:%d" .Release.Name (int .Values.storefront.seller.port) | quote }}
+      base_url_override: {{ .Values.storefront.seller.baseUrlOverride | quote }}
 
     provisioning:
       api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}

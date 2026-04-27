@@ -226,11 +226,13 @@ class OrderRequest:
     offer: dict[str, Any]
     demand: dict[str, Any]
     duration_hours: float
+    order_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
 
     def to_dict(self) -> dict:
         return {
-            "offer": self.offer,
-            "demand": self.demand,
+            "order_id": self.order_id,
+            "offer_resource": self.offer,
+            "demand_resource": self.demand,
             "duration_hours": self.duration_hours,
         }
 

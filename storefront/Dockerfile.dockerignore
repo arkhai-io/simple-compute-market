@@ -6,16 +6,17 @@
 # ── Internal package wheels (built by make dist before docker build) ─
 !.dist/
 
-# ── core ─────────────────────────────────────────────────────────────
-!core/pyproject.toml
-!core/uv.lock
-!core/agent/
-!core/schemas.py
-!core/entrypoint.sh
+# ── storefront ───────────────────────────────────────────────────────
+!storefront/pyproject.toml
+!storefront/uv.lock
+!storefront/src/
+!storefront/scripts/
+!storefront/packages/
+!storefront/entrypoint.sh
 
-# ── service / cli / domain (imported by agent at runtime) ────────────
+# ── service / policy / domain (imported by storefront at runtime) ─────
 !service/
-!cli/
+!policy/
 !domain/
 
 # ── Global excludes ──────────────────────────────────────────────────

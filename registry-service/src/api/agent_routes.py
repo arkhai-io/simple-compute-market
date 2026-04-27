@@ -280,6 +280,55 @@ async def register_agent(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/agents/search")
+async def search_agents(
+    q: str = Query(..., description="Search query"),
+    endpoint_type: Optional[str] = Query(None, description="Filter by endpoint type"),
+    db: Session = Depends(get_db),
+):
+    """Search agents with optional endpoint type filter"""
+    if not q:
+        return {"items": []}
+
+    # Simple search - in production, implement full-text search
+    agents = db.query(Agent).filter(
+        Agent.agent_id.contains(q)
+    ).limit(50).all()
+
+    items = []
+    for agent in agents:
+        metadata = agent.metadata_json or {}
+        
+        # Filter by endpoint type if specified
+        if endpoint_type:
+            endpoints = metadata.get("endpoints", [])
+            has_endpoint = any(
+                ep.get("name", "").upper() == endpoint_type.upper()
+                for ep in endpoints
+            )
+            if not has_endpoint:
+                continue
+        
+        # Extract endpoint URLs
+        endpoints = metadata.get("endpoints", [])
+        a2a_url = None
+        for ep in endpoints:
+            ep_name = ep.get("name", "") if isinstance(ep, dict) else getattr(ep, "name", "")
+            if ep_name.upper() == "A2A":
+                a2a_url = ep.get("endpoint") if isinstance(ep, dict) else getattr(ep, "endpoint", None)
+        
+        items.append({
+            "id": agent.id,  # Integer PK
+            "agentId": agent.agent_id,  # Single agentId field (canonical format)
+            "name": metadata.get("name", "Unknown"),
+            "status": agent.health_status,
+            "url": a2a_url or agent.token_uri,
+            "tokenURI": agent.token_uri,
+        })
+
+    return {"items": items}
+
+
 @router.get("/agents/{agent_id}")
 async def get_agent(
     agent_id: str = Path(..., description="Agent ID (canonical eip155:... format or integer PK)"),
@@ -393,55 +442,6 @@ async def list_agents(
         "items": filtered_items,
         "count": len(filtered_items),
     }
-
-
-@router.get("/agents/search")
-async def search_agents(
-    q: str = Query(..., description="Search query"),
-    endpoint_type: Optional[str] = Query(None, description="Filter by endpoint type"),
-    db: Session = Depends(get_db),
-):
-    """Search agents with optional endpoint type filter"""
-    if not q:
-        return {"items": []}
-
-    # Simple search - in production, implement full-text search
-    agents = db.query(Agent).filter(
-        Agent.agent_id.contains(q)
-    ).limit(50).all()
-
-    items = []
-    for agent in agents:
-        metadata = agent.metadata_json or {}
-        
-        # Filter by endpoint type if specified
-        if endpoint_type:
-            endpoints = metadata.get("endpoints", [])
-            has_endpoint = any(
-                ep.get("name", "").upper() == endpoint_type.upper()
-                for ep in endpoints
-            )
-            if not has_endpoint:
-                continue
-        
-        # Extract endpoint URLs
-        endpoints = metadata.get("endpoints", [])
-        a2a_url = None
-        for ep in endpoints:
-            ep_name = ep.get("name", "") if isinstance(ep, dict) else getattr(ep, "name", "")
-            if ep_name.upper() == "A2A":
-                a2a_url = ep.get("endpoint") if isinstance(ep, dict) else getattr(ep, "endpoint", None)
-        
-        items.append({
-            "id": agent.id,  # Integer PK
-            "agentId": agent.agent_id,  # Single agentId field (canonical format)
-            "name": metadata.get("name", "Unknown"),
-            "status": agent.health_status,
-            "url": a2a_url or agent.token_uri,
-            "tokenURI": agent.token_uri,
-        })
-
-    return {"items": items}
 
 
 @router.post("/agents/{agent_id}/heartbeat")
