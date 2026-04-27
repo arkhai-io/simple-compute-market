@@ -95,3 +95,42 @@ def decide_response(
         return SellerDecision(action="exit", reason="price_unreasonable")
 
     return SellerDecision(action="reject", reason=f"unknown_strategy:{strategy!r}")
+
+
+def decide_buyer_response(
+    *,
+    seller_counter_price: int,
+    max_price: int,
+    our_previous_counters: list[int],
+    max_rounds: int = DEFAULT_MAX_ROUNDS,
+    convergence_ratio: float = DEFAULT_CONVERGENCE_RATIO,
+) -> SellerDecision:
+    """Per-round decision for the buyer side of a negotiation.
+
+    Different shape from decide_response because the buyer reasons in
+    terms of a single ceiling (`max_price`) rather than a
+    strategy-flagged `our_price`. The buyer never counter-offers above
+    its ceiling — even when the strategic midpoint would land there —
+    so this also caps the counter at `max_price`. (decide_response on
+    its own can produce midpoints above its `our_price` when used
+    with strategy="minimize"; the buyer cap closes that gap.)
+
+    Returns a SellerDecision for symmetry with decide_response. The
+    "Seller" name in the type is historical — see the SellerDecision
+    docstring; the dataclass holds either side's per-round output.
+    """
+    if len(our_previous_counters) >= max_rounds:
+        return SellerDecision(action="exit", reason="max_rounds")
+    if len(our_previous_counters) >= 2 and our_previous_counters[-1] == our_previous_counters[-2]:
+        return SellerDecision(action="exit", reason="stale_negotiation")
+
+    if seller_counter_price <= max_price * (1 + convergence_ratio):
+        return SellerDecision(action="accept", price=seller_counter_price)
+
+    if seller_counter_price <= max_price * 1.5:
+        proposed = (max_price + seller_counter_price) // 2
+        if proposed > max_price:
+            proposed = max_price
+        return SellerDecision(action="counter", price=proposed)
+
+    return SellerDecision(action="exit", reason="price_unreasonable")

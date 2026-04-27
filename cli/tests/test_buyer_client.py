@@ -3,10 +3,12 @@
 Mocks the HTTP transport and verifies that the negotiation loop:
 - handles the seller's immediate-accept short-circuit on round 0
 - propagates seller-initiated exits
-- applies the buyer policy (accept under ceiling, counter at midpoint,
-  exit on unreasonable prices)
 - terminates after max_rounds
 - signs every request with a timestamp + EIP-191 signature
+
+The pure decision logic (decide_buyer_response) is exercised in
+policy/tests/unit/test_negotiation_round.py — this file just covers
+the HTTP loop wrapping it.
 """
 
 from __future__ import annotations
@@ -17,75 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from market.buyer_client import (
-    NegotiationOutcome,
-    _decide_buyer_response,
-    negotiate_with_seller,
-)
-
-
-# ---------------------------------------------------------------------------
-# _decide_buyer_response — pure policy
-# ---------------------------------------------------------------------------
-
-
-def test_accept_when_seller_price_under_ceiling():
-    move = _decide_buyer_response(
-        seller_counter_price=90, max_price=100, our_previous_counters=[],
-    )
-    assert move == {"action": "accept"}
-
-
-def test_accept_at_convergence_boundary():
-    move = _decide_buyer_response(
-        seller_counter_price=100, max_price=100, our_previous_counters=[],
-    )
-    assert move == {"action": "accept"}
-
-
-def test_counter_at_midpoint_when_seller_reasonable():
-    """Seller asks 140, ceiling 100 → counter at midpoint 120 — but clamped to 100."""
-    move = _decide_buyer_response(
-        seller_counter_price=140, max_price=100, our_previous_counters=[],
-    )
-    assert move["action"] == "counter"
-    # Midpoint would be (100+140)//2 = 120, but that's over our ceiling → clamp to 100.
-    assert move["price"] == 100
-
-
-def test_counter_at_midpoint_when_seller_only_slightly_over():
-    """Seller asks 110, ceiling 100 → midpoint 105, clamped to 100."""
-    move = _decide_buyer_response(
-        seller_counter_price=110, max_price=100, our_previous_counters=[],
-    )
-    assert move == {"action": "counter", "price": 100}
-
-
-def test_exit_when_seller_price_unreasonable():
-    """Seller asks 200, ceiling 100 → exit (ratio > 1.5)."""
-    move = _decide_buyer_response(
-        seller_counter_price=200, max_price=100, our_previous_counters=[],
-    )
-    assert move["action"] == "exit"
-    assert move["reason"] == "price_unreasonable"
-
-
-def test_max_rounds_exits():
-    move = _decide_buyer_response(
-        seller_counter_price=100, max_price=100,
-        our_previous_counters=[50] * 10, max_rounds=10,
-    )
-    assert move["action"] == "exit"
-    assert move["reason"] == "max_rounds"
-
-
-def test_stale_counter_guard_fires():
-    move = _decide_buyer_response(
-        seller_counter_price=140, max_price=100,
-        our_previous_counters=[100, 100],
-    )
-    assert move["action"] == "exit"
-    assert move["reason"] == "stale_negotiation"
+from market.buyer_client import NegotiationOutcome, negotiate_with_seller
 
 
 # ---------------------------------------------------------------------------

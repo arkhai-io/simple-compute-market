@@ -13,6 +13,7 @@ import pytest
 from market_policy.negotiation_round import (
     DEFAULT_MAX_ROUNDS,
     SellerDecision,
+    decide_buyer_response,
     decide_response,
 )
 
@@ -185,3 +186,69 @@ def test_minimize_boundary(price, expected):
         our_previous_counters=[],
     )
     assert d.action == expected
+
+
+# ---------------------------------------------------------------------------
+# decide_buyer_response — buyer-side variant with max-price cap
+# ---------------------------------------------------------------------------
+
+
+def test_buyer_accept_when_seller_price_under_ceiling():
+    move = decide_buyer_response(
+        seller_counter_price=90, max_price=100, our_previous_counters=[],
+    )
+    assert move.action == "accept"
+    assert move.price == 90
+
+
+def test_buyer_accept_at_convergence_boundary():
+    move = decide_buyer_response(
+        seller_counter_price=100, max_price=100, our_previous_counters=[],
+    )
+    assert move.action == "accept"
+    assert move.price == 100
+
+
+def test_buyer_counter_caps_at_max_price():
+    """Seller asks 140, ceiling 100 → midpoint 120, clamped to 100."""
+    move = decide_buyer_response(
+        seller_counter_price=140, max_price=100, our_previous_counters=[],
+    )
+    assert move.action == "counter"
+    assert move.price == 100
+
+
+def test_buyer_counter_caps_when_seller_only_slightly_over():
+    """Seller asks 110, ceiling 100 → midpoint 105, clamped to 100."""
+    move = decide_buyer_response(
+        seller_counter_price=110, max_price=100, our_previous_counters=[],
+    )
+    assert move.action == "counter"
+    assert move.price == 100
+
+
+def test_buyer_exit_when_seller_price_unreasonable():
+    """Seller asks 200, ceiling 100 → exit (ratio > 1.5)."""
+    move = decide_buyer_response(
+        seller_counter_price=200, max_price=100, our_previous_counters=[],
+    )
+    assert move.action == "exit"
+    assert move.reason == "price_unreasonable"
+
+
+def test_buyer_max_rounds_exits():
+    move = decide_buyer_response(
+        seller_counter_price=100, max_price=100,
+        our_previous_counters=[50] * 10, max_rounds=10,
+    )
+    assert move.action == "exit"
+    assert move.reason == "max_rounds"
+
+
+def test_buyer_stale_counter_guard_fires():
+    move = decide_buyer_response(
+        seller_counter_price=140, max_price=100,
+        our_previous_counters=[100, 100],
+    )
+    assert move.action == "exit"
+    assert move.reason == "stale_negotiation"

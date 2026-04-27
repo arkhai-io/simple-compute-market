@@ -15,6 +15,7 @@ dependencies = [
   # orchestrator actually runs.
   "alkahest-py",
   "market-service",
+  "market-policy",
 ]
 
 [project.optional-dependencies]
@@ -25,11 +26,14 @@ test = [
 [project.scripts]
 market = "market.cli:app"
 
-# Workspace resolution for the sibling `service` package — used by the
-# buyer orchestrator (buy-sync) for token registry + alkahest address
-# resolution.
+# Workspace resolution for sibling packages.
+# market-service: token registry + alkahest address resolution for the
+# buyer orchestrator (buy-sync).
+# market-policy: per-round negotiation decision logic, shared with the
+# storefront so both sides drive negotiation through one engine.
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
+market-policy = { path = "../policy", editable = true }
 
 [build-system]
 requires = ["hatchling"]

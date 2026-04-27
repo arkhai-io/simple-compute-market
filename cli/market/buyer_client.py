@@ -1,22 +1,18 @@
 """Buyer-as-pure-client negotiation library.
 
-The buyer doesn't run an agent or a server. They pick a seller, open a
-negotiation via HTTP, loop round-by-round until the thread ends, and
-return the outcome. Every request is signed by the buyer's wallet so
-the seller can verify without any prior registration.
+The buyer doesn't run a storefront or any HTTP server. They pick a
+seller, open a negotiation via HTTP, loop round-by-round until the
+thread ends, and return the outcome. Every request is signed by the
+buyer's wallet so the seller can verify without any prior
+registration.
 
 Public API:
     negotiate_with_seller(...) -> NegotiationOutcome
 
-Internal pieces:
-    _sign(message, private_key) -> (signature_hex, timestamp)
-    _post(url, body, ...) -> dict
-    _decide_buyer_response(...) -> dict  # the buyer's next move
-
-`_decide_buyer_response` is deliberately kept simple here — a minimal
-price-ceiling policy with a midpoint counter. Fancier buyer strategies
-(LLM-based, reinforcement-learning-based, etc.) would slot in at this
-function without touching the transport layer.
+The per-round decision logic lives in `market_policy.negotiation_round`
+(decide_buyer_response). Both sides of a negotiation now resolve their
+moves through the same package; this module is just the buyer's HTTP
+transport + signing.
 """
 
 from __future__ import annotations
@@ -28,9 +24,13 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from market_policy.negotiation_round import (
+    DEFAULT_CONVERGENCE_RATIO,
+    DEFAULT_MAX_ROUNDS,
+    decide_buyer_response,
+)
 
-DEFAULT_MAX_ROUNDS = 10
-DEFAULT_CONVERGENCE_RATIO = 0.01
+
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
@@ -110,41 +110,6 @@ def _post(
         raise RuntimeError(f"POST {url} returned non-JSON: {text[:200]!r}") from exc
 
 
-def _decide_buyer_response(
-    *,
-    seller_counter_price: int,
-    max_price: int,
-    our_previous_counters: list[int],
-    max_rounds: int = DEFAULT_MAX_ROUNDS,
-    convergence_ratio: float = DEFAULT_CONVERGENCE_RATIO,
-) -> dict[str, Any]:
-    """Pure buyer-side policy. Returns {action, price?, reason?}.
-
-    Simple ceiling-based strategy: accept anything at or under max_price
-    (within convergence); counter at the midpoint otherwise; walk away
-    after max_rounds or if the seller quotes something we can't afford.
-    """
-    if len(our_previous_counters) >= max_rounds:
-        return {"action": "exit", "reason": "max_rounds"}
-    if len(our_previous_counters) >= 2 and our_previous_counters[-1] == our_previous_counters[-2]:
-        return {"action": "exit", "reason": "stale_negotiation"}
-
-    # Accept when the seller's counter is within our ceiling (including a
-    # small convergence bump, mirrors the seller's 1% ratio).
-    if seller_counter_price <= max_price * (1 + convergence_ratio):
-        return {"action": "accept"}
-
-    # If still reasonable (seller within 1.5× our ceiling), counter at midpoint.
-    if seller_counter_price <= max_price * 1.5:
-        proposed = (max_price + seller_counter_price) // 2
-        # Don't exceed our max by counter-proposing unaffordably high.
-        if proposed > max_price:
-            proposed = max_price
-        return {"action": "counter", "price": proposed}
-
-    return {"action": "exit", "reason": "price_unreasonable"}
-
-
 def negotiate_with_seller(
     *,
     seller_url: str,
@@ -219,7 +184,7 @@ def negotiate_with_seller(
         if seller_counter_price is None:
             raise RuntimeError(f"Seller counter without price: {reply!r}")
 
-        next_move = _decide_buyer_response(
+        next_move = decide_buyer_response(
             seller_counter_price=int(seller_counter_price),
             max_price=int(max_price),
             our_previous_counters=our_counters,
@@ -227,13 +192,13 @@ def negotiate_with_seller(
         )
 
         body: dict[str, Any] = {
-            "action": next_move["action"],
+            "action": next_move.action,
             "buyer_address": buyer_address,
         }
-        if next_move["action"] == "counter":
-            body["price"] = int(next_move["price"])
-        elif next_move["action"] == "exit":
-            body["reason"] = next_move.get("reason") or "buyer_exit"
+        if next_move.action == "counter":
+            body["price"] = int(next_move.price)
+        elif next_move.action == "exit":
+            body["reason"] = next_move.reason or "buyer_exit"
 
         sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
         reply = _post(
@@ -245,7 +210,7 @@ def negotiate_with_seller(
 
         # After we sent our move, the seller has replied with either
         # a matching terminal (accept/exit) or a further counter.
-        if next_move["action"] == "accept":
+        if next_move.action == "accept":
             # We told the seller we accept; their reply should echo accept.
             if reply.get("action") == "accept":
                 return NegotiationOutcome(
@@ -261,23 +226,23 @@ def negotiate_with_seller(
                 reason=f"seller_non_accept_after_buyer_accept:{reply.get('action')!r}",
                 rounds=round_idx,
             )
-        if next_move["action"] == "exit":
+        if next_move.action == "exit":
             return NegotiationOutcome(
                 status="exited",
                 negotiation_id=neg_id,
-                reason=next_move.get("reason") or "buyer_exit",
+                reason=next_move.reason or "buyer_exit",
                 rounds=round_idx,
             )
 
         # next_move was counter → our_counters appended, loop continues.
-        our_counters.append(int(next_move["price"]))
+        our_counters.append(int(next_move.price))
 
         seller_action = reply.get("action")
         if seller_action == "accept":
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_price=int(reply.get("price", next_move["price"])),
+                agreed_price=int(reply.get("price", next_move.price)),
                 rounds=round_idx,
             )
         if seller_action in ("exit", "reject"):
