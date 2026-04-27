@@ -1,12 +1,47 @@
+"""Synchronous HTTP client for the Arkhai ERC-8004 registry REST API.
+
+Covers the routes the registry exposes:
+
+    GET  /health
+    GET  /agents
+    GET  /agents/{agent_id}
+    GET  /agents/search
+    POST /agents/{agent_id}/heartbeat
+    POST /agents/{agent_id}/orders
+    GET  /agents/{agent_id}/orders
+    GET  /orders
+    GET  /orders/{order_id}
+    DELETE /orders/{order_id}
+
+Auth
+----
+Mutation endpoints (heartbeat, publish_order, delete_order) require EIP-191
+signed ``X-Signature`` / ``X-Timestamp`` headers.  Supply ``private_key``
+when calling those methods.
+
+Usage::
+
+    from registry_client import RegistryClient, RegistryClientError
+
+    client = RegistryClient("http://localhost:8080")
+    health = client.get_health()
+    agents = client.list_agents(limit=10)
+    client.close()
+
+Instantiate once per test session (session-scoped fixture in conftest).
+All methods raise ``RegistryClientError`` on non-2xx responses.
+"""
+
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 import httpx
-import logging
-import time
 
-from src.models.registry import (
+from registry_client.auth import build_auth_headers, sign_eip191, RegistryClientError
+from registry_client.models import (
     AgentListResponse,
     AgentSummary,
     HealthResponse,
@@ -16,16 +51,18 @@ from src.models.registry import (
     OrderSummary,
 )
 
-from src.eip191_http_client import sign_eip191, build_auth_headers, ApiError
-
 log = logging.getLogger(__name__)
 
-class RegistryClient:
-    """
-    Synchronous client for the Registry REST API.
 
-    Instantiate once per test session (session-scoped fixture in conftest).
-    All methods raise ``ApiError`` on non-2xx responses.
+class RegistryClient:
+    """Synchronous client for the Registry REST API.
+
+    Parameters
+    ----------
+    base_url:
+        Base URL of the registry service (e.g. ``http://localhost:8080``).
+    timeout:
+        HTTP timeout in seconds for all requests.
     """
 
     def __init__(self, base_url: str, timeout: float = 30.0) -> None:
@@ -57,7 +94,7 @@ class RegistryClient:
         log.debug("%s %s params=%s", method, path, params)
         resp = self._http.request(method, path, params=params, json=json, headers=headers)
         if resp.status_code not in expected_statuses:
-            raise ApiError(method, f"{self._base_url}{path}", resp.status_code, resp.text)
+            raise RegistryClientError(method, f"{self._base_url}{path}", resp.status_code, resp.text)
         return resp
 
     # ------------------------------------------------------------------

@@ -11,5 +11,5 @@ def registry_start() -> None:
     run_step(
         "Start Registry Indexer (make serve)",
         ["make", "serve"],
-        REPO_ROOT / "erc-8004-registry-py",
+        REPO_ROOT / "registry-service",
     )

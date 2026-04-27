@@ -36,7 +36,7 @@ The stack is designed so that in production, multiple independent seller nodes e
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼────────────────┐
-         │  erc-8004-registry │   │  core (agent)          │
+         │  registry-service  │   │  core (agent)          │
          │  :8080             │   │  :8000 buyer           │
          │  FastAPI indexer   │◄──┤  :8001 seller          │
          │  SQLite/Postgres   │   │  Google ADK / A2A      │
@@ -82,7 +82,7 @@ In production this component is absent — the agent and registry configs point 
 
 ---
 
-### `erc-8004-registry-py`
+### `registry-service`
 
 **Role:** Off-chain indexer and discovery service for on-chain agent/order state.
 
@@ -110,7 +110,7 @@ Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
 
 **Source layout:**
 ```
-erc-8004-registry-py/src/
+registry-service/src/
 ├── api/             # FastAPI routes (agent_routes, order_routes)
 ├── contracts/       # ABI + web3.py interaction layer
 ├── db/              # SQLAlchemy models + Alembic migrations (7 versions so far)
@@ -668,7 +668,7 @@ Config is schema-validated against YAML schemas in `cli/config/` (agent, provisi
 ### Local Dev (compose)
 
 ```
-compose/market.yml   — test-env (Anvil) + erc-8004-registry
+compose/market.yml   — test-env (Anvil) + registry-service
 compose/seller.yml   — seller agent + provisioning service (unified)
 compose/buyer.yml    — buyer agent
 compose/external.yml — (unclear — TODO)
@@ -691,7 +691,7 @@ helm/
 │   └── tests/test-config.yaml  # Shared ConfigMap for helm test pods
 └── charts/
     ├── test-env/           # Anvil node (condition: test-env.enabled)
-    ├── registry/           # erc-8004-registry-py (condition: registry.enabled)
+    ├── registry/           # registry-service (condition: registry.enabled)
     ├── agents/             # buyer + seller agents (condition: agents.enabled)
     ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
@@ -768,7 +768,7 @@ make build
   ├── build-test-env
   │     └── build-anvil-state   # Runs deployer against fresh Anvil, saves state.json
   └── build-runtime-images (parallel)
-        ├── build-registry       # erc-8004-registry-py Docker image
+        ├── build-registry       # registry-service Docker image
         ├── build-core           # core Docker image
         └── build-provisioning   # async-provisioning-service Docker image
 ```
@@ -784,7 +784,7 @@ make build
 | `CHAIN_NAME` | core | `anvil` / `ethereum_sepolia` / `base_sepolia` |
 | `CHAIN_RPC_URL` | core, registry | WebSocket RPC — must match `CHAIN_NAME` |
 | `IDENTITY_REGISTRY_ADDRESS` | core, registry | ERC-8004 contract — must match chain |
-| `REGISTRY_URL` | core | Points to `erc-8004-registry-py` |
+| `REGISTRY_URL` | core | Points to `registry-service` |
 | `AGENT_PRIV_KEY` | core | Signing key for on-chain txns + heartbeats |
 | `ONCHAIN_AGENT_ID` | core | Canonical ERC-8004 ID; auto-set after registration |
 | `AGENT_DB_PATH` | core | SQLite path for policy/order/resource state |
@@ -850,15 +850,20 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 
 ### 2. Registry native client
 
-**Status:** Needs discussion.
+**Status:** Partially complete.
 
-**Problem:** `service/src/service/clients/indexer.py` is a 250-line `RegistryClient` inside `market-service`. The `erc-8004-registry-py` submodule owns the registry API but has no client package. The agent imports `get_registry_client()` from `service.clients.indexer`, coupling the agent to `market-service` for registry access.
+**Problem:** `service/src/service/clients/indexer.py` is a 250-line `RegistryClient` inside `market-service`. The agent imports `get_registry_client()` from `service.clients.indexer`, coupling the agent to `market-service` for registry access. The `integration-tests` project previously duplicated registry client logic in `src/registry_client.py` and `src/models/registry.py`.
 
-**Planned fix:**
-1. Add a `client/` subpackage to `erc-8004-registry-py` following the provisioning-service pattern.
-2. Build it as a `erc8004-registry-client` wheel distributed via `.dist/`.
-3. Replace `service/src/service/clients/indexer.py` with a re-export shim.
-4. Update `core/agent/app/utils/action_executor.py` to import from the new wheel directly.
+**Completed:**
+- Created `registry-client/` as a standalone lightweight package (`arkhai-registry-client` wheel) following the `arkhai-agent-client` pattern. Dependencies: `httpx` + `eth-account` only — avoids pulling `registry-service`'s `web3`, `sqlalchemy`, `fastapi` etc. into consumers.
+- `integration-tests` now imports `RegistryClient` and all response models directly from `registry_client` (the wheel). The old `src/registry_client.py` and `src/models/registry.py` files are deleted.
+- `dist-registry` target added to root `Makefile`; `arkhai-registry-client` added to `integration-tests/pyproject.toml` dependencies.
+- Renamed `erc-8004-registry-py/` → `registry-service/` throughout the monorepo.
+
+**Remaining:**
+- Replace `service/src/service/clients/indexer.py` with a re-export shim pointing at `registry_client`.
+- Update `core/agent/app/utils/action_executor.py` to import from `registry_client` directly instead of `service.clients.indexer`.
+- Add `arkhai-registry-client` as a dependency to `service/pyproject.toml` and `core/pyproject.toml` (or wherever `action_executor` lives).
 
 ### 3. Provisioning service README and root Makefile
 
@@ -1018,7 +1023,7 @@ simple-market-service/   ← monorepo root
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, or `arkhai-agent-client`. These packages are resolved exclusively from wheels in `.dist/`.
+**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-agent-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
 
 **Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker the relative path no longer exists, causing resolution failures. The wheel approach avoids this by making both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
@@ -1031,6 +1036,7 @@ Three pure-Python internal packages are distributed as wheels:
 | `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
 | `arkhai-agent-client` | `arkhai_agent_client-*.whl` | `agent-client/` | `integration-tests`, `core` |
+| `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
 
 `arkhai-agent-client` exists as a separate lightweight package to avoid pulling `market-core`'s heavyweight dependencies (`google-adk`, `pufferlib`, native RL wheels) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `agent-client/src/agent_client/client.py`; `core/agent/client/agent_client.py` is a re-export shim that preserves the historical import path for callers inside `core/`.
 

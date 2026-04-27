@@ -1,4 +1,4 @@
-name: Build and Push ERC-8004 Registry Docker Image
+name: Build and Push Registry Service Docker Image
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
       - develop
     paths:
-      - 'erc-8004-registry-py/**'
+      - 'registry-service/**'
       - '.github/workflows/docker-build-push-erc8004-registry.yml'
     tags:
       - 'registry-v*.*.*'  # Triggers on version tags like registry-v1.0.0
@@ -17,8 +17,8 @@ on:
 env:
   GAR_REGISTRY: us-east4-docker.pkg.dev
   GCP_PROJECT_ID: ww-migration-arkhai
-  GAR_REPOSITORY: erc-8004-registry
-  IMAGE_NAME: erc-8004-registry-py
+  GAR_REPOSITORY: registry-service
+  IMAGE_NAME: registry-service
   PYTHON_VERSION: "3.13"
   UV_VERSION: "0.10.0"
   APP_PORT: "8080"
@@ -70,8 +70,8 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./erc-8004-registry-py
-          file: ./erc-8004-registry-py/Dockerfile
+          context: ./registry-service
+          file: ./registry-service/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

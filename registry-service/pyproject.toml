@@ -1,7 +1,7 @@
 [project]
-name = "erc-8004-registry"
+name = "registry-service"
 version = "0.1.0"
-description = "ERC-8004 Agent Registry Service (Python)"
+description = "ERC-8004 Agent Registry Service"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.104.0",
@@ -17,12 +17,15 @@ dependencies = [
     "aiohttp>=3.9.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[tool.setuptools]
+package-dir = {"" = "src"}
 
-[tool.hatch.build.targets.wheel]
-packages = ["src"]
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
 
 [dependency-groups]
 dev = [

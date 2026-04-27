@@ -1,14 +1,11 @@
-"""
-arkhai_e2e_tests/models/registry.py
--------------------------------------
-Typed dataclasses for Registry API requests and responses.
+"""Typed dataclasses for Registry API requests and responses.
 
 These are intentionally permissive — fields that the API may omit are
 Optional so that responses from different environments (local, staging,
 production) don't cause parse failures when non-critical fields are absent.
 
 All models use dataclasses + a lightweight ``from_dict`` factory rather than
-a heavy validation library, keeping the test package dependency-light.
+a heavy validation library, keeping the package dependency-light.
 """
 
 from __future__ import annotations
@@ -20,6 +17,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Shared / primitive models
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ValidationErrorDetail:
@@ -45,9 +43,11 @@ class HTTPValidationError:
 # Health
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HealthResponse:
     """Response body from GET /health."""
+
     status: str | None = None
     health_checks_enabled: bool | None = None
     # Preserve any extra fields the service may return
@@ -66,6 +66,7 @@ class HealthResponse:
 # ---------------------------------------------------------------------------
 # Agents
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Capability:
@@ -120,8 +121,9 @@ class AgentSummary:
     The API currently returns ``{}`` schema, so we capture all known fields
     defensively and stash extras.
     """
+
     id: str | int | None = None
-    agent_id: str | None = None          # canonical eip155:… form
+    agent_id: str | None = None           # canonical eip155:… form
     name: str | None = None
     description: str | None = None
     owner: str | None = None
@@ -150,6 +152,7 @@ class AgentSummary:
 @dataclass
 class AgentListResponse:
     """Wrapper around the list returned by GET /agents."""
+
     agents: list[AgentSummary]
     total: int | None = None
     limit: int | None = None
@@ -176,6 +179,7 @@ class AgentListResponse:
 # ---------------------------------------------------------------------------
 # Orders
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ComputeResource:
@@ -218,6 +222,7 @@ class TokenResource:
 @dataclass
 class OrderRequest:
     """Request body for POST /agents/{agent_id}/orders."""
+
     offer: dict[str, Any]
     demand: dict[str, Any]
     duration_hours: float
@@ -236,6 +241,7 @@ class OrderSummary:
     Single order record as returned by GET /orders or GET /agents/{id}/orders.
     Schema is ``{}`` in the spec; we capture common fields defensively.
     """
+
     id: str | int | None = None
     status: str | None = None
     maker_agent_id: str | None = None
@@ -285,6 +291,7 @@ class OrderSummary:
 @dataclass
 class OrderListResponse:
     """Wrapper around GET /orders response (list or paginated envelope)."""
+
     orders: list[OrderSummary]
     total: int | None = None
     limit: int | None = None
@@ -307,6 +314,7 @@ class OrderListResponse:
 # ---------------------------------------------------------------------------
 # Agent registration (request)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HeartbeatRequest:

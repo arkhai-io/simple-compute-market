@@ -19,8 +19,7 @@ from typing import Any
 import pytest
 
 from src.agent_client import AgentClient
-from src.registry_client import RegistryClient
-from src.eip191_http_client import ApiError
+from registry_client import RegistryClient, RegistryClientError
 from src.models.agent import (
     AgentOrderCreateRequest,
 )
@@ -137,7 +136,7 @@ def _poll_registry_order_status(
             log.debug("Order %s status=%s", order_id, order.status)
             if order.status == target_status:
                 return vars(order)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             log.debug("get_order(%s) → %s (will retry)", order_id, exc.status_code)
         time.sleep(interval)
     return None
@@ -166,7 +165,7 @@ class TestAgentRegistration:
         client = buyer_client if role == "buyer" else seller_client
         try:
             reg = client.get_registration_file()
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"Could not fetch {role} registration file.\n{exc}")
 
         assert reg.registrations, (
@@ -206,7 +205,7 @@ class TestAgentRegistration:
         expected_address = registry_settings["identity_address"].lower()
         try:
             reg = client.get_registration_file()
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"Could not fetch {role} registration file.\n{exc}")
 
         assert reg.registrations, f"{role} agent has no registration records."
@@ -268,7 +267,7 @@ def _discover_order_id_from_registry(
                             order.id, order.created_at,
                         )
                         return str(order.id)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             log.debug(
                 "get_agent_orders(%s) → %s (will retry)", agent_canonical_id, exc.status_code
             )
@@ -338,7 +337,7 @@ class TestAgentOrderLifecycle:
                     first = reg.registrations[0]
                     agent_canonical_ids[role] = f"{first.agent_registry}:{first.agent_id}"
                 log.info("[%s] canonical id: %s", role, agent_canonical_ids[role])
-            except ApiError as exc:
+            except RegistryClientError as exc:
                 pytest.skip(
                     f"Could not fetch {role} registration file to resolve agent ID.\n{exc}"
                 )
@@ -349,7 +348,7 @@ class TestAgentOrderLifecycle:
         ]:
             try:
                 resp = client.create_order(order_req)
-            except ApiError as exc:
+            except RegistryClientError as exc:
                 pytest.skip(
                     f"POST /orders/create failed on {role} agent — "
                     f"skipping order lifecycle tests.\n{exc}"
@@ -494,7 +493,7 @@ class TestAgentOrderLifecycle:
                 )
                 log.info("✓ Buyer order %s closed (status=%s)", order_id, resp.status)
                 return
-            except ApiError as exc:
+            except RegistryClientError as exc:
                 last_exc = exc
                 log.debug("close_order buyer → %s (will retry)", exc.status_code)
                 time.sleep(2)
@@ -532,7 +531,7 @@ class TestAgentOrderLifecycle:
                 )
                 log.info("✓ Seller order %s closed (status=%s)", order_id, resp.status)
                 return
-            except ApiError as exc:
+            except RegistryClientError as exc:
                 last_exc = exc
                 log.debug("close_order seller → %s (will retry)", exc.status_code)
                 time.sleep(2)

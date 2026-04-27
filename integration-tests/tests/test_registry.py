@@ -16,8 +16,8 @@ import logging
 
 import pytest
 
-from src.registry_client import ApiError, RegistryClient
-from src.models.registry import AgentListResponse, OrderListResponse
+from registry_client import RegistryClient, RegistryClientError
+from registry_client.models import AgentListResponse, OrderListResponse
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class TestRegistryHealth:
     def test_health_endpoint_returns_200(self, registry_client: RegistryClient) -> None:
         try:
             health = registry_client.get_health()
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(
                 f"Registry health check failed — service may be down or unreachable.\n{exc}"
             )
@@ -69,7 +69,7 @@ class TestRegistryHealth:
     def test_health_checks_enabled(self, registry_client: RegistryClient) -> None:
         try:
             health = registry_client.get_health()
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"Could not reach /health to check dependency status.\n{exc}")
 
         assert health.health_checks_enabled is not None, (
@@ -101,7 +101,7 @@ class TestRegistryAgents:
         """
         try:
             result = registry_client.list_agents(limit=1)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"GET /agents failed — route may be misconfigured in this deployment.\n{exc}")
 
         assert isinstance(result, AgentListResponse), (
@@ -123,7 +123,7 @@ class TestRegistryAgents:
         """
         try:
             result = registry_client.list_agents(limit=1)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"GET /agents failed — cannot verify agent population.\n{exc}")
 
         log.info(
@@ -165,7 +165,7 @@ class TestRegistryOrders:
         """
         try:
             result = registry_client.list_orders(limit=1, status=None)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(
                 f"GET /orders failed — route may be misconfigured in this deployment.\n{exc}"
             )
@@ -193,7 +193,7 @@ class TestRegistryOrders:
             result = registry_client.list_orders(limit=1, status="closed")
             if len(result.orders) == 0:
                 result = registry_client.list_orders(limit=1, status=None)
-        except ApiError as exc:
+        except RegistryClientError as exc:
             pytest.fail(f"GET /orders failed — cannot verify order book population.\n{exc}")
 
         assert len(result.orders) >= 1, (
