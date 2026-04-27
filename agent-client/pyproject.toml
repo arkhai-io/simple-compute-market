@@ -1,10 +1,10 @@
 [project]
 name = "arkhai-agent-client"
-version = "0.1.0"
-description = "Lightweight async HTTP client for the Arkhai agent REST API."
+version = "0.1.2"
+description = "Async and sync HTTP clients for the Arkhai agent REST API."
 requires-python = ">=3.12"
 dependencies = [
-    "aiohttp>=3.12.15",
+    "httpx>=0.27",
     "eth-account>=0.12",
 ]
 

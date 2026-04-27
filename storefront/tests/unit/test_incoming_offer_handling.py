@@ -130,7 +130,11 @@ class TestRespondToMakeOffer:
     @pytest.fixture
     def thread_store(self, temp_db):
         from market_policy.negotiation_thread import NegotiationThreadStore
-        return NegotiationThreadStore(sqlite_client=SQLiteClient(db_path=temp_db))
+        from market_policy.identity import Identity
+        return NegotiationThreadStore(
+            sqlite_client=SQLiteClient(db_path=temp_db),
+            identity=Identity(agent_url="http://localhost:8001"),
+        )
 
     @pytest.fixture
     def policy_store(self, temp_db, thread_store):
@@ -639,8 +643,12 @@ class TestThreadCreationWithInitialPriceAndStrategy:
     @pytest.fixture
     def thread_store(self, temp_db):
         from market_policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.identity import Identity
         sqlite_client = SQLiteClient(db_path=temp_db)
-        return NegotiationThreadStore(sqlite_client=sqlite_client)
+        return NegotiationThreadStore(
+            sqlite_client=sqlite_client,
+            identity=Identity(agent_url="http://localhost:8001"),
+        )
 
     @pytest.mark.asyncio
     async def test_thread_created_with_initial_price_and_strategy(self, thread_store):

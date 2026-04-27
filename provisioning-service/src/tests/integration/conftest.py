@@ -38,7 +38,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import container as _container_module
+from client.provisioning_client import ProvisioningClient
 from db.database import create_session_factory
+
+AGENT_ID = "eip155:1337:0xdeadbeef:1"
 from db.models import Base
 from main import app
 from services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
@@ -255,7 +258,12 @@ async def client_and_queue(
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as http:
-        yield http, job_queue
+        client = ProvisioningClient(
+            "http://test",
+            agent_id=AGENT_ID,
+            transport=transport,
+        )
+        yield client, job_queue
 
     processing_task.cancel()
     try:

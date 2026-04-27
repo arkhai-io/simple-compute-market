@@ -33,8 +33,7 @@ from market_storefront.utils.config import CONFIG
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.indexer import get_registry_client
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from service.clients.provisioning import provision_machine_async, provision_machine_async_with_id, get_job_credentials_async, ProvisioningError
-from service.clients.provisioning import schedule_vm_expiry_async
+from service.clients.provisioning import ProvisioningClient, ProvisioningError
 from market_policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
@@ -112,18 +111,18 @@ async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) ->
     buyer calls before escrow creation to name the seller as the demanded
     recipient under RecipientArbiter.
     """
-    import aiohttp
+    import httpx
 
     url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    logger.warning(
-                        "[WALLET_LOOKUP] %s returned HTTP %d", url, resp.status
-                    )
-                    return None
-                body = await resp.json()
+        async with httpx.AsyncClient(timeout=timeout) as http:
+            resp = await http.get(url)
+            if resp.status_code != 200:
+                logger.warning(
+                    "[WALLET_LOOKUP] %s returned HTTP %d", url, resp.status_code
+                )
+                return None
+            body = resp.json()
     except Exception as exc:
         logger.warning("[WALLET_LOOKUP] Failed to fetch %s: %s", url, exc)
         return None
@@ -354,12 +353,71 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-def _get_provision_fn():
-    return provision_machine_async
+async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
+    """Submit a create VM job to the provisioning service and return the result."""
+    from models.vm_request_model import CreateVmRequest
+    canonical_id = _canonical_agent_id()
+    client = ProvisioningClient(
+        CONFIG.provisioning_service_url,
+        agent_id=canonical_id,
+        timeout=float(CONFIG.provisioning_timeout),
+    )
+    async with client:
+        params: dict = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
+        if CONFIG.frp_server_addr:
+            params["frp_server_addr"] = CONFIG.frp_server_addr
+        if CONFIG.frp_domain:
+            params["frp_domain"] = CONFIG.frp_domain
+        if CONFIG.frp_dashboard_password:
+            params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+        submit = await client.create_vm(vm_host, CreateVmRequest(**params))
+        job = await client.poll_until_complete(
+            submit.job_id,
+            timeout=float(CONFIG.provisioning_timeout),
+            poll_interval=float(CONFIG.provisioning_poll_interval),
+        )
+        result = job.result or {}
+        if canonical_id:
+            try:
+                creds_resp = await client.get_job_credentials(submit.job_id)
+                auth: dict = {}
+                for c in creds_resp.credentials:
+                    if c.role:
+                        auth[c.role] = {
+                            "password": c.password,
+                            "ssh_commands": c.ssh_commands,
+                            "ssh_key_path_host": c.ssh_key_path_host,
+                            "key_type": c.key_type,
+                        }
+                if auth:
+                    result["authentication"] = auth
+            except Exception as exc:
+                logger.warning(
+                    "[PROVISIONING] Failed to fetch credentials for job %s: %s",
+                    submit.job_id, exc,
+                )
+    return result
 
 
-def _get_shutdown_fn():
-    return schedule_vm_expiry_async
+async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
+    """Schedule VM expiry via the provisioning service."""
+    from models.vm_request_model import ScheduleVmExpiryRequest
+    canonical_id = _canonical_agent_id()
+    client = ProvisioningClient(
+        CONFIG.provisioning_service_url,
+        agent_id=canonical_id,
+        timeout=float(CONFIG.provisioning_timeout),
+    )
+    async with client:
+        submit = await client.schedule_expiry(
+            vm_host, vm_target, ScheduleVmExpiryRequest(vm_expiry_at=lease_end_utc)
+        )
+        job = await client.poll_until_complete(
+            submit.job_id,
+            timeout=float(CONFIG.provisioning_timeout),
+            poll_interval=float(CONFIG.provisioning_poll_interval),
+        )
+    return job.result or {}
 
 
 @functools.lru_cache(maxsize=1)
@@ -406,44 +464,6 @@ def _sender_id() -> str:
     """
     return _canonical_agent_id() or AGENT_ID
 
-
-async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
-    """Submit a create VM job to the provisioning service and return the result."""
-    params: dict = {"ssh_pubkey": ssh_public_key, "vm_host": vm_host, "vm_target": vm_target}
-    if CONFIG.frp_server_addr:
-        params["frp_server_addr"] = CONFIG.frp_server_addr
-    if CONFIG.frp_domain:
-        params["frp_domain"] = CONFIG.frp_domain
-    if CONFIG.frp_dashboard_password:
-        params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
-    canonical_id = _canonical_agent_id()
-    job_id, result = await provision_machine_async_with_id(
-        CONFIG.provisioning_service_url,
-        params,
-        timeout=CONFIG.provisioning_timeout,
-        poll_interval=CONFIG.provisioning_poll_interval,
-        agent_id=canonical_id,
-    )
-    if job_id and canonical_id:
-        auth = await get_job_credentials_async(
-            CONFIG.provisioning_service_url, job_id, canonical_id
-        )
-        if auth:
-            result["authentication"] = auth
-    return result
-
-
-async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
-    """Schedule VM expiry via the provisioning service."""
-    return await schedule_vm_expiry_async(
-        CONFIG.provisioning_service_url,
-        lease_end_utc,
-        vm_host,
-        vm_target,
-        timeout=CONFIG.provisioning_timeout,
-        poll_interval=CONFIG.provisioning_poll_interval,
-        agent_id=CONFIG.onchain_agent_id,
-    )
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     """Given an order, take the demand and offer and extract which is compute and which is tokens."""

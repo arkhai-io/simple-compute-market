@@ -1,43 +1,46 @@
-"""HTTP client for the provisioning service.
+"""HTTP clients for the provisioning service REST API.
 
-Importable as::
+Two clients with identical method signatures:
 
-    from provisioning_service.client.provisioning_client import (
-        ProvisioningClient,
-        ProvisioningError,
-        ProvisioningJobError,
-        ProvisioningTimeoutError,
-    )
+``ProvisioningClient``      — async, backed by ``httpx.AsyncClient``
+``SyncProvisioningClient``  — sync,  backed by ``httpx.Client``
 
-This client is the canonical contract between the provisioning service and its
-consumers.  The provisioning service integration tests import it directly, so
-any drift between the client and the actual REST API is caught immediately.
+Both clients:
+- Own their HTTP session internally — callers never create or pass a session
+- Accept a ``transport=`` kwarg at construction for in-process test injection
+- Send ``X-Agent-ID`` on every request when ``agent_id`` is set
+- Raise ``ProvisioningError`` on non-2xx responses
+- Return typed model objects from all methods
 
-Design principles
------------------
-* **Lightweight**: only ``aiohttp`` and ``pydantic`` — no server-side imports.
-* **Mirror the REST API exactly**: one method per endpoint, URL structure
-  matches ``/api/v1/hosts/{host}/vms/...``.
-* **Typed**: request bodies use the same Pydantic models defined in
-  ``models/vm_request_model.py`` and ``models/jobs_model.py``.  Consumers
-  can build requests with autocomplete and validation before sending.
+Usage (async)::
+
+    client = ProvisioningClient("http://provisioning:8081", agent_id="eip155:1:0x…:42")
+    async with client:
+        submit = await client.create_vm("ww1", CreateVmRequest(...))
+        result = await client.poll_until_complete(submit.job_id)
+
+Usage (sync, e.g. smoke tests)::
+
+    client = SyncProvisioningClient("http://provisioning:8081")
+    hosts = client.list_hosts()
+    client.close()
 
 Polling pattern
 ---------------
-All job-creating methods return a ``JobSubmitResponse`` (job_id + "queued").
-Use ``poll_until_complete`` to block until the job reaches a terminal state,
-or call ``get_job`` yourself for custom polling logic.
+All job-creating methods return a ``JobSubmitResponse`` (job_id + status).
+Use ``poll_until_complete`` / ``sync_poll_until_complete`` to block until the
+job reaches a terminal state, or call ``get_job`` for custom polling logic.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import asyncio
 import logging
+import time
+from pathlib import Path
 from typing import Any, Optional
 
-import aiohttp
+import httpx
 
 from models.host_model import (
     HostCreate,
@@ -56,10 +59,10 @@ from models.vm_request_model import (
     CreateVmRequest,
     ScheduleVmExpiryRequest,
     VmActionRequest,
-    build_simple_params,
 )
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -68,6 +71,10 @@ logger = logging.getLogger(__name__)
 
 class ProvisioningError(Exception):
     """Base class for provisioning client errors."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ProvisioningJobError(ProvisioningError):
@@ -79,32 +86,18 @@ class ProvisioningTimeoutError(ProvisioningError):
 
 
 # ---------------------------------------------------------------------------
-# Client
+# Shared base
 # ---------------------------------------------------------------------------
 
 
-class ProvisioningClient:
-    """Async HTTP client for the provisioning service REST API.
-
-    Instantiate with the base URL of the service and an optional agent ID
-    that is sent as ``X-Agent-ID`` on every mutating request::
-
-        client = ProvisioningClient("http://provisioning:8081", agent_id="eip155:1:0x…:42")
-        async with aiohttp.ClientSession() as session:
-            response = await client.create_vm(session, "ww1", CreateVmRequest(...))
-            result = await client.poll_until_complete(session, response.job_id)
-
-    All methods accept an ``aiohttp.ClientSession`` rather than creating one
-    internally so that the caller controls connection pooling and lifecycle.
-    """
-
-    def __init__(self, base_url: str, agent_id: Optional[str] = None) -> None:
+class _ProvisioningClientBase:
+    def __init__(self, base_url: str, agent_id: Optional[str], timeout: float) -> None:
         self._base = base_url.rstrip("/")
         self._agent_id = agent_id
+        self._timeout = timeout
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    def _url(self, path: str) -> str:
+        return f"{self._base}{path}"
 
     def _headers(self, require_agent_id: bool = False) -> dict[str, str]:
         h: dict[str, str] = {}
@@ -116,357 +109,237 @@ class ProvisioningClient:
             )
         return h
 
-    async def _post(
-        self,
-        session: aiohttp.ClientSession,
-        path: str,
-        body: Any,
-        *,
-        require_agent_id: bool = False,
-    ) -> dict:
-        url = f"{self._base}{path}"
-        payload = body.model_dump() if hasattr(body, "model_dump") else (body or {})
-        async with session.post(url, json=payload, headers=self._headers(require_agent_id)) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+    @staticmethod
+    def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
+        if status not in range(200, 300):
+            raise ProvisioningError(
+                f"{method} {url} → HTTP {status}\n{text[:500]}", status_code=status
+            )
 
-    async def _delete(
-        self,
-        session: aiohttp.ClientSession,
-        path: str,
-        body: Any = None,
-    ) -> dict:
-        url = f"{self._base}{path}"
-        payload = body.model_dump() if hasattr(body, "model_dump") else {}
-        async with session.delete(url, json=payload, headers=self._headers()) as resp:
-            resp.raise_for_status()
-            return await resp.json()
-
-    async def _get(
-        self,
-        session: aiohttp.ClientSession,
-        path: str,
-        *,
-        params: Optional[dict] = None,
-        require_agent_id: bool = False,
-    ) -> dict:
-        url = f"{self._base}{path}"
-        async with session.get(
-            url, params=params, headers=self._headers(require_agent_id)
-        ) as resp:
-            resp.raise_for_status()
-            return await resp.json()
-
-    def _submit_response(self, data: dict) -> JobSubmitResponse:
+    @staticmethod
+    def _submit(data: dict) -> JobSubmitResponse:
         return JobSubmitResponse(**data)
+
+
+# ---------------------------------------------------------------------------
+# Async client
+# ---------------------------------------------------------------------------
+
+
+class ProvisioningClient(_ProvisioningClientBase):
+    """Async HTTP client for the provisioning service REST API.
+
+    Parameters
+    ----------
+    base_url:
+        Base URL of the provisioning service.
+    agent_id:
+        Canonical ERC-8004 agent ID sent as ``X-Agent-ID`` on every request.
+    timeout:
+        HTTP timeout in seconds.
+    transport:
+        Optional ``httpx.AsyncBaseTransport`` for in-process test injection.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        agent_id: Optional[str] = None,
+        *,
+        timeout: float = 60.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        super().__init__(base_url, agent_id, timeout)
+        self._client = httpx.AsyncClient(
+            base_url=self._base,
+            timeout=timeout,
+            transport=transport,
+        )
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def __aenter__(self) -> "ProvisioningClient":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.close()
+
+    async def _get(self, path: str, *, params: dict | None = None,
+                   require_agent_id: bool = False) -> dict:
+        url = self._url(path)
+        resp = await self._client.get(
+            path, params=params, headers=self._headers(require_agent_id)
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _post(self, path: str, body: Any, *,
+                    require_agent_id: bool = False) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = await self._client.post(
+            path, json=payload, headers=self._headers(require_agent_id)
+        )
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _put(self, path: str, body: Any) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = await self._client.put(path, json=payload, headers=self._headers())
+        self._raise_for_status("PUT", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _delete(self, path: str, body: Any = None) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
+        resp = await self._client.delete(path, json=payload, headers=self._headers())
+        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
+        url = self._url(path)
+        resp = await self._client.post(
+            path, files=files, data=data, headers=self._headers()
+        )
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return resp.json()
 
     # ------------------------------------------------------------------
     # VM lifecycle
     # ------------------------------------------------------------------
 
-    async def create_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        body: CreateVmRequest,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/", body)
-        return self._submit_response(data)
+    async def create_vm(self, host: str, body: CreateVmRequest) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/", body))
 
-    async def list_vms(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``GET /api/v1/hosts/{host}/vms/``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/", body or VmActionRequest())
-        return self._submit_response(data)
+    async def list_vms(self, host: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/ (list action)"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/", body or VmActionRequest()))
 
-    async def start_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/start``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/start", body or VmActionRequest())
-        return self._submit_response(data)
+    async def start_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/start"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/start", body or VmActionRequest()))
 
-    async def shutdown_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/shutdown``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/shutdown", body or VmActionRequest())
-        return self._submit_response(data)
+    async def shutdown_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/shutdown"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/shutdown", body or VmActionRequest()))
 
-    async def reboot_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/reboot``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/reboot", body or VmActionRequest())
-        return self._submit_response(data)
+    async def reboot_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/reboot"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/reboot", body or VmActionRequest()))
 
-    async def destroy_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/destroy", body or VmActionRequest())
-        return self._submit_response(data)
+    async def destroy_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/destroy"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/destroy", body or VmActionRequest()))
 
-    async def undefine_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/undefine``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/undefine", body or VmActionRequest())
-        return self._submit_response(data)
+    async def undefine_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/undefine"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/undefine", body or VmActionRequest()))
 
-    async def monitor_vm(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-    ) -> JobSubmitResponse:
-        """``GET /api/v1/hosts/{host}/vms/{vm_name}/monitor``"""
-        data = await self._get(session, f"/api/v1/hosts/{host}/vms/{vm_name}/monitor")
-        return self._submit_response(data)
+    async def monitor_vm(self, host: str, vm_name: str) -> JobSubmitResponse:
+        """GET /api/v1/hosts/{host}/vms/{vm_name}/monitor"""
+        return self._submit(await self._get(f"/api/v1/hosts/{host}/vms/{vm_name}/monitor"))
 
-    async def reset_password(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/reset-password``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/reset-password", body or VmActionRequest())
-        return self._submit_response(data)
+    async def reset_password(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/reset-password"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/reset-password", body or VmActionRequest()))
 
-    async def schedule_expiry(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: ScheduleVmExpiryRequest,
-    ) -> JobSubmitResponse:
-        """``POST /api/v1/hosts/{host}/vms/{vm_name}/expiry``"""
-        data = await self._post(session, f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body)
-        return self._submit_response(data)
+    async def schedule_expiry(self, host: str, vm_name: str, body: ScheduleVmExpiryRequest) -> JobSubmitResponse:
+        """POST /api/v1/hosts/{host}/vms/{vm_name}/expiry"""
+        return self._submit(await self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body))
 
-    async def cancel_expiry(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-        vm_name: str,
-        body: Optional[VmActionRequest] = None,
-    ) -> JobSubmitResponse:
-        """``DELETE /api/v1/hosts/{host}/vms/{vm_name}/expiry``"""
-        data = await self._delete(session, f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body or VmActionRequest())
-        return self._submit_response(data)
+    async def cancel_expiry(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        """DELETE /api/v1/hosts/{host}/vms/{vm_name}/expiry"""
+        return self._submit(await self._delete(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body or VmActionRequest()))
 
-    # ------------------------------------------------------------------
+    async def check_capacity(self, host: str) -> JobSubmitResponse:
+        """GET /api/v1/hosts/{host}/capacity"""
+        return self._submit(await self._get(f"/api/v1/hosts/{host}/capacity"))
+
     # ------------------------------------------------------------------
     # Host operations
     # ------------------------------------------------------------------
 
-    async def list_hosts(
-        self,
-        session: aiohttp.ClientSession,
-        *,
-        search: Optional[str] = None,
-        include_disabled: bool = False,
-    ) -> HostListResponse:
-        """``GET /api/v1/hosts/``"""
+    async def list_hosts(self, *, search: Optional[str] = None,
+                         include_disabled: bool = False) -> HostListResponse:
+        """GET /api/v1/hosts/"""
         params: dict[str, Any] = {}
         if search:
             params["search"] = search
         if include_disabled:
             params["include_disabled"] = "true"
-        data = await self._get(session, "/api/v1/hosts/", params=params or None)
-        return HostListResponse(**data)
+        return HostListResponse(**(await self._get("/api/v1/hosts/", params=params or None)))
 
-    async def get_host(
-        self,
-        session: aiohttp.ClientSession,
-        name: str,
-    ) -> HostResponse:
-        """``GET /api/v1/hosts/{name}``"""
-        data = await self._get(session, f"/api/v1/hosts/{name}")
-        return HostResponse(**data)
+    async def get_host(self, name: str) -> HostResponse:
+        """GET /api/v1/hosts/{name}"""
+        return HostResponse(**(await self._get(f"/api/v1/hosts/{name}")))
 
-    async def register_host(
-        self,
-        session: aiohttp.ClientSession,
-        body: HostCreate,
-    ) -> HostResponse:
-        """``POST /api/v1/hosts/``"""
-        data = await self._post(session, "/api/v1/hosts/", body)
-        return HostResponse(**data)
+    async def register_host(self, body: HostCreate) -> HostResponse:
+        """POST /api/v1/hosts/"""
+        return HostResponse(**(await self._post("/api/v1/hosts/", body)))
 
-    async def update_host(
-        self,
-        session: aiohttp.ClientSession,
-        name: str,
-        body: HostUpdate,
-    ) -> HostResponse:
-        """``PUT /api/v1/hosts/{name}``"""
-        url = f"{self._base}/api/v1/hosts/{name}"
-        payload = body.model_dump(exclude_none=True)
-        async with session.put(url, json=payload, headers=self._headers()) as resp:
-            resp.raise_for_status()
-            return HostResponse(**(await resp.json()))
+    async def update_host(self, name: str, body: HostUpdate) -> HostResponse:
+        """PUT /api/v1/hosts/{name}"""
+        return HostResponse(**(await self._put(f"/api/v1/hosts/{name}", body)))
 
-    async def enable_host(
-        self,
-        session: aiohttp.ClientSession,
-        name: str,
-    ) -> HostResponse:
-        """``POST /api/v1/hosts/{name}/enable``"""
-        data = await self._post(session, f"/api/v1/hosts/{name}/enable", {})
-        return HostResponse(**data)
+    async def enable_host(self, name: str) -> HostResponse:
+        """POST /api/v1/hosts/{name}/enable"""
+        return HostResponse(**(await self._post(f"/api/v1/hosts/{name}/enable", {})))
 
-    async def disable_host(
-        self,
-        session: aiohttp.ClientSession,
-        name: str,
-    ) -> HostResponse:
-        """``POST /api/v1/hosts/{name}/disable``"""
-        data = await self._post(session, f"/api/v1/hosts/{name}/disable", {})
-        return HostResponse(**data)
+    async def disable_host(self, name: str) -> HostResponse:
+        """POST /api/v1/hosts/{name}/disable"""
+        return HostResponse(**(await self._post(f"/api/v1/hosts/{name}/disable", {})))
 
-    async def import_hosts_from_path(
-        self,
-        session: aiohttp.ClientSession,
-        path: "Path",
-        ssh_key_type: str = "path",
-    ) -> HostListResponse:
-        """``POST /api/v1/hosts/import`` — upload an INI file from disk.
-
-        Args:
-            path: Filesystem path to an Ansible INI inventory file.
-            ssh_key_type: ``'path'`` or ``'embedded'`` (see endpoint docs).
-        """
-        url = f"{self._base}/api/v1/hosts/import"
+    async def import_hosts_from_path(self, path: Path, ssh_key_type: str = "path") -> HostListResponse:
+        """POST /api/v1/hosts/import — upload an INI file from disk."""
         with open(path, "rb") as f:
-            form = aiohttp.FormData()
-            form.add_field("file", f, filename=path.name, content_type="text/plain")
-            form.add_field("ssh_key_type", ssh_key_type)
-            async with session.post(url, data=form, headers=self._headers()) as resp:
-                resp.raise_for_status()
-                return HostListResponse(**(await resp.json()))
+            content = f.read()
+        return HostListResponse(**(await self._post_multipart(
+            "/api/v1/hosts/import",
+            files={"file": (path.name, content, "text/plain")},
+            data={"ssh_key_type": ssh_key_type},
+        )))
 
-    async def import_hosts_from_text(
-        self,
-        session: aiohttp.ClientSession,
-        ini_text: str,
-        ssh_key_type: str = "path",
-        filename: str = "hosts",
-    ) -> HostListResponse:
-        """``POST /api/v1/hosts/import`` — upload INI content from a string.
-
-        Args:
-            ini_text: Raw Ansible INI inventory content.
-            ssh_key_type: ``'path'`` or ``'embedded'`` (see endpoint docs).
-            filename: Filename to use in the multipart upload (informational only).
-        """
-        url = f"{self._base}/api/v1/hosts/import"
-        form = aiohttp.FormData()
-        form.add_field(
-            "file",
-            ini_text.encode("utf-8"),
-            filename=filename,
-            content_type="text/plain",
-        )
-        form.add_field("ssh_key_type", ssh_key_type)
-        async with session.post(url, data=form, headers=self._headers()) as resp:
-            resp.raise_for_status()
-            return HostListResponse(**(await resp.json()))
-
-    async def check_capacity(
-        self,
-        session: aiohttp.ClientSession,
-        host: str,
-    ) -> JobSubmitResponse:
-        """``GET /api/v1/hosts/{host}/capacity``"""
-        data = await self._get(session, f"/api/v1/hosts/{host}/capacity")
-        return self._submit_response(data)
+    async def import_hosts_from_text(self, ini_text: str, ssh_key_type: str = "path",
+                                     filename: str = "hosts") -> HostListResponse:
+        """POST /api/v1/hosts/import — upload INI content from a string."""
+        return HostListResponse(**(await self._post_multipart(
+            "/api/v1/hosts/import",
+            files={"file": (filename, ini_text.encode("utf-8"), "text/plain")},
+            data={"ssh_key_type": ssh_key_type},
+        )))
 
     # ------------------------------------------------------------------
     # Job operations
     # ------------------------------------------------------------------
 
-    async def get_job(
-        self,
-        session: aiohttp.ClientSession,
-        job_id: str,
-    ) -> JobStatusResponse:
-        """``GET /api/v1/jobs/{job_id}``"""
-        data = await self._get(session, f"/api/v1/jobs/{job_id}")
-        return JobStatusResponse(**data)
+    async def get_job(self, job_id: str) -> JobStatusResponse:
+        """GET /api/v1/jobs/{job_id}"""
+        return JobStatusResponse(**(await self._get(f"/api/v1/jobs/{job_id}")))
 
-    async def get_job_credentials(
-        self,
-        session: aiohttp.ClientSession,
-        job_id: str,
-    ) -> CredentialListResponse:
-        """``GET /api/v1/jobs/{job_id}/credentials``
+    async def get_job_credentials(self, job_id: str) -> CredentialListResponse:
+        """GET /api/v1/jobs/{job_id}/credentials — requires agent_id."""
+        return CredentialListResponse(**(await self._get(
+            f"/api/v1/jobs/{job_id}/credentials", require_agent_id=True
+        )))
 
-        Requires ``agent_id`` to be set on the client.
-        """
-        data = await self._get(
-            session, f"/api/v1/jobs/{job_id}/credentials", require_agent_id=True
-        )
-        return CredentialListResponse(**data)
+    async def get_job_logs(self, job_id: str) -> JobLogsResponse:
+        """GET /api/v1/jobs/{job_id}/logs"""
+        return JobLogsResponse(**(await self._get(f"/api/v1/jobs/{job_id}/logs")))
 
-    async def get_job_logs(
-        self,
-        session: aiohttp.ClientSession,
-        job_id: str,
-    ) -> JobLogsResponse:
-        """``GET /api/v1/jobs/{job_id}/logs``"""
-        data = await self._get(session, f"/api/v1/jobs/{job_id}/logs")
-        return JobLogsResponse(**data)
+    async def cancel_job(self, job_id: str) -> dict:
+        """POST /api/v1/jobs/{job_id}/cancel"""
+        return await self._post(f"/api/v1/jobs/{job_id}/cancel", {})
 
-    async def cancel_job(
-        self,
-        session: aiohttp.ClientSession,
-        job_id: str,
-    ) -> dict:
-        """``POST /api/v1/jobs/{job_id}/cancel``"""
-        return await self._post(session, f"/api/v1/jobs/{job_id}/cancel", {})
-
-    async def list_jobs(
-        self,
-        session: aiohttp.ClientSession,
-        *,
-        status: Optional[str] = None,
-        offset: int = 0,
-        limit: int = 20,
-    ) -> JobListResponse:
-        """``GET /api/v1/jobs/``"""
+    async def list_jobs(self, *, status: Optional[str] = None,
+                        offset: int = 0, limit: int = 20) -> JobListResponse:
+        """GET /api/v1/jobs/"""
         params: dict[str, Any] = {"offset": offset, "limit": limit}
         if status:
             params["status"] = status
-        data = await self._get(session, "/api/v1/jobs/", params=params)
-        return JobListResponse(**data)
+        return JobListResponse(**(await self._get("/api/v1/jobs/", params=params)))
 
     # ------------------------------------------------------------------
     # Polling
@@ -474,30 +347,26 @@ class ProvisioningClient:
 
     async def poll_until_complete(
         self,
-        session: aiohttp.ClientSession,
         job_id: str,
         *,
         timeout: float = 3600.0,
         poll_interval: float = 5.0,
     ) -> JobStatusResponse:
-        """Poll ``GET /api/v1/jobs/{job_id}`` until the job reaches a terminal state.
+        """Poll GET /api/v1/jobs/{job_id} until terminal state.
 
         Returns the final ``JobStatusResponse`` on ``succeeded``.
-        Raises ``ProvisioningJobError`` on ``failed``.
-        Raises ``ProvisioningTimeoutError`` if ``timeout`` seconds elapse
-        before a terminal state is reached.
+        Raises ``ProvisioningJobError`` on ``failed`` or ``cancelled``.
+        Raises ``ProvisioningTimeoutError`` if ``timeout`` seconds elapse.
         """
         deadline = asyncio.get_event_loop().time() + timeout
         while True:
-            job = await self.get_job(session, job_id)
+            job = await self.get_job(job_id)
             if job.status == "succeeded":
                 return job
-            if job.status == "failed":
+            if job.status in ("failed", "cancelled"):
                 raise ProvisioningJobError(
-                    f"Job {job_id} failed: {job.error or 'unknown error'}"
+                    f"Job {job_id} {job.status}: {job.error or 'unknown error'}"
                 )
-            if job.status == "cancelled":
-                raise ProvisioningJobError(f"Job {job_id} was cancelled")
             if asyncio.get_event_loop().time() >= deadline:
                 raise ProvisioningTimeoutError(
                     f"Job {job_id} did not complete within {timeout}s "
@@ -507,145 +376,189 @@ class ProvisioningClient:
 
 
 # ---------------------------------------------------------------------------
-# Module-level convenience wrappers
-#
-# These preserve the calling convention of the old service.clients.provisioning
-# module so agent-side call sites need only change their import path, not
-# their call sites.  Each wrapper creates a single-use aiohttp.ClientSession
-# internally, mirroring the old behaviour.
-#
-# TODO(action_executor_refactor): Replace these wrappers with direct use of
-# ProvisioningClient in market_storefront/utils/action_executor.py.  The class
-# interface is cleaner: caller controls session lifecycle, and the typed
-# create_vm / schedule_expiry methods replace the raw params dict.
+# Sync client
 # ---------------------------------------------------------------------------
 
 
-async def provision_machine_async(
-    provisioning_service_url: str,
-    params: dict[str, Any],
-    *,
-    timeout: int = 3600,
-    poll_interval: int = 15,
-    agent_id: Optional[str] = None,
-) -> dict[str, Any]:
-    """Submit a create VM job and poll until succeeded.
+class SyncProvisioningClient(_ProvisioningClientBase):
+    """Synchronous HTTP client for the provisioning service REST API.
 
-    Returns the job result dict on success.
-    Raises ``ProvisioningJobError`` on failure, ``ProvisioningTimeoutError`` on timeout.
+    Identical method signatures to ``ProvisioningClient`` but blocking.
+    Suitable for synchronous smoke tests and scripts.
+
+    Parameters
+    ----------
+    base_url:
+        Base URL of the provisioning service.
+    agent_id:
+        Canonical ERC-8004 agent ID sent as ``X-Agent-ID`` on every request.
+    timeout:
+        HTTP timeout in seconds.
+    transport:
+        Optional ``httpx.BaseTransport`` for in-process test injection.
     """
-    from models.vm_request_model import CreateVmRequest
-    host = params.get("vm_host", "ww1")
-    body = CreateVmRequest(**{k: v for k, v in params.items() if k != "vm_host"})
-    client = ProvisioningClient(provisioning_service_url, agent_id=agent_id)
-    async with aiohttp.ClientSession() as session:
-        submit = await client.create_vm(session, host, body)
-        job = await client.poll_until_complete(
-            session, submit.job_id,
-            timeout=float(timeout), poll_interval=float(poll_interval),
+
+    def __init__(
+        self,
+        base_url: str,
+        agent_id: Optional[str] = None,
+        *,
+        timeout: float = 60.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        super().__init__(base_url, agent_id, timeout)
+        self._client = httpx.Client(
+            base_url=self._base,
+            timeout=timeout,
+            transport=transport,
         )
-    return job.result or {}
 
+    def close(self) -> None:
+        self._client.close()
 
-async def provision_machine_async_with_id(
-    provisioning_service_url: str,
-    params: dict[str, Any],
-    *,
-    timeout: int = 3600,
-    poll_interval: int = 15,
-    agent_id: Optional[str] = None,
-) -> tuple[str, dict[str, Any]]:
-    """Submit a create VM job and poll until succeeded.  Returns (job_id, result)."""
-    from models.vm_request_model import CreateVmRequest
-    host = params.get("vm_host", "ww1")
-    body = CreateVmRequest(**{k: v for k, v in params.items() if k != "vm_host"})
-    client = ProvisioningClient(provisioning_service_url, agent_id=agent_id)
-    async with aiohttp.ClientSession() as session:
-        submit = await client.create_vm(session, host, body)
-        job = await client.poll_until_complete(
-            session, submit.job_id,
-            timeout=float(timeout), poll_interval=float(poll_interval),
-        )
-    return submit.job_id, job.result or {}
+    def __enter__(self) -> "SyncProvisioningClient":
+        return self
 
+    def __exit__(self, *_: Any) -> None:
+        self.close()
 
-async def schedule_vm_expiry_async(
-    provisioning_service_url: str,
-    vm_expiry_at: str,
-    vm_host: str = "ww1",
-    vm_target: str = "tenant-vm",
-    *,
-    timeout: int = 300,
-    poll_interval: int = 5,
-    agent_id: Optional[str] = None,
-) -> dict[str, Any]:
-    """Schedule VM expiry via ``POST /api/v1/hosts/{host}/vms/{vm}/expiry``."""
-    from models.vm_request_model import ScheduleVmExpiryRequest
-    body = ScheduleVmExpiryRequest(vm_expiry_at=vm_expiry_at)
-    client = ProvisioningClient(provisioning_service_url, agent_id=agent_id)
-    async with aiohttp.ClientSession() as session:
-        submit = await client.schedule_expiry(session, vm_host, vm_target, body)
-        job = await client.poll_until_complete(
-            session, submit.job_id,
-            timeout=float(timeout), poll_interval=float(poll_interval),
-        )
-    return job.result or {}
+    def _get(self, path: str, *, params: dict | None = None,
+             require_agent_id: bool = False) -> dict:
+        url = self._url(path)
+        resp = self._client.get(path, params=params, headers=self._headers(require_agent_id))
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
 
+    def _post(self, path: str, body: Any, *, require_agent_id: bool = False) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = self._client.post(path, json=payload, headers=self._headers(require_agent_id))
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return resp.json()
 
-# Backward-compat alias — callers using the old name still work.
-schedule_vm_shutdown_async = schedule_vm_expiry_async
+    def _put(self, path: str, body: Any) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = self._client.put(path, json=payload, headers=self._headers())
+        self._raise_for_status("PUT", url, resp.status_code, resp.text)
+        return resp.json()
 
+    def _delete(self, path: str, body: Any = None) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
+        resp = self._client.delete(path, json=payload, headers=self._headers())
+        self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
 
-async def get_vm_available_resources(
-    provisioning_service_url: str,
-    vm_host: str = "ww1",
-    *,
-    timeout: int = 120,
-    poll_interval: int = 5,
-    agent_id: Optional[str] = None,
-) -> dict[str, Any]:
-    """Check host capacity via ``GET /api/v1/hosts/{host}/capacity``."""
-    client = ProvisioningClient(provisioning_service_url, agent_id=agent_id)
-    async with aiohttp.ClientSession() as session:
-        submit = await client.check_capacity(session, vm_host)
-        job = await client.poll_until_complete(
-            session, submit.job_id,
-            timeout=float(timeout), poll_interval=float(poll_interval),
-        )
-    result = job.result or {}
-    available = result.get("available", {})
-    allocated = result.get("allocated", {})
-    if not isinstance(available, dict):
-        return result
-    return {
-        "available": available.get("gpus", 0) > 0,
-        "running_vms": allocated.get("gpus", 0),
-        "available_gpus": available.get("gpus", 0),
-        "available_vcpus": available.get("vcpus", 0),
-        "available_ram_mb": available.get("ram_mb", 0),
-    }
+    def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
+        url = self._url(path)
+        resp = self._client.post(path, files=files, data=data, headers=self._headers())
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return resp.json()
 
+    # VM lifecycle (sync mirrors)
+    def create_vm(self, host: str, body: CreateVmRequest) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/", body))
 
-async def get_job_credentials_async(
-    service_url: str,
-    job_id: str,
-    agent_id: str,
-) -> dict | None:
-    """Fetch credentials for a completed job."""
-    client = ProvisioningClient(service_url, agent_id=agent_id)
-    async with aiohttp.ClientSession() as session:
-        try:
-            creds_resp = await client.get_job_credentials(session, job_id)
-        except Exception as exc:
-            logger.warning("[PROVISIONING] Failed to fetch credentials for job %s: %s", job_id, exc)
-            return None
-    auth: dict[str, dict] = {}
-    for c in creds_resp.credentials:
-        if c.role:
-            auth[c.role] = {
-                "password": c.password,
-                "ssh_commands": c.ssh_commands,
-                "ssh_key_path_host": c.ssh_key_path_host,
-                "key_type": c.key_type,
-            }
-    return auth or None
+    def start_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/start", body or VmActionRequest()))
+
+    def shutdown_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/shutdown", body or VmActionRequest()))
+
+    def destroy_vm(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/destroy", body or VmActionRequest()))
+
+    def schedule_expiry(self, host: str, vm_name: str, body: ScheduleVmExpiryRequest) -> JobSubmitResponse:
+        return self._submit(self._post(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body))
+
+    def cancel_expiry(self, host: str, vm_name: str, body: Optional[VmActionRequest] = None) -> JobSubmitResponse:
+        return self._submit(self._delete(f"/api/v1/hosts/{host}/vms/{vm_name}/expiry", body or VmActionRequest()))
+
+    def check_capacity(self, host: str) -> JobSubmitResponse:
+        return self._submit(self._get(f"/api/v1/hosts/{host}/capacity"))
+
+    # Host operations (sync mirrors)
+    def list_hosts(self, *, search: Optional[str] = None,
+                   include_disabled: bool = False) -> HostListResponse:
+        params: dict[str, Any] = {}
+        if search:
+            params["search"] = search
+        if include_disabled:
+            params["include_disabled"] = "true"
+        return HostListResponse(**(self._get("/api/v1/hosts/", params=params or None)))
+
+    def get_host(self, name: str) -> HostResponse:
+        return HostResponse(**(self._get(f"/api/v1/hosts/{name}")))
+
+    def register_host(self, body: HostCreate) -> HostResponse:
+        return HostResponse(**(self._post("/api/v1/hosts/", body)))
+
+    def update_host(self, name: str, body: HostUpdate) -> HostResponse:
+        return HostResponse(**(self._put(f"/api/v1/hosts/{name}", body)))
+
+    def enable_host(self, name: str) -> HostResponse:
+        return HostResponse(**(self._post(f"/api/v1/hosts/{name}/enable", {})))
+
+    def disable_host(self, name: str) -> HostResponse:
+        return HostResponse(**(self._post(f"/api/v1/hosts/{name}/disable", {})))
+
+    def import_hosts_from_text(self, ini_text: str, ssh_key_type: str = "path",
+                                filename: str = "hosts") -> HostListResponse:
+        return HostListResponse(**(self._post_multipart(
+            "/api/v1/hosts/import",
+            files={"file": (filename, ini_text.encode("utf-8"), "text/plain")},
+            data={"ssh_key_type": ssh_key_type},
+        )))
+
+    def import_hosts_from_path(self, path: Path, ssh_key_type: str = "path") -> HostListResponse:
+        with open(path, "rb") as f:
+            content = f.read()
+        return HostListResponse(**(self._post_multipart(
+            "/api/v1/hosts/import",
+            files={"file": (path.name, content, "text/plain")},
+            data={"ssh_key_type": ssh_key_type},
+        )))
+
+    # Job operations (sync mirrors)
+    def get_job(self, job_id: str) -> JobStatusResponse:
+        return JobStatusResponse(**(self._get(f"/api/v1/jobs/{job_id}")))
+
+    def get_job_credentials(self, job_id: str) -> CredentialListResponse:
+        return CredentialListResponse(**(self._get(
+            f"/api/v1/jobs/{job_id}/credentials", require_agent_id=True
+        )))
+
+    def get_job_logs(self, job_id: str) -> JobLogsResponse:
+        return JobLogsResponse(**(self._get(f"/api/v1/jobs/{job_id}/logs")))
+
+    def list_jobs(self, *, status: Optional[str] = None,
+                  offset: int = 0, limit: int = 20) -> JobListResponse:
+        params: dict[str, Any] = {"offset": offset, "limit": limit}
+        if status:
+            params["status"] = status
+        return JobListResponse(**(self._get("/api/v1/jobs/", params=params)))
+
+    def sync_poll_until_complete(
+        self,
+        job_id: str,
+        *,
+        timeout: float = 3600.0,
+        poll_interval: float = 5.0,
+    ) -> JobStatusResponse:
+        """Poll GET /api/v1/jobs/{job_id} until terminal state (blocking)."""
+        deadline = time.monotonic() + timeout
+        while True:
+            job = self.get_job(job_id)
+            if job.status == "succeeded":
+                return job
+            if job.status in ("failed", "cancelled"):
+                raise ProvisioningJobError(
+                    f"Job {job_id} {job.status}: {job.error or 'unknown error'}"
+                )
+            if time.monotonic() >= deadline:
+                raise ProvisioningTimeoutError(
+                    f"Job {job_id} did not complete within {timeout}s "
+                    f"(current status: {job.status})"
+                )
+            time.sleep(poll_interval)

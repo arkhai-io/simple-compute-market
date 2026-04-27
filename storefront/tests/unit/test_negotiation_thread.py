@@ -193,14 +193,14 @@ class TestNegotiationThreadStore:
     async def test_thread_persistence(self, sqlite_client, temp_db):
         """Test that threads persist across store instances."""
         # Create first store and add message
-        store1 = NegotiationThreadStore(sqlite_client=sqlite_client)
+        store1 = NegotiationThreadStore(sqlite_client=sqlite_client, identity=_TEST_IDENTITY)
         await store1.add_message(
             "test-persist", "agent-1", 100, 120, 110, "COUNTER_OFFER", "proposal"
         )
         
         # Create second store with same database
         client2 = SQLiteClient(db_path=temp_db)
-        store2 = NegotiationThreadStore(sqlite_client=client2)
+        store2 = NegotiationThreadStore(sqlite_client=client2, identity=_TEST_IDENTITY)
         
         # Load thread from second store
         thread = await store2.get_thread("test-persist")

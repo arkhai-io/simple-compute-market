@@ -912,9 +912,9 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 - Ansible subprocess invocations — mocked at `AnsibleService` (replace `start_playbook` / `wait_for_playbook` / `check_connectivity`)
 - The ERC-8004 registry HTTP call in `AgentAuthMiddleware` — bypassed by disabling auth (`enable_auth=false` in test settings)
 
-**Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
+**Test setup pattern:** Use `httpx.AsyncClient` with `ASGITransport` against the real `app` instance, injected via the canonical `FooClient(transport=...)` constructor. Override container providers for `AnsibleService` before the test and restore them after. See `src/tests/integration/conftest.py` for the full fixture implementation.
 
-**Client contract verification:** Integration tests import `ProvisioningClient` from `client.provisioning_client` and exercise it against the real app. This ensures the client's URL paths, request body shapes, and response parsing stay in sync with the actual API — drift is caught immediately rather than at e2e test time.
+**Client contract verification:** Integration tests call `ProvisioningClient` methods directly against the in-process app. Route strings, request body shapes, and response parsing are owned by the client — no raw HTTP calls appear in test code. If the API renames a field or changes a route, the client method raises `ProvisioningError` and the test fails immediately.
 
 **State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions only for state that is not expressible through any API endpoint — this keeps integration tests honest about the API contract.
 
@@ -1090,38 +1090,103 @@ When either contract changes: bump `version` in `agent-client/pyproject.toml`, u
 
 **Long term — GCP Artifact Registry:** The project already uses GAR for `alkahest-py`. When ready: `uv publish --index https://...gar.../simple .dist/*.whl`. Consumer-side change is one URL in `pyproject.toml`. No structural changes elsewhere.
 
-### Client packages
+### Canonical client design pattern
 
-Each service that has HTTP consumers owns a `client/` subpackage alongside its `src/` code. The client is a lightweight wrapper (models + `aiohttp` calls) with no server-side imports. It is packaged into the service's wheel and imported by consumers as:
+Every service that has HTTP consumers provides two client classes with identical method signatures:
 
-```python
-from client.provisioning_client import ProvisioningClient
+```
+FooClient          — async, backed by httpx.AsyncClient
+SyncFooClient      — sync,  backed by httpx.Client
 ```
 
-The provisioning service's integration tests import `ProvisioningClient` directly and exercise it against the real FastAPI app. This ensures client ↔ API contract drift is caught at the integration test level, well before e2e tests.
+Both classes:
+- **Own their HTTP session internally** — callers never create or pass a session object
+- **Accept a `transport=` kwarg at construction** for in-process test injection
+- **Raise a typed `FooClientError`** (subclass of `Exception`) on non-2xx responses
+- **Return typed model objects** from all methods — no raw dicts exposed
 
-**`service/clients/provisioning.py` (agent-side shim):** The agent imports provisioning client functions from `service.clients.provisioning`, which is currently a one-line re-export shim pointing at `client.provisioning_client`. The shim preserves existing import paths while the underlying implementation lives canonically in the provisioning service package.
+```python
+# Production (real network)
+client = SyncRegistryClient("http://registry:8080")
+agents = client.list_agents(limit=10)
 
-> **TODO(action_executor_refactor):** `core/agent/app/utils/action_executor.py` uses module-level wrapper functions from the shim rather than `ProvisioningClient` directly. The functions `_do_provision` and `_do_shutdown` should be refactored to instantiate `ProvisioningClient` and call `create_vm` / `schedule_expiry` with typed request models. This removes the raw `params` dict and `vm_host` extraction hacks, and makes provisioning calls fully typed end-to-end.
+# In-process integration test (no network socket)
+client = RegistryClient("http://test", transport=httpx.ASGITransport(app=app))
+agents = await client.list_agents(limit=10)
+```
 
-### Agent client
+**Why httpx, not aiohttp:** `httpx` provides both `AsyncClient` and `Client` with identical interfaces, and crucially supports `ASGITransport` for driving ASGI apps (FastAPI) in-process without a network socket. `aiohttp` has no ASGI transport and requires a `ClientSession` to be passed per-call, which leaks transport concerns into callers.
 
-The canonical `AgentClient` lives in the `arkhai-agent-client` package (`agent-client/`). It is a pure-Python, async aiohttp-based client distributed as a wheel to avoid pulling `market-core`'s heavyweight dependencies into consumers that only need the HTTP client and EIP-191 signing.
+**No session argument:** Methods do not accept a session. The client owns its session lifecycle. Use the client as a context manager or call `close()` explicitly:
 
-`AgentClient` implements EIP-191 signing via `_build_auth_headers`. The private key is supplied at construction time. All response methods return typed model objects from `agent_client.models` (`ERC8004RegistrationFile`, `AgentOrderCreateResponse`, `AgentOrderCloseResponse`).
+```python
+async with RegistryClient("http://registry:8080") as client:
+    health = await client.get_health()
 
-The `core/agent/client/agent_client.py` file is a re-export shim that preserves the historical import path for callers inside `core/`.
+# or
+client = SyncRegistryClient("http://registry:8080")
+try:
+    health = client.get_health()
+finally:
+    client.close()
+```
 
-**`integration-tests/src/agent_client.py` (sync shim):** `test_agents.py` is synchronous; the canonical client is async. A thin synchronous wrapper in `integration-tests/src/agent_client.py` bridges this via `asyncio.run()`. Its public interface is identical to the old hand-rolled client so no test changes were needed.
+**No module-level wrapper functions:** Functions like `provision_machine_async()` or `schedule_vm_expiry_async()` that wrap client methods are removed. Callers instantiate the client and call methods directly.
 
-> **TODO(agent-client-migration):** Remove the sync shim and use the canonical async client directly in tests.
->
-> Steps:
-> 1. Convert `test_agents.py` fixtures and test methods to `async def` (pytest-asyncio is already configured, `asyncio_mode = auto`).
-> 2. Delete `integration-tests/src/agent_client.py`.
-> 3. Replace `from src.agent_client import AgentClient` with `from agent_client import AgentClient` in `test_agents.py`.
-> 4. Move remaining request builder classes (`AgentOrderCreateRequest`, `AgentOrderCloseRequest`, `ComputeResourcePayload`, `TokenResourcePayload`, `ResourceAlertRequest`) from `integration-tests/src/models/agent.py` into `agent-client/src/agent_client/models.py`.
-> 5. Delete `integration-tests/src/models/agent.py` (all classes will be importable from `agent_client.models`).
+**Transport injection for integration tests:** Service integration tests use `FooClient` (async) with `httpx.ASGITransport(app=app)`. The fixture wires `get_db` override and yields the client — tests call methods, never route strings:
+
+```python
+@pytest_asyncio.fixture
+async def registry_client(db_session):
+    app.dependency_overrides[get_db] = lambda: ...
+    async with RegistryClient("http://test", transport=httpx.ASGITransport(app=app)) as client:
+        yield client
+    app.dependency_overrides.clear()
+
+async def test_list_orders(registry_client):
+    result = await registry_client.list_orders()   # no route strings
+    assert result.orders == []
+```
+
+**`SyncFooClient` for smoke tests:** Smoke tests run against real deployed endpoints over a real network socket. They use `SyncFooClient` directly — no shims, no `asyncio.run()`:
+
+```python
+client = SyncRegistryClient(base_url=registry_api_url)
+health = client.get_health()
+```
+
+**Iteration workflow for wheel consumers:** When iterating on a client package during development, use `make reinit` (not `make init`) to force reinstallation without bumping the version:
+
+```
+make dist-registry          # rebuild wheel
+cd registry-service && make reinit && make test-integration
+```
+
+`reinit` runs `uv sync --reinstall-package <pkg>` which pulls fresh from `.dist/` regardless of cache.
+
+### Client package inventory
+
+| Package | Wheel | Async client | Sync client | Consumers |
+|---|---|---|---|---|
+| `agent-client/` | `arkhai_agent_client-*.whl` | `AgentClient` | `SyncAgentClient` | `storefront`, `integration-tests` |
+| `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
+| `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
+
+`arkhai-agent-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`google-adk`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
+
+`provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
+
+### Re-export shims
+
+Two re-export shims exist to preserve legacy import paths:
+
+**`storefront/src/market_storefront/client/agent_client.py`:** re-exports `AgentClient` from the wheel so callers inside `storefront` use `from market_storefront.client.agent_client import AgentClient` without knowing the wheel name.
+
+**`service/src/service/clients/provisioning.py`:** re-exports `ProvisioningClient` and error classes from `client.provisioning_client` so agent-side callers use `from service.clients.provisioning import ProvisioningClient`.
+
+Both shims contain no logic. Changes to clients go in the canonical package.
+
+**`integration-tests/src/registry_client.py` and `src/agent_client.py`:** these files now re-export `SyncRegistryClient as RegistryClient` and `SyncAgentClient as AgentClient` from the canonical wheels. They exist only to preserve the `from src.X import Y` import path in smoke tests. They are intentionally thin — a future task can update the smoke test import paths to import from the wheel directly and delete these files.
 
 | Term | Meaning |
 |---|---|

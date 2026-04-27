@@ -19,12 +19,14 @@ NOTE: Policy requires strategy to be specified. If no strategy, passes to next p
 
 import pytest
 from market_storefront.schema.pydantic_models import DecisionContext, NegotiationEvent
+from market_policy.identity import Identity
 from market_policy.store import PolicyStore
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.evaluator import CallableEvaluator
 import tempfile
 import os
 
+_TEST_IDENTITY = Identity(agent_url="test-agent-url", agent_id="test-agent-id")
 
 @pytest.fixture
 def temp_db():
@@ -459,8 +461,12 @@ class TestMultipleBilateralNegotiations:
     def thread_store(self, temp_db):
         """Create a NegotiationThreadStore for multi-party tests."""
         from market_policy.negotiation_thread import NegotiationThreadStore
+        from market_policy.identity import Identity
         sqlite_client = SQLiteClient(db_path=temp_db)
-        return NegotiationThreadStore(sqlite_client=sqlite_client)
+        return NegotiationThreadStore(
+            sqlite_client=sqlite_client,
+            identity=Identity(agent_url="http://localhost:8001"),
+        )
 
     @pytest.mark.asyncio
     async def test_minimizer_negotiates_with_multiple_maximizers(self, policy_store, thread_store):
@@ -910,7 +916,7 @@ class TestMakeOfferRoundGuard:
     @pytest.fixture
     def thread_store(self, temp_db):
         from market_policy.negotiation_thread import NegotiationThreadStore
-        return NegotiationThreadStore(SQLiteClient(db_path=temp_db))
+        return NegotiationThreadStore(SQLiteClient(db_path=temp_db), identity=_TEST_IDENTITY)
 
     def _make_event_and_context(self, their_price: int = 150):
         """Build a MakeOfferEvent + DecisionContext for the incoming offer."""

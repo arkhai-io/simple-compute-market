@@ -26,13 +26,12 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 logger = logging.getLogger(__name__)
 
 
-def _get_resources_fn() -> Callable[..., Coroutine[Any, Any, dict[str, Any]]]:
-    """Return the ``get_vm_available_resources`` function from the provisioning client."""
-    from service.clients.provisioning import get_vm_available_resources
-    return get_vm_available_resources  # type: ignore[return-value]
+def _get_resources_fn():
+    """Kept for backward compatibility — resource_poller_loop passes this to _poll_once."""
+    return None  # _poll_once now uses ProvisioningClient directly
 
 
-async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> None:
+async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Any = None) -> None:
     """Run one availability check for every registered compute.gpu resource."""
     resources = await sqlite_client.list_resources(resource_type="compute.gpu")
     if not resources:
@@ -103,13 +102,27 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Callable) -> 
         # resource below — a provisioning outage must not strand leases.
         result: dict[str, Any] | None = None
         try:
-            result = await provisioning_fn(
+            from service.clients.provisioning import ProvisioningClient
+            client = ProvisioningClient(
                 CONFIG.provisioning_service_url,
-                vm_host=vm_host,
-                timeout=60,
-                poll_interval=5,
                 agent_id=CONFIG.onchain_agent_id,
+                timeout=60,
             )
+            async with client:
+                submit = await client.check_capacity(vm_host)
+                job = await client.poll_until_complete(
+                    submit.job_id, timeout=60, poll_interval=5
+                )
+            raw = job.result or {}
+            available = raw.get("available", {})
+            allocated = raw.get("allocated", {})
+            result = {
+                "available": available.get("gpus", 0) > 0 if isinstance(available, dict) else False,
+                "running_vms": allocated.get("gpus", 0) if isinstance(allocated, dict) else 0,
+                "available_gpus": available.get("gpus", 0) if isinstance(available, dict) else 0,
+                "available_vcpus": available.get("vcpus", 0) if isinstance(available, dict) else 0,
+                "available_ram_mb": available.get("ram_mb", 0) if isinstance(available, dict) else 0,
+            }
         except Exception as exc:
             logger.warning(
                 "resource_poller: failed to check %s via provisioning service: %s",

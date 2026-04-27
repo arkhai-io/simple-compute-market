@@ -16,7 +16,7 @@ import logging
 
 import pytest
 
-from src.registry_client import RegistryClient
+from registry_client import SyncRegistryClient as RegistryClient
 from registry_client import RegistryClientError
 from registry_client.models import AgentListResponse, OrderListResponse
 

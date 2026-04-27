@@ -2015,23 +2015,23 @@ async def _preflight_provisioning() -> None:
     Does not hard-fail — provisioning may come up later, and we want the
     agent to keep serving unrelated endpoints.
     """
-    import aiohttp
+    import httpx
     from market_storefront.utils.config import CONFIG
 
     await asyncio.sleep(10)
     url = CONFIG.provisioning_service_url.rstrip("/") + "/health"
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    logger.info("[STARTUP] Provisioning service reachable at %s",
-                                CONFIG.provisioning_service_url)
-                    return
-                logger.warning(
-                    "[STARTUP] Provisioning service at %s returned HTTP %d — "
-                    "fulfillment will fail until this is resolved",
-                    CONFIG.provisioning_service_url, resp.status,
-                )
+        async with httpx.AsyncClient(timeout=5) as http:
+            resp = await http.get(url)
+            if resp.status_code == 200:
+                logger.info("[STARTUP] Provisioning service reachable at %s",
+                            CONFIG.provisioning_service_url)
+                return
+            logger.warning(
+                "[STARTUP] Provisioning service at %s returned HTTP %d — "
+                "fulfillment will fail until this is resolved",
+                CONFIG.provisioning_service_url, resp.status_code,
+            )
     except Exception as exc:
         logger.warning(
             "A working PROVISIONING_SERVICE_URL is required; "
