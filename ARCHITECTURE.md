@@ -884,6 +884,34 @@ The specific gaps in the current implementation:
 
 ---
 
+### 3. Registry native client
+
+**Status:** Planned.
+
+**Problem:** `service/src/service/clients/indexer.py` is a 250-line `RegistryClient` inside `market-service`. The `erc-8004-registry-py` submodule owns the registry API but has no client package. The agent imports `get_registry_client()` from `service.clients.indexer`, coupling the agent to `market-service` for registry access.
+
+**Planned fix:**
+1. Add a `client/` subpackage to `erc-8004-registry-py` following the provisioning-service pattern.
+2. Build it as a `erc8004-registry-client` wheel distributed via `.dist/`.
+3. Replace `service/src/service/clients/indexer.py` with a re-export shim.
+4. Update `core/agent/app/utils/action_executor.py` to import from the new wheel directly.
+
+### 4. Provisioning service README and root Makefile
+
+**Status:** Planned.
+
+**Problem:** `provisioning-service/README.md` and the root `Makefile` contain stale references from before the typed API, host registry, and wheel distribution work. Neither was updated during the implementation sessions.
+
+**Planned fix:** Review and rewrite both files to reflect current architecture, Makefile targets (`dist`, `init`, `build-*`), and the Helm deployment workflow.
+
+### 5. Helm deploy Makefile target
+
+**Status:** Planned.
+
+**Problem:** The Helm deploy Makefile target does not set `inventory.hostsIni` from the IAC hosts file. Operators must supply it manually.
+
+**Planned fix:** Add a `HOSTS_INI` variable to the root Makefile deploy target defaulting to `$(IAC_DIR)/ansible/inventory/hosts`. Pass it as `--set-string inventory.hostsIni="$$(cat $(HOSTS_INI))"` in the `helm upgrade --install` call.
+
 
 ## Testing Strategy
 
@@ -1076,7 +1104,22 @@ The provisioning service's integration tests import `ProvisioningClient` directl
 
 ### Agent client
 
-`AgentClient._auth_headers` documents the intended EIP-191 signing interface but raises `NotImplementedError` because signing requires the caller's private key, not just the wallet address. Callers requiring auth should subclass `AgentClient` and override `_auth_headers`, or set `AGENT_WALLET_ADDRESS` to empty on the target agent to skip auth during testing.
+The canonical `AgentClient` lives in the `arkhai-agent-client` package (`agent-client/`). It is a pure-Python, async aiohttp-based client distributed as a wheel to avoid pulling `market-core`'s heavyweight dependencies into consumers that only need the HTTP client and EIP-191 signing.
+
+`AgentClient` implements EIP-191 signing via `_build_auth_headers`. The private key is supplied at construction time. All response methods return typed model objects from `agent_client.models` (`ERC8004RegistrationFile`, `AgentOrderCreateResponse`, `AgentOrderCloseResponse`).
+
+The `core/agent/client/agent_client.py` file is a re-export shim that preserves the historical import path for callers inside `core/`.
+
+**`integration-tests/src/agent_client.py` (sync shim):** `test_agents.py` is synchronous; the canonical client is async. A thin synchronous wrapper in `integration-tests/src/agent_client.py` bridges this via `asyncio.run()`. Its public interface is identical to the old hand-rolled client so no test changes were needed.
+
+> **TODO(agent-client-migration):** Remove the sync shim and use the canonical async client directly in tests.
+>
+> Steps:
+> 1. Convert `test_agents.py` fixtures and test methods to `async def` (pytest-asyncio is already configured, `asyncio_mode = auto`).
+> 2. Delete `integration-tests/src/agent_client.py`.
+> 3. Replace `from src.agent_client import AgentClient` with `from agent_client import AgentClient` in `test_agents.py`.
+> 4. Move remaining request builder classes (`AgentOrderCreateRequest`, `AgentOrderCloseRequest`, `ComputeResourcePayload`, `TokenResourcePayload`, `ResourceAlertRequest`) from `integration-tests/src/models/agent.py` into `agent-client/src/agent_client/models.py`.
+> 5. Delete `integration-tests/src/models/agent.py` (all classes will be importable from `agent_client.models`).
 
 | Term | Meaning |
 |---|---|

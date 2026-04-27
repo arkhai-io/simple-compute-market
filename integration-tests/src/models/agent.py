@@ -21,95 +21,26 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# ERC-8004 registration file  (GET /.well-known/erc-8004-registration.json)
+# ERC-8004 registration file and order response models
+#
+# These classes have moved to the ``arkhai-agent-client`` package
+# (``agent_client.models``).  They are re-exported here so that existing
+# imports from ``src.models.agent`` continue to work without changes.
+# See TODO(agent-client-migration) in ARCHITECTURE.md.
 # ---------------------------------------------------------------------------
 
-@dataclass
-class RegistrationRecord:
-    """Single on-chain registration entry inside the ERC-8004 file."""
-    agent_id: int | None = None          # 0 means not yet registered
-    agent_registry: str | None = None    # "eip155:<chainId>:<address>"
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "RegistrationRecord":
-        return cls(
-            agent_id=d.get("agentId"),
-            agent_registry=d.get("agentRegistry"),
-        )
-
-    @property
-    def registry_address(self) -> str | None:
-        """Extract the bare 0x address from 'eip155:<chainId>:<address>'."""
-        raw = self.agent_registry or ""
-        parts = raw.split(":")
-        return parts[-1] if len(parts) == 3 else None
+from agent_client.models import (  # noqa: F401 — re-exported for backward compat
+    AgentEndpoint,
+    AgentOrderCloseResponse,
+    AgentOrderCreateResponse,
+    ERC8004RegistrationFile,
+    RegistrationRecord,
+)
 
 
-@dataclass
-class AgentEndpoint:
-    name: str
-    endpoint: str
-    version: str | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "AgentEndpoint":
-        known = {"name", "endpoint", "version"}
-        return cls(
-            name=d["name"],
-            endpoint=d["endpoint"],
-            version=d.get("version"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class ERC8004RegistrationFile:
-    """
-    Response from GET /.well-known/erc-8004-registration.json
-
-    Example::
-
-        {
-          "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
-          "name": "alice",
-          "description": "...",
-          "endpoints": [...],
-          "updatedAt": 1774380840,
-          "registrations": [
-            {"agentId": 3, "agentRegistry": "eip155:31337:0x8004..."}
-          ]
-        }
-    """
-    type: str | None = None
-    name: str | None = None
-    description: str | None = None
-    endpoints: list[AgentEndpoint] = field(default_factory=list)
-    registrations: list[RegistrationRecord] = field(default_factory=list)
-    updated_at: int | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ERC8004RegistrationFile":
-        known = {"type", "name", "description", "endpoints", "registrations", "updatedAt"}
-        return cls(
-            type=d.get("type"),
-            name=d.get("name"),
-            description=d.get("description"),
-            endpoints=[AgentEndpoint.from_dict(e) for e in d.get("endpoints", [])],
-            registrations=[RegistrationRecord.from_dict(r) for r in d.get("registrations", [])],
-            updated_at=d.get("updatedAt"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-    @property
-    def is_registered(self) -> bool:
-        """True iff at least one registration record has an agentId."""
-        return any(
-            r.agent_id is not None
-            for r in self.registrations
-        )
-
+# ---------------------------------------------------------------------------
+# (Remaining classes below are request builders — not yet migrated.)
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Order create  (POST /orders/create)

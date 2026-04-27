@@ -47,6 +47,12 @@ from typing import Any, Optional
 
 import aiohttp
 
+from agent_client.models import (
+    AgentOrderCloseResponse,
+    AgentOrderCreateResponse,
+    ERC8004RegistrationFile,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,7 +222,8 @@ class AgentClient:
             "demand": demand,
             "duration_hours": duration_hours,
         }
-        return await self._post(session, "/orders/create", body, extra_headers=headers)
+        data = await self._post(session, "/orders/create", body, extra_headers=headers)
+        return AgentOrderCreateResponse.from_dict(data)
 
     async def close_order(
         self,
@@ -237,7 +244,8 @@ class AgentClient:
         """
         headers = self._auth_headers("close_order", order_id)
         body = {"order_id": order_id}
-        return await self._post(session, "/orders/close", body, extra_headers=headers)
+        data = await self._post(session, "/orders/close", body, extra_headers=headers)
+        return AgentOrderCloseResponse.from_dict(data)
 
     # ------------------------------------------------------------------
     # ERC-8004 registration
@@ -248,4 +256,5 @@ class AgentClient:
         session: aiohttp.ClientSession,
     ) -> dict[str, Any]:
         """``GET /.well-known/erc-8004-registration.json``"""
-        return await self._get(session, "/.well-known/erc-8004-registration.json")
+        data = await self._get(session, "/.well-known/erc-8004-registration.json")
+        return ERC8004RegistrationFile.from_dict(data)

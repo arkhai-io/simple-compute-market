@@ -1,72 +1,54 @@
-"""Synchronous HTTP client for the Arkhai agent REST API.
+"""Synchronous shim over the canonical async AgentClient.
 
-This is the integration-test shim over the canonical async client in
-``agent.client.agent_client``.  It uses httpx for synchronous I/O but
-delegates EIP-191 signing to the canonical ``_build_auth_headers``
-helper so both clients stay in sync with the server's auth protocol.
+This module exists solely to let the synchronous ``test_agents.py`` test
+suite call the canonical ``agent_client.AgentClient`` without being
+converted to async.  It bridges sync→async via ``asyncio.run()``.
 
-Auth
-----
-The signed message format (from agent.py ``_check_agent_request_auth``):
+The shim's public interface is intentionally identical to the old
+``integration-tests/src/agent_client.py`` so that no test changes are
+needed.
 
-    create_order  →  "create_order:<agent_wallet_address>:<timestamp>"
-    close_order   →  "close_order:<order_id>:<timestamp>"
-
-``agent_wallet_address`` is the ``AGENT_WALLET_ADDRESS`` setting on the
-target agent, available in test config as ``buyer.wallet_address`` /
-``seller.wallet_address``.
+See TODO(agent-client-migration) in ARCHITECTURE.md for the planned work
+to remove this shim entirely by converting the tests to async and importing
+``AgentClient`` from ``agent_client`` directly.
 """
 
 from __future__ import annotations
 
-import logging
+import asyncio
 from typing import Any
 
-import httpx
+import aiohttp
 
-from agent_client.client import AgentClientError, _build_auth_headers
-from src.models.agent import ERC8004RegistrationFile
+from agent_client import (
+    AgentClient as _AsyncAgentClient,
+    AgentClientError,
+    ERC8004RegistrationFile,
+    AgentOrderCreateResponse,
+    AgentOrderCloseResponse,
+)
 from src.eip191_http_client import ApiError
 
-log = logging.getLogger(__name__)
 
-
-class _OrderResponse:
-    """Thin wrapper around the raw JSON response from /orders/create and /orders/close."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        self._data = data
-
-    @property
-    def status(self) -> str:
-        return self._data.get("status", "")
-
-    @property
-    def order_id(self) -> str | None:
-        return self._data.get("order_id")
-
-    @property
-    def event_id(self) -> str | None:
-        return self._data.get("event_id")
-
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data.get(key, default)
+def _run(coro):
+    """Run a coroutine synchronously."""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 class AgentClient:
-    """Synchronous HTTP client for the Arkhai agent REST API.
+    """Synchronous wrapper over the canonical async AgentClient.
 
     Parameters
     ----------
     base_url:
-        Publicly-reachable URL of the agent.
+        Base URL of the agent.
     private_key:
-        Caller's EIP-191 private key used to sign ``X-Signature`` headers.
+        EIP-191 private key for signing auth headers.
     agent_wallet_address:
-        Wallet address of the target agent.  Used as ``resource_id`` in
-        the ``create_order`` signed message.  Falls back to ``base_url``
-        if not supplied (backward-compat — agents without
-        ``AGENT_WALLET_ADDRESS`` set skip auth).
+        Wallet address of the target agent (resource_id for create_order).
+    agent_base_url_override:
+        Legacy kwarg alias for agent_wallet_address — kept for backward
+        compat with existing fixture call sites.
     timeout:
         HTTP timeout in seconds.
     """
@@ -77,77 +59,63 @@ class AgentClient:
         private_key: str,
         *,
         agent_wallet_address: str | None = None,
-        # Legacy kwarg name kept for backward compat with existing test fixtures
         agent_base_url_override: str | None = None,
         timeout: float = 60.0,
     ) -> None:
-        self._base = base_url.rstrip("/")
-        self._private_key = private_key
-        # Prefer explicit wallet_address; fall back to legacy base_url_override
-        # (which was wrong — kept only to avoid breaking callers mid-refactor).
-        self._agent_wallet_address = agent_wallet_address or agent_base_url_override or base_url
-        self._http = httpx.Client(
-            base_url=self._base,
+        self._wallet_address = agent_wallet_address or agent_base_url_override or base_url
+        self._async_client = _AsyncAgentClient(
+            base_url=base_url,
+            private_key=private_key,
             timeout=timeout,
-            headers={"Accept": "application/json"},
         )
-        log.info("AgentClient initialised — base_url=%s", self._base)
+        self._session: aiohttp.ClientSession | None = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
 
     def close(self) -> None:
-        self._http.close()
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        json: Any = None,
-        extra_headers: dict[str, str] | None = None,
-        expected_statuses: tuple[int, ...] = (200, 201),
-    ) -> dict[str, Any]:
-        headers = dict(extra_headers or {})
-        resp = self._http.request(method, path, json=json, headers=headers)
-        if resp.status_code not in expected_statuses:
-            raise ApiError(method, f"{self._base}{path}", resp.status_code, resp.text)
-        return resp.json()
+        if self._session and not self._session.closed:
+            _run(self._session.close())
+        self._session = None
 
     # ------------------------------------------------------------------
     # ERC-8004 registration
     # ------------------------------------------------------------------
 
-    def get_registration_file(self) -> "ERC8004RegistrationFile":
+    def get_registration_file(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
-        data = self._request("GET", "/.well-known/erc-8004-registration.json")
-        return ERC8004RegistrationFile.from_dict(data)
+        try:
+            return _run(self._async_client.get_registration(self._get_session()))
+        except AgentClientError as exc:
+            raise ApiError("GET", "/.well-known/erc-8004-registration.json",
+                           0, str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Orders
     # ------------------------------------------------------------------
 
-    def create_order(self, order: Any) -> _OrderResponse:
-        """POST /orders/create with EIP-191 signed headers.
-
-        ``order`` may be an ``AgentOrderCreateRequest`` (with ``.to_dict()``)
-        or a plain dict.
-        """
-        headers = _build_auth_headers(
-            self._private_key, "create_order", self._agent_wallet_address
-        )
+    def create_order(self, order: Any) -> AgentOrderCreateResponse:
+        """POST /orders/create with EIP-191 signed headers."""
         body = order.to_dict() if hasattr(order, "to_dict") else dict(order)
-        data = self._request("POST", "/orders/create", json=body, extra_headers=headers)
-        return _OrderResponse(data)
+        try:
+            return _run(self._async_client.create_order(
+                self._get_session(),
+                agent_wallet_address=self._wallet_address,
+                offer=body.get("offer", {}),
+                demand=body.get("demand", {}),
+                duration_hours=body.get("duration_hours", 1.0),
+            ))
+        except AgentClientError as exc:
+            raise ApiError("POST", "/orders/create", 0, str(exc)) from exc
 
-    def close_order(self, order_id: str) -> _OrderResponse:
+    def close_order(self, order_id: str) -> AgentOrderCloseResponse:
         """POST /orders/close with EIP-191 signed headers."""
-        headers = _build_auth_headers(self._private_key, "close_order", order_id)
-        data = self._request(
-            "POST", "/orders/close", json={"order_id": order_id}, extra_headers=headers
-        )
-        return _OrderResponse(data)
+        try:
+            return _run(self._async_client.close_order(self._get_session(), order_id))
+        except AgentClientError as exc:
+            raise ApiError("POST", "/orders/close", 0, str(exc)) from exc
 
     # ------------------------------------------------------------------
     # Alerts
@@ -156,9 +124,14 @@ class AgentClient:
     def send_resource_alert(self, alert: Any) -> dict[str, Any]:
         """POST /alerts/resource (no auth required)."""
         body = alert.to_dict() if hasattr(alert, "to_dict") else dict(alert)
-        return self._request(
-            "POST",
-            "/alerts/resource",
-            json=body,
-            extra_headers={"Content-Type": "application/json"},
-        )
+        try:
+            return _run(self._async_client.send_resource_alert(
+                self._get_session(),
+                event_type=body.get("event_type", "resource_imbalance"),
+                resource=body.get("resource", {}),
+                value=body.get("value", 0.0),
+                label=body.get("label", ""),
+                threshold=body.get("threshold", ""),
+            ))
+        except AgentClientError as exc:
+            raise ApiError("POST", "/alerts/resource", 0, str(exc)) from exc
