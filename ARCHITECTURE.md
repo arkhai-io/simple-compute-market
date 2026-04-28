@@ -37,8 +37,8 @@ The stack is designed so that in production, multiple independent seller nodes e
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼────────────────┐
          │  registry-service  │   │  core (agent)          │
-         │  :8080             │   │  :8000 buyer           │
-         │  FastAPI indexer   │◄──┤  :8001 seller          │
+         │  :8080             │   │  :8001 seller          │
+         │  FastAPI indexer   │◄──┤  Google ADK / A2A      │
          │  SQLite/Postgres   │   │  Google ADK / A2A      │
          └────────────────────┘   └───────┬────────────────┘
                                           │ HTTP (provisioning API)
@@ -692,7 +692,6 @@ helm/
 └── charts/
     ├── test-env/           # Anvil node (condition: test-env.enabled)
     ├── registry/           # registry-service (condition: registry.enabled)
-    ├── agents/             # buyer + seller agents (condition: agents.enabled)
     ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
 ```
@@ -703,15 +702,14 @@ helm/
 |---|---|---|
 | `test-env` | 1 (Anvil) | 1 NodePort :8545 |
 | `registry` | 1 | 1 NodePort :8080 |
-| `agents` | 2 (buyer, seller) | 2 ClusterIP (buyer :8000, seller :8001) |
 | `provisioning` | 1 (unified API + job loop) | 1 ClusterIP (:8081) |
 
 **Startup ordering** is enforced by init containers:
-- Both agents wait on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
+- The seller agent waits on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
 - The provisioning container has no init containers or startup dependencies
 
 **Secrets:**
-- Agent private keys + wallet addresses → `Secret` per agent (buyer/seller), sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
+- Seller agent private key + wallet address → `Secret` per agent, sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
 - SSH private key for Ansible → `Secret` mounted as a volume at `/home/appuser/.ssh/id_ed25519` (mode 0400); set via `--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE)` at deploy time or by providing a pre-existing Secret
 
 **Global values** propagated to all subcharts:
@@ -735,9 +733,7 @@ make unforward         # kill all port-forwards
 ```
 localhost:8545  → test-env (Anvil RPC)
 localhost:8080  → registry
-localhost:8000  → buyer agent
 localhost:8001  → seller agent
-localhost:8081  → provisioning API
 localhost:8081  → provisioning API (also handles ansible inventory + connectivity endpoints)
 ```
 
@@ -754,8 +750,7 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 - Agent `Deployment` has no liveness or readiness probes (noted as TODO in the template)
 - `ONCHAIN_AGENT_ID` is not cleared in the Helm deployment the way it is in compose — behavior on pod restart against a persistent chain needs verification
 - `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
-- Both agents currently share a single image tag via `agents.image` — no per-role image override is possible without editing the template
-- `replicaCount` exists for agents and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect
+- `replicaCount` exists for the storefront and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect
 
 ---
 
@@ -859,11 +854,9 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 
 ### 3. Helm deploy Makefile target
 
-**Status:** Planned.
+**Status:** Complete.
 
-**Problem:** The Helm deploy Makefile target does not set `inventory.hostsIni` from the IAC hosts file. Operators must supply it manually.
-
-**Planned fix:** Add a `HOSTS_INI` variable to the root Makefile deploy target defaulting to `$(IAC_DIR)/ansible/inventory/hosts`. Pass it as `--set-string inventory.hostsIni="$$(cat $(HOSTS_INI))"` in the `helm upgrade --install` call.
+The root `Makefile` `deploy` target now calls `deploy-helm` (Helm) and `deploy-docker` (legacy docker-run) as prereqs. `deploy-helm` delegates to `helm/Makefile deploy` passing `SSH_KEY_FILE` and `--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)`. `HOSTS_INI` defaults to `$(IAC_DIR)/ansible/inventory/hosts` where `IAC_DIR` defaults to the `compute-provisioning-iac` submodule at the repo root. The stale `provisioning-worker` port-forward (port 8082) was removed from `helm/Makefile forward` — that service no longer exists since the worker was unified into the provisioning service.
 
 
 ## Testing Strategy
@@ -1039,7 +1032,7 @@ simple-market-service/   ← monorepo root
 
 Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockfile and breaks the other context. Setting it via `UV_FIND_LINKS` on the command line means the path stays out of version-controlled files entirely.
 
-**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-agent-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
+**Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
 
 **Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker the relative path no longer exists, causing resolution failures. The wheel approach avoids this by making both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
@@ -1051,14 +1044,14 @@ Three pure-Python internal packages are distributed as wheels:
 |---------|-----------|--------|-------------------|
 | `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
-| `arkhai-agent-client` | `arkhai_agent_client-*.whl` | `agent-client/` | `integration-tests`, `core` |
+| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
 
-`arkhai-agent-client` exists as a separate lightweight package to avoid pulling `market-core`'s heavyweight dependencies (`google-adk`, `pufferlib`, native RL wheels) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `agent-client/src/agent_client/client.py`; `core/agent/client/agent_client.py` is a re-export shim that preserves the historical import path for callers inside `core/`.
+`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`google-adk`, `pufferlib`, native RL wheels) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
 
-**`arkhai-agent-client` versioning policy:**
+**`arkhai-storefront-client` versioning policy:**
 
-`arkhai-agent-client` encodes two contracts with the agent server (`core/agent/app/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
+`arkhai-storefront-client` encodes two contracts with the agent server (`storefront/src/market_storefront/agent.py`) that are not enforced at import time — mismatches produce silent 403s or wrong response shapes at runtime:
 
 1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
    - `create_order` → `"create_order:<agent_wallet_address>:<timestamp>"`
@@ -1066,7 +1059,7 @@ Three pure-Python internal packages are distributed as wheels:
 
 2. **Endpoint signatures** — `/orders/create`, `/orders/close`, `/alerts/resource` request/response shapes.
 
-When either contract changes: bump `version` in `agent-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-agent-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `agent-client/README.md` for the full checklist.
+When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
 
 ### Upgrade path
 
@@ -1152,21 +1145,19 @@ cd registry-service && make reinit && make test-integration
 
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
-| `agent-client/` | `arkhai_agent_client-*.whl` | `AgentClient` | `SyncAgentClient` | `storefront`, `integration-tests` |
+| `storefront-client/` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
 | `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
-`arkhai-agent-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`google-adk`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
+`arkhai-storefront-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`google-adk`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 
 ### Re-export shims
 
-**`storefront/src/market_storefront/client/agent_client.py`:** re-exports `AgentClient` from the wheel so callers inside `storefront` use `from market_storefront.client.agent_client import AgentClient` without knowing the wheel name.
+**`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by `test_agents.py` (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once `test_agents.py` is updated to call `SyncStorefrontClient` directly.
 
-
-
-**`integration-tests/src/registry_client.py` and `src/agent_client.py`:** re-export `SyncRegistryClient as RegistryClient` and delegate to `SyncAgentClient` from the canonical wheels. Preserved for the smoke test import path `from src.X import Y`. A future task can update the smoke test imports and delete these files.
+**`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`. A future task can update the smoke test imports and delete this file.
 
 | Term | Meaning |
 |---|---|

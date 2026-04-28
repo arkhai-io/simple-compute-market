@@ -31,12 +31,16 @@ endif
 ## Install or upgrade the release in the target namespace
 ## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
 ##   make deploy SSH_KEY_FILE=/path/to/other_key
+## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
+## inject --set-file provisioning.inventory.hostsIni=<path>.
+EXTRA_SET_FILE_ARGS ?=
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
 		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
+		$(EXTRA_SET_FILE_ARGS) \
 		--wait
 
 ## Run helm tests against the deployed release
@@ -76,10 +80,8 @@ FORWARD_PID_FILE := .port-forward.pids
 ## Access services at:
 ##   Anvil RPC   http://localhost:8545
 ##   Registry    http://localhost:8080
-##   Agent buy   http://localhost:8000
 ##   Agent sell  http://localhost:8001
 ##   Provisioning http://localhost:8081
-##   Provisioning worker  http://localhost:8082
 forward: unforward
 	@echo "Starting port-forwards..."
 	@kubectl port-forward --namespace $(NAMESPACE) \
@@ -87,19 +89,13 @@ forward: unforward
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-agents-buyer 8000:8000 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-agents-seller 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
-	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-provisioning-worker 8082:8082 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@echo "  anvil    → http://localhost:8545"
 	@echo "  registry → http://localhost:8080"
-	@echo "  buy      → http://localhost:8000"
 	@echo "  sell     → http://localhost:8001"
 	@echo "  prov     → http://localhost:8081"
-	@echo "  prov-wkr → http://localhost:8082"
 	@echo "Run 'make unforward' to stop."
 
 ## Kill all port-forwards started by 'make forward'

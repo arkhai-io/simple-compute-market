@@ -124,8 +124,25 @@ deploy-compose:
 	docker compose up
 	docker compose ps
 
-#Ideally a helm chart eventually replaces the different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-test-env deploy-registry deploy-storefront deploy-provisioning
+# Top-level deploy: runs both Helm and docker-run deployments.
+# Override SSH_KEY_FILE and HOSTS_INI as needed:
+#   make deploy SSH_KEY_FILE=/path/to/key HOSTS_INI=/path/to/hosts
+deploy: deploy-helm
+
+IAC_DIR      ?= $(CURDIR)/compute-provisioning-iac
+HOSTS_INI    ?= $(IAC_DIR)/ansible/inventory/hosts
+SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
+
+## Install or upgrade the Helm release.
+## Requires a reachable cluster context (kubectl) and SSH_KEY_FILE.
+## HOSTS_INI defaults to the IAC submodule inventory.
+deploy-helm:
+	$(MAKE) -C helm deploy \
+		SSH_KEY_FILE=$(SSH_KEY_FILE) \
+		EXTRA_SET_FILE_ARGS="--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)"
+
+## Docker-run based local deploy (legacy, still useful for local dev without k8s).
+deploy-docker: deploy-test-env deploy-registry deploy-storefront deploy-provisioning
 
 #docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
 deploy-test-env:
