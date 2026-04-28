@@ -18,6 +18,7 @@ from registry_client.models import (
     OrderListResponse,
     OrderRequest,
     OrderSummary,
+    UpdateOrderRequest,
 )
 
 __all__ = [
@@ -33,4 +34,5 @@ __all__ = [
     "OrderListResponse",
     "OrderRequest",
     "OrderSummary",
+    "UpdateOrderRequest",
 ]

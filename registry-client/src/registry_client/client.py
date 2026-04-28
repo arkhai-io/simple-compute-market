@@ -38,6 +38,7 @@ from registry_client.models import (
     OrderListResponse,
     OrderRequest,
     OrderSummary,
+    UpdateOrderRequest,
 )
 
 log = logging.getLogger(__name__)
@@ -344,6 +345,10 @@ class RegistryClient(_RegistryClientBase):
         # API wraps the order in {"order": {...}}
         return self._parse_order(data.get("order", data) if isinstance(data, dict) else data)
 
+    async def update_order(self, order_id: str, request: UpdateOrderRequest) -> dict:
+        """PUT /orders/{order_id} → updated order dict."""
+        return await self._request("PUT", f"/orders/{order_id}", json=request.to_dict())
+
     async def delete_order(self, order_id: str, private_key: str) -> None:
         """DELETE /orders/{order_id} with EIP-191 auth query params."""
         params = self._delete_order_params(order_id, private_key)
@@ -522,6 +527,10 @@ class SyncRegistryClient(_RegistryClientBase):
         data = self._request("GET", f"/orders/{order_id}")
         # API wraps the order in {"order": {...}}
         return self._parse_order(data.get("order", data) if isinstance(data, dict) else data)
+
+    def update_order(self, order_id: str, request: UpdateOrderRequest) -> dict:
+        """PUT /orders/{order_id} → updated order dict."""
+        return self._request("PUT", f"/orders/{order_id}", json=request.to_dict())
 
     def delete_order(self, order_id: str, private_key: str) -> None:
         """DELETE /orders/{order_id} with EIP-191 auth query params."""

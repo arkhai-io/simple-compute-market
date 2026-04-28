@@ -31,13 +31,15 @@ from market_storefront.resources import parse_resource_from_dict
 
 from market_storefront.utils.config import CONFIG
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
-from service.clients.indexer import get_registry_client
 from market_storefront.utils.sqlite_client import get_sqlite_client
-from service.clients.provisioning import ProvisioningClient, ProvisioningError
+from client.provisioning_client import ProvisioningClient, ProvisioningError
+from registry_client import RegistryClient, RegistryClientError, OrderRequest, UpdateOrderRequest
+from market_storefront.utils.order_matching import match_orders
 from market_policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
 )
+from market_policy.action_builders import make_negotiation_id
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
@@ -329,8 +331,15 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
     try:
-        registry_client = get_registry_client()
-        result = await registry_client.update_order(order_id, {"status": "closed"})
+        async with _make_registry_client() as registry_client:
+            result = await registry_client.update_order(
+                order_id,
+                UpdateOrderRequest(
+                    updates={"status": "closed"},
+                    private_key=CONFIG.agent_priv_key,
+                    agent_id=_canonical_agent_id(),
+                ),
+            )
         if result:
             return {
                 "status": "closed",
@@ -453,6 +462,20 @@ def _canonical_agent_id() -> str | None:
     except Exception as exc:
         logger.warning("[PROVISIONING] Could not build canonical agent ID from %r: %s", raw, exc)
         return str(raw)
+
+
+def _make_registry_client() -> RegistryClient:
+    """Construct a RegistryClient from environment/CONFIG.
+
+    Each call returns a new client instance — callers should use it as a
+    context manager or call close() when done.  Singletons are avoided here
+    because the private_key and agent_id config values can theoretically
+    change between calls during testing.
+    """
+    return RegistryClient(
+        CONFIG.registry_url or CONFIG.indexer_url or "http://localhost:8080",
+        private_key=CONFIG.agent_priv_key,
+    )
 
 
 def _sender_id() -> str:
@@ -591,26 +614,24 @@ async def discover(
     if not CONFIG.enable_registry_discovery:
         raise RuntimeError("Registry discovery is disabled (CONFIG.enable_registry_discovery=False)")
 
-    registry_client = get_registry_client()
-    our_order_dict = await registry_client.get_order(order_id)
-    if not our_order_dict:
-        raise ValueError(f"Order {order_id} not found in registry")
+    async with _make_registry_client() as registry_client:
+        try:
+            our_order = await registry_client.get_order(order_id)
+        except RegistryClientError as exc:
+            if exc.status_code == 404:
+                raise ValueError(f"Order {order_id} not found in registry") from exc
+            raise
 
-    matching_orders = await registry_client.query_orders(
-        filters={"status": "open"},
-        bidirectional=True,
-        limit=CONFIG.max_discovery_agents,
-    )
-    matching_orders = registry_client.match_orders(
-        our_order_dict,
-        matching_orders,
-        bidirectional=True,
-    )
+        candidates_resp = await registry_client.list_orders(
+            status="open",
+            limit=CONFIG.max_discovery_agents,
+        )
+        matching_orders = match_orders(our_order, candidates_resp.orders, bidirectional=True)
     # Drop our own orders.
     matching_orders = [
         m for m in matching_orders
-        if m.get("order_id") != order_id
-        and not _agent_urls_match(m.get("order_maker"), BASE_URL_OVERRIDE)
+        if str(m.id) != order_id
+        and not _agent_urls_match(m.maker_agent_id, BASE_URL_OVERRIDE)
     ]
 
     if not include_active_negotiations:
@@ -619,7 +640,7 @@ async def discover(
             if active_order_ids:
                 matching_orders = [
                     m for m in matching_orders
-                    if m.get("order_id") not in active_order_ids
+                    if str(m.id) not in active_order_ids
                 ]
                 logger.info(
                     "[DISCOVER] Filtered out %d orders already in active negotiations",
@@ -628,8 +649,8 @@ async def discover(
 
     matches: list[dict[str, Any]] = []
     for m in matching_orders[:CONFIG.max_discovery_agents]:
-        their_order_id = m.get("order_id")
-        their_agent_url = m.get("order_maker")
+        their_order_id = str(m.id)
+        their_agent_url = m.maker_agent_id
         if not their_order_id or not their_agent_url:
             continue
         matches.append({
@@ -676,67 +697,27 @@ async def publish_order_to_registry(order: MarketOrder | dict) -> dict[str, Any]
         return {"status": "disabled", "order_id": order_id}
 
     try:
-        registry_client = get_registry_client()
-
-        # Resolve the canonical ERC-8004 agent ID. Registry writes are
-        # keyed by this; if ONCHAIN_AGENT_ID isn't set, fall back to the
-        # local agent name (write may be rejected depending on registry).
-        agent_id_for_registry = CONFIG.agent_id
-        onchain_agent_id = CONFIG.onchain_agent_id
-        if not onchain_agent_id:
-            logger.warning(
-                "[REGISTRY] ONCHAIN_AGENT_ID not set; falling back to CONFIG.agent_id=%s",
-                CONFIG.agent_id,
-            )
-        elif isinstance(onchain_agent_id, str) and onchain_agent_id.startswith("eip155:"):
-            agent_id_for_registry = onchain_agent_id
-        elif CONFIG.identity_registry_address:
-            try:
-                numeric_agent_id = (
-                    int(onchain_agent_id) if isinstance(onchain_agent_id, str) else onchain_agent_id
-                )
-                from service.clients.erc8004.blockchain import build_erc8004_canonical_id
-
-                chain_id = 31337
-                if CONFIG.chain_rpc_url:
-                    try:
-                        from web3 import Web3
-                        from web3.providers import HTTPProvider
-                        from service.clients.erc8004.blockchain import rpc_url_for_http_provider
-
-                        w3 = Web3(HTTPProvider(
-                            rpc_url_for_http_provider(CONFIG.chain_rpc_url),
-                            request_kwargs={"timeout": 5},
-                        ))
-                        chain_id = w3.eth.chain_id
-                    except Exception:
-                        pass
-                agent_id_for_registry = build_erc8004_canonical_id(
-                    chain_id=chain_id,
-                    identity_registry=CONFIG.identity_registry_address,
-                    agent_id=numeric_agent_id,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[REGISTRY] Could not build canonical agent ID (onchain_agent_id=%r): %s",
-                    onchain_agent_id, exc,
-                )
-
-        result = await registry_client.publish_order(agent_id_for_registry, order_dict)
-        if result:
-            logger.info("[REGISTRY] Published order %s", order_id)
-            stage_event(
-                "discovery", "order_published",
+        agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
+        async with _make_registry_client() as registry_client:
+            order_request = OrderRequest(
                 order_id=order_id,
-                agent_url=BASE_URL_OVERRIDE,
-                offer=order_dict.get("offer_resource"),
-                demand=order_dict.get("demand_resource"),
-                duration_hours=order_dict.get("duration_hours"),
+                offer=order_dict.get("offer_resource", {}),
+                demand=order_dict.get("demand_resource", {}),
+                duration_hours=float(order_dict.get("duration_hours", 1.0)),
             )
-            return {"status": "published", "order_id": order_id}
-        logger.warning("[REGISTRY] publish_order returned None for %s", order_id)
-        return {"status": "error", "order_id": order_id,
-                "message": "Registry returned None (agent may not be registered)"}
+            await registry_client.publish_order(
+                agent_id_for_registry, order_request, private_key=CONFIG.agent_priv_key
+            )
+        logger.info("[REGISTRY] Published order %s", order_id)
+        stage_event(
+            "discovery", "order_published",
+            order_id=order_id,
+            agent_url=BASE_URL_OVERRIDE,
+            offer=order_dict.get("offer_resource"),
+            demand=order_dict.get("demand_resource"),
+            duration_hours=order_dict.get("duration_hours"),
+        )
+        return {"status": "published", "order_id": order_id}
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
         return {"status": "error", "order_id": order_id, "message": str(exc)}
@@ -989,15 +970,19 @@ async def fulfill_compute_obligation(
     # Update registry with maker_attestation when maker fulfills
     if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
         try:
-            registry_client = get_registry_client()
-            updates = {
-                "maker_attestation": maker_attestation,
-            }
-            result = await registry_client.update_order(order_id, updates)
-            if result:
-                logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
-            else:
-                logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
+            async with _make_registry_client() as registry_client:
+                result = await registry_client.update_order(
+                    order_id,
+                    UpdateOrderRequest(
+                        updates={"maker_attestation": maker_attestation},
+                        private_key=CONFIG.agent_priv_key,
+                        agent_id=_canonical_agent_id(),
+                    ),
+                )
+                if result:
+                    logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
+                else:
+                    logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
         except Exception as e:
             logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
 

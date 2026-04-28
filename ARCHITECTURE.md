@@ -848,24 +848,8 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 
 ---
 
-### 2. Registry native client
 
-**Status:** Partially complete.
-
-**Problem:** `service/src/service/clients/indexer.py` is a 250-line `RegistryClient` inside `market-service`. The agent imports `get_registry_client()` from `service.clients.indexer`, coupling the agent to `market-service` for registry access. The `integration-tests` project previously duplicated registry client logic in `src/registry_client.py` and `src/models/registry.py`.
-
-**Completed:**
-- Created `registry-client/` as a standalone lightweight package (`arkhai-registry-client` wheel) following the `arkhai-agent-client` pattern. Dependencies: `httpx` + `eth-account` only — avoids pulling `registry-service`'s `web3`, `sqlalchemy`, `fastapi` etc. into consumers.
-- `integration-tests` now imports `RegistryClient` and all response models directly from `registry_client` (the wheel). The old `src/registry_client.py` and `src/models/registry.py` files are deleted.
-- `dist-registry` target added to root `Makefile`; `arkhai-registry-client` added to `integration-tests/pyproject.toml` dependencies.
-- Renamed `erc-8004-registry-py/` → `registry-service/` throughout the monorepo.
-
-**Remaining:**
-- Replace `service/src/service/clients/indexer.py` with a re-export shim pointing at `registry_client`.
-- Update `core/agent/app/utils/action_executor.py` to import from `registry_client` directly instead of `service.clients.indexer`.
-- Add `arkhai-registry-client` as a dependency to `service/pyproject.toml` and `core/pyproject.toml` (or wherever `action_executor` lives).
-
-### 3. Provisioning service README and root Makefile
+### 2. Provisioning service README and root Makefile
 
 **Status:** Planned.
 
@@ -873,7 +857,7 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 
 **Planned fix:** Review and rewrite both files to reflect current architecture, Makefile targets (`dist`, `init`, `build-*`), and the Helm deployment workflow.
 
-### 4. Helm deploy Makefile target
+### 3. Helm deploy Makefile target
 
 **Status:** Planned.
 
@@ -1178,15 +1162,11 @@ cd registry-service && make reinit && make test-integration
 
 ### Re-export shims
 
-Two re-export shims exist to preserve legacy import paths:
-
 **`storefront/src/market_storefront/client/agent_client.py`:** re-exports `AgentClient` from the wheel so callers inside `storefront` use `from market_storefront.client.agent_client import AgentClient` without knowing the wheel name.
 
-**`service/src/service/clients/provisioning.py`:** re-exports `ProvisioningClient` and error classes from `client.provisioning_client` so agent-side callers use `from service.clients.provisioning import ProvisioningClient`.
 
-Both shims contain no logic. Changes to clients go in the canonical package.
 
-**`integration-tests/src/registry_client.py` and `src/agent_client.py`:** these files now re-export `SyncRegistryClient as RegistryClient` and `SyncAgentClient as AgentClient` from the canonical wheels. They exist only to preserve the `from src.X import Y` import path in smoke tests. They are intentionally thin — a future task can update the smoke test import paths to import from the wheel directly and delete these files.
+**`integration-tests/src/registry_client.py` and `src/agent_client.py`:** re-export `SyncRegistryClient as RegistryClient` and delegate to `SyncAgentClient` from the canonical wheels. Preserved for the smoke test import path `from src.X import Y`. A future task can update the smoke test imports and delete these files.
 
 | Term | Meaning |
 |---|---|

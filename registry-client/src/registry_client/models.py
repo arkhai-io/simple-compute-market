@@ -319,6 +319,32 @@ class OrderListResponse:
 
 
 @dataclass
+class UpdateOrderRequest:
+    """Request body for PUT /orders/{order_id}.
+
+    Constructs the signed body that the registry route expects.
+    Auth fields (signature, timestamp, signer_agent_id) are embedded
+    when ``private_key`` is supplied.
+    """
+
+    updates: dict[str, Any]
+    private_key: str | None = None
+    agent_id: str | None = None
+
+    def to_dict(self) -> dict:
+        from registry_client.auth import build_auth_headers
+        body = dict(self.updates)
+        if self.private_key:
+            auth = build_auth_headers(self.private_key, "update_order",
+                                      self.updates.get("order_id", ""))
+            body["signature"] = auth["X-Signature"]
+            body["timestamp"] = int(auth["X-Timestamp"])
+        if self.agent_id:
+            body["signer_agent_id"] = self.agent_id
+        return body
+
+
+@dataclass
 class HeartbeatRequest:
     signature: str | None = None
     timestamp: int | None = None

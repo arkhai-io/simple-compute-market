@@ -10,16 +10,15 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
-.PHONY: build build-images deploy deploy-buyer-agent deploy-seller-agent init test test-unit test-integration
+.PHONY: build build-images deploy deploy-seller-agent init test test-unit test-integration
 
 init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
 	uv sync --find-links $(DIST_DIR)
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
-	uv sync --find-links $(DIST_DIR) --reinstall-package provisioning-service --reinstall-package arkhai-storefront-client
+	uv sync --find-links $(DIST_DIR) --reinstall-package provisioning-service --reinstall-package arkhai-storefront-client --reinstall-package arkhai-registry-client
 
-
-build: build-images
+build: reinit build-images
 
 build-images:
 	docker build -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..

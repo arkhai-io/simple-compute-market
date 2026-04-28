@@ -9,10 +9,11 @@ authors = [
 #pufferlib requires numpy<2. So we're stuck with python 3.12
 requires-python = ">=3.12,<3.13"
 dependencies = [
+	"arkhai-registry-client>=0.1.2",
     "arkhai-storefront-client>=0.2.0",
     "market-service",
     "market-policy",
-    "provisioning-service>=0.1.1",
+    "provisioning-service",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
@@ -59,13 +60,13 @@ lint = [
 
 [tool.uv]
 no-build-isolation-package = ["pufferlib"]
-# Restrict resolution to platforms that have alkahest_py wheels AND a
-# matching torch (via pytorch-cpu) wheel for the optional [rl] extra.
-# darwin-x86_64 is intentionally excluded — pytorch-cpu has no wheel
-# for that arch, and apple-silicon dev runs arm64. Linux x86_64 (the
-# Docker build target) and aarch64 (Linux servers) are kept.
+# Restrict resolution to platforms that have alkahest_py wheels.
+# Without this, uv attempts to solve for all platforms and fails to
+# find provisioning-service / market-service wheels for platforms
+# where it has no local find-links path to check.
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
@@ -76,7 +77,6 @@ pufferlib = ["setuptools", "Cython", "numpy<2"]
 
 [tool.uv.sources]
 market-policy = { path = "../policy", editable = true }
-arkhai-storefront-client = { path = "../storefront-client", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -141,7 +141,7 @@ build-backend = "hatchling.build"
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src", ".."]
+pythonpath = ["src", "..", "../policy/src", "../service/src"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
