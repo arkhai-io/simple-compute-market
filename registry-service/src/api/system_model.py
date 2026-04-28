@@ -72,3 +72,25 @@ class StatsResponse(BaseModel):
     agent_count: int
     order_count: int
     orders_by_status: OrderStatusCounts
+
+
+class AttestationStatsResponse(BaseModel):
+    """Settlement activity counts derived from order attestation fields.
+
+    A 'settled' order is one where both maker_attestation and
+    taker_attestation are non-null — meaning the full Alkahest escrow +
+    fulfillment cycle completed on-chain and both UIDs were written back
+    to the registry.  This is the most meaningful indicator of a
+    functioning market: contracts deployed + agents registered + at least
+    one deal fully settled.
+    """
+
+    settled_order_count: int = Field(
+        description="Orders with both maker_attestation and taker_attestation set"
+    )
+    maker_attestation_count: int = Field(
+        description="Orders with maker_attestation set (escrow created by buyer)"
+    )
+    taker_attestation_count: int = Field(
+        description="Orders with taker_attestation set (fulfillment attested by seller)"
+    )

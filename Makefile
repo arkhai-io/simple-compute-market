@@ -4,15 +4,6 @@ DIST_DIR := $(CURDIR)/.dist
 
 .PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-clean
 
-#Basic flow: build (optional), init (downloads if not built), run
-#Build should construct all deployment and runtime arifacts locally.
-# build-test-env must run after build-market-contract-deployer (uses the image).
-# build-runtime-images parallelizes the three independent service images.
-build: build-buyer build-market-contract-deployer build-test-env build-runtime-images
-
-build-runtime-images: dist
-	$(MAKE) -j3 build-registry build-storefront build-provisioning
-
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
 #
@@ -66,6 +57,15 @@ dist-service: ## Build market-service wheel into .dist/
 
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
+
+#Basic flow: build (optional), init (downloads if not built), run
+#Build should construct all deployment and runtime arifacts locally.
+# build-test-env must run after build-market-contract-deployer (uses the image).
+# build-runtime-images parallelizes the three independent service images.
+build: build-buyer build-market-contract-deployer build-test-env build-runtime-images
+
+build-runtime-images: dist
+	$(MAKE) -j3 build-registry build-storefront build-provisioning
 
 build-buyer: init-prerequisites init-dependencies
 	cd buyer && make build

@@ -120,3 +120,167 @@ class TestSystemStats:
         db_session.commit()
         resp = await registry_client._request("GET", "/api/v1/system/stats")
         assert resp["orders_by_status"]["closed"] == 1
+
+
+class TestAttestationStats:
+    """Semantic tests for GET /api/v1/system/stats/attestations.
+
+    Each test builds a precise DB state and asserts the counts returned
+    match exactly — verifying that the three counters are independent and
+    that the 'settled' count correctly requires both attestations.
+    """
+
+    async def test_empty_db_returns_zero_counts(self, registry_client):
+        stats = await registry_client.get_attestation_stats()
+        assert stats.settled_order_count == 0
+        assert stats.maker_attestation_count == 0
+        assert stats.taker_attestation_count == 0
+
+    async def test_order_with_no_attestations_not_counted(
+        self, registry_client, open_order
+    ):
+        # open_order has neither attestation set
+        stats = await registry_client.get_attestation_stats()
+        assert stats.settled_order_count == 0
+        assert stats.maker_attestation_count == 0
+        assert stats.taker_attestation_count == 0
+
+    async def test_only_maker_attestation_counted_separately(
+        self, registry_client, db_session, agent_no_owner
+    ):
+        from src.db.models import MarketOrder, OrderStatusEnum
+        db_session.add(MarketOrder(
+            order_id="attest-maker-only-1",
+            agent_id=agent_no_owner.agent_id,
+            order_maker=agent_no_owner.token_uri,
+            offer_resource={"gpu_model": "A100"},
+            demand_resource={"token": "USDC"},
+            duration_hours=1,
+            status=OrderStatusEnum.accepted,
+            maker_attestation="0xmaker_uid_abc",
+            taker_attestation=None,
+        ))
+        db_session.commit()
+
+        stats = await registry_client.get_attestation_stats()
+        assert stats.maker_attestation_count == 1
+        assert stats.taker_attestation_count == 0
+        # Not settled — taker_attestation is missing
+        assert stats.settled_order_count == 0
+
+    async def test_only_taker_attestation_counted_separately(
+        self, registry_client, db_session, agent_no_owner
+    ):
+        from src.db.models import MarketOrder, OrderStatusEnum
+        db_session.add(MarketOrder(
+            order_id="attest-taker-only-1",
+            agent_id=agent_no_owner.agent_id,
+            order_maker=agent_no_owner.token_uri,
+            offer_resource={"gpu_model": "A100"},
+            demand_resource={"token": "USDC"},
+            duration_hours=1,
+            status=OrderStatusEnum.accepted,
+            maker_attestation=None,
+            taker_attestation="0xtaker_uid_xyz",
+        ))
+        db_session.commit()
+
+        stats = await registry_client.get_attestation_stats()
+        assert stats.maker_attestation_count == 0
+        assert stats.taker_attestation_count == 1
+        # Not settled — maker_attestation is missing
+        assert stats.settled_order_count == 0
+
+    async def test_both_attestations_counted_as_settled(
+        self, registry_client, db_session, agent_no_owner
+    ):
+        from src.db.models import MarketOrder, OrderStatusEnum
+        db_session.add(MarketOrder(
+            order_id="attest-settled-1",
+            agent_id=agent_no_owner.agent_id,
+            order_maker=agent_no_owner.token_uri,
+            offer_resource={"gpu_model": "A100"},
+            demand_resource={"token": "USDC"},
+            duration_hours=1,
+            status=OrderStatusEnum.closed,
+            maker_attestation="0xmaker_uid_001",
+            taker_attestation="0xtaker_uid_001",
+        ))
+        db_session.commit()
+
+        stats = await registry_client.get_attestation_stats()
+        assert stats.maker_attestation_count == 1
+        assert stats.taker_attestation_count == 1
+        assert stats.settled_order_count == 1
+
+    async def test_mixed_orders_counted_independently(
+        self, registry_client, db_session, agent_no_owner
+    ):
+        """Three orders in different attestation states — each counter
+        reflects only its own condition, settled requires both."""
+        from src.db.models import MarketOrder, OrderStatusEnum
+
+        agent_id = agent_no_owner.agent_id
+        maker = agent_no_owner.token_uri
+
+        db_session.add_all([
+            MarketOrder(
+                order_id="mix-open",
+                agent_id=agent_id, order_maker=maker,
+                offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
+                duration_hours=1, status=OrderStatusEnum.open,
+                maker_attestation=None, taker_attestation=None,
+            ),
+            MarketOrder(
+                order_id="mix-maker-only",
+                agent_id=agent_id, order_maker=maker,
+                offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
+                duration_hours=1, status=OrderStatusEnum.accepted,
+                maker_attestation="0xmaker_mix_001", taker_attestation=None,
+            ),
+            MarketOrder(
+                order_id="mix-settled",
+                agent_id=agent_id, order_maker=maker,
+                offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
+                duration_hours=1, status=OrderStatusEnum.closed,
+                maker_attestation="0xmaker_mix_002", taker_attestation="0xtaker_mix_002",
+            ),
+        ])
+        db_session.commit()
+
+        stats = await registry_client.get_attestation_stats()
+        assert stats.maker_attestation_count == 2  # maker-only + settled
+        assert stats.taker_attestation_count == 1  # settled only
+        assert stats.settled_order_count == 1       # only the fully settled one
+
+    async def test_settled_count_does_not_double_count(
+        self, registry_client, db_session, agent_no_owner
+    ):
+        """Two fully settled orders → settled_order_count == 2, not 4."""
+        from src.db.models import MarketOrder, OrderStatusEnum
+
+        agent_id = agent_no_owner.agent_id
+        maker = agent_no_owner.token_uri
+
+        db_session.add_all([
+            MarketOrder(
+                order_id="double-settled-1",
+                agent_id=agent_id, order_maker=maker,
+                offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
+                duration_hours=1, status=OrderStatusEnum.closed,
+                maker_attestation="0xm1", taker_attestation="0xt1",
+            ),
+            MarketOrder(
+                order_id="double-settled-2",
+                agent_id=agent_id, order_maker=maker,
+                offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
+                duration_hours=1, status=OrderStatusEnum.closed,
+                maker_attestation="0xm2", taker_attestation="0xt2",
+            ),
+        ])
+        db_session.commit()
+
+        stats = await registry_client.get_attestation_stats()
+        assert stats.maker_attestation_count == 2
+        assert stats.taker_attestation_count == 2
+        assert stats.settled_order_count == 2

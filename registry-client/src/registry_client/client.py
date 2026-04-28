@@ -33,6 +33,7 @@ from registry_client.auth import build_auth_headers, sign_eip191, RegistryClient
 from registry_client.models import (
     AgentListResponse,
     AgentSummary,
+    AttestationStats,
     HealthResponse,
     HeartbeatRequest,
     OrderListResponse,
@@ -174,6 +175,10 @@ class _RegistryClientBase:
     def _parse_order(data: dict) -> OrderSummary:
         return OrderSummary.from_dict(data)
 
+    @staticmethod
+    def _parse_attestation_stats(data: dict) -> AttestationStats:
+        return AttestationStats.from_dict(data)
+
 
 # ---------------------------------------------------------------------------
 # Async client
@@ -246,6 +251,16 @@ class RegistryClient(_RegistryClientBase):
     async def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(await self._request("GET", "/health"))
+
+    # ------------------------------------------------------------------
+    # /api/v1/system/stats/attestations
+    # ------------------------------------------------------------------
+
+    async def get_attestation_stats(self) -> AttestationStats:
+        """GET /api/v1/system/stats/attestations → AttestationStats"""
+        return self._parse_attestation_stats(
+            await self._request("GET", "/api/v1/system/stats/attestations")
+        )
 
     # ------------------------------------------------------------------
     # /agents
@@ -431,6 +446,16 @@ class SyncRegistryClient(_RegistryClientBase):
     def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(self._request("GET", "/health"))
+
+    # ------------------------------------------------------------------
+    # /api/v1/system/stats/attestations
+    # ------------------------------------------------------------------
+
+    def get_attestation_stats(self) -> AttestationStats:
+        """GET /api/v1/system/stats/attestations → AttestationStats"""
+        return self._parse_attestation_stats(
+            self._request("GET", "/api/v1/system/stats/attestations")
+        )
 
     # ------------------------------------------------------------------
     # /agents

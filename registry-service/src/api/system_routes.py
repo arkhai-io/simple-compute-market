@@ -30,6 +30,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from src.api.system_model import (
+    AttestationStatsResponse,
     ConfigResponse,
     EventSyncStatus,
     HealthCheckServiceStatus,
@@ -42,7 +43,6 @@ from src.api.system_model import (
 from src.config import settings
 from src.db.database import get_db
 from src.db.models import Agent, MarketOrder, OrderStatusEnum
-
 _health_router = APIRouter(tags=["system"])
 _system_router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
@@ -180,6 +180,53 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
         agent_count=agent_count,
         order_count=total_orders,
         orders_by_status=OrderStatusCounts(**order_counts),
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/system/stats/attestations  — settlement activity counts
+# ---------------------------------------------------------------------------
+
+
+@_system_router.get(
+    "/stats/attestations",
+    response_model=AttestationStatsResponse,
+    summary="Settlement activity counts",
+    description=(
+        "Returns counts of orders with Alkahest attestation UIDs written back "
+        "by agents after on-chain settlement. A non-zero settled_order_count "
+        "confirms that at least one full deal cycle has completed: escrow locked "
+        "by the buyer (maker_attestation) and compute obligation fulfilled by the "
+        "seller (taker_attestation). Intended as a smoke-test signal that the "
+        "market is functioning end-to-end, not just deployed."
+    ),
+)
+def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse:
+    maker_count: int = (
+        db.query(func.count(MarketOrder.order_id))
+        .filter(MarketOrder.maker_attestation.isnot(None))
+        .scalar()
+        or 0
+    )
+    taker_count: int = (
+        db.query(func.count(MarketOrder.order_id))
+        .filter(MarketOrder.taker_attestation.isnot(None))
+        .scalar()
+        or 0
+    )
+    settled_count: int = (
+        db.query(func.count(MarketOrder.order_id))
+        .filter(
+            MarketOrder.maker_attestation.isnot(None),
+            MarketOrder.taker_attestation.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
+    return AttestationStatsResponse(
+        settled_order_count=settled_count,
+        maker_attestation_count=maker_count,
+        taker_attestation_count=taker_count,
     )
 
 

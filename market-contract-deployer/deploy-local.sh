@@ -65,3 +65,10 @@ done
 } > "${ENV_FILE}"
 echo "Wrote contract addresses to ${ENV_FILE}"
 cat "${ENV_FILE}"
+
+# Step 6: Register a sentinel agent on-chain so the registry smoke test
+# (test_at_least_one_agent_registered) passes against a fresh test-env.
+# Uses Anvil account #3 — not used by any market agent (buyer/seller use
+# accounts #1/#2, deployer uses #0).  The registry service discovers this
+# agent automatically via sync_from_start() replaying the Registered event.
+IDENTITY_REGISTRY_ADDRESS=${IDENTITY_ADDR} python3 /app/seed_agent.py

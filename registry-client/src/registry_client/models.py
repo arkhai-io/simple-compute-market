@@ -352,3 +352,25 @@ class HeartbeatRequest:
     def to_dict(self) -> dict:
         return {k: v for k, v in {"signature": self.signature, "timestamp": self.timestamp}.items()
                 if v is not None}
+
+
+@dataclass
+class AttestationStats:
+    """Settlement activity counts from GET /api/v1/system/stats/attestations.
+
+    settled_order_count > 0 means at least one full Alkahest deal cycle has
+    completed: buyer locked escrow (maker_attestation) and seller attested
+    fulfillment (taker_attestation).
+    """
+
+    settled_order_count: int = 0
+    maker_attestation_count: int = 0
+    taker_attestation_count: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AttestationStats":
+        return cls(
+            settled_order_count=int(d.get("settled_order_count", 0)),
+            maker_attestation_count=int(d.get("maker_attestation_count", 0)),
+            taker_attestation_count=int(d.get("taker_attestation_count", 0)),
+        )

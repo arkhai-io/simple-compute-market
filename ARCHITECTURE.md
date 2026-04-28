@@ -804,6 +804,28 @@ make build
 
 ---
 
+## Registry Service — Planned Rework
+
+### 1. Registry as shared marketplace infrastructure (not per-node)
+
+**Status:** Planned.
+
+**Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
+
+**Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in this file.
+
+---
+
+### 2. Event sync full-history gap
+
+**Status:** Planned.
+
+**Problem:** `EventSyncService.sync_from_start()` only scans the last 1000 blocks for `Registered`, `MetadataSet`, and `URIUpdated` events. On a live chain with registrations months ago this window misses all historical agents. The registry's agent count is therefore a function of how recently agents registered, not how many are actually on-chain.
+
+**Planned fix:** Replace the sliding window with a full enumeration using view functions: call `totalSupply()` on the IdentityRegistry to get the count of registered agents, then call `ownerOf(id)` and `tokenURI(id)` for each token ID from 0 to `totalSupply()-1`. This is a set of pure read calls with no event history dependency, works correctly on any RPC provider, and is immune to block range limits. The periodic sync can still use event filtering for incremental updates after the initial full enumeration.
+
+---
+
 ## Provisioning Service — Planned Rework
 
 The following items represent known architectural deficiencies in `provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.

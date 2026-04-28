@@ -25,7 +25,11 @@ init: init-venv
 	uv sync --find-links $(DIST_DIR)
 
 reinit: init-venv
-	uv sync --find-links $(DIST_DIR) --reinstall-package arkhai-registry-client --reinstall-package arkhai-storefront-client
+	uv sync --find-links $(DIST_DIR) \
+	--reinstall-package arkhai-registry-client \
+	--reinstall-package arkhai-storefront-client \
+	--reinstall-package provisioning-service \
+	--reinstall-package market-storefront
 
 # -----------------------------------------------------------------------
 # Build
