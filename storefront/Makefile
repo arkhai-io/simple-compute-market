@@ -35,17 +35,15 @@ test-integration: ## Run integration tests (no real infrastructure required — 
 	AGENT_WALLET_ADDRESS="" \
 	uv run --find-links $(DIST_DIR) pytest tests/integration/ -v
 
-deploy: deploy-buyer-agent deploy-seller-agent
+deploy: deploy-seller-agent
 
-# Todo, figure out what this volume was doing in the compose file: #      - zerotier-buy:/var/lib/zerotier-one
-deploy-buyer-agent:
-	docker run --rm -d --network market --name market-agent-buy -p 8000:8000 \
-	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
-	--env-file ./.env.alice.docker-compose --env-file ../shared-env/.env \
-	arkhai:storefront
-
+# Buyers are pure HTTP clients (the `market` CLI / market_buyer
+# library); they don't run a storefront. Use `make deploy-seller-agent`
+# to bring up the seller; run `market buy ...` from the host or another
+# container against `http://market-agent-sell:8001`.
 deploy-seller-agent:
 	docker run --rm -d --network market --name market-agent-sell -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
-	--env-file ./.env.bob.docker-compose --env-file ../shared-env/.env \
+	-e XDG_CONFIG_HOME=/etc \
+	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
 	arkhai:storefront

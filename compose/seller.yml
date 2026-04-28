@@ -30,16 +30,12 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    env_file:
-      - ../storefront/.env.bob.docker-compose
     environment:
-      # Force re-registration on every fresh Anvil — clear stale IDs
-      - ONCHAIN_AGENT_ID=
-      - ZEROTIER_IP=
+      - XDG_CONFIG_HOME=/etc
       - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
     volumes:
-      - ../shared-env:/app/shared-env
+      - ../storefront/config.bob.toml:/etc/arkhai/config.toml:ro
       - zerotier-sell:/var/lib/zerotier-one
       - ../storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
     networks:
@@ -52,9 +48,6 @@ services:
       - sh
       - -c
       - |
-        set -a
-        . /app/shared-env/.env
-        set +a
         echo "Importing seller resources..."
         PYTHONPATH="/:/app:/app/src" uv run python scripts/import_resources_csv.py \
           --csv src/market_storefront/data/ww1-machine.csv

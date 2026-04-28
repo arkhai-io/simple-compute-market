@@ -1,39 +1,45 @@
 #!/bin/sh
+# Container entrypoint for the storefront agent.
+#
+# Reads configuration exclusively from $XDG_CONFIG_HOME/arkhai/config.toml
+# (the mounted TOML). Steps:
+#   1. Bring up ZeroTier if a network is configured in the TOML.
+#   2. Run register_onchain.py to publish the agent's identity.
+#   3. exec uvicorn.
 
-# Start ZeroTier daemon in the background
-echo "Starting ZeroTier daemon..."
+set -eu
 
-sudo zerotier-one -d
-# Wait for the daemon to be ready (port file created)
-for i in $(seq 1 10); do
-  [ -f /var/lib/zerotier-one/zerotier-one.port ] && break
-  sleep 1
-done
+# Read a single TOML key via the config-loader's pure Python.
+toml_get() {
+  PYTHONPATH="/:/app:/app/src" uv run --no-project python -c "
+from service.config_loader import load_user_config, get_dotted
+v = get_dotted(load_user_config(), '$1')
+print('' if v is None else v)
+" 2>/dev/null || echo ""
+}
 
-# Always join the ZeroTier network if configured, regardless of registration state
-if [ -n "${ZEROTIER_NETWORK:-}" ]; then
+ZEROTIER_NETWORK=$(toml_get seller.zerotier_network)
+PORT=$(toml_get seller.port)
+PORT="${PORT:-8001}"
+
+if [ -n "${ZEROTIER_NETWORK}" ]; then
+  echo "Starting ZeroTier daemon..."
+  sudo zerotier-one -d
+  for i in $(seq 1 10); do
+    [ -f /var/lib/zerotier-one/zerotier-one.port ] && break
+    sleep 1
+  done
   echo "Joining ZeroTier network ${ZEROTIER_NETWORK}..."
-  sudo zerotier-cli join "${ZEROTIER_NETWORK}" || echo "Warning: zerotier-cli join failed (may already be joined)"
+  sudo zerotier-cli join "${ZEROTIER_NETWORK}" \
+    || echo "Warning: zerotier-cli join failed (may already be joined)"
 fi
 
-if [ -z "${ONCHAIN_AGENT_ID:-}" ] || [ -z "${ZEROTIER_IP:-}" ]; then
-  echo "Registering agent on-chain..."
-  # Resolve env file to absolute path so POSIX sh (dash) can source it
-  echo "ZeroTier Env file:"${ENV_FILE}
-  case "${ENV_FILE:-.env}" in
-    /*) _env_file="${ENV_FILE:-.env}" ;;
-    *)  _env_file="$(pwd)/${ENV_FILE:-.env}" ;;
-  esac
-  # Ensure the file exists so register_onchain.py can write ONCHAIN_AGENT_ID back to it
-  touch "${_env_file}"
-  PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" uv run python scripts/register_onchain.py --env_file="${_env_file}"
-  # Reload env file so ONCHAIN_AGENT_ID written by registration is visible to the server
-  set -a
-  . "${_env_file}"
-  set +a
-else
-  echo "Skipping on-chain registration (ONCHAIN_AGENT_ID and ZEROTIER_IP already set)."
-fi
+echo "Registering agent on-chain..."
+PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  uv run python storefront/scripts/register_onchain.py --no-update-env \
+  || { echo "On-chain registration failed; aborting startup."; exit 1; }
 
-echo "Starting storefront server..."
-exec env PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" uv run uvicorn market_storefront.server:app --host 0.0.0.0 --port "${PORT:-8080}"
+echo "Starting storefront server on port ${PORT}..."
+exec env PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  uv run uvicorn market_storefront.server:app \
+  --host 0.0.0.0 --port "${PORT}"

@@ -55,47 +55,11 @@ services:
       retries: 3
       start_period: 10s
 
-  # 4. Buyer agent (Alice)
-  buy_agent:
-    image: arkhai:core
-    platform: linux/amd64
-    container_name: market-agent-buy
-    depends_on:
-      registry:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    env_file:
-      - ./storefront/.env.alice.docker-compose
-    environment:
-      # Force re-registration on every fresh Anvil — clear stale IDs from env file
-      - ONCHAIN_AGENT_ID=
-      - ZEROTIER_IP=
-    volumes:
-      - ./shared-env:/app/shared-env
-      - zerotier-buy:/var/lib/zerotier-one
-      - ./storefront/src/market_storefront/data/buy-agent:/app/src/market_storefront/data/buy-agent
-    networks:
-      - market-network
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-    command:
-      - sh
-      - -c
-      - |
-        set -a
-        . /app/shared-env/.env
-        set +a
-        exec ./entrypoint.sh
-
-  # 5. Seller agent (Bob)
+  # 4. Seller agent (Bob).
+  # Buyers are pure HTTP clients (the `market` CLI / market_buyer
+  # library) — no buyer container in this stack. To exercise a buy
+  # against this seller, run `market buy ...` from the host (or a
+  # one-shot pod / Job that sees the same network).
   sell_agent:
     image: arkhai:core
     platform: linux/amd64
@@ -110,17 +74,18 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    env_file:
-      - ./storefront/.env.bob.docker-compose
     environment:
-      # Force re-registration on every fresh Anvil — clear stale IDs from env file
-      - ONCHAIN_AGENT_ID=
-      - ZEROTIER_IP=
-      # Overridable via host env vars (e.g. PROVISIONING_MODE=mock make e2e-mock-happy)
-      - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      # Sole config-bearing env var: tell the typed config loader where
+      # to find the mounted TOML. service.config_loader resolves
+      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/config.toml.
+      - XDG_CONFIG_HOME=/etc
+      # Provisioning-mode override stays a host-level env var because
+      # tests flip it per-invocation (e.g. PROVISIONING_MODE=mock make
+      # e2e-mock-happy). Wired into the agent runtime via TOML override.
+      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
     volumes:
-      - ./shared-env:/app/shared-env
+      - ./storefront/config.bob.toml:/etc/arkhai/config.toml:ro
       - zerotier-sell:/var/lib/zerotier-one
       - ./storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
     networks:
@@ -133,9 +98,6 @@ services:
       - sh
       - -c
       - |
-        set -a
-        . /app/shared-env/.env
-        set +a
         echo "Importing seller resources..."
         PYTHONPATH="/:/app:/app/src" uv run python scripts/import_resources_csv.py \
           --csv src/market_storefront/data/ww1-machine.csv
@@ -184,5 +146,4 @@ networks:
     driver: bridge
 
 volumes:
-  zerotier-buy:
   zerotier-sell:
