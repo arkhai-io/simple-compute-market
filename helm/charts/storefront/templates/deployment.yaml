@@ -1,283 +1,110 @@
 {{/*
-Buyer agent deployment (Alice / market-agent-buy)
-Mirrors: docker run --cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun
+One Deployment per agent in .Values.agents. Each pod mounts its
+per-agent Secret as a single config.toml file at /etc/arkhai/config.toml
+and points XDG_CONFIG_HOME at /etc — no env-var-based config.
 */}}
+{{- range $agent := .Values.agents }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "storefront.fullname" . }}-buyer
+  name: {{ include "storefront.agentFullname" (dict "root" $ "agent" $agent) }}
   labels:
-    {{- include "storefront.labels" . | nindent 4 }}
-    app.kubernetes.io/component: buyer
+    {{- include "storefront.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ $.Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "storefront.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: buyer
+      {{- include "storefront.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
   template:
     metadata:
       labels:
-        {{- include "storefront.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: buyer
+        {{- include "storefront.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
     spec:
       initContainers:
-        # Wait for the Anvil RPC node to be accepting JSON-RPC requests.
-        # Uses HTTP since that is sufficient to prove the node is ready;
-        # the main container connects over WebSocket.
         - name: wait-for-rpc
           image: busybox:1.36
           command:
             - sh
             - -c
             - |
-              echo "Waiting for RPC at {{ include "rpc.url" . }}..."
+              echo "Waiting for RPC at {{ include "rpc.url" $ }}..."
               until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
                 --header 'Content-Type: application/json' \
-                {{ include "rpc.url" . }} > /dev/null 2>&1; do
+                {{ include "rpc.url" $ }} > /dev/null 2>&1; do
                 echo "RPC not ready, retrying in 5s..."; sleep 5
               done
               echo "RPC ready."
-        # Wait for the registry /health endpoint to return 200.
         - name: wait-for-registry
           image: busybox:1.36
           command:
             - sh
             - -c
             - |
-              echo "Waiting for registry at {{ include "registry.url" . }}/health..."
-              until wget -qO- {{ include "registry.url" . }}/health > /dev/null 2>&1; do
+              echo "Waiting for registry at {{ include "registry.url" $ }}/health..."
+              until wget -qO- {{ include "registry.url" $ }}/health > /dev/null 2>&1; do
                 echo "Registry not ready, retrying in 5s..."; sleep 5
               done
               echo "Registry ready."
       containers:
-        - name: market-agent-buy
-          image: {{ include "storefront.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: market-storefront-{{ $agent.name }}
+          image: {{ include "storefront.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: {{ .Values.buyer.port }}
+              containerPort: {{ $agent.port }}
               protocol: TCP
           securityContext:
             capabilities:
               add:
                 - NET_ADMIN
                 - SYS_MODULE
-          # /dev/net/tun is required for VPN-based networking
+          env:
+            # Point the typed config loader at the mounted TOML.
+            # service.config_loader.user_config_dir() resolves to
+            # $XDG_CONFIG_HOME/arkhai, so this maps to /etc/arkhai/config.toml.
+            - name: XDG_CONFIG_HOME
+              value: /etc
+            {{- if $agent.config.geminiApiKey }}
+            - name: GEMINI_API_KEY
+              value: {{ $agent.config.geminiApiKey | quote }}
+            {{- end }}
+            {{- if $agent.config.autoRegister }}
+            - name: AUTO_REGISTER
+              value: "true"
+            {{- end }}
           volumeMounts:
             - name: tun-device
               mountPath: /dev/net/tun
-          env:
-            # --- agent identity ---
-            - name: PORT
-              value: {{ .Values.buyer.port | quote }}
-            - name: AGENT_ID
-              value: {{ .Values.buyer.agentId | quote }}
-            - name: BASE_URL_OVERRIDE
-              value: {{ .Values.buyer.baseUrlOverride | quote }}
-            - name: AGENT_DB_PATH
-              value: {{ .Values.buyer.agentDbPath | quote }}
-            - name: LOG_FILE_PATH
-              value: {{ .Values.buyer.logFilePath | quote }}
-            - name: AUTO_REGISTER
-              value: {{ .Values.buyer.autoRegister | quote }}
-            - name: ENABLE_EVENT_QUEUE
-              value: {{ .Values.buyer.enableEventQueue | quote }}
-            - name: GEMINI_API_KEY
-              value: {{ .Values.buyer.geminiApiKey | quote }}
-            # --- chain / networking ---
-            - name: CHAIN_RPC_URL
-              value: {{ include "rpc.wsUrl" . | quote }}
-            - name: CHAIN_NAME
-              value: {{ .Values.buyer.chainName | quote }}
-            - name: ALKAHEST_ADDRESS_CONFIG_PATH
-              value: {{ .Values.buyer.alkahestAddressConfigPath | quote }}
-            - name: TOKEN_REGISTRY_PATH
-              value: {{ .Values.buyer.tokenRegistryPath | quote }}
-            - name: SSH_PUBLIC_KEY
-              value: {{ .Values.buyer.sshPublicKey | quote }}
-            # --- registry / indexer ---
-            - name: INDEXER_URL
-              value: {{ include "registry.url" . | quote }}
-            - name: IDENTITY_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.identity_address | quote }}
-            - name: REPUTATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.reputation_address | quote }}
-            - name: VALIDATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.validation_address | quote }}
-            # --- provisioning / negotiation ---
-            - name: PROVISIONING_MODE
-              value: {{ .Values.buyer.provisioningMode | quote }}
-            - name: NEGOTIATION_POLICY_MODE
-              value: {{ .Values.buyer.negotiationPolicyMode | quote }}
-            # --- wallet (from secret) ---
-            - name: AGENT_PRIV_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storefront.buyer.secretName" . }}
-                  key: private_key
-            - name: AGENT_WALLET_ADDRESS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storefront.buyer.secretName" . }}
-                  key: wallet_address
+            - name: arkhai-config
+              mountPath: /etc/arkhai
+              readOnly: true
           # TODO: add liveness/readiness probes once agent health endpoint is defined.
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml $.Values.resources | nindent 12 }}
       volumes:
         - name: tun-device
           hostPath:
             path: /dev/net/tun
-      {{- with .Values.nodeSelector }}
+        - name: arkhai-config
+          secret:
+            secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+            items:
+              - key: config.toml
+                path: config.toml
+      {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- with $.Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with $.Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
 ---
-{{/*
-Seller agent deployment (Bob / market-agent-sell)
-*/}}
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "storefront.fullname" . }}-seller
-  labels:
-    {{- include "storefront.labels" . | nindent 4 }}
-    app.kubernetes.io/component: seller
-spec:
-  replicas: {{ .Values.replicaCount }}
-  selector:
-    matchLabels:
-      {{- include "storefront.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: seller
-  template:
-    metadata:
-      labels:
-        {{- include "storefront.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: seller
-    spec:
-      initContainers:
-        # Wait for the Anvil RPC node to be accepting JSON-RPC requests.
-        # Uses HTTP since that is sufficient to prove the node is ready;
-        # the main container connects over WebSocket.
-        - name: wait-for-rpc
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for RPC at {{ include "rpc.url" . }}..."
-              until wget -qO- --post-data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-                --header 'Content-Type: application/json' \
-                {{ include "rpc.url" . }} > /dev/null 2>&1; do
-                echo "RPC not ready, retrying in 5s..."; sleep 5
-              done
-              echo "RPC ready."
-        # Wait for the registry /health endpoint to return 200.
-        - name: wait-for-registry
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for registry at {{ include "registry.url" . }}/health..."
-              until wget -qO- {{ include "registry.url" . }}/health > /dev/null 2>&1; do
-                echo "Registry not ready, retrying in 5s..."; sleep 5
-              done
-              echo "Registry ready."
-      containers:
-        - name: market-agent-sell
-          image: {{ include "storefront.image" . }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: {{ .Values.seller.port }}
-              protocol: TCP
-          securityContext:
-            capabilities:
-              add:
-                - NET_ADMIN
-                - SYS_MODULE
-          volumeMounts:
-            - name: tun-device
-              mountPath: /dev/net/tun
-          env:
-            # --- agent identity ---
-            - name: PORT
-              value: {{ .Values.seller.port | quote }}
-            - name: AGENT_ID
-              value: {{ .Values.seller.agentId | quote }}
-            - name: BASE_URL_OVERRIDE
-              value: {{ .Values.seller.baseUrlOverride | quote }}
-            - name: AGENT_DB_PATH
-              value: {{ .Values.seller.agentDbPath | quote }}
-            - name: LOG_FILE_PATH
-              value: {{ .Values.seller.logFilePath | quote }}
-            - name: AUTO_REGISTER
-              value: {{ .Values.seller.autoRegister | quote }}
-            - name: ENABLE_EVENT_QUEUE
-              value: {{ .Values.seller.enableEventQueue | quote }}
-            - name: GEMINI_API_KEY
-              value: {{ .Values.seller.geminiApiKey | quote }}
-            # --- chain / networking ---
-            - name: CHAIN_RPC_URL
-              value: {{ include "rpc.wsUrl" . | quote }}
-            - name: CHAIN_NAME
-              value: {{ .Values.seller.chainName | quote }}
-            - name: ALKAHEST_ADDRESS_CONFIG_PATH
-              value: {{ .Values.seller.alkahestAddressConfigPath | quote }}
-            - name: TOKEN_REGISTRY_PATH
-              value: {{ .Values.seller.tokenRegistryPath | quote }}
-            - name: SSH_PUBLIC_KEY
-              value: {{ .Values.seller.sshPublicKey | quote }}
-            # --- registry / indexer ---
-            - name: INDEXER_URL
-              value: {{ include "registry.url" . | quote }}
-            - name: IDENTITY_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.identity_address | quote }}
-            - name: REPUTATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.reputation_address | quote }}
-            - name: VALIDATION_REGISTRY_ADDRESS
-              value: {{ .Values.global.registry.validation_address | quote }}
-            # --- provisioning / negotiation ---
-            - name: PROVISIONING_MODE
-              value: {{ .Values.seller.provisioningMode | quote }}
-            - name: NEGOTIATION_POLICY_MODE
-              value: {{ .Values.seller.negotiationPolicyMode | quote }}
-            # --- wallet (from secret) ---
-            - name: AGENT_PRIV_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storefront.seller.secretName" . }}
-                  key: private_key
-            - name: AGENT_WALLET_ADDRESS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "storefront.seller.secretName" . }}
-                  key: wallet_address
-          # TODO: add liveness/readiness probes once agent health endpoint is defined.
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-      volumes:
-        - name: tun-device
-          hostPath:
-            path: /dev/net/tun
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+{{- end }}

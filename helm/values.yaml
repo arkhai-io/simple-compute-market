@@ -82,47 +82,66 @@ storefront:
     tag: storefront
     pullPolicy: IfNotPresent
 
-  buyer:
-    port: 8000
-    agentId: "alice"
-    baseUrlOverride: "http://market-agent-buy:8000/"
-    agentDbPath: "./agent.db"
-    logFilePath: "./logs/alice.log"
-    autoRegister: true
-    enableEventQueue: false
-    chainName: "anvil"
-    alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-    tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-    provisioningMode: "mock"
-    negotiationPolicyMode: "rl"
-    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
-    geminiApiKey: ""
-    secret:
-      createSecret: true
-      secretName: ""
-      privKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-      walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  # See helm/charts/storefront/values.yaml for the per-agent schema. Both
+  # entries run the same storefront binary; the buyer/seller distinction
+  # is application-level (which orders the agent posts), not deployment-
+  # level. Add or remove entries to scale the number of agents.
+  agents:
+    - name: alice
+      port: 8000
+      component: buyer
+      secret:
+        createSecret: true
+        secretName: ""
+        privKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+        walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+      config:
+        seller:
+          agentId: alice
+          baseUrl: "http://market-agent-buy:8000/"
+          dbPath: "./agent.db"
+          logFilePath: "./logs/alice.log"
+          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
+          enableEventQueue: false
+          provisioning:
+            serviceUrl: "http://provisioning:8081"
+            mode: "mock"
+          negotiation:
+            policyMode: "rl"
+        chain:
+          name: "anvil"
+          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+        tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
+        autoRegister: true
+        geminiApiKey: ""
 
-  seller:
-    port: 8001
-    agentId: "bob"
-    baseUrlOverride: "http://market-agent-sell:8001/"
-    agentDbPath: "./agent.db"
-    logFilePath: "./logs/bob.log"
-    autoRegister: true
-    enableEventQueue: false
-    chainName: "anvil"
-    alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-    tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-    provisioningMode: "mock"
-    negotiationPolicyMode: "rl"
-    sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
-    geminiApiKey: ""
-    secret:
-      createSecret: true
-      secretName: ""
-      privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-      walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    - name: bob
+      port: 8001
+      component: seller
+      secret:
+        createSecret: true
+        secretName: ""
+        privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+        walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      config:
+        seller:
+          agentId: bob
+          baseUrl: "http://market-agent-sell:8001/"
+          dbPath: "./agent.db"
+          logFilePath: "./logs/bob.log"
+          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+          enableEventQueue: false
+          provisioning:
+            serviceUrl: "http://provisioning:8081"
+            mode: "mock"
+          negotiation:
+            policyMode: "rl"
+        chain:
+          name: "anvil"
+          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+        tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
+        autoRegister: true
+        geminiApiKey: ""
 
 # ---------------------------------------------------------------------------
 # provisioning subchart

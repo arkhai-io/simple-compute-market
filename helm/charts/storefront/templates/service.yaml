@@ -1,35 +1,20 @@
+{{- range $agent := .Values.agents }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "storefront.fullname" . }}-buyer
+  name: {{ include "storefront.agentFullname" (dict "root" $ "agent" $agent) }}
   labels:
-    {{- include "storefront.labels" . | nindent 4 }}
-    app.kubernetes.io/component: buyer
+    {{- include "storefront.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
 spec:
   type: ClusterIP
   selector:
-    {{- include "storefront.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: buyer
+    {{- include "storefront.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
   ports:
     - name: http
-      port: {{ .Values.buyer.port }}
+      port: {{ $agent.port }}
       targetPort: http
       protocol: TCP
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "storefront.fullname" . }}-seller
-  labels:
-    {{- include "storefront.labels" . | nindent 4 }}
-    app.kubernetes.io/component: seller
-spec:
-  type: ClusterIP
-  selector:
-    {{- include "storefront.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: seller
-  ports:
-    - name: http
-      port: {{ .Values.seller.port }}
-      targetPort: http
-      protocol: TCP
+{{- end }}

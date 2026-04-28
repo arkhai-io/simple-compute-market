@@ -1,7 +1,11 @@
 {{/*
 Shared helm-test configuration mounted by all test pods.
-All values are sourced from global.* and per-subchart values so subcharts
-do not need to generate their own copies of this data.
+
+The storefront block iterates over .Values.storefront.agents and renders
+one entry per agent under its `component` label (or .name as fallback).
+Tests typically expect "buyer" and "seller" keys; that's an application-
+level convention, not a deployment one — agents with those component
+labels render at those keys, others render at their name.
 */}}
 {{- $rpcUrl := (index .Values "validate-contracts").rpcUrl -}}
 {{- if not $rpcUrl -}}
@@ -27,13 +31,12 @@ data:
       owner_address:      {{ .Values.global.registry.owner_address | quote }}
       api_url:            {{ printf "http://%s-registry:%d" .Release.Name (int .Values.registry.service.port) | quote }}
 
-    buyer:
-      api_url:           {{ printf "http://%s-storefront-buyer:%d" .Release.Name (int .Values.storefront.buyer.port) | quote }}
-      base_url_override: {{ .Values.storefront.buyer.baseUrlOverride | quote }}
-
-    seller:
-      api_url:           {{ printf "http://%s-storefront-seller:%d" .Release.Name (int .Values.storefront.seller.port) | quote }}
-      base_url_override: {{ .Values.storefront.seller.baseUrlOverride | quote }}
+    {{- range $agent := .Values.storefront.agents }}
+    {{- $component := $agent.component | default $agent.name }}
+    {{ $component }}:
+      api_url:           {{ printf "http://%s-storefront-%s:%d" $.Release.Name $agent.name (int $agent.port) | quote }}
+      base_url_override: {{ $agent.config.seller.baseUrl | quote }}
+    {{- end }}
 
     provisioning:
       api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}

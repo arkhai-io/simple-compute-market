@@ -16,6 +16,14 @@
 {{- else -}}
   {{- $itImage = printf "%s:%s" $itName $itTag -}}
 {{- end -}}
+{{/*
+Build the dynaconf profile list as "helm" + one "{component}-secret"
+entry per agent, joined by commas.
+*/}}
+{{- $profiles := list "helm" -}}
+{{- range $agent := .Values.agents -}}
+  {{- $profiles = append $profiles (printf "%s-secret" ($agent.component | default $agent.name)) -}}
+{{- end -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -37,27 +45,26 @@ spec:
         - agents
       env:
         - name: ACTIVE_PROFILES
-          value: "helm,buyer-secret,seller-secret"
+          value: {{ join "," $profiles | quote }}
       volumeMounts:
         - name: test-config
           mountPath: /app/config/config-helm.yml
           subPath: config-helm.yml
           readOnly: true
-        - name: buyer-secret-config
-          mountPath: /app/config/config-buyer-secret.yml
-          subPath: config-buyer-secret.yml
+        {{- range $agent := .Values.agents }}
+        {{- $component := $agent.component | default $agent.name }}
+        - name: {{ $component }}-secret-config
+          mountPath: /app/config/config-{{ $component }}-secret.yml
+          subPath: config-{{ $component }}-secret.yml
           readOnly: true
-        - name: seller-secret-config
-          mountPath: /app/config/config-seller-secret.yml
-          subPath: config-seller-secret.yml
-          readOnly: true
+        {{- end }}
   volumes:
     - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
-    - name: buyer-secret-config
+    {{- range $agent := .Values.agents }}
+    {{- $component := $agent.component | default $agent.name }}
+    - name: {{ $component }}-secret-config
       secret:
-        secretName: {{ include "storefront.buyer.secretName" . }}
-    - name: seller-secret-config
-      secret:
-        secretName: {{ include "storefront.seller.secretName" . }}
+        secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+    {{- end }}
