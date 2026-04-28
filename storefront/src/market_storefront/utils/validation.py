@@ -14,8 +14,6 @@ from market_storefront.schema.pydantic_models import (
     ComputeResource,
     ComputeDomainResource,
     TokenResource,
-    MakeOfferEvent,
-    DecisionContext,
 )
 
 
@@ -46,20 +44,6 @@ def extract_token_resource(resource: ComputeDomainResource) -> TokenResource | N
     if isinstance(resource, TokenResource):
         return resource
     return None
-
-
-def extract_resources_from_make_offer_event(
-    context: DecisionContext,
-) -> tuple[MarketOrder | None, ComputeDomainResource | None, ComputeDomainResource | None]:
-    """Safely extract offer_resource and demand_resource from MakeOfferEvent."""
-    if not isinstance(context.event, MakeOfferEvent):
-        return None, None, None
-
-    order = context.event.order
-    offer_resource = order.offer_resource
-    demand_resource = order.demand_resource
-
-    return order, offer_resource, demand_resource
 
 
 def determine_strategy_from_resources(

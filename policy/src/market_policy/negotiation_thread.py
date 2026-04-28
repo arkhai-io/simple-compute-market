@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 from market_policy.ports.persistence import NegotiationThreadPersistencePort
-from market_policy.action_builders import make_negotiation_id
 from market_policy.identity import Identity
 
 logger = logging.getLogger(__name__)
@@ -463,58 +462,6 @@ class NegotiationThreadStore:
         await self._sqlite.delete_negotiation_thread(negotiation_id=negotiation_id)
         logger.debug(f"[NEGOTIATION THREAD] Cleared thread {negotiation_id}")
 
-    async def get_or_create_thread_for_incoming_offer(
-        self,
-        their_order_id: str,
-        their_agent_id: str,
-        our_order_id: str | None = None,
-    ) -> str | None:
-        """Get existing thread or create one for an incoming offer.
-
-        This prevents duplicate negotiations when the same counterparty sends
-        multiple offers before we respond.
-
-        Args:
-            their_order_id: The order ID from the incoming offer
-            their_agent_id: The agent URL/ID of the sender
-            our_order_id: Our order ID (if we have one)
-
-        Returns:
-            The negotiation_id if thread exists or was created, None otherwise
-        """
-        # First check if a thread already exists
-        existing = await self._sqlite.check_existing_negotiation(
-            our_order_id=our_order_id or "",
-            their_order_id=their_order_id,
-            our_agent_id=self._identity.agent_url if our_order_id else None,
-            their_agent_id=their_agent_id,
-        )
-        if existing:
-            logger.debug(
-                f"[NEGOTIATION THREAD] Found existing thread {existing['negotiation_id']} "
-                f"for incoming offer from {their_agent_id}"
-            )
-            return existing["negotiation_id"]
-
-        # Create new thread to track this incoming offer
-        negotiation_id = make_negotiation_id(our_order_id or "", their_order_id)
-        try:
-            await self.create_thread(
-                negotiation_id=negotiation_id,
-                our_order_id=our_order_id or "",
-                their_order_id=their_order_id,
-                our_agent_id=self._identity.agent_url,
-                their_agent_id=their_agent_id,
-                owner_id=self._identity.agent_url,
-            )
-            logger.info(
-                f"[NEGOTIATION THREAD] Created thread {negotiation_id} for incoming offer "
-                f"from {their_agent_id}, order {their_order_id}"
-            )
-            return negotiation_id
-        except Exception as e:
-            logger.warning(f"[NEGOTIATION THREAD] Failed to create thread for incoming offer: {e}")
-            return None
 
 
 # Global thread store instance (will be initialized by agent)

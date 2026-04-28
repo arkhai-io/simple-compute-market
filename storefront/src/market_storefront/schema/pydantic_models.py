@@ -241,17 +241,12 @@ class EventType(str, Enum):
 
     ORDER_CREATE = "order_create"
     ORDER_CLOSE = "order_close"
-    MAKE_OFFER = "make_offer"
-    ACCEPT_OFFER = "accept_offer"
     RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
     FULFILLMENT_FAILED = "fulfillment_failed"
     ARBITRATION_COMPLETE = "arbitration_complete"
     RESOURCE_IMBALANCE = "resource_imbalance"
     CRON_JOB = "cron_job"
     ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
-    NEGOTIATION = "negotiation"
-
-
 DomainEvent = CoreDomainEvent
 
 
@@ -284,107 +279,6 @@ class OrderCloseEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)
     order_id: str = Field(description="Order ID to close")
-
-
-class MakeOfferEvent(DomainEvent):
-    """Event triggered when a market order is broadcast"""
-
-    event_type: EventType = Field(default=EventType.MAKE_OFFER)
-    order: MarketOrder = Field(description="The market order that was broadcast")
-    negotiation_id: str | None = Field(
-        default=None,
-        description=(
-            "Buyer-supplied correlation token for this negotiation. "
-            "Echoed back by the seller in events so the buyer can join "
-            "to its local run-log entries without a fuzzy lookup."
-        ),
-    )
-
-    @classmethod
-    def from_order(cls, order: MarketOrder) -> "MakeOfferEvent":
-        """Create event from a market order"""
-        return cls(
-            event_id=f"evt_{order.order_id}",
-            source=order.order_maker,
-            order=order,
-            data={
-                "order_id": order.order_id,
-                "offer_resource": order.offer_resource.model_dump(mode="json"),
-                "demand_resource": order.demand_resource.model_dump(mode="json"),
-                "duration_hours": order.duration_hours,
-                "oracle_address": order.oracle_address,
-            },
-        )
-
-
-class AcceptOfferEvent(DomainEvent):
-    """Event triggered when a taker accepts a market offer."""
-
-    event_type: EventType = Field(default=EventType.ACCEPT_OFFER)
-    order: MarketOrder = Field(description="The accepted market order with taker info")
-    escrow_uid: str | None = Field(
-        default=None,
-        description="Escrow receipt UID supplied by the buyer; None when seller is merely signalling acceptance",
-    )
-    ssh_public_key: str | None = Field(
-        default=None,
-        description="Buyer-provided SSH public key for provisioning access",
-    )
-    matched_order_id: str | None = Field(
-        default=None,
-        description=(
-            "The sender's own local order_id, threaded through the acceptance handshake so the "
-            "receiver can update their DB without a reverse-lookup. "
-            "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
-        ),
-    )
-    negotiation_id: str | None = Field(
-        default=None,
-        description=(
-            "Buyer-supplied correlation token, set by the seller on the "
-            "first (no-escrow) acceptance so the buyer can link the "
-            "escrow_uid to its local run-log entry."
-        ),
-    )
-    agreed_price: float | int | None = Field(
-        default=None,
-        description=(
-            "The negotiated/agreed price carried forward from the negotiation thread. "
-            "When present, overrides demand_resource.amount for escrow and fulfillment encoding."
-        ),
-    )
-
-    @classmethod
-    def from_order(
-        cls,
-        order: MarketOrder,
-        escrow_uid: str | None = None,
-        ssh_public_key: str | None = None,
-        matched_order_id: str | None = None,
-        source: str | None = None,
-        agreed_price: float | int | None = None,
-    ) -> "AcceptOfferEvent":
-        """Create an accept-offer event from a market order and optional escrow UID."""
-        return cls(
-            event_id=f"acc_{order.order_id}",
-            source=source or order.order_taker or order.order_maker,
-            order=order,
-            escrow_uid=escrow_uid,
-            ssh_public_key=ssh_public_key,
-            matched_order_id=matched_order_id,
-            agreed_price=agreed_price,
-            data={
-                "order_id": order.order_id,
-                "offer_resource": order.offer_resource.model_dump(mode="json"),
-                "demand_resource": order.demand_resource.model_dump(mode="json"),
-                "duration_hours": order.duration_hours,
-                "escrow_uid": escrow_uid,
-                "ssh_public_key": ssh_public_key,
-                "oracle_address": order.oracle_address,
-                "matched_order_id": matched_order_id,
-                "agreed_price": agreed_price,
-            },
-        )
 
 
 class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
@@ -638,34 +532,6 @@ class ResourceImbalanceEvent(DomainEvent):
                 "imbalance_type": imbalance_type,
                 "severity": severity,
             },
-        )
-
-
-class NegotiationEvent(DomainEvent):
-    """Event triggered when a negotiation message is received"""
-
-    event_type: EventType = Field(default=EventType.NEGOTIATION)
-    negotiation_id: str = Field(description="ID of the negotiation thread")
-    message_type: str = Field(description="Type of negotiation message")
-    sender: str = Field(description="Agent who sent the message")
-
-    @classmethod
-    def create(
-        cls,
-        event_id: str,
-        negotiation_id: str,
-        message_type: str,
-        sender: str,
-        data: dict[str, Any],
-    ) -> "NegotiationEvent":
-        """Create a negotiation event"""
-        return cls(
-            event_id=event_id,
-            source=sender,
-            negotiation_id=negotiation_id,
-            message_type=message_type,
-            sender=sender,
-            data=data,
         )
 
 

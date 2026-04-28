@@ -49,15 +49,12 @@ from market_storefront.schema.pydantic_models import (
     ActionType,
     EventType,
     DomainEvent,
-    AcceptOfferEvent,
     MarketOrder,
-    MakeOfferEvent,
     ReceiveComputeObligationFulfillmentEvent,
     FulfillmentFailedEvent,
     ArbitrationCompleteEvent,
     ResourceImbalanceEvent,
     ResourceAlertRequest,
-    NegotiationEvent,
     ComputeResource,
     TokenResource,
     OrderCreateEvent,
@@ -212,46 +209,6 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             }
             return OrderCloseEvent.model_validate(order_close_payload)
 
-        elif event_type == EventType.MAKE_OFFER:
-            # Extract offer data - could be in 'offer' key or directly in 'data'
-            offer_data = data.get("offer", data)
-            if not isinstance(offer_data, dict):
-                raise ValueError("MakeOfferEvent requires 'offer' or order data as dictionary")
-            
-            # Validate MarketOrder (which will validate resources via model_validator)
-            order = MarketOrder.model_validate(offer_data)
-            event = MakeOfferEvent.from_order(order)
-            # Preserve negotiation_id echoed back by the seller so the buyer can
-            # find and update their own local order record without a fuzzy lookup.
-            negotiation_id = offer_data.get("negotiation_id")
-            if negotiation_id:
-                event = event.model_copy(update={"negotiation_id": negotiation_id})
-            return event
-            
-        elif event_type == EventType.ACCEPT_OFFER:
-            offer_data = data.get("offer", data)
-            if not isinstance(offer_data, dict):
-                raise ValueError("AcceptOfferEvent requires 'offer' or order data as dictionary")
-
-            order = MarketOrder.model_validate(offer_data)
-            escrow_uid = data.get("escrow_uid") or payload.get("escrow_uid")
-            ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
-            matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
-            source = data.get("source") or payload.get("source")
-            negotiation_id = data.get("negotiation_id") or payload.get("negotiation_id")
-            agreed_price = data.get("agreed_price") or payload.get("agreed_price")
-            event = AcceptOfferEvent.from_order(
-                order,
-                escrow_uid=escrow_uid,
-                ssh_public_key=ssh_public_key,
-                matched_order_id=matched_order_id,
-                source=source,
-                agreed_price=agreed_price,
-            )
-            if negotiation_id:
-                event = event.model_copy(update={"negotiation_id": negotiation_id})
-            return event
-            
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
             source_url = payload.get("source_url") or (
@@ -281,16 +238,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
         elif event_type == EventType.ARBITRATION_COMPLETE:
             arb_payload = {**data, "source": payload.get("source") or data.get("source", "unknown")}
             return ArbitrationCompleteEvent.from_payload(arb_payload)
-            
-        elif event_type == EventType.NEGOTIATION:
-            # Validate NegotiationEvent with required fields (these are top-level, not in data)
-            required_fields = ["negotiation_id", "message_type", "sender"]
-            missing = [f for f in required_fields if f not in payload]
-            if missing:
-                raise ValueError(f"NegotiationEvent missing required fields: {missing}")
-            
-            return NegotiationEvent.model_validate(payload)
-            
+
         else:
             # For other known event types, use model_validate
             return DomainEvent.model_validate(payload)
@@ -485,45 +433,13 @@ class TraderAgent:
             event_type=domain_event.event_type.value,
         )
         
-        # Load negotiation history from thread store if this is a NegotiationEvent
-        negotiation_history = []
-        thread_info = {}
-        if isinstance(domain_event, NegotiationEvent):
-            thread_store = get_thread_store()
-            negotiation_id = domain_event.negotiation_id
-            if negotiation_id:
-                # Fetch thread_info first so our_initial_price is available when recording
-                # the incoming message below (avoids NULL our_price in audit log).
-                thread_info = await thread_store.get_thread_info(
-                    negotiation_id=negotiation_id,
-                    owner_id=BASE_URL_OVERRIDE,
-                ) or {}
-
-                # Record the incoming message so the thread_store has bilateral history.
-                # Our own outgoing messages are recorded inside action_executor (counter_offer).
-                # Recording what we receive here completes the audit log for both sides.
-                msg_type = domain_event.message_type
-                sender = domain_event.sender
-                proposed_price = (domain_event.data or {}).get("proposed_price")
-                if (sender and sender != self.name
-                        and proposed_price is not None
-                        and msg_type in ("counter_proposal", "initial_proposal")):
-                    try:
-                        await thread_store.add_message(
-                            negotiation_id=negotiation_id,
-                            sender=sender,
-                            our_price=thread_info.get("our_initial_price"),
-                            their_price=proposed_price,
-                            proposed_price=proposed_price,
-                            action_taken=ActionType.COUNTER_OFFER.value,
-                            message_type=msg_type,
-                        )
-                    except Exception as exc:
-                        logger.debug("[NEGOTIATION] Could not record incoming message: %s", exc)
-
-                negotiation_history = await thread_store.get_thread(negotiation_id)
-        
-        market_state_with_thread = {**market_state, "thread_info": thread_info}
+        # The legacy NegotiationEvent path used to load thread_info +
+        # negotiation_history here. Negotiation now goes through the
+        # sync /negotiate/* endpoints, which talk to the thread store
+        # directly; the event-pipeline path no longer sees negotiation
+        # events.
+        market_state_with_thread = {**market_state, "thread_info": {}}
+        negotiation_history: list = []
         
         return (domain_event, {
             "resource_portfolio": resource_portfolio,
