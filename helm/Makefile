@@ -47,16 +47,16 @@ test:
 
 ## Run helm tests for a single subchart.
 ## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
-## Valid values: validate-contracts, registry, agents, provisioning
+## Valid values: validate-contracts, registry, storefront, provisioning
 ##
 ## Test pod names per module:
 ##   validate-contracts → $(RELEASE)-validate-contracts-chain-environment-test
 ##   registry           → $(RELEASE)-registry-smoke-test
-##   agents             → $(RELEASE)-agents-smoke-test
+##   storefront         → $(RELEASE)-storefront-smoke-test
 ##   provisioning       → $(RELEASE)-provisioning-smoke-test
 TEST_POD_SUFFIX_validate-contracts := chain-environment-test
 TEST_POD_SUFFIX_registry           := smoke-test
-TEST_POD_SUFFIX_agents             := smoke-test
+TEST_POD_SUFFIX_storefront         := smoke-test
 TEST_POD_SUFFIX_provisioning       := smoke-test
  
 test-module:

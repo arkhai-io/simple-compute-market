@@ -19,7 +19,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "storefront.fullname" . }}-agents-smoke-test
+  name: {{ include "storefront.fullname" . }}-smoke-test
   labels:
     {{- include "storefront.labels" . | nindent 4 }}
   annotations:

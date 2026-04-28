@@ -22,7 +22,7 @@ dependencies = [
     "httpx>=0.27",            # used by test_provisioning_smoke, eip191_http_client, and SyncRegistryClient
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with agent behavior.
-    "arkhai-agent-client>=0.1.0",
+    "arkhai-agent-client>=0.1.2",
     "arkhai-registry-client>=0.1.2",
     "market-service",
     "provisioning-service>=0.1.1",
