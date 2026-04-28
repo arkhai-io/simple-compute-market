@@ -15,6 +15,6 @@ fixture out.
 
 from __future__ import annotations
 
-from tests.roles.layers.test_external import external_world  # noqa: F401
-from tests.roles.layers.test_market import market_registry  # noqa: F401
-from tests.roles.layers.test_seller import seller_node  # noqa: F401
+from tests.e2e.roles.layers.test_external import external_world  # noqa: F401
+from tests.e2e.roles.layers.test_market import market_registry  # noqa: F401
+from tests.e2e.roles.layers.test_seller import seller_node  # noqa: F401

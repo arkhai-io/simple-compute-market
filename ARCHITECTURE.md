@@ -926,7 +926,7 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 **What they do not cover:** Anything already covered by the three levels above. System integration tests are expensive to run and brittle to maintain; they should be minimal in count and cover only the cross-service contract, not any service's internal logic.
 
-**Current location:** `integration-tests/tests/test_agents.py`. This is planned to move to a separate project as the stack matures.
+**Current location:** `integration-tests/tests/e2e/` — the `roles/` subtree organises tests by deployment layer (external chain, market registry, seller node) and negotiation stage (discovery, negotiation, settlement). This is planned to move to a separate project as the stack matures.
 
 ### Coverage Contract Between Levels
 
@@ -990,9 +990,41 @@ Routes not yet surfaced on `RegistryClient` (PUT /orders/{id}, POST /agents/regi
 are exercised via `registry_client._http` — the raw httpx client — which still traverses the
 full stack.  These are marked as candidates for client extension in follow-on work.
 
+**integration-tests**:
+```
+integration-tests/
+├── conftest.py                  # CLI options (--profile, --config-dir); sets env vars pre-import
+├── src/                         # Shared clients and settings (not test files)
+│   ├── agent_client.py          # SyncStorefrontClient adapter shim (see Re-export shims)
+│   ├── registry_client.py       # SyncRegistryClient re-export shim
+│   ├── settings.py              # dynaconf settings loader
+│   └── web3_client.py           # Web3 connection helper
+└── tests/
+    ├── conftest.py              # Session fixtures: w3, rpc_settings, registry_settings,
+    │                            # buyer_settings, seller_settings, min_eth_balance
+    ├── helpers/                 # Shared helpers used by both smoke and e2e tests
+    │   ├── addresses.py
+    │   ├── polling.py
+    │   ├── registry_helpers.py
+    │   └── sqlite_reader.py
+    ├── fixtures/                # Shared pytest fixtures (ABIs, etc.)
+    ├── smoke/                   # Smoke tests — stateless deployment validation
+    │   ├── test_contracts_smoke.py     # On-chain contract bytecode + owner()
+    │   ├── test_registry_smoke.py      # Registry reachability, health, seeding
+    │   ├── test_wallets_smoke.py       # Wallet balance + key/address consistency
+    │   ├── test_provisioning_smoke.py  # Provisioning API health, host registry, auth
+    │   └── test_storefront_smoke.py    # Seller storefront reachability + registration
+    └── e2e/                     # System integration tests — cross-service scenarios
+        └── roles/               # Organised by deployment layer and negotiation stage
+            ├── conftest.py      # Imports layer fixtures (external_world, market_registry, seller_node)
+            ├── helpers/         # deal.py (full deal flow helper), erc20.py
+            ├── layers/          # test_external.py, test_market.py, test_seller.py
+            └── stages/
+                └── discovery/test_buyer.py
+```
+
 
 ### Problem
-
 Python packages in this monorepo need to consume each other (e.g. the agent imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `core/agent/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
 
 ### Current Approach: `--find-links` flat wheel directory
@@ -1155,7 +1187,7 @@ cd registry-service && make reinit && make test-integration
 
 ### Re-export shims
 
-**`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by `test_agents.py` (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once `test_agents.py` is updated to call `SyncStorefrontClient` directly.
+**`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by the smoke tests (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once the smoke tests are updated to call `SyncStorefrontClient` directly.
 
 **`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`. A future task can update the smoke test imports and delete this file.
 

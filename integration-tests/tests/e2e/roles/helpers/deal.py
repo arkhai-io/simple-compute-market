@@ -119,7 +119,7 @@ class Deal:
 
     def buyer_balance(self) -> int:
         """Current on-chain payment-token balance of the buyer's wallet."""
-        from tests.roles.helpers.erc20 import get_erc20_balance
+        from tests.e2e.roles.helpers.erc20 import get_erc20_balance
         return get_erc20_balance(
             self.w3, self.payment_token_address,
             self.buyer_node["wallet_address"],
@@ -127,7 +127,7 @@ class Deal:
 
     def seller_balance(self) -> int:
         """Current on-chain payment-token balance of the seller's wallet."""
-        from tests.roles.helpers.erc20 import get_erc20_balance
+        from tests.e2e.roles.helpers.erc20 import get_erc20_balance
         return get_erc20_balance(
             self.w3, self.payment_token_address,
             self.seller_node["wallet_address"],
