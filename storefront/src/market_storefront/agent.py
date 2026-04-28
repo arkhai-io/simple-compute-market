@@ -119,30 +119,6 @@ configure_default_ingestion(
 ALKAHEST_NETWORK = get_alkahest_network(CONFIG.chain_name)
 
 
-# Wire the typed RegistryClient config into the service-layer singleton
-# so callers (action_executor, etc.) can use `get_registry_client()` with
-# no args. The canonical eip155:... agent_id is resolved from CONFIG —
-# no env vars.
-from service.clients.indexer import (
-    CanonicalAgentIdInputs,
-    RegistryClientConfig,
-    configure_registry_client,
-    resolve_canonical_agent_id,
-)
-
-configure_registry_client(RegistryClientConfig(
-    base_url=CONFIG.indexer_url,
-    timeout=CONFIG.registry_order_timeout,
-    private_key=CONFIG.agent_priv_key,
-    agent_id=resolve_canonical_agent_id(CanonicalAgentIdInputs(
-        onchain_agent_id=CONFIG.onchain_agent_id,
-        agent_id=CONFIG.agent_id,
-        identity_registry_address=CONFIG.identity_registry_address,
-        chain_rpc_url=CONFIG.chain_rpc_url,
-        alkahest_network=ALKAHEST_NETWORK,
-    )),
-))
-
 # Limits to keep stored JSON blobs from exploding the SQLite size
 MAX_CONTEXT_JSON_CHARS = 100_000
 MAX_OUTCOME_JSON_CHARS = 100_000
