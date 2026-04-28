@@ -1,47 +1,19 @@
-"""Unit tests for the seller agent's TOML config fallback.
+"""Unit tests for the seller agent's TOML config loader.
 
-The seller agent's `load_config()` reads every value via env > TOML >
-default. This module verifies that hierarchy by monkey-patching the
-TOML doc and toggling env vars, then calling load_config() fresh each
-time.
-
-The tests deliberately avoid touching a real `~/.config/arkhai/
-config.toml` file — everything goes through the module-level `_USER_CFG`
-dict.
+`load_config()` reads every value from
+`$XDG_CONFIG_HOME/arkhai/config.toml` (or its default fallback). This
+module verifies the TOML→default precedence by monkey-patching the
+module-level `_USER_CFG` dict — no real file is touched, no env vars
+are read.
 """
 
 from __future__ import annotations
 
-import os
 from unittest.mock import patch
 
 import pytest
 
 from market_storefront.utils import config as agent_config
-
-
-@pytest.fixture
-def seller_env(monkeypatch):
-    """Start from a minimal known env — only AGENT_ID set so load_config
-    doesn't raise the default-agent-id warning mid-test."""
-    # Wipe anything the outer shell might have set.
-    for var in [
-        "AGENT_ID", "AGENT_NAME", "BASE_URL_OVERRIDE", "PORT",
-        "CHAIN_NAME", "CHAIN_RPC_URL", "ALKAHEST_ADDRESS_CONFIG_PATH",
-        "AGENT_PRIV_KEY", "AGENT_WALLET_ADDRESS", "SSH_PUBLIC_KEY",
-        "AGENT_DB_PATH", "LOG_LEVEL", "LOG_FILE_PATH", "TOKEN_REGISTRY_PATH",
-        "INDEXER_URL", "REGISTRY_URL", "IDENTITY_REGISTRY_ADDRESS",
-        "ONCHAIN_AGENT_ID", "PROVISIONING_SERVICE_URL",
-        "PROVISIONING_TIMEOUT", "PROVISIONING_POLL_INTERVAL",
-        "ENABLE_REDIS_INGEST", "REDIS_URL", "REDIS_CHANNELS",
-        "ENABLE_REGISTRY_DISCOVERY", "ENABLE_ORDER_RETRY",
-        "EVENT_VALIDATION_MODE", "NEGOTIATION_POLICY_MODE",
-        "ZEROTIER_NETWORK", "DEFAULT_VM_HOST", "MCP_SERVER_URL",
-    ]:
-        monkeypatch.delenv(var, raising=False)
-    # Give AGENT_ID a value so we don't hit the default-id warning path.
-    monkeypatch.setenv("AGENT_ID", "test_agent")
-    yield
 
 
 def _load_with_toml(doc: dict):
@@ -51,12 +23,13 @@ def _load_with_toml(doc: dict):
 
 
 # ---------------------------------------------------------------------------
-# Empty TOML — everything falls through to defaults or env.
+# Empty TOML — everything falls through to defaults.
 # ---------------------------------------------------------------------------
 
 
-def test_empty_toml_uses_all_defaults(seller_env):
-    cfg = _load_with_toml({})
+def test_empty_toml_uses_all_defaults():
+    cfg = _load_with_toml({"seller": {"agent_id": "test_agent"}})
+    assert cfg.agent_id == "test_agent"
     assert cfg.chain_name == "ethereum_sepolia"
     assert cfg.port == 8000
     assert cfg.agent_db_path == "/tmp/agent.db"
@@ -68,7 +41,7 @@ def test_empty_toml_uses_all_defaults(seller_env):
     assert cfg.negotiation_policy_mode == ""
 
 
-def test_empty_toml_with_no_seller_section_still_loads(seller_env):
+def test_empty_toml_with_no_seller_section_still_loads():
     """The whole [seller] block is optional — a buyer's config.toml
     should not break seller-side load_config() if it somehow ends up
     being read."""
@@ -90,31 +63,30 @@ def test_empty_toml_with_no_seller_section_still_loads(seller_env):
 
 
 # ---------------------------------------------------------------------------
-# Env > TOML > default precedence
+# TOML → default precedence
 # ---------------------------------------------------------------------------
 
 
-def test_env_wins_over_toml(seller_env, monkeypatch):
-    monkeypatch.setenv("CHAIN_NAME", "from_env")
-    cfg = _load_with_toml({"chain": {"name": "from_toml"}})
-    assert cfg.chain_name == "from_env"
-
-
-def test_toml_used_when_env_absent(seller_env):
-    cfg = _load_with_toml({"chain": {"name": "from_toml"}})
+def test_toml_used_when_set():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "chain": {"name": "from_toml"},
+    })
     assert cfg.chain_name == "from_toml"
 
 
-def test_default_when_both_absent(seller_env):
-    cfg = _load_with_toml({})
+def test_default_when_toml_absent():
+    cfg = _load_with_toml({"seller": {"agent_id": "test_agent"}})
     assert cfg.chain_name == "ethereum_sepolia"
 
 
-def test_empty_env_string_treated_as_unset(seller_env, monkeypatch):
-    """CHAIN_NAME= (empty) should not shadow a TOML value."""
-    monkeypatch.setenv("CHAIN_NAME", "")
-    cfg = _load_with_toml({"chain": {"name": "from_toml"}})
-    assert cfg.chain_name == "from_toml"
+def test_empty_string_treated_as_unset():
+    """An explicit empty string in TOML should not shadow the default."""
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "chain": {"name": ""},
+    })
+    assert cfg.chain_name == "ethereum_sepolia"
 
 
 # ---------------------------------------------------------------------------
@@ -122,35 +94,30 @@ def test_empty_env_string_treated_as_unset(seller_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_int_coerced_from_env_string(seller_env, monkeypatch):
-    monkeypatch.setenv("PORT", "9001")
-    cfg = _load_with_toml({})
+def test_int_coerced_from_toml_int():
+    cfg = _load_with_toml({"seller": {"agent_id": "test_agent", "port": 9001}})
     assert cfg.port == 9001
 
 
-def test_int_coerced_from_toml_int(seller_env):
-    cfg = _load_with_toml({"seller": {"port": 9001}})
-    assert cfg.port == 9001
-
-
-def test_int_bad_env_falls_back_to_default(seller_env, monkeypatch):
-    monkeypatch.setenv("PORT", "definitely-not-an-int")
-    cfg = _load_with_toml({})
+def test_int_bad_toml_value_falls_back_to_default():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent", "port": "definitely-not-an-int"},
+    })
     assert cfg.port == 8000
 
 
-def test_bool_from_toml_native(seller_env):
-    cfg = _load_with_toml({"seller": {"redis": {"enable": True}}})
+def test_bool_from_toml_native():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent", "redis": {"enable": True}},
+    })
     assert cfg.enable_redis_ingest is True
 
 
-def test_bool_from_env_string(seller_env, monkeypatch):
-    monkeypatch.setenv("ENABLE_REDIS_INGEST", "true")
-    cfg = _load_with_toml({"seller": {"redis": {"enable": False}}})
-    assert cfg.enable_redis_ingest is True  # env wins
-    monkeypatch.setenv("ENABLE_REDIS_INGEST", "false")
-    cfg = _load_with_toml({"seller": {"redis": {"enable": True}}})
-    assert cfg.enable_redis_ingest is False
+def test_bool_from_toml_string_truthy():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent", "redis": {"enable": "true"}},
+    })
+    assert cfg.enable_redis_ingest is True
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +125,10 @@ def test_bool_from_env_string(seller_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_seller_provisioning_subtable(seller_env):
+def test_seller_provisioning_subtable():
     cfg = _load_with_toml({
         "seller": {
+            "agent_id": "test_agent",
             "provisioning": {
                 "service_url": "http://prov.example:8085",
                 "timeout": 1800,
@@ -173,9 +141,10 @@ def test_seller_provisioning_subtable(seller_env):
     assert cfg.provisioning_poll_interval == 5
 
 
-def test_seller_redis_subtable(seller_env):
+def test_seller_redis_subtable():
     cfg = _load_with_toml({
         "seller": {
+            "agent_id": "test_agent",
             "redis": {
                 "enable": True,
                 "url": "redis://cache.example:6379/1",
@@ -188,9 +157,10 @@ def test_seller_redis_subtable(seller_env):
     assert cfg.redis_channels == "events:orders,events:trades"
 
 
-def test_seller_negotiation_subtable(seller_env):
+def test_seller_negotiation_subtable():
     cfg = _load_with_toml({
         "seller": {
+            "agent_id": "test_agent",
             "negotiation": {
                 "policy_mode": "rl",
                 "seller_model_path": "/models/seller.pt",
@@ -208,8 +178,9 @@ def test_seller_negotiation_subtable(seller_env):
 # ---------------------------------------------------------------------------
 
 
-def test_shared_wallet_section(seller_env):
+def test_shared_wallet_section():
     cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
         "wallet": {
             "address": "0xdeadbeef",
             "private_key": "0xabc",
@@ -221,8 +192,9 @@ def test_shared_wallet_section(seller_env):
     assert cfg.ssh_public_key == "ssh-ed25519 AAAA foo@bar"
 
 
-def test_shared_chain_section(seller_env):
+def test_shared_chain_section():
     cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
         "chain": {
             "name": "anvil",
             "rpc_url": "http://localhost:8545",
@@ -234,8 +206,9 @@ def test_shared_chain_section(seller_env):
     assert cfg.alkahest_address_config_path == "/etc/arkhai/alkahest.json"
 
 
-def test_shared_registry_section(seller_env):
+def test_shared_registry_section():
     cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
         "registry": {
             "url": "http://registry.example:8080",
             "identity_registry_address": "0xreg1",
@@ -250,15 +223,18 @@ def test_shared_registry_section(seller_env):
 # ---------------------------------------------------------------------------
 
 
-def test_toml_agent_id_validated(monkeypatch):
-    """Invalid agent_id in TOML must raise, same as env."""
-    for var in ["AGENT_ID"]:
-        monkeypatch.delenv(var, raising=False)
+def test_toml_agent_id_validated():
+    """Invalid agent_id in TOML must raise."""
     with pytest.raises(ValueError, match="not a valid identifier"):
         _load_with_toml({"seller": {"agent_id": "has-a-hyphen"}})
 
 
-def test_toml_agent_id_from_seller_section(monkeypatch):
-    monkeypatch.delenv("AGENT_ID", raising=False)
+def test_toml_agent_id_from_seller_section():
     cfg = _load_with_toml({"seller": {"agent_id": "alice"}})
     assert cfg.agent_id == "alice"
+
+
+def test_missing_agent_id_warns_and_falls_back_to_default():
+    with pytest.warns(UserWarning, match="agent_id not set"):
+        cfg = _load_with_toml({})
+    assert cfg.agent_id == agent_config.DEFAULT_AGENT_ID
