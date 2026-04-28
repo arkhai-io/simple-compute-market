@@ -4,7 +4,6 @@ from pathlib import Path
 import os
 import json
 import textwrap
-import time
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -14,6 +13,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
+
+from storefront_client import StorefrontClientError, SyncStorefrontClient
 
 from ..common import REPO_ROOT, container_db_to_host, read_env_value, resolve_config_value
 
@@ -80,26 +81,30 @@ def order_create(
     wallet_address = resolve_config_value(
         "AGENT_WALLET_ADDRESS", env_file=env_path, toml_path="wallet.address",
     )
-    payload = {
-        "offer": offer_data,
-        "demand": demand_data,
-        "duration_hours": duration,
-    }
-    url = f"{base_url}/orders/create"
-    response = _post_json(url, payload, _get_auth_headers("create_order", wallet_address, private_key))
+    with SyncStorefrontClient(base_url, private_key=private_key) as client:
+        try:
+            resp = client.create_order(
+                agent_wallet_address=wallet_address,
+                offer=offer_data,
+                demand=demand_data,
+                duration_hours=duration,
+            )
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
 
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
-    table.add_row("Status", str(response.get("status", "-")))
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
-    if "order_id" in response:
-        table.add_row("Order ID", str(response.get("order_id")))
-    if "root_agent_response" in response:
-        table.add_row("Agent", str(response.get("root_agent_response")))
-    order_request = response.get("order_request")
+    table.add_row("Status", str(resp.status or "-"))
+    if resp.event_id is not None:
+        table.add_row("Event ID", str(resp.event_id))
+    if resp.order_id is not None:
+        table.add_row("Order ID", str(resp.order_id))
+    if resp.root_agent_response is not None:
+        table.add_row("Agent", str(resp.root_agent_response))
+    order_request = resp.order_request
     if isinstance(order_request, dict):
         offer_req = order_request.get("offer")
         demand_req = order_request.get("demand")
@@ -146,20 +151,23 @@ def order_close(
     private_key = resolve_config_value(
         "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
     ) or None
-    payload = {"order_id": order_id}
-    url = f"{base_url}/orders/close"
-    response = _post_json(url, payload, _get_auth_headers("close_order", order_id, private_key))
+    with SyncStorefrontClient(base_url, private_key=private_key) as client:
+        try:
+            resp = client.close_order(order_id)
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
 
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
-    table.add_row("Status", str(response.get("status", "-")))
+    table.add_row("Status", str(resp.status or "-"))
     table.add_row("Order ID", order_id)
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
-    if "root_agent_response" in response:
-        table.add_row("Agent", str(response.get("root_agent_response")))
+    if resp.event_id is not None:
+        table.add_row("Event ID", str(resp.event_id))
+    if resp.root_agent_response is not None:
+        table.add_row("Agent", str(resp.root_agent_response))
 
     console.print(Panel(table, title="Order Close", border_style="green"))
 
@@ -202,18 +210,21 @@ def order_discover(
         "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
     ) or None
 
-    payload = {"order_id": order_id, "include_active": include_active}
-    url = f"{base_url}/orders/discover"
-    response = _post_json(url, payload, _get_auth_headers("discover_orders", order_id, private_key))
+    with SyncStorefrontClient(base_url, private_key=private_key) as client:
+        try:
+            resp = client.discover_orders(order_id=order_id, include_active=include_active)
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
 
     console = Console()
-    matches = response.get("matches", []) or []
+    matches = resp.matches
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
     header.add_row("Order", order_id)
     header.add_row("Agent", base_url)
-    header.add_row("Matches", str(response.get("match_count", len(matches))))
+    header.add_row("Matches", str(resp.match_count if resp.match_count is not None else len(matches)))
     console.print(Panel(header, title="market order discover", border_style="cyan"))
 
     if not matches:
@@ -225,8 +236,8 @@ def order_discover(
     table.add_column("Their Agent URL", overflow="fold")
     for m in matches:
         table.add_row(
-            str(m.get("their_order_id", "-")),
-            str(m.get("their_agent_url", "-")),
+            str(m.their_order_id or "-"),
+            str(m.their_agent_url or "-"),
         )
     console.print(table)
 
@@ -407,20 +418,35 @@ def order_match(
     private_key = resolve_config_value(
         "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
     ) or None
-    create_url = f"{base_agent_url}/orders/create"
-    response = _post_json(create_url, payload, _get_auth_headers("create_order", base_agent_url, private_key))
+    # Note: pre-migration this code signed `create_order` with
+    # base_agent_url as the resource_id rather than wallet_address. The
+    # storefront's auth check expects wallet_address; this only worked
+    # against unauthenticated storefronts. Preserved here verbatim
+    # (passing the URL into the wallet_address slot) to keep the
+    # migration behavior-neutral. Fix as a follow-up.
+    with SyncStorefrontClient(base_agent_url, private_key=private_key) as client:
+        try:
+            resp = client.create_order(
+                agent_wallet_address=base_agent_url,
+                offer=offer_resource,
+                demand=demand_resource,
+                duration_hours=duration,
+            )
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
 
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
-    table.add_row("Status", str(response.get("status", "-")))
-    if "event_id" in response:
-        table.add_row("Event ID", str(response.get("event_id")))
-    if "order_id" in response:
-        table.add_row("Order ID", str(response.get("order_id")))
-    if "root_agent_response" in response:
-        table.add_row("Agent", str(response.get("root_agent_response")))
+    table.add_row("Status", str(resp.status or "-"))
+    if resp.event_id is not None:
+        table.add_row("Event ID", str(resp.event_id))
+    if resp.order_id is not None:
+        table.add_row("Order ID", str(resp.order_id))
+    if resp.root_agent_response is not None:
+        table.add_row("Agent", str(resp.root_agent_response))
 
     console.print(Panel(table, title="Order Match", border_style="green"))
 
@@ -537,40 +563,9 @@ def _format_resource_full(resource: dict | str | None) -> str:
         return str(resource)
 
 
-def _get_auth_headers(operation: str, resource_id: str, private_key: str | None) -> dict[str, str]:
-    """Build X-Signature / X-Timestamp headers for a CLI→agent request.
-
-    Returns an empty dict if no private_key is provided or if eth_account is
-    not installed (request is sent unsigned; the agent will reject it if it
-    requires auth).
-    """
-    if not private_key:
-        return {}
-    try:
-        from eth_account import Account
-        from eth_account.messages import encode_defunct
-    except ImportError:
-        return {}
-    ts = int(time.time())
-    message = f"{operation}:{resource_id}:{ts}"
-    msg_hash = encode_defunct(text=message)
-    sig = Account.sign_message(msg_hash, private_key).signature.hex()
-    return {"X-Signature": sig, "X-Timestamp": str(ts)}
-
-
-def _get_cli_http_timeout() -> float:
-    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
-    default_value = 120.0
-    try:
-        timeout = float(raw)
-    except ValueError:
-        return default_value
-    if timeout <= 0:
-        return default_value
-    return timeout
-
-
 def _fetch_json(url: str) -> dict:
+    """GET a JSON document — used for unauthenticated registry-indexer
+    queries that don't fit the storefront-client SDK surface."""
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -581,29 +576,6 @@ def _fetch_json(url: str) -> dict:
         raise typer.Exit(code=1)
     except Exception as exc:
         typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-
-def _post_json(url: str, payload: dict, extra_headers: dict[str, str] | None = None) -> dict:
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        if extra_headers:
-            headers.update(extra_headers)
-        request = urllib.request.Request(
-            url,
-            data=data,
-            headers=headers,
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=_get_cli_http_timeout()) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
-        typer.secho(f"Agent error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        typer.secho(f"Failed to call agent endpoint: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
 

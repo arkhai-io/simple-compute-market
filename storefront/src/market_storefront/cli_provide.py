@@ -34,9 +34,12 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from .cli_common import REPO_ROOT, read_env_value, resolve_agent_url
-from .cli_common import _get_auth_headers, _normalize_registry_url, _post_json
-from .cli_common import _resolve_db_path
+from storefront_client import (
+    StorefrontClientError,
+    SyncStorefrontClient,
+)
+
+from .cli_common import REPO_ROOT, read_env_value, resolve_agent_url, _resolve_db_path
 
 
 def _import_csv(csv_path: str, env: Optional[str], db: Optional[str]) -> None:
@@ -132,11 +135,31 @@ def _publish_offer(
     wallet_address: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/create and return the full response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/create"
-    payload = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-    headers = _get_auth_headers("create_order", wallet_address, private_key)
-    return _post_json(url, payload, headers)
+    """POST /orders/create and return the response as a dict.
+
+    Returns a dict (not the typed StorefrontOrderCreateResponse) for
+    backward compat with `_publish_round`'s callers, which inspect
+    `resp["order_id"]` and `resp["status"]` directly.
+    """
+    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+        try:
+            resp = client.create_order(
+                agent_wallet_address=wallet_address,
+                offer=offer,
+                demand=demand,
+                duration_hours=duration_hours,
+            )
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    return {
+        "status": resp.status,
+        "order_id": resp.order_id,
+        "event_id": resp.event_id,
+        "root_agent_response": resp.root_agent_response,
+        "order_request": resp.order_request,
+        **resp.extra,
+    }
 
 
 def _open_order_ids(db_path: str) -> list[str]:
@@ -156,10 +179,20 @@ def _close_order(
     order_id: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/close on the seller agent; returns the response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/close"
-    headers = _get_auth_headers("close_order", order_id, private_key)
-    return _post_json(url, {"order_id": order_id}, headers)
+    """POST /orders/close on the storefront; returns the response as a dict."""
+    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+        try:
+            resp = client.close_order(order_id)
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    return {
+        "status": resp.status,
+        "event_id": resp.event_id,
+        "root_agent_response": resp.root_agent_response,
+        "order_request": resp.order_request,
+        **resp.extra,
+    }
 
 
 def _publish_round(
@@ -247,15 +280,24 @@ def _submit_refund(
     token: Optional[str],
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/refund; returns the agent's response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/refund"
-    payload: dict = {"order_id": order_id, "buyer_address": buyer_address}
-    if amount is not None:
-        payload["amount"] = amount
-    if token is not None:
-        payload["token"] = token
-    headers = _get_auth_headers("refund_order", order_id, private_key)
-    return _post_json(url, payload, headers)
+    """POST /orders/refund; returns the storefront's response as a dict."""
+    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+        try:
+            resp = client.refund_order(
+                order_id=order_id,
+                buyer_address=buyer_address,
+                amount=amount,
+                token=token,
+            )
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    return {
+        "status": resp.status,
+        "order_id": resp.order_id,
+        "refund_tx": resp.refund_tx,
+        **resp.extra,
+    }
 
 
 def _submit_claim(
@@ -264,13 +306,20 @@ def _submit_claim(
     fulfillment_uid: Optional[str],
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/claim; returns the agent's response dict."""
-    url = f"{_normalize_registry_url(agent_url)}/orders/claim"
-    payload: dict = {"order_id": order_id}
-    if fulfillment_uid:
-        payload["fulfillment_uid"] = fulfillment_uid
-    headers = _get_auth_headers("claim_order", order_id, private_key)
-    return _post_json(url, payload, headers)
+    """POST /orders/claim; returns the storefront's response as a dict."""
+    with SyncStorefrontClient(agent_url, private_key=private_key) as client:
+        try:
+            resp = client.claim_order(order_id=order_id, fulfillment_uid=fulfillment_uid)
+        except StorefrontClientError as exc:
+            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    return {
+        "status": resp.status,
+        "order_id": resp.order_id,
+        "fulfillment_uid": resp.fulfillment_uid,
+        "claim_tx": resp.claim_tx,
+        **resp.extra,
+    }
 
 
 def register(app: typer.Typer) -> None:
@@ -322,7 +371,7 @@ def register(app: typer.Typer) -> None:
         try:
             resp = _submit_claim(base_url, order_id, fulfillment_uid, private_key)
         except typer.Exit:
-            raise  # _post_json already reported the error
+            raise  # SyncStorefrontClient already reported the error
 
         status = str(resp.get("status", "?"))
         if status != "claimed":
@@ -397,7 +446,7 @@ def register(app: typer.Typer) -> None:
                 base_url, order_id, buyer_address, amount, token, private_key,
             )
         except typer.Exit:
-            raise  # _post_json already printed the error
+            raise  # SyncStorefrontClient already printed the error
 
         status = str(resp.get("status", "?"))
         if status != "refunded":

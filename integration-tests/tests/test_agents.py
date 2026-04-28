@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from src.agent_client import AgentClient
-from agent_client import AgentClientError
+from storefront_client import StorefrontClientError
 from registry_client import SyncRegistryClient as RegistryClient
 from registry_client import RegistryClientError
 from src.models.agent import (

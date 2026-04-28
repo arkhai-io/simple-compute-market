@@ -3,7 +3,7 @@ Integration tests for the Arkhai agent REST API routes.
 
 Coverage (per Architecture.md — Integration Tests jurisdiction):
   - Request bodies accepted / rejected correctly (validation path)
-  - Responses parse into AgentClient's expected shapes
+  - Responses parse into StorefrontClient's expected shapes
   - Auth bypass works when AGENT_WALLET_ADDRESS is unset
   - GET /.well-known/erc-8004-registration.json returns valid JSON
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_storefront.client.agent_client import AgentClient, AgentClientError
+from storefront_client import StorefrontClient, StorefrontClientError
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +90,11 @@ class TestAlertEndpoint:
 
 class TestAlertViaClient:
     async def test_client_send_resource_alert_matches_endpoint(self, agent_app_client):
-        """AgentClient.send_resource_alert body matches what the endpoint accepts."""
+        """StorefrontClient.send_resource_alert body matches what the endpoint accepts."""
         import aiohttp
 
-        # Build the body that AgentClient would send
-        client = AgentClient("http://test")
+        # Build the body that StorefrontClient would send
+        client = StorefrontClient("http://test")
 
         # Call the endpoint directly with the same body the client would use
         resp = await agent_app_client.post("/alerts/resource", json=_ALERT_BODY)
@@ -168,7 +168,7 @@ class TestCreateOrderEndpoint:
 
 class TestCreateOrderViaClient:
     async def test_client_create_order_body_matches_endpoint(self, agent_app_client):
-        """AgentClient.create_order serialises to a body the endpoint accepts."""
+        """StorefrontClient.create_order serialises to a body the endpoint accepts."""
         body = {
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
@@ -213,7 +213,7 @@ class TestCloseOrderEndpoint:
 
 class TestCloseOrderViaClient:
     async def test_client_close_order_body_matches_endpoint(self, agent_app_client):
-        """AgentClient.close_order serialises to a body the endpoint accepts."""
+        """StorefrontClient.close_order serialises to a body the endpoint accepts."""
         body = {"order_id": "order-abc"}
         resp = await agent_app_client.post("/orders/close", json=body)
         assert resp.status_code == 200
@@ -238,7 +238,7 @@ class TestRegistrationEndpoint:
         assert "type" in data or "name" in data  # either spec field is acceptable
 
     async def test_client_get_registration_parses_response(self, agent_app_client):
-        """AgentClient.get_registration parses a valid JSON response."""
+        """StorefrontClient.get_registration parses a valid JSON response."""
         resp = await agent_app_client.get("/.well-known/erc-8004-registration.json")
         assert resp.status_code == 200
         data = resp.json()

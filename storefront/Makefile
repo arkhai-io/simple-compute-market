@@ -16,7 +16,7 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 	uv sync --find-links $(DIST_DIR)
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
-	uv sync --find-links $(DIST_DIR) --reinstall-package provisioning-service --reinstall-package arkhai-agent-client
+	uv sync --find-links $(DIST_DIR) --reinstall-package provisioning-service --reinstall-package arkhai-storefront-client
 
 
 build: build-images

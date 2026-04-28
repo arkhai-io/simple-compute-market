@@ -1,22 +1,16 @@
 """CLI helpers for the storefront's `market-storefront` console script.
 
-Mirror of buyer/market_buyer/common.py. Both CLIs expose small admin
-utilities (start, register, provide, etc.) that need the same env-file
-parsing + venv-aware subprocess wrappers; duplicating the helpers
-keeps each CLI self-contained without a forced cross-package import.
-If these drift apart it'll be obvious; if they don't, a follow-up can
-factor them into a shared module.
+Env-file parsing, container-path translation, and venv-aware subprocess
+wrappers — mirroring buyer/market_buyer/common.py. The HTTP and auth
+helpers used to live here too, but were superseded by the
+storefront-client SDK; only the local-orchestration helpers remain.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-import json
 import os
 import subprocess
-import time
-import urllib.error
-import urllib.request
 
 import typer
 
@@ -132,57 +126,6 @@ def resolve_agent_url(
         or os.getenv("BASE_URL_OVERRIDE")
         or f"http://localhost:{default_port}"
     )
-
-
-def _normalize_registry_url(raw_url: str) -> str:
-    return raw_url.rstrip("/")
-
-
-def _get_cli_http_timeout() -> float:
-    raw = os.getenv("MARKET_CLI_HTTP_TIMEOUT", "120")
-    try:
-        return float(raw)
-    except ValueError:
-        return 120.0
-
-
-def _get_auth_headers(operation: str, resource_id: str, private_key: str | None) -> dict[str, str]:
-    """Build X-Signature / X-Timestamp headers for a CLI→storefront request.
-
-    Returns an empty dict if no private_key is provided or if
-    eth_account is not installed (request is sent unsigned; the
-    storefront will reject it if it requires auth).
-    """
-    if not private_key:
-        return {}
-    try:
-        from eth_account import Account
-        from eth_account.messages import encode_defunct
-    except ImportError:
-        return {}
-    ts = int(time.time())
-    message = f"{operation}:{resource_id}:{ts}"
-    msg_hash = encode_defunct(text=message)
-    sig = Account.sign_message(msg_hash, private_key).signature.hex()
-    return {"X-Signature": sig, "X-Timestamp": str(ts)}
-
-
-def _post_json(url: str, payload: dict, extra_headers: dict[str, str] | None = None) -> dict:
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        if extra_headers:
-            headers.update(extra_headers)
-        request = urllib.request.Request(url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=_get_cli_http_timeout()) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8") if exc.fp else str(exc)
-        typer.secho(f"Storefront error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        typer.secho(f"Failed to call storefront endpoint: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
 
 
 def _resolve_db_path(db: str | None, env: str | None) -> str | None:

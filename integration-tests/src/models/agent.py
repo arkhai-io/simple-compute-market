@@ -24,15 +24,15 @@ from typing import Any
 # ERC-8004 registration file and order response models
 #
 # These classes have moved to the ``arkhai-agent-client`` package
-# (``agent_client.models``).  They are re-exported here so that existing
+# (``storefront_client.models``).  They are re-exported here so that existing
 # imports from ``src.models.agent`` continue to work without changes.
 # See TODO(agent-client-migration) in ARCHITECTURE.md.
 # ---------------------------------------------------------------------------
 
-from agent_client.models import (  # noqa: F401 — re-exported for backward compat
-    AgentEndpoint,
-    AgentOrderCloseResponse,
-    AgentOrderCreateResponse,
+from storefront_client.models import (  # noqa: F401 — re-exported for backward compat
+    StorefrontEndpoint,
+    StorefrontOrderCloseResponse,
+    StorefrontOrderCreateResponse,
     ERC8004RegistrationFile,
     RegistrationRecord,
 )
@@ -130,7 +130,7 @@ class AgentOrderCreateRequest:
 
 
 @dataclass
-class AgentOrderCreateResponse:
+class StorefrontOrderCreateResponse:
     """
     Response from POST /orders/create.
 
@@ -147,7 +147,7 @@ class AgentOrderCreateResponse:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AgentOrderCreateResponse":
+    def from_dict(cls, d: dict) -> "StorefrontOrderCreateResponse":
         known = {"status", "event_id", "order_id", "root_agent_response", "order_request"}
         return cls(
             status=d.get("status"),
@@ -173,7 +173,7 @@ class AgentOrderCloseRequest:
 
 
 @dataclass
-class AgentOrderCloseResponse:
+class StorefrontOrderCloseResponse:
     """
     Response from POST /orders/close.
 
@@ -186,7 +186,7 @@ class AgentOrderCloseResponse:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AgentOrderCloseResponse":
+    def from_dict(cls, d: dict) -> "StorefrontOrderCloseResponse":
         known = {"status", "event_id", "root_agent_response", "order_request"}
         return cls(
             status=d.get("status"),

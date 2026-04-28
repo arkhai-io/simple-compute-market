@@ -1,21 +1,21 @@
-"""HTTP clients for the Arkhai agent REST API.
+"""HTTP clients for the Arkhai storefront REST API.
 
 Two clients with identical method signatures:
 
-``AgentClient``      — async, backed by ``httpx.AsyncClient``
-``SyncAgentClient``  — sync,  backed by ``httpx.Client``
+``StorefrontClient``      — async, backed by ``httpx.AsyncClient``
+``SyncStorefrontClient``  — sync,  backed by ``httpx.Client``
 
 Both clients:
-- Own their HTTP session internally — callers never create or pass a session
-- Accept a ``transport=`` kwarg at construction for in-process test injection
-- Raise ``AgentClientError`` on non-2xx responses
-- Return typed model objects from all methods
+- Own their HTTP session internally — callers never create or pass a session.
+- Accept a ``transport=`` kwarg at construction for in-process test injection.
+- Raise ``StorefrontClientError`` on non-2xx responses.
+- Return typed model objects from all methods.
 
 Usage (async)::
 
-    from agent_client import AgentClient
+    from storefront_client import StorefrontClient
 
-    client = AgentClient("http://seller-agent:8001", private_key="0x...")
+    client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
     async with client:
         reg = await client.get_registration()
         resp = await client.create_order(
@@ -26,9 +26,9 @@ Usage (async)::
 
 Usage (sync, e.g. smoke tests)::
 
-    from agent_client import SyncAgentClient
+    from storefront_client import SyncStorefrontClient
 
-    client = SyncAgentClient("http://seller-agent:8001", private_key="0x...")
+    client = SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...")
     reg = client.get_registration()
     client.close()
 """
@@ -41,17 +41,21 @@ from typing import Any, Optional
 
 import httpx
 
-from agent_client.models import (
-    AgentOrderCloseResponse,
-    AgentOrderCreateResponse,
+from storefront_client.models import (
+    DiscoverMatch,
+    StorefrontOrderClaimResponse,
+    StorefrontOrderCloseResponse,
+    StorefrontOrderCreateResponse,
+    StorefrontOrderDiscoverResponse,
+    StorefrontOrderRefundResponse,
     ERC8004RegistrationFile,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class AgentClientError(Exception):
-    """HTTP or protocol error from the agent API."""
+class StorefrontClientError(Exception):
+    """HTTP or protocol error from the storefront API."""
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +91,7 @@ def _build_auth_headers(private_key: str, operation: str, resource_id: str) -> d
 # ---------------------------------------------------------------------------
 
 
-class _AgentClientBase:
+class _StorefrontClientBase:
     def __init__(self, base_url: str, private_key: Optional[str], timeout: float) -> None:
         self._base = base_url.rstrip("/")
         self._private_key = private_key
@@ -104,19 +108,7 @@ class _AgentClientBase:
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
         if status >= 400:
-            raise AgentClientError(f"{method} {url} returned {status}: {text[:200]}")
-
-    @staticmethod
-    def _parse_registration(data: dict) -> ERC8004RegistrationFile:
-        return ERC8004RegistrationFile.from_dict(data)
-
-    @staticmethod
-    def _parse_create_order(data: dict) -> AgentOrderCreateResponse:
-        return AgentOrderCreateResponse.from_dict(data)
-
-    @staticmethod
-    def _parse_close_order(data: dict) -> AgentOrderCloseResponse:
-        return AgentOrderCloseResponse.from_dict(data)
+            raise StorefrontClientError(f"{method} {url} returned {status}: {text[:200]}")
 
 
 # ---------------------------------------------------------------------------
@@ -124,16 +116,16 @@ class _AgentClientBase:
 # ---------------------------------------------------------------------------
 
 
-class AgentClient(_AgentClientBase):
-    """Async HTTP client for the Arkhai agent REST API.
+class StorefrontClient(_StorefrontClientBase):
+    """Async HTTP client for the Arkhai storefront REST API.
 
     Parameters
     ----------
     base_url:
-        Base URL of the agent (e.g. ``http://localhost:8001``).
+        Base URL of the storefront (e.g. ``http://localhost:8001``).
     private_key:
-        EIP-191 private key for signing auth headers.  When ``None`` auth
-        headers are omitted — only works if the agent has
+        EIP-191 private key for signing auth headers. When ``None`` auth
+        headers are omitted — only works if the storefront has
         ``AGENT_WALLET_ADDRESS`` unset.
     timeout:
         HTTP timeout in seconds.
@@ -159,7 +151,7 @@ class AgentClient(_AgentClientBase):
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "AgentClient":
+    async def __aenter__(self) -> "StorefrontClient":
         return self
 
     async def __aexit__(self, *_: Any) -> None:
@@ -181,7 +173,7 @@ class AgentClient(_AgentClientBase):
 
     async def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
-        return self._parse_registration(
+        return ERC8004RegistrationFile.from_dict(
             await self._get("/.well-known/erc-8004-registration.json")
         )
 
@@ -192,19 +184,66 @@ class AgentClient(_AgentClientBase):
         offer: dict[str, Any],
         demand: dict[str, Any],
         duration_hours: float = 1.0,
-    ) -> AgentOrderCreateResponse:
+    ) -> StorefrontOrderCreateResponse:
         """POST /orders/create"""
         headers = self._auth_headers("create_order", agent_wallet_address)
         body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-        return self._parse_create_order(
+        return StorefrontOrderCreateResponse.from_dict(
             await self._post("/orders/create", body, extra_headers=headers)
         )
 
-    async def close_order(self, order_id: str) -> AgentOrderCloseResponse:
+    async def close_order(self, order_id: str) -> StorefrontOrderCloseResponse:
         """POST /orders/close"""
         headers = self._auth_headers("close_order", order_id)
-        return self._parse_close_order(
+        return StorefrontOrderCloseResponse.from_dict(
             await self._post("/orders/close", {"order_id": order_id}, extra_headers=headers)
+        )
+
+    async def refund_order(
+        self,
+        *,
+        order_id: str,
+        buyer_address: str,
+        amount: str | None = None,
+        token: str | None = None,
+    ) -> StorefrontOrderRefundResponse:
+        """POST /orders/refund"""
+        headers = self._auth_headers("refund_order", order_id)
+        body: dict[str, Any] = {"order_id": order_id, "buyer_address": buyer_address}
+        if amount is not None:
+            body["amount"] = amount
+        if token is not None:
+            body["token"] = token
+        return StorefrontOrderRefundResponse.from_dict(
+            await self._post("/orders/refund", body, extra_headers=headers)
+        )
+
+    async def claim_order(
+        self,
+        *,
+        order_id: str,
+        fulfillment_uid: str | None = None,
+    ) -> StorefrontOrderClaimResponse:
+        """POST /orders/claim"""
+        headers = self._auth_headers("claim_order", order_id)
+        body: dict[str, Any] = {"order_id": order_id}
+        if fulfillment_uid:
+            body["fulfillment_uid"] = fulfillment_uid
+        return StorefrontOrderClaimResponse.from_dict(
+            await self._post("/orders/claim", body, extra_headers=headers)
+        )
+
+    async def discover_orders(
+        self,
+        *,
+        order_id: str,
+        include_active: bool = False,
+    ) -> StorefrontOrderDiscoverResponse:
+        """POST /orders/discover"""
+        headers = self._auth_headers("discover_orders", order_id)
+        body = {"order_id": order_id, "include_active": include_active}
+        return StorefrontOrderDiscoverResponse.from_dict(
+            await self._post("/orders/discover", body, extra_headers=headers)
         )
 
     async def send_resource_alert(
@@ -232,16 +271,16 @@ class AgentClient(_AgentClientBase):
 # ---------------------------------------------------------------------------
 
 
-class SyncAgentClient(_AgentClientBase):
-    """Synchronous HTTP client for the Arkhai agent REST API.
+class SyncStorefrontClient(_StorefrontClientBase):
+    """Synchronous HTTP client for the Arkhai storefront REST API.
 
-    Identical method signatures to ``AgentClient`` but blocking.  Suitable
-    for synchronous smoke tests and scripts.
+    Identical method signatures to ``StorefrontClient`` but blocking.
+    Suitable for synchronous CLI commands, smoke tests, and scripts.
 
     Parameters
     ----------
     base_url:
-        Base URL of the agent.
+        Base URL of the storefront.
     private_key:
         EIP-191 private key for signing auth headers.
     timeout:
@@ -268,7 +307,7 @@ class SyncAgentClient(_AgentClientBase):
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "SyncAgentClient":
+    def __enter__(self) -> "SyncStorefrontClient":
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -290,7 +329,7 @@ class SyncAgentClient(_AgentClientBase):
 
     def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
-        return self._parse_registration(
+        return ERC8004RegistrationFile.from_dict(
             self._get("/.well-known/erc-8004-registration.json")
         )
 
@@ -301,19 +340,66 @@ class SyncAgentClient(_AgentClientBase):
         offer: dict[str, Any],
         demand: dict[str, Any],
         duration_hours: float = 1.0,
-    ) -> AgentOrderCreateResponse:
+    ) -> StorefrontOrderCreateResponse:
         """POST /orders/create"""
         headers = self._auth_headers("create_order", agent_wallet_address)
         body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-        return self._parse_create_order(
+        return StorefrontOrderCreateResponse.from_dict(
             self._post("/orders/create", body, extra_headers=headers)
         )
 
-    def close_order(self, order_id: str) -> AgentOrderCloseResponse:
+    def close_order(self, order_id: str) -> StorefrontOrderCloseResponse:
         """POST /orders/close"""
         headers = self._auth_headers("close_order", order_id)
-        return self._parse_close_order(
+        return StorefrontOrderCloseResponse.from_dict(
             self._post("/orders/close", {"order_id": order_id}, extra_headers=headers)
+        )
+
+    def refund_order(
+        self,
+        *,
+        order_id: str,
+        buyer_address: str,
+        amount: str | None = None,
+        token: str | None = None,
+    ) -> StorefrontOrderRefundResponse:
+        """POST /orders/refund"""
+        headers = self._auth_headers("refund_order", order_id)
+        body: dict[str, Any] = {"order_id": order_id, "buyer_address": buyer_address}
+        if amount is not None:
+            body["amount"] = amount
+        if token is not None:
+            body["token"] = token
+        return StorefrontOrderRefundResponse.from_dict(
+            self._post("/orders/refund", body, extra_headers=headers)
+        )
+
+    def claim_order(
+        self,
+        *,
+        order_id: str,
+        fulfillment_uid: str | None = None,
+    ) -> StorefrontOrderClaimResponse:
+        """POST /orders/claim"""
+        headers = self._auth_headers("claim_order", order_id)
+        body: dict[str, Any] = {"order_id": order_id}
+        if fulfillment_uid:
+            body["fulfillment_uid"] = fulfillment_uid
+        return StorefrontOrderClaimResponse.from_dict(
+            self._post("/orders/claim", body, extra_headers=headers)
+        )
+
+    def discover_orders(
+        self,
+        *,
+        order_id: str,
+        include_active: bool = False,
+    ) -> StorefrontOrderDiscoverResponse:
+        """POST /orders/discover"""
+        headers = self._auth_headers("discover_orders", order_id)
+        body = {"order_id": order_id, "include_active": include_active}
+        return StorefrontOrderDiscoverResponse.from_dict(
+            self._post("/orders/discover", body, extra_headers=headers)
         )
 
     def send_resource_alert(
