@@ -145,12 +145,12 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_post(url, payload, headers):
-        calls.append(payload)
-        rid = payload["offer"]["resource_id"]
+    def fake_publish(agent_url, offer, demand, duration_hours, wallet_address, private_key):
+        calls.append({"offer": offer, "demand": demand})
+        rid = offer["resource_id"]
         return {"status": "created", "order_id": f"order-for-{rid}"}
 
-    monkeypatch.setattr("market_storefront.cli_provide._post_json", fake_post)
+    monkeypatch.setattr("market_storefront.cli_provide._publish_offer", fake_publish)
 
     published, failed, skipped = _publish_round(
         db_path=db,
@@ -167,7 +167,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert skipped[0]["resource_id"] == "compute-001"
     assert published[0]["resource"]["resource_id"] == "compute-002"
     assert not failed
-    # The POST payload carries the explicit resource_id so future `--watch`
+    # The publish call carries the explicit resource_id so future `--watch`
     # cycles can tell which resource a given order covers.
     assert calls[0]["offer"]["resource_id"] == "compute-002"
 
@@ -181,7 +181,7 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "market_storefront.cli_provide._post_json",
+        "market_storefront.cli_provide._publish_offer",
         lambda *a, **k: {"status": "created", "order_id": "o1"},
     )
 
@@ -219,10 +219,10 @@ def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
         {"gpu_model": "RTX 4090", "sla": 95.0, "region": "New York, US"},
     )
 
-    def fake_post(*a, **k):
+    def fake_publish(*a, **k):
         pytest.fail("Should not publish a leased resource")
 
-    monkeypatch.setattr("market_storefront.cli_provide._post_json", fake_post)
+    monkeypatch.setattr("market_storefront.cli_provide._publish_offer", fake_publish)
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
