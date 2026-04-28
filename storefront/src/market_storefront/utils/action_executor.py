@@ -39,7 +39,6 @@ from market_policy.negotiation_thread import (
     get_thread_store,
     NegotiationThreadTransaction,
 )
-from market_policy.action_builders import make_negotiation_id
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override

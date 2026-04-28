@@ -150,7 +150,7 @@ core/agent/app/
 │   ├── evaluator.py        # Runs policies against events
 │   ├── composite.py        # Callable chaining helpers
 │   ├── negotiation_thread.py # Per-negotiation message thread, state tracking
-│   ├── action_builders.py  # Helpers to build response actions
+│   ├── action_builders.py  # make_negotiation_id (deterministic sha256 of sorted order-ID pair) + NegotiationActionBuilder (.accept/.reject/.counter/.exit wrappers over DomainAction)
 │   └── seeding.py          # Default policy seeding
 ├── resources.py            # Resource portfolio management
 ├── resource_poller.py      # Background resource state polling

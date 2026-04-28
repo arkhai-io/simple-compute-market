@@ -11,19 +11,54 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from registry_client.models import OrderListResponse, OrderSummary
+
 from market_storefront.utils.action_executor import discover
 
+# Canonical complementary resource pair used across fixtures.
+# Buyer: demands compute (GPU), offers token payment.
+# Seller: offers compute (GPU), demands token payment.
+_BUYER_OFFER = {"token": "USDC"}
+_BUYER_DEMAND = {"gpu_model": "H200"}
+_SELLER_OFFER = {"gpu_model": "H200"}
+_SELLER_DEMAND = {"token": "USDC"}
 
-def _mock_registry(*, our_order: dict, matches_for_query: list[dict]):
-    """Build a registry_client mock that returns the given fixtures."""
+
+def _buyer_order(order_id: str, order_maker: str) -> OrderSummary:
+    """Construct a buyer-role OrderSummary (demands compute, offers token)."""
+    return OrderSummary(
+        id=order_id,
+        maker_agent_id=order_maker,
+        offer=_BUYER_OFFER,
+        demand=_BUYER_DEMAND,
+    )
+
+
+def _seller_order(order_id: str, order_maker: str) -> OrderSummary:
+    """Construct a seller-role OrderSummary (offers compute, demands token)."""
+    return OrderSummary(
+        id=order_id,
+        maker_agent_id=order_maker,
+        offer=_SELLER_OFFER,
+        demand=_SELLER_DEMAND,
+    )
+
+
+def _mock_registry(*, our_order: OrderSummary, candidates: list[OrderSummary]):
+    """Build a registry_client mock that returns the given fixtures.
+
+    Wraps the client in an async context manager to match the
+    ``async with _make_registry_client() as registry_client:`` pattern.
+    """
     client = MagicMock()
     client.get_order = AsyncMock(return_value=our_order)
-    client.query_orders = AsyncMock(return_value=matches_for_query)
-    # match_orders is synchronous and filters based on resource compat;
-    # for these tests we pass-through so we can focus on the higher-level
-    # filters discover applies itself.
-    client.match_orders = lambda our, candidates, bidirectional=True: candidates
-    return client
+    client.list_orders = AsyncMock(
+        return_value=OrderListResponse(orders=candidates)
+    )
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
 
 
 def _mock_thread_txn(active_order_ids: set[str] | None = None):
@@ -37,16 +72,12 @@ def _mock_thread_txn(active_order_ids: set[str] | None = None):
 
 @pytest.mark.asyncio
 async def test_discover_happy_path_returns_structured_matches():
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
-    peer_order = {
-        "order_id": "seller-ord-1",
-        "order_maker": "http://seller:8001",
-        "offer_resource": {"gpu_model": "H200"},
-    }
-    client = _mock_registry(our_order=our_order, matches_for_query=[peer_order])
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
+    peer_order = _seller_order("seller-ord-1", "http://seller:8001")
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=[peer_order])),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn()),
         patch("market_storefront.utils.action_executor.CONFIG",
@@ -59,24 +90,24 @@ async def test_discover_happy_path_returns_structured_matches():
     m = matches[0]
     assert m["their_order_id"] == "seller-ord-1"
     assert m["their_agent_url"] == "http://seller:8001"
-    assert m["their_order"] == peer_order
+    assert m["their_order"] is peer_order
 
 
 @pytest.mark.asyncio
 async def test_discover_filters_out_our_own_orders():
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
     candidates = [
         # Same order_id → drop
-        {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"},
+        _seller_order("buyer-ord-1", "http://buyer:8000"),
         # Same maker (different order_id) → drop
-        {"order_id": "another-ours", "order_maker": "http://buyer:8000"},
+        _seller_order("another-ours", "http://buyer:8000"),
         # Legit peer
-        {"order_id": "seller-ord-1", "order_maker": "http://seller:8001"},
+        _seller_order("seller-ord-1", "http://seller:8001"),
     ]
-    client = _mock_registry(our_order=our_order, matches_for_query=candidates)
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=candidates)),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn()),
         patch("market_storefront.utils.action_executor.CONFIG",
@@ -91,15 +122,15 @@ async def test_discover_filters_out_our_own_orders():
 
 @pytest.mark.asyncio
 async def test_discover_drops_active_negotiations_by_default():
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
     candidates = [
-        {"order_id": "already-active", "order_maker": "http://peer1:8000"},
-        {"order_id": "fresh", "order_maker": "http://peer2:8000"},
+        _seller_order("already-active", "http://peer1:8000"),
+        _seller_order("fresh", "http://peer2:8000"),
     ]
-    client = _mock_registry(our_order=our_order, matches_for_query=candidates)
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=candidates)),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn(active_order_ids={"already-active"})),
         patch("market_storefront.utils.action_executor.CONFIG",
@@ -113,15 +144,15 @@ async def test_discover_drops_active_negotiations_by_default():
 
 @pytest.mark.asyncio
 async def test_discover_include_active_skips_the_filter():
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
     candidates = [
-        {"order_id": "already-active", "order_maker": "http://peer1:8000"},
-        {"order_id": "fresh", "order_maker": "http://peer2:8000"},
+        _seller_order("already-active", "http://peer1:8000"),
+        _seller_order("fresh", "http://peer2:8000"),
     ]
-    client = _mock_registry(our_order=our_order, matches_for_query=candidates)
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=candidates)),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn(active_order_ids={"already-active"})),
         patch("market_storefront.utils.action_executor.CONFIG",
@@ -135,15 +166,12 @@ async def test_discover_include_active_skips_the_filter():
 
 @pytest.mark.asyncio
 async def test_discover_caps_at_max_discovery_agents():
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
-    candidates = [
-        {"order_id": f"peer-{i}", "order_maker": f"http://peer{i}:8000"}
-        for i in range(20)
-    ]
-    client = _mock_registry(our_order=our_order, matches_for_query=candidates)
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
+    candidates = [_seller_order(f"peer-{i}", f"http://peer{i}:8000") for i in range(20)]
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=candidates)),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn()),
         patch("market_storefront.utils.action_executor.CONFIG",
@@ -167,11 +195,18 @@ async def test_discover_refuses_when_registry_discovery_disabled():
 
 @pytest.mark.asyncio
 async def test_discover_raises_when_order_not_in_registry():
+    from registry_client import RegistryClientError
+
     client = MagicMock()
-    client.get_order = AsyncMock(return_value=None)
+    client.get_order = AsyncMock(
+        side_effect=RegistryClientError("GET", "/orders/phantom", 404, "not found")
+    )
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client", return_value=cm),
         patch("market_storefront.utils.action_executor.CONFIG",
               MagicMock(enable_registry_discovery=True, max_discovery_agents=10)),
     ):
@@ -181,17 +216,28 @@ async def test_discover_raises_when_order_not_in_registry():
 
 @pytest.mark.asyncio
 async def test_discover_skips_matches_missing_fields():
-    """Registry entries with no order_id or no order_maker are silently dropped."""
-    our_order = {"order_id": "buyer-ord-1", "order_maker": "http://buyer:8000"}
+    """Registry entries with no maker_agent_id or empty id are silently dropped.
+
+    The guard in discover() is ``if not their_order_id or not their_agent_url``.
+    - Empty string id (``id=""``) → str("") is falsy → dropped.
+    - None maker_agent_id → falsy → dropped.
+    Note: ``id=None`` produces ``str(None) == "None"`` which is truthy and is NOT
+    dropped by the current guard — that is a known pre-existing gap, not tested here.
+    """
+    our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
     candidates = [
-        {"order_maker": "http://peer1:8000"},  # missing order_id
-        {"order_id": "no-maker"},              # missing maker
-        {"order_id": "good", "order_maker": "http://peer2:8000"},
+        # Empty id string → str("") is falsy → dropped.
+        OrderSummary(id="", maker_agent_id="http://peer1:8000",
+                     offer=_SELLER_OFFER, demand=_SELLER_DEMAND),
+        # Missing maker_agent_id → None is falsy → dropped.
+        OrderSummary(id="no-maker", maker_agent_id=None,
+                     offer=_SELLER_OFFER, demand=_SELLER_DEMAND),
+        _seller_order("good", "http://peer2:8000"),
     ]
-    client = _mock_registry(our_order=our_order, matches_for_query=candidates)
 
     with (
-        patch("market_storefront.utils.action_executor.get_registry_client", return_value=client),
+        patch("market_storefront.utils.action_executor._make_registry_client",
+              return_value=_mock_registry(our_order=our_order, candidates=candidates)),
         patch("market_storefront.utils.action_executor.NegotiationThreadTransaction",
               return_value=_mock_thread_txn()),
         patch("market_storefront.utils.action_executor.CONFIG",
