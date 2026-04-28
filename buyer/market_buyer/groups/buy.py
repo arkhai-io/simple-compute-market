@@ -33,6 +33,7 @@ from ..buy_orchestrator import (
     run_buy,
 )
 from ..common import read_env_value, resolve_config_value
+from ..run_log import RunLog
 
 
 def register(app: typer.Typer) -> None:
@@ -211,9 +212,21 @@ def register(app: typer.Typer) -> None:
             max_price=max_price, initial_price=initial_price,
         )
 
+        run_log = RunLog.start(
+            command="market buy",
+            buyer_order_id=buyer_order_id,
+            buyer_address=addr,
+            registry_url=reg,
+            initial_price=initial_price,
+            max_price=max_price,
+            max_matches=max_matches,
+            max_rounds=max_rounds,
+        )
+
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
         header.add_column()
+        header.add_row("Run ID", run_log.run_id)
         header.add_row("Registry", reg)
         header.add_row("Buyer order", buyer_order_id)
         header.add_row("Buyer wallet", addr)
@@ -222,7 +235,12 @@ def register(app: typer.Typer) -> None:
         console.print(Panel(header, title="market buy-sync", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:
-            # Keep the UI simple: just one line per event.
+            # Append a structured event to the run log so post-mortem
+            # `market logs` and (eventually) `market buy --resume` have
+            # something to read.
+            run_log.event(stage, **body)
+
+            # Plus a one-line console summary for the human.
             if stage == "discover":
                 console.print(f"[dim]discover[/dim]  {body.get('match_count', 0)} match(es)")
             elif stage == "negotiate_start":
@@ -256,8 +274,19 @@ def register(app: typer.Typer) -> None:
                 on_event=_observe,
             )
         except RuntimeError as exc:
+            run_log.end("error", error=str(exc))
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
+
+        run_log.end(
+            result.status,
+            seller_url=result.seller_url,
+            negotiation_id=result.negotiation_id,
+            agreed_price=result.agreed_price,
+            escrow_uid=result.escrow_uid,
+            attestation_uid=result.attestation_uid,
+            reason=result.reason,
+        )
 
         # Render the final outcome.
         tbl = Table.grid(padding=(0, 2))

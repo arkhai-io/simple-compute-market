@@ -60,7 +60,7 @@ app.add_typer(
     help="Manage market config (targets: agent, provisioning, registry, zerotier).",
 )
 app.add_typer(dev_app, name="dev", help="Developer utilities (local chain + contract deploy).")
-app.add_typer(logs_app, name="logs", help="Inspect stage events and deal status.")
+app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
 
 buy_module.register(app)
 negotiate_module.register(app)

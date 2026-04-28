@@ -21,6 +21,7 @@ from rich.table import Table
 
 from ..common import read_env_value, resolve_config_value
 from ..buyer_client import negotiate_with_seller
+from ..run_log import RunLog
 
 
 def register(app: typer.Typer) -> None:
@@ -92,9 +93,21 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
+        run_log = RunLog.start(
+            command="market negotiate",
+            seller_url=seller_url,
+            seller_order_id=seller_order_id,
+            buyer_order_id=buyer_order_id,
+            buyer_address=addr,
+            initial_price=initial_price,
+            max_price=max_price,
+            max_rounds=max_rounds,
+        )
+
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
         header.add_column()
+        header.add_row("Run ID", run_log.run_id)
         header.add_row("Seller", seller_url)
         header.add_row("Seller order", seller_order_id)
         header.add_row("Our order", buyer_order_id)
@@ -111,6 +124,12 @@ def register(app: typer.Typer) -> None:
         round_table.add_column("Seller price")
 
         def _observe(round_idx: int, our_msg: dict, reply: dict) -> None:
+            run_log.event(
+                "negotiation_round",
+                round=round_idx,
+                our_message=our_msg,
+                their_reply=reply,
+            )
             round_table.add_row(
                 str(round_idx),
                 str(our_msg.get("action", "propose")),
@@ -132,8 +151,17 @@ def register(app: typer.Typer) -> None:
                 on_round=_observe,
             )
         except RuntimeError as exc:
+            run_log.end("error", error=str(exc))
             typer.secho(f"Negotiation failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
+
+        run_log.end(
+            outcome.status,
+            negotiation_id=outcome.negotiation_id,
+            agreed_price=outcome.agreed_price,
+            rounds=outcome.rounds,
+            reason=outcome.reason,
+        )
 
         console.print(round_table)
 

@@ -23,6 +23,7 @@ from importlib.metadata import version, PackageNotFoundError
 import typer
 
 from .cli_common import REPO_ROOT, DEFAULT_AGENT_ENV, read_env_value, container_db_to_host, run_step
+from .cli_logs import logs_app
 from .cli_network import network_app
 from .cli_policy import policy_app
 from .cli_portfolio import portfolio_app
@@ -161,6 +162,7 @@ def start_cmd(
 # Group registrations
 # ---------------------------------------------------------------------------
 
+app.add_typer(logs_app, name="logs", help="Inspect storefront stage events from the local SQLite log.")
 app.add_typer(network_app, name="network", help="Manage ZeroTier network.")
 app.add_typer(registry_app, name="registry", help="Manage the registry indexer server.")
 app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
