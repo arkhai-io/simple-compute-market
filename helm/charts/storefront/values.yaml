@@ -24,7 +24,7 @@ buyer:
   alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
   tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
   provisioningMode: "mock"
-  negotiationPolicyMode: "bisection"
+  negotiationPolicyMode: "rl"
   sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
   geminiApiKey: ""
 
@@ -53,7 +53,7 @@ seller:
   alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
   tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
   provisioningMode: "mock"
-  negotiationPolicyMode: "bisection"
+  negotiationPolicyMode: "rl"
   sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
   geminiApiKey: ""
 

@@ -19,7 +19,7 @@ Shape:
 
 Negotiation state is persisted in the existing `negotiation_threads` +
 `negotiation_messages` tables. The per-round decision lives in
-`market_policy.negotiation_round` so both buyer and storefront drive
+`market_policy.negotiation_strategy` so both buyer and storefront drive
 rounds through the same engine.
 """
 
@@ -29,13 +29,83 @@ import logging
 import uuid
 from typing import Any
 
-from market_policy.negotiation_round import SellerDecision, decide_response
+from market_policy.negotiation_strategy import (
+    DEFAULT_STRATEGY,
+    NegotiationDecision,
+    NegotiationRound,
+    NegotiationRoundInput,
+    load_strategy,
+)
 
 logger = logging.getLogger(__name__)
 
 
+def _maybe_register_rl_strategy() -> None:
+    """Trigger self-registration of the torch RL strategy.
+
+    The strategy module calls ``register_strategy("rl", ...)`` at import
+    time. If torch / pufferlib aren't installed, the import fails — we
+    swallow it and let ``load_strategy("rl")`` raise the actionable
+    KeyError so callers get a clear "install with [rl] extras" message.
+    """
+    try:
+        import domain.compute.agent.app.policy.torch_arkhai_strategy  # noqa: F401
+    except Exception as exc:
+        logger.debug("[NEGOTIATION] torch_arkhai_strategy not available: %s", exc)
+
+
+def _load_storefront_strategy():
+    """Resolve the storefront's configured strategy.
+
+    Selected via ``CONFIG.negotiation_policy_mode``; defaults to the
+    registered default ("rl") if unset. Triggers the torch strategy's
+    self-registration on first call.
+    """
+    from market_storefront.utils.config import CONFIG
+    name = (CONFIG.negotiation_policy_mode or "").strip() or None
+    if (name or DEFAULT_STRATEGY) == "rl":
+        _maybe_register_rl_strategy()
+    return load_strategy(name)
+
+
+def _direction_from_strategy_label(strategy: str) -> str:
+    """Translate the storefront's per-order strategy ('minimize'|'maximize')
+    into the symmetric negotiation direction. They happen to match
+    today; the indirection makes any future schema drift obvious."""
+    if strategy in ("minimize", "maximize"):
+        return strategy
+    raise ValueError(f"Unknown order strategy {strategy!r}")
+
+
+def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> list[NegotiationRound]:
+    """Convert the SQLite-flavored thread messages into the symmetric
+    NegotiationRound shape strategies consume."""
+    out: list[NegotiationRound] = []
+    for i, m in enumerate(messages):
+        sender = "us" if m.get("sender") == our_sender else "them"
+        action_taken = m.get("action_taken", "")
+        if action_taken == "make_offer":
+            action = "initial"
+        elif action_taken == "counter_offer":
+            action = "counter"
+        elif action_taken == "accept_offer":
+            action = "accept"
+        elif action_taken in ("exit_negotiation",):
+            action = "exit"
+        else:
+            action = "counter"
+        price = m.get("proposed_price")
+        out.append(NegotiationRound(
+            round_number=i,
+            sender=sender,
+            action=action,
+            price=int(price) if price is not None else None,
+        ))
+    return out
+
+
 # ---------------------------------------------------------------------------
-# Stateful wrappers — load/save thread, call decide_response.
+# Stateful wrappers — load/save thread, call the configured strategy.
 # ---------------------------------------------------------------------------
 
 
@@ -102,12 +172,13 @@ async def start_sync_negotiation(
             message_type="offer",
         )
 
-    decision = decide_response(
-        strategy=strategy,
-        our_price=our_price,
+    strategy_obj = _load_storefront_strategy()
+    decision = strategy_obj.decide(NegotiationRoundInput(
+        direction=_direction_from_strategy_label(strategy),
+        our_reference_price=our_price,
         their_proposed_price=their_proposed_price,
-        our_previous_counters=[],
-    )
+        history=[],
+    ))
     await _record_seller_decision(neg_id=neg_id, our_price=our_price,
                                   their_price=their_proposed_price,
                                   decision=decision)
@@ -243,12 +314,15 @@ async def continue_sync_negotiation(
             message_type="counter_proposal",
         )
 
-    decision = decide_response(
-        strategy=strategy,
-        our_price=our_price,
+    from market_storefront.utils.config import CONFIG as _CONFIG
+    our_sender = _CONFIG.base_url_override or "seller"
+    strategy_obj = _load_storefront_strategy()
+    decision = strategy_obj.decide(NegotiationRoundInput(
+        direction=_direction_from_strategy_label(strategy),
+        our_reference_price=our_price,
         their_proposed_price=int(buyer_price),
-        our_previous_counters=our_previous_counters,
-    )
+        history=_history_from_messages(messages, our_sender),
+    ))
     await _record_seller_decision(
         neg_id=neg_id, our_price=our_price,
         their_price=int(buyer_price), decision=decision,
@@ -276,7 +350,7 @@ async def _record_seller_decision(
     neg_id: str,
     our_price: int,
     their_price: int,
-    decision: SellerDecision,
+    decision: NegotiationDecision,
 ) -> None:
     """Persist the seller's decision as a message + terminal state if applicable."""
     from market_policy.negotiation_thread import NegotiationThreadTransaction

@@ -9,10 +9,11 @@ registration.
 Public API:
     negotiate_with_seller(...) -> NegotiationOutcome
 
-The per-round decision logic lives in `market_policy.negotiation_round`
-(decide_buyer_response). Both sides of a negotiation now resolve their
-moves through the same package; this module is just the buyer's HTTP
-transport + signing.
+The per-round decision logic lives in
+`market_policy.negotiation_strategy` (BisectionStrategy or the
+register-on-import RL strategy). Both sides of a negotiation resolve
+their moves through the same package; this module is just the buyer's
+HTTP transport + signing.
 """
 
 from __future__ import annotations
@@ -24,11 +25,29 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-from market_policy.negotiation_round import (
-    DEFAULT_CONVERGENCE_RATIO,
+from market_policy.negotiation_strategy import (
     DEFAULT_MAX_ROUNDS,
-    decide_buyer_response,
+    DEFAULT_STRATEGY,
+    NegotiationRound,
+    NegotiationRoundInput,
+    NegotiationStrategy,
+    load_strategy,
 )
+
+
+def _maybe_register_rl_strategy() -> None:
+    """Trigger self-registration of the torch RL strategy.
+
+    Mirrors the storefront-side helper: imports
+    ``domain.compute.agent.app.policy.torch_arkhai_strategy`` so its
+    ``register_strategy("rl", ...)`` call fires. The import is best-effort —
+    if torch / pufferlib aren't installed, ``load_strategy("rl")`` will
+    raise its own actionable KeyError pointing at the [rl] extras.
+    """
+    try:
+        import domain.compute.agent.app.policy.torch_arkhai_strategy  # noqa: F401
+    except Exception:
+        pass
 
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -120,6 +139,7 @@ def negotiate_with_seller(
     max_price: int,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
+    strategy: Optional[NegotiationStrategy] = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -139,6 +159,12 @@ def negotiate_with_seller(
     """
     seller_url = seller_url.rstrip("/")
     our_counters: list[int] = []
+    transcript: list[NegotiationRound] = []
+    if strategy is None:
+        # Default to the registered default ("rl"); pull the torch
+        # module in if installed so its registration fires.
+        _maybe_register_rl_strategy()
+        strategy = load_strategy()
 
     # --- Round 0: /negotiate/new ---------------------------------------
     new_body = {
@@ -178,6 +204,13 @@ def negotiate_with_seller(
         raise RuntimeError("/negotiate/new returned counter but no negotiation_id")
 
     our_counters.append(int(initial_price))
+    transcript.append(NegotiationRound(
+        round_number=0, sender="us", action="initial", price=int(initial_price),
+    ))
+    transcript.append(NegotiationRound(
+        round_number=0, sender="them", action="counter",
+        price=int(reply.get("price")) if reply.get("price") is not None else None,
+    ))
 
     # --- Rounds 1..N: /negotiate/{id} ----------------------------------
     round_idx = 1
@@ -186,12 +219,13 @@ def negotiate_with_seller(
         if seller_counter_price is None:
             raise RuntimeError(f"Seller counter without price: {reply!r}")
 
-        next_move = decide_buyer_response(
-            seller_counter_price=int(seller_counter_price),
-            max_price=int(max_price),
-            our_previous_counters=our_counters,
+        next_move = strategy.decide(NegotiationRoundInput(
+            direction="minimize",
+            our_reference_price=int(max_price),
+            their_proposed_price=int(seller_counter_price),
+            history=transcript,
             max_rounds=max_rounds,
-        )
+        ))
 
         body: dict[str, Any] = {
             "action": next_move.action,
@@ -236,8 +270,20 @@ def negotiate_with_seller(
                 rounds=round_idx,
             )
 
-        # next_move was counter → our_counters appended, loop continues.
+        # next_move was counter → state appended, loop continues.
         our_counters.append(int(next_move.price))
+        transcript.append(NegotiationRound(
+            round_number=round_idx, sender="us", action="counter", price=int(next_move.price),
+        ))
+        # Record the seller's reply to this round.
+        seller_reply_action = reply.get("action") or "counter"
+        seller_reply_price = reply.get("price")
+        transcript.append(NegotiationRound(
+            round_number=round_idx,
+            sender="them",
+            action=seller_reply_action if seller_reply_action in ("counter", "accept", "exit", "reject") else "counter",
+            price=int(seller_reply_price) if seller_reply_price is not None else None,
+        ))
 
         seller_action = reply.get("action")
         if seller_action == "accept":

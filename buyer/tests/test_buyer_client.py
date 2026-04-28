@@ -6,9 +6,9 @@ Mocks the HTTP transport and verifies that the negotiation loop:
 - terminates after max_rounds
 - signs every request with a timestamp + EIP-191 signature
 
-The pure decision logic (decide_buyer_response) is exercised in
-policy/tests/unit/test_negotiation_round.py — this file just covers
-the HTTP loop wrapping it.
+The pure decision logic lives in BisectionStrategy / TorchArkhaiStrategy
+and is exercised in policy/tests/unit/test_negotiation_strategy.py —
+this file just covers the HTTP loop wrapping it.
 """
 
 from __future__ import annotations

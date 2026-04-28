@@ -351,9 +351,11 @@ def load_config() -> Config:
             "REDIS_CHANNELS", "seller.redis.channels", "events:*",
         )),
 
-        # Negotiation policy.
+        # Negotiation policy. Empty string (the default) means "use the
+        # registered default", which today is the trained RL strategy
+        # ("rl"). Set explicitly to "bisection" to opt out.
         negotiation_policy_mode=str(_resolve(
-            "NEGOTIATION_POLICY_MODE", "seller.negotiation.policy_mode", "bisection",
+            "NEGOTIATION_POLICY_MODE", "seller.negotiation.policy_mode", "",
         )).lower(),
         arkhai_negotiator_seller_model_path=str(_resolve(
             "ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH",

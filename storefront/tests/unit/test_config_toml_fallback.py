@@ -64,7 +64,8 @@ def test_empty_toml_uses_all_defaults(seller_env):
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
     assert cfg.enable_redis_ingest is False
-    assert cfg.negotiation_policy_mode == "bisection"
+    # Empty default → strategy loader falls back to DEFAULT_STRATEGY ("rl").
+    assert cfg.negotiation_policy_mode == ""
 
 
 def test_empty_toml_with_no_seller_section_still_loads(seller_env):

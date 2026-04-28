@@ -23,6 +23,14 @@ test = [
   "pytest>=8.0.0",
 ]
 
+# RL negotiation strategy. Mirrors the storefront's [rl] extra so a
+# buyer installed with `uv pip install -e ".[rl]"` can run against the
+# trained pufferlib checkpoints from the compute domain.
+rl = [
+  "torch>=2.7.0",
+  "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
+]
+
 [project.scripts]
 market = "market_buyer.cli:app"
 
@@ -31,13 +39,30 @@ market = "market_buyer.cli:app"
 # buyer orchestrator (buy-sync).
 # market-policy: per-round negotiation decision logic, shared with the
 # storefront so both sides drive negotiation through one engine.
+[tool.uv]
+no-build-isolation-package = ["pufferlib"]
+
+[tool.uv.extra-build-dependencies]
+pufferlib = ["setuptools", "Cython", "numpy<2"]
+
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
 market-policy = { path = "../policy", editable = true }
+torch = [
+  { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["market_buyer"]

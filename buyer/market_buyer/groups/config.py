@@ -484,7 +484,7 @@ def config_init_user(
 # channels = "events:*"
 
 # [seller.negotiation]
-# policy_mode = "bisection"                    # bisection | rl
+# policy_mode = ""                              # "" (default → rl) | "bisection" | "rl"
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 """
