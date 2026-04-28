@@ -21,5 +21,4 @@ from client.provisioning_client import (  # noqa: F401
     ProvisioningError,
     ProvisioningJobError,
     ProvisioningTimeoutError,
-    SyncProvisioningClient,
 )

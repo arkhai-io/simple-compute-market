@@ -15,8 +15,9 @@ DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
 	uv sync --find-links $(DIST_DIR)
 
-reinit:
-	uv sync --find-links $(DIST_DIR) --reinstall-package arkhai-registry-client --reinstall-package provisioning-service
+reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
+	uv sync --find-links $(DIST_DIR) --reinstall-package provisioning-service --reinstall-package arkhai-agent-client
+
 
 build: build-images
 

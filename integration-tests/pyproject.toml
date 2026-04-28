@@ -25,7 +25,7 @@ dependencies = [
     "arkhai-agent-client>=0.1.0",
     "arkhai-registry-client>=0.1.2",
     "market-service",
-    "provisioning-service",
+    "provisioning-service>=0.1.1",
 ]
 
 [tool.uv]

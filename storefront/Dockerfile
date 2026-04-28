@@ -16,7 +16,7 @@ WORKDIR /app
 # These are built on the host by `make dist` before `docker build`.
 COPY .dist/ /dist/
 
-COPY storefront/pyproject.toml storefront/uv.lock ./
+COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
 COPY storefront/packages/ ./packages/
 COPY service/ ../service/
 COPY policy/ ../policy/
@@ -73,6 +73,7 @@ COPY storefront/src ./src
 COPY storefront/scripts ./scripts
 COPY domain/ ./domain/
 COPY service/ ../service/
+COPY policy/ ../policy/
 
 ARG PORT=8080
 ENV PORT=${PORT}
