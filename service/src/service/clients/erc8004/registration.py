@@ -3,9 +3,9 @@ On-chain registration logic for ERC-8004 Identity Registry.
 """
 import json
 import logging
-import os
 import re
 import urllib.request
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 try:
@@ -70,64 +70,41 @@ def build_registration_file_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/.well-known/erc-8004-registration.json"
 
 
-async def register_onchain_from_env(
-    base_url: Optional[str] = None,
-    chain_id: Optional[int] = None,
+@dataclass(frozen=True)
+class RegisterOnchainConfig:
+    """Caller-supplied inputs to ``register_onchain_from_config``.
+
+    Replaces the prior env-driven ``register_onchain_from_env`` shim.
+    Storefront callers populate this from ``CONFIG``; the
+    ``register_onchain.py`` script builds it from its CLI args + the
+    same TOML loader the agent uses.
+    """
+    private_key: str
+    chain_rpc_url: str
+    identity_registry_address: str
+    wallet_address: str
+    base_url: str
+    agent_name: str
     explicit_agent_id: Optional[str] = None
+
+
+async def register_onchain_from_config(
+    cfg: "RegisterOnchainConfig",
 ) -> Optional[Tuple[str, int, Optional[dict]]]:
+    """Register the agent on-chain using a typed config object.
+
+    Returns the same shape as ``register_onchain``.
     """
-    Register agent on-chain using environment variables.
-    Convenience wrapper around register_onchain() that reads from env vars.
-
-    Args:
-        base_url: Optional base URL override (defaults to BASE_URL_OVERRIDE env var)
-        chain_id: Optional chain ID override (defaults to CHAIN_ID env var)
-        explicit_agent_id: Optional explicit agent ID override (defaults to ONCHAIN_AGENT_ID env var)
-
-    Returns:
-        Same as register_onchain(): Tuple of (tx_hash, agent_id, updates_dict) or None
-    """
-    # Read required env vars
-    agent_priv_key = os.getenv("AGENT_PRIV_KEY")
-    chain_rpc_url = os.getenv("CHAIN_RPC_URL")
-    identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
-    agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
-    base_url_override = base_url or os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
-
-    # Validate required variables
-    missing = []
-    if not agent_priv_key:
-        missing.append("AGENT_PRIV_KEY")
-    if not chain_rpc_url:
-        missing.append("CHAIN_RPC_URL")
-    if not identity_registry_address:
-        missing.append("IDENTITY_REGISTRY_ADDRESS")
-    if not agent_wallet_address:
-        missing.append("AGENT_WALLET_ADDRESS")
-
-    if missing:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
-
-    # Get optional values
-    explicit_agent_id = explicit_agent_id or os.getenv("ONCHAIN_AGENT_ID")
-
-    # Get agent name (for on-chain metadata and agent card)
-    agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
-
-    # Build agent card URL (used to build registration file URL)
-    agent_card_url = build_agent_card_url(base_url_override)
-
-    # Call the core registration function
-    # Note: register_onchain will build the registration file URL from agent_card_url
+    agent_card_url = build_agent_card_url(cfg.base_url)
     return await register_onchain(
         agent_card_url=agent_card_url,
-        private_key=agent_priv_key,
-        rpc_url=chain_rpc_url,
-        contract_address=identity_registry_address,
-        owner_address=agent_wallet_address,
-        explicit_agent_id=explicit_agent_id,
-        indexer_url=None,  # Not needed for standalone registration
-        agent_name=agent_name
+        private_key=cfg.private_key,
+        rpc_url=cfg.chain_rpc_url,
+        contract_address=cfg.identity_registry_address,
+        owner_address=cfg.wallet_address,
+        explicit_agent_id=cfg.explicit_agent_id,
+        indexer_url=None,
+        agent_name=cfg.agent_name,
     )
 
 
@@ -513,7 +490,7 @@ async def register_onchain(
         chain_id = w3.eth.chain_id
 
         # Build metadata for on-chain storage
-        final_agent_name = agent_name or agent_card_data.get("name") or os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
+        final_agent_name = agent_name or agent_card_data.get("name") or "root_agent"
         labels = {"category": "compute", "type": "trader"}  # Default labels
 
         # Official contract: register(string tokenUri, MetadataEntry[] metadata)

@@ -55,11 +55,10 @@ def make_create_escrow_fn(
         )
 
         # Resolve alkahest address config for the target chain.
-        if addr_config_path:
-            prewarm_alkahest_address_config_cache(addr_config_path)
+        prewarm_alkahest_address_config_cache(addr_config_path)
         alkahest_network = get_alkahest_network(chain_name)
         address_config = resolve_alkahest_address_config(
-            alkahest_network=alkahest_network,
+            alkahest_network,
             config_path=addr_config_path,
         )
 
@@ -71,7 +70,9 @@ def make_create_escrow_fn(
 
         # Under RecipientArbiter, the demand is literally the seller's address.
         demand_bytes = encode_recipient_demand(terms.seller_wallet_address)
-        arbiter_address = get_recipient_arbiter()
+        arbiter_address = get_recipient_arbiter(
+            chain_name, config_path=addr_config_path,
+        )
 
         # Total payment = agreed_price × duration. agreed_price is already
         # in raw token units (see negotiation_threads.agreed_price).

@@ -20,7 +20,7 @@ def test_get_alkahest_network_defaults_to_base_sepolia() -> None:
 
 
 def test_get_alkahest_network_rejects_unknown() -> None:
-    with pytest.raises(ValueError, match="Unsupported CHAIN_NAME"):
+    with pytest.raises(ValueError, match="Unsupported"):
         get_alkahest_network("devnet")
 
 
@@ -43,7 +43,7 @@ def test_resolve_config_ethereum_sepolia_returns_explicit_config() -> None:
 
 
 def test_resolve_config_anvil_requires_override() -> None:
-    with pytest.raises(ValueError, match="CHAIN_NAME=anvil requires"):
+    with pytest.raises(ValueError, match="anvil"):
         resolve_alkahest_address_config(NETWORK_ANVIL)
 
 
@@ -70,10 +70,7 @@ def test_resolve_config_from_path_override(tmp_path: Path) -> None:
     assert config.erc20_addresses.barter_utils == override["erc20_addresses"]["barter_utils"]
 
 
-def test_get_trusted_oracle_arbiter_prefers_override(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_get_trusted_oracle_arbiter_prefers_override(tmp_path: Path) -> None:
     override = {
         "arbiters_addresses": {
             "trusted_oracle_arbiter": "0x6666666666666666666666666666666666666666",
@@ -81,10 +78,8 @@ def test_get_trusted_oracle_arbiter_prefers_override(
     }
     path = tmp_path / "arbiter_override.json"
     path.write_text(json.dumps(override), encoding="utf-8")
-    monkeypatch.setenv("CHAIN_NAME", NETWORK_BASE_SEPOLIA)
-    monkeypatch.setenv("ALKAHEST_ADDRESS_CONFIG_PATH", str(path))
-    # Clear the lru_cache so the new path is picked up
+    # Clear the lru_cache so the new path is picked up.
     from service.clients.alkahest import _load_override_config_cached
     _load_override_config_cached.cache_clear()
-    resolved = get_trusted_oracle_arbiter()
+    resolved = get_trusted_oracle_arbiter(NETWORK_BASE_SEPOLIA, config_path=str(path))
     assert resolved == override["arbiters_addresses"]["trusted_oracle_arbiter"]

@@ -1,6 +1,5 @@
 import json
 import copy
-import os
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
@@ -282,7 +281,7 @@ def get_alkahest_network(value: str | None) -> str:
     network = (value or NETWORK_BASE_SEPOLIA).strip().lower()
     if network not in SUPPORTED_NETWORKS:
         raise ValueError(
-            f"Unsupported CHAIN_NAME '{network}'. "
+            f"Unsupported chain network '{network}'. "
             f"Supported values: {sorted(SUPPORTED_NETWORKS)}"
         )
     return network
@@ -293,7 +292,7 @@ def _load_override_config_cached(path_str: str) -> dict[str, Any]:
     path = Path(path_str)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("ALKAHEST_ADDRESS_CONFIG_PATH must point to a JSON object")
+        raise ValueError("alkahest address config path must point to a JSON object")
     return data
 
 
@@ -307,11 +306,13 @@ def _load_override_config(
     return None
 
 
-def prewarm_alkahest_address_config_cache(config_path: str | None = None) -> None:
-    """Eagerly load/validate the configured address override JSON (if any)."""
-    _load_override_config(
-        config_path if config_path is not None else os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH")
-    )
+def prewarm_alkahest_address_config_cache(config_path: str | None) -> None:
+    """Eagerly load/validate the configured address override JSON (if any).
+
+    ``config_path=None`` is a valid input (no override) — callers pass
+    their resolved config value explicitly; nothing is read from env.
+    """
+    _load_override_config(config_path)
 
 
 def resolve_alkahest_address_config(
@@ -340,9 +341,13 @@ def resolve_alkahest_address_config(
     )
 
 
-def get_trusted_oracle_arbiter() -> str:
-    selected = get_alkahest_network(os.getenv("CHAIN_NAME", "ethereum_sepolia"))
-    override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
+def get_trusted_oracle_arbiter(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    selected = get_alkahest_network(chain_name)
+    override = _load_override_config(config_path)
     if override is not None:
         return str(override["arbiters_addresses"]["trusted_oracle_arbiter"])
     if selected in NETWORK_ADDRESS_CONFIGS:
@@ -353,22 +358,26 @@ def get_trusted_oracle_arbiter() -> str:
         )
 
     raise ValueError(
-        "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
+        "chain_name='anvil' requires an explicit alkahest_address_config_path "
         "with deployed local addresses."
     )
 
 
-def get_recipient_arbiter() -> str:
+def get_recipient_arbiter(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
     """Resolve the RecipientArbiter address for the selected network.
 
-    Mirrors get_trusted_oracle_arbiter(). Used when the escrow demand is
+    Mirrors ``get_trusted_oracle_arbiter``. Used when the escrow demand is
     "the fulfillment attestation's recipient must equal X" — the simplest
     non-oracle gating scheme available. For compute deals, X is the
-    seller's wallet, because StringObligation.doObligation sets the
-    fulfillment attestation's recipient to msg.sender (the seller).
+    seller's wallet, because ``StringObligation.doObligation`` sets the
+    fulfillment attestation's recipient to ``msg.sender`` (the seller).
     """
-    selected = get_alkahest_network(os.getenv("CHAIN_NAME", "ethereum_sepolia"))
-    override = _load_override_config(os.getenv("ALKAHEST_ADDRESS_CONFIG_PATH"))
+    selected = get_alkahest_network(chain_name)
+    override = _load_override_config(config_path)
     if override is not None:
         return str(override["arbiters_addresses"]["recipient_arbiter"])
     if selected in NETWORK_ADDRESS_CONFIGS:
@@ -379,7 +388,7 @@ def get_recipient_arbiter() -> str:
         )
 
     raise ValueError(
-        "CHAIN_NAME=anvil requires ALKAHEST_ADDRESS_CONFIG_PATH "
+        "chain_name='anvil' requires an explicit alkahest_address_config_path "
         "with deployed local addresses."
     )
 

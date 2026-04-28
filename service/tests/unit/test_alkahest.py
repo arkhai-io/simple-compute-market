@@ -1,51 +1,48 @@
-"""Unit tests for service.clients.alkahest (ported from core tests, using monkeypatch.setenv)."""
+"""Unit tests for service.clients.alkahest.
+
+The helpers take ``chain_name`` + optional ``config_path`` arguments —
+no env reads. Tests pass values explicitly.
+"""
 import pytest
 
 
-def test_get_alkahest_network_base_sepolia(monkeypatch):
+def test_get_alkahest_network_base_sepolia():
     from service.clients.alkahest import get_alkahest_network
     assert get_alkahest_network("base_sepolia") == "base_sepolia"
 
 
-def test_get_alkahest_network_default(monkeypatch):
+def test_get_alkahest_network_default():
     from service.clients.alkahest import get_alkahest_network
     assert get_alkahest_network(None) == "base_sepolia"
 
 
 def test_get_alkahest_network_invalid():
     from service.clients.alkahest import get_alkahest_network
-    with pytest.raises(ValueError, match="Unsupported CHAIN_NAME"):
+    with pytest.raises(ValueError, match="Unsupported"):
         get_alkahest_network("unknown_network")
 
 
-def test_get_trusted_oracle_arbiter_base_sepolia(monkeypatch):
-    monkeypatch.setenv("CHAIN_NAME","base_sepolia")
-    monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
-    from service.clients.alkahest import get_trusted_oracle_arbiter
-    import importlib, service.clients.alkahest as alc
-    # Clear lru_cache
-    alc._load_override_config_cached.cache_clear()
-    addr = get_trusted_oracle_arbiter()
-    assert addr.startswith("0x")
-
-
-def test_get_trusted_oracle_arbiter_ethereum_mainnet(monkeypatch):
-    monkeypatch.setenv("CHAIN_NAME","ethereum_mainnet")
-    monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
+def test_get_trusted_oracle_arbiter_base_sepolia():
     from service.clients.alkahest import get_trusted_oracle_arbiter
     import service.clients.alkahest as alc
     alc._load_override_config_cached.cache_clear()
-    addr = get_trusted_oracle_arbiter()
+    addr = get_trusted_oracle_arbiter("base_sepolia")
     assert addr.startswith("0x")
 
 
-def test_get_trusted_oracle_arbiter_ethereum_sepolia(monkeypatch):
-    monkeypatch.setenv("CHAIN_NAME","ethereum_sepolia")
-    monkeypatch.delenv("ALKAHEST_ADDRESS_CONFIG_PATH", raising=False)
+def test_get_trusted_oracle_arbiter_ethereum_mainnet():
     from service.clients.alkahest import get_trusted_oracle_arbiter
     import service.clients.alkahest as alc
     alc._load_override_config_cached.cache_clear()
-    addr = get_trusted_oracle_arbiter()
+    addr = get_trusted_oracle_arbiter("ethereum_mainnet")
+    assert addr.startswith("0x")
+
+
+def test_get_trusted_oracle_arbiter_ethereum_sepolia():
+    from service.clients.alkahest import get_trusted_oracle_arbiter
+    import service.clients.alkahest as alc
+    alc._load_override_config_cached.cache_clear()
+    addr = get_trusted_oracle_arbiter("ethereum_sepolia")
     assert addr == "0x3B2a812E3eb3B729D40d866Da16c2BB2b6cDd2f2"
 
 

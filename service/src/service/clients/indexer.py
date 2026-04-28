@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import os
+from dataclasses import dataclass
 import aiohttp
 from typing import Any, Dict, List, Optional
 
@@ -12,29 +12,55 @@ from service.clients.erc8004.signing import build_order_auth
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class CanonicalAgentIdInputs:
+    """Inputs needed to build the eip155 canonical agent id used in signing.
+
+    Callers (storefront / buyer) populate this from their own typed
+    config instead of having `service.clients.indexer` read env vars.
+    """
+    onchain_agent_id: str | None = None
+    agent_id: str | None = None  # local fallback; used only if no onchain_agent_id
+    identity_registry_address: str | None = None
+    chain_id: int | None = None
+    chain_rpc_url: str | None = None
+    alkahest_network: str | None = None  # secondary chain-id source
+
+
+@dataclass(frozen=True)
+class RegistryClientConfig:
+    """Everything `RegistryClient` needs at construction time."""
+    base_url: str
+    timeout: int = 30
+    private_key: str | None = None
+    agent_id: str | None = None  # canonical eip155:... id
+
+
 class RegistryClient:
     """Client for interacting with the ERC-8004 registry API."""
 
     def __init__(
         self,
-        base_url: str | None = None,
+        base_url: str,
         timeout: int = 30,
         private_key: str | None = None,
         agent_id: str | None = None,
     ):
         """Initialize registry client.
 
+        All values come from the caller; nothing is read from env.
+
         Args:
-            base_url: Base URL of the registry API (defaults to INDEXER_URL env var)
+            base_url: Base URL of the registry API
             timeout: Request timeout in seconds
-            private_key: Agent private key for signing mutations (optional)
-            agent_id: Canonical agent ID used as signer_agent_id on updates (optional)
+            private_key: Agent private key for signing mutations
+            agent_id: Canonical agent ID used as signer_agent_id on updates
         """
-        self.base_url = (base_url or os.getenv("INDEXER_URL", os.getenv("REGISTRY_URL", "http://localhost:8080"))).rstrip('/')
+        self.base_url = base_url.rstrip('/')
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: Optional[aiohttp.ClientSession] = None
-        self._private_key = private_key or os.getenv("AGENT_PRIV_KEY")
-        self._agent_id = agent_id or os.getenv("AGENT_ID")
+        self._private_key = private_key
+        self._agent_id = agent_id
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session."""
@@ -345,26 +371,30 @@ _ALKAHEST_NETWORK_CHAIN_IDS: dict[str, int] = {
 }
 
 
-def _resolve_canonical_agent_id() -> str | None:
+def resolve_canonical_agent_id(inputs: CanonicalAgentIdInputs) -> str | None:
     """Resolve the full canonical agent ID (eip155:...) for registry signing.
 
+    All inputs come from the caller's typed config; nothing is read
+    from env here.
+
     Resolution order:
-    1. ONCHAIN_AGENT_ID already in canonical format → use as-is.
-    2. Build from ONCHAIN_AGENT_ID + IDENTITY_REGISTRY_ADDRESS + chain ID
-       (chain ID sourced from: CHAIN_ID env → ALKAHEST_NETWORK map → web3 call).
-    3. Fall back to AGENT_ID.
+    1. ``onchain_agent_id`` already in canonical format → use as-is.
+    2. Build from ``onchain_agent_id`` + ``identity_registry_address`` +
+       chain ID (taken from ``chain_id``, then the ``alkahest_network``
+       lookup, then a web3 call against ``chain_rpc_url``).
+    3. Fall back to ``agent_id``.
     """
-    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
+    onchain_agent_id = inputs.onchain_agent_id
     if not onchain_agent_id:
-        return os.getenv("AGENT_ID")
+        return inputs.agent_id
 
     if onchain_agent_id.startswith("eip155:"):
         return onchain_agent_id
 
-    identity_registry = os.getenv("IDENTITY_REGISTRY_ADDRESS")
+    identity_registry = inputs.identity_registry_address
     if not identity_registry:
         logger.warning(
-            "[REGISTRY] IDENTITY_REGISTRY_ADDRESS not set; using raw ONCHAIN_AGENT_ID=%s as signer_agent_id",
+            "[REGISTRY] identity_registry_address not set; using raw onchain_agent_id=%s as signer_agent_id",
             onchain_agent_id,
         )
         return onchain_agent_id
@@ -374,29 +404,21 @@ def _resolve_canonical_agent_id() -> str | None:
     except ValueError:
         return onchain_agent_id
 
-    # Resolve chain ID.
-    chain_id: int | None = None
-    chain_id_env = os.getenv("CHAIN_ID")
-    if chain_id_env:
+    # Resolve chain ID from inputs.
+    chain_id: int | None = inputs.chain_id
+    if chain_id is None and inputs.alkahest_network:
+        chain_id = _ALKAHEST_NETWORK_CHAIN_IDS.get(inputs.alkahest_network.lower())
+    if chain_id is None and inputs.chain_rpc_url:
         try:
-            chain_id = int(chain_id_env)
-        except ValueError:
-            pass
+            from web3 import Web3
+            from web3.providers import HTTPProvider
+            from service.clients.erc8004.blockchain import rpc_url_for_http_provider
+            w3 = Web3(HTTPProvider(rpc_url_for_http_provider(inputs.chain_rpc_url), request_kwargs={"timeout": 5}))
+            chain_id = w3.eth.chain_id
+        except Exception as exc:
+            logger.warning("[REGISTRY] Could not resolve chain ID from RPC: %s", exc)
     if chain_id is None:
-        chain_id = _ALKAHEST_NETWORK_CHAIN_IDS.get(os.getenv("ALKAHEST_NETWORK", "").lower())
-    if chain_id is None:
-        chain_rpc_url = os.getenv("CHAIN_RPC_URL")
-        if chain_rpc_url:
-            try:
-                from web3 import Web3
-                from web3.providers import HTTPProvider
-                from service.clients.erc8004.blockchain import rpc_url_for_http_provider
-                w3 = Web3(HTTPProvider(rpc_url_for_http_provider(chain_rpc_url), request_kwargs={"timeout": 5}))
-                chain_id = w3.eth.chain_id
-            except Exception as exc:
-                logger.warning("[REGISTRY] Could not resolve chain ID from RPC: %s", exc)
-    if chain_id is None:
-        logger.warning("[REGISTRY] Cannot resolve chain ID; using raw ONCHAIN_AGENT_ID=%s", onchain_agent_id)
+        logger.warning("[REGISTRY] Cannot resolve chain ID; using raw onchain_agent_id=%s", onchain_agent_id)
         return onchain_agent_id
 
     try:
@@ -409,14 +431,42 @@ def _resolve_canonical_agent_id() -> str | None:
         return onchain_agent_id
 
 
+# Stored config for the global singleton. Set once at startup via
+# ``configure_registry_client``; ``get_registry_client`` then constructs
+# (or reuses) the singleton from it.
+_registry_client_config: Optional[RegistryClientConfig] = None
+
+
+def configure_registry_client(config: RegistryClientConfig) -> None:
+    """Bind the global ``RegistryClient`` to a typed config.
+
+    Called once at process startup (storefront agent.py / buyer CLI /
+    register_onchain script) before any code path invokes
+    ``get_registry_client()``. Replaces the prior env-driven init.
+    """
+    global _registry_client_config, _registry_client
+    _registry_client_config = config
+    _registry_client = None  # force rebuild on next get
+
+
 def get_registry_client() -> RegistryClient:
-    """Get or create global registry client instance."""
+    """Return the global registry client.
+
+    Requires ``configure_registry_client`` to have been called first;
+    raises if the runtime forgot to wire its config.
+    """
     global _registry_client
     if _registry_client is None:
-        timeout = int(os.getenv("REGISTRY_ORDER_TIMEOUT", "30"))
+        if _registry_client_config is None:
+            raise RuntimeError(
+                "RegistryClient is not configured. Call "
+                "configure_registry_client(...) at startup before any "
+                "code path that needs a registry client."
+            )
         _registry_client = RegistryClient(
-            timeout=timeout,
-            private_key=os.getenv("AGENT_PRIV_KEY"),
-            agent_id=_resolve_canonical_agent_id(),
+            base_url=_registry_client_config.base_url,
+            timeout=_registry_client_config.timeout,
+            private_key=_registry_client_config.private_key,
+            agent_id=_registry_client_config.agent_id,
         )
     return _registry_client

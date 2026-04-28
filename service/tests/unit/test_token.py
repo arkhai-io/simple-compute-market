@@ -209,16 +209,19 @@ def test_reload_picks_up_changes(tmp_path):
     assert reg.resolve("DAI") is not None
 
 
-def test_token_registry_path_env(tmp_path, monkeypatch):
-    from service.clients.token import TokenRegistry
+def test_init_token_registry_rebinds_singleton(tmp_path):
+    """``init_token_registry`` re-points the module-level singleton at a
+    different file in place. Modules that already imported
+    ``TOKEN_REGISTRY`` keep seeing the updated data via the same object."""
+    from service.clients.token import TOKEN_REGISTRY, init_token_registry
     data = [
-        {"symbol": "ENV_TOKEN", "name": "Env Token", "contract_address": "0xEnvEnvEnvEnvEnvEnvEnvEnvEnvEnvEnvEnvEnv1", "decimals": 8},
+        {"symbol": "REBOUND_TOKEN", "name": "Rebound Token", "contract_address": "0xCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcC1", "decimals": 8},
     ]
-    p = tmp_path / "env_registry.json"
+    p = tmp_path / "rebind_registry.json"
     p.write_text(json.dumps(data))
-    monkeypatch.setenv("TOKEN_REGISTRY_PATH", str(p))
-    reg = TokenRegistry()  # no explicit path — should pick up env var
-    assert reg.resolve("ENV_TOKEN") is not None
+    returned = init_token_registry(p)
+    assert returned is TOKEN_REGISTRY
+    assert TOKEN_REGISTRY.resolve("REBOUND_TOKEN") is not None
 
 
 def test_singleton_importable():

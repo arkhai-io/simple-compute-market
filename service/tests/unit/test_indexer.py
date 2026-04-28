@@ -205,11 +205,24 @@ async def test_delete_order_no_private_key_empty_params(client):
     assert captured["params"] == {}
 
 
-def test_get_registry_client_singleton(monkeypatch):
-    monkeypatch.setenv("REGISTRY_ORDER_TIMEOUT", "15")
+def test_get_registry_client_singleton():
     import service.clients.indexer as idx
     idx._registry_client = None  # reset singleton
+    idx._registry_client_config = None
+    idx.configure_registry_client(idx.RegistryClientConfig(
+        base_url="http://test-indexer:8080",
+        timeout=15,
+    ))
     c1 = idx.get_registry_client()
     c2 = idx.get_registry_client()
     assert c1 is c2
     idx._registry_client = None  # cleanup
+    idx._registry_client_config = None
+
+
+def test_get_registry_client_unconfigured_raises():
+    import service.clients.indexer as idx
+    idx._registry_client = None
+    idx._registry_client_config = None
+    with pytest.raises(RuntimeError, match="not configured"):
+        idx.get_registry_client()

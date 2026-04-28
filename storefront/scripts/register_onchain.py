@@ -23,7 +23,8 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from service.clients.erc8004.registration import (
-    register_onchain_from_env,
+    RegisterOnchainConfig,
+    register_onchain_from_config,
     build_agent_card_url,
     build_registration_file_url,
 )
@@ -269,14 +270,33 @@ async def main():
     print("=" * 70)
     print()
     
-    # Register on-chain
+    # Register on-chain.
+    # NOTE: this script still sources its inputs from env vars; the
+    # migration to TOML-only happens in a follow-up step. The change
+    # here is just to call the new typed-config entry point now that
+    # register_onchain_from_env is gone.
     print("Registering agent on-chain...")
+    agent_priv_key = os.getenv("AGENT_PRIV_KEY")
+    agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
+    if not all([agent_priv_key, chain_rpc_url, identity_registry_address, agent_wallet_address]):
+        missing = [k for k, v in {
+            "AGENT_PRIV_KEY": agent_priv_key,
+            "CHAIN_RPC_URL": chain_rpc_url,
+            "IDENTITY_REGISTRY_ADDRESS": identity_registry_address,
+            "AGENT_WALLET_ADDRESS": agent_wallet_address,
+        }.items() if not v]
+        print(f"❌ Missing required env vars: {', '.join(missing)}")
+        return 1
     try:
-        result = await register_onchain_from_env(
+        result = await register_onchain_from_config(RegisterOnchainConfig(
+            private_key=agent_priv_key,
+            chain_rpc_url=chain_rpc_url,
+            identity_registry_address=identity_registry_address,
+            wallet_address=agent_wallet_address,
             base_url=resolved_base_url,
-            chain_id=chain_id,
+            agent_name=agent_name,
             explicit_agent_id=onchain_agent_id,
-        )
+        ))
         
         if result:
             tx_hash, numeric_agent_id, updates_dict = result
