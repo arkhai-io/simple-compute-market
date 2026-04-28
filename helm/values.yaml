@@ -82,39 +82,12 @@ storefront:
     tag: storefront
     pullPolicy: IfNotPresent
 
-  # See helm/charts/storefront/values.yaml for the per-agent schema. Both
-  # entries run the same storefront binary; the buyer/seller distinction
-  # is application-level (which orders the agent posts), not deployment-
-  # level. Add or remove entries to scale the number of agents.
+  # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
+  # client and is invoked as a one-shot process (or a helm-test Job),
+  # not deployed alongside the storefront. Add more agents: entries to
+  # run multiple seller identities on one cluster.
+  # See helm/charts/storefront/values.yaml for the per-agent schema.
   agents:
-    - name: alice
-      port: 8000
-      component: buyer
-      secret:
-        createSecret: true
-        secretName: ""
-        privKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-        walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-      config:
-        seller:
-          agentId: alice
-          baseUrl: "http://market-agent-buy:8000/"
-          dbPath: "./agent.db"
-          logFilePath: "./logs/alice.log"
-          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
-          enableEventQueue: false
-          provisioning:
-            serviceUrl: "http://provisioning:8081"
-            mode: "mock"
-          negotiation:
-            policyMode: "rl"
-        chain:
-          name: "anvil"
-          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-        tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-        autoRegister: true
-        geminiApiKey: ""
-
     - name: bob
       port: 8001
       component: seller

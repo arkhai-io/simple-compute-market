@@ -53,9 +53,12 @@ def registry_settings() -> dict:
 
 @pytest.fixture(scope="session")
 def buyer_settings() -> dict:
+    """Buyer wallet config. The buyer is a pure HTTP client (market_buyer
+    CLI / library) — there is no buyer api_url because no buyer-side
+    server runs. Only the wallet keys are exposed: they sign negotiation
+    requests against the seller's storefront and on-chain escrow calls.
+    """
     return {
-        "api_url": settings.BUYER.API_URL,
-        "base_url_override": settings.BUYER.BASE_URL_OVERRIDE,
         "private_key": settings.BUYER.PRIVATE_KEY,
         "wallet_address": settings.BUYER.WALLET_ADDRESS,
     }

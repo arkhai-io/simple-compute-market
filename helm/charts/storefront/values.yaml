@@ -10,58 +10,27 @@ image:
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
-# Agent instances. Each entry produces one Deployment + Service + Secret.
-# The chart used to hardcode buyer:/seller: blocks; that was always just
-# two named storefront instances running the same binary. The "buyer"/
-# "seller" distinction is at the application layer (which orders the
-# agent posts), not at the deployment layer — both processes are pure
-# market_storefront servers.
+# Storefront agent(s). The list models per-process identity, not role —
+# only sellers run a storefront, so the typical deploy has one entry.
+# Operators running multiple seller identities on one cluster (sharded
+# by region, by hardware fleet, etc.) add more entries. Buyers do not
+# appear here at all: the buyer-side surface is the `market` CLI, run
+# as a one-shot client process (or a Job for E2E tests).
 #
-# `component` lands as the `app.kubernetes.io/component` label so a
-# multi-agent deploy can distinguish roles for selectors / dashboards.
+# Each entry renders one Deployment + Service + Secret. The Secret holds
+# the rendered config.toml mounted at /etc/arkhai/config.toml.
 # ---------------------------------------------------------------------------
 agents:
-  - name: alice
-    port: 8000
-    component: buyer
-    secret:
-      createSecret: true
-      secretName: ""   # auto-generated as {fullname}-{name} when empty
-      privKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-      walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-    # config.* lands in the rendered config.toml. Keys map 1:1 to the
-    # typed Config dataclass in market_storefront.utils.config.
-    config:
-      seller:
-        agentId: alice
-        baseUrl: "http://market-agent-buy:8000/"
-        dbPath: "./agent.db"
-        logFilePath: "./logs/alice.log"
-        sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess alice@example.com"
-        enableEventQueue: false
-        provisioning:
-          serviceUrl: "http://provisioning:8081"
-          mode: "mock"
-        negotiation:
-          policyMode: "rl"
-      chain:
-        name: "anvil"
-        alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-      tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-      # Whether to run register_onchain.py before the server starts.
-      autoRegister: true
-      # Optional integration secret (kept here, not split into the
-      # secretRef block, because it's not a wallet key).
-      geminiApiKey: ""
-
   - name: bob
     port: 8001
     component: seller
     secret:
       createSecret: true
-      secretName: ""
+      secretName: ""   # auto-generated as {fullname}-{name} when empty
       privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
       walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    # config.* lands in the rendered config.toml. Keys map 1:1 to the
+    # typed Config dataclass in market_storefront.utils.config.
     config:
       seller:
         agentId: bob
@@ -79,7 +48,10 @@ agents:
         name: "anvil"
         alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
       tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
+      # Whether to run register_onchain.py before the server starts.
       autoRegister: true
+      # Optional integration secret (kept here, not split into the
+      # secretRef block, because it's not a wallet key).
       geminiApiKey: ""
 
 # Number of replicas per agent.

@@ -21,15 +21,16 @@ registry: # injected from environment profile file
   validation_address:
   owner_address:
 
-buyer: 
-  api_url:           "" # injected from environment profile file
-  base_url_override: "" # agent's BASE_URL_OVERRIDE; used as resource_id in create_order auth. Defaults to api_url if unset.
+buyer:
+  # The buyer is a pure HTTP client (market_buyer CLI / library) — only
+  # wallet keys are configured here; they sign negotiation requests
+  # against the seller's storefront and on-chain escrow calls.
   private_key:       "" # injected from secret profile file
   wallet_address:    ""
 
-seller: 
+seller:
   api_url:           "" # injected from environment profile file
-  base_url_override: "" # agent's BASE_URL_OVERRIDE; used as resource_id in create_order auth. Defaults to api_url if unset.
+  base_url_override: "" # agent's seller.base_url in config.toml; used as resource_id in create_order auth. Defaults to api_url if unset.
   private_key:       "" # injected from secret profile file
   wallet_address:    ""
 
