@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from .cli_common import REPO_ROOT, read_env_value, container_db_to_host, run_step, DEFAULT_AGENT_ENV
+from .cli_common import REPO_ROOT, container_db_to_host, run_step
 
 portfolio_app = typer.Typer(no_args_is_help=True)
 
@@ -34,14 +34,16 @@ def portfolio_import_csv(
     if not csv_file.exists():
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
 
-    # In container mode, resolve the container DB path to its host-side volume mount
-    # so the import script can write directly without needing docker exec.
+    # If --db-path isn't passed explicitly, fall back to seller.db_path
+    # in config.toml. (Container-mode path translation that lived here
+    # previously is being retired with the deployment swap.)
     if not db_path:
-        agent_mode = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_MODE", default="host")
-        if agent_mode == "container":
-            raw = read_env_value(env or DEFAULT_AGENT_ENV, "AGENT_DB_PATH", default="")
-            if raw:
-                db_path = str(container_db_to_host(raw))
+        from .utils.config import CONFIG
+        toml_db = CONFIG.agent_db_path
+        if toml_db:
+            host_path = str(container_db_to_host(toml_db))
+            if Path(host_path).exists():
+                db_path = host_path
 
     cmd = ["make", "import-resources", f"CSV={csv_file.resolve()}"]
     if env:

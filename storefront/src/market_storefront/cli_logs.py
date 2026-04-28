@@ -24,25 +24,10 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.text import Text
 
-from .cli_common import DEFAULT_AGENT_ENV, container_db_to_host, read_env_value
+from .cli_common import _resolve_db_path
 
 logs_app = typer.Typer(no_args_is_help=True)
 console = Console()
-
-
-def _resolve_db_path(db: str | None, env: str | None) -> str | None:
-    """Return the SQLite DB path from explicit ``--db`` or the explicit
-    ``--env`` file. Process env is not consulted."""
-    if db:
-        return db
-    env_path = Path(env) if env else DEFAULT_AGENT_ENV
-    db_path_from_env = read_env_value(env_path, "AGENT_DB_PATH")
-    if db_path_from_env:
-        agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
-        resolved = str(container_db_to_host(db_path_from_env)) if agent_mode == "container" else db_path_from_env
-        if Path(resolved).exists():
-            return resolved
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +41,12 @@ def logs_show(
     stage: Optional[str] = typer.Option(None, "--stage", "-s", help="Filter by stage (discovery, negotiation, settlement, provision, post_settlement)"),
     last: int = typer.Option(50, "--last", "-l", help="Show last N events"),
     db: Optional[str] = typer.Option(None, "--db", help="Agent SQLite DB path"),
-    env: Optional[str] = typer.Option(None, "-e", "--env", help="Agent env file"),
     raw: bool = typer.Option(False, "--raw", help="Print raw JSON per line"),
 ):
     """Show stage-boundary events from the agent's local log."""
-    db_path = _resolve_db_path(db, env)
+    db_path = _resolve_db_path(db)
     if not db_path:
-        console.print("[red]Could not find agent DB. Use --db or --env to specify.[/red]")
+        console.print("[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]")
         raise typer.Exit(1)
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
@@ -225,12 +209,11 @@ def _derive_stage(
 def deal_status(
     negotiation_id: str = typer.Argument(help="Negotiation ID (or order ID to search by)"),
     db: Optional[str] = typer.Option(None, "--db", help="Agent SQLite DB path"),
-    env: Optional[str] = typer.Option(None, "-e", "--env", help="Agent env file"),
 ):
     """Show the current stage and state of a deal/negotiation."""
-    db_path = _resolve_db_path(db, env)
+    db_path = _resolve_db_path(db)
     if not db_path:
-        console.print("[red]Could not find agent DB. Use --db or --env to specify.[/red]")
+        console.print("[red]Could not find agent DB. Use --db or set seller.db_path in config.toml.[/red]")
         raise typer.Exit(1)
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)

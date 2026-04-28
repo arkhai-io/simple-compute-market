@@ -11,61 +11,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_AGENT_ENV = REPO_ROOT / "storefront" / ".env"
 
 
-def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> str:
-    """Read a single KEY=value from an env file, returning default if absent."""
-    if not env_file:
-        return default
-    path = Path(env_file)
-    if not path.exists():
-        return default
-    try:
-        for raw_line in path.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export "):].strip()
-            if "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            if name.strip() != key:
-                continue
-            value = value.strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-                value = value[1:-1]
-            return value
-    except Exception:
-        return default
-    return default
-
-
 def resolve_config_value(
     *,
     override: str | None = None,
-    env_file: str | Path | None = None,
-    env_name: str | None = None,
     toml_path: str | None = None,
     default: str = "",
 ) -> str:
-    """One-stop lookup for a scalar config value across our sources.
+    """Lookup a scalar config value: CLI override > config.toml > default.
 
-    Precedence:
-      1. Explicit ``override`` (CLI flag)
-      2. ``env_file`` value (only when the user explicitly passed ``--env``;
-         these files are dev-time helpers, not the runtime config surface)
-      3. Dotted ``toml_path`` key in the user config.toml
-      4. ``default``
-
-    Process env vars are intentionally not consulted — config flows
-    through TOML or explicit CLI args. ``env_name`` is kept (optional)
-    only as the key lookup name for the explicit ``env_file`` step.
+    The TOML file location is whatever ``service.config_loader.load_user_config``
+    resolves to (XDG default, or the override set by ``--config``).
     """
     if override:
         return override
-    if env_file and env_name:
-        v = read_env_value(env_file, env_name)
-        if v:
-            return v
     if toml_path:
         from service.config_loader import get_dotted, load_user_config
         v = get_dotted(load_user_config(), toml_path)
@@ -94,33 +52,21 @@ def container_db_to_host(db_path: str) -> Path:
 
 def resolve_agent_url(
     agent_url: str | None,
-    env_file: str | Path | None,
     default_port: int = 8000,
 ) -> str:
     """Resolve the URL the CLI should dial to reach the agent.
 
-    Precedence:
-      1. Explicit ``--agent-url`` flag (passed as ``agent_url``).
-      2. If the env file declares ``AGENT_MODE=container``:
-         ``http://localhost:{PORT}``. ``BASE_URL_OVERRIDE`` in container
-         env files points at the docker-internal hostname (e.g.
-         ``http://buy_agent:8000/``), which is unreachable from the
-         host — never use it as a CLI target.
-      3. Env-file ``BASE_URL_OVERRIDE`` (host mode).
-      4. ``http://localhost:{default_port}``.
-
-    Process env vars are not consulted — config flows through CLI args
-    or TOML, not ambient env.
+    Precedence: explicit ``agent_url`` > ``seller.base_url`` from
+    config.toml > ``http://localhost:{default_port}``.
     """
     if agent_url:
         return agent_url
-    env_path = Path(env_file) if env_file else None
-    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host") if env_path else "host"
-    port = read_env_value(env_path, "PORT", default=str(default_port)) if env_path else str(default_port)
-    if agent_mode == "container":
-        return f"http://localhost:{port}"
-    env_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    return env_url or f"http://localhost:{default_port}"
+    from service.config_loader import get_dotted, load_user_config
+    cfg = load_user_config()
+    base_url = get_dotted(cfg, "seller.base_url")
+    if isinstance(base_url, str) and base_url:
+        return base_url
+    return f"http://localhost:{default_port}"
 
 
 def run_step(

@@ -44,6 +44,14 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _config_path_callback(value: str | None) -> str | None:
+    """Override the TOML loader path before any subcommand body runs."""
+    if value:
+        from service.config_loader import set_user_config_path
+        set_user_config_path(Path(value))
+    return value
+
+
 @app.callback()
 def main(
     version_flag: bool = typer.Option(
@@ -53,6 +61,14 @@ def main(
         callback=version_callback,
         is_eager=True,
         help="Show version and exit.",
+    ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config",
+        callback=_config_path_callback,
+        is_eager=True,
+        help="Path to an explicit config.toml. Defaults to "
+             "$XDG_CONFIG_HOME/arkhai/config.toml.",
     ),
 ) -> None:
     """market-storefront — provider-side admin CLI."""

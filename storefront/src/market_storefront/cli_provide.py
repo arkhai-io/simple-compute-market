@@ -38,13 +38,13 @@ from storefront_client import (
     SyncStorefrontClient,
 )
 
-from .cli_common import REPO_ROOT, read_env_value, resolve_agent_url, _resolve_db_path
+from .cli_common import REPO_ROOT, resolve_agent_url, _resolve_db_path
 
 
-def _import_csv(csv_path: str, env: Optional[str], db: Optional[str]) -> None:
+def _import_csv(csv_path: str, db: Optional[str]) -> None:
     """Invoke the existing import_resources_csv.py script directly.
 
-    Uses `storefront/.venv/bin/python` rather than `uv run` — the
+    Uses ``storefront/.venv/bin/python`` rather than ``uv run`` — the
     latter fails cleanly from outside the storefront project, and the
     storefront venv is a stable dependency of the provider-side
     deployment anyway.
@@ -62,8 +62,6 @@ def _import_csv(csv_path: str, env: Optional[str], db: Optional[str]) -> None:
     ]
     if db:
         cmd.extend(["--db-path", str(Path(db).resolve())])
-    if env:
-        cmd.extend(["--env-file", str(Path(env).resolve())])
     subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
 
 
@@ -334,11 +332,7 @@ def register(app: typer.Typer) -> None:
         ),
         agent_url: Optional[str] = typer.Option(
             None, "--agent-url", "-a",
-            help="Provider agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+            help="Provider agent base URL (default: seller.base_url from config.toml).",
         ),
     ) -> None:
         """Collect an escrow on-chain after fulfillment.
@@ -351,9 +345,9 @@ def register(app: typer.Typer) -> None:
         outage, etc.).
         """
         console = Console()
-        env_path = Path(env) if env else None
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
+        from .utils.config import CONFIG
+        base_url = resolve_agent_url(agent_url, default_port=8001)
+        private_key = CONFIG.agent_priv_key
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -404,11 +398,7 @@ def register(app: typer.Typer) -> None:
         ),
         agent_url: Optional[str] = typer.Option(
             None, "--agent-url", "-a",
-            help="Provider agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY).",
+            help="Provider agent base URL (default: seller.base_url from config.toml).",
         ),
     ) -> None:
         """Refund a deal via direct ERC-20 transfer from the provider wallet.
@@ -418,9 +408,9 @@ def register(app: typer.Typer) -> None:
         can't settle through the normal escrow release path.
         """
         console = Console()
-        env_path = Path(env) if env else None
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
+        from .utils.config import CONFIG
+        base_url = resolve_agent_url(agent_url, default_port=8001)
+        private_key = CONFIG.agent_priv_key
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -494,27 +484,26 @@ def register(app: typer.Typer) -> None:
         ),
         agent_url: Optional[str] = typer.Option(
             None, "--agent-url", "-a",
-            help="Seller agent base URL (env: AGENT_URL, BASE_URL_OVERRIDE).",
-        ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file (reads BASE_URL_OVERRIDE, AGENT_PRIV_KEY, AGENT_WALLET_ADDRESS, AGENT_DB_PATH).",
+            help="Seller agent base URL (default: seller.base_url from config.toml).",
         ),
         db: Optional[str] = typer.Option(
-            None, "--db", help="Explicit seller agent SQLite DB path.",
+            None, "--db",
+            help="Explicit seller agent SQLite DB path "
+                 "(default: seller.db_path from config.toml).",
         ),
     ) -> None:
         """Publish sell orders for every available compute resource on the seller's node."""
         console = Console()
-        env_path = Path(env) if env else None
+        from .utils.config import CONFIG
 
-        base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
-        wallet_address = (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None) or ""
-        db_path = _resolve_db_path(db, env)
+        base_url = resolve_agent_url(agent_url, default_port=8001)
+        private_key = CONFIG.agent_priv_key
+        wallet_address = CONFIG.agent_wallet_address or ""
+        db_path = _resolve_db_path(db)
         if not db_path:
             typer.secho(
-                "Could not resolve seller agent DB. Pass --db or --env with AGENT_DB_PATH set.",
+                "Could not resolve seller agent DB. Pass --db or set "
+                "seller.db_path in config.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(1)
@@ -577,7 +566,7 @@ def register(app: typer.Typer) -> None:
                 raise typer.BadParameter(f"Inventory file not found: {inventory}")
             console.print(f"[bold]Importing inventory:[/bold] {csv_file}")
             try:
-                _import_csv(str(csv_file), env, db)
+                _import_csv(str(csv_file), db)
             except subprocess.CalledProcessError as exc:
                 typer.secho(f"Inventory import failed: {exc}", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)

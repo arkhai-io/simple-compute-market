@@ -48,6 +48,9 @@ def user_config_dir() -> Path:
     """Return the XDG-aware arkhai config directory.
 
     Honors XDG_CONFIG_HOME when set, otherwise falls back to ~/.config.
+    XDG_CONFIG_HOME is a platform/runtime knob (set by the OS or
+    container orchestrator), not user config — it's the only env var
+    this loader still consults.
     """
     xdg = os.environ.get("XDG_CONFIG_HOME")
     if xdg:
@@ -59,11 +62,34 @@ def user_config_dir() -> Path:
 
 def user_config_file() -> Path:
     """Return the path to the user's config.toml (may not exist)."""
+    override = _config_path_override
+    if override is not None:
+        return override
     return user_config_dir() / "config.toml"
+
+
+# Set by ``set_user_config_path`` from a CLI ``--config`` callback so
+# every subsequent ``load_user_config()`` call resolves to the override.
+_config_path_override: Optional[Path] = None
+
+
+def set_user_config_path(path: Path | str | None) -> None:
+    """Override the canonical TOML location for this process.
+
+    Called from each CLI entry point's ``--config PATH`` callback before
+    any subcommand body runs. ``None`` clears the override (back to the
+    XDG default). Called once per process — there's no expectation of
+    re-entrancy.
+    """
+    global _config_path_override
+    _config_path_override = Path(path) if path is not None else None
 
 
 def load_user_config(path: Optional[Path] = None) -> dict[str, Any]:
     """Read the user's TOML config as a plain dict.
+
+    Lookup order: explicit ``path`` arg > ``set_user_config_path`` override >
+    ``$XDG_CONFIG_HOME/arkhai/config.toml`` (or ``~/.config/arkhai/config.toml``).
 
     Missing file → empty dict. Unreadable / malformed → empty dict with
     a warning on stderr, so a typo never prevents the CLI from running.

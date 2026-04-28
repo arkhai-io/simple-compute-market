@@ -11,7 +11,6 @@ exists to exercise /negotiate/new + /negotiate/{id} directly.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Optional
 
 import typer
@@ -19,7 +18,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ..common import read_env_value, resolve_config_value
+from ..common import resolve_config_value
 from ..buyer_client import negotiate_with_seller
 from ..run_log import RunLog
 
@@ -49,17 +48,13 @@ def register(app: typer.Typer) -> None:
             10, "--max-rounds",
             help="Walk away after this many buyer-initiated counters.",
         ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file for AGENT_WALLET_ADDRESS + AGENT_PRIV_KEY.",
-        ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet address (default: from env).",
+            help="Override buyer wallet address (default: wallet.address).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
-            help="Override buyer private key (default: from env).",
+            help="Override buyer private key (default: wallet.private_key).",
         ),
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
@@ -70,16 +65,13 @@ def register(app: typer.Typer) -> None:
         runs locally in this process.
         """
         console = Console()
-        env_path = Path(env) if env else None
 
-        # Same hierarchy as `market buy` — see common.resolve_config_value.
+        # Resolution: CLI flag > config.toml.
         addr = resolve_config_value(
-            override=buyer_address, env_file=env_path,
-            env_name="AGENT_WALLET_ADDRESS", toml_path="wallet.address",
+            override=buyer_address, toml_path="wallet.address",
         )
         pk = resolve_config_value(
-            override=buyer_private_key, env_file=env_path,
-            env_name="AGENT_PRIV_KEY", toml_path="wallet.private_key",
+            override=buyer_private_key, toml_path="wallet.private_key",
         )
         if not addr or not pk:
             typer.secho(

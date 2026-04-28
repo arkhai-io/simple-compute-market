@@ -49,31 +49,14 @@ def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> 
 
 
 def resolve_config_value(
-    env_name: str,
     *,
     override: str | None = None,
-    env_file: str | Path | None = None,
     toml_path: str | None = None,
     default: str = "",
 ) -> str:
-    """One-stop lookup for a scalar config value across all our sources.
-
-    Precedence:
-      1. Explicit `override` (CLI flag)
-      2. `env_file` (e.g. storefront/.env passed via --env)
-      3. Shell `env_name` environment variable
-      4. Dotted `toml_path` key in the user config.toml
-      5. `default`
-    """
+    """Lookup a scalar config value: CLI override > config.toml > default."""
     if override:
         return override
-    if env_file:
-        v = read_env_value(env_file, env_name)
-        if v:
-            return v
-    v = os.environ.get(env_name)
-    if v:
-        return v
     if toml_path:
         from service.config_loader import get_dotted, load_user_config
         v = get_dotted(load_user_config(), toml_path)
@@ -99,48 +82,33 @@ def container_db_to_host(db_path: str) -> Path:
 
 def resolve_agent_url(
     agent_url: str | None,
-    env_file: str | Path | None,
     default_port: int = 8000,
 ) -> str:
     """Resolve the URL the CLI should dial to reach the storefront.
 
-    Precedence:
-      1. Explicit ``--agent-url`` flag.
-      2. ``AGENT_MODE=container`` (in the explicit ``--env`` file) →
-         ``http://localhost:{PORT}`` from the same env file.
-      3. Env-file ``BASE_URL_OVERRIDE`` (host mode).
-      4. ``http://localhost:{default_port}``.
-
-    Process env vars are not consulted — config flows through CLI args
-    and (for dev/test) the explicit ``--env`` file.
+    Precedence: explicit ``agent_url`` > ``seller.base_url`` from
+    config.toml > ``http://localhost:{default_port}``.
     """
     if agent_url:
         return agent_url
-    env_path = Path(env_file) if env_file else None
-    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host") if env_path else "host"
-    port = read_env_value(env_path, "PORT", default=str(default_port)) if env_path else str(default_port)
-    if agent_mode == "container":
-        return f"http://localhost:{port}"
-    env_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    return env_url or f"http://localhost:{default_port}"
+    from service.config_loader import get_dotted, load_user_config
+    cfg = load_user_config()
+    base_url = get_dotted(cfg, "seller.base_url")
+    if isinstance(base_url, str) and base_url:
+        return base_url
+    return f"http://localhost:{default_port}"
 
 
-def _resolve_db_path(db: str | None, env: str | None) -> str | None:
-    """Return the SQLite DB path from explicit ``--db`` or the explicit
-    ``--env`` file. Process env is not consulted."""
+def _resolve_db_path(db: str | None) -> str | None:
+    """Return the SQLite DB path from explicit ``--db`` or
+    ``seller.db_path`` in config.toml."""
     if db:
         return db
-    env_path = Path(env) if env else DEFAULT_AGENT_ENV
-    db_path_from_env = read_env_value(env_path, "AGENT_DB_PATH")
-    if db_path_from_env:
-        agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
-        resolved = (
-            str(container_db_to_host(db_path_from_env))
-            if agent_mode == "container"
-            else db_path_from_env
-        )
-        if Path(resolved).exists():
-            return resolved
+    from service.config_loader import get_dotted, load_user_config
+    cfg = load_user_config()
+    toml_db = get_dotted(cfg, "seller.db_path")
+    if isinstance(toml_db, str) and toml_db and Path(toml_db).exists():
+        return toml_db
     return None
 
 

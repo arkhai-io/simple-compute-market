@@ -164,7 +164,18 @@ async def main():
         '--chain-id', type=int, default=1337,
         help='Numeric chain ID for canonical-id construction (default: 1337).',
     )
+    parser.add_argument(
+        '--config', default=None,
+        help='Path to an explicit config.toml. Defaults to '
+             '$XDG_CONFIG_HOME/arkhai/config.toml.',
+    )
     args, _ = parser.parse_known_args()
+
+    # Apply --config before importing the storefront's typed config
+    # (which loads TOML at module import time).
+    if args.config:
+        from service.config_loader import set_user_config_path
+        set_user_config_path(args.config)
 
     # Read inputs from the typed config (TOML). The script no longer
     # reads os.environ; values come from $XDG_CONFIG_HOME/arkhai/config.toml.

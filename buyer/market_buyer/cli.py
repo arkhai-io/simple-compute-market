@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib.metadata import version, PackageNotFoundError
+from pathlib import Path
 
 import typer
 
@@ -26,6 +27,15 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _config_path_callback(value: str | None) -> str | None:
+    """Point the TOML loader at an explicit path before any subcommand
+    body runs. Default (no flag) leaves the XDG location in effect."""
+    if value:
+        from service.config_loader import set_user_config_path
+        set_user_config_path(Path(value))
+    return value
+
+
 @app.callback()
 def main(
     version_flag: bool = typer.Option(
@@ -35,6 +45,14 @@ def main(
         callback=version_callback,
         is_eager=True,
         help="Show version and exit.",
+    ),
+    config_file: str | None = typer.Option(
+        None,
+        "--config",
+        callback=_config_path_callback,
+        is_eager=True,
+        help="Path to an explicit config.toml. Defaults to "
+             "$XDG_CONFIG_HOME/arkhai/config.toml.",
     ),
 ) -> None:
     """market — buyer-side CLI for Arkhai market operations.

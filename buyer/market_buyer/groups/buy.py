@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Optional
 
 import typer
@@ -31,7 +30,7 @@ from ..buy_orchestrator import (
     BuyConstraints,
     run_buy,
 )
-from ..common import read_env_value, resolve_config_value
+from ..common import resolve_config_value
 from ..run_log import RunLog
 
 
@@ -50,7 +49,7 @@ def register(app: typer.Typer) -> None:
         ),
         registry_url: Optional[str] = typer.Option(
             None, "--registry-url",
-            help="Registry base URL. Default: INDEXER_URL env / env file.",
+            help="Registry base URL (default: registry.url from config.toml).",
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
@@ -64,12 +63,12 @@ def register(app: typer.Typer) -> None:
         chain_name: Optional[str] = typer.Option(
             None, "--chain-name",
             help="Chain name for alkahest address resolution "
-                 "(env: CHAIN_NAME).",
+                 "(default: chain.name from config.toml).",
         ),
         alkahest_addr_config: Optional[str] = typer.Option(
             None, "--alkahest-addr-config",
             help="Path to alkahest address config JSON "
-                 "(env: ALKAHEST_ADDRESS_CONFIG_PATH).",
+                 "(default: chain.alkahest_address_config_path).",
         ),
         expiration_seconds: int = typer.Option(
             3600, "--expiration",
@@ -92,26 +91,21 @@ def register(app: typer.Typer) -> None:
             600.0, "--settlement-timeout",
             help="Max seconds to wait for provisioning before giving up.",
         ),
-        env: Optional[str] = typer.Option(
-            None, "--env", "-e",
-            help="Env file for AGENT_WALLET_ADDRESS, AGENT_PRIV_KEY, "
-                 "CHAIN_RPC_URL, INDEXER_URL, CHAIN_NAME, etc.",
-        ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
-            help="Override buyer wallet (default: AGENT_WALLET_ADDRESS).",
+            help="Override buyer wallet (default: wallet.address from config.toml).",
         ),
         buyer_private_key: Optional[str] = typer.Option(
             None, "--buyer-priv-key",
-            help="Override buyer private key (default: AGENT_PRIV_KEY).",
+            help="Override buyer private key (default: wallet.private_key).",
         ),
         ssh_public_key: Optional[str] = typer.Option(
             None, "--ssh-public-key",
-            help="SSH public key for provisioning (default: SSH_PUBLIC_KEY env).",
+            help="SSH public key for provisioning (default: wallet.ssh_public_key).",
         ),
         rpc_url: Optional[str] = typer.Option(
             None, "--rpc-url",
-            help="Chain RPC URL (default: CHAIN_RPC_URL env).",
+            help="Chain RPC URL (default: chain.rpc_url).",
         ),
     ) -> None:
         """Run a buy end-to-end as a pure HTTP/web3 client.
@@ -121,38 +115,29 @@ def register(app: typer.Typer) -> None:
         on-chain call.
         """
         console = Console()
-        env_path = Path(env) if env else None
 
-        # Resolution hierarchy (see common.resolve_config_value):
-        #   CLI flag > --env file > user config.toml > default
+        # Resolution: CLI flag > config.toml > default.
         addr = resolve_config_value(
-            override=buyer_address, env_file=env_path,
-            env_name="AGENT_WALLET_ADDRESS", toml_path="wallet.address",
+            override=buyer_address, toml_path="wallet.address",
         )
         pk = resolve_config_value(
-            override=buyer_private_key, env_file=env_path,
-            env_name="AGENT_PRIV_KEY", toml_path="wallet.private_key",
+            override=buyer_private_key, toml_path="wallet.private_key",
         )
         ssh = resolve_config_value(
-            override=ssh_public_key, env_file=env_path,
-            env_name="SSH_PUBLIC_KEY", toml_path="wallet.ssh_public_key",
+            override=ssh_public_key, toml_path="wallet.ssh_public_key",
         )
         reg = resolve_config_value(
-            override=registry_url, env_file=env_path,
-            env_name="INDEXER_URL", toml_path="registry.url",
+            override=registry_url, toml_path="registry.url",
         )
         rpc = resolve_config_value(
-            override=rpc_url, env_file=env_path,
-            env_name="CHAIN_RPC_URL", toml_path="chain.rpc_url",
+            override=rpc_url, toml_path="chain.rpc_url",
         )
         chain = resolve_config_value(
-            override=chain_name, env_file=env_path,
-            env_name="CHAIN_NAME", toml_path="chain.name",
+            override=chain_name, toml_path="chain.name",
             default="ethereum_sepolia",
         )
         addr_cfg = resolve_config_value(
-            override=alkahest_addr_config, env_file=env_path,
-            env_name="ALKAHEST_ADDRESS_CONFIG_PATH",
+            override=alkahest_addr_config,
             toml_path="chain.alkahest_address_config_path",
         )
 
