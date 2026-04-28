@@ -54,17 +54,17 @@ def setup_file_logging(log_file_path: str | None = None, log_level: str = "INFO"
         
         logging.info(f"Logging configured for Cloud Run: stdout/stderr (captured by Cloud Logging), level={log_level}")
     else:
-        # Local development: Use file-based logging
-        # Default log file location
+        # Local development: Use file-based logging.
+        # Default log file location derived from the typed config's
+        # validated agent_id; falls back to DEFAULT_AGENT_ID if the
+        # config helper itself raises (no env-var consultation).
         if log_file_path is None:
-            # Use agent_id from config helper for consistency
             try:
-                from .config import get_agent_id
+                from .config import DEFAULT_AGENT_ID, get_agent_id
                 agent_id = get_agent_id()
             except (ImportError, ValueError):
-                # Fallback if config not available or validation fails
-                agent_id = os.getenv("AGENT_ID", "root_agent")
-            # Sanitize agent_id for filename (remove invalid chars, but should already be valid)
+                agent_id = "root_agent"
+            # Sanitize agent_id for filename (remove invalid chars, but should already be valid).
             safe_agent_id = "".join(c if c.isalnum() or c == '_' else '_' for c in agent_id)
             log_file_path = f"{safe_agent_id}.log"
         

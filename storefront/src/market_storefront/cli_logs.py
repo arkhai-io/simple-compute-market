@@ -14,7 +14,6 @@ by the storefront runtime via market_storefront.utils.stage_log).
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from pathlib import Path
 from typing import Optional
@@ -32,7 +31,8 @@ console = Console()
 
 
 def _resolve_db_path(db: str | None, env: str | None) -> str | None:
-    """Return the SQLite DB path from explicit arg, env file, or env var."""
+    """Return the SQLite DB path from explicit ``--db`` or the explicit
+    ``--env`` file. Process env is not consulted."""
     if db:
         return db
     env_path = Path(env) if env else DEFAULT_AGENT_ENV
@@ -42,9 +42,6 @@ def _resolve_db_path(db: str | None, env: str | None) -> str | None:
         resolved = str(container_db_to_host(db_path_from_env)) if agent_mode == "container" else db_path_from_env
         if Path(resolved).exists():
             return resolved
-    from_env = os.getenv("AGENT_DB_PATH")
-    if from_env and Path(from_env).exists():
-        return from_env
     return None
 
 

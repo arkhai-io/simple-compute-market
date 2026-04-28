@@ -115,7 +115,7 @@ def order_list(
         None,
         "--registry-url",
         "-r",
-        help="Registry indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+        help="Registry indexer base URL (config.toml: registry.url).",
     ),
     order_id: str | None = typer.Option(
         None,
@@ -138,8 +138,7 @@ def order_list(
     """List open orders from the registry indexer."""
     base_url = (
         registry_url
-        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
-        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
+        or resolve_config_value(toml_path="registry.url")
         or "http://localhost:8080"
     )
     base_url = _normalize_registry_url(base_url)
@@ -199,14 +198,13 @@ def order_show(
         None,
         "--registry-url",
         "-r",
-        help="Registry indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+        help="Registry indexer base URL (config.toml: registry.url).",
     ),
 ) -> None:
     """Show a single order by ID, fetched from the registry indexer."""
     base_url = (
         registry_url
-        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
-        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
+        or resolve_config_value(toml_path="registry.url")
         or "http://localhost:8080"
     )
     base_url = _normalize_registry_url(base_url)

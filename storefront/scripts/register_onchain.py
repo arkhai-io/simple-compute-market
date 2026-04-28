@@ -152,30 +152,39 @@ async def main():
     """Register agent on-chain and output the agent ID."""
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env-file', default='.env', help='Path to .env file')
-    parser.add_argument('--no-update-env', action='store_true', help='Skip automatic .env file update (useful for CI/CD)')
+    parser.add_argument(
+        '--env-file', default='.env',
+        help='Path to .env file the script writes resolved IP / agent ID back into.',
+    )
+    parser.add_argument(
+        '--no-update-env', action='store_true',
+        help='Skip automatic .env file update (useful for CI/CD).',
+    )
+    parser.add_argument(
+        '--chain-id', type=int, default=1337,
+        help='Numeric chain ID for canonical-id construction (default: 1337).',
+    )
     args, _ = parser.parse_known_args()
-    
-    # Load environment variables from .env file if available
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(args.env_file)
-    except ImportError:
-        # dotenv not available, rely on environment variables from Makefile or shell
-        pass
 
-    # Path to the env file we will read/update
+    # Read inputs from the typed config (TOML). The script no longer
+    # reads os.environ; values come from $XDG_CONFIG_HOME/arkhai/config.toml.
+    from market_storefront.utils.config import CONFIG
+
+    # The env-file path is still used for the script's *outputs* —
+    # ZEROTIER_IP, BASE_URL_OVERRIDE, ONCHAIN_AGENT_ID are written back
+    # into the dev .env file consumed by docker-compose. (Replacing the
+    # output channel with TOML writes is part of the deployment-swap
+    # step; this script intentionally keeps the .env writes for now.)
     env_file = Path(args.env_file)
 
-    # Read config for display
-    base_url_override_env = os.getenv("BASE_URL_OVERRIDE")
-    zerotier_network = os.getenv("ZEROTIER_NETWORK")
-    port = int(os.getenv("PORT", "8000"))  # Get port from env or default to 8000
-    chain_id = int(os.getenv("CHAIN_ID", "1337"))
-    identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
-    agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
-    chain_rpc_url = os.getenv("CHAIN_RPC_URL")
-    onchain_agent_id = os.getenv("ONCHAIN_AGENT_ID")
+    base_url_override_env = CONFIG.base_url_override_raw
+    zerotier_network = CONFIG.zerotier_network
+    port = CONFIG.port
+    chain_id = args.chain_id
+    identity_registry_address = CONFIG.identity_registry_address
+    agent_wallet_address = CONFIG.agent_wallet_address
+    chain_rpc_url = CONFIG.chain_rpc_url
+    onchain_agent_id = CONFIG.onchain_agent_id
 
     # Determine final base URL, possibly using ZeroTier
     use_zerotier = bool(zerotier_network)
@@ -270,22 +279,18 @@ async def main():
     print("=" * 70)
     print()
     
-    # Register on-chain.
-    # NOTE: this script still sources its inputs from env vars; the
-    # migration to TOML-only happens in a follow-up step. The change
-    # here is just to call the new typed-config entry point now that
-    # register_onchain_from_env is gone.
+    # Register on-chain. All inputs come from the typed config above.
     print("Registering agent on-chain...")
-    agent_priv_key = os.getenv("AGENT_PRIV_KEY")
-    agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
+    agent_priv_key = CONFIG.agent_priv_key
+    agent_name = CONFIG.agent_name or CONFIG.agent_id or "root_agent"
     if not all([agent_priv_key, chain_rpc_url, identity_registry_address, agent_wallet_address]):
         missing = [k for k, v in {
-            "AGENT_PRIV_KEY": agent_priv_key,
-            "CHAIN_RPC_URL": chain_rpc_url,
-            "IDENTITY_REGISTRY_ADDRESS": identity_registry_address,
-            "AGENT_WALLET_ADDRESS": agent_wallet_address,
+            "wallet.private_key": agent_priv_key,
+            "chain.rpc_url": chain_rpc_url,
+            "registry.identity_registry_address": identity_registry_address,
+            "wallet.address": agent_wallet_address,
         }.items() if not v]
-        print(f"❌ Missing required env vars: {', '.join(missing)}")
+        print(f"❌ Missing required config keys: {', '.join(missing)}")
         return 1
     try:
         result = await register_onchain_from_config(RegisterOnchainConfig(

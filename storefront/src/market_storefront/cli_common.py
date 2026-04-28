@@ -105,12 +105,14 @@ def resolve_agent_url(
     """Resolve the URL the CLI should dial to reach the storefront.
 
     Precedence:
-      1. Explicit --agent-url flag.
-      2. AGENT_MODE=container → http://localhost:{PORT} (env-file PORT,
-         or default_port).
-      3. Env-file BASE_URL_OVERRIDE (host mode).
-      4. Process-env AGENT_URL / BASE_URL_OVERRIDE.
-      5. http://localhost:{default_port}.
+      1. Explicit ``--agent-url`` flag.
+      2. ``AGENT_MODE=container`` (in the explicit ``--env`` file) →
+         ``http://localhost:{PORT}`` from the same env file.
+      3. Env-file ``BASE_URL_OVERRIDE`` (host mode).
+      4. ``http://localhost:{default_port}``.
+
+    Process env vars are not consulted — config flows through CLI args
+    and (for dev/test) the explicit ``--env`` file.
     """
     if agent_url:
         return agent_url
@@ -120,16 +122,12 @@ def resolve_agent_url(
     if agent_mode == "container":
         return f"http://localhost:{port}"
     env_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    return (
-        env_url
-        or os.getenv("AGENT_URL")
-        or os.getenv("BASE_URL_OVERRIDE")
-        or f"http://localhost:{default_port}"
-    )
+    return env_url or f"http://localhost:{default_port}"
 
 
 def _resolve_db_path(db: str | None, env: str | None) -> str | None:
-    """Return the SQLite DB path from explicit arg, env file, or env var."""
+    """Return the SQLite DB path from explicit ``--db`` or the explicit
+    ``--env`` file. Process env is not consulted."""
     if db:
         return db
     env_path = Path(env) if env else DEFAULT_AGENT_ENV
@@ -143,9 +141,6 @@ def _resolve_db_path(db: str | None, env: str | None) -> str | None:
         )
         if Path(resolved).exists():
             return resolved
-    from_env = os.getenv("AGENT_DB_PATH")
-    if from_env and Path(from_env).exists():
-        return from_env
     return None
 
 

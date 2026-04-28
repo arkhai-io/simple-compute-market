@@ -40,35 +40,32 @@ def read_env_value(env_file: str | Path | None, key: str, default: str = "") -> 
 
 
 def resolve_config_value(
-    env_name: str,
     *,
     override: str | None = None,
     env_file: str | Path | None = None,
+    env_name: str | None = None,
     toml_path: str | None = None,
     default: str = "",
 ) -> str:
-    """One-stop lookup for a scalar config value across all our sources.
+    """One-stop lookup for a scalar config value across our sources.
 
     Precedence:
-      1. Explicit `override` (CLI flag)
-      2. `env_file` (e.g. storefront/.env passed via --env)
-      3. Shell `env_name` environment variable
-      4. Dotted `toml_path` key in the user config.toml
-      5. `default`
+      1. Explicit ``override`` (CLI flag)
+      2. ``env_file`` value (only when the user explicitly passed ``--env``;
+         these files are dev-time helpers, not the runtime config surface)
+      3. Dotted ``toml_path`` key in the user config.toml
+      4. ``default``
 
-    Centralized so every CLI command gets the same hierarchy without
-    duplicating a _resolve block. Keeps the existing --env file flow
-    working while adding the TOML-config fallback beneath it.
+    Process env vars are intentionally not consulted — config flows
+    through TOML or explicit CLI args. ``env_name`` is kept (optional)
+    only as the key lookup name for the explicit ``env_file`` step.
     """
     if override:
         return override
-    if env_file:
+    if env_file and env_name:
         v = read_env_value(env_file, env_name)
         if v:
             return v
-    v = os.environ.get(env_name)
-    if v:
-        return v
     if toml_path:
         from service.config_loader import get_dotted, load_user_config
         v = get_dotted(load_user_config(), toml_path)
@@ -103,14 +100,17 @@ def resolve_agent_url(
     """Resolve the URL the CLI should dial to reach the agent.
 
     Precedence:
-      1. Explicit --agent-url flag (passed in as `agent_url`).
-      2. If the env file declares AGENT_MODE=container: `http://localhost:{PORT}`.
-         BASE_URL_OVERRIDE in container env files points at the docker-internal
-         hostname (e.g. `http://buy_agent:8000/`), which is unreachable from
-         the host — never use it as a CLI target.
-      3. Env-file BASE_URL_OVERRIDE (host mode).
-      4. Process-env AGENT_URL / BASE_URL_OVERRIDE.
-      5. `http://localhost:{default_port}`.
+      1. Explicit ``--agent-url`` flag (passed as ``agent_url``).
+      2. If the env file declares ``AGENT_MODE=container``:
+         ``http://localhost:{PORT}``. ``BASE_URL_OVERRIDE`` in container
+         env files points at the docker-internal hostname (e.g.
+         ``http://buy_agent:8000/``), which is unreachable from the
+         host — never use it as a CLI target.
+      3. Env-file ``BASE_URL_OVERRIDE`` (host mode).
+      4. ``http://localhost:{default_port}``.
+
+    Process env vars are not consulted — config flows through CLI args
+    or TOML, not ambient env.
     """
     if agent_url:
         return agent_url
@@ -120,12 +120,7 @@ def resolve_agent_url(
     if agent_mode == "container":
         return f"http://localhost:{port}"
     env_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    return (
-        env_url
-        or os.getenv("AGENT_URL")
-        or os.getenv("BASE_URL_OVERRIDE")
-        or f"http://localhost:{default_port}"
-    )
+    return env_url or f"http://localhost:{default_port}"
 
 
 def run_step(

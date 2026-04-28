@@ -137,6 +137,7 @@ class Config:
     log_level: str
     token_registry_path: str
     ssh_public_key: str
+    zerotier_network: str | None
     # Indexer/Registry settings
     indexer_url: str
     identity_registry_address: str | None
@@ -231,6 +232,8 @@ def load_config() -> Config:
         ssh_public_key=str(_resolve(
             "wallet.ssh_public_key", _DEFAULT_SSH_PUBLIC_KEY,
         )),
+
+        zerotier_network=_resolve("seller.zerotier_network", None),
 
         # Shared with buyer via [registry].
         indexer_url=str(_resolve("registry.url", "http://localhost:8080")),

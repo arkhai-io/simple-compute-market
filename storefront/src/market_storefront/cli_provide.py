@@ -20,7 +20,6 @@ Assumes the seller agent is already running (mirror of `market buy`).
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import subprocess
 import time
@@ -354,10 +353,7 @@ def register(app: typer.Typer) -> None:
         console = Console()
         env_path = Path(env) if env else None
         base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
+        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -424,10 +420,7 @@ def register(app: typer.Typer) -> None:
         console = Console()
         env_path = Path(env) if env else None
         base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
+        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
@@ -516,15 +509,8 @@ def register(app: typer.Typer) -> None:
         env_path = Path(env) if env else None
 
         base_url = resolve_agent_url(agent_url, env_path, default_port=8001)
-        private_key = (
-            (read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None)
-            or os.getenv("AGENT_PRIV_KEY")
-        )
-        wallet_address = (
-            (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None)
-            or os.getenv("AGENT_WALLET_ADDRESS")
-            or ""
-        )
+        private_key = read_env_value(env_path, "AGENT_PRIV_KEY") if env_path else None
+        wallet_address = (read_env_value(env_path, "AGENT_WALLET_ADDRESS") if env_path else None) or ""
         db_path = _resolve_db_path(db, env)
         if not db_path:
             typer.secho(

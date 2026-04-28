@@ -343,8 +343,8 @@ class TraderAgent:
         self.resource_portfolio: dict = {}
         self._last_action_outcomes: dict[str, dict] = {}
 
-        # Log ZeroTier IP if available for the configured network
-        zerotier_network = os.getenv("ZEROTIER_NETWORK")
+        # Log ZeroTier IP if available for the configured network.
+        zerotier_network = CONFIG.zerotier_network
         if zerotier_network:
             zerotier_ip = get_zerotier_ip(zerotier_network)
             if zerotier_ip:

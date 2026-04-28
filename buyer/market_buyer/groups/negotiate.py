@@ -74,17 +74,17 @@ def register(app: typer.Typer) -> None:
 
         # Same hierarchy as `market buy` — see common.resolve_config_value.
         addr = resolve_config_value(
-            "AGENT_WALLET_ADDRESS", override=buyer_address,
-            env_file=env_path, toml_path="wallet.address",
+            override=buyer_address, env_file=env_path,
+            env_name="AGENT_WALLET_ADDRESS", toml_path="wallet.address",
         )
         pk = resolve_config_value(
-            "AGENT_PRIV_KEY", override=buyer_private_key,
-            env_file=env_path, toml_path="wallet.private_key",
+            override=buyer_private_key, env_file=env_path,
+            env_name="AGENT_PRIV_KEY", toml_path="wallet.private_key",
         )
         if not addr or not pk:
             typer.secho(
                 "Missing buyer wallet config. Pass --buyer-address + --buyer-priv-key "
-                "or set AGENT_WALLET_ADDRESS + AGENT_PRIV_KEY.",
+                "or set wallet.address + wallet.private_key in config.toml.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
