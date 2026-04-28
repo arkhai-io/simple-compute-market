@@ -48,6 +48,24 @@ spec:
                 echo "Registry not ready, retrying in 5s..."; sleep 5
               done
               echo "Registry ready."
+        {{- if $agent.autoRegister }}
+        - name: register-onchain
+          image: {{ include "storefront.image" $ }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - python
+            - storefront/scripts/register_onchain.py
+            - --no-update-env
+            - --chain-id
+            - {{ $.Values.global.rpc.chainId | quote }}
+          env:
+            - name: XDG_CONFIG_HOME
+              value: /etc
+          volumeMounts:
+            - name: arkhai-config
+              mountPath: /etc/arkhai
+              readOnly: true
+        {{- end }}
       containers:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
@@ -62,19 +80,13 @@ spec:
                 - NET_ADMIN
                 - SYS_MODULE
           env:
-            # Point the typed config loader at the mounted TOML.
-            # service.config_loader.user_config_dir() resolves to
-            # $XDG_CONFIG_HOME/arkhai, so this maps to /etc/arkhai/config.toml.
+            # Sole env var: tell the typed config loader where to find
+            # the mounted TOML. service.config_loader.user_config_dir()
+            # resolves to $XDG_CONFIG_HOME/arkhai, so this maps to
+            # /etc/arkhai/config.toml. Everything else (including
+            # secrets) lives inside that file.
             - name: XDG_CONFIG_HOME
               value: /etc
-            {{- if $agent.config.geminiApiKey }}
-            - name: GEMINI_API_KEY
-              value: {{ $agent.config.geminiApiKey | quote }}
-            {{- end }}
-            {{- if $agent.config.autoRegister }}
-            - name: AUTO_REGISTER
-              value: "true"
-            {{- end }}
           volumeMounts:
             - name: tun-device
               mountPath: /dev/net/tun

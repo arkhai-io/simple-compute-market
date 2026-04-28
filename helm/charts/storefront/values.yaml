@@ -31,28 +31,33 @@ agents:
       walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
     # config.* lands in the rendered config.toml. Keys map 1:1 to the
     # typed Config dataclass in market_storefront.utils.config.
+    # Whether to run register_onchain.py as an init container before
+    # uvicorn starts. Set false to skip (e.g. agent ID is provisioned
+    # out of band).
+    autoRegister: true
     config:
       seller:
         agentId: bob
-        baseUrl: "http://market-agent-sell:8001/"
+        # base_url, provisioning.serviceUrl: composed by the chart from
+        # the agent's Service DNS / global.provisioning.* — explicit
+        # overrides go here only when the cluster topology demands
+        # something different.
         dbPath: "./agent.db"
         logFilePath: "./logs/bob.log"
         sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
         enableEventQueue: false
         provisioning:
-          serviceUrl: "http://provisioning:8081"
           mode: "mock"
         negotiation:
           policyMode: "rl"
+        # Runtime credentials the agent reads. Empty = absent in TOML.
+        integrations:
+          geminiApiKey: ""
       chain:
         name: "anvil"
-        alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-      tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-      # Whether to run register_onchain.py before the server starts.
-      autoRegister: true
-      # Optional integration secret (kept here, not split into the
-      # secretRef block, because it's not a wallet key).
-      geminiApiKey: ""
+        # alkahestAddressConfigPath + tokenRegistryPath: paths inside
+        # the container image; agent has working defaults. Override
+        # here only when mounting external JSON files.
 
 # Number of replicas per agent.
 replicaCount: 1

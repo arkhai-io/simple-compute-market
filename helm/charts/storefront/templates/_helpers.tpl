@@ -73,6 +73,24 @@ Compose the registry URL from global.registry.host and global.registry.port.
 {{- end }}
 
 {{/*
+Compose the provisioning service URL from global.provisioning.{host,port}.
+*/}}
+{{- define "provisioning.url" -}}
+{{- printf "http://%s:%d" .Values.global.provisioning.host (int .Values.global.provisioning.port) -}}
+{{- end }}
+
+{{/*
+Compose the agent's externally-advertised base URL from the agent's
+Service DNS + port. This is what the agent writes to its on-chain
+ERC-8004 registration file (and what other agents dial to reach it).
+Argument: dict with `root` and `agent`.
+*/}}
+{{- define "storefront.agentBaseUrl" -}}
+{{- $svc := include "storefront.agentFullname" . -}}
+{{- printf "http://%s:%d/" $svc (int .agent.port) -}}
+{{- end }}
+
+{{/*
 Per-agent fullname: {fullname}-{agent.name}.
 Used as the Deployment / Service / Secret object name.
 Argument: dict with `root` (the chart root) and `agent` (one entry from agents:).
@@ -99,8 +117,14 @@ single string the Secret template embeds under `config.toml`.
 
 Argument: dict with `root` (chart root, for global access) and `agent`.
 
-Keys map directly to market_storefront.utils.config.Config field names
-(see service.config_loader and storefront/utils/config.py).
+Keys map directly to market_storefront.utils.config.Config field names.
+Topology-derived values (base_url, registry.url, chain.rpc_url,
+seller.provisioning.service_url) are composed from the chart's view of
+the cluster — never authored as hardcoded strings in values.yaml.
+
+Anything that isn't here (image, replicas, probes, Service objects,
+resources, autoRegister) is k8s-only and never ends up in the agent's
+config.toml.
 */}}
 {{- define "storefront.agentConfigToml" -}}
 {{- $root := .root -}}
@@ -110,6 +134,7 @@ Keys map directly to market_storefront.utils.config.Config field names
 {{- $chain := $cfg.chain | default dict -}}
 {{- $prov := $seller.provisioning | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
+{{- $integ := $seller.integrations | default dict -}}
 # Rendered by the storefront helm chart. Source of truth lives in
 # helm/charts/storefront/values.yaml under agents:.
 
@@ -132,7 +157,7 @@ identity_registry_address = {{ $root.Values.global.registry.identity_address | q
 [seller]
 agent_id            = {{ $seller.agentId | quote }}
 port                = {{ $agent.port }}
-base_url            = {{ $seller.baseUrl | quote }}
+base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
 db_path             = {{ $seller.dbPath | quote }}
 log_file_path       = {{ $seller.logFilePath | quote }}
 {{- if $cfg.tokenRegistryPath }}
@@ -141,11 +166,16 @@ token_registry_path = {{ $cfg.tokenRegistryPath | quote }}
 enable_event_queue  = {{ $seller.enableEventQueue | default false }}
 
 [seller.provisioning]
-service_url = {{ $prov.serviceUrl | default "http://localhost:8085" | quote }}
+service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
 {{- if $prov.mode }}
 mode        = {{ $prov.mode | quote }}
 {{- end }}
 
 [seller.negotiation]
 policy_mode = {{ $neg.policyMode | default "" | quote }}
+{{- if or $integ.geminiApiKey $integ.gemini_api_key }}
+
+[seller.integrations]
+gemini_api_key = {{ default $integ.geminiApiKey $integ.gemini_api_key | quote }}
+{{- end }}
 {{- end }}

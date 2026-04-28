@@ -27,6 +27,13 @@ global:
     validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
     owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
 
+  # Provisioning service coordinates. Surfaced in globals so the
+  # storefront subchart can compose seller.provisioning.service_url
+  # without hardcoding a string.
+  provisioning:
+    host: "arkhai-node-operator-provisioning"
+    port: 8081
+
 # ---------------------------------------------------------------------------
 # test-env subchart
 # ---------------------------------------------------------------------------
@@ -96,25 +103,22 @@ storefront:
         secretName: ""
         privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
         walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      autoRegister: true
       config:
         seller:
           agentId: bob
-          baseUrl: "http://market-agent-sell:8001/"
           dbPath: "./agent.db"
           logFilePath: "./logs/bob.log"
           sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
           enableEventQueue: false
           provisioning:
-            serviceUrl: "http://provisioning:8081"
             mode: "mock"
           negotiation:
             policyMode: "rl"
+          integrations:
+            geminiApiKey: ""
         chain:
           name: "anvil"
-          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
-        tokenRegistryPath: "/app/src/market_storefront/data/token_registry_docker_compose.json"
-        autoRegister: true
-        geminiApiKey: ""
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
