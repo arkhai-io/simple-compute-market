@@ -16,7 +16,6 @@ dependencies = [
   "alkahest-py",
   "market-service",
   "market-policy",
-  "arkhai-storefront-client>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -32,12 +31,9 @@ market = "market_buyer.cli:app"
 # buyer orchestrator (buy-sync).
 # market-policy: per-round negotiation decision logic, shared with the
 # storefront so both sides drive negotiation through one engine.
-# arkhai-storefront-client: typed HTTP SDK for /orders/* + /alerts/*
-# endpoints on a storefront. Used by `market order create/close/discover/match`.
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
 market-policy = { path = "../policy", editable = true }
-arkhai-storefront-client = { path = "../storefront-client", editable = true }
 
 [build-system]
 requires = ["hatchling"]

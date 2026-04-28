@@ -1,454 +1,39 @@
+"""`market order` — read-only views over the registry indexer.
+
+Pure buyers don't run a storefront, so this module only covers
+operations that hit the operator-run registry indexer:
+
+    market order list           # browse open orders
+    market order show <id>      # inspect a single order
+
+Order publication, closing, refunds, claims, and discovery used to
+live here too, but those endpoints live on a storefront and only made
+sense in the symmetric era when buyers also ran agents. They moved
+out with the buyer-as-pure-client refactor.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
-import os
 import json
-import textwrap
+import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.error
 
 import typer
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
 from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
-from storefront_client import StorefrontClientError, SyncStorefrontClient
+from ..common import resolve_config_value
 
-from ..common import REPO_ROOT, container_db_to_host, read_env_value, resolve_config_value
 
 order_app = typer.Typer(no_args_is_help=True)
 
 
-@order_app.command("create")
-def order_create(
-    offer: str = typer.Option(
-        ...,
-        "--offer",
-        "-o",
-        help="Offer resource JSON. Example: '{\"gpu_model\":\"H200\",\"quantity\":1,\"sla\":99.9,\"region\":\"California, US\"}'",
-    ),
-    demand: str = typer.Option(
-        ...,
-        "--demand",
-        "-d",
-        help="Demand resource JSON. Example: '{\"token\":\"MOCK\",\"amount\":9.0}'",
-    ),
-    agent_url: str | None = typer.Option(
-        None,
-        "--agent-url",
-        "-a",
-        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
-    ),
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file used to read BASE_URL_OVERRIDE.",
-    ),
-    duration_hours: int | None = typer.Option(
-        None,
-        "--duration-hours",
-        "-t",
-        help="Order duration in hours (default: 1).",
-    ),
-) -> None:
-    """Create a new order via the Agent endpoint."""
-    env_path = Path(env) if env else None
-    base_url = agent_url or resolve_config_value(
-        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
-    ) or resolve_config_value(
-        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
-    ) or "http://localhost:8000"
-    base_url = _normalize_registry_url(base_url)
-    duration = duration_hours if duration_hours is not None else 1
-    if duration < 1:
-        raise typer.BadParameter("duration-hours must be >= 1")
-
-    try:
-        offer_data = json.loads(offer)
-        demand_data = json.loads(demand)
-    except json.JSONDecodeError as exc:
-        raise typer.BadParameter(f"Invalid JSON: {exc}") from exc
-
-    if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
-        raise typer.BadParameter("Offer and demand must be JSON objects")
-
-    private_key = resolve_config_value(
-        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
-    ) or None
-    wallet_address = resolve_config_value(
-        "AGENT_WALLET_ADDRESS", env_file=env_path, toml_path="wallet.address",
-    )
-    with SyncStorefrontClient(base_url, private_key=private_key) as client:
-        try:
-            resp = client.create_order(
-                agent_wallet_address=wallet_address,
-                offer=offer_data,
-                demand=demand_data,
-                duration_hours=duration,
-            )
-        except StorefrontClientError as exc:
-            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-
-    console = Console()
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="bold", no_wrap=True)
-    table.add_column()
-    table.add_row("Status", str(resp.status or "-"))
-    if resp.event_id is not None:
-        table.add_row("Event ID", str(resp.event_id))
-    if resp.order_id is not None:
-        table.add_row("Order ID", str(resp.order_id))
-    if resp.root_agent_response is not None:
-        table.add_row("Agent", str(resp.root_agent_response))
-    order_request = resp.order_request
-    if isinstance(order_request, dict):
-        offer_req = order_request.get("offer")
-        demand_req = order_request.get("demand")
-        if offer_req is not None:
-            table.add_row("Offer", _format_resource(offer_req))
-        if demand_req is not None:
-            table.add_row("Demand", _format_resource(demand_req))
-        if "duration_hours" in order_request:
-            table.add_row("Duration (h)", str(order_request.get("duration_hours")))
-
-    console.print(Panel(table, title="Order Create", border_style="green"))
-
-
-@order_app.command("close")
-def order_close(
-    order_id: str = typer.Argument(
-        ...,
-        help="Order ID to close.",
-    ),
-    agent_url: str | None = typer.Option(
-        None,
-        "--agent-url",
-        "-a",
-        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
-    ),
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
-    ),
-) -> None:
-    """Close an order via the Agent endpoint."""
-    env_path = Path(env) if env else None
-    base_url = agent_url or resolve_config_value(
-        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
-    ) or resolve_config_value(
-        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
-    ) or "http://localhost:8000"
-    base_url = _normalize_registry_url(base_url)
-    if not order_id.strip():
-        raise typer.BadParameter("order-id must be a non-empty string")
-
-    private_key = resolve_config_value(
-        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
-    ) or None
-    with SyncStorefrontClient(base_url, private_key=private_key) as client:
-        try:
-            resp = client.close_order(order_id)
-        except StorefrontClientError as exc:
-            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-
-    console = Console()
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="bold", no_wrap=True)
-    table.add_column()
-    table.add_row("Status", str(resp.status or "-"))
-    table.add_row("Order ID", order_id)
-    if resp.event_id is not None:
-        table.add_row("Event ID", str(resp.event_id))
-    if resp.root_agent_response is not None:
-        table.add_row("Agent", str(resp.root_agent_response))
-
-    console.print(Panel(table, title="Order Close", border_style="green"))
-
-
-@order_app.command("discover")
-def order_discover(
-    order_id: str = typer.Argument(
-        ...,
-        help="Our local order ID whose matches to list.",
-    ),
-    include_active: bool = typer.Option(
-        False,
-        "--include-active",
-        help="Include matches already in active negotiations with us. "
-             "Default is to filter them out.",
-    ),
-    agent_url: str | None = typer.Option(
-        None, "--agent-url", "-a",
-        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
-    ),
-    env: str | None = typer.Option(
-        None, "--env", "-e",
-        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
-    ),
-) -> None:
-    """List registry orders that match this order — pure query, no side effects.
-
-    Runs the discovery step without initiating any negotiations. Use as
-    the first step of a sequential buy/sell flow, or ad-hoc to inspect
-    what a given order would match against today.
-    """
-    env_path = Path(env) if env else None
-    base_url = agent_url or resolve_config_value(
-        "BASE_URL_OVERRIDE", env_file=env_path, toml_path="seller.base_url",
-    ) or resolve_config_value(
-        "AGENT_URL", env_file=env_path, toml_path="seller.base_url",
-    ) or "http://localhost:8000"
-    base_url = _normalize_registry_url(base_url)
-    private_key = resolve_config_value(
-        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
-    ) or None
-
-    with SyncStorefrontClient(base_url, private_key=private_key) as client:
-        try:
-            resp = client.discover_orders(order_id=order_id, include_active=include_active)
-        except StorefrontClientError as exc:
-            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-
-    console = Console()
-    matches = resp.matches
-    header = Table.grid(padding=(0, 2))
-    header.add_column(style="bold")
-    header.add_column()
-    header.add_row("Order", order_id)
-    header.add_row("Agent", base_url)
-    header.add_row("Matches", str(resp.match_count if resp.match_count is not None else len(matches)))
-    console.print(Panel(header, title="market order discover", border_style="cyan"))
-
-    if not matches:
-        console.print("[dim]No matches.[/dim]")
-        return
-
-    table = Table(title="Matches", show_lines=False)
-    table.add_column("Their Order ID", overflow="fold")
-    table.add_column("Their Agent URL", overflow="fold")
-    for m in matches:
-        table.add_row(
-            str(m.their_order_id or "-"),
-            str(m.their_agent_url or "-"),
-        )
-    console.print(table)
-
-
-@order_app.command("history")
-def order_history(
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file (default: core/agent/.env).",
-    ),
-    db: str | None = typer.Option(
-        None,
-        "--db",
-        help="Explicit path to the agent SQLite DB.",
-    ),
-) -> None:
-    """Show order history from local SQLite."""
-    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    db_path = read_env_value(env_path, "AGENT_DB_PATH")
-    if not db_path:
-        typer.secho(
-            "Local DB not found. Pass --db <path> or --env <envfile> with AGENT_DB_PATH set.",
-            err=True,
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(code=1)
-    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
-    if agent_mode == "container":
-        # DB lives in a host-mounted volume; resolve container path to host path
-        resolved = container_db_to_host(db_path)
-    else:
-        resolved = Path(db_path)
-    if not resolved.exists():
-        typer.secho(f"No local order database found at {resolved}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-    try:
-        import sqlite3
-
-        conn = sqlite3.connect(resolved)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT order_id, status, created_at, updated_at,
-                       offer_resource, demand_resource, fulfillment_resource
-                FROM orders
-                ORDER BY created_at DESC
-                """
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-    except Exception as exc:
-        typer.secho(f"Failed to read local orders: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-
-    if not rows:
-        typer.echo("No local orders found.")
-        return
-
-    console = Console()
-    table = Table(title="Order History", box=box.SIMPLE_HEAVY, expand=True)
-    table.add_column("Order ID", style="bold", overflow="fold")
-    table.add_column("Status")
-    table.add_column("Offer")
-    table.add_column("Demand")
-    table.add_column("Fulfillment", overflow="fold")
-    table.add_column("Created", justify="right")
-    table.add_column("Updated", justify="right")
-
-    for row in rows:
-        (
-            order_id,
-            status,
-            created_at,
-            updated_at,
-            offer_resource,
-            demand_resource,
-            fulfillment_resource,
-        ) = row
-        offer_parsed = _parse_db_resource(offer_resource)
-        demand_parsed = _parse_db_resource(demand_resource)
-        fulfillment_parsed = _parse_db_resource(fulfillment_resource)
-
-        offer_display = _format_resource(offer_parsed) if offer_parsed is not None else "-"
-        demand_display = _format_resource(demand_parsed) if demand_parsed is not None else "-"
-        fulfillment_display = _format_resource_full(fulfillment_parsed)
-
-        table.add_row(
-            str(order_id or "-"),
-            str(status or "-"),
-            offer_display if "\n" in offer_display else _shorten(offer_display, 120),
-            demand_display if "\n" in demand_display else _shorten(demand_display, 120),
-            fulfillment_display,
-            _short_ts(created_at),
-            _short_ts(updated_at),
-        )
-
-    console.print(table)
-
-
-@order_app.command("match")
-def order_match(
-    order_id: str = typer.Argument(
-        ...,
-        help="Order ID to match (flip offer/demand).",
-    ),
-    registry_url: str = typer.Option(
-        None,
-        "--registry-url",
-        "-r",
-        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
-    ),
-    agent_url: str | None = typer.Option(
-        None,
-        "--agent-url",
-        "-a",
-        help="Agent base URL (env: AGENT_URL or BASE_URL_OVERRIDE).",
-    ),
-    duration_hours: int | None = typer.Option(
-        None,
-        "--duration-hours",
-        "-t",
-        help="Order duration in hours (default: from target order or 1).",
-    ),
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file used to read BASE_URL_OVERRIDE and AGENT_PRIV_KEY.",
-    ),
-) -> None:
-    """Match an existing order by flipping offer/demand and creating a new order."""
-    if not order_id.strip():
-        raise typer.BadParameter("order-id must be a non-empty string")
-
-    base_registry_url = (
-        registry_url
-        or resolve_config_value("INDEXER_URL", toml_path="registry.url")
-        or resolve_config_value("REGISTRY_URL", toml_path="registry.url")
-        or "http://localhost:8080"
-    )
-    base_registry_url = _normalize_registry_url(base_registry_url)
-    target_url = f"{base_registry_url}/orders/{order_id}"
-    target_payload = _fetch_json(target_url)
-    target_order = target_payload.get("order") if isinstance(target_payload, dict) and "order" in target_payload else target_payload
-    if not isinstance(target_order, dict):
-        raise typer.BadParameter("Registry response did not include an order object")
-
-    offer_resource = _normalize_registry_resource(target_order.get("demand_resource"))
-    demand_resource = _normalize_registry_resource(target_order.get("offer_resource"))
-    if not isinstance(offer_resource, dict) or not isinstance(demand_resource, dict):
-        raise typer.BadParameter("Target order is missing offer/demand resources")
-
-    duration = duration_hours if duration_hours is not None else target_order.get("duration_hours", 1)
-    if not isinstance(duration, int):
-        try:
-            duration = int(str(duration))
-        except (TypeError, ValueError):
-            raise typer.BadParameter("duration-hours must be an integer")
-    if duration < 1:
-        raise typer.BadParameter("duration-hours must be >= 1")
-
-    payload = {
-        "offer": offer_resource,
-        "demand": demand_resource,
-        "duration_hours": duration,
-    }
-
-    env_path = Path(env) if env else None
-    env_base_url = read_env_value(env_path, "BASE_URL_OVERRIDE") if env_path else None
-    base_agent_url = agent_url or env_base_url or os.getenv("AGENT_URL") or os.getenv("BASE_URL_OVERRIDE") or "http://localhost:8000"
-    base_agent_url = _normalize_registry_url(base_agent_url)
-    private_key = resolve_config_value(
-        "AGENT_PRIV_KEY", env_file=env_path, toml_path="wallet.private_key",
-    ) or None
-    # Note: pre-migration this code signed `create_order` with
-    # base_agent_url as the resource_id rather than wallet_address. The
-    # storefront's auth check expects wallet_address; this only worked
-    # against unauthenticated storefronts. Preserved here verbatim
-    # (passing the URL into the wallet_address slot) to keep the
-    # migration behavior-neutral. Fix as a follow-up.
-    with SyncStorefrontClient(base_agent_url, private_key=private_key) as client:
-        try:
-            resp = client.create_order(
-                agent_wallet_address=base_agent_url,
-                offer=offer_resource,
-                demand=demand_resource,
-                duration_hours=duration,
-            )
-        except StorefrontClientError as exc:
-            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-
-    console = Console()
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="bold", no_wrap=True)
-    table.add_column()
-    table.add_row("Status", str(resp.status or "-"))
-    if resp.event_id is not None:
-        table.add_row("Event ID", str(resp.event_id))
-    if resp.order_id is not None:
-        table.add_row("Order ID", str(resp.order_id))
-    if resp.root_agent_response is not None:
-        table.add_row("Agent", str(resp.root_agent_response))
-
-    console.print(Panel(table, title="Order Match", border_style="green"))
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
 
 
 def _normalize_registry_url(raw_url: str) -> str:
@@ -474,98 +59,38 @@ def _format_resource(resource: dict) -> str:
         lines = [f"{key}={resource[key]}" for key in ordered_keys if key in resource]
         extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
         lines.extend(f"{key}={resource[key]}" for key in extra_keys)
-        return "\n".join(lines) if lines else json.dumps(resource, separators=(",", ":"), sort_keys=True)
-
-    token_payload = resource.get("token")
-    is_token = resource.get("type") == "token" or isinstance(token_payload, dict) or "symbol" in resource
-    if is_token:
-        token_data = token_payload if isinstance(token_payload, dict) else resource
-        symbol = token_data.get("symbol")
-        decimals = token_data.get("decimals")
-        amount = resource.get("amount", token_data.get("amount"))
-        contract = token_data.get("contract_address")
+        return "\n".join(lines) if lines else "-"
+    if "token" in resource:
+        token = resource.get("token", {})
+        amount = resource.get("amount")
         lines = []
-        if symbol is not None:
-            lines.append(f"symbol={symbol}")
-        if decimals is not None:
-            lines.append(f"decimals={decimals}")
+        if isinstance(token, dict):
+            symbol = token.get("symbol")
+            contract = token.get("contract_address")
+            if symbol:
+                lines.append(f"symbol={symbol}")
+            if contract:
+                lines.append(f"contract_address={_short_contract_address(str(contract))}")
         if amount is not None:
             lines.append(f"amount={amount}")
-        if contract is not None:
-            lines.append(f"contract_address={_short_contract_address(str(contract))}")
-        return "\n".join(lines) if lines else json.dumps(resource, separators=(",", ":"), sort_keys=True)
-
-    parts: list[str] = []
-    for key in ("type", "region", "gpu_model", "sla", "symbol"):
-        if key in resource:
-            parts.append(f"{key}={resource[key]}")
-    if parts:
-        return ", ".join(parts)
+        return "\n".join(lines) if lines else "-"
     return json.dumps(resource, separators=(",", ":"), sort_keys=True)
 
 
 def _shorten(text: str, width: int = 36) -> str:
-    if not text:
-        return "-"
-    return textwrap.shorten(text, width=width, placeholder="…")
-
-
-def _normalize_registry_resource(resource: dict) -> dict:
-    """Convert registry token resource amounts to friendly units for create endpoint."""
-    if not isinstance(resource, dict):
-        return resource
-    token = resource.get("token")
-    amount = resource.get("amount")
-    if isinstance(token, dict) and "decimals" in token and amount is not None:
-        try:
-            decimals = int(token["decimals"])
-        except (TypeError, ValueError):
-            return resource
-        from decimal import Decimal, InvalidOperation
-
-        try:
-            amount_value = Decimal(str(amount))
-        except (InvalidOperation, ValueError, TypeError):
-            return resource
-        human_amount = amount_value / (Decimal(10) ** decimals)
-        normalized = dict(resource)
-        normalized["amount"] = str(human_amount.normalize())
-        return normalized
-    return resource
+    if len(text) <= width:
+        return text
+    return text[: width - 1] + "…"
 
 
 def _short_ts(value: str | None) -> str:
     if not value:
         return "-"
-    return value.replace("T", " ")[:19]
-
-
-
-def _parse_db_resource(value: str | None) -> dict | str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
-    return value
-
-
-def _format_resource_full(resource: dict | str | None) -> str:
-    if resource is None or resource == "":
-        return "-"
-    if isinstance(resource, str):
-        return resource
-    try:
-        return json.dumps(resource, separators=(",", ":"), sort_keys=True)
-    except Exception:
-        return str(resource)
+    return value.split(".")[0].replace("T", " ")
 
 
 def _fetch_json(url: str) -> dict:
-    """GET a JSON document — used for unauthenticated registry-indexer
-    queries that don't fit the storefront-client SDK surface."""
+    """GET a JSON document from the registry indexer."""
     try:
         request = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(request, timeout=10) as response:
@@ -575,8 +100,13 @@ def _fetch_json(url: str) -> dict:
         typer.secho(f"Registry error ({exc.code}): {detail}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
     except Exception as exc:
-        typer.secho(f"Failed to fetch orders: {exc}", err=True, fg=typer.colors.RED)
+        typer.secho(f"Failed to fetch from registry: {exc}", err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# market order list
+# ---------------------------------------------------------------------------
 
 
 @order_app.command("list")
@@ -585,7 +115,7 @@ def order_list(
         None,
         "--registry-url",
         "-r",
-        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
+        help="Registry indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
     ),
     order_id: str | None = typer.Option(
         None,
@@ -605,7 +135,7 @@ def order_list(
         help="Pagination offset.",
     ),
 ) -> None:
-    """List open orders from the Registry Indexer."""
+    """List open orders from the registry indexer."""
     base_url = (
         registry_url
         or resolve_config_value("INDEXER_URL", toml_path="registry.url")
@@ -657,6 +187,11 @@ def order_list(
     console.print(table)
 
 
+# ---------------------------------------------------------------------------
+# market order show
+# ---------------------------------------------------------------------------
+
+
 @order_app.command("show")
 def order_show(
     order_id: str = typer.Argument(..., help="Order ID"),
@@ -664,39 +199,10 @@ def order_show(
         None,
         "--registry-url",
         "-r",
-        help="Registry Indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
-    ),
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file (reads AGENT_DB_PATH for local DB queries).",
-    ),
-    db: str | None = typer.Option(
-        None,
-        "--db",
-        help="Explicit path to the agent SQLite DB.",
-    ),
-    negotiation: bool = typer.Option(
-        False,
-        "--negotiation",
-        "-n",
-        help="Show negotiation message history for this order.",
-    ),
-    credentials: bool = typer.Option(
-        False,
-        "--credentials",
-        "-c",
-        help="Show credentials associated with this order.",
-    ),
-    show_password: bool = typer.Option(
-        False,
-        "--show-password",
-        "-p",
-        help="Reveal credential passwords in plain text (implies --credentials).",
+        help="Registry indexer base URL (env: INDEXER_URL or REGISTRY_URL).",
     ),
 ) -> None:
-    """Show a single order by ID."""
+    """Show a single order by ID, fetched from the registry indexer."""
     base_url = (
         registry_url
         or resolve_config_value("INDEXER_URL", toml_path="registry.url")
@@ -724,208 +230,3 @@ def order_show(
     table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
 
     console.print(Panel(table, title="Market Order", border_style="blue"))
-
-    if show_password:
-        credentials = True
-
-    if not (negotiation or credentials):
-        return
-
-    db_path = _resolve_db_path(db, env)
-    if not db_path:
-        typer.secho(
-            "Local DB not found. Pass --db <path> or --env <envfile> with AGENT_DB_PATH set.",
-            err=True,
-            fg=typer.colors.YELLOW,
-        )
-        return
-
-    import sqlite3
-
-    if negotiation:
-        _print_negotiation_table(console, db_path, order_id)
-
-    if credentials:
-        _print_credentials_table(console, db_path, order_id, show_password=show_password)
-
-
-def _resolve_db_path(db: str | None, env: str | None) -> str | None:
-    """Return the SQLite DB path from explicit arg, env file, or env var."""
-    if db:
-        return db
-    env_path = Path(env) if env else REPO_ROOT / "core" / "agent" / ".env"
-    db_path_from_env = read_env_value(env_path, "AGENT_DB_PATH")
-    if db_path_from_env:
-        agent_mode = read_env_value(env_path, "AGENT_MODE", default="host")
-        resolved = str(container_db_to_host(db_path_from_env)) if agent_mode == "container" else db_path_from_env
-        if Path(resolved).exists():
-            return resolved
-    # Fallback: check env var directly
-    from_env = os.getenv("AGENT_DB_PATH")
-    if from_env and Path(from_env).exists():
-        return from_env
-    return None
-
-
-def _negotiation_price_decimals(db_path: str, order_id: str) -> int:
-    """Return the token decimals for an order by reading its token resource from SQLite."""
-    try:
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT offer_resource, demand_resource FROM orders WHERE order_id = ?",
-                (order_id,),
-            )
-            row = cur.fetchone()
-        finally:
-            conn.close()
-        if not row:
-            return 0
-        for raw in row:
-            try:
-                resource = json.loads(raw) if isinstance(raw, str) else raw
-                token = resource.get("token") if isinstance(resource, dict) else None
-                if isinstance(token, dict) and "decimals" in token:
-                    return int(token["decimals"])
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return 0
-
-
-def _fmt_price(price: int | None, decimals: int) -> str:
-    if price is None:
-        return "-"
-    if decimals == 0:
-        return str(price)
-    from decimal import Decimal
-    return str((Decimal(price) / Decimal(10) ** decimals).normalize())
-
-
-def _print_negotiation_table(console: Console, db_path: str, order_id: str) -> None:
-    """Query negotiation_messages for this order and print as a table."""
-    try:
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        try:
-            cur = conn.cursor()
-            # negotiation_id is sorted(order_a, order_b) joined by '_'.
-            # UUIDs don't contain '_', so LIKE matching is unambiguous.
-            cur.execute(
-                """
-                SELECT negotiation_id, round, sender, our_price, their_price,
-                       proposed_price, action_taken, message_type, timestamp
-                FROM negotiation_messages
-                WHERE negotiation_id LIKE ? OR negotiation_id LIKE ?
-                ORDER BY negotiation_id, round ASC
-                """,
-                (f"{order_id}_%", f"%_{order_id}"),
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-    except Exception as exc:
-        typer.secho(f"Failed to read negotiation history: {exc}", err=True, fg=typer.colors.RED)
-        return
-
-    if not rows:
-        console.print("\n[dim]No negotiation history found for this order.[/dim]")
-        return
-
-    decimals = _negotiation_price_decimals(db_path, order_id)
-
-    table = Table(title="Negotiation History", box=box.SIMPLE_HEAVY, expand=True)
-    table.add_column("Round", justify="right", style="bold", no_wrap=True)
-    table.add_column("Sender", overflow="fold")
-    table.add_column("Our Price", justify="right")
-    table.add_column("Their Price", justify="right")
-    table.add_column("Proposed", justify="right")
-    table.add_column("Action")
-    table.add_column("Type")
-    table.add_column("Timestamp", justify="right")
-
-    prev_neg_id = None
-    for neg_id, rnd, sender, our_price, their_price, proposed, action, msg_type, ts in rows:
-        if prev_neg_id and neg_id != prev_neg_id:
-            table.add_section()
-        prev_neg_id = neg_id
-        # Shorten sender URL to last component (agent hostname or port)
-        sender_short = sender.rstrip("/").rsplit("/", 1)[-1] if "/" in sender else sender
-        table.add_row(
-            str(rnd),
-            sender_short,
-            _fmt_price(our_price, decimals),
-            _fmt_price(their_price, decimals),
-            _fmt_price(proposed, decimals),
-            str(action or "-"),
-            str(msg_type or "-"),
-            _short_ts(ts),
-        )
-
-    console.print(table)
-
-
-def _print_credentials_table(console: Console, db_path: str, order_id: str, *, show_password: bool = False) -> None:
-    """Query credentials for this order and print as a table."""
-    try:
-        import sqlite3
-
-        conn = sqlite3.connect(db_path)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT role, granted_to, password, ssh_commands, ssh_key_path_host, key_type
-                FROM credentials
-                WHERE order_id = ?
-                ORDER BY role
-                """,
-                (order_id,),
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-    except Exception as exc:
-        typer.secho(f"Failed to read credentials: {exc}", err=True, fg=typer.colors.RED)
-        return
-
-    if not rows:
-        console.print("\n[dim]No credentials found for this order.[/dim]")
-        return
-
-    table = Table(title="Credentials", box=box.SIMPLE_HEAVY, expand=True)
-    table.add_column("Role", style="bold", no_wrap=True)
-    table.add_column("Granted To", no_wrap=True)
-    table.add_column("Password")
-    table.add_column("SSH Commands", overflow="fold")
-    table.add_column("Key Path", overflow="fold")
-    table.add_column("Key Type", no_wrap=True)
-
-    for role, granted_to, password, ssh_commands, ssh_key_path_host, key_type in rows:
-        # Parse ssh_commands JSON if present, show as newline-separated values
-        ssh_display = "-"
-        if ssh_commands:
-            try:
-                cmds = json.loads(ssh_commands)
-                if isinstance(cmds, dict):
-                    ssh_display = "\n".join(f"{k}: {v}" for k, v in cmds.items())
-                else:
-                    ssh_display = str(cmds)
-            except Exception:
-                ssh_display = ssh_commands
-
-        table.add_row(
-            str(role or "-"),
-            str(granted_to or "-"),
-            (str(password) if show_password else "••••••••") if password else "-",
-            ssh_display,
-            str(ssh_key_path_host or "-"),
-            str(key_type or "-"),
-        )
-
-    console.print(table)
