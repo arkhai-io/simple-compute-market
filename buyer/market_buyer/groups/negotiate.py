@@ -37,9 +37,11 @@ def register(app: typer.Typer) -> None:
             ..., "--seller-order",
             help="The seller's order_id we're negotiating against.",
         ),
-        buyer_order_id: str = typer.Option(
-            ..., "--buyer-order",
-            help="Our own order_id (already published to the registry).",
+        negotiation_ref: str = typer.Option(
+            ..., "--negotiation-ref",
+            help="Buyer-supplied correlation token for this negotiation. "
+                 "Echoed by the storefront in events; visible in run-log "
+                 "JSONL.",
         ),
         initial_price: int = typer.Option(
             ..., "--initial-price",
@@ -97,7 +99,7 @@ def register(app: typer.Typer) -> None:
             command="market negotiate",
             seller_url=seller_url,
             seller_order_id=seller_order_id,
-            buyer_order_id=buyer_order_id,
+            negotiation_ref=negotiation_ref,
             buyer_address=addr,
             initial_price=initial_price,
             max_price=max_price,
@@ -110,7 +112,7 @@ def register(app: typer.Typer) -> None:
         header.add_row("Run ID", run_log.run_id)
         header.add_row("Seller", seller_url)
         header.add_row("Seller order", seller_order_id)
-        header.add_row("Our order", buyer_order_id)
+        header.add_row("Negotiation ref", negotiation_ref)
         header.add_row("Opening bid", str(initial_price))
         header.add_row("Ceiling", str(max_price))
         header.add_row("Max rounds", str(max_rounds))
@@ -143,7 +145,7 @@ def register(app: typer.Typer) -> None:
                 seller_url=seller_url,
                 buyer_address=addr,
                 buyer_private_key=pk,
-                buyer_order_id=buyer_order_id,
+                negotiation_ref=negotiation_ref,
                 seller_order_id=seller_order_id,
                 initial_price=initial_price,
                 max_price=max_price,

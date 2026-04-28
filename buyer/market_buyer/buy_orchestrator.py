@@ -39,7 +39,7 @@ class BuyConfig:
     registry_url: str
     buyer_address: str
     buyer_private_key: str
-    buyer_order_id: str
+    negotiation_ref: str
     ssh_public_key: str
 
 
@@ -86,7 +86,7 @@ class BuyResult:
 
 def query_registry_for_matches(
     registry_url: str,
-    buyer_order_id: str,
+    negotiation_ref: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
 ) -> list[dict[str, Any]]:
     """Ask the registry for open orders that bidirectionally match ours.
@@ -120,7 +120,7 @@ def query_registry_for_matches(
         return []
 
     # Drop our own order if the registry returns it.
-    return [o for o in orders if o.get("order_id") != buyer_order_id]
+    return [o for o in orders if o.get("order_id") != negotiation_ref]
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ def run_buy(
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
         matches = query_registry_for_matches(
-            config.registry_url, config.buyer_order_id,
+            config.registry_url, config.negotiation_ref,
         )
     _event("discover", {"match_count": len(matches)})
 
@@ -356,7 +356,7 @@ def run_buy(
                 seller_url=seller_url,
                 buyer_address=config.buyer_address,
                 buyer_private_key=config.buyer_private_key,
-                buyer_order_id=config.buyer_order_id,
+                negotiation_ref=config.negotiation_ref,
                 seller_order_id=seller_order_id,
                 initial_price=constraints.initial_price,
                 max_price=constraints.max_price,

@@ -66,7 +66,7 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1",
+        negotiation_ref="buyer-1",
         seller_order_id="seller-1",
         initial_price=50,
         max_price=100,
@@ -85,7 +85,7 @@ def test_round_0_seller_exits(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=10, max_price=20,
     )
     assert outcome.status == "exited"
@@ -104,7 +104,7 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=50, max_price=100,
     )
     assert outcome.status == "agreed"
@@ -124,7 +124,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=50, max_price=100,
     )
     assert outcome.status == "exited"
@@ -143,7 +143,7 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=50, max_price=100,
     )
     assert outcome.status == "exited"
@@ -165,7 +165,7 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
     negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=50, max_price=100,
     )
     # One round, one request.
@@ -187,7 +187,7 @@ def test_on_round_hook_receives_each_round(mock_urlopen):
     negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK,
-        buyer_order_id="buyer-1", seller_order_id="seller-1",
+        negotiation_ref="buyer-1", seller_order_id="seller-1",
         initial_price=50, max_price=100,
         on_round=lambda i, msg, reply: seen.append((i, msg, reply)),
     )

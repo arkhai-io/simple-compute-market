@@ -115,7 +115,7 @@ def negotiate_with_seller(
     seller_url: str,
     buyer_address: str,
     buyer_private_key: str,
-    buyer_order_id: str,
+    negotiation_ref: str,
     seller_order_id: str,
     initial_price: int,
     max_price: int,
@@ -140,7 +140,7 @@ def negotiate_with_seller(
     # --- Round 0: /negotiate/new ---------------------------------------
     new_body = {
         "seller_order_id": seller_order_id,
-        "buyer_order_id": buyer_order_id,
+        "negotiation_ref": negotiation_ref,
         "buyer_address": buyer_address,
         "initial_price": int(initial_price),
     }

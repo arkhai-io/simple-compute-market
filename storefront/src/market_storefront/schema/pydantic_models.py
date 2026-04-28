@@ -291,9 +291,13 @@ class MakeOfferEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
-    buyer_order_id: str | None = Field(
+    negotiation_ref: str | None = Field(
         default=None,
-        description="The buyer's local order_id, echoed back by the seller so the buyer can update their record without a fuzzy DB lookup.",
+        description=(
+            "Buyer-supplied correlation token for this negotiation. "
+            "Echoed back by the seller in events so the buyer can join "
+            "to its local run-log entries without a fuzzy lookup."
+        ),
     )
 
     @classmethod
@@ -334,11 +338,12 @@ class AcceptOfferEvent(DomainEvent):
             "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
         ),
     )
-    buyer_order_id: str | None = Field(
+    negotiation_ref: str | None = Field(
         default=None,
         description=(
-            "The buyer's own demand order_id, set by the seller on the first (no-escrow) "
-            "acceptance so the buyer can link the escrow_uid to their local order record."
+            "Buyer-supplied correlation token, set by the seller on the "
+            "first (no-escrow) acceptance so the buyer can link the "
+            "escrow_uid to its local run-log entry."
         ),
     )
     agreed_price: float | int | None = Field(
@@ -427,7 +432,7 @@ class FulfillmentFailedEvent(DomainEvent):
     escrow_uid: str = Field(description="Escrow UID that was locked for this deal")
     reason: str | None = Field(default=None, description="Human-readable failure reason")
     seller_order_id: str | None = Field(default=None, description="Seller's local order ID")
-    buyer_order_id: str | None = Field(default=None, description="Buyer's local order ID")
+    negotiation_ref: str | None = Field(default=None, description="Buyer-supplied correlation token for this negotiation")
 
 
 class ArbitrationCompleteEvent(DomainEvent):

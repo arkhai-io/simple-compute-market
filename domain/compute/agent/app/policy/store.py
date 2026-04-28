@@ -182,9 +182,9 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             return None
         neg_id = make_negotiation_id(order.order_id, matched_order_id) if matched_order_id else None
         our_initial_price = _extract_initial_price_from_order(order)
-        # buyer_order_id is set by the seller so the buyer can link escrow_uid to their local
+        # negotiation_ref is set by the seller so the buyer can link escrow_uid to their local
         # order record. Fall back to order.order_id for backwards-compat (older seller agents).
-        our_order_id = getattr(context.event, "buyer_order_id", None) or order.order_id
+        our_order_id = getattr(context.event, "negotiation_ref", None) or order.order_id
         return DomainAction(
             action_type=DomainActionType.ACCEPT_OFFER,
             parameters={
@@ -223,12 +223,12 @@ def ao_action_fulfill_after_accept(context: DecisionContext) -> DomainAction | N
             "oracle_address": order.oracle_address,
             "counterparty_url": sender_url,
             "matched_order_id": matched_order_id,
-            # buyer_order_id is echoed by the buyer in their AcceptOfferEvent so the seller
+            # negotiation_ref is echoed by the buyer in their AcceptOfferEvent so the seller
             # can reconstruct make_negotiation_id(seller_order, buyer_order) regardless of
             # who initiated the MakeOfferEvent.
             # Case A (buyer initiates): offer field = buyer's order → order.order_id = buyer's ✓
             # Case B (seller initiates): offer field = seller's order → need the echo ✓
-            "buyer_order_id": getattr(context.event, "buyer_order_id", None) or order.order_id,
+            "negotiation_ref": getattr(context.event, "negotiation_ref", None) or order.order_id,
         },
     )
 
@@ -261,7 +261,7 @@ def ff_action_handle_fulfillment_failure(context: DecisionContext) -> DomainActi
             "escrow_uid": context.event.escrow_uid,
             "reason": context.event.reason,
             "seller_order_id": context.event.seller_order_id,
-            "buyer_order_id": context.event.buyer_order_id,
+            "negotiation_ref": context.event.negotiation_ref,
         },
     )
 

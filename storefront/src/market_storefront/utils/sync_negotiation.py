@@ -7,7 +7,7 @@ being pushed back as a separate message.
 Shape:
 
     POST /negotiate/new
-      {seller_order_id, buyer_order_id, buyer_address, initial_price}
+      {seller_order_id, negotiation_ref, buyer_address, initial_price}
       → {neg_id, action: "counter"|"accept"|"exit"|"reject", price?, reason?}
 
     POST /negotiate/{neg_id}

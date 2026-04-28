@@ -221,11 +221,11 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             # Validate MarketOrder (which will validate resources via model_validator)
             order = MarketOrder.model_validate(offer_data)
             event = MakeOfferEvent.from_order(order)
-            # Preserve buyer_order_id echoed back by the seller so the buyer can
+            # Preserve negotiation_ref echoed back by the seller so the buyer can
             # find and update their own local order record without a fuzzy lookup.
-            buyer_order_id = offer_data.get("buyer_order_id")
-            if buyer_order_id:
-                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            negotiation_ref = offer_data.get("negotiation_ref")
+            if negotiation_ref:
+                event = event.model_copy(update={"negotiation_ref": negotiation_ref})
             return event
             
         elif event_type == EventType.ACCEPT_OFFER:
@@ -238,7 +238,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             ssh_public_key = data.get("ssh_public_key") or payload.get("ssh_public_key")
             matched_order_id = data.get("matched_order_id") or payload.get("matched_order_id")
             source = data.get("source") or payload.get("source")
-            buyer_order_id = data.get("buyer_order_id") or payload.get("buyer_order_id")
+            negotiation_ref = data.get("negotiation_ref") or payload.get("negotiation_ref")
             agreed_price = data.get("agreed_price") or payload.get("agreed_price")
             event = AcceptOfferEvent.from_order(
                 order,
@@ -248,8 +248,8 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 source=source,
                 agreed_price=agreed_price,
             )
-            if buyer_order_id:
-                event = event.model_copy(update={"buyer_order_id": buyer_order_id})
+            if negotiation_ref:
+                event = event.model_copy(update={"negotiation_ref": negotiation_ref})
             return event
             
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
@@ -274,7 +274,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 escrow_uid=data.get("escrow_uid", ""),
                 reason=data.get("reason"),
                 seller_order_id=data.get("seller_order_id"),
-                buyer_order_id=data.get("buyer_order_id"),
+                negotiation_ref=data.get("negotiation_ref"),
                 data=data,
             )
 
@@ -1613,7 +1613,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     Body:
       {
         "seller_order_id": "...",
-        "buyer_order_id": "...",
+        "negotiation_ref": "...",
         "buyer_address":  "0x...",
         "initial_price":  <int, raw token units>
       }
@@ -1633,12 +1633,12 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
     seller_order_id = body.get("seller_order_id")
-    buyer_order_id = body.get("buyer_order_id")
+    negotiation_ref = body.get("negotiation_ref")
     buyer_address = body.get("buyer_address")
     initial_price_raw = body.get("initial_price")
 
     for name, val in (("seller_order_id", seller_order_id),
-                      ("buyer_order_id", buyer_order_id),
+                      ("negotiation_ref", negotiation_ref),
                       ("buyer_address", buyer_address)):
         if not isinstance(val, str) or not val.strip():
             return JSONResponse({"error": f"Missing or empty '{name}'"}, status_code=400)
@@ -1661,7 +1661,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
         result = await start_sync_negotiation(
             sqlite_client=root_agent._sqlite_client,
             our_order_id=seller_order_id,
-            their_order_id=buyer_order_id,
+            their_order_id=negotiation_ref,
             buyer_address=buyer_address,
             their_proposed_price=initial_price,
             our_base_url=BASE_URL_OVERRIDE or "",

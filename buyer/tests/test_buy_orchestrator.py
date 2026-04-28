@@ -43,7 +43,7 @@ def _config(order_id: str = "buyer-1") -> BuyConfig:
         registry_url=_REGISTRY,
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,
-        buyer_order_id=order_id,
+        negotiation_ref=order_id,
         ssh_public_key="ssh-rsa AAAA...",
     )
 
