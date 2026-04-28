@@ -7,7 +7,7 @@ being pushed back as a separate message.
 Shape:
 
     POST /negotiate/new
-      {seller_order_id, negotiation_ref, buyer_address, initial_price}
+      {seller_order_id, buyer_address, initial_price}
       → {neg_id, action: "counter"|"accept"|"exit"|"reject", price?, reason?}
 
     POST /negotiate/{neg_id}
@@ -43,7 +43,6 @@ async def start_sync_negotiation(
     *,
     sqlite_client: Any,
     our_order_id: str,
-    their_order_id: str,
     buyer_address: str,
     their_proposed_price: int,
     our_base_url: str,
@@ -51,15 +50,18 @@ async def start_sync_negotiation(
 ) -> dict[str, Any]:
     """Create a new negotiation thread and return the seller's first response.
 
-    - `sqlite_client` must expose upsert_negotiation_thread-like helpers
-      via the thread store; we use existing NegotiationThreadTransaction.
-    - Raises ValueError if our_order isn't in the local DB (seller must
-      have published; no ad-hoc negotiations without a listing).
+    Generates a fresh ``negotiation_id`` (uuid4) and returns it to the
+    buyer in the response. The buyer captures it from the response and
+    uses it for all subsequent ``/negotiate/{neg_id}`` rounds — the
+    canonical id is server-assigned, not client-derived.
+
+    Raises ``ValueError`` if ``our_order_id`` isn't in the local DB
+    (seller must have published; no ad-hoc negotiations without a
+    listing).
     """
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_policy.action_builders import make_negotiation_id
     from market_storefront.schema.pydantic_models import MarketOrder
     from market_storefront.utils.action_executor import (
         _extract_initial_price_from_order,
@@ -77,13 +79,13 @@ async def start_sync_negotiation(
         raise ValueError(f"Order {our_order_id} has no usable strategy for negotiation")
     our_price = _extract_initial_price_from_order(our_order)
 
-    neg_id = make_negotiation_id(our_order_id, their_order_id)
+    neg_id = "neg_" + uuid.uuid4().hex
 
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_NEW") as txn:
         await txn.ensure_thread(
             negotiation_id=neg_id,
             our_order_id=our_order_id,
-            their_order_id=their_order_id,
+            their_order_id="",  # buyer has no order; engine column kept for symmetric schema
             our_agent_id=our_base_url,
             their_agent_id=their_agent_url,
             our_initial_price=our_price,

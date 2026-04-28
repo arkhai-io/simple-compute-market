@@ -63,7 +63,7 @@ def _persist(entry: dict[str, Any]) -> None:
                     entry["stage"],
                     entry["event"],
                     entry.get("negotiation_id"),
-                    entry.get("order_id") or entry.get("our_order_id") or entry.get("negotiation_ref"),
+                    entry.get("order_id") or entry.get("our_order_id") or entry.get("negotiation_id"),
                     entry.get("escrow_uid"),
                     json.dumps(entry, default=str),
                 ),

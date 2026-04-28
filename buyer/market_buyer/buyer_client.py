@@ -115,7 +115,6 @@ def negotiate_with_seller(
     seller_url: str,
     buyer_address: str,
     buyer_private_key: str,
-    negotiation_ref: str,
     seller_order_id: str,
     initial_price: int,
     max_price: int,
@@ -127,6 +126,10 @@ def negotiate_with_seller(
     `initial_price` is what the buyer opens with (can be lower than max
     to haggle). `max_price` is the buyer's absolute ceiling — any seller
     counter at or below convergence to this gets accepted.
+
+    The negotiation_id is server-assigned (returned in the
+    /negotiate/new response) and threaded through every subsequent
+    /negotiate/{neg_id} round; the buyer doesn't supply it.
 
     `on_round(round_idx, our_msg, their_reply)` is an optional observer
     hook (for CLI rendering, testing).
@@ -140,7 +143,6 @@ def negotiate_with_seller(
     # --- Round 0: /negotiate/new ---------------------------------------
     new_body = {
         "seller_order_id": seller_order_id,
-        "negotiation_ref": negotiation_ref,
         "buyer_address": buyer_address,
         "initial_price": int(initial_price),
     }

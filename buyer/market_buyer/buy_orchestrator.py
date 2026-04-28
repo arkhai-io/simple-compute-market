@@ -39,7 +39,6 @@ class BuyConfig:
     registry_url: str
     buyer_address: str
     buyer_private_key: str
-    negotiation_ref: str
     ssh_public_key: str
 
 
@@ -86,16 +85,15 @@ class BuyResult:
 
 def query_registry_for_matches(
     registry_url: str,
-    negotiation_ref: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
 ) -> list[dict[str, Any]]:
-    """Ask the registry for open orders that bidirectionally match ours.
+    """Ask the registry for open seller offers.
 
-    Returns the raw list of order dicts the registry gave us. Filtering
-    out our own order is done client-side (the registry has no concept
-    of "our" — it's just a catalog).
+    Returns the raw list of order dicts the registry gave us. Buyers
+    don't have anything in the registry to filter against — they pick
+    one (or several) offers to negotiate with.
     """
-    url = registry_url.rstrip("/") + "/orders?status=open&bidirectional=true"
+    url = registry_url.rstrip("/") + "/orders?status=open"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -119,8 +117,7 @@ def query_registry_for_matches(
     if not isinstance(orders, list):
         return []
 
-    # Drop our own order if the registry returns it.
-    return [o for o in orders if o.get("order_id") != negotiation_ref]
+    return orders
 
 
 # ---------------------------------------------------------------------------
@@ -331,9 +328,7 @@ def run_buy(
 
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
-        matches = query_registry_for_matches(
-            config.registry_url, config.negotiation_ref,
-        )
+        matches = query_registry_for_matches(config.registry_url)
     _event("discover", {"match_count": len(matches)})
 
     if not matches:
@@ -356,7 +351,6 @@ def run_buy(
                 seller_url=seller_url,
                 buyer_address=config.buyer_address,
                 buyer_private_key=config.buyer_private_key,
-                negotiation_ref=config.negotiation_ref,
                 seller_order_id=seller_order_id,
                 initial_price=constraints.initial_price,
                 max_price=constraints.max_price,

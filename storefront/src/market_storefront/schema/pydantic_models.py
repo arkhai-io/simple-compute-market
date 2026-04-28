@@ -291,7 +291,7 @@ class MakeOfferEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.MAKE_OFFER)
     order: MarketOrder = Field(description="The market order that was broadcast")
-    negotiation_ref: str | None = Field(
+    negotiation_id: str | None = Field(
         default=None,
         description=(
             "Buyer-supplied correlation token for this negotiation. "
@@ -338,7 +338,7 @@ class AcceptOfferEvent(DomainEvent):
             "Set by the seller on the first (no-escrow) acceptance; echoed back by the buyer."
         ),
     )
-    negotiation_ref: str | None = Field(
+    negotiation_id: str | None = Field(
         default=None,
         description=(
             "Buyer-supplied correlation token, set by the seller on the "
@@ -432,7 +432,7 @@ class FulfillmentFailedEvent(DomainEvent):
     escrow_uid: str = Field(description="Escrow UID that was locked for this deal")
     reason: str | None = Field(default=None, description="Human-readable failure reason")
     seller_order_id: str | None = Field(default=None, description="Seller's local order ID")
-    negotiation_ref: str | None = Field(default=None, description="Buyer-supplied correlation token for this negotiation")
+    negotiation_id: str | None = Field(default=None, description="Buyer-supplied correlation token for this negotiation")
 
 
 class ArbitrationCompleteEvent(DomainEvent):

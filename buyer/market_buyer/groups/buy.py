@@ -40,13 +40,6 @@ def register(app: typer.Typer) -> None:
 
     @app.command("buy")
     def buy(
-        negotiation_ref: str = typer.Argument(
-            ...,
-            help="Buyer-supplied correlation token for this negotiation. "
-                 "Echoed by the storefront in events and visible in run-log "
-                 "JSONL. Pick something meaningful to you (e.g. a client "
-                 "ticket id) or just a uuid.",
-        ),
         initial_price: int = typer.Option(
             ..., "--initial-price",
             help="Opening bid per negotiation (raw token units).",
@@ -208,7 +201,6 @@ def register(app: typer.Typer) -> None:
             registry_url=reg,
             buyer_address=addr,
             buyer_private_key=pk,
-            negotiation_ref=negotiation_ref,
             ssh_public_key=ssh,
         )
         constraints = BuyConstraints(
@@ -217,7 +209,6 @@ def register(app: typer.Typer) -> None:
 
         run_log = RunLog.start(
             command="market buy",
-            negotiation_ref=negotiation_ref,
             buyer_address=addr,
             registry_url=reg,
             initial_price=initial_price,
@@ -231,7 +222,6 @@ def register(app: typer.Typer) -> None:
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
         header.add_row("Registry", reg)
-        header.add_row("Buyer order", negotiation_ref)
         header.add_row("Buyer wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
