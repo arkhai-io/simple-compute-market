@@ -9,10 +9,17 @@ import sys
 from pathlib import Path
 
 
-# Add repository root to path so `core.*` imports resolve from any cwd.
-repo_root = Path(__file__).resolve().parents[3]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+# Best-effort: add the repo root to sys.path so imports resolve when
+# the script is run from a host checkout. Inside the container the
+# market_storefront wheel is already on the venv path, so this is a
+# no-op — and the path math overflows (the script lives at /app/scripts/),
+# so we tolerate the out-of-range index.
+try:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+except IndexError:
+    pass
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 

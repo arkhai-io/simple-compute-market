@@ -54,7 +54,7 @@ spec:
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           command:
             - python
-            - storefront/scripts/register_onchain.py
+            - scripts/register_onchain.py
             - --no-update-env
             - --chain-id
             - {{ $.Values.global.rpc.chainId | quote }}

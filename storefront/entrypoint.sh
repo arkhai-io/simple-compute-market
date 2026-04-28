@@ -22,7 +22,7 @@ done
 
 echo "Registering agent on-chain..."
 PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  uv run python storefront/scripts/register_onchain.py --no-update-env \
+  uv run python scripts/register_onchain.py --no-update-env \
   || { echo "On-chain registration failed; aborting startup."; exit 1; }
 
 echo "Starting storefront server..."

@@ -61,7 +61,7 @@ services:
   # against this seller, run `market buy ...` from the host (or a
   # one-shot pod / Job that sees the same network).
   sell_agent:
-    image: arkhai:core
+    image: arkhai:storefront
     platform: linux/amd64
     container_name: market-agent-sell
     depends_on:
@@ -117,7 +117,10 @@ services:
       timeout: 3s
       retries: 3
 
-  # 7. Async provisioning service
+  # 7. Provisioning service.
+  # Configuration is bundled in the image (provisioning-service/src/settings.toml,
+  # plus dynaconf profile loading via ACTIVE_PROFILES). Compose-time
+  # overrides go in `environment:` below.
   provisioning:
     image: arkhai:provisioning
     container_name: market-provisioning
@@ -128,8 +131,9 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
-    env_file:
-      - ./async-provisioning-service/.env.docker-compose
+    environment:
+      - DATABASE_URL=sqlite:////app/data/provisioning.db
+      - REDIS_URL=redis://redis:6379
     volumes:
       - ./compute-provisioning-iac:/app/compute-provisioning-iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro

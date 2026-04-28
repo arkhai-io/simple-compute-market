@@ -20,6 +20,11 @@ COPY storefront/pyproject.toml storefront/uv.lock storefront/entrypoint.sh ./
 COPY storefront/packages/ ./packages/
 COPY service/ ../service/
 COPY policy/ ../policy/
+# arkhai-storefront-client is a workspace path source in
+# storefront/pyproject.toml (editable=true). The lock file pins it to
+# editable+../storefront-client, so the source tree must be present
+# at build time even though we also ship the prebuilt wheel in .dist/.
+COPY storefront-client/ ../storefront-client/
 
 # Pass the GCP service account JSON key from GitHub Actions secrets to authenticate
 # against GCP Artifact Registry for the alkahest-py private Python package.

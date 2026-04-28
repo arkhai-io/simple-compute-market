@@ -6,6 +6,11 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
+# psutil falls back to a source build on platforms without a prebuilt
+# wheel (e.g. aarch64 cpython 3.13); needs a C toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 --shell /bin/bash appuser
 WORKDIR /app
 RUN chown appuser:appuser /app
