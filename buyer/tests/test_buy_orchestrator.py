@@ -184,7 +184,8 @@ def test_happy_path_drives_to_ready():
     # Observer saw the key stages.
     stages = [name for name, _ in events]
     assert "discover" in stages
-    assert "negotiate_end" in stages
+    assert "negotiation_started" in stages
+    assert "negotiation_completed" in stages
     assert "escrow_created" in stages
     assert "settlement_submitted" in stages
     assert any(s == "settlement_poll" for s in stages)

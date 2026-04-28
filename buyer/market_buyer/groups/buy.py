@@ -230,23 +230,32 @@ def register(app: typer.Typer) -> None:
         def _observe(stage: str, body: dict) -> None:
             # Append a structured event to the run log so post-mortem
             # `market logs` and (eventually) `market buy --resume` have
-            # something to read.
+            # something to read. Negotiation-scoped events carry
+            # seller_order_id (and negotiation_id once round 0 returns)
+            # so consumers can group per-negotiation.
             run_log.event(stage, **body)
 
             # Plus a one-line console summary for the human.
             if stage == "discover":
                 console.print(f"[dim]discover[/dim]  {body.get('match_count', 0)} match(es)")
-            elif stage == "negotiate_start":
-                console.print(f"[dim]negotiate →[/dim] {body.get('seller_url')}")
-            elif stage == "negotiate_end":
-                oc = body.get("outcome", {})
-                color = "green" if oc.get("status") == "agreed" else "yellow"
-                price = oc.get("agreed_price", "-")
-                rounds = oc.get("rounds", "-")
+            elif stage == "negotiation_started":
+                console.print(f"[dim]negotiate →[/dim] {body.get('seller_url')} ({body.get('seller_order_id')})")
+            elif stage == "negotiation_round":
+                rd = body.get("round", "?")
+                their = body.get("their_reply") or {}
                 console.print(
-                    f"[{color}]negotiate ←[/{color}] {oc.get('status')} "
-                    f"@ {price}  ({rounds} rounds)"
+                    f"[dim]  round {rd}[/dim]  → {their.get('action', '-')}"
+                    f" @ {their.get('price', '-')}"
                 )
+            elif stage == "negotiation_completed":
+                color = "green" if body.get("status") == "agreed" else "yellow"
+                console.print(
+                    f"[{color}]negotiate ←[/{color}] {body.get('status')} "
+                    f"@ {body.get('agreed_price', '-')}  "
+                    f"({body.get('rounds', '-')} rounds)"
+                )
+            elif stage == "negotiation_failed":
+                console.print(f"[red]negotiate ✗[/red]  {body.get('error')}")
             elif stage == "escrow_created":
                 console.print(f"[green]escrow[/green]    {body.get('escrow_uid')}")
             elif stage == "settlement_submitted":

@@ -337,6 +337,10 @@ def run_buy(
     attempts: list[dict[str, Any]] = []
 
     # --- 2. Try each match ---------------------------------------------
+    # Each negotiation attempt is its own sub-stream of events: emitted
+    # with sticky `seller_order_id` (known up-front) plus
+    # `negotiation_id` (server-assigned, captured from round 0).
+    # Consumers (run-log readers, observers) group on those keys.
     for match in matches[:max_matches_to_try]:
         seller_url = match.get("order_maker") or match.get("seller_url") or ""
         seller_order_id = match.get("order_id") or match.get("seller_order_id") or ""
@@ -344,8 +348,28 @@ def run_buy(
             attempts.append({"match": match, "error": "missing_seller_url_or_order_id"})
             continue
 
-        _event("negotiate_start", {"seller_url": seller_url,
-                                   "seller_order_id": seller_order_id})
+        # Mutable context: starts with seller_order_id, gets
+        # negotiation_id added once round 0 returns.
+        neg_ctx: dict[str, Any] = {"seller_order_id": seller_order_id}
+
+        def _emit_neg(stage: str, **fields: Any) -> None:
+            _event(stage, {**neg_ctx, **fields})
+
+        _emit_neg("negotiation_started", seller_url=seller_url)
+
+        def _on_round(round_idx: int, our_msg: dict, their_reply: dict) -> None:
+            # Capture the server-assigned negotiation_id from round 0.
+            if "negotiation_id" not in neg_ctx:
+                nid = their_reply.get("negotiation_id")
+                if nid:
+                    neg_ctx["negotiation_id"] = nid
+            _emit_neg(
+                "negotiation_round",
+                round=round_idx,
+                our_message=our_msg,
+                their_reply=their_reply,
+            )
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
@@ -355,8 +379,10 @@ def run_buy(
                 initial_price=constraints.initial_price,
                 max_price=constraints.max_price,
                 max_rounds=max_negotiation_rounds,
+                on_round=_on_round,
             )
         except RuntimeError as exc:
+            _emit_neg("negotiation_failed", error=f"http_error: {exc}")
             attempts.append({
                 "seller_url": seller_url,
                 "seller_order_id": seller_order_id,
@@ -364,8 +390,17 @@ def run_buy(
             })
             continue
 
-        _event("negotiate_end", {"seller_url": seller_url,
-                                 "outcome": outcome.to_dict()})
+        if outcome.negotiation_id and "negotiation_id" not in neg_ctx:
+            neg_ctx["negotiation_id"] = outcome.negotiation_id
+
+        _emit_neg(
+            "negotiation_completed",
+            seller_url=seller_url,
+            status=outcome.status,
+            agreed_price=outcome.agreed_price,
+            rounds=outcome.rounds,
+            reason=outcome.reason,
+        )
         attempts.append({
             "seller_url": seller_url,
             "seller_order_id": seller_order_id,

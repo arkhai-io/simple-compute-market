@@ -84,6 +84,39 @@ def runs_list(
     _print_runs_table(limit=limit)
 
 
+def _negotiation_key(ev: dict) -> str | None:
+    """The grouping key for negotiation-scoped events.
+
+    Always ``seller_order_id`` when present — it's sticky from the
+    negotiation_started event through completion, so events stay in
+    one group even when negotiation_id is added partway through.
+    Returns ``None`` for run-level events (discover, escrow_*,
+    run_started, run_ended, settlement_*, etc.).
+    """
+    if "seller_order_id" in ev:
+        return ev["seller_order_id"]
+    if "negotiation_id" in ev:
+        return ev["negotiation_id"]
+    return None
+
+
+def _print_event_line(ev: dict, *, indent: int = 0) -> None:
+    ts = _short_ts(ev.get("ts"))
+    name = ev.get("event", "?")
+    body = {
+        k: v for k, v in ev.items()
+        if k not in ("ts", "run_id", "event", "seller_order_id", "negotiation_id")
+    }
+    prefix = "  " * indent
+    if body:
+        console.print(
+            f"{prefix}[dim]{ts}[/dim]  [bold]{name}[/bold]  "
+            f"{json.dumps(body, default=str)}"
+        )
+    else:
+        console.print(f"{prefix}[dim]{ts}[/dim]  [bold]{name}[/bold]")
+
+
 def _print_run_events(run_id_prefix: str, raw: bool) -> None:
     matched = _resolve_run_id(run_id_prefix)
     if matched is None:
@@ -106,14 +139,36 @@ def _print_run_events(run_id_prefix: str, raw: bool) -> None:
     header.add_row("Events", str(len(events)))
     console.print(Panel(header, title="market logs show", border_style="cyan"))
 
+    # First pass: resolve seller_order_id → negotiation_id for the
+    # heading (the id only shows up after round 0; we want it on the
+    # group banner even when the first event in the group doesn't
+    # have it yet).
+    soid_to_neg_id: dict[str, str] = {}
     for ev in events:
-        ts = _short_ts(ev.get("ts"))
-        name = ev.get("event", "?")
-        body = {k: v for k, v in ev.items() if k not in ("ts", "run_id", "event")}
-        if body:
-            console.print(f"[dim]{ts}[/dim]  [bold]{name}[/bold]  {json.dumps(body, default=str)}")
+        soid = ev.get("seller_order_id")
+        nid = ev.get("negotiation_id")
+        if soid and nid and soid not in soid_to_neg_id:
+            soid_to_neg_id[soid] = nid
+
+    # Group consecutive negotiation-scoped events under a single
+    # heading per negotiation. Run-level events (no key) print flat.
+    current_key: str | None = None
+    for ev in events:
+        key = _negotiation_key(ev)
+        if key is None:
+            current_key = None
+            _print_event_line(ev)
         else:
-            console.print(f"[dim]{ts}[/dim]  [bold]{name}[/bold]")
+            if key != current_key:
+                current_key = key
+                soid = ev.get("seller_order_id") or "?"
+                nid = soid_to_neg_id.get(soid)
+                heading = (
+                    f"{nid}  (seller_order={soid})" if nid
+                    else f"seller_order={soid}"
+                )
+                console.print(f"[cyan]┌── negotiation: {heading}[/cyan]")
+            _print_event_line(ev, indent=1)
 
 
 @logs_app.command("show")
