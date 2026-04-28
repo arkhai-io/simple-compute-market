@@ -1,45 +1,30 @@
 #!/bin/sh
 # Container entrypoint for the storefront agent.
 #
-# Reads configuration exclusively from $XDG_CONFIG_HOME/arkhai/config.toml
-# (the mounted TOML). Steps:
-#   1. Bring up ZeroTier if a network is configured in the TOML.
+# Three linear steps, no shell-side config inspection:
+#   1. Bring up the ZeroTier daemon (fail-soft — caps may not be granted).
 #   2. Run register_onchain.py to publish the agent's identity.
-#   3. exec uvicorn.
+#   3. exec the storefront server, which reads its own config from the
+#      mounted TOML at $XDG_CONFIG_HOME/arkhai/config.toml.
+#
+# The agent itself decides whether to actually `zerotier-cli join` based
+# on its TOML (seller.zerotier_network); the daemon idles when no
+# network is requested.
 
 set -eu
 
-# Read a single TOML key via the config-loader's pure Python.
-toml_get() {
-  PYTHONPATH="/:/app:/app/src" uv run --no-project python -c "
-from service.config_loader import load_user_config, get_dotted
-v = get_dotted(load_user_config(), '$1')
-print('' if v is None else v)
-" 2>/dev/null || echo ""
-}
-
-ZEROTIER_NETWORK=$(toml_get seller.zerotier_network)
-PORT=$(toml_get seller.port)
-PORT="${PORT:-8001}"
-
-if [ -n "${ZEROTIER_NETWORK}" ]; then
-  echo "Starting ZeroTier daemon..."
-  sudo zerotier-one -d
-  for i in $(seq 1 10); do
-    [ -f /var/lib/zerotier-one/zerotier-one.port ] && break
-    sleep 1
-  done
-  echo "Joining ZeroTier network ${ZEROTIER_NETWORK}..."
-  sudo zerotier-cli join "${ZEROTIER_NETWORK}" \
-    || echo "Warning: zerotier-cli join failed (may already be joined)"
-fi
+echo "Starting ZeroTier daemon (fail-soft)..."
+sudo zerotier-one -d || echo "ZeroTier daemon could not start (no caps?). Continuing."
+for i in $(seq 1 10); do
+  [ -f /var/lib/zerotier-one/zerotier-one.port ] && break
+  sleep 1
+done
 
 echo "Registering agent on-chain..."
 PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
   uv run python storefront/scripts/register_onchain.py --no-update-env \
   || { echo "On-chain registration failed; aborting startup."; exit 1; }
 
-echo "Starting storefront server on port ${PORT}..."
+echo "Starting storefront server..."
 exec env PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  uv run uvicorn market_storefront.server:app \
-  --host 0.0.0.0 --port "${PORT}"
+  uv run python -m market_storefront.server

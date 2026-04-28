@@ -29,4 +29,6 @@ async def startup_event() -> None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    from market_storefront.utils.config import CONFIG
+
+    uvicorn.run(app, host="0.0.0.0", port=CONFIG.port)

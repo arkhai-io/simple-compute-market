@@ -1984,11 +1984,40 @@ async def _preflight_provisioning() -> None:
         )
 
 
+def _maybe_join_zerotier_network() -> None:
+    """If a ZeroTier network is configured, ask the local zerotier-one
+    daemon to join it. The daemon itself is brought up by the deploy
+    layer (compose entrypoint, helm initContainer, or systemd unit) —
+    we don't manage its lifecycle here, just talk to its CLI socket.
+
+    Errors are logged and swallowed: a misconfigured ZeroTier setup
+    should not block the agent from serving on its host network.
+    """
+    network = CONFIG.zerotier_network
+    if not network:
+        return
+    import subprocess
+    try:
+        subprocess.run(
+            ["sudo", "zerotier-cli", "join", network],
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+        logger.info("[STARTUP] Joined ZeroTier network %s", network)
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        logger.warning(
+            "[STARTUP] ZeroTier join failed for network=%s: %s. "
+            "The agent will continue serving on its host network.",
+            network, exc,
+        )
+
+
 # Initialize startup tasks
 async def _startup_tasks():
     """Initialize background tasks."""
     from market_storefront.utils.config import CONFIG
     from market_storefront.resource_poller import resource_poller_loop
+
+    _maybe_join_zerotier_network()
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
