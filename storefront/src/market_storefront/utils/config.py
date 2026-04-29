@@ -170,6 +170,10 @@ class Config:
     negotiation_policy_mode: str
     arkhai_negotiator_seller_model_path: str
     arkhai_negotiator_buyer_model_path: str
+    # Admin API key — protects /admin/* routes and admin-only resource actions.
+    # None means unprotected (local dev).  Set via [seller].admin_api_key in
+    # config.toml, or injected via the Helm provisioning-secrets profile.
+    admin_api_key: str | None
 
 
 DEFAULT_TOKEN_REGISTRY_PATH = (
@@ -345,6 +349,7 @@ def load_config() -> Config:
             "seller.negotiation.buyer_model_path",
             "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
         )),
+        admin_api_key=_resolve("seller.admin_api_key", None) or None,
     )
 
 

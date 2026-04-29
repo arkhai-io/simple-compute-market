@@ -1575,7 +1575,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
 
     buyer_agent_url = body.get("buyer_agent_url", "")  # informational
 
-    from market_storefront.utils.sync_negotiation import start_sync_negotiation
+    from market_storefront.utils.sync_negotiation import start_sync_negotiation, StorefrontPausedError
     try:
         result = await start_sync_negotiation(
             sqlite_client=root_agent._sqlite_client,
@@ -1584,6 +1584,12 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
             their_proposed_price=initial_price,
             our_base_url=BASE_URL_OVERRIDE or "",
             their_agent_url=buyer_agent_url or buyer_address,
+        )
+    except StorefrontPausedError as exc:
+        return JSONResponse(
+            {"error": "paused", "reason": exc.reason,
+             "hint": "Storefront or order is paused; use admin API to advance or resume"},
+            status_code=503,
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)

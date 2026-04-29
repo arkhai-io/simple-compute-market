@@ -212,10 +212,16 @@ class SQLiteClient:
                   maker_attestation TEXT,
                   taker_attestation TEXT,
                   escrow_uid TEXT,
-                  oracle_address TEXT
+                  oracle_address TEXT,
+                  paused INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
+            # Migrate: add paused column if missing (existing databases).
+            try:
+                cur.execute("ALTER TABLE orders ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             # Resources table (local source of truth across all resource types)
             cur.execute(
                 """
@@ -2215,6 +2221,275 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+
+    # ------------------------------------------------------------------
+    # Orders API helpers
+    # ------------------------------------------------------------------
+
+    async def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        paused: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return a paginated list of orders with optional filters."""
+        def _list() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                clauses: list[str] = []
+                params: list[Any] = []
+                if status is not None:
+                    clauses.append("status = ?")
+                    params.append(status)
+                if paused is not None:
+                    clauses.append("paused = ?")
+                    params.append(1 if paused else 0)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(
+                    f"""
+                    SELECT order_id, status, created_at, updated_at,
+                           offer_resource, demand_resource, fulfillment_resource,
+                           duration_hours, order_maker, order_taker,
+                           matched_offer_id, maker_attestation, taker_attestation,
+                           escrow_uid, oracle_address,
+                           COALESCE(paused, 0) AS paused
+                    FROM orders {where}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*params, limit, offset),
+                )
+                keys = [
+                    "order_id", "status", "created_at", "updated_at",
+                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "duration_hours", "order_maker", "order_taker",
+                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "escrow_uid", "oracle_address", "paused",
+                ]
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    d = dict(zip(keys, row))
+                    d["paused"] = bool(d["paused"])
+                    result.append(d)
+                return result
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
+    async def set_order_paused(self, *, order_id: str, paused: bool) -> None:
+        """Set the paused flag on a local order."""
+        def _update() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE orders SET paused = ?, updated_at = ? WHERE order_id = ?",
+                    (1 if paused else 0, datetime.now().isoformat(), order_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_update)
+
+    async def is_order_paused(self, *, order_id: str) -> bool:
+        """Return True if the order exists and has paused=1."""
+        def _check() -> bool:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COALESCE(paused, 0) FROM orders WHERE order_id = ? LIMIT 1",
+                    (order_id,),
+                )
+                row = cur.fetchone()
+                return bool(row[0]) if row else False
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_check)
+
+    # ------------------------------------------------------------------
+    # Negotiations API helpers
+    # ------------------------------------------------------------------
+
+    async def list_negotiations_for_order(
+        self,
+        *,
+        order_id: str,
+        terminal_state: str | None = None,
+        buyer_address: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List negotiation threads for a given seller order."""
+        def _list() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                clauses: list[str] = ["our_order_id = ?"]
+                params: list[Any] = [order_id]
+                if terminal_state is not None:
+                    clauses.append("terminal_state = ?")
+                    params.append(terminal_state)
+                if buyer_address is not None:
+                    # their_agent_id holds the buyer's address or URL
+                    clauses.append("their_agent_id LIKE ?")
+                    params.append(f"%{buyer_address}%")
+                where = "WHERE " + " AND ".join(clauses)
+                cur.execute(
+                    f"""
+                    SELECT negotiation_id, our_order_id, their_agent_id,
+                           status, terminal_state, agreed_price, agreed_duration_hours,
+                           agreed_at, created_at, updated_at
+                    FROM negotiation_threads
+                    {where}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*params, limit, offset),
+                )
+                keys = [
+                    "negotiation_id", "our_order_id", "buyer_address",
+                    "status", "terminal_state", "agreed_price", "agreed_duration_hours",
+                    "agreed_at", "created_at", "updated_at",
+                ]
+                return [dict(zip(keys, row)) for row in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
+    async def load_negotiation_detail(
+        self,
+        *,
+        order_id: str,
+        neg_id: str,
+    ) -> dict[str, Any] | None:
+        """Return full negotiation detail: thread + messages + stage events.
+
+        Returns None if the negotiation doesn't exist or doesn't belong to
+        the given order_id.
+        """
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+
+                # Thread row
+                cur.execute(
+                    """
+                    SELECT negotiation_id, our_order_id, their_order_id,
+                           our_agent_id, their_agent_id, status, terminal_state,
+                           agreed_price, agreed_duration_hours, agreed_at,
+                           created_at, updated_at
+                    FROM negotiation_threads
+                    WHERE negotiation_id = ? AND our_order_id = ?
+                    """,
+                    (neg_id, order_id),
+                )
+                thread_row = cur.fetchone()
+                if not thread_row:
+                    return None
+
+                thread_keys = [
+                    "negotiation_id", "our_order_id", "their_order_id",
+                    "our_agent_id", "their_agent_id", "status", "terminal_state",
+                    "agreed_price", "agreed_duration_hours", "agreed_at",
+                    "created_at", "updated_at",
+                ]
+                thread = dict(zip(thread_keys, thread_row))
+
+                # Message log
+                cur.execute(
+                    """
+                    SELECT round, sender, our_price, their_price, proposed_price,
+                           action_taken, message_type, timestamp
+                    FROM negotiation_messages
+                    WHERE negotiation_id = ?
+                    ORDER BY round ASC
+                    """,
+                    (neg_id,),
+                )
+                msg_keys = [
+                    "round", "sender", "our_price", "their_price", "proposed_price",
+                    "action_taken", "message_type", "timestamp",
+                ]
+                messages = [dict(zip(msg_keys, row)) for row in cur.fetchall()]
+
+                # Related stage events
+                cur.execute(
+                    """
+                    SELECT ts, stage, event, data
+                    FROM stage_events
+                    WHERE negotiation_id = ?
+                    ORDER BY ts ASC
+                    """,
+                    (neg_id,),
+                )
+                import json as _json
+                stage_events = []
+                for ts, stage, event, data_str in cur.fetchall():
+                    try:
+                        data = _json.loads(data_str) if data_str else {}
+                    except Exception:
+                        data = {"raw": data_str}
+                    stage_events.append({
+                        "ts": ts, "stage": stage, "event": event, "data": data,
+                    })
+
+                return {
+                    **thread,
+                    "messages": messages,
+                    "stage_events": stage_events,
+                    "round_count": len(messages),
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    # ------------------------------------------------------------------
+    # Admin status counts
+    # ------------------------------------------------------------------
+
+    async def get_admin_status_counts(self) -> dict[str, int]:
+        """Return live counts for the admin /status endpoint."""
+        def _counts() -> dict[str, int]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+
+                cur.execute(
+                    "SELECT COUNT(*) FROM negotiation_threads WHERE terminal_state IS NULL AND status = 'active'"
+                )
+                active_negotiations = int(cur.fetchone()[0] or 0)
+
+                cur.execute(
+                    "SELECT COUNT(*) FROM orders WHERE status = 'open' AND COALESCE(paused, 0) = 0"
+                )
+                open_orders = int(cur.fetchone()[0] or 0)
+
+                cur.execute(
+                    "SELECT COUNT(*) FROM orders WHERE COALESCE(paused, 0) = 1"
+                )
+                paused_orders = int(cur.fetchone()[0] or 0)
+
+                return {
+                    "active_negotiations": active_negotiations,
+                    "open_orders": open_orders,
+                    "paused_orders": paused_orders,
+                }
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_counts)
 
 
 _sqlite_client: SQLiteClient | None = None

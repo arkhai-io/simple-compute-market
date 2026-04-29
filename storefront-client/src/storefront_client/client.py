@@ -49,6 +49,15 @@ from storefront_client.models import (
     StorefrontOrderDiscoverResponse,
     StorefrontOrderRefundResponse,
     ERC8004RegistrationFile,
+    HealthResponse,
+    OrderListResponse,
+    OrderSummary,
+    OrderPauseResponse,
+    NegotiationListResponse,
+    NegotiationDetail,
+    NegotiationActionResponse,
+    AdminPauseResponse,
+    AdminStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,10 +101,17 @@ def _build_auth_headers(private_key: str, operation: str, resource_id: str) -> d
 
 
 class _StorefrontClientBase:
-    def __init__(self, base_url: str, private_key: Optional[str], timeout: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        private_key: Optional[str],
+        timeout: float,
+        admin_key: Optional[str] = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
         self._private_key = private_key
         self._timeout = timeout
+        self._admin_key = admin_key
 
     def _url(self, path: str) -> str:
         return f"{self._base}{path}"
@@ -104,6 +120,11 @@ class _StorefrontClientBase:
         if not self._private_key:
             return {}
         return _build_auth_headers(self._private_key, operation, resource_id)
+
+    def _admin_headers(self) -> dict[str, str]:
+        if not self._admin_key:
+            return {}
+        return {"X-Admin-Key": self._admin_key}
 
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
@@ -140,8 +161,9 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        admin_key: Optional[str] = None,
     ) -> None:
-        super().__init__(base_url, private_key, timeout)
+        super().__init__(base_url, private_key, timeout, admin_key)
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
@@ -165,11 +187,170 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
 
-    async def _get(self, path: str) -> dict:
+    async def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
-        resp = await self._client.get(path, timeout=self._timeout)
+        resp = await self._client.get(path, params=params or {}, timeout=self._timeout)
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return resp.json()
+
+    # ------------------------------------------------------------------
+    # System / health
+    # ------------------------------------------------------------------
+
+    async def get_health(self) -> HealthResponse:
+        """GET /health"""
+        return HealthResponse.from_dict(await self._get("/health"))
+
+    async def get_system_status(self) -> HealthResponse:
+        """GET /api/v1/system/status — includes paused flag."""
+        return HealthResponse.from_dict(await self._get("/api/v1/system/status"))
+
+    # ------------------------------------------------------------------
+    # Orders API (GET endpoints unauthenticated; write endpoints admin-key)
+    # ------------------------------------------------------------------
+
+    async def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        paused: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> OrderListResponse:
+        """GET /api/v1/orders"""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+        if paused is not None:
+            params["paused"] = "true" if paused else "false"
+        return OrderListResponse.from_dict(
+            await self._get("/api/v1/orders", params=params)
+        )
+
+    async def get_order(self, order_id: str) -> OrderSummary:
+        """GET /api/v1/orders/{order_id}"""
+        return OrderSummary.from_dict(
+            await self._get(f"/api/v1/orders/{order_id}")
+        )
+
+    async def pause_order(self, order_id: str) -> OrderPauseResponse:
+        """POST /api/v1/orders/{order_id}/pause  (admin key required)"""
+        return OrderPauseResponse.from_dict(
+            await self._post(
+                f"/api/v1/orders/{order_id}/pause",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    async def resume_order(self, order_id: str) -> OrderPauseResponse:
+        """POST /api/v1/orders/{order_id}/resume  (admin key required)"""
+        return OrderPauseResponse.from_dict(
+            await self._post(
+                f"/api/v1/orders/{order_id}/resume",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Negotiations API
+    # ------------------------------------------------------------------
+
+    async def list_negotiations(
+        self,
+        order_id: str,
+        *,
+        terminal_state: str | None = None,
+        buyer_address: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> "NegotiationListResponse":
+        """GET /api/v1/orders/{order_id}/negotiations"""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if terminal_state is not None:
+            params["terminal_state"] = terminal_state
+        if buyer_address is not None:
+            params["buyer_address"] = buyer_address
+        return NegotiationListResponse.from_dict(
+            await self._get(f"/api/v1/orders/{order_id}/negotiations", params=params)
+        )
+
+    async def get_negotiation(self, order_id: str, neg_id: str) -> "NegotiationDetail":
+        """GET /api/v1/orders/{order_id}/negotiations/{neg_id}"""
+        return NegotiationDetail.from_dict(
+            await self._get(f"/api/v1/orders/{order_id}/negotiations/{neg_id}")
+        )
+
+    async def advance_negotiation(
+        self,
+        order_id: str,
+        neg_id: str,
+        *,
+        action: str,
+        price: int | None = None,
+        reason: str | None = None,
+    ) -> "NegotiationActionResponse":
+        """POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance  (admin key)"""
+        body: dict[str, Any] = {"action": action}
+        if price is not None:
+            body["price"] = price
+        if reason is not None:
+            body["reason"] = reason
+        return NegotiationActionResponse.from_dict(
+            await self._post(
+                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/advance",
+                body,
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    async def force_accept_negotiation(
+        self,
+        order_id: str,
+        neg_id: str,
+        *,
+        price: int,
+    ) -> "NegotiationActionResponse":
+        """POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept  (admin key)"""
+        return NegotiationActionResponse.from_dict(
+            await self._post(
+                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept",
+                {"price": price},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Admin API
+    # ------------------------------------------------------------------
+
+    async def admin_pause(self) -> AdminPauseResponse:
+        """POST /admin/pause  (admin key required)"""
+        return AdminPauseResponse.from_dict(
+            await self._post("/admin/pause", {}, extra_headers=self._admin_headers())
+        )
+
+    async def admin_resume(self) -> AdminPauseResponse:
+        """POST /admin/resume  (admin key required)"""
+        return AdminPauseResponse.from_dict(
+            await self._post("/admin/resume", {}, extra_headers=self._admin_headers())
+        )
+
+    async def admin_status(self) -> AdminStatusResponse:
+        """GET /admin/status  (admin key required)"""
+        url = self._url("/admin/status")
+        resp = await self._client.get(
+            "/admin/status",
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return AdminStatusResponse.from_dict(resp.json())
+
+    # ------------------------------------------------------------------
+    # Existing methods (unchanged)
+    # ------------------------------------------------------------------
 
     async def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
@@ -296,8 +477,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,
+        admin_key: Optional[str] = None,
     ) -> None:
-        super().__init__(base_url, private_key, timeout)
+        super().__init__(base_url, private_key, timeout, admin_key)
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
@@ -321,11 +503,168 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
 
-    def _get(self, path: str) -> dict:
+    def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
-        resp = self._client.get(path, timeout=self._timeout)
+        resp = self._client.get(path, params=params or {}, timeout=self._timeout)
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return resp.json()
+
+    # ------------------------------------------------------------------
+    # System / health
+    # ------------------------------------------------------------------
+
+    def get_health(self) -> HealthResponse:
+        """GET /health"""
+        return HealthResponse.from_dict(self._get("/health"))
+
+    def get_system_status(self) -> HealthResponse:
+        """GET /api/v1/system/status — includes paused flag."""
+        return HealthResponse.from_dict(self._get("/api/v1/system/status"))
+
+    # ------------------------------------------------------------------
+    # Orders API
+    # ------------------------------------------------------------------
+
+    def list_orders(
+        self,
+        *,
+        status: str | None = None,
+        paused: bool | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> OrderListResponse:
+        """GET /api/v1/orders"""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+        if paused is not None:
+            params["paused"] = "true" if paused else "false"
+        return OrderListResponse.from_dict(
+            self._get("/api/v1/orders", params=params)
+        )
+
+    def get_order(self, order_id: str) -> OrderSummary:
+        """GET /api/v1/orders/{order_id}"""
+        return OrderSummary.from_dict(self._get(f"/api/v1/orders/{order_id}"))
+
+    def pause_order(self, order_id: str) -> OrderPauseResponse:
+        """POST /api/v1/orders/{order_id}/pause  (admin key required)"""
+        return OrderPauseResponse.from_dict(
+            self._post(
+                f"/api/v1/orders/{order_id}/pause",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    def resume_order(self, order_id: str) -> OrderPauseResponse:
+        """POST /api/v1/orders/{order_id}/resume  (admin key required)"""
+        return OrderPauseResponse.from_dict(
+            self._post(
+                f"/api/v1/orders/{order_id}/resume",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Negotiations API
+    # ------------------------------------------------------------------
+
+    def list_negotiations(
+        self,
+        order_id: str,
+        *,
+        terminal_state: str | None = None,
+        buyer_address: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> NegotiationListResponse:
+        """GET /api/v1/orders/{order_id}/negotiations"""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if terminal_state is not None:
+            params["terminal_state"] = terminal_state
+        if buyer_address is not None:
+            params["buyer_address"] = buyer_address
+        return NegotiationListResponse.from_dict(
+            self._get(f"/api/v1/orders/{order_id}/negotiations", params=params)
+        )
+
+    def get_negotiation(self, order_id: str, neg_id: str) -> NegotiationDetail:
+        """GET /api/v1/orders/{order_id}/negotiations/{neg_id}"""
+        return NegotiationDetail.from_dict(
+            self._get(f"/api/v1/orders/{order_id}/negotiations/{neg_id}")
+        )
+
+    def advance_negotiation(
+        self,
+        order_id: str,
+        neg_id: str,
+        *,
+        action: str,
+        price: int | None = None,
+        reason: str | None = None,
+    ) -> NegotiationActionResponse:
+        """POST .../advance  (admin key required)"""
+        body: dict[str, Any] = {"action": action}
+        if price is not None:
+            body["price"] = price
+        if reason is not None:
+            body["reason"] = reason
+        return NegotiationActionResponse.from_dict(
+            self._post(
+                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/advance",
+                body,
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    def force_accept_negotiation(
+        self,
+        order_id: str,
+        neg_id: str,
+        *,
+        price: int,
+    ) -> NegotiationActionResponse:
+        """POST .../force-accept  (admin key required)"""
+        return NegotiationActionResponse.from_dict(
+            self._post(
+                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept",
+                {"price": price},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Admin API
+    # ------------------------------------------------------------------
+
+    def admin_pause(self) -> AdminPauseResponse:
+        """POST /admin/pause  (admin key required)"""
+        return AdminPauseResponse.from_dict(
+            self._post("/admin/pause", {}, extra_headers=self._admin_headers())
+        )
+
+    def admin_resume(self) -> AdminPauseResponse:
+        """POST /admin/resume  (admin key required)"""
+        return AdminPauseResponse.from_dict(
+            self._post("/admin/resume", {}, extra_headers=self._admin_headers())
+        )
+
+    def admin_status(self) -> AdminStatusResponse:
+        """GET /admin/status  (admin key required)"""
+        url = self._url("/admin/status")
+        resp = self._client.get(
+            "/admin/status",
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return AdminStatusResponse.from_dict(resp.json())
+
+    # ------------------------------------------------------------------
+    # Existing methods (unchanged)
+    # ------------------------------------------------------------------
 
     def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""

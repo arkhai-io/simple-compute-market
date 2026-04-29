@@ -295,10 +295,104 @@ layer whenever wheel file contents change.
 > statefulness/concurrency issues.
 > **TODO:** Document the `negotiation_watchdog` — what conditions
 > trigger it and what it does to orphaned negotiations.
-> **TODO:** Add a `/health` endpoint to the storefront. Currently the
-> service has no health route; `make forward` and readiness probes have
-> nothing to poll. Candidate: `GET /health` returning `{"status": "ok"}`
-> with 200, mirroring the provisioning and registry service conventions.
+
+#### Storefront API Surface (`controllers/`)
+
+The storefront exposes a structured REST API via a `controllers/` package,
+mirroring the provisioning service's controller pattern. All controllers are
+mounted in `server.py` alongside the legacy `a2a_app` routes.
+
+**System controller** (`controllers/system_controller.py`):
+```
+GET /health                   Kubernetes liveness/readiness probe
+GET /api/v1/system/health     Versioned alias
+GET /api/v1/system/status     Diagnostic snapshot: DB health + global pause state
+```
+
+**Orders controller** (`controllers/orders_controller.py`):
+```
+GET  /api/v1/orders                    List local orders (filter: status, paused, limit, offset)
+GET  /api/v1/orders/{order_id}         Single order detail (includes paused flag)
+POST /api/v1/orders/{order_id}/pause   Take order off market — admin key required
+POST /api/v1/orders/{order_id}/resume  Put order back on market — admin key required
+```
+
+**Negotiations controller** (`controllers/negotiations_controller.py`):
+```
+GET  /api/v1/orders/{order_id}/negotiations                        List threads (filter: terminal_state, buyer_address)
+GET  /api/v1/orders/{order_id}/negotiations/{neg_id}               Full detail: thread + messages + stage_events
+POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance       Admin: drive one round — admin key required
+POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept  Admin: commit terminal-success — admin key required
+```
+
+**Admin controller** (`controllers/admin_controller.py`):
+```
+POST /admin/pause    Set globally paused = True — admin key required
+POST /admin/resume   Set globally paused = False — admin key required
+GET  /admin/status   Live counts: active_negotiations, open_orders, paused_orders — admin key required
+```
+
+#### Admin API Key
+
+A global admin API key gates all admin-only endpoints. Read from
+`CONFIG.admin_api_key` (`[seller].admin_api_key` in config.toml, or injected
+via the Helm secrets profile as a `config-storefront-secrets.yml` entry).
+Enforced by `AdminAuthMiddleware` via the `X-Admin-Key` header. When
+`admin_api_key` is `None` (local dev default), the middleware is a no-op.
+
+Protected paths: any route under `/admin/`, and any route ending in `/pause`,
+`/resume`, `/advance`, or `/force-accept`.
+
+**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into both
+`config-storefront-secrets.yml` and `config-provisioning-secrets.yml` (for
+the provisioning test controller). See Deployment Topology → Helm section.
+
+#### Global Pause and Per-Order Pause
+
+**Global pause** (`_GLOBALLY_PAUSED` flag in `server.py`): when `True`, all
+`POST /negotiate/new` requests return 503 with machine-readable body
+`{"error": "paused", "reason": "global", "hint": "..."}`. In-flight
+negotiations are not interrupted. Toggled via `POST /admin/pause|resume`.
+
+**Per-order pause** (`paused` INTEGER column on the `orders` table, default 0):
+when set for a specific order, `POST /negotiate/new` against that order returns
+503 with `{"reason": "order:<order_id>"}`. Toggled via
+`POST /api/v1/orders/{id}/pause|resume`. Orders can be created already-paused
+by passing `"paused": true` in the `POST /orders/create` body.
+
+Both flags are checked at the top of `start_sync_negotiation()` in
+`sync_negotiation.py`, raising `StorefrontPausedError` which the negotiate
+endpoint converts to HTTP 503.
+
+**Use in e2e tests:** The test pod pauses the storefront via `POST /admin/pause`
+before submitting the buyer order, asserts registry visibility, then uses
+`POST .../force-accept` or `POST /admin/resume` to advance — no polling loops.
+
+#### Negotiation Detail Response Shape
+
+`GET /api/v1/orders/{order_id}/negotiations/{neg_id}` returns the full
+buyer↔seller conversation in one call (no DB access required from callers):
+
+```json
+{
+  "negotiation_id": "neg_abc",
+  "our_order_id": "ord_xyz",
+  "their_agent_id": "0xBuyerAddress",
+  "terminal_state": "success",
+  "agreed_price": 9000,
+  "round_count": 4,
+  "messages": [
+    {"round": 0, "sender": "0xBuyer", "action_taken": "make_offer", "proposed_price": 7000},
+    {"round": 1, "sender": "http://seller:8001", "action_taken": "counter_offer", "proposed_price": 9500},
+    {"round": 2, "sender": "0xBuyer", "action_taken": "counter_offer", "proposed_price": 8500},
+    {"round": 3, "sender": "http://seller:8001", "action_taken": "accept_offer", "proposed_price": 9000}
+  ],
+  "stage_events": [...]
+}
+```
+
+No new DB state — reads `negotiation_threads`, `negotiation_messages`, and
+`stage_events` tables.
 
 ---
 
@@ -979,7 +1073,75 @@ make build
 
 ## Storefront — Planned Rework
 
-### 1. Storefront config unification (TOML singleton → dynaconf profiles)
+### 1. Migrate storefront HTTP layer to FastAPI
+
+**Status:** Planned.
+
+**Problem:** The storefront currently uses plain Starlette with manual `Request`/`JSONResponse`
+throughout — in `agent.py` (20+ legacy route handlers) and in the new `controllers/`
+package. The rest of the stack (provisioning-service, registry-service) uses FastAPI,
+which provides:
+- Automatic `/docs` Swagger UI with live request/response schemas (critical for operator
+  visibility into the new orders and negotiations APIs)
+- Pydantic-powered request validation with structured 422 errors instead of manual
+  `if not isinstance(val, str)` checks
+- Typed function parameters via `Depends()` replacing `request.path_params["x"]` extraction
+- Consistency across all services — one HTTP framework to reason about
+
+**Scope:** Both layers need to move together. Converting only the new controllers while
+leaving `agent.py` on raw Starlette creates a Starlette/FastAPI hybrid that is harder
+to maintain than either alone.
+
+**Planned fix:** In a single batch:
+1. Rewrite all `controllers/` to use `@router.get/post()` decorators and typed params
+2. Extract all route handlers from `agent.py` into controllers (see item 2 below)
+3. Replace the `Starlette(routes=[...])` app construction in `server.py` with a
+   `FastAPI()` instance using `app.include_router()`
+4. Replace `JSONResponse({...})` returns with plain `dict` returns (FastAPI serialises)
+5. Add Pydantic request body models for the negotiate, settle, and admin endpoints
+
+**Dependency:** Blocked on item 2 (agent.py refactor) — both should land in the same
+PR to avoid an intermediate broken state.
+
+---
+
+### 2. Refactor agent.py routes into controllers
+
+**Status:** Planned.
+
+**Problem:** `agent.py` contains 20+ route handler functions defined at module level,
+mixed with `TraderAgent` class definition, module-level singletons (`root_agent`,
+`CONFIG`, `BASE_URL_OVERRIDE`), EIP-191 auth helpers, and background task management.
+This conflation makes the handlers untestable in isolation — importing any handler
+pulls in the full agent initialisation, Alkahest client setup, and SQLite connection.
+
+The existing `tests/integration/conftest.py` documents this explicitly:
+> "TODO(agent-testability): Refactor the three handler functions out of agent.py into a
+> dedicated routes/ package so they can be imported and tested without triggering the
+> full module-level agent initialisation."
+
+**Planned fix:** Extract handlers into controllers following the existing `controllers/`
+pattern:
+```
+controllers/
+  negotiate_controller.py   — POST /negotiate/new, POST /negotiate/{neg_id}
+  settle_controller.py      — POST /settle/{escrow_uid}, GET /settle/{escrow_uid}/status
+  orders_legacy_controller.py — POST /orders/create, /close, /claim, /reclaim,
+                                  /refund, /arbitrate, /discover
+  alerts_controller.py      — POST /alerts/resource
+  identity_controller.py    — GET /.well-known/*, GET /.well-known/agent-wallet.json
+```
+
+Each controller receives its dependencies (`sqlite_client`, `alkahest_client`,
+`config`) via constructor injection rather than reading module-level globals.
+This makes each handler independently importable and unit-testable.
+
+**Dependency:** Should land in the same batch as the FastAPI migration (item 1) since
+the injection pattern aligns with FastAPI's `Depends()` mechanism.
+
+---
+
+### 3. Storefront config unification (TOML singleton → dynaconf profiles)
 
 **Status:** Planned.
 
@@ -1077,6 +1239,8 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 ---
 
 ## Testing Strategy
+
+> **Test execution context:** The e2e / system integration test suite runs from a **Helm test pod** inside the cluster. It cannot import or instantiate service code in-process. All assertions are made over HTTP against live services using typed client libraries. This affects every layer of the test design: there is no `ASGITransport`, no monkeypatching of service internals, and no direct DB reads from the test pod. Visibility into service state is provided exclusively through HTTP endpoints — which is why the storefront and provisioning service expose rich read APIs rather than relying on direct DB inspection.
 
 This section defines the testing conventions for the Arkhai Market Stack. It exists to give every contributor a consistent mental model of what each test level is responsible for, what it is explicitly not responsible for, and how the levels relate to each other. New tests should be placed at the lowest level that can meaningfully exercise the behaviour in question.
 

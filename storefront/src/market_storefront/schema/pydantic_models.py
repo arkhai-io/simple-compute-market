@@ -63,6 +63,7 @@ class ComputeDomainResource(CoreResource):
         
         Converts dictionary payloads into the appropriate Resource subclass:
         - If data is already a Resource instance → returns it unchanged
+        - If data is a JSON string → deserializes it first, then dispatches
         - If dict contains 'token' key → returns TokenResource (takes precedence)
         - If dict contains 'gpu_model' key → returns ComputeResource
         - If dict contains both keys → returns TokenResource (token takes precedence)
@@ -70,19 +71,29 @@ class ComputeDomainResource(CoreResource):
         - If data is not a dict and not a Resource → returns data unchanged
         
         Args:
-            data: Dictionary with resource data, existing Resource instance, or other value
+            data: Dictionary with resource data, JSON string, existing Resource
+                  instance, or other value
             
         Returns:
             Resource instance (TokenResource, ComputeResource, or existing Resource)
             
         Raises:
-            ValueError: If data is a dict but doesn't contain required keys for any resource type
+            ValueError: If data is a dict but doesn't contain required keys for
+                        any resource type
         """
         # If already a Resource instance, return it unchanged
         if isinstance(data, CoreResource):
             return data
-        
-        # If not a dict, return as-is (pass through)
+
+        # Deserialize JSON strings — SQLite stores resources as JSON text
+        if isinstance(data, str):
+            import json as _json
+            try:
+                data = _json.loads(data)
+            except (ValueError, TypeError):
+                return data  # not valid JSON; pass through unchanged
+
+        # If not a dict after attempted deserialization, return as-is
         if not isinstance(data, dict):
             return data
         

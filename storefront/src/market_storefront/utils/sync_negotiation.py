@@ -40,6 +40,19 @@ from market_policy.negotiation_strategy import (
 logger = logging.getLogger(__name__)
 
 
+class StorefrontPausedError(Exception):
+    """Raised when a new negotiation is attempted while the storefront (or the
+    specific order) is paused.
+
+    The negotiate endpoints convert this to HTTP 503 with a machine-readable
+    body so callers can distinguish a pause from a real server error.
+    """
+
+    def __init__(self, reason: str = "paused") -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def _maybe_register_rl_strategy() -> None:
     """Trigger self-registration of the torch RL strategy.
 
@@ -138,6 +151,14 @@ async def start_sync_negotiation(
         determine_strategy_from_order,
     )
     from market_storefront.utils.stage_log import stage_event
+
+    # Check global pause flag and per-order pause flag before doing any work.
+    from market_storefront.server import is_globally_paused
+    if is_globally_paused():
+        raise StorefrontPausedError("global")
+
+    if await sqlite_client.is_order_paused(order_id=our_order_id):
+        raise StorefrontPausedError(f"order:{our_order_id}")
 
     our_order_dict = await sqlite_client.load_order(order_id=our_order_id)
     if not our_order_dict:
