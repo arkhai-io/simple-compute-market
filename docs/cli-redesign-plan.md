@@ -92,6 +92,37 @@ market-policy eval
 market-policy export
 ```
 
+### `chain deploy-contracts` — per-suite flags
+
+`market-infra chain deploy-contracts` toggles three contract suites
+independently so operators can deploy onto chains where some subset
+already has canonical deployments:
+
+```
+market-infra chain deploy-contracts
+  --rpc-url URL
+  --erc8004 / --no-erc8004     # default on
+  --alkahest / --no-alkahest   # default on (replays alkahest-transactions.json)
+  --eas / --no-eas             # default on (today bundled with --alkahest)
+  [--deployer-key 0x...]       # env: ANVIL_PRIVATE_KEY
+```
+
+Today's behaviour:
+
+- `--alkahest` runs `market-contract-deployer/deploy_alkahest.py`,
+  which replays the canned alkahest-transactions.json. EAS is
+  deployed as part of that replay — so `--alkahest` and `--eas` must
+  match. The CLI warns when they diverge and treats them as both
+  enabled.
+- `--erc8004` runs the three hardhat scripts in `erc-8004-contracts/`:
+  `deploy-create2-factory.ts` → `deploy-vanity.ts` →
+  `upgrade-local.ts`.
+- `--no-eas` independent of `--alkahest` is a TODO in upstream
+  alkahest. The deploy fixture would need to accept an existing EAS
+  address rather than always deploying its own. Until then,
+  `--no-eas --alkahest` falls back to the bundled behaviour with a
+  warning.
+
 ### `market-infra` — market-operator tools
 Pip: `market-infra`. New package, or fold into a re-purposed existing
 one if a 4th binary is unwanted.
