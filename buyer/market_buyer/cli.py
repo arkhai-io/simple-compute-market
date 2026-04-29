@@ -12,6 +12,7 @@ from .groups.escrow import escrow_app
 from .groups.network import network_app
 from .groups import buy as buy_module
 from .groups import negotiate as negotiate_module
+from .groups import settle as settle_module
 
 
 app = typer.Typer(no_args_is_help=True)
@@ -79,11 +80,12 @@ app.add_typer(
     help="Inspect or edit the user config.toml (path/show/get/set/init-user).",
 )
 app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
-app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (reclaim).")
+app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (create, reclaim).")
 app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
 
 buy_module.register(app)
 negotiate_module.register(app)
+settle_module.register(app)
 
 
 if __name__ == "__main__":

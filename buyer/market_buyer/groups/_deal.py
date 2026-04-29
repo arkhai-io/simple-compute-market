@@ -1,0 +1,220 @@
+"""Shared helpers for deal-recovery commands (`settle`, `escrow create`).
+
+Both pull deal context (seller_url, agreed_price, …) from a buyer
+run-log JSONL, then feed `buy_orchestrator` stage helpers and
+`escrow_client.make_create_escrow_fn` to advance the deal.
+
+Putting this in one place avoids duplicating run-log scraping +
+chain-config resolution between the two commands.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Optional
+
+import typer
+
+from ..common import resolve_config_value
+from ..run_log import RunLog, read_run
+
+
+@dataclass
+class DealContext:
+    """What we need to drive stages 3-5 of a deal post-negotiation."""
+    seller_url: str
+    seller_order_id: str
+    negotiation_id: str
+    agreed_price: int
+    escrow_uid: Optional[str] = None
+    duration_hours: int = 1
+
+
+def load_deal_context(run_id: str) -> DealContext:
+    """Read a buyer run-log and extract the deal context.
+
+    Tolerates either a `market negotiate` log (one negotiation,
+    fields at the run_started/run_ended boundary) or a `market buy`
+    log (potentially multiple negotiation attempts; uses the most
+    recent agreed one). Picks up any `escrow_created` event already
+    present so callers can short-circuit stage 3.
+    """
+    events = read_run(run_id)
+    if not events:
+        raise typer.BadParameter(
+            f"No run-log found for run_id={run_id!r}. "
+            f"Check `market logs runs`."
+        )
+
+    seller_url: Optional[str] = None
+    seller_order_id: Optional[str] = None
+    negotiation_id: Optional[str] = None
+    agreed_price: Optional[int] = None
+    escrow_uid: Optional[str] = None
+    duration_hours: int = 1
+    last_status: Optional[str] = None
+
+    for ev in events:
+        ev_type = ev.get("event")
+
+        # `negotiate` end carries the agreed_price + negotiation_id.
+        if ev_type == "run_ended":
+            last_status = ev.get("status")
+            if ev.get("agreed_price") is not None:
+                agreed_price = int(ev["agreed_price"])
+            if ev.get("negotiation_id"):
+                negotiation_id = str(ev["negotiation_id"])
+
+        # `market buy`-style log.
+        if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
+            seller_url = ev.get("seller_url") or seller_url
+            if ev.get("agreed_price") is not None:
+                agreed_price = int(ev["agreed_price"])
+            if ev.get("negotiation_id"):
+                negotiation_id = str(ev["negotiation_id"])
+            if ev.get("seller_order_id"):
+                seller_order_id = str(ev["seller_order_id"])
+        if ev_type == "escrow_created":
+            uid = ev.get("escrow_uid")
+            if isinstance(uid, str) and uid:
+                escrow_uid = uid
+        if ev_type == "escrow_create_start":
+            terms = ev.get("terms", {})
+            if isinstance(terms, dict):
+                if terms.get("seller_url"):
+                    seller_url = terms["seller_url"]
+                if terms.get("seller_order_id"):
+                    seller_order_id = terms["seller_order_id"]
+                if terms.get("duration_hours"):
+                    duration_hours = int(terms["duration_hours"])
+
+        # `negotiate`-style log start carries seller_url + order id.
+        if ev_type == "run_started":
+            if ev.get("seller_url"):
+                seller_url = ev["seller_url"]
+            if ev.get("seller_order_id"):
+                seller_order_id = ev["seller_order_id"]
+            if ev.get("duration_hours"):
+                duration_hours = int(ev["duration_hours"])
+
+    missing = [
+        name for name, v in (
+            ("seller_url", seller_url),
+            ("seller_order_id", seller_order_id),
+            ("negotiation_id", negotiation_id),
+            ("agreed_price", agreed_price),
+        ) if not v
+    ]
+    if missing:
+        raise typer.BadParameter(
+            f"Run-log {run_id!r} is missing fields: {', '.join(missing)}. "
+            f"Last status was {last_status!r}. Recovery requires a "
+            f"prior `agreed` outcome."
+        )
+
+    return DealContext(
+        seller_url=seller_url,                # type: ignore[arg-type]
+        seller_order_id=seller_order_id,      # type: ignore[arg-type]
+        negotiation_id=negotiation_id,        # type: ignore[arg-type]
+        agreed_price=agreed_price,            # type: ignore[arg-type]
+        escrow_uid=escrow_uid,
+        duration_hours=duration_hours,
+    )
+
+
+@dataclass
+class ChainSettings:
+    """Buyer-side chain + token resolution result.
+
+    `ssh_public_key` is empty for commands that don't submit settlement
+    (e.g. `market escrow create`). Pass `require_ssh=False` to opt out
+    of the missing-key guard.
+    """
+    buyer_address: str
+    buyer_private_key: str
+    ssh_public_key: str
+    rpc_url: str
+    chain_name: str
+    alkahest_addr_config: Optional[str]
+    token_contract: str
+    token_decimals: int
+
+
+def resolve_chain_settings(
+    *,
+    buyer_address: Optional[str],
+    buyer_private_key: Optional[str],
+    ssh_public_key: Optional[str],
+    rpc_url: Optional[str],
+    chain_name: Optional[str],
+    alkahest_addr_config: Optional[str],
+    token_contract: Optional[str],
+    token_decimals: int,
+    require_ssh: bool = True,
+) -> ChainSettings:
+    """Resolve chain/token flags + config.toml fallbacks.
+
+    Mirrors `market buy`'s resolution. Default token is "MOCK" via the
+    bundled token registry; explicit `--token-contract` skips the
+    lookup. Errors with typer.Exit(2) on missing required values.
+
+    `require_ssh=False` skips the SSH-key check for commands that
+    don't submit settlement (the SSH key only matters for the seller's
+    provisioning step).
+    """
+    addr = resolve_config_value(override=buyer_address, toml_path="wallet.address")
+    pk = resolve_config_value(override=buyer_private_key, toml_path="wallet.private_key")
+    ssh = resolve_config_value(override=ssh_public_key, toml_path="wallet.ssh_public_key")
+    rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
+    chain = resolve_config_value(
+        override=chain_name, toml_path="chain.name", default="ethereum_sepolia",
+    )
+    addr_cfg = resolve_config_value(
+        override=alkahest_addr_config, toml_path="chain.alkahest_address_config_path",
+    )
+
+    missing = [n for n, v in (
+        ("buyer_address", addr), ("buyer_priv_key", pk),
+        ("rpc_url", rpc),
+    ) if not v]
+    if require_ssh and not ssh:
+        missing.append("ssh_public_key")
+    if missing:
+        typer.secho(
+            f"Missing required config: {', '.join(missing)}. "
+            "Pass --flags or set corresponding [wallet]/[chain] keys in config.toml.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+
+    tc = token_contract
+    decimals = token_decimals
+    if not tc:
+        try:
+            from service.clients.token import TOKEN_REGISTRY
+            meta = TOKEN_REGISTRY.require("MOCK")
+            tc = meta.contract_address
+            decimals = meta.decimals
+        except Exception as exc:
+            typer.secho(
+                f"Could not resolve default token 'MOCK' — pass "
+                f"--token-contract and --token-decimals. ({exc})",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+    return ChainSettings(
+        buyer_address=addr,
+        buyer_private_key=pk,
+        ssh_public_key=ssh,
+        rpc_url=rpc,
+        chain_name=chain,
+        alkahest_addr_config=addr_cfg or None,
+        token_contract=tc,
+        token_decimals=decimals,
+    )
+
+
+def open_run_log(run_id: str) -> RunLog:
+    """Append-only run log for the run we're recovering."""
+    return RunLog.open(run_id)

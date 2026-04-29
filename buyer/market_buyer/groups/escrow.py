@@ -1,12 +1,14 @@
 """`market escrow` — buyer-side escrow lifecycle commands.
 
-One verb today: `reclaim` — pull tokens back from an escrow that
-expired without ever being claimed by a seller. The buyer's wallet is
-the original payer, so the on-chain `reclaim_expired` call is signed
-locally; no agent involvement.
+Three verbs:
+  create   — stage 3 only: alkahest approve + escrow.create on-chain
+  reclaim  — post-expiration tokens-back via reclaim_expired
+  show     — (TODO; needs alkahest-py attestation.get(uid)) EVM read
+             of escrow attestation state by uid
 
-Refunds (post-claim manual return of tokens) are seller-side and live
-under `market-storefront escrow refund`.
+Refunds (post-claim manual return of tokens by the seller) live under
+`market-storefront escrow refund`. The full create+submit+poll
+composite lives at `market settle`.
 """
 
 from __future__ import annotations
@@ -185,3 +187,150 @@ def reclaim_cmd(
     result.add_row("Status", "reclaimed")
     result.add_row("Receipt", str(receipt))
     console.print(Panel(result, title="Reclaim complete", border_style="green"))
+
+
+@escrow_app.command("create")
+def create_cmd(
+    run_id: str = typer.Option(
+        ..., "--run", "-r",
+        help="Buyer run-id from a prior `market negotiate` "
+             "(see `market logs runs`).",
+    ),
+    duration_hours: Optional[int] = typer.Option(
+        None, "--duration-hours", "-t",
+        help="Lease duration the escrow funds. Default: from the run-log if "
+             "recorded, else 1.",
+    ),
+    expiration_seconds: int = typer.Option(
+        3600, "--expiration",
+        help="Escrow deadline (seconds from now) for the reclaim_expired "
+             "escape hatch. Default 1h.",
+    ),
+    token_contract: Optional[str] = typer.Option(
+        None, "--token-contract",
+        help="ERC-20 contract address. Default: resolve 'MOCK' via the token registry.",
+    ),
+    token_decimals: int = typer.Option(
+        18, "--token-decimals",
+        help="ERC-20 token decimals.",
+    ),
+    chain_name_flag: Optional[str] = typer.Option(
+        None, "--chain-name",
+        help="Chain name for alkahest address resolution (default: chain.name).",
+    ),
+    rpc_url: Optional[str] = typer.Option(
+        None, "--rpc-url",
+        help="Chain RPC URL (default: chain.rpc_url).",
+    ),
+    addr_config: Optional[str] = typer.Option(
+        None, "--alkahest-addr-config",
+        help="Path to alkahest address config JSON (default: chain.alkahest_address_config_path).",
+    ),
+    private_key: Optional[str] = typer.Option(
+        None, "--buyer-priv-key",
+        help="Override buyer private key (default: wallet.private_key).",
+    ),
+    buyer_address: Optional[str] = typer.Option(
+        None, "--buyer-address",
+        help="Override buyer wallet (default: wallet.address from config.toml).",
+    ),
+) -> None:
+    """Create the on-chain escrow for a previously negotiated deal.
+
+    Stage 3 of the deal pipeline only — does not POST `/settle/...`
+    or poll. After this returns, run `market settle --run <run_id>`
+    to submit settlement and poll to terminal. The settle command
+    will detect the recorded `escrow_uid` and skip its own create
+    branch.
+    """
+    console = Console()
+
+    from ._deal import load_deal_context, open_run_log, resolve_chain_settings
+    from ..buy_orchestrator import AgreedTerms, _resolve_seller_wallet
+    from ..escrow_client import make_create_escrow_fn
+
+    deal = load_deal_context(run_id)
+    if deal.escrow_uid:
+        typer.secho(
+            f"Run-log already records escrow_uid={deal.escrow_uid}. "
+            f"Nothing to do.",
+            fg=typer.colors.YELLOW,
+        )
+        return
+
+    chain = resolve_chain_settings(
+        buyer_address=buyer_address,
+        buyer_private_key=private_key,
+        ssh_public_key=None,
+        rpc_url=rpc_url,
+        chain_name=chain_name_flag,
+        alkahest_addr_config=addr_config,
+        token_contract=token_contract,
+        token_decimals=token_decimals,
+        require_ssh=False,
+    )
+    effective_duration = (
+        duration_hours if duration_hours is not None else deal.duration_hours
+    )
+
+    log = open_run_log(run_id)
+
+    try:
+        seller_wallet = _resolve_seller_wallet(deal.seller_url)
+    except RuntimeError as exc:
+        log.event("escrow_resolve_wallet_failed", error=str(exc))
+        typer.secho(
+            f"Could not resolve seller wallet from "
+            f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(3)
+
+    terms = AgreedTerms(
+        seller_url=deal.seller_url,
+        seller_wallet_address=seller_wallet,
+        negotiation_id=deal.negotiation_id,
+        seller_order_id=deal.seller_order_id,
+        agreed_price=deal.agreed_price,
+        duration_hours=effective_duration,
+    )
+    log.event("escrow_create_start", terms=terms.__dict__)
+
+    header = Table.grid(padding=(0, 2))
+    header.add_column(style="bold")
+    header.add_column()
+    header.add_row("Run ID", run_id)
+    header.add_row("Seller", deal.seller_url)
+    header.add_row("Seller wallet", seller_wallet)
+    header.add_row("Agreed price", str(deal.agreed_price))
+    header.add_row("Duration (hours)", str(effective_duration))
+    header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
+    console.print(Panel(header, title="market escrow create", border_style="cyan"))
+
+    create_escrow = make_create_escrow_fn(
+        private_key=chain.buyer_private_key,
+        rpc_url=chain.rpc_url,
+        chain_name=chain.chain_name,
+        addr_config_path=chain.alkahest_addr_config,
+        token_contract_address=chain.token_contract,
+        token_decimals=chain.token_decimals,
+        expiration_seconds=expiration_seconds,
+    )
+    try:
+        escrow_uid = create_escrow(terms)
+    except Exception as exc:
+        log.event("escrow_create_failed", error=str(exc))
+        typer.secho(
+            f"escrow.create failed on-chain: {exc}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(4) from exc
+
+    log.event("escrow_created", escrow_uid=escrow_uid)
+    result = Table.grid(padding=(0, 2))
+    result.add_column(style="bold")
+    result.add_column()
+    result.add_row("Status", "created")
+    result.add_row("Escrow UID", escrow_uid)
+    result.add_row("Next step", f"market settle --run {run_id}")
+    console.print(Panel(result, title="Escrow created", border_style="green"))

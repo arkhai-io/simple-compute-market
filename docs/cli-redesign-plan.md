@@ -29,14 +29,42 @@ plan separates the three concerns into their own binaries.
 Pip: `market-buyer`. Pure HTTP client.
 
 ```
-market buy
-market negotiate
-market escrow reclaim          # NEW: pull tokens back when escrow expired unclaimed
+market buy                     # full pipeline (1-5)
+market negotiate                # stage 2 only — stops at agreement
+market settle                   # stages 3-5: create_if_needed + submit + poll
+market escrow create            # stage 3 only (chain ops, no server interaction)
+market escrow reclaim           # post-expiration tokens-back
+market escrow show              # EVM read of escrow state (TODO: needs EAS ABI)
 market order list / show
 market network join / get-peers
 market config init / init-user / path / show / set / get
 market logs runs / show / tail
 ```
+
+The deal pipeline has five conceptual stages:
+1. **discover** — registry query
+2. **negotiate** — signed `/negotiate/...` rounds
+3. **escrow.create** — alkahest approve + escrow.create on-chain
+4. **submit settlement** — POST `/settle/{escrow_uid}` to seller
+5. **poll settlement** — GET `/settle/{escrow_uid}/status` to terminal
+
+`market buy` runs all five in one process. `market negotiate` stops
+at stage 2; `market settle --run <id>` resumes from stage 3 using a
+buyer run-log. `market escrow create` is the standalone stage 3
+escape hatch for advanced operators (e.g., pre-fund a deal before the
+seller is reachable). `market escrow reclaim` covers the
+"escrow expired unclaimed → pull tokens back" recovery path.
+
+Inspection follows the source-of-truth split:
+- "What did the buyer's CLI do?" → `market logs show <run_id>` (the
+  JSONL run-log already records every stage event).
+- "What's the escrow's on-chain state?" → `market escrow show`
+  (TODO; alkahest-py does not yet expose `attestation.get(uid)`,
+  needs either an upstream addition or an inlined EAS ABI + web3
+  read).
+- "What's the seller's job state?" → not a buyer-side command; runs
+  inside `market settle` while polling, and the result lands in the
+  buyer's run-log.
 
 ### `market-storefront` — seller runtime
 Pip: `market-storefront`.
@@ -47,6 +75,7 @@ market-storefront serve                # in-process uvicorn (replaces broken `st
 market-storefront provide
 market-storefront escrow claim         # regrouped from top-level
 market-storefront escrow refund        # regrouped from top-level (post-claim manual return)
+market-storefront escrow show          # EVM read of escrow state (TODO: shared EAS gap with buyer)
 market-storefront portfolio import-csv
 market-storefront network join / get-peers
 market-storefront config init / path / show / set / get   # NEW (symmetric with buyer)
@@ -138,6 +167,76 @@ Wins:
 | `market-storefront claim / refund` | `market-storefront escrow claim / refund` |
 | (none) | `market escrow reclaim` |
 | (none) | `market-storefront config ...` |
+
+## `market settle` design (composite stages 3-5)
+
+```
+market settle --run <run_id>
+  [--escrow-uid 0x...]           # skip stage 3 if escrow already on-chain
+  [--token-contract 0x...]       # ERC-20 contract; default from token registry
+  [--token-decimals N]           # default 18
+  [--duration-hours N]           # default 1; pulled from registry order in future
+  [--expiration N]               # escape-hatch deadline (seconds from now); default 1h
+  [--rpc-url URL]                # default chain.rpc_url
+  [--chain-name NAME]            # default chain.name
+  [--alkahest-addr-config PATH]  # default chain.alkahest_address_config_path
+  [--ssh-public-key KEY]         # default wallet.ssh_public_key
+  [--buyer-address 0x...]        # default wallet.address
+  [--buyer-priv-key 0x...]       # default wallet.private_key
+  [--poll-interval F]
+  [--settlement-timeout F]
+```
+
+Behaviour:
+1. Open the buyer run-log for `<run_id>` and pull `seller_url`,
+   `negotiation_id`, `agreed_price`, `seller_order_id`. If any are
+   missing or the prior negotiation didn't reach `agreed`, exit
+   non-zero.
+2. If `--escrow-uid` not passed AND no `escrow_uid` event recorded:
+   resolve seller wallet via `_resolve_seller_wallet(seller_url)`,
+   build `AgreedTerms`, call `make_create_escrow_fn(...)`, log an
+   `escrow_created` event. Otherwise reuse the recorded uid.
+3. Submit `/settle/{escrow_uid}` (signed POST), log
+   `settle_submitted`.
+4. Poll `/settle/{escrow_uid}/status` until terminal
+   (`ready` / `failed`), logging `settle_status` per attempt and
+   `settle_terminal` on exit.
+5. Exit 0 on `ready`, non-zero otherwise — same shape as `market buy`'s tail.
+
+`market escrow create --run <run_id>` is the same path but stops
+after step 2: it produces the on-chain escrow_uid, logs it, exits.
+The operator can then run `market settle --run <run_id>` later
+(the create event in the log will skip the create branch).
+
+## `escrow show` (deferred)
+
+Both `market escrow show --escrow-uid 0x...` and
+`market-storefront escrow show --escrow-uid 0x...` need a way to
+read an EAS attestation by UID and decode the
+`ERC20EscrowObligationData` payload. `alkahest_py` currently exposes
+`get_escrow_attestation(fulfillment_uid)` (wrong direction —
+fulfillment → escrow) but no `attestation.get(uid)` /
+`escrow.get(uid)`. Two unblocking options:
+
+- **Upstream**: add `client.attestation.get(uid)` to alkahest-py.
+  Cleanest; matches the existing client surface.
+- **Local**: inline the EAS contract ABI + a `web3.py` call to
+  `getAttestation(bytes32)`. Smallest scope but adds an EAS-flavored
+  dep to both runtime CLIs.
+
+Either path lands the same UX. Tracking under "follow-up" in the
+plan rather than this commit.
+
+## Run-log enrichment for `market negotiate` (follow-up)
+
+`market settle --run <id>` currently relies on flags or config.toml
+defaults for `duration_hours`, token contract + decimals, etc.
+Enriching `market negotiate` to log `seller_wallet_address`
+(returned by the seller's `accept` reply, or fetched from
+`/.well-known/agent-wallet.json`), `duration_hours`, and the token
+contract + decimals (resolved from the seller's order on the
+registry) lets `market settle --run <id>` work flag-free. Tracking
+as a follow-up; the flag-driven `settle` is already usable today.
 
 ## Suggested execution order
 
