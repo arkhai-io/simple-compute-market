@@ -56,7 +56,7 @@ The stack is designed so that in production, multiple independent seller nodes e
          └─────────▲──────────┘   └───────┬────────────────┘
                    │  GET /orders            │ HTTP (provisioning API)
                    │  signed reqs    ┌────────▼────────────────┐
-                   │                 │ async-provisioning-svc  │
+                   │                 │ provisioning-service    │
          ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
          │  buyer (`market`)  ├─────▶│   Job loop (in-process) │
          │  pure HTTP client  │ HTTP └────────┬────────────────┘
@@ -498,8 +498,6 @@ provisioning-service/src/
 └── main.py                     # FastAPI app + lifespan (starts job processing loop)
 ```
 
-> **TODO:** Document FRP topology in detail — where does the FRP server live, how does the buyer reach their VM's SSH port through it.
-
 ---
 
 #### Configuration System
@@ -814,6 +812,7 @@ helm/
 └── charts/
     ├── test-env/           # Anvil node (condition: test-env.enabled)
     ├── registry/           # registry-service (condition: registry.enabled)
+    ├── storefront/         # storefront-service (condition: agents>0)
     ├── provisioning/       # Unified provisioning service (condition: provisioning.enabled)
     └── validate-contracts/ # Helm test: chain connectivity check
 ```
@@ -824,11 +823,13 @@ helm/
 |---|---|---|
 | `test-env` | 1 (Anvil) | 1 NodePort :8545 |
 | `registry` | 1 | 1 NodePort :8080 |
+| `storefront` | 1 | 1 NodePort :8001 |
 | `provisioning` | 1 (unified API + job loop) | 1 ClusterIP (:8081) |
 
 **Startup ordering** is enforced by init containers:
 - The seller agent waits on RPC (`eth_blockNumber` poll) and registry (`/health` poll) before starting
 - The provisioning container has no init containers or startup dependencies
+- The test-env container has no init containers or startup dependencies
 
 **Secrets:**
 - Seller agent private key + wallet address → `Secret` per agent, sourced from `values.yaml` `secret.privKey` / `secret.walletAddress`, or an externally pre-created secret
@@ -838,6 +839,7 @@ helm/
 - `global.imageRepository` — optional registry prefix for all images
 - `global.rpc.{host,port,chainId}` — single source of truth for the Anvil/chain coordinates
 - `global.registry.{host,port,identity_address,...}` — registry service coordinates and contract addresses
+- `global.provisioning.{host,port}` — provisioning service coordinates
 
 **Helm Makefile targets:**
 ```
@@ -855,14 +857,14 @@ make unforward         # kill all port-forwards
 ```
 localhost:8545  → test-env (Anvil RPC)
 localhost:8080  → registry
-localhost:8001  → seller agent
+localhost:8001  → seller storefront
 localhost:8081  → provisioning API (also handles ansible inventory + connectivity endpoints)
 ```
 
 **Helm test suite:**
 - `validate-contracts` — verifies RPC connectivity and contract deployment by running `pytest -m contracts` against the integration test image
 - `registry` — environment smoke test
-- `agents` — environment smoke test
+- `storefront` — environment smoke test
 - `provisioning` — environment smoke test (no provisioning test pod currently defined in source)
 - All tests share a ConfigMap (`{release}-test-config`) injected as `config-helm.yml`, containing resolved RPC URLs, contract addresses, and agent URLs
 
@@ -889,26 +891,6 @@ make build
         ├── build-core           # core Docker image
         └── build-provisioning   # async-provisioning-service Docker image
 ```
-
----
-
-## Key Environment Variables
-
-> See `cli/config/agent.schema.yaml` for the authoritative list with descriptions. Below are the most operationally significant ones.
-
-| Variable | Service | Notes |
-|---|---|---|
-| `CHAIN_NAME` | core | `anvil` / `ethereum_sepolia` / `base_sepolia` |
-| `CHAIN_RPC_URL` | core, registry | WebSocket RPC — must match `CHAIN_NAME` |
-| `IDENTITY_REGISTRY_ADDRESS` | core, registry | ERC-8004 contract — must match chain |
-| `REGISTRY_URL` | core | Points to `registry-service` |
-| `AGENT_PRIV_KEY` | core | Signing key for on-chain txns + heartbeats |
-| `ONCHAIN_AGENT_ID` | core | Canonical ERC-8004 ID; auto-set after registration |
-| `AGENT_DB_PATH` | core | SQLite path for policy/order/resource state |
-| `PROVISIONING_SERVICE_URL` | core | URL of the provisioning service API (default: `http://localhost:8085`) |
-| `ACTIVE_PROFILES` | provisioning | Comma-separated profile names; selects `config/config-<profile>.yml` files; use `mock` for e2e tests without hardware |
-| `CONFIG_DIRECTORY` | provisioning | Directory containing config YAML files (default: `/app/src/config`) |
-| `ALKAHEST_ADDRESS_CONFIG_PATH` | core | JSON with Alkahest contract addresses (anvil only) |
 
 ---
 
@@ -954,7 +936,7 @@ The following items represent known architectural deficiencies in `provisioning-
 
 > **TODO(client-compat): The provisioning-service package currently exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`). Until that refactor is done, `service/clients/provisioning.py` imports from `client.provisioning_client` rather than `provisioning_service.client.provisioning_client`.
 
-#### Golden image configuration (`management-vars.yaml`)
+#### 1. Golden image configuration (`management-vars.yaml`)
 
 **Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
 
@@ -974,7 +956,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 **`HostController.check_capacity` — future:** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
 
-### 1. Implement reliable lease expiry detection
+### 2. Implement reliable lease expiry detection
 
 **Problem:** The current lease mechanism schedules a Unix `at` daemon job on the KVM host at the moment `lease_end` is called. After that, the provisioning service has no further awareness of whether the lease timer fired, whether the cleanup script ran, or whether the VM was actually destroyed. There is no polling, no callback, no record in the provisioning database. If the `at` daemon is not running, if the KVM host reboots before the lease time, or if the agent never calls `lease_end` at all (e.g., due to a crash), the VM runs indefinitely.
 
@@ -986,22 +968,6 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
 
 ---
-
-
-### 2. Provisioning service README and root Makefile
-
-**Status:** Planned.
-
-**Problem:** `provisioning-service/README.md` and the root `Makefile` contain stale references from before the typed API, host registry, and wheel distribution work. Neither was updated during the implementation sessions.
-
-**Planned fix:** Review and rewrite both files to reflect current architecture, Makefile targets (`dist`, `init`, `build-*`), and the Helm deployment workflow.
-
-### 3. Helm deploy Makefile target
-
-**Status:** Complete.
-
-The root `Makefile` `deploy` target now calls `deploy-helm` (Helm) and `deploy-docker` (legacy docker-run) as prereqs. `deploy-helm` delegates to `helm/Makefile deploy` passing `SSH_KEY_FILE` and `--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)`. `HOSTS_INI` defaults to `$(IAC_DIR)/ansible/inventory/hosts` where `IAC_DIR` defaults to the `compute-provisioning-iac` submodule at the repo root. The stale `provisioning-worker` port-forward (port 8082) was removed from `helm/Makefile forward` — that service no longer exists since the worker was unified into the provisioning service.
-
 
 ## Testing Strategy
 
@@ -1179,7 +1145,7 @@ Pure Python internal packages are built as wheels and placed in `.dist/` at the 
 
 ```
 make dist          →  uv build for each pure-Python package  →  .dist/*.whl
-make build-core    →  docker build (COPY .dist/ /dist/, uv sync --find-links /dist)
+make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /dist)
 ```
 
 `make dist` runs automatically as a prerequisite of `make build-runtime-images`.
@@ -1189,13 +1155,6 @@ make build-core    →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 ```
 simple-market-service/   ← monorepo root
   .dist/                 ← gitignored; populated by make dist
-    market_service-0.1.0-py3-none-any.whl
-    market_policy-0.1.0-py3-none-any.whl
-    market_storefront-0.1.0-py3-none-any.whl
-    market_infra-0.1.0-py3-none-any.whl
-    provisioning_service-0.1.1-py3-none-any.whl
-    arkhai_storefront_client-0.2.0-py3-none-any.whl
-    arkhai_registry_client-0.1.2-py3-none-any.whl
   buyer/
   storefront/
   policy/
@@ -1207,6 +1166,8 @@ simple-market-service/   ← monorepo root
   provisioning-service/
   ...
 ```
+
+TODO: Add notes on contents of these folders.
 
 **Guard:** `make dist-provisioning` asserts the output wheel filename ends in `-none-any.whl`. If a C extension or Rust crate is ever added to a package, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
 
