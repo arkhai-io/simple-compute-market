@@ -10,7 +10,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 # this variable is for local development only.
 DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 
-.PHONY: build build-images deploy deploy-seller-agent init test test-unit test-integration
+.PHONY: build build-images build-no-cache deploy deploy-seller-agent init reinit test test-unit test-integration
 
 init: ## Resolve deps and create .venv. Run once after checkout or after changing pyproject.toml.
 	uv sync --find-links $(DIST_DIR)
@@ -25,6 +25,10 @@ build: reinit build-images
 
 build-images:
 	docker build -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
+	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+
+build-no-cache: reinit ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
+	docker build --no-cache -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
 test: test-unit test-integration ## Run all tests

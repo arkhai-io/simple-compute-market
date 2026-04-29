@@ -70,7 +70,7 @@ def _client() -> httpx.Client:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.provisioning_smoke
+@pytest.mark.provisioning
 class TestProvisioningSmoke:
 
     def test_health_returns_ok(self):

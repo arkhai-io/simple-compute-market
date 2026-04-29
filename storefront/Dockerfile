@@ -67,7 +67,7 @@ WORKDIR /app
 
 EXPOSE 9993/udp
 
-COPY --from=builder /app/.venv ./.venv
+COPY --chown=appuser:appuser --from=builder /app/.venv ./.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application code. The market_storefront package is shipped at
@@ -79,6 +79,23 @@ COPY storefront/scripts ./scripts
 COPY domain/ ./domain/
 COPY service/ ../service/
 COPY policy/ ../policy/
+
+# Complete the two-phase uv install: deps were installed with
+# --no-install-project in the builder stage (for layer caching);
+# now install the project itself so the `market-storefront` console
+# script is written to .venv/bin/.
+# /dist/ carries the internal wheels needed for --find-links resolution.
+COPY storefront/pyproject.toml storefront/uv.lock ./
+COPY storefront/packages/ ./packages/
+COPY storefront-client/ ../storefront-client/
+# Copy wheels directly from the build context (not from the builder stage).
+# Using --from=builder here would serve a cached /dist that Docker baked at
+# the last full builder rebuild, silently ignoring any make dist updates since.
+# Sourcing from the build context means this layer invalidates whenever
+# .dist/ changes on disk, which is exactly what we want.
+COPY .dist/ /dist/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-dev --find-links /dist
 
 ARG PORT=8080
 ENV PORT=${PORT}

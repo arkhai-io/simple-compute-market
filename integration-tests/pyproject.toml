@@ -52,9 +52,10 @@ addopts = [
 ]
 markers = [
     "contracts: Tests that validate on-chain contract state",
-    "wallets: Tests that validate wallet balances and key pairs",
-    "registry: Tests that validate the Registry REST API",
-    "agents: Tests that validate the buyer and seller agent",
+    "wallets: Smoke tests that validate wallet balances and key pairs",
+    "registry: Smoke tests that validate the Registry REST API",
+    "storefront: Smoke tests that validate seller storefront",
+	"provisioning: Smoke tests for the deployed provisioning service REST API",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
@@ -76,7 +77,7 @@ markers = [
     "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
     "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
     "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
-    "provisioning_smoke: Smoke tests for the deployed provisioning service REST API",
+    
 ]
 log_cli = true
 log_cli_level = "INFO"

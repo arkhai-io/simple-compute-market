@@ -224,6 +224,56 @@ server.
 negotiation threads, and the resource portfolio. This is a known area
 of complexity — see Known Issues below.
 
+**Docker build pattern — two-phase uv install:**
+
+The storefront Dockerfile uses a two-stage build to cache the heavy
+dependency install separately from the volatile project source:
+
+1. **Builder stage** — runs `uv sync --no-install-project` to populate
+   `.venv` with all third-party and internal-wheel dependencies. The
+   project package itself is deliberately excluded so this layer is
+   only invalidated when `pyproject.toml` or `uv.lock` change.
+
+2. **Runtime stage** — copies the pre-built `.venv` from the builder,
+   then copies the project source, then runs a completing
+   `uv sync --no-dev --find-links /dist` (without `--no-install-project`)
+   to install the project package and write the `market-storefront`
+   console script to `.venv/bin/`.
+
+Omitting the completing `uv sync` in the runtime stage means
+`market-storefront` is absent from `.venv/bin/` and `entrypoint.sh`
+exits 127. Both stages must be present for the console script to work.
+
+**Critical: `/dist/` must be sourced from the build context in both stages.**
+
+The runtime stage's completing `uv sync` must `COPY .dist/ /dist/`
+directly from the build context — **not** `COPY --from=builder /dist /dist`.
+The builder's `/dist/` layer is cached independently of `.dist/` on disk:
+if `pyproject.toml` and `uv.lock` are unchanged, Docker reuses the builder
+cache and the runtime stage receives whatever wheels were baked at the last
+full rebuild, silently ignoring any `make dist` runs since. Sourcing from
+the build context ensures the runtime layer invalidates whenever `.dist/`
+changes, keeping installed internal packages in sync with the host.
+
+**BuildKit context cache and when to use `make build-no-cache`:**
+
+BuildKit caches the build context transfer keyed on file contents. If
+`.dist/` was excluded from the context during earlier builds (e.g., by a
+stale `.dockerignore`), BuildKit's cached context snapshot will not contain
+the wheels even after the ignore file is corrected — subsequent `make build`
+runs serve the poisoned snapshot. `make build-no-cache` passes `--no-cache`
+to `docker build`, which forces BuildKit to re-evaluate the context from disk
+and invalidates all layer cache. Use it when:
+
+- A `.dockerignore` change is not being reflected in the context transfer size
+- A `make dist` run is not being picked up despite the correct Dockerfile setup
+- Any situation where the build completes without error but the wrong package
+  version ends up in the container
+
+Under normal operation (`.dist/` correctly in context, no ignore file issues),
+`make build` is sufficient — BuildKit will invalidate the `COPY .dist/ /dist/`
+layer whenever wheel file contents change.
+
 > **TODO:** Document Alkahest escrow mechanics — what on-chain calls
 > are made at which points in the negotiation.
 > **TODO:** Document the SQLite schema and known

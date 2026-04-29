@@ -7,8 +7,8 @@ they're a pure HTTP client surfaced via the `market` CLI / market_buyer
 library — so what the helm smoke pod actually wants to confirm is "the
 seller storefront is reachable and on-chain registered".
 
-Tagged ``@pytest.mark.agents`` so the helm test pod's
-``pytest -m agents`` selector still picks them up.
+Tagged ``@pytest.mark.storefront`` so the helm test pod's
+``pytest -m storefront`` selector still picks them up.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def seller_client(seller_api_url: str, seller_settings: dict) -> AgentClient:
     client.close()
 
 
-@pytest.mark.agents
+@pytest.mark.storefront
 class TestStorefrontRegistration:
     """Verify the deployed seller storefront is reachable and on-chain registered."""
 
