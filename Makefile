@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := $(CURDIR)/.dist
 
-.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-clean
+.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -17,7 +17,7 @@ DIST_DIR := $(CURDIR)/.dist
 # to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
 # Registry and switch to --index https://...gar.../simple.
 # ---------------------------------------------------------------------------
-dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service
+dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra
 
 dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
 	@mkdir -p $(DIST_DIR)
@@ -54,6 +54,12 @@ dist-service: ## Build market-service wheel into .dist/
 	cd service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-infra: ## Build market-infra wheel into .dist/
+	@mkdir -p $(DIST_DIR)
+	cd infra && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_infra-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-infra produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)

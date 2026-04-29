@@ -8,8 +8,6 @@ import typer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEFAULT_AGENT_ENV = REPO_ROOT / "storefront" / ".env"
-
 
 def resolve_config_value(
     *,
@@ -30,24 +28,6 @@ def resolve_config_value(
         if v not in (None, ""):
             return str(v)
     return default
-
-
-def container_db_to_host(db_path: str) -> Path:
-    """Resolve a container-side AGENT_DB_PATH to its host-side equivalent under REPO_ROOT.
-
-    Container paths are relative to the container WORKDIR (/app), e.g.:
-      ./src/market_storefront/data/buy-agent/agent.db  →  REPO_ROOT/src/market_storefront/data/buy-agent/agent.db
-      /app/src/market_storefront/data/buy-agent/agent.db  →  same
-
-    With the -v mount added by `market start`, the file is accessible
-    at this host path without needing docker exec.
-    """
-    rel = db_path
-    if rel.startswith("/app/"):
-        rel = rel[len("/app/"):]
-    elif rel.startswith("./"):
-        rel = rel[2:]
-    return REPO_ROOT / rel
 
 
 def resolve_agent_url(

@@ -120,27 +120,29 @@ make serve
 
 The registry runs on `http://localhost:8080` by default.
 
-### 4. Configure and Start Agent
+### 4. Configure and Start the Seller Agent
 
 In a new terminal:
 
 ```bash
-cd agent
-make install
-cp .env.sample .env
+cd storefront
+uv sync --find-links ../.dist
+market-storefront config init-user   # scaffolds $XDG_CONFIG_HOME/arkhai/config.toml
 ```
 
-Edit `.env` with:
+Edit the rendered config with:
 
-- Contract addresses from step 2
-- `CHAIN_RPC_URL` (from step 1)
-- `REGISTRY_URL=http://localhost:8080/`
-- `AGENT_PRIV_KEY` and `AGENT_WALLET_ADDRESS` (use test keys)
+- Contract addresses from step 2 (`registry.identity_registry_address`,
+  `chain.alkahest_address_config_path`)
+- `chain.rpc_url` (from step 1)
+- `registry.url = "http://localhost:8080"`
+- `wallet.private_key` and `wallet.address` (test keys)
 
-Start the agent:
+Register on-chain (one-shot), then start the server:
 
 ```bash
-make serve-a2a
+market-storefront register
+market-storefront serve
 ```
 
 ## ZeroTier Setup (Optional)
@@ -220,5 +222,6 @@ Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `ZEROTIER_NETWORK`
 
 ## Useful Commands
 
-- Agent playground: `make playground` in `agent`
 - ZeroTier network info: `sudo zerotier-cli listnetworks`
+- Inspect/edit user config: `market-storefront config show`
+- Reclaim an expired buyer escrow: `market escrow reclaim --escrow-uid 0x...`

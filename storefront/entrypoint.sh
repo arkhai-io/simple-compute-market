@@ -1,15 +1,22 @@
 #!/bin/sh
 # Container entrypoint for the storefront agent.
 #
-# Three linear steps, no shell-side config inspection:
-#   1. Bring up the ZeroTier daemon (fail-soft — caps may not be granted).
-#   2. Run register_onchain.py to publish the agent's identity.
-#   3. exec the storefront server, which reads its own config from the
-#      mounted TOML at $XDG_CONFIG_HOME/arkhai/config.toml.
+# Pattern: bring up the ZeroTier daemon, then exec whatever was passed
+# as args. If no args, fall back to the default sequence (register +
+# serve) — that's the one-shot docker-compose case.
 #
-# The agent itself decides whether to actually `zerotier-cli join` based
-# on its TOML (seller.zerotier_network); the daemon idles when no
-# network is requested.
+# This split lets Helm run the same image with two different commands:
+#   init container: ./entrypoint.sh market-storefront register --chain-id ...
+#   main container: ./entrypoint.sh market-storefront serve
+# without re-registering on every pod start.
+#
+# The ZeroTier daemon is the one piece that can't move into the CLI:
+# it's a side-process that has to keep running alongside `serve` (and
+# is needed by `register` too, when seller.zerotier_network is set).
+#
+# The `market-storefront` console script is installed into
+# /app/.venv/bin/ by `uv sync` in the builder stage and is on PATH
+# (see Dockerfile: ENV PATH="/app/.venv/bin:$PATH").
 
 set -eu
 
@@ -20,11 +27,12 @@ for i in $(seq 1 10); do
   sleep 1
 done
 
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 echo "Registering agent on-chain..."
-PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  uv run python scripts/register_onchain.py --no-update-env \
-  || { echo "On-chain registration failed; aborting startup."; exit 1; }
+market-storefront register
 
 echo "Starting storefront server..."
-exec env PYTHONPATH="/:/app:/app/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  uv run python -m market_storefront.server
+exec market-storefront serve

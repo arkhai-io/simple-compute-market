@@ -1,10 +1,13 @@
+"""`market-storefront portfolio` — manage the local resource portfolio."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import typer
 
-from .cli_common import REPO_ROOT, container_db_to_host, run_step
+from .cli_common import REPO_ROOT
+
 
 portfolio_app = typer.Typer(no_args_is_help=True)
 
@@ -12,50 +15,43 @@ portfolio_app = typer.Typer(no_args_is_help=True)
 @portfolio_app.command("import-csv")
 def portfolio_import_csv(
     csv_path: str = typer.Argument(..., help="Path to CSV file to import."),
-    env: str | None = typer.Option(
-        None,
-        "--env",
-        "-e",
-        help="Path to env file used by core/agent script (default: storefront/.env).",
-    ),
     db_path: str | None = typer.Option(
-        None,
-        "--db-path",
-        help="Override AGENT_DB_PATH for import target DB.",
+        None, "--db-path",
+        help="Override the target SQLite DB path "
+             "(default: seller.db_path from config.toml).",
     ),
     dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
+        False, "--dry-run",
         help="Validate and report without writing to DB.",
     ),
 ) -> None:
-    """Import resource portfolio rows from CSV into the Agent DB."""
+    """Import resource portfolio rows from CSV into the agent DB.
+
+    Calls `storefront/scripts/import_resources_csv.py` directly. Used
+    on a freshly provisioned seller before `provide` to seed the
+    `resources` table.
+    """
     csv_file = Path(csv_path)
     if not csv_file.exists():
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
 
-    # If --db-path isn't passed explicitly, fall back to seller.db_path
-    # in config.toml. (Container-mode path translation that lived here
-    # previously is being retired with the deployment swap.)
     if not db_path:
         from .utils.config import CONFIG
-        toml_db = CONFIG.agent_db_path
-        if toml_db:
-            host_path = str(container_db_to_host(toml_db))
-            if Path(host_path).exists():
-                db_path = host_path
+        if CONFIG.agent_db_path:
+            db_path = CONFIG.agent_db_path
 
-    cmd = ["make", "import-resources", f"CSV={csv_file.resolve()}"]
-    if env:
-        cmd.append(f"ENV_FILE={env}")
+    script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
+    if not script.exists():
+        raise typer.BadParameter(f"Import script not found: {script}")
+
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(script), "--csv", str(csv_file.resolve())]
     if db_path:
-        cmd.append(f"DB_PATH={db_path}")
+        cmd += ["--db-path", db_path]
     if dry_run:
-        cmd.append("DRY_RUN=true")
+        cmd += ["--dry-run"]
 
-    run_step(
-        "Import resource portfolio from CSV",
-        cmd,
-        REPO_ROOT / "core" / "agent",
-    )
-
+    typer.echo(f"==> Import resource portfolio from CSV: {csv_file}")
+    subprocess.run(cmd, cwd=str(REPO_ROOT / "storefront"), check=True)

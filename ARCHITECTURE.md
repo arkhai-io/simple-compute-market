@@ -16,13 +16,26 @@ The stack is designed so that in production, multiple independent seller nodes e
 |---|---|
 | On-chain settlement / escrow | [Alkahest](https://github.com/arkhai-io/alkahest) contracts |
 | Agent identity & discovery | [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) (ERC-721-based agent registry) |
-| Agent-to-agent protocol | [A2A](https://a2a-protocol.org/latest/) |
-| Agent runtime framework | Google ADK (`google.adk`) |
-| Services framework | FastAPI + uvicorn |
+| Buyer ↔ seller protocol | Plain HTTP request/response, EIP-191-signed bodies |
+| Seller server framework | FastAPI / Starlette + uvicorn |
+| Buyer | Pure HTTP client — `market` CLI, no server |
 | VM automation | Ansible (via `compute-provisioning-iac` submodule) |
 | Job queue | In-process `asyncio.Queue` (no external queue dependency) |
 | Overlay networking (optional) | ZeroTier |
 | Local dev chain | Anvil (Foundry) |
+
+> **Asymmetric topology.** Earlier iterations of this stack had buyer
+> *and* seller running symmetric agents based on Google ADK and the
+> A2A agent-to-agent protocol — both sides hosted HTTP servers and
+> exchanged push messages. That has been retired. Today only the
+> seller runs a server (the **storefront**, exposed by
+> `market-storefront serve`); the buyer is a pure HTTP client driven
+> by the `market` CLI. Negotiation is a sequence of synchronous
+> request/response calls from the buyer to the seller's storefront
+> over plain HTTP, with bodies authenticated via EIP-191 wallet
+> signatures. There is no agent runtime framework — `agent.py` on the
+> seller side is plain Python that wires Starlette routes to policy
+> evaluation.
 
 ---
 
@@ -36,30 +49,41 @@ The stack is designed so that in production, multiple independent seller nodes e
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
          ┌─────────▼──────────┐   ┌───────▼────────────────┐
-         │  registry-service  │   │  core (agent)          │
-         │  :8080             │   │  :8001 seller          │
-         │  FastAPI indexer   │◄──┤  Google ADK / A2A      │
-         │  SQLite/Postgres   │   │  Google ADK / A2A      │
-         └────────────────────┘   └───────┬────────────────┘
-                                          │ HTTP (provisioning API)
-                                 ┌────────▼────────────────┐
-                                 │ async-provisioning-svc  │
-                                 │   API  :8081  (FastAPI) │
-                                 │   Job loop (in-process) │
-                                 └────────┬────────────────┘
-                                          │ asyncio.Queue
-                                 ┌────────▼────────────────┐
-                                 │  Ansible playbooks      │
-                                 │  (compute-provisioning- │
-                                 │   iac submodule)        │
-                                 └─────────────────────────┘
+         │  registry-service  │   │  storefront            │
+         │  :8080             │   │  :8001 (seller only)   │
+         │  FastAPI indexer   │◄──┤  FastAPI/Starlette     │
+         │  SQLite/Postgres   │   │  market-storefront serve│
+         └─────────▲──────────┘   └───────┬────────────────┘
+                   │  GET /orders            │ HTTP (provisioning API)
+                   │  signed reqs    ┌────────▼────────────────┐
+                   │                 │ async-provisioning-svc  │
+         ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
+         │  buyer (`market`)  ├─────▶│   Job loop (in-process) │
+         │  pure HTTP client  │ HTTP └────────┬────────────────┘
+         │  no server         │ buyer→seller  │ asyncio.Queue
+         │  signed bodies     │      ┌────────▼────────────────┐
+         └────────────────────┘      │  Ansible playbooks      │
+                                     │  (compute-provisioning- │
+                                     │   iac submodule)        │
+                                     └─────────────────────────┘
 
- ┌──────────────┐      ┌──────────────┐
- │  test-env    │      │  CLI         │
- │  Anvil node  │      │  market ...  │
- │  (dev only)  │      │  (operator)  │
- └──────────────┘      └──────────────┘
+ ┌──────────────┐   ┌────────────────────────────────────────┐
+ │  test-env    │   │  Operator CLIs                         │
+ │  Anvil node  │   │   market           — buyer runtime     │
+ │  (dev only)  │   │   market-storefront — seller runtime   │
+ └──────────────┘   │   market-policy    — train/eval/export │
+                    │   market-infra     — chain/registry/zt │
+                    └────────────────────────────────────────┘
 ```
+
+Negotiation flow: the buyer's `market buy`/`market negotiate`
+discovers seller orders from `registry-service`, then issues
+synchronous signed POSTs against the seller's storefront
+(`/negotiate`, `/orders/...`, `/settle/{escrow_uid}`). The seller's
+storefront evaluates each request through the policy engine, decides
+counter/accept/exit, and returns the next round inline. There are no
+push messages and no symmetric agent-to-agent protocol — the buyer
+drives every round.
 
 ---
 
@@ -124,61 +148,142 @@ registry-service/src/
 
 ---
 
-### `core` (Market Agent)
+### `storefront` (Seller-side server)
 
-**Role:** The buyer and seller agent runtime. A single codebase serves both roles; the behavior is differentiated by configuration.
+**Role:** The seller's HTTP server. Hosts the `/orders/...`,
+`/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
+`.well-known/erc-8004-registration.json` endpoints that buyers and the
+provisioning service call. Runs as `market-storefront serve` (uvicorn,
+FastAPI/Starlette). Internally it uses Alkahest (`alkahest_py` — a
+pre-built `.whl` in `storefront/packages/`) for on-chain escrow
+operations.
 
-Built on Google ADK (`google.adk`) with A2A protocol support. The agent exposes an HTTP server that counterparties call to initiate and continue negotiations. Internally it uses Alkahest (`alkahest_py` — a pre-built `.whl` in `core/agent/packages/`) for on-chain escrow operations.
+There is no agent runtime framework — `agent.py` is plain Python that
+wires Starlette routes to the policy evaluation engine in
+`market_policy`. There is no `google.adk`, no A2A push protocol, and
+no symmetric agent-to-agent server on the buyer side. The earlier
+"core agent" served both roles via ADK + A2A; both have been retired.
 
-**Ports:** `8000` (buyer convention), `8001` (seller convention)
+**Ports:** `8001` (default seller port; `seller.port` in config.toml).
 
-**Startup sequence:**
-1. Agent registers on-chain with the ERC-8004 IdentityRegistry (idempotent — finds existing registration on re-runs unless `ONCHAIN_AGENT_ID` is cleared)
-2. Imports resource portfolio from CSV into local SQLite DB (seller only — `ww1-machine.csv`, `btc1-machine.csv`)
-3. Starts A2A server, begins sending heartbeats to the registry
-4. Runs background tasks: negotiation watchdog, resource poller
+**Startup sequence:** the entrypoint runs three linear steps. The
+`market-storefront register` console verb registers the agent on the
+ERC-8004 IdentityRegistry (idempotent — finds existing registration on
+re-runs unless `seller.onchain_agent_id` is cleared). Then
+`market-storefront serve` starts uvicorn, which on `@app.on_event("startup")`
+joins the configured ZeroTier network if any, kicks off the heartbeat
+sender to the registry, and starts the resource poller.
 
 **Key source layout:**
 ```
-core/agent/app/
-├── agent.py                # ADK agent definition, A2A app setup, startup tasks
-├── server.py               # FastAPI/A2A server entrypoint
-├── policy/                 # Policy evaluation engine
-│   ├── manager.py          # Discovery + registration + seeding hook
-│   ├── store.py            # Policy registry / cache / evaluation orchestration
-│   ├── registry.py         # @policy_callable decorator, CALLABLE_REGISTRY
-│   ├── evaluator.py        # Runs policies against events
-│   ├── composite.py        # Callable chaining helpers
-│   ├── negotiation_thread.py # Per-negotiation message thread, state tracking
-│   ├── action_builders.py  # make_negotiation_id (deterministic sha256 of sorted order-ID pair) + NegotiationActionBuilder (.accept/.reject/.counter/.exit wrappers over DomainAction)
-│   └── seeding.py          # Default policy seeding
-├── resources.py            # Resource portfolio management
+storefront/src/market_storefront/
+├── cli.py                  # `market-storefront` console-script entry
+├── commands/
+│   ├── register.py         # in-process port of the legacy register_onchain.py
+│   └── serve.py            # uvicorn launch
+├── groups/                 # CLI groups: config, escrow, network
+├── cli_provide.py          # `provide` (publish sell orders from DB)
+├── cli_portfolio.py        # `portfolio import-csv`
+├── cli_logs.py             # `logs show / status` (SQLite-backed seller stage events)
+├── cli_common.py
+├── server.py               # uvicorn entrypoint
+├── agent.py                # Starlette routes, policy wiring, startup hooks
 ├── resource_poller.py      # Background resource state polling
-├── negotiation_watchdog.py # Background task; monitors stuck/orphaned negotiations
+├── negotiation_watchdog.py # Background task; monitors stuck negotiations
 ├── agent_heartbeat.py      # Heartbeat sender to registry
+├── policy/seeding.py       # Default policy seeding for the seller role
 ├── utils/
-│   ├── config.py           # All env var config (CONFIG singleton)
+│   ├── config.py           # Typed Config dataclass (CONFIG singleton, TOML-only)
 │   ├── sqlite_client.py    # SQLite DB wrapper
-│   ├── action_executor.py  # Executes policy actions (send offers, call provisioning, etc.)
-│   └── ...
-├── ports/
-│   └── persistence.py      # Persistence port (abstracts SQLite operations)
-└── schema/
-    └── pydantic_models.py  # Shared data models
+│   ├── action_executor.py  # Executes policy actions (send offers, call provisioning, …)
+│   ├── sync_negotiation.py # Synchronous /negotiate handler that drives one round
+│   └── …
+├── schema/pydantic_models.py
+└── data/                   # Bundled token/alkahest address registries
 ```
 
-**Policy system:**
-Policies are named callables registered with `@policy_callable("name")` and stored in a `PolicyStore`. When a negotiation event fires, the evaluator runs registered callables in order until one returns an action (accept, reject, counter-offer, exit). Composite policies chain multiple callables. Domain modules (buyer/seller) seed their default policies.
+The legacy `core/agent/app/` tree is gone. Files that lived there
+either moved into `storefront/src/market_storefront/` (server,
+resource poller, watchdog, action executor) or into the standalone
+`market-policy` package (policy store, manager, registry, evaluator,
+composite, negotiation thread, action builders).
 
-**Local state — SQLite:**
-The agent maintains a SQLite database (`AGENT_DB_PATH`) containing policy configuration, order history, negotiation threads, and resource portfolio. This is a known area of complexity — see Known Issues below.
+**Policy system:** lives in `market-policy` (package: `policy/`,
+import: `market_policy`). Policies are named callables registered
+with `@policy_callable("name")` and stored in a `PolicyStore`. When a
+negotiation request hits the storefront, the evaluator runs the
+registered chain until one returns an action
+(`accept` / `reject` / `counter` / `exit`). The seller seeds its
+default policies at server startup via
+`market_storefront.policy.seeding.ComputePolicySeeder`. The buyer
+side imports the same engine at CLI invocation time but does not run a
+server.
 
-> **TODO(mock-provisioning-fidelity):** `MockAnsibleService` currently returns static fake results. For full lifecycle testing (Item 3 — VM state cache, expiry watchdog), it should model state transitions (`creating → running → lease-expiring → destroyed`) so scenarios can be exercised via REST without hardware. See Architecture.md — Item 3.
+**Local state — SQLite:** the storefront maintains a SQLite database
+(`seller.db_path`) containing policy configuration, order history,
+negotiation threads, and the resource portfolio. This is a known area
+of complexity — see Known Issues below.
 
-> **TODO:** Document the full negotiation message flow: how an offer is initiated, countered, and accepted between two agent instances.
-> **TODO:** Document Alkahest escrow mechanics — what on-chain calls are made at which points in the negotiation.
-> **TODO:** Document the SQLite schema and known statefulness/concurrency issues.
-> **TODO:** Document the `negotiation_watchdog` — what conditions trigger it and what it does to orphaned negotiations.
+> **TODO:** Document Alkahest escrow mechanics — what on-chain calls
+> are made at which points in the negotiation.
+> **TODO:** Document the SQLite schema and known
+> statefulness/concurrency issues.
+> **TODO:** Document the `negotiation_watchdog` — what conditions
+> trigger it and what it does to orphaned negotiations.
+
+---
+
+### `buyer` (Pure HTTP client)
+
+**Role:** The buyer side of the market. There is no buyer server, no
+agent runtime, no SQLite database — only the `market` console script
+(package: `buyer/`, import: `market_buyer`).
+
+`market buy` is a one-shot orchestrator: it queries
+`registry-service` for matching seller orders, runs synchronous
+negotiations against each candidate seller's storefront (POST
+`/negotiate`, signed bodies), and on agreement creates the on-chain
+escrow via `alkahest_py` directly from the CLI process before POSTing
+`/settle/{escrow_uid}` and polling for fulfillment. `market negotiate`
+is the same loop bound to a single known seller; both share
+`buy_orchestrator`.
+
+The negotiation policy used by the buyer is the same `market-policy`
+engine the seller runs — both sides import a `BisectionStrategy` (or,
+behind the `[rl]` extra, the trained Arkhai pufferlib checkpoint)
+through `market_policy.negotiation_strategy`. Round-by-round events
+land in a per-run JSONL log under
+`$XDG_STATE_HOME/arkhai/buy-runs/<run_id>.jsonl` rather than a
+database.
+
+**Key source layout:**
+```
+buyer/market_buyer/
+├── cli.py                  # `market` console-script entry
+├── groups/                 # buy, negotiate, order, config, logs, escrow, network
+├── buy_orchestrator.py     # the one-shot buy flow
+├── buyer_client.py         # signed HTTP client for /negotiate
+├── escrow_client.py        # alkahest-py escrow create/reclaim
+├── run_log.py              # JSONL run logs under XDG_STATE_HOME
+└── common.py               # config-resolution + REPO_ROOT helpers
+```
+
+---
+
+### `policy` (`market-policy`)
+
+Domain-agnostic strategy engine + training tool. Two surfaces:
+
+- **Library**: `market_policy.{store, manager, registry, evaluator,
+  composite, negotiation_thread, negotiation_strategy,
+  action_builders, identity}` — imported by both runtimes.
+- **CLI**: `market-policy train / eval / export` — invoked by
+  policy authors to produce strategy artifacts (RL checkpoints) that
+  buyers and sellers load at runtime through
+  `market_policy.negotiation_strategy.load_strategy()`.
+
+The CLI lives here (not in either runtime) because policy authoring
+is a tooling concern separate from the buyer or seller process.
 
 ---
 
@@ -640,26 +745,39 @@ This mode requires the KVM host to have a publicly reachable IP, which is not al
 
 ---
 
-### `cli`
+### CLIs
 
-**Role:** Operator tooling. A PyInstaller-packaged binary (`market`) for managing deployments and interacting with the marketplace.
+There are four console scripts, each a separate distributable. They
+split by concern (runtime vs. tooling vs. operator infra) rather than
+by buyer-vs-seller role. Built with Typer; config is read from a
+single TOML file at `$XDG_CONFIG_HOME/arkhai/config.toml` (override
+with `--config <path>`).
 
-Built with Click. Command groups:
-- `buy` — buyer-side operations (find offers, create orders)
-- `provide` — seller/provider-side operations (register resources, manage offers)
-- `order` — order lifecycle management
-- `config` — init and validate agent/registry/provisioning config files
-- `policy` — policy management
-- `portfolio` — import resource CSVs into agent DB
-- `logs` — log inspection
-- `network` — ZeroTier network management
-- `registry` — registry interactions
-- `dev` — dev utilities
+| CLI | Package | Role | Top-level groups |
+|---|---|---|---|
+| `market` | `buyer/` | Buyer runtime (pure HTTP client) | `buy`, `negotiate`, `order`, `escrow reclaim`, `network join/get-peers`, `config`, `logs` |
+| `market-storefront` | `storefront/` | Seller runtime | `register`, `serve`, `provide`, `escrow claim/refund`, `portfolio import-csv`, `network join/get-peers`, `config`, `logs` |
+| `market-policy` | `policy/` | Policy authoring tool | `train`, `eval`, `export` |
+| `market-infra` | `infra/` | Market-operator infra (one process per market) | `chain up/deploy-contracts`, `registry start`, `network install/create/add` |
 
-Config is schema-validated against YAML schemas in `cli/config/` (agent, provisioning, registry, zerotier).
+The two runtimes (`market`, `market-storefront`) share `network join`
+and `get-peers` because each operator manages their own ZeroTier
+membership. The owner-side actions (`install` / `create` / `add`)
+live in `market-infra` because they are run once per market by the
+trust authority, not per-agent.
 
-> **TODO:** Document the typical provider onboarding flow using the CLI.
-> **TODO:** Clarify relationship between CLI-managed config files and Docker/compose env files.
+Deployment shells just compose CLI verbs:
+
+- **Docker (storefront image):** `entrypoint.sh` brings up the
+  ZeroTier daemon, then runs `market-storefront register` and
+  `exec market-storefront serve`.
+- **Helm:** the init container runs
+  `./entrypoint.sh market-storefront register --chain-id N` and the
+  main container runs `./entrypoint.sh market-storefront serve` —
+  same image, two CLI verbs.
+
+See `docs/cli-redesign-plan.md` for the rationale and migration
+table behind the current 4-CLI surface.
 
 ---
 
@@ -669,12 +787,16 @@ Config is schema-validated against YAML schemas in `cli/config/` (agent, provisi
 
 ```
 compose/market.yml   — test-env (Anvil) + registry-service
-compose/seller.yml   — seller agent + provisioning service (unified)
-compose/buyer.yml    — buyer agent
+compose/seller.yml   — storefront server + provisioning service (unified)
 compose/external.yml — (unclear — TODO)
 ```
 
-Agents source `shared-env/.env` (written by the contract deployer during `build-anvil-state`) for contract addresses.
+There is no `compose/buyer.yml` anymore — the buyer is the `market`
+CLI invoked from the host or another container, not a long-running
+service. The seller container reads its config from a TOML file
+mounted at `/etc/arkhai/config.toml` (set via `XDG_CONFIG_HOME=/etc`);
+the `.env` flow used by the previous symmetric topology has been
+retired.
 
 ### Production / Staging — Helm (`helm/`)
 
@@ -1047,7 +1169,7 @@ integration-tests/
 
 
 ### Problem
-Python packages in this monorepo need to consume each other (e.g. the agent imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `core/agent/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
+Python packages in this monorepo need to consume each other (e.g. the storefront imports the provisioning service client). Relative path imports across project directories are fragile — they encode layout assumptions and break when projects move. Native extension wheels (those with platform/ABI tags like `cp312-cp312-linux_x86_64`) must be compiled inside the target Docker environment; this is why `alkahest-py` ships pre-built wheels for each platform in `storefront/packages/`. Pure Python wheels (`py3-none-any`) have no such constraint and can be built safely on the host.
 
 ### Current Approach: `--find-links` flat wheel directory
 
@@ -1067,11 +1189,22 @@ make build-core    →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 ```
 simple-market-service/   ← monorepo root
   .dist/                 ← gitignored; populated by make dist
-    provisioning_service-0.2.0-py3-none-any.whl
     market_service-0.1.0-py3-none-any.whl
-  provisioning-service/
+    market_policy-0.1.0-py3-none-any.whl
+    market_storefront-0.1.0-py3-none-any.whl
+    market_infra-0.1.0-py3-none-any.whl
+    provisioning_service-0.1.1-py3-none-any.whl
+    arkhai_storefront_client-0.2.0-py3-none-any.whl
+    arkhai_registry_client-0.1.2-py3-none-any.whl
+  buyer/
+  storefront/
+  policy/
+  infra/
   service/
-  core/
+  registry-client/
+  storefront-client/
+  registry-service/
+  provisioning-service/
   ...
 ```
 
@@ -1101,7 +1234,7 @@ Three pure-Python internal packages are distributed as wheels:
 | `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
 
-`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`google-adk`, `pufferlib`, native RL wheels) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+`arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
 
 **`arkhai-storefront-client` versioning policy:**
 
@@ -1203,7 +1336,7 @@ cd registry-service && make reinit && make test-integration
 | `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
-`arkhai-storefront-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`google-adk`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
+`arkhai-storefront-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`pufferlib`, `torch`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 
@@ -1217,10 +1350,10 @@ cd registry-service && make reinit && make test-integration
 |---|---|
 | Alkahest | Arkhai's smart contract suite for peer-to-peer agreements and escrow |
 | ERC-8004 | Ethereum standard for on-chain agent identity (ERC-721-based) |
-| A2A | Agent-to-Agent protocol — how agents communicate over HTTP |
+| Storefront | The seller-side HTTP server (`market-storefront serve`); the only running agent process in the negotiation flow |
 | Canonical agent ID | `eip155:{chainId}:{registryAddress}:{tokenId}` |
 | FRP | Fast Reverse Proxy — used to give buyers network access to their VMs |
 | Anvil | Local EVM testnet node from Foundry |
-| ADK | Google Agent Development Kit — the agent framework used by `core` |
+| EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
 | Order | A published offer in the registry; has `offer_resource`, `demand_resource`, status |

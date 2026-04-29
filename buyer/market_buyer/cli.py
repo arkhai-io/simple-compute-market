@@ -7,8 +7,9 @@ import typer
 
 from .groups.order import order_app
 from .groups.config import config_app
-from .groups.dev import dev_app
 from .groups.logs import logs_app
+from .groups.escrow import escrow_app
+from .groups.network import network_app
 from .groups import buy as buy_module
 from .groups import negotiate as negotiate_module
 
@@ -75,10 +76,11 @@ app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
 app.add_typer(
     config_app,
     name="config",
-    help="Manage market config (targets: agent, provisioning, registry, zerotier).",
+    help="Inspect or edit the user config.toml (path/show/get/set/init-user).",
 )
-app.add_typer(dev_app, name="dev", help="Developer utilities (local chain + contract deploy).")
 app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
+app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (reclaim).")
+app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
 
 buy_module.register(app)
 negotiate_module.register(app)

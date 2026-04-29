@@ -52,10 +52,13 @@ spec:
         - name: register-onchain
           image: {{ include "storefront.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          # entrypoint.sh launches the ZeroTier daemon then execs args.
+          # Skips the default register+serve fallback because we pass
+          # explicit args.
           command:
-            - python
-            - scripts/register_onchain.py
-            - --no-update-env
+            - ./entrypoint.sh
+            - market-storefront
+            - register
             - --chain-id
             - {{ $.Values.global.rpc.chainId | quote }}
           env:
@@ -70,6 +73,13 @@ spec:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          # entrypoint.sh starts the ZeroTier daemon then execs the
+          # CLI verb. Registration is handled by the init container
+          # above, so the main pod only needs `serve`.
+          command:
+            - ./entrypoint.sh
+            - market-storefront
+            - serve
           ports:
             - name: http
               containerPort: {{ $agent.port }}
