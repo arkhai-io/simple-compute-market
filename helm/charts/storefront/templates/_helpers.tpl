@@ -146,6 +146,7 @@ ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 [chain]
 name    = {{ $chain.name | default "ethereum_sepolia" | quote }}
 rpc_url = {{ default (include "rpc.wsUrl" $root) $chain.rpcUrl | quote }}
+chain_id = {{ $root.Values.global.rpc.chainId | int }}
 {{- if $chain.alkahestAddressConfigPath }}
 alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}
@@ -164,6 +165,10 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 token_registry_path = {{ $cfg.tokenRegistryPath | quote }}
 {{- end }}
 enable_event_queue  = {{ $seller.enableEventQueue | default false }}
+{{- if $agent.agentId }}
+onchain_agent_id    = {{ $agent.agentId | quote }}
+{{- end }}
+auto_register       = {{ $agent.autoRegister | default true }}
 
 [seller.provisioning]
 service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}

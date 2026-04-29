@@ -138,10 +138,14 @@ class Config:
     token_registry_path: str
     ssh_public_key: str
     zerotier_network: str | None
+    # Chain identity
+    chain_id: int
     # Indexer/Registry settings
     indexer_url: str
     identity_registry_address: str | None
     onchain_agent_id: str | None
+    # Registration behaviour
+    auto_register: bool
     # Registry discovery settings
     enable_registry_discovery: bool
     registry_order_timeout: int
@@ -241,6 +245,10 @@ def load_config() -> Config:
             "registry.identity_registry_address", None,
         ),
 
+        # Chain identity (explicit in TOML so serve never needs an RPC
+        # call to discover it; required for canonical agent ID construction).
+        chain_id=_resolve_int("chain.chain_id", 1337),
+
         # Seller-only bookkeeping.
         agent_db_path=str(_resolve("seller.db_path", "/tmp/agent.db")),
         event_validation_mode=str(_resolve(
@@ -257,6 +265,16 @@ def load_config() -> Config:
         )),
 
         onchain_agent_id=_resolve("seller.onchain_agent_id", None),
+
+        # Registration behaviour.
+        # auto_register=True  → if onchain_agent_id is absent, register at
+        #                       startup and hold the resolved ID in memory.
+        # auto_register=False → if onchain_agent_id is absent, crash loudly.
+        #                       Use this when an agent has already been
+        #                       registered and a missing ID should be caught
+        #                       immediately rather than silently creating a
+        #                       new on-chain identity.
+        auto_register=_resolve_bool("seller.auto_register", True),
 
         # Registry discovery settings (seller-side).
         enable_registry_discovery=_resolve_bool(

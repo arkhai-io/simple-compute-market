@@ -78,10 +78,10 @@ FORWARD_PID_FILE := .port-forward.pids
 ## Forward all service ports to localhost in the background.
 ## PIDs are written to $(FORWARD_PID_FILE) so unforward can clean them up.
 ## Access services at:
-##   Anvil RPC   http://localhost:8545
-##   Registry    http://localhost:8080
-##   Agent sell  http://localhost:8001
-##   Provisioning http://localhost:8081
+##   Anvil RPC          http://localhost:8545
+##   Registry           http://localhost:8080
+##   Seller Storefront  http://localhost:8001
+##   Provisioning       http://localhost:8081
 forward: unforward
 	@echo "Starting port-forwards..."
 	@kubectl port-forward --namespace $(NAMESPACE) \
@@ -89,7 +89,7 @@ forward: unforward
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-registry 8080:8080 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
-		svc/$(RELEASE)-agents-seller 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
+		svc/$(RELEASE)-storefront-bob 8001:8001 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@kubectl port-forward --namespace $(NAMESPACE) \
 		svc/$(RELEASE)-provisioning 8081:8081 > /dev/null 2>&1 & echo $$! >> $(FORWARD_PID_FILE)
 	@echo "  anvil    → http://localhost:8545"

@@ -72,10 +72,18 @@ async def _resolve_base_url(port: int, base_url_raw: str | None, zerotier_networ
     return f"http://localhost:{port}"
 
 
-async def run_register(chain_id: int = 1337) -> int:
-    """Register the agent on-chain via ERC-8004 IdentityRegistry.
+async def perform_registration(chain_id: int) -> int:
+    """Register the agent on-chain and return the numeric agent ID.
 
-    Returns a shell-style exit code (0 on success, 1 on failure).
+    This is the shared core used by both the ``market-storefront register``
+    CLI verb and the ``serve`` startup hook.  It reads all inputs from the
+    module-level CONFIG singleton.
+
+    Raises ``RuntimeError`` on any unrecoverable failure so callers can
+    treat it as a hard crash signal (serve startup) or catch and exit with
+    a non-zero code (CLI verb).
+
+    Returns the numeric agent ID (always a positive int on success).
     """
     base_url_raw = CONFIG.base_url_override_raw
     zerotier_network = CONFIG.zerotier_network
@@ -87,7 +95,7 @@ async def run_register(chain_id: int = 1337) -> int:
 
     resolved_base_url = await _resolve_base_url(port, base_url_raw, zerotier_network)
     if resolved_base_url is None:
-        return 1
+        raise RuntimeError("Could not resolve externally-reachable base URL for registration.")
 
     agent_card_url = build_agent_card_url(resolved_base_url)
     registration_file_url = build_registration_file_url(resolved_base_url)
@@ -118,8 +126,7 @@ async def run_register(chain_id: int = 1337) -> int:
         if not v
     ]
     if missing:
-        print(f"❌ Missing required config keys: {', '.join(missing)}")
-        return 1
+        raise RuntimeError(f"Missing required config keys: {', '.join(missing)}")
 
     print("Registering agent on-chain...")
     try:
@@ -133,16 +140,13 @@ async def run_register(chain_id: int = 1337) -> int:
             explicit_agent_id=onchain_agent_id,
         ))
     except ValueError as exc:
-        print(f"❌ Error: {exc}")
-        return 1
+        raise RuntimeError(str(exc)) from exc
     except Exception as exc:
-        print(f"❌ Registration failed: {exc}")
         traceback.print_exc()
-        return 1
+        raise RuntimeError(f"Registration failed: {exc}") from exc
 
     if not result:
-        print("❌ Registration failed - no result returned")
-        return 1
+        raise RuntimeError("Registration failed — no result returned.")
 
     tx_hash, numeric_agent_id, updates_dict = result
     canonical_id = build_erc8004_canonical_id(
@@ -181,6 +185,21 @@ async def run_register(chain_id: int = 1337) -> int:
     print()
 
     if onchain_agent_id is None:
-        print("💡 Pin this in your config.toml to skip the on-chain lookup next time:")
+        print("💡 Pin this in your config.toml to skip registration on next start:")
         print(f"   [seller]\n   onchain_agent_id = \"{numeric_agent_id}\"")
-    return 0
+
+    return numeric_agent_id
+
+
+async def run_register(chain_id: int = 1337) -> int:
+    """CLI entry point for ``market-storefront register``.
+
+    Thin wrapper around ``perform_registration`` that translates exceptions
+    to shell-style exit codes (0 = success, 1 = failure).
+    """
+    try:
+        await perform_registration(chain_id)
+        return 0
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
+        return 1

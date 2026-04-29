@@ -1818,18 +1818,74 @@ a2a_app = Starlette(routes=[
     agent_settle_status_route,
 ])
 
+# ---------------------------------------------------------------------------
+# Runtime agent identity
+#
+# _AGENT_ID is set once during _startup_tasks() via _ensure_agent_identity().
+# It is the authoritative resolved numeric agent ID for this process lifetime.
+# CONFIG.onchain_agent_id is the TOML-sourced value (may be None if not
+# pinned); _AGENT_ID is always set after a successful startup or the process
+# has crashed with a clear error message.
+# ---------------------------------------------------------------------------
+
+_AGENT_ID: int | None = None
+
+
+async def _ensure_agent_identity() -> int:
+    """Resolve the numeric on-chain agent ID, registering if necessary.
+
+    Resolution order:
+      1. CONFIG.onchain_agent_id (pinned in TOML / helm values) — fast path,
+         no chain interaction.
+      2. auto_register=True → call perform_registration() and hold the result
+         in memory for this process lifetime.
+      3. auto_register=False and no ID pinned → crash with a clear message.
+         This protects operators who have already registered an agent and
+         don't want a misconfigured deploy to silently mint a new one.
+
+    Sets the module-level _AGENT_ID and returns it.
+    """
+    global _AGENT_ID
+
+    if CONFIG.onchain_agent_id:
+        try:
+            _AGENT_ID = int(CONFIG.onchain_agent_id)
+            logger.info(
+                "[IDENTITY] Using pinned agent ID %d from config", _AGENT_ID
+            )
+            return _AGENT_ID
+        except ValueError:
+            raise RuntimeError(
+                f"[IDENTITY] seller.onchain_agent_id '{CONFIG.onchain_agent_id}' "
+                "is not a valid integer."
+            )
+
+    if not CONFIG.auto_register:
+        raise RuntimeError(
+            "[IDENTITY] seller.onchain_agent_id is not set and "
+            "seller.auto_register is false. "
+            "Either pin [seller].onchain_agent_id in config.toml / helm values, "
+            "or set seller.auto_register = true to allow automatic registration."
+        )
+
+    logger.info("[IDENTITY] No agent ID pinned — performing on-chain registration.")
+    from market_storefront.commands.register import perform_registration
+    _AGENT_ID = await perform_registration(chain_id=CONFIG.chain_id)
+    logger.info("[IDENTITY] Registered with agent ID %d", _AGENT_ID)
+    return _AGENT_ID
+
+
 # Add ERC-8004 registration file endpoint
 # Per ERC-8004 spec: tokenURI MUST resolve to the agent registration file
 from market_storefront.utils.agent_card import build_erc8004_registration_file
 from service.clients.erc8004.blockchain import (
     build_erc8004_canonical_id,
-    rpc_url_for_http_provider,
 )
 
 async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     """
     Serve ERC-8004 registration file at /.well-known/erc-8004-registration.json
-    
+
     Per ERC-8004 spec, this file contains:
     - type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1"
     - name, description, endpoints (with A2A endpoint pointing to agent card)
@@ -1837,25 +1893,12 @@ async def serve_erc8004_registration_file(request: Request) -> JSONResponse:
     - supportedTrust: array (optional)
     """
     # Get chain_id
-    chain_id = 1337  # Default
-    if CONFIG.chain_rpc_url:
-        try:
-            from web3 import Web3
-            from web3.providers import HTTPProvider
-            http_url = rpc_url_for_http_provider(CONFIG.chain_rpc_url)
-            w3 = Web3(HTTPProvider(http_url, request_kwargs={'timeout': 5}))
-            chain_id = w3.eth.chain_id
-        except Exception:
-            pass  # Use default
-    
-    # Get on-chain agent ID if available
-    agent_id = None
-    if CONFIG.onchain_agent_id:
-        try:
-            agent_id = int(CONFIG.onchain_agent_id)
-        except ValueError:
-            pass
-    
+    # chain_id and agent_id are resolved once at startup by
+    # _ensure_agent_identity() and cached in module-level state.
+    # No per-request RPC call needed.
+    chain_id = CONFIG.chain_id
+    agent_id = _AGENT_ID  # None until startup completes; valid int after.
+
     # Build registration file
     registration_file = build_erc8004_registration_file(
         agent_card_data=agent_card_data,
@@ -1920,7 +1963,7 @@ async def _start_heartbeat():
         "indexer_url": CONFIG.indexer_url,
         "identity_registry_address": CONFIG.identity_registry_address,
         "agent_wallet_address": CONFIG.agent_wallet_address,
-        "onchain_agent_id": CONFIG.onchain_agent_id,
+        "onchain_agent_id": str(_AGENT_ID) if _AGENT_ID is not None else None,
         "chain_rpc_url": CONFIG.chain_rpc_url,
         "agent_priv_key": CONFIG.agent_priv_key,
     })
@@ -1994,6 +2037,12 @@ async def _startup_tasks():
     from market_storefront.resource_poller import resource_poller_loop
 
     _maybe_join_zerotier_network()
+
+    # Resolve agent identity first — everything else (heartbeat, registration
+    # file endpoint) depends on having a valid numeric agent ID.
+    # Raises RuntimeError on hard failure (missing config + auto_register=False),
+    # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
+    await _ensure_agent_identity()
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())

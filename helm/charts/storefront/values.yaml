@@ -24,6 +24,18 @@ agents:
   - name: bob
     port: 8001
     component: seller
+    # agentId: the numeric on-chain agent ID assigned at first registration.
+    # Leave empty on first deploy — the service will register automatically
+    # (requires autoRegister: true) and print the assigned ID in the logs.
+    # Pin this value after first registration to skip re-registration on
+    # subsequent deploys and to guard against accidental new registrations.
+    agentId: ""
+    # autoRegister: controls behaviour when agentId is not set.
+    #   true  → register at startup (default; safe for first deploys).
+    #   false → crash loudly if agentId is missing. Use this once an agent
+    #           has been registered to prevent a misconfigured deploy from
+    #           silently minting a new on-chain identity.
+    autoRegister: true
     secret:
       createSecret: true
       secretName: ""   # auto-generated as {fullname}-{name} when empty

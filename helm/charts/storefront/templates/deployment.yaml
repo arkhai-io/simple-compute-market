@@ -48,34 +48,13 @@ spec:
                 echo "Registry not ready, retrying in 5s..."; sleep 5
               done
               echo "Registry ready."
-        {{- if $agent.autoRegister }}
-        - name: register-onchain
-          image: {{ include "storefront.image" $ }}
-          imagePullPolicy: {{ $.Values.image.pullPolicy }}
-          # entrypoint.sh launches the ZeroTier daemon then execs args.
-          # Skips the default register+serve fallback because we pass
-          # explicit args.
-          command:
-            - ./entrypoint.sh
-            - market-storefront
-            - register
-            - --chain-id
-            - {{ $.Values.global.rpc.chainId | quote }}
-          env:
-            - name: XDG_CONFIG_HOME
-              value: /etc
-          volumeMounts:
-            - name: arkhai-config
-              mountPath: /etc/arkhai
-              readOnly: true
-        {{- end }}
       containers:
         - name: market-storefront-{{ $agent.name }}
           image: {{ include "storefront.image" $ }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           # entrypoint.sh starts the ZeroTier daemon then execs the
-          # CLI verb. Registration is handled by the init container
-          # above, so the main pod only needs `serve`.
+          # CLI verb. Registration and heartbeating are handled inside
+          # `serve` at startup — no separate init container needed.
           command:
             - ./entrypoint.sh
             - market-storefront

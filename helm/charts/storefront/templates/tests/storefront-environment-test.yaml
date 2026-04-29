@@ -42,7 +42,7 @@ spec:
       command:
         - .venv/bin/pytest
         - -m
-        - agents
+        - storefront
       env:
         - name: ACTIVE_PROFILES
           value: {{ join "," $profiles | quote }}

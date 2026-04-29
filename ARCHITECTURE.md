@@ -166,13 +166,28 @@ no symmetric agent-to-agent server on the buyer side. The earlier
 
 **Ports:** `8001` (default seller port; `seller.port` in config.toml).
 
-**Startup sequence:** the entrypoint runs three linear steps. The
-`market-storefront register` console verb registers the agent on the
-ERC-8004 IdentityRegistry (idempotent — finds existing registration on
-re-runs unless `seller.onchain_agent_id` is cleared). Then
-`market-storefront serve` starts uvicorn, which on `@app.on_event("startup")`
-joins the configured ZeroTier network if any, kicks off the heartbeat
-sender to the registry, and starts the resource poller.
+**Startup sequence:** `entrypoint.sh` starts the ZeroTier daemon,
+then `exec market-storefront serve`. On `@app.on_event("startup")` the
+server joins the configured ZeroTier network if any, then runs
+`_ensure_agent_identity()`:
+
+- If `seller.onchain_agent_id` is set in config (fast path) — use that
+  ID directly, no chain interaction.
+- If `seller.auto_register = true` (default) and no ID is set — call
+  `perform_registration()`, hold the resolved numeric ID in the
+  module-level `_AGENT_ID` for the process lifetime, and log a hint to
+  pin it in config.
+- If `seller.auto_register = false` and no ID is set — raise
+  `RuntimeError` immediately. The pod crashes with a clear message
+  rather than silently minting a new on-chain identity.
+
+After identity is resolved, the heartbeat sender, resource poller, and
+negotiation watchdog are started as background tasks.
+
+The `market-storefront register` console verb still exists and works
+identically to before — operators can run it manually to inspect or
+update registration. It now delegates to the shared `perform_registration()`
+helper extracted from the same module.
 
 **Key source layout:**
 ```
@@ -280,6 +295,10 @@ layer whenever wheel file contents change.
 > statefulness/concurrency issues.
 > **TODO:** Document the `negotiation_watchdog` — what conditions
 > trigger it and what it does to orphaned negotiations.
+> **TODO:** Add a `/health` endpoint to the storefront. Currently the
+> service has no health route; `make forward` and readiness probes have
+> nothing to poll. Candidate: `GET /health` returning `{"status": "ok"}`
+> with 200, mirroring the provisioning and registry service conventions.
 
 ---
 
@@ -922,7 +941,7 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 - No `PersistentVolumeClaim` for agent SQLite DBs — each pod restart loses negotiation history and policy state (significant given the known SQLite statefulness issues)
 - No `PersistentVolumeClaim` for registry SQLite — event sync state is also ephemeral
 - Agent `Deployment` has no liveness or readiness probes (noted as TODO in the template)
-- `ONCHAIN_AGENT_ID` is not cleared in the Helm deployment the way it is in compose — behavior on pod restart against a persistent chain needs verification
+- Agent ID persistence across pod restarts is handled by `seller.onchain_agent_id` in config (a Helm value). On first deploy with `agentId: ""` and `autoRegister: true`, the service registers and logs the assigned ID. Operators pin that ID in `values.yaml` and flip `autoRegister: false` to prevent accidental re-registration. The compose flow (which used `ONCHAIN_AGENT_ID=` env var clearing to force re-registration on fresh Anvil) is unchanged.
 - `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
 - `replicaCount` exists for the storefront and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect
 
@@ -955,6 +974,44 @@ make build
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
+
+---
+
+## Storefront — Planned Rework
+
+### 1. Storefront config unification (TOML singleton → dynaconf profiles)
+
+**Status:** Planned.
+
+**Problem:** The storefront uses a bespoke TOML singleton (`CONFIG` in
+`market_storefront.utils.config`) loaded once at import time via a custom
+`load_user_config()` / `get_dotted()` chain. This is a different system
+from the profile-based dynaconf loader used by the provisioning service
+and the integration test suite. The inconsistency creates friction:
+- Secrets and environment-specific overrides require a separate `config.toml`
+  mount rather than profile files; there is no equivalent of the
+  `provisioning-secrets` profile pattern for the storefront.
+- The test suite cannot inject per-test config overrides cleanly — tests
+  monkeypatch `_USER_CFG` directly, which is fragile.
+- Adding a new config key requires touching the `Config` dataclass, the
+  `load_config()` function, and every Helm template that renders the TOML —
+  three places instead of one.
+
+**Planned fix:** Migrate the storefront config to dynaconf profiles
+following the provisioning service pattern:
+- Replace `load_user_config()` / `get_dotted()` with `dynaconf.Dynaconf`
+  with profile resolution via `ACTIVE_PROFILES` and `CONFIG_DIRECTORY`.
+- The rendered `config.toml` becomes one profile file (`config-seller.yml`
+  or similar) mounted from a Kubernetes Secret.
+- The `Config` dataclass and `load_config()` are replaced by a thin
+  validated wrapper over `settings.*` keys, or removed in favour of direct
+  `settings` attribute access.
+- Helm test pods consume the same profile files as the service pods,
+  eliminating the separate `config-{component}-secret.yml` key that the
+  storefront Secret currently emits for the test pod.
+
+This is a prerequisite for clean secret injection (wallet keys, API keys)
+via the standard Helm Secret + profile pattern.
 
 ---
 
