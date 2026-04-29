@@ -56,6 +56,22 @@ def register(app: typer.Typer) -> None:
             None, "--buyer-priv-key",
             help="Override buyer private key (default: wallet.private_key).",
         ),
+        duration_hours: Optional[int] = typer.Option(
+            None, "--duration-hours", "-t",
+            help="Lease duration the deal funds. Logged so a follow-on "
+                 "`market settle --run <id>` can drive escrow.create "
+                 "without re-passing it.",
+        ),
+        token_contract: Optional[str] = typer.Option(
+            None, "--token-contract",
+            help="Payment token contract address. Logged for downstream "
+                 "`market settle` / `escrow create`.",
+        ),
+        token_decimals: Optional[int] = typer.Option(
+            None, "--token-decimals",
+            help="Payment token decimals. Logged for downstream "
+                 "`market settle` / `escrow create`.",
+        ),
     ) -> None:
         """Drive a synchronous negotiation with one seller, round-by-round.
 
@@ -81,6 +97,24 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
+        # Best-effort: fetch the seller's on-chain wallet from the
+        # /.well-known/agent-wallet.json endpoint and log it. Failure
+        # is non-fatal — the negotiation itself doesn't need this; we
+        # log it only so a follow-up `settle --run <id>` can avoid
+        # re-fetching. A later `_resolve_seller_wallet` call from the
+        # settle path will fall back to a fresh HTTP fetch if absent.
+        seller_wallet: Optional[str] = None
+        try:
+            from ..buy_orchestrator import _resolve_seller_wallet
+            seller_wallet = _resolve_seller_wallet(seller_url)
+        except Exception as exc:
+            typer.secho(
+                f"(warn) could not resolve seller wallet from "
+                f"{seller_url}/.well-known/agent-wallet.json: {exc}. "
+                f"Negotiating anyway; settle will retry the lookup.",
+                fg=typer.colors.YELLOW,
+            )
+
         run_log = RunLog.start(
             command="market negotiate",
             seller_url=seller_url,
@@ -89,6 +123,10 @@ def register(app: typer.Typer) -> None:
             initial_price=initial_price,
             max_price=max_price,
             max_rounds=max_rounds,
+            seller_wallet_address=seller_wallet,
+            duration_hours=duration_hours,
+            token_contract=token_contract,
+            token_decimals=token_decimals,
         )
 
         header = Table.grid(padding=(0, 2))

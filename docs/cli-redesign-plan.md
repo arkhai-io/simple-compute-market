@@ -34,7 +34,7 @@ market negotiate                # stage 2 only — stops at agreement
 market settle                   # stages 3-5: create_if_needed + submit + poll
 market escrow create            # stage 3 only (chain ops, no server interaction)
 market escrow reclaim           # post-expiration tokens-back
-market escrow show              # EVM read of escrow state (TODO: needs EAS ABI)
+market escrow show              # EVM read of escrow state (IEAS.getAttestation)
 market order list / show
 market network join / get-peers
 market config init / init-user / path / show / set / get
@@ -59,9 +59,9 @@ Inspection follows the source-of-truth split:
 - "What did the buyer's CLI do?" → `market logs show <run_id>` (the
   JSONL run-log already records every stage event).
 - "What's the escrow's on-chain state?" → `market escrow show`
-  (TODO; alkahest-py does not yet expose `attestation.get(uid)`,
-  needs either an upstream addition or an inlined EAS ABI + web3
-  read).
+  (calls `IEAS.getAttestation(uid)` via web3.py + the vendored ABI
+  at `service/abi/IEAS.json`, decodes the obligation data against
+  the ERC-20 escrow schema).
 - "What's the seller's job state?" → not a buyer-side command; runs
   inside `market settle` while polling, and the result lands in the
   buyer's run-log.
@@ -75,7 +75,7 @@ market-storefront serve                # in-process uvicorn (replaces broken `st
 market-storefront provide
 market-storefront escrow claim         # regrouped from top-level
 market-storefront escrow refund        # regrouped from top-level (post-claim manual return)
-market-storefront escrow show          # EVM read of escrow state (TODO: shared EAS gap with buyer)
+market-storefront escrow show          # EVM read of escrow state (IEAS.getAttestation; symmetric with buyer)
 market-storefront portfolio import-csv
 market-storefront network join / get-peers
 market-storefront config init / path / show / set / get   # NEW (symmetric with buyer)
@@ -239,35 +239,50 @@ after step 2: it produces the on-chain escrow_uid, logs it, exits.
 The operator can then run `market settle --run <run_id>` later
 (the create event in the log will skip the create branch).
 
-## `escrow show` (deferred)
+## `escrow show` (implemented)
 
-Both `market escrow show --escrow-uid 0x...` and
-`market-storefront escrow show --escrow-uid 0x...` need a way to
-read an EAS attestation by UID and decode the
-`ERC20EscrowObligationData` payload. `alkahest_py` currently exposes
-`get_escrow_attestation(fulfillment_uid)` (wrong direction —
-fulfillment → escrow) but no `attestation.get(uid)` /
-`escrow.get(uid)`. Two unblocking options:
+`market escrow show --escrow-uid 0x...` and
+`market-storefront escrow show --escrow-uid 0x...` both use the
+shared `service.clients.eas.read_attestation()` helper, which:
 
-- **Upstream**: add `client.attestation.get(uid)` to alkahest-py.
-  Cleanest; matches the existing client surface.
-- **Local**: inline the EAS contract ABI + a `web3.py` call to
-  `getAttestation(bytes32)`. Smallest scope but adds an EAS-flavored
-  dep to both runtime CLIs.
+1. Loads the vendored `IEAS` ABI from `service/abi/IEAS.json`.
+2. Resolves the EAS contract address from the alkahest address
+   config (`attestation_addresses.eas`).
+3. Calls `IEAS.getAttestation(bytes32 uid)` via `web3.py`.
+4. Decodes the `data` payload against the
+   `(address arbiter, bytes demand, address token, uint256 amount)`
+   tuple — `ERC20EscrowObligation.ObligationData`'s known layout.
 
-Either path lands the same UX. Tracking under "follow-up" in the
-plan rather than this commit.
+Output covers the attestation envelope (uid, schema, attester,
+recipient, time, expiration, revocation, ref_uid, revocable) plus
+the decoded escrow fields. UIDs that point at a different obligation
+type (e.g. `StringObligation`) surface a decode warning but still
+print the envelope. `read_attestation` works against http(s) and
+ws(s) RPC URLs.
 
-## Run-log enrichment for `market negotiate` (follow-up)
+The buyer command takes either `--escrow-uid` or `--run <run_id>`
+(in which case the uid is resolved from the run-log via the same
+helper that powers `escrow reclaim`). The seller command requires
+`--escrow-uid` directly because there's no per-deal SQLite log on
+the seller-side equivalent of the buyer's run-log.
 
-`market settle --run <id>` currently relies on flags or config.toml
-defaults for `duration_hours`, token contract + decimals, etc.
-Enriching `market negotiate` to log `seller_wallet_address`
-(returned by the seller's `accept` reply, or fetched from
-`/.well-known/agent-wallet.json`), `duration_hours`, and the token
-contract + decimals (resolved from the seller's order on the
-registry) lets `market settle --run <id>` work flag-free. Tracking
-as a follow-up; the flag-driven `settle` is already usable today.
+## Run-log enrichment for `market negotiate` (implemented)
+
+`market negotiate` now:
+
+1. Calls `_resolve_seller_wallet(seller_url)` once at startup
+   (best-effort; warns and continues on failure) and logs the
+   resulting `seller_wallet_address` into the `run_started` event.
+2. Accepts `--duration-hours`, `--token-contract`, and
+   `--token-decimals` flags. When passed, they land in the
+   `run_started` event.
+
+`load_deal_context` reads these fields. `market settle --run <id>`
+and `market escrow create --run <id>` use them as defaults — flags
+on those commands still override. The result: a `negotiate` run
+launched with the right flags makes downstream `settle` work
+flag-free; without them, the existing flag-driven recovery still
+works.
 
 ## Suggested execution order
 

@@ -1,14 +1,16 @@
 """`market-storefront escrow` — seller-side escrow lifecycle commands.
 
-Two verbs:
+Three verbs:
   claim  — collect an escrow on-chain after fulfillment.
   refund — direct ERC-20 transfer from the provider wallet, used when
            a deal can't settle through the normal release path
            (e.g. provisioning failed post-claim, dispute).
+  show   — read-only EVM inspection (calls IEAS.getAttestation,
+           decodes ERC-20 escrow obligation data).
 
 Counterpart on the buyer side: `market escrow reclaim`, which pulls
 tokens back when an escrow expired *unclaimed*. Reclaim is buyer-only;
-claim/refund are seller-only.
+claim/refund are seller-only; show is symmetric.
 """
 
 from __future__ import annotations
@@ -209,3 +211,82 @@ def refund_cmd(
     result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
     result.add_row("Block", str(resp.get("block_number", "-")))
     console.print(Panel(result, title="Refund complete", border_style="green"))
+
+
+@escrow_app.command("show")
+def show_cmd(
+    escrow_uid: str = typer.Option(
+        ..., "--escrow-uid", "-u",
+        help="0x-prefixed escrow UID to inspect.",
+    ),
+    eas_address: Optional[str] = typer.Option(
+        None, "--eas-address",
+        help="Override EAS contract address (default: resolve from "
+             "chain.alkahest_address_config_path).",
+    ),
+) -> None:
+    """Read an escrow attestation from chain state.
+
+    Inputs come from CONFIG (chain.rpc_url, chain.name,
+    chain.alkahest_address_config_path) — same TOML the seller uses
+    at runtime. Symmetric with `market escrow show` on the buyer side.
+    """
+    from ..utils.config import CONFIG
+    from service.clients.eas import read_attestation, resolve_eas_address
+
+    rpc = CONFIG.chain_rpc_url
+    if not rpc:
+        typer.secho(
+            "Missing chain.rpc_url in config.toml.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+
+    eas = eas_address
+    if not eas:
+        try:
+            eas = resolve_eas_address(
+                CONFIG.chain_name,
+                config_path=CONFIG.alkahest_address_config_path,
+            )
+        except ValueError as exc:
+            typer.secho(str(exc), err=True, fg=typer.colors.RED)
+            raise typer.Exit(2)
+
+    try:
+        att = read_attestation(rpc, eas, escrow_uid)
+    except Exception as exc:
+        typer.secho(
+            f"IEAS.getAttestation failed: {exc}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(4) from exc
+
+    console = Console()
+    head = Table.grid(padding=(0, 2))
+    head.add_column(style="bold")
+    head.add_column()
+    head.add_row("Escrow UID", att.uid)
+    head.add_row("Schema", att.schema)
+    head.add_row("Attester", att.attester)
+    head.add_row("Recipient", att.recipient)
+    head.add_row("Created at (unix)", str(att.time))
+    head.add_row("Expiration (unix)", str(att.expiration_time) or "(no expiry)")
+    head.add_row("Revoked at (unix)", str(att.revocation_time) or "(not revoked)")
+    head.add_row("Ref UID", att.ref_uid)
+    head.add_row("Revocable", "yes" if att.revocable else "no")
+    border = "red" if att.is_revoked else "green"
+    console.print(Panel(head, title="Escrow attestation", border_style=border))
+
+    if att.decode_error:
+        typer.secho(att.decode_error, fg=typer.colors.YELLOW)
+        return
+
+    body = Table.grid(padding=(0, 2))
+    body.add_column(style="bold")
+    body.add_column()
+    body.add_row("Arbiter", att.arbiter or "-")
+    body.add_row("Token", att.token or "-")
+    body.add_row("Amount (raw)", str(att.amount) if att.amount is not None else "-")
+    body.add_row("Demand", ("0x" + att.demand.hex()) if att.demand else "-")
+    console.print(Panel(body, title="ERC-20 escrow obligation data", border_style="cyan"))

@@ -104,6 +104,13 @@ def register(app: typer.Typer) -> None:
         """
         console = Console()
         deal = load_deal_context(run_id)
+        # Run-log enrichments (when `market negotiate` was given the
+        # corresponding flags) become defaults if the operator didn't
+        # pass them on `settle`. Explicit flags still win.
+        effective_token = token_contract or deal.token_contract
+        effective_token_decimals = (
+            token_decimals if token_decimals != 18 else (deal.token_decimals or 18)
+        )
         chain = resolve_chain_settings(
             buyer_address=buyer_address,
             buyer_private_key=buyer_private_key,
@@ -111,8 +118,8 @@ def register(app: typer.Typer) -> None:
             rpc_url=rpc_url,
             chain_name=chain_name,
             alkahest_addr_config=alkahest_addr_config,
-            token_contract=token_contract,
-            token_decimals=token_decimals,
+            token_contract=effective_token,
+            token_decimals=effective_token_decimals,
         )
 
         log = open_run_log(run_id)
@@ -139,17 +146,19 @@ def register(app: typer.Typer) -> None:
 
         # --- Stage 3: escrow.create (skip if uid already known) -------
         if not resolved_uid:
-            try:
-                seller_wallet = _resolve_seller_wallet(deal.seller_url)
-            except RuntimeError as exc:
-                log.event("escrow_resolve_wallet_failed", error=str(exc))
-                log.end("error", error=f"resolve_seller_wallet: {exc}")
-                typer.secho(
-                    f"Could not resolve seller wallet from "
-                    f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(3)
+            seller_wallet = deal.seller_wallet_address
+            if not seller_wallet:
+                try:
+                    seller_wallet = _resolve_seller_wallet(deal.seller_url)
+                except RuntimeError as exc:
+                    log.event("escrow_resolve_wallet_failed", error=str(exc))
+                    log.end("error", error=f"resolve_seller_wallet: {exc}")
+                    typer.secho(
+                        f"Could not resolve seller wallet from "
+                        f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
+                        err=True, fg=typer.colors.RED,
+                    )
+                    raise typer.Exit(3)
 
             terms = AgreedTerms(
                 seller_url=deal.seller_url,

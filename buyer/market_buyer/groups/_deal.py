@@ -28,6 +28,12 @@ class DealContext:
     agreed_price: int
     escrow_uid: Optional[str] = None
     duration_hours: int = 1
+    # Settlement-time enrichments captured by `market negotiate` when
+    # available. None means the field wasn't logged — caller falls
+    # back to flags / config.toml defaults / a fresh HTTP lookup.
+    seller_wallet_address: Optional[str] = None
+    token_contract: Optional[str] = None
+    token_decimals: Optional[int] = None
 
 
 def load_deal_context(run_id: str) -> DealContext:
@@ -52,6 +58,9 @@ def load_deal_context(run_id: str) -> DealContext:
     agreed_price: Optional[int] = None
     escrow_uid: Optional[str] = None
     duration_hours: int = 1
+    seller_wallet_address: Optional[str] = None
+    token_contract: Optional[str] = None
+    token_decimals: Optional[int] = None
     last_status: Optional[str] = None
 
     for ev in events:
@@ -96,6 +105,15 @@ def load_deal_context(run_id: str) -> DealContext:
                 seller_order_id = ev["seller_order_id"]
             if ev.get("duration_hours"):
                 duration_hours = int(ev["duration_hours"])
+            if ev.get("seller_wallet_address"):
+                seller_wallet_address = str(ev["seller_wallet_address"])
+            if ev.get("token_contract"):
+                token_contract = str(ev["token_contract"])
+            if ev.get("token_decimals") is not None:
+                try:
+                    token_decimals = int(ev["token_decimals"])
+                except (TypeError, ValueError):
+                    pass
 
     missing = [
         name for name, v in (
@@ -119,6 +137,9 @@ def load_deal_context(run_id: str) -> DealContext:
         agreed_price=agreed_price,            # type: ignore[arg-type]
         escrow_uid=escrow_uid,
         duration_hours=duration_hours,
+        seller_wallet_address=seller_wallet_address,
+        token_contract=token_contract,
+        token_decimals=token_decimals,
     )
 
 
@@ -194,7 +215,10 @@ def resolve_chain_settings(
             from service.clients.token import TOKEN_REGISTRY
             meta = TOKEN_REGISTRY.require("MOCK")
             tc = meta.contract_address
-            decimals = meta.decimals
+            # Only override decimals when the token registry is the
+            # source — caller-supplied flag wins over the default.
+            if token_decimals == 18:  # the typer default
+                decimals = meta.decimals
         except Exception as exc:
             typer.secho(
                 f"Could not resolve default token 'MOCK' — pass "
