@@ -23,7 +23,7 @@ dependencies = [
     # Workspace dependency: tests use the real discovery/matching logic,
     # not a re-implementation. Keeps test behavior aligned with storefront behavior.
     "arkhai-storefront-client>=0.2.0",
-    "arkhai-registry-client>=0.1.2",
+    "arkhai-registry-client>=0.1.3",
     "market-service>=0.1.0",
 	"market-storefront>=0.1.0",
     "provisioning-service>=0.1.1",
