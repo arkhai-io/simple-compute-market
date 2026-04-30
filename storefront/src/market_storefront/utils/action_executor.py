@@ -229,7 +229,7 @@ async def execute_action(
                     now_iso = datetime.now().isoformat()
                     sqlite_client = get_sqlite_client()
                     await sqlite_client.upsert_order(
-                        order_id=order.get("order_id"),
+                        listing_id=order.get("order_id"),
                         status="open",
                         created_at=now_iso,
                         updated_at=now_iso,
@@ -237,11 +237,11 @@ async def execute_action(
                         demand_resource=order.get("demand_resource"),
                         fulfillment_resource=None,
                         duration_hours=int(order.get("duration_hours", 1)),
-                        order_maker=order.get("order_maker", BASE_URL_OVERRIDE),
-                        order_taker=order.get("order_taker"),
+                        seller=order.get("order_maker", BASE_URL_OVERRIDE),
+                        buyer=order.get("order_taker"),
                         matched_offer_id=parameters.get("matched_offer_id"),
-                        maker_attestation=order.get("maker_attestation"),
-                        taker_attestation=order.get("taker_attestation"),
+                        seller_attestation=order.get("maker_attestation"),
+                        buyer_attestation=order.get("taker_attestation"),
                         oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
                     )
@@ -316,7 +316,7 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     try:
         sqlite_client = get_sqlite_client()
         await sqlite_client.update_order(
-            order_id=order_id,
+            listing_id=order_id,
             status="closed",
         )
     except Exception as exc:
@@ -595,7 +595,7 @@ async def discover(
     first closed-function step of a sequential buy/sell flow.
 
     Returns a list of match records:
-        {"their_order_id": str,
+        {"their_listing_id": str,
          "their_agent_url": str,
          "their_order": dict}
 
@@ -648,12 +648,12 @@ async def discover(
 
     matches: list[dict[str, Any]] = []
     for m in matching_orders[:CONFIG.max_discovery_agents]:
-        their_order_id = str(m.id)
+        their_listing_id = str(m.id)
         their_agent_url = m.maker_agent_id
-        if not their_order_id or not their_agent_url:
+        if not their_listing_id or not their_agent_url:
             continue
         matches.append({
-            "their_order_id": their_order_id,
+            "their_listing_id": their_listing_id,
             "their_agent_url": their_agent_url,
             "their_order": m,
         })
@@ -662,7 +662,7 @@ async def discover(
         "discovery", "matches_found",
         our_order_id=order_id,
         match_count=len(matches),
-        matched_order_ids=[m["their_order_id"] for m in matches],
+        matched_order_ids=[m["their_listing_id"] for m in matches],
         counterparty_urls=[m["their_agent_url"] for m in matches],
     )
     return matches
@@ -828,7 +828,7 @@ async def fulfill_compute_obligation(
             try:
                 sqlite_client = get_sqlite_client()
                 await sqlite_client.update_order(
-                    order_id=order_id,
+                    listing_id=order_id,
                     status="accepted",
                     escrow_uid=escrow_uid,
                 )
@@ -923,7 +923,7 @@ async def fulfill_compute_obligation(
             tenant_data = authentication.get("tenant", {}) or {}
             if root_data:
                 await _cred_client.store_credential(
-                    order_id=cred_order_id,
+                    listing_id=cred_order_id,
                     role="root",
                     granted_to="self",
                     password=root_data.get("password"),
@@ -932,7 +932,7 @@ async def fulfill_compute_obligation(
                 )
             if tenant_data:
                 await _cred_client.store_credential(
-                    order_id=cred_order_id,
+                    listing_id=cred_order_id,
                     role="tenant",
                     granted_to="self",
                     password=tenant_data.get("password"),
@@ -989,8 +989,8 @@ async def fulfill_compute_obligation(
         try:
             sqlite_client = get_sqlite_client()
             await sqlite_client.update_order(
-                order_id=order_id,
-                maker_attestation=maker_attestation,
+                listing_id=order_id,
+                seller_attestation=maker_attestation,
                 fulfillment_resource=connection_details,
                 escrow_uid=escrow_uid,
             )

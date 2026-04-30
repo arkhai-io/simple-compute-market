@@ -45,8 +45,8 @@ class NegotiationActionBuilder:
 
         actions = NegotiationActionBuilder({
             "negotiation_id": neg_id,
-            "our_order_id": our_order_id,
-            "their_order_id": their_order_id,
+            "our_listing_id": our_listing_id,
+            "their_listing_id": their_listing_id,
             "proposed_price": their_price,
         })
         return actions.counter(new_price)

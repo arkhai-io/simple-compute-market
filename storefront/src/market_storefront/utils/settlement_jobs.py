@@ -60,8 +60,8 @@ async def start_settlement_job(
     if thread.get("agreed_price") is None:
         raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
 
-    our_order_id = thread.get("our_order_id")
-    our_order_dict = await sqlite_client.load_order(order_id=our_order_id) if our_order_id else None
+    our_order_id = thread.get("our_listing_id")
+    our_order_dict = await sqlite_client.load_order(listing_id=our_order_id) if our_order_id else None
     if not our_order_dict:
         raise ValueError(
             f"Seller's order {our_order_id!r} (from negotiation {negotiation_id}) "

@@ -125,7 +125,7 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
 async def start_sync_negotiation(
     *,
     sqlite_client: Any,
-    our_order_id: str,
+    our_listing_id: str,
     buyer_address: str,
     their_proposed_price: int,
     our_base_url: str,
@@ -138,7 +138,7 @@ async def start_sync_negotiation(
     uses it for all subsequent ``/negotiate/{neg_id}`` rounds — the
     canonical id is server-assigned, not client-derived.
 
-    Raises ``ValueError`` if ``our_order_id`` isn't in the local DB
+    Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
     listing).
     """
@@ -157,17 +157,17 @@ async def start_sync_negotiation(
     if is_globally_paused():
         raise StorefrontPausedError("global")
 
-    if await sqlite_client.is_order_paused(order_id=our_order_id):
-        raise StorefrontPausedError(f"order:{our_order_id}")
+    if await sqlite_client.is_order_paused(listing_id=our_listing_id):
+        raise StorefrontPausedError(f"order:{our_listing_id}")
 
-    our_order_dict = await sqlite_client.load_order(order_id=our_order_id)
+    our_order_dict = await sqlite_client.load_order(listing_id=our_listing_id)
     if not our_order_dict:
-        raise ValueError(f"Order {our_order_id} not found locally; seller has no matching listing")
+        raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     if not strategy:
-        raise ValueError(f"Order {our_order_id} has no usable strategy for negotiation")
+        raise ValueError(f"Order {our_listing_id} has no usable strategy for negotiation")
     our_price = _extract_initial_price_from_order(our_order)
 
     neg_id = "neg_" + uuid.uuid4().hex
@@ -175,8 +175,8 @@ async def start_sync_negotiation(
     async with NegotiationThreadTransaction("SYNC_NEGOTIATE_NEW") as txn:
         await txn.ensure_thread(
             negotiation_id=neg_id,
-            our_order_id=our_order_id,
-            their_order_id="",  # buyer has no order; engine column kept for symmetric schema
+            our_listing_id=our_listing_id,
+            their_listing_id="",  # buyer has no listing; engine column kept for symmetric schema
             our_agent_id=our_base_url,
             their_agent_id=their_agent_url,
             our_initial_price=our_price,
@@ -249,10 +249,10 @@ async def continue_sync_negotiation(
             f"{thread.get('terminal_state')!r}",
         )
 
-    our_order_id = thread.get("our_order_id")
-    our_order_dict = await sqlite_client.load_order(order_id=our_order_id) if our_order_id else None
+    our_listing_id = thread.get("our_listing_id")
+    our_order_dict = await sqlite_client.load_order(listing_id=our_listing_id) if our_listing_id else None
     if not our_order_dict:
-        raise ValueError(f"Seller's order {our_order_id} is gone from local DB")
+        raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     our_price = _extract_initial_price_from_order(our_order)

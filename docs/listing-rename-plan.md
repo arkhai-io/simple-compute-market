@@ -101,15 +101,26 @@ tests updated to use the new column names directly. Wire-translation
 helpers (`_listing_body_to_columns`, `order_to_dict`) deleted now that
 the DB matches the wire.
 
-**Slice 4b — DB (storefront SQLite)** ⏳ deferred
-The storefront's local SQLite has the same schema rename pending.
-Has high blast radius (~2500 lines of `sqlite_client.py` + ~30
-internal callers passing kwargs like `order_id`/`order_maker`). The
-wire-translation shims added in Slice 2 (`_row_to_wire`/`_wire_in`/
-`_wire_out` in `agent.py` and `listings_controller.py`) keep the
-storefront wire on the listings vocabulary while the SQLite columns
-stay legacy. Migration block scaffolding exists; full rewrite
-deferred to a follow-up commit.
+**Slice 4b — DB (storefront SQLite)** ✅ committed
+Schema migration in `_ensure_tables_sync`: idempotent `ALTER TABLE`
+renames (`orders` → `listings`, `our_order_id`/`their_order_id` →
+`our_listing_id`/`their_listing_id` on negotiation_threads,
+`credentials.order_id` → `listing_id`, indexes renamed). CREATE TABLE
+statements + all SELECT/INSERT/UPDATE column refs flipped. Python
+kwarg names on `sqlite_client` methods (`upsert_order`, `update_order`,
+`load_order`, `is_order_paused`, etc.) renamed to `listing_id`/`seller`/
+`buyer`/`seller_attestation`/`buyer_attestation`. `get_order_id_by_escrow_uid`
+→ `get_listing_id_by_escrow_uid`. Internal callers updated:
+`action_executor.py`, `agent.py`, `sync_negotiation.py`,
+`settlement_jobs.py`, `negotiation_watchdog.py`,
+`services/negotiation_service.py`, `cli_logs.py`. Helpers in
+`recovery.py` updated to read `seller_attestation` from row dicts.
+Policy package (`market_policy`) propagated: `our_order_id` →
+`our_listing_id`, `their_order_id` → `their_listing_id`. Wire shims
+removed from controllers (`_row_to_wire` in listings_controller and
+negotiations_controller). `action_executor.discover()` now returns
+`their_listing_id` keys. Tests green: storefront 290 unit + integration,
+registry 84, buyer 17, policy 21.
 
 **Slice 5 — Docs + helm**
 ARCHITECTURE.md, READMEs, helm values comments,

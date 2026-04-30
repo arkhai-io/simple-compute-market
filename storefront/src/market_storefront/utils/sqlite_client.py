@@ -39,6 +39,81 @@ class SQLiteClient:
         conn = sqlite3.connect(self.db_path)
         try:
             cur = conn.cursor()
+            # ---------------------------------------------------------
+            # Legacy schema migration: rename `orders` → `listings`
+            # plus its columns to match the listings vocabulary used on
+            # the wire. Idempotent: skipped when the new table already
+            # exists.
+            # ---------------------------------------------------------
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='orders'"
+            )
+            has_legacy_orders = cur.fetchone() is not None
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='listings'"
+            )
+            has_listings = cur.fetchone() is not None
+            if has_legacy_orders and not has_listings:
+                cur.execute("ALTER TABLE orders RENAME TO listings")
+                for old_col, new_col in (
+                    ("order_id", "listing_id"),
+                    ("order_maker", "seller"),
+                    ("order_taker", "buyer"),
+                    ("maker_attestation", "seller_attestation"),
+                    ("taker_attestation", "buyer_attestation"),
+                ):
+                    try:
+                        cur.execute(f"ALTER TABLE listings RENAME COLUMN {old_col} TO {new_col}")
+                    except sqlite3.OperationalError:
+                        pass
+                for old_idx in (
+                    "idx_orders_status",
+                    "idx_orders_created_at",
+                    "idx_orders_updated_at",
+                ):
+                    try:
+                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
+                    except sqlite3.OperationalError:
+                        pass
+
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='negotiation_threads'"
+            )
+            if cur.fetchone() is not None:
+                for old_col, new_col in (
+                    ("our_order_id", "our_listing_id"),
+                    ("their_order_id", "their_listing_id"),
+                ):
+                    try:
+                        cur.execute(f"ALTER TABLE negotiation_threads RENAME COLUMN {old_col} TO {new_col}")
+                    except sqlite3.OperationalError:
+                        pass
+                for old_idx in (
+                    "idx_negotiation_threads_our_order_id",
+                    "idx_negotiation_threads_their_order_id",
+                ):
+                    try:
+                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
+                    except sqlite3.OperationalError:
+                        pass
+
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='credentials'"
+            )
+            if cur.fetchone() is not None:
+                try:
+                    cur.execute("ALTER TABLE credentials RENAME COLUMN order_id TO listing_id")
+                except sqlite3.OperationalError:
+                    pass
+                for old_idx in (
+                    "idx_credentials_order_id",
+                    "idx_credentials_order_granted",
+                ):
+                    try:
+                        cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
+                    except sqlite3.OperationalError:
+                        pass
+
             # Policies table (callable-only)
             cur.execute(
                 """
@@ -95,8 +170,8 @@ class SQLiteClient:
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_threads (
                   negotiation_id TEXT PRIMARY KEY,
-                  our_order_id TEXT,
-                  their_order_id TEXT,
+                  our_listing_id TEXT,
+                  their_listing_id TEXT,
                   our_agent_id TEXT,
                   their_agent_id TEXT,
                   status TEXT DEFAULT 'active',
@@ -114,11 +189,11 @@ class SQLiteClient:
             )
             # Add columns if they don't exist (for existing databases)
             try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_order_id TEXT")
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN our_listing_id TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_order_id TEXT")
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN their_listing_id TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -189,16 +264,16 @@ class SQLiteClient:
                 )
                 """
             )
-            # Migrate orders table: add columns that may be missing from older DBs
+            # Migrate listings table: add columns that may be missing from older DBs
             try:
-                cur.execute("ALTER TABLE orders ADD COLUMN oracle_address TEXT")
+                cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # Orders table (local source of truth)
+            # Listings table (local source of truth)
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS orders (
-                  order_id TEXT PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS listings (
+                  listing_id TEXT PRIMARY KEY,
                   status TEXT NOT NULL,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
@@ -206,11 +281,11 @@ class SQLiteClient:
                   demand_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
                   duration_hours INTEGER NOT NULL,
-                  order_maker TEXT NOT NULL,
-                  order_taker TEXT,
+                  seller TEXT NOT NULL,
+                  buyer TEXT,
                   matched_offer_id TEXT,
-                  maker_attestation TEXT,
-                  taker_attestation TEXT,
+                  seller_attestation TEXT,
+                  buyer_attestation TEXT,
                   escrow_uid TEXT,
                   oracle_address TEXT,
                   paused INTEGER NOT NULL DEFAULT 0
@@ -219,7 +294,7 @@ class SQLiteClient:
             )
             # Migrate: add paused column if missing (existing databases).
             try:
-                cur.execute("ALTER TABLE orders ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # Column already exists
             # Resources table (local source of truth across all resource types)
@@ -275,7 +350,7 @@ class SQLiteClient:
                 """
                 CREATE TABLE IF NOT EXISTS credentials (
                   id TEXT PRIMARY KEY,
-                  order_id TEXT NOT NULL,
+                  listing_id TEXT NOT NULL,
                   role TEXT NOT NULL,
                   granted_to TEXT NOT NULL,
                   password TEXT,
@@ -287,10 +362,10 @@ class SQLiteClient:
                 """
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_credentials_order_id ON credentials(order_id)"
+                "CREATE INDEX IF NOT EXISTS idx_credentials_listing_id ON credentials(listing_id)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_credentials_order_granted ON credentials(order_id, granted_to)"
+                "CREATE INDEX IF NOT EXISTS idx_credentials_listing_granted ON credentials(listing_id, granted_to)"
             )
             # Create indexes
             cur.execute(
@@ -313,10 +388,10 @@ class SQLiteClient:
             )
             # Indexes for negotiation tracking
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_order_id ON negotiation_threads(our_order_id)"
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_listing_id ON negotiation_threads(our_listing_id)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_order_id ON negotiation_threads(their_order_id)"
+                "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_their_listing_id ON negotiation_threads(their_listing_id)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_our_agent_id ON negotiation_threads(our_agent_id)"
@@ -328,13 +403,13 @@ class SQLiteClient:
                 "CREATE INDEX IF NOT EXISTS idx_negotiation_threads_status ON negotiation_threads(status)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)"
+                "CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)"
+                "CREATE INDEX IF NOT EXISTS idx_listings_created_at ON listings(created_at)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at)"
+                "CREATE INDEX IF NOT EXISTS idx_listings_updated_at ON listings(updated_at)"
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_resources_resource_id ON resources(resource_id)"
@@ -365,7 +440,7 @@ class SQLiteClient:
                   stage TEXT NOT NULL,
                   event TEXT NOT NULL,
                   negotiation_id TEXT,
-                  order_id TEXT,
+                  listing_id TEXT,
                   escrow_uid TEXT,
                   data TEXT NOT NULL
                 )
@@ -946,7 +1021,7 @@ class SQLiteClient:
         *,
         offer_resource: Any,
         demand_resource: Any,
-        order_maker: str | None = None,
+        seller: str | None = None,
     ) -> dict[str, Any] | None:
         """Find an open local order whose resources are symmetric to the given pair.
 
@@ -960,22 +1035,22 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT order_id, offer_resource, demand_resource, order_maker, status, order_taker, created_at
-                    FROM orders
+                    SELECT listing_id, offer_resource, demand_resource, seller, status, buyer, created_at
+                    FROM listings
                     WHERE status = 'open'
-                      AND (order_taker IS NULL OR order_taker = '')
+                      AND (buyer IS NULL OR buyer = '')
                     """
                 )
                 rows = cur.fetchall()
                 matches: list[dict[str, Any]] = []
                 for row in rows:
-                    row_order_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
-                    if order_maker and row_maker != order_maker:
+                    row_listing_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
+                    if seller and row_maker != seller:
                         continue
                     if self._resources_equal(row_offer, demand_resource) and self._resources_equal(row_demand, offer_resource):
                         matches.append({
-                            "order_id": row_order_id,
-                            "order_maker": row_maker,
+                            "listing_id": row_listing_id,
+                            "seller": row_maker,
                             "created_at": row_created,
                         })
                 if not matches:
@@ -990,7 +1065,7 @@ class SQLiteClient:
     async def upsert_order(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         status: str,
         created_at: str,
         updated_at: str,
@@ -998,11 +1073,11 @@ class SQLiteClient:
         demand_resource: Any,
         fulfillment_resource: Any | None,
         duration_hours: int,
-        order_maker: str,
-        order_taker: str | None = None,
+        seller: str,
+        buyer: str | None = None,
         matched_offer_id: str | None = None,
-        maker_attestation: str | None = None,
-        taker_attestation: str | None = None,
+        seller_attestation: str | None = None,
+        buyer_attestation: str | None = None,
         escrow_uid: str | None = None,
         oracle_address: str | None = None,
     ) -> None:
@@ -1012,8 +1087,8 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    INSERT INTO orders(
-                      order_id,
+                    INSERT INTO listings(
+                      listing_id,
                       status,
                       created_at,
                       updated_at,
@@ -1021,32 +1096,32 @@ class SQLiteClient:
                       demand_resource,
                       fulfillment_resource,
                       duration_hours,
-                      order_maker,
-                      order_taker,
+                      seller,
+                      buyer,
                       matched_offer_id,
-                      maker_attestation,
-                      taker_attestation,
+                      seller_attestation,
+                      buyer_attestation,
                       escrow_uid,
                       oracle_address
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(order_id) DO UPDATE SET
+                    ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
                       offer_resource=excluded.offer_resource,
                       demand_resource=excluded.demand_resource,
                       fulfillment_resource=excluded.fulfillment_resource,
                       duration_hours=excluded.duration_hours,
-                      order_maker=excluded.order_maker,
-                      order_taker=excluded.order_taker,
+                      seller=excluded.seller,
+                      buyer=excluded.buyer,
                       matched_offer_id=excluded.matched_offer_id,
-                      maker_attestation=excluded.maker_attestation,
-                      taker_attestation=excluded.taker_attestation,
+                      seller_attestation=excluded.seller_attestation,
+                      buyer_attestation=excluded.buyer_attestation,
                       escrow_uid=excluded.escrow_uid,
                       oracle_address=excluded.oracle_address
                     """,
                     (
-                        order_id,
+                        listing_id,
                         status,
                         created_at,
                         updated_at,
@@ -1054,11 +1129,11 @@ class SQLiteClient:
                         self._serialize_resource(demand_resource),
                         self._serialize_resource(fulfillment_resource),
                         duration_hours,
-                        order_maker,
-                        order_taker,
+                        seller,
+                        buyer,
                         matched_offer_id,
-                        maker_attestation,
-                        taker_attestation,
+                        seller_attestation,
+                        buyer_attestation,
                         escrow_uid,
                         oracle_address,
                     ),
@@ -1072,18 +1147,18 @@ class SQLiteClient:
     async def update_order(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         status: str | None = None,
         updated_at: str | None = None,
         offer_resource: Any | None = None,
         demand_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         duration_hours: int | None = None,
-        order_maker: str | None = None,
-        order_taker: str | None = None,
+        seller: str | None = None,
+        buyer: str | None = None,
         matched_offer_id: str | None = None,
-        maker_attestation: str | None = None,
-        taker_attestation: str | None = None,
+        seller_attestation: str | None = None,
+        buyer_attestation: str | None = None,
         escrow_uid: str | None = None,
         oracle_address: str | None = None,
     ) -> None:
@@ -1103,11 +1178,11 @@ class SQLiteClient:
             add("demand_resource", demand_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("duration_hours", duration_hours)
-            add("order_maker", order_maker)
-            add("order_taker", order_taker)
+            add("seller", seller)
+            add("buyer", buyer)
             add("matched_offer_id", matched_offer_id)
-            add("maker_attestation", maker_attestation)
-            add("taker_attestation", taker_attestation)
+            add("seller_attestation", seller_attestation)
+            add("buyer_attestation", buyer_attestation)
             add("escrow_uid", escrow_uid)
             add("oracle_address", oracle_address)
 
@@ -1118,8 +1193,8 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    f"UPDATE orders SET {', '.join(updates)} WHERE order_id=?",
-                    (*values, order_id),
+                    f"UPDATE listings SET {', '.join(updates)} WHERE listing_id=?",
+                    (*values, listing_id),
                 )
                 conn.commit()
             finally:
@@ -1134,12 +1209,12 @@ class SQLiteClient:
         status: str | None = None,
         updated_at: str | None = None,
         fulfillment_resource: Any | None = None,
-        maker_attestation: str | None = None,
-        taker_attestation: str | None = None,
+        seller_attestation: str | None = None,
+        buyer_attestation: str | None = None,
         oracle_address: str | None = None,
     ) -> None:
         """
-        Update order fields based on escrow_uid, when order_id is not available.
+        Update order fields based on escrow_uid, when listing_id is not available.
         """
         def _save() -> None:
             updates: list[str] = []
@@ -1154,8 +1229,8 @@ class SQLiteClient:
             add("status", status)
             add("updated_at", updated_at or datetime.now().isoformat())
             add("fulfillment_resource", fulfillment_resource, serialize=True)
-            add("maker_attestation", maker_attestation)
-            add("taker_attestation", taker_attestation)
+            add("seller_attestation", seller_attestation)
+            add("buyer_attestation", buyer_attestation)
             add("oracle_address", oracle_address)
 
             if not updates:
@@ -1165,7 +1240,7 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    f"UPDATE orders SET {', '.join(updates)} WHERE escrow_uid=?",
+                    f"UPDATE listings SET {', '.join(updates)} WHERE escrow_uid=?",
                     (*values, escrow_uid),
                 )
                 conn.commit()
@@ -1174,31 +1249,31 @@ class SQLiteClient:
 
         await asyncio.to_thread(_save)
 
-    async def load_order(self, *, order_id: str) -> dict[str, Any] | None:
-        """Return a single order by order_id, or None if not found."""
+    async def load_order(self, *, listing_id: str) -> dict[str, Any] | None:
+        """Return a single order by listing_id, or None if not found."""
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT order_id, status, created_at, updated_at,
+                    SELECT listing_id, status, created_at, updated_at,
                            offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, order_maker, order_taker,
-                           matched_offer_id, maker_attestation, taker_attestation,
+                           duration_hours, seller, buyer,
+                           matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address
-                    FROM orders WHERE order_id = ?
+                    FROM listings WHERE listing_id = ?
                     """,
-                    (order_id,),
+                    (listing_id,),
                 )
                 row = cur.fetchone()
                 if not row:
                     return None
                 keys = [
-                    "order_id", "status", "created_at", "updated_at",
+                    "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "order_maker", "order_taker",
-                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "duration_hours", "seller", "buyer",
+                    "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address",
                 ]
                 return dict(zip(keys, row))
@@ -1215,20 +1290,20 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT order_id, status, created_at, updated_at,
+                    SELECT listing_id, status, created_at, updated_at,
                            offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, order_maker, order_taker,
-                           matched_offer_id, maker_attestation, taker_attestation,
+                           duration_hours, seller, buyer,
+                           matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address
-                    FROM orders WHERE escrow_uid = ?
+                    FROM listings WHERE escrow_uid = ?
                     """,
                     (escrow_uid,),
                 )
                 keys = [
-                    "order_id", "status", "created_at", "updated_at",
+                    "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "order_maker", "order_taker",
-                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "duration_hours", "seller", "buyer",
+                    "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address",
                 ]
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
@@ -1649,7 +1724,7 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id,
+                    SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status,
                            created_at, updated_at, terminal_state,
                            agreed_price, agreed_duration_hours, agreed_at
@@ -1661,7 +1736,7 @@ class SQLiteClient:
                 if not row:
                     return None
                 keys = [
-                    "negotiation_id", "our_order_id", "their_order_id",
+                    "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
                     "agreed_price", "agreed_duration_hours", "agreed_at",
@@ -1817,8 +1892,8 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,  # The agent creating this record
@@ -1830,8 +1905,8 @@ class SQLiteClient:
         
         Args:
             negotiation_id: Unique negotiation identifier
-            our_order_id: Our order ID
-            their_order_id: Their order ID
+            our_listing_id: Our order ID
+            their_listing_id: Their order ID
             our_agent_id: Our agent ID (participant A)
             their_agent_id: Their agent ID (participant B)
             owner_id: ID of the agent owning this private state
@@ -1849,13 +1924,13 @@ class SQLiteClient:
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_threads(
-                        negotiation_id, our_order_id, their_order_id,
+                        negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status, created_at, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        negotiation_id, our_order_id, their_order_id,
+                        negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status, timestamp, timestamp
                     ),
                 )
@@ -1900,7 +1975,7 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT t.negotiation_id, t.our_order_id, t.their_order_id,
+                    SELECT t.negotiation_id, t.our_listing_id, t.their_listing_id,
                            t.our_agent_id, t.their_agent_id, t.status,
                            l.our_initial_price, l.our_strategy
                     FROM negotiation_threads t
@@ -1914,8 +1989,8 @@ class SQLiteClient:
                 if row:
                     return {
                         "negotiation_id": row[0],
-                        "our_order_id": row[1],
-                        "their_order_id": row[2],
+                        "our_listing_id": row[1],
+                        "their_listing_id": row[2],
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
@@ -1931,8 +2006,8 @@ class SQLiteClient:
     async def check_existing_negotiation(
         self,
         *,
-        our_order_id: str | None = None,
-        their_order_id: str | None = None,
+        our_listing_id: str | None = None,
+        their_listing_id: str | None = None,
         our_agent_id: str | None = None,
         their_agent_id: str | None = None,
     ) -> dict[str, Any] | None:
@@ -1946,18 +2021,18 @@ class SQLiteClient:
             try:
                 cur = conn.cursor()
                 query = """
-                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    SELECT negotiation_id, our_listing_id, their_listing_id, our_agent_id, their_agent_id, status
                     FROM negotiation_threads
                     WHERE status = 'active' AND (
-                        (our_order_id = ? AND their_order_id = ?) OR
-                        (our_order_id = ? AND their_order_id = ?) OR
+                        (our_listing_id = ? AND their_listing_id = ?) OR
+                        (our_listing_id = ? AND their_listing_id = ?) OR
                         (our_agent_id = ? AND their_agent_id = ?) OR
                         (our_agent_id = ? AND their_agent_id = ?)
                     )
                 """
                 params = (
-                    our_order_id, their_order_id,
-                    their_order_id, our_order_id,
+                    our_listing_id, their_listing_id,
+                    their_listing_id, our_listing_id,
                     our_agent_id, their_agent_id,
                     their_agent_id, our_agent_id,
                 )
@@ -1966,8 +2041,8 @@ class SQLiteClient:
                 if row:
                     return {
                         "negotiation_id": row[0],
-                        "our_order_id": row[1],
-                        "their_order_id": row[2],
+                        "our_listing_id": row[1],
+                        "their_listing_id": row[2],
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
@@ -1978,28 +2053,28 @@ class SQLiteClient:
         return await asyncio.to_thread(_check)
 
     async def get_active_negotiations_for_order(
-        self, *, order_id: str
+        self, *, listing_id: str
     ) -> list[dict[str, Any]]:
-        """Get all active negotiations involving an order (as our_order_id or their_order_id)."""
+        """Get all active negotiations involving an order (as our_listing_id or their_listing_id)."""
         def _load() -> list[dict[str, Any]]:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    SELECT negotiation_id, our_listing_id, their_listing_id, our_agent_id, their_agent_id, status
                     FROM negotiation_threads
-                    WHERE (our_order_id = ? OR their_order_id = ?) AND status = 'active'
+                    WHERE (our_listing_id = ? OR their_listing_id = ?) AND status = 'active'
                     """,
-                    (order_id, order_id),
+                    (listing_id, listing_id),
                 )
                 rows = cur.fetchall()
                 result = []
                 for row in rows:
                     result.append({
                         "negotiation_id": row[0],
-                        "our_order_id": row[1],
-                        "their_order_id": row[2],
+                        "our_listing_id": row[1],
+                        "their_listing_id": row[2],
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
@@ -2019,7 +2094,7 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id, our_agent_id, their_agent_id, status
+                    SELECT negotiation_id, our_listing_id, their_listing_id, our_agent_id, their_agent_id, status
                     FROM negotiation_threads
                     WHERE (our_agent_id = ? OR their_agent_id = ?) AND status = 'active'
                     """,
@@ -2030,8 +2105,8 @@ class SQLiteClient:
                 for row in rows:
                     result.append({
                         "negotiation_id": row[0],
-                        "our_order_id": row[1],
-                        "their_order_id": row[2],
+                        "our_listing_id": row[1],
+                        "their_listing_id": row[2],
                         "our_agent_id": row[3],
                         "their_agent_id": row[4],
                         "status": row[5],
@@ -2042,12 +2117,12 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
     async def cancel_negotiations_for_order(
-        self, *, order_id: str, except_negotiation_id: str | None = None
+        self, *, listing_id: str, except_negotiation_id: str | None = None
     ) -> list[dict]:
         """Cancel all active negotiations for an order, except the specified one.
 
         Returns:
-            List of dicts with keys: negotiation_id, our_order_id, their_order_id,
+            List of dicts with keys: negotiation_id, our_listing_id, their_listing_id,
             our_agent_id, their_agent_id — one entry per canceled negotiation.
         """
         def _cancel() -> list[dict]:
@@ -2058,14 +2133,14 @@ class SQLiteClient:
                 # Find all active negotiations involving this order
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id,
+                    SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id
                     FROM negotiation_threads
-                    WHERE (our_order_id = ? OR their_order_id = ?)
+                    WHERE (our_listing_id = ? OR their_listing_id = ?)
                       AND (status = 'active')
                       AND negotiation_id != COALESCE(?, '')
                     """,
-                    (order_id, order_id, except_negotiation_id or '')
+                    (listing_id, listing_id, except_negotiation_id or '')
                 )
 
                 rows = cur.fetchall()
@@ -2084,8 +2159,8 @@ class SQLiteClient:
                     )
                     canceled.append({
                         "negotiation_id": neg_id,
-                        "our_order_id": our_oid,
-                        "their_order_id": their_oid,
+                        "our_listing_id": our_oid,
+                        "their_listing_id": their_oid,
                         "our_agent_id": our_aid,
                         "their_agent_id": their_aid,
                     })
@@ -2125,7 +2200,7 @@ class SQLiteClient:
     async def store_credential(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         role: str,
         granted_to: str,
         password: str | None = None,
@@ -2141,14 +2216,14 @@ class SQLiteClient:
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO credentials(
-                      id, order_id, role, granted_to, password,
+                      id, listing_id, role, granted_to, password,
                       ssh_commands, ssh_key_path_host, key_type, created_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         str(uuid.uuid4()),
-                        order_id,
+                        listing_id,
                         role,
                         granted_to,
                         password,
@@ -2167,7 +2242,7 @@ class SQLiteClient:
     async def get_credentials(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         granted_to: str,
     ) -> list[dict[str, Any]]:
         """Return credential rows for a given order visible to granted_to."""
@@ -2177,19 +2252,19 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT id, order_id, role, granted_to, password,
+                    SELECT id, listing_id, role, granted_to, password,
                            ssh_commands, ssh_key_path_host, key_type, created_at
                     FROM credentials
-                    WHERE order_id = ? AND granted_to = ?
+                    WHERE listing_id = ? AND granted_to = ?
                     ORDER BY created_at ASC
                     """,
-                    (order_id, granted_to),
+                    (listing_id, granted_to),
                 )
                 rows = cur.fetchall()
                 return [
                     {
                         "id": r[0],
-                        "order_id": r[1],
+                        "listing_id": r[1],
                         "role": r[2],
                         "granted_to": r[3],
                         "password": r[4],
@@ -2205,14 +2280,14 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_load)
 
-    async def get_order_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
-        """Return the order_id for the given escrow_uid, or None if not found."""
+    async def get_listing_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
+        """Return the listing_id for the given escrow_uid, or None if not found."""
         def _load() -> str | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT order_id FROM orders WHERE escrow_uid = ? LIMIT 1",
+                    "SELECT listing_id FROM listings WHERE escrow_uid = ? LIMIT 1",
                     (escrow_uid,),
                 )
                 row = cur.fetchone()
@@ -2251,23 +2326,23 @@ class SQLiteClient:
                 where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 cur.execute(
                     f"""
-                    SELECT order_id, status, created_at, updated_at,
+                    SELECT listing_id, status, created_at, updated_at,
                            offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, order_maker, order_taker,
-                           matched_offer_id, maker_attestation, taker_attestation,
+                           duration_hours, seller, buyer,
+                           matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
                            COALESCE(paused, 0) AS paused
-                    FROM orders {where}
+                    FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),
                 )
                 keys = [
-                    "order_id", "status", "created_at", "updated_at",
+                    "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "order_maker", "order_taker",
-                    "matched_offer_id", "maker_attestation", "taker_attestation",
+                    "duration_hours", "seller", "buyer",
+                    "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address", "paused",
                 ]
                 rows = cur.fetchall()
@@ -2282,15 +2357,15 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_list)
 
-    async def set_order_paused(self, *, order_id: str, paused: bool) -> None:
+    async def set_order_paused(self, *, listing_id: str, paused: bool) -> None:
         """Set the paused flag on a local order."""
         def _update() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "UPDATE orders SET paused = ?, updated_at = ? WHERE order_id = ?",
-                    (1 if paused else 0, datetime.now().isoformat(), order_id),
+                    "UPDATE listings SET paused = ?, updated_at = ? WHERE listing_id = ?",
+                    (1 if paused else 0, datetime.now().isoformat(), listing_id),
                 )
                 conn.commit()
             finally:
@@ -2298,15 +2373,15 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
-    async def is_order_paused(self, *, order_id: str) -> bool:
+    async def is_order_paused(self, *, listing_id: str) -> bool:
         """Return True if the order exists and has paused=1."""
         def _check() -> bool:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT COALESCE(paused, 0) FROM orders WHERE order_id = ? LIMIT 1",
-                    (order_id,),
+                    "SELECT COALESCE(paused, 0) FROM listings WHERE listing_id = ? LIMIT 1",
+                    (listing_id,),
                 )
                 row = cur.fetchone()
                 return bool(row[0]) if row else False
@@ -2322,7 +2397,7 @@ class SQLiteClient:
     async def list_negotiations_for_order(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         terminal_state: str | None = None,
         buyer_address: str | None = None,
         limit: int = 50,
@@ -2333,8 +2408,8 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
-                clauses: list[str] = ["our_order_id = ?"]
-                params: list[Any] = [order_id]
+                clauses: list[str] = ["our_listing_id = ?"]
+                params: list[Any] = [listing_id]
                 if terminal_state is not None:
                     clauses.append("terminal_state = ?")
                     params.append(terminal_state)
@@ -2345,7 +2420,7 @@ class SQLiteClient:
                 where = "WHERE " + " AND ".join(clauses)
                 cur.execute(
                     f"""
-                    SELECT negotiation_id, our_order_id, their_agent_id,
+                    SELECT negotiation_id, our_listing_id, their_agent_id,
                            status, terminal_state, agreed_price, agreed_duration_hours,
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
@@ -2356,7 +2431,7 @@ class SQLiteClient:
                     (*params, limit, offset),
                 )
                 keys = [
-                    "negotiation_id", "our_order_id", "buyer_address",
+                    "negotiation_id", "our_listing_id", "buyer_address",
                     "status", "terminal_state", "agreed_price", "agreed_duration_hours",
                     "agreed_at", "created_at", "updated_at",
                 ]
@@ -2369,13 +2444,13 @@ class SQLiteClient:
     async def load_negotiation_detail(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
     ) -> dict[str, Any] | None:
         """Return full negotiation detail: thread + messages + stage events.
 
         Returns None if the negotiation doesn't exist or doesn't belong to
-        the given order_id.
+        the given listing_id.
         """
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
@@ -2385,21 +2460,21 @@ class SQLiteClient:
                 # Thread row
                 cur.execute(
                     """
-                    SELECT negotiation_id, our_order_id, their_order_id,
+                    SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status, terminal_state,
                            agreed_price, agreed_duration_hours, agreed_at,
                            created_at, updated_at
                     FROM negotiation_threads
-                    WHERE negotiation_id = ? AND our_order_id = ?
+                    WHERE negotiation_id = ? AND our_listing_id = ?
                     """,
-                    (neg_id, order_id),
+                    (neg_id, listing_id),
                 )
                 thread_row = cur.fetchone()
                 if not thread_row:
                     return None
 
                 thread_keys = [
-                    "negotiation_id", "our_order_id", "their_order_id",
+                    "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
                     "agreed_price", "agreed_duration_hours", "agreed_at",
                     "created_at", "updated_at",
@@ -2472,12 +2547,12 @@ class SQLiteClient:
                 active_negotiations = int(cur.fetchone()[0] or 0)
 
                 cur.execute(
-                    "SELECT COUNT(*) FROM orders WHERE status = 'open' AND COALESCE(paused, 0) = 0"
+                    "SELECT COUNT(*) FROM listings WHERE status = 'open' AND COALESCE(paused, 0) = 0"
                 )
                 open_orders = int(cur.fetchone()[0] or 0)
 
                 cur.execute(
-                    "SELECT COUNT(*) FROM orders WHERE COALESCE(paused, 0) = 1"
+                    "SELECT COUNT(*) FROM listings WHERE COALESCE(paused, 0) = 1"
                 )
                 paused_orders = int(cur.fetchone()[0] or 0)
 

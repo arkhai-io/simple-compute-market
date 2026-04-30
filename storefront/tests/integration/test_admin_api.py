@@ -164,7 +164,7 @@ class TestAdminStatus:
         c, db, _ = client
         now = datetime.now().isoformat()
         await db.upsert_order(
-            order_id="count-1",
+            listing_id="count-1",
             status="open",
             created_at=now,
             updated_at=now,
@@ -172,7 +172,7 @@ class TestAdminStatus:
             demand_resource={},
             fulfillment_resource=None,
             duration_hours=1,
-            order_maker="http://seller:8001",
+            seller="http://seller:8001",
         )
         result = await c.admin_status()
         assert result.open_listings == 1
@@ -181,7 +181,7 @@ class TestAdminStatus:
         c, db, _ = client
         now = datetime.now().isoformat()
         await db.upsert_order(
-            order_id="pause-count",
+            listing_id="pause-count",
             status="open",
             created_at=now,
             updated_at=now,
@@ -189,9 +189,9 @@ class TestAdminStatus:
             demand_resource={},
             fulfillment_resource=None,
             duration_hours=1,
-            order_maker="http://seller:8001",
+            seller="http://seller:8001",
         )
-        await db.set_order_paused(order_id="pause-count", paused=True)
+        await db.set_order_paused(listing_id="pause-count", paused=True)
         result = await c.admin_status()
         # Paused order is excluded from open_orders count
         assert result.open_listings == 0

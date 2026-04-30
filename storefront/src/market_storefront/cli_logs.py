@@ -64,7 +64,7 @@ def logs_show(
             params.append(stage)
 
         where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        query = f"SELECT ts, stage, event, negotiation_id, order_id, escrow_uid, data FROM stage_events {where} ORDER BY id DESC LIMIT ?"
+        query = f"SELECT ts, stage, event, negotiation_id, listing_id, escrow_uid, data FROM stage_events {where} ORDER BY id DESC LIMIT ?"
         params.append(last)
 
         rows = cur.execute(query, params).fetchall()
@@ -106,7 +106,7 @@ def logs_show(
     for row in rows:
         data = json.loads(row["data"])
         # Build a concise detail string from the interesting fields
-        skip_keys = {"ts", "stage", "event", "negotiation_id", "order_id", "escrow_uid"}
+        skip_keys = {"ts", "stage", "event", "negotiation_id", "listing_id", "escrow_uid"}
         details = {k: v for k, v in data.items() if k not in skip_keys and v is not None}
         detail_str = ", ".join(f"{k}={v}" for k, v in details.items())
         if len(detail_str) > 60:
@@ -149,25 +149,25 @@ def _derive_stage(
 
     result = {
         "negotiation_id": negotiation_id,
-        "our_order_id": thread["our_order_id"],
-        "their_order_id": thread["their_order_id"],
+        "our_listing_id": thread["our_listing_id"],
+        "their_listing_id": thread["their_listing_id"],
         "thread_status": thread["status"],
         "terminal_state": thread["terminal_state"],
     }
 
-    # 2. Load our order
+    # 2. Load our listing
     our_order = None
-    if thread["our_order_id"]:
+    if thread["our_listing_id"]:
         our_order = conn.execute(
-            "SELECT * FROM orders WHERE order_id = ?",
-            (thread["our_order_id"],),
+            "SELECT * FROM listings WHERE listing_id = ?",
+            (thread["our_listing_id"],),
         ).fetchone()
 
     if our_order:
         result["order_status"] = our_order["status"]
         result["escrow_uid"] = our_order["escrow_uid"]
-        result["maker_attestation"] = our_order["maker_attestation"]
-        result["taker_attestation"] = our_order["taker_attestation"]
+        result["seller_attestation"] = our_order["seller_attestation"]
+        result["buyer_attestation"] = our_order["buyer_attestation"]
 
     # 3. Derive stage
     if not thread["terminal_state"]:
@@ -192,10 +192,10 @@ def _derive_stage(
         elif our_order["status"] == "closed":
             result["stage"] = "closed"
             result["detail"] = "deal complete"
-        elif our_order["taker_attestation"]:
+        elif our_order["buyer_attestation"]:
             result["stage"] = "post_settlement"
             result["detail"] = "fulfillment received, awaiting close"
-        elif our_order["maker_attestation"]:
+        elif our_order["seller_attestation"]:
             result["stage"] = "provision"
             result["detail"] = "fulfilled, awaiting buyer confirmation"
         else:
@@ -218,7 +218,7 @@ def deal_status(
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
     try:
-        # If the argument looks like an order_id, find the negotiation
+        # If the argument looks like an listing_id, find the negotiation
         neg_ids = []
         row = conn.execute(
             "SELECT negotiation_id FROM negotiation_threads WHERE negotiation_id = ?",
@@ -227,10 +227,10 @@ def deal_status(
         if row:
             neg_ids = [negotiation_id]
         else:
-            # Search by order_id
+            # Search by listing_id
             rows = conn.execute(
                 """SELECT negotiation_id FROM negotiation_threads
-                   WHERE our_order_id = ? OR their_order_id = ?""",
+                   WHERE our_listing_id = ? OR their_listing_id = ?""",
                 (negotiation_id, negotiation_id),
             ).fetchall()
             neg_ids = [r[0] for r in rows]
@@ -256,8 +256,8 @@ def deal_status(
             panel_lines.append(f"[bold]Stage:[/bold] [{color}]{info.get('stage', '?')}[/{color}]")
             if info.get("detail"):
                 panel_lines.append(f"[bold]Detail:[/bold] {info['detail']}")
-            for key in ("our_order_id", "their_order_id", "order_status",
-                        "escrow_uid", "maker_attestation", "taker_attestation",
+            for key in ("our_listing_id", "their_listing_id", "order_status",
+                        "escrow_uid", "seller_attestation", "buyer_attestation",
                         "rounds", "terminal_state"):
                 val = info.get(key)
                 if val is not None:
@@ -271,10 +271,10 @@ def deal_status(
 
             # Show stage events for this deal. Events fire throughout the
             # lifecycle; some land before a negotiation_id exists (discovery)
-            # or carry only an order_id (provision/settlement). Join on any
+            # or carry only an listing_id (provision/settlement). Join on any
             # identifier that names this deal.
             ids_to_match = [nid]
-            for key in ("our_order_id", "their_order_id", "escrow_uid"):
+            for key in ("our_listing_id", "their_listing_id", "escrow_uid"):
                 v = info.get(key)
                 if v and v not in ids_to_match:
                     ids_to_match.append(v)
@@ -283,7 +283,7 @@ def deal_status(
                 events = conn.execute(
                     f"""SELECT ts, stage, event, data FROM stage_events
                         WHERE negotiation_id IN ({placeholders})
-                           OR order_id IN ({placeholders})
+                           OR listing_id IN ({placeholders})
                            OR escrow_uid IN ({placeholders})
                         ORDER BY id ASC""",
                     ids_to_match * 3,

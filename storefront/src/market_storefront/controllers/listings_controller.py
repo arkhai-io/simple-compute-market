@@ -25,25 +25,9 @@ Query parameters for ``GET /api/v1/listings``
 
 from __future__ import annotations
 
-from typing import Any
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
-
-
-def _row_to_wire(row: dict[str, Any]) -> dict[str, Any]:
-    """Translate a SQLite listing row (DB column ``order_id``) into the
-    wire shape (key ``listing_id``).
-
-    The DB-level rename is deferred to a later slice; this layer keeps
-    the public JSON contract on the listings vocabulary while the
-    storage stays on the legacy column names.
-    """
-    out = dict(row)
-    if "order_id" in out and "listing_id" not in out:
-        out["listing_id"] = out.pop("order_id")
-    return out
 
 
 class ListingsController:
@@ -78,13 +62,12 @@ class ListingsController:
             paused_filter = paused_raw.lower() in ("true", "1", "yes")
         limit, offset = self._parse_pagination(request)
 
-        rows = await self._sqlite_client.list_orders(
+        listings = await self._sqlite_client.list_orders(
             status=status_filter,
             paused=paused_filter,
             limit=limit,
             offset=offset,
         )
-        listings = [_row_to_wire(r) for r in rows]
         return JSONResponse({
             "listings": listings,
             "count": len(listings),
@@ -95,16 +78,15 @@ class ListingsController:
     async def get_listing(self, request: Request) -> JSONResponse:
         """``GET /api/v1/listings/{listing_id}``"""
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(order_id=listing_id)
+        row = await self._sqlite_client.load_order(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
                 status_code=404,
             )
-        # Attach paused flag if present (older rows default to False)
         if "paused" not in row:
             row["paused"] = False
-        return JSONResponse(_row_to_wire(row))
+        return JSONResponse(row)
 
     async def pause_listing(self, request: Request) -> JSONResponse:
         """``POST /api/v1/listings/{listing_id}/pause``
@@ -113,13 +95,13 @@ class ListingsController:
         this listing will receive 503 while it is paused.
         """
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(order_id=listing_id)
+        row = await self._sqlite_client.load_order(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(order_id=listing_id, paused=True)
+        await self._sqlite_client.set_order_paused(listing_id=listing_id, paused=True)
         return JSONResponse({
             "listing_id": listing_id,
             "paused": True,
@@ -129,13 +111,13 @@ class ListingsController:
     async def resume_listing(self, request: Request) -> JSONResponse:
         """``POST /api/v1/listings/{listing_id}/resume``"""
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(order_id=listing_id)
+        row = await self._sqlite_client.load_order(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(order_id=listing_id, paused=False)
+        await self._sqlite_client.set_order_paused(listing_id=listing_id, paused=False)
         return JSONResponse({
             "listing_id": listing_id,
             "paused": False,

@@ -37,7 +37,7 @@ def _insert_thread(
     try:
         conn.execute(
             """INSERT OR REPLACE INTO negotiation_threads
-               (negotiation_id, our_order_id, their_order_id,
+               (negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status,
                 created_at, updated_at, terminal_state)
                VALUES (?, 'o1', 'o2', 'a1', 'a2', 'active', ?, ?, ?)""",

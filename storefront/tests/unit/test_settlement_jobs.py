@@ -95,7 +95,7 @@ async def _seed_negotiation(
     client: SQLiteClient,
     *,
     neg_id: str = "neg-1",
-    our_order_id: str = "seller-ord-1",
+    our_listing_id: str = "seller-ord-1",
     terminal: str | None = "success",
     agreed_price: int | None = 10**18,
     agreed_duration_hours: int | None = 1,
@@ -104,7 +104,7 @@ async def _seed_negotiation(
     try:
         conn.execute(
             """INSERT OR REPLACE INTO negotiation_threads
-               (negotiation_id, our_order_id, their_order_id,
+               (negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status,
                 created_at, updated_at, terminal_state,
                 agreed_price, agreed_duration_hours, agreed_at)
@@ -113,7 +113,7 @@ async def _seed_negotiation(
                        '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z', ?,
                        ?, ?, ?)""",
             (
-                neg_id, our_order_id, terminal,
+                neg_id, our_listing_id, terminal,
                 agreed_price, agreed_duration_hours,
                 "2026-04-23T00:00:00Z" if agreed_price is not None else None,
             ),
@@ -127,9 +127,9 @@ async def _seed_seller_order(client: SQLiteClient, order_id: str = "seller-ord-1
     conn = sqlite3.connect(client.db_path)
     try:
         conn.execute(
-            """INSERT INTO orders (order_id, status, created_at, updated_at,
+            """INSERT INTO listings (listing_id, status, created_at, updated_at,
                                    offer_resource, demand_resource, duration_hours,
-                                   order_maker, order_taker, escrow_uid)
+                                   seller, buyer, escrow_uid)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
                        '{}', '{}', 1, 'http://seller:8001', NULL, NULL)""",
             (order_id,),
@@ -183,7 +183,7 @@ async def test_start_refuses_terminal_without_agreed_price(client):
 @pytest.mark.asyncio
 async def test_start_refuses_when_seller_order_gone(client):
     # No seller order seeded.
-    await _seed_negotiation(client, our_order_id="seller-gone")
+    await _seed_negotiation(client, our_listing_id="seller-gone")
     with pytest.raises(ValueError, match="is gone from the local DB"):
         await start_settlement_job(
             escrow_uid="0xescrow",
@@ -273,7 +273,7 @@ async def test_background_task_writes_ready_on_success(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             seller_order_id="seller-ord-1",
-            order_dict={"order_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -298,7 +298,7 @@ async def test_background_task_writes_failed_on_exception(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             seller_order_id="seller-ord-1",
-            order_dict={"order_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -325,7 +325,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             seller_order_id="seller-ord-1",
-            order_dict={"order_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )

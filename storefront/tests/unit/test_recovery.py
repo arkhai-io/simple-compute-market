@@ -22,14 +22,14 @@ def _order(
     order_id: str = "ord-1",
     status: str = "accepted",
     escrow_uid: str | None = "0xescrow",
-    maker_attestation: str | None = "0xfulfill",
+    seller_attestation: str | None = "0xfulfill",
     oracle_address: str | None = "0x" + "0" * 40,
 ) -> dict:
     return {
         "order_id": order_id,
         "status": status,
         "escrow_uid": escrow_uid,
-        "maker_attestation": maker_attestation,
+        "seller_attestation": seller_attestation,
         "oracle_address": oracle_address,
     }
 
@@ -74,15 +74,15 @@ def test_claim_without_escrow_uid_returns_400():
 
 
 def test_claim_without_attestation_returns_400():
-    order = _order(maker_attestation=None)
+    order = _order(seller_attestation=None)
     tag, status, body = derive_claim_params(order=order, payload={"order_id": "ord-1"})
     assert tag == "error"
     assert status == 400
-    assert "maker_attestation" in body["error"] or "fulfillment" in body["error"]
+    assert "seller_attestation" in body["error"] or "fulfillment" in body["error"]
 
 
 def test_claim_payload_override_wins_over_db():
-    order = _order(maker_attestation=None)
+    order = _order(seller_attestation=None)
     tag, params = derive_claim_params(
         order=order,
         payload={"order_id": "ord-1", "fulfillment_uid": "0xfromclient"},
@@ -97,7 +97,7 @@ def test_claim_payload_override_wins_over_db():
 
 
 def test_reclaim_happy_path():
-    order = _order(status="accepted", maker_attestation=None)  # attestation not needed
+    order = _order(status="accepted", seller_attestation=None)  # attestation not needed
     tag, params = derive_reclaim_params(order=order, payload={"order_id": "ord-1"})
     assert tag == "ok"
     assert params["escrow_uid"] == "0xescrow"
@@ -170,17 +170,17 @@ def test_arbitrate_order_not_found_returns_404():
 
 
 def test_arbitrate_without_attestation_and_no_override_returns_400():
-    order = _order(maker_attestation=None)
+    order = _order(seller_attestation=None)
     tag, status, body = derive_arbitrate_params(
         order=order, payload={"order_id": "ord-1"}
     )
     assert tag == "error"
     assert status == 400
-    assert "fulfillment" in body["error"].lower() or "maker_attestation" in body["error"]
+    assert "fulfillment" in body["error"].lower() or "seller_attestation" in body["error"]
 
 
 def test_arbitrate_payload_fulfillment_uid_overrides_db():
-    order = _order(maker_attestation=None)
+    order = _order(seller_attestation=None)
     tag, params = derive_arbitrate_params(
         order=order,
         payload={"order_id": "ord-1", "fulfillment_uid": "0xoverride"},

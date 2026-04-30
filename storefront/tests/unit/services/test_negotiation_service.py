@@ -36,7 +36,7 @@ def _thread(
 ) -> dict:
     return {
         "negotiation_id": neg_id,
-        "our_order_id": order_id,
+        "our_listing_id": order_id,
         "their_agent_id": "0xBuyer",
         "terminal_state": terminal_state,
         "agreed_price": agreed_price,
@@ -64,7 +64,7 @@ class TestListForOrder:
         db.load_order.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.list_for_order(order_id="ghost")
+            await svc.list_for_order(listing_id="ghost")
         assert exc_info.value.status_code == 404
 
     async def test_returns_threads_from_db(self):
@@ -75,10 +75,10 @@ class TestListForOrder:
             _thread("n2", "ord-1"),
         ]
         svc = _make_service(db)
-        result = await svc.list_for_order(order_id="ord-1")
+        result = await svc.list_for_order(listing_id="ord-1")
         assert len(result) == 2
         db.list_negotiations_for_order.assert_awaited_once_with(
-            order_id="ord-1",
+            listing_id="ord-1",
             terminal_state=None,
             buyer_address=None,
             limit=50,
@@ -91,14 +91,14 @@ class TestListForOrder:
         db.list_negotiations_for_order.return_value = []
         svc = _make_service(db)
         await svc.list_for_order(
-            order_id="ord-1",
+            listing_id="ord-1",
             terminal_state="success",
             buyer_address="0xBuyer",
             limit=10,
             offset=5,
         )
         db.list_negotiations_for_order.assert_awaited_once_with(
-            order_id="ord-1",
+            listing_id="ord-1",
             terminal_state="success",
             buyer_address="0xBuyer",
             limit=10,
@@ -116,7 +116,7 @@ class TestGetDetail:
         db.load_negotiation_detail.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.get_detail(order_id="ord-1", neg_id="ghost")
+            await svc.get_detail(listing_id="ord-1", neg_id="ghost")
         assert exc_info.value.status_code == 404
 
     async def test_returns_detail(self):
@@ -124,7 +124,7 @@ class TestGetDetail:
         db = AsyncMock()
         db.load_negotiation_detail.return_value = detail
         svc = _make_service(db)
-        result = await svc.get_detail(order_id="ord-1", neg_id="neg-1")
+        result = await svc.get_detail(listing_id="ord-1", neg_id="neg-1")
         assert result is detail
 
 
@@ -136,13 +136,13 @@ class TestAdvance:
     async def test_raises_400_invalid_action(self):
         svc = _make_service(AsyncMock())
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(order_id="o", neg_id="n", action="fly", price=None, reason=None)
+            await svc.advance(listing_id="o", neg_id="n", action="fly", price=None, reason=None)
         assert exc_info.value.status_code == 400
 
     async def test_raises_400_counter_without_price(self):
         svc = _make_service(AsyncMock())
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(order_id="o", neg_id="n", action="counter", price=None, reason=None)
+            await svc.advance(listing_id="o", neg_id="n", action="counter", price=None, reason=None)
         assert exc_info.value.status_code == 400
 
     async def test_raises_404_thread_not_found(self):
@@ -150,7 +150,7 @@ class TestAdvance:
         db.load_negotiation_thread_row.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(order_id="o", neg_id="ghost", action="exit", price=None, reason=None)
+            await svc.advance(listing_id="o", neg_id="ghost", action="exit", price=None, reason=None)
         assert exc_info.value.status_code == 404
 
     async def test_raises_404_thread_wrong_order(self):
@@ -158,7 +158,7 @@ class TestAdvance:
         db.load_negotiation_thread_row.return_value = _thread("neg-1", "ord-other")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(order_id="ord-1", neg_id="neg-1", action="exit", price=None, reason=None)
+            await svc.advance(listing_id="ord-1", neg_id="neg-1", action="exit", price=None, reason=None)
         assert exc_info.value.status_code == 404
 
     async def test_raises_409_already_terminal(self):
@@ -168,7 +168,7 @@ class TestAdvance:
         )
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.advance(order_id="ord-1", neg_id="neg-1", action="exit", price=None, reason=None)
+            await svc.advance(listing_id="ord-1", neg_id="neg-1", action="exit", price=None, reason=None)
         assert exc_info.value.status_code == 409
 
     async def test_delegates_to_continue_sync_negotiation(self):
@@ -183,7 +183,7 @@ class TestAdvance:
             return_value=mock_result,
         ) as mock_continue:
             result = await svc.advance(
-                order_id="ord-1",
+                listing_id="ord-1",
                 neg_id="neg-1",
                 action="exit",
                 price=None,
@@ -203,7 +203,7 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(order_id="o", neg_id="ghost", price=9000)
+            await svc.force_accept(listing_id="o", neg_id="ghost", price=9000)
         assert exc_info.value.status_code == 404
 
     async def test_raises_404_thread_wrong_order(self):
@@ -211,7 +211,7 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = _thread("neg-1", "ord-other")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(order_id="ord-1", neg_id="neg-1", price=9000)
+            await svc.force_accept(listing_id="ord-1", neg_id="neg-1", price=9000)
         assert exc_info.value.status_code == 404
 
     async def test_raises_409_already_terminal(self):
@@ -219,7 +219,7 @@ class TestForceAccept:
         db.load_negotiation_thread_row.return_value = _thread(terminal_state="success")
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
-            await svc.force_accept(order_id="ord-1", neg_id="neg-1", price=9000)
+            await svc.force_accept(listing_id="ord-1", neg_id="neg-1", price=9000)
         assert exc_info.value.status_code == 409
 
     async def test_commits_agreed_terms_and_returns_result(self):
@@ -233,7 +233,7 @@ class TestForceAccept:
         svc = _make_service(db)
         with patch("market_storefront.services.negotiation_service.stage_event"):
             result = await svc.force_accept(
-                order_id="ord-1", neg_id="neg-1", price=8500
+                listing_id="ord-1", neg_id="neg-1", price=8500
             )
 
         db.save_negotiation_message.assert_awaited_once()

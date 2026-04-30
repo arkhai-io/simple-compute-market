@@ -1079,7 +1079,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
     order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
     order = None
     if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
 
     def _resolve_token(ident: str) -> dict:
         try:
@@ -1201,7 +1201,7 @@ async def _run_claim_flow(request: Request) -> tuple[int, dict]:
     order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
     order = None
     if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_claim_params
     outcome = derive_claim_params(order=order, payload=payload)
@@ -1290,7 +1290,7 @@ async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
     order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
     order = None
     if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_reclaim_params
     outcome = derive_reclaim_params(order=order, payload=payload)
@@ -1384,7 +1384,7 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
     order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
     order = None
     if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(order_id=order_id_peek.strip())
+        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_arbitrate_params
     outcome = derive_arbitrate_params(order=order, payload=payload)
@@ -1619,7 +1619,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     try:
         result = await start_sync_negotiation(
             sqlite_client=root_agent._sqlite_client,
-            our_order_id=seller_order_id,
+            our_listing_id=seller_order_id,
             buyer_address=buyer_address,
             their_proposed_price=initial_price,
             our_base_url=BASE_URL_OVERRIDE or "",

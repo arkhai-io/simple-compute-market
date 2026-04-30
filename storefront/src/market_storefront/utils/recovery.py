@@ -57,7 +57,7 @@ def derive_claim_params(*, order: dict[str, Any] | None, payload: dict) -> Valid
             {"error": f"Order {order_id} has no escrow_uid; nothing to claim"},
         )
 
-    fulfillment_uid = payload.get("fulfillment_uid") or order.get("maker_attestation")
+    fulfillment_uid = payload.get("fulfillment_uid") or order.get("seller_attestation")
     if not fulfillment_uid:
         return (
             "error",
@@ -138,7 +138,7 @@ def derive_arbitrate_params(*, order: dict[str, Any] | None, payload: dict) -> V
     if not order:
         return ("error", 404, {"error": f"Order {order_id} not found on this agent"})
 
-    fulfillment_uid = payload.get("fulfillment_uid") or order.get("maker_attestation")
+    fulfillment_uid = payload.get("fulfillment_uid") or order.get("seller_attestation")
     if not fulfillment_uid:
         return (
             "error",

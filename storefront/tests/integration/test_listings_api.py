@@ -34,7 +34,7 @@ async def db(tmp_path) -> SQLiteClient:
 
 async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open") -> None:
     await db.upsert_order(
-        order_id=listing_id,
+        listing_id=listing_id,
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -42,7 +42,7 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
         fulfillment_resource=None,
         duration_hours=2,
-        order_maker="http://seller:8001",
+        seller="http://seller:8001",
     )
 
 
@@ -103,7 +103,7 @@ class TestListListings:
         c, db = client
         await _seed_listing(db, "paused1")
         await _seed_listing(db, "active1")
-        await db.set_order_paused(order_id="paused1", paused=True)
+        await db.set_order_paused(listing_id="paused1", paused=True)
         paused_result = await c.list_listings(paused=True)
         active_result = await c.list_listings(paused=False)
         paused_ids = {o.listing_id for o in paused_result.listings}
@@ -162,7 +162,7 @@ class TestPauseListing:
         await _seed_listing(db, "pausable")
         result = await c.pause_listing("pausable")
         assert result.paused is True
-        assert await db.is_order_paused(order_id="pausable") is True
+        assert await db.is_order_paused(listing_id="pausable") is True
 
     async def test_pause_unknown_listing_raises(self, client):
         c, _ = client
@@ -184,10 +184,10 @@ class TestResumeListing:
     async def test_resume_clears_flag(self, client):
         c, db = client
         await _seed_listing(db, "resumable")
-        await db.set_order_paused(order_id="resumable", paused=True)
+        await db.set_order_paused(listing_id="resumable", paused=True)
         result = await c.resume_listing("resumable")
         assert result.paused is False
-        assert await db.is_order_paused(order_id="resumable") is False
+        assert await db.is_order_paused(listing_id="resumable") is False
 
     async def test_resume_unknown_listing_raises(self, client):
         c, _ = client

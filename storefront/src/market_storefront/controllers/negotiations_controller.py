@@ -31,20 +31,6 @@ from market_storefront.services.negotiation_service import (
 logger = logging.getLogger(__name__)
 
 
-def _row_to_wire(row: dict) -> dict:
-    """Translate negotiation DB rows to the wire vocabulary.
-
-    DB-column ``our_order_id`` → JSON key ``our_listing_id``.
-    DB-column ``order_id``     → JSON key ``listing_id``.
-    """
-    out = dict(row)
-    if "our_order_id" in out and "our_listing_id" not in out:
-        out["our_listing_id"] = out.pop("our_order_id")
-    if "order_id" in out and "listing_id" not in out:
-        out["listing_id"] = out.pop("order_id")
-    return out
-
-
 class NegotiationsController:
     def __init__(self, *, sqlite_client) -> None:
         self._service = NegotiationService(sqlite_client=sqlite_client)
@@ -75,7 +61,7 @@ class NegotiationsController:
         limit, offset = self._pagination(request)
         try:
             threads = await self._service.list_for_order(
-                order_id=listing_id,
+                listing_id=listing_id,
                 terminal_state=request.query_params.get("terminal_state") or None,
                 buyer_address=request.query_params.get("buyer_address") or None,
                 limit=limit,
@@ -86,7 +72,7 @@ class NegotiationsController:
 
         return JSONResponse({
             "listing_id": listing_id,
-            "negotiations": [_row_to_wire(t) for t in threads],
+            "negotiations": threads,
             "count": len(threads),
             "limit": limit,
             "offset": offset,
@@ -98,11 +84,11 @@ class NegotiationsController:
         neg_id = request.path_params["neg_id"]
         try:
             detail = await self._service.get_detail(
-                order_id=listing_id, neg_id=neg_id
+                listing_id=listing_id, neg_id=neg_id
             )
         except NegotiationServiceError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
-        return JSONResponse(_row_to_wire(detail))
+        return JSONResponse(detail)
 
     async def advance_negotiation(self, request: Request) -> JSONResponse:
         """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance``"""
@@ -127,7 +113,7 @@ class NegotiationsController:
 
         try:
             result = await self._service.advance(
-                order_id=listing_id,
+                listing_id=listing_id,
                 neg_id=neg_id,
                 action=action,
                 price=price,
@@ -141,7 +127,7 @@ class NegotiationsController:
                 {"error": "advance failed", "detail": str(exc)}, status_code=500
             )
 
-        return JSONResponse(_row_to_wire(result))
+        return JSONResponse(result)
 
     async def force_accept_negotiation(self, request: Request) -> JSONResponse:
         """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept``"""
@@ -162,7 +148,7 @@ class NegotiationsController:
 
         try:
             result = await self._service.force_accept(
-                order_id=listing_id, neg_id=neg_id, price=price
+                listing_id=listing_id, neg_id=neg_id, price=price
             )
         except NegotiationServiceError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
@@ -174,7 +160,7 @@ class NegotiationsController:
                 {"error": "force-accept failed", "detail": str(exc)}, status_code=500
             )
 
-        return JSONResponse(_row_to_wire(result))
+        return JSONResponse(result)
 
     # ------------------------------------------------------------------
     # Route factory

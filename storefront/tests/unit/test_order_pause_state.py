@@ -25,7 +25,7 @@ async def db(tmp_path) -> SQLiteClient:
     # Seed a minimal order row to test pause helpers against
     from datetime import datetime
     await client.upsert_order(
-        order_id="order-001",
+        listing_id="order-001",
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -33,7 +33,7 @@ async def db(tmp_path) -> SQLiteClient:
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 1000},
         fulfillment_resource=None,
         duration_hours=1,
-        order_maker="http://seller:8001",
+        seller="http://seller:8001",
     )
     return client
 
@@ -44,25 +44,25 @@ async def db(tmp_path) -> SQLiteClient:
 
 class TestOrderPauseHelpers:
     async def test_new_order_not_paused_by_default(self, db):
-        assert await db.is_order_paused(order_id="order-001") is False
+        assert await db.is_order_paused(listing_id="order-001") is False
 
     async def test_set_paused_true(self, db):
-        await db.set_order_paused(order_id="order-001", paused=True)
-        assert await db.is_order_paused(order_id="order-001") is True
+        await db.set_order_paused(listing_id="order-001", paused=True)
+        assert await db.is_order_paused(listing_id="order-001") is True
 
     async def test_set_paused_false_after_true(self, db):
-        await db.set_order_paused(order_id="order-001", paused=True)
-        await db.set_order_paused(order_id="order-001", paused=False)
-        assert await db.is_order_paused(order_id="order-001") is False
+        await db.set_order_paused(listing_id="order-001", paused=True)
+        await db.set_order_paused(listing_id="order-001", paused=False)
+        assert await db.is_order_paused(listing_id="order-001") is False
 
     async def test_unknown_order_not_paused(self, db):
-        assert await db.is_order_paused(order_id="does-not-exist") is False
+        assert await db.is_order_paused(listing_id="does-not-exist") is False
 
     async def test_list_orders_paused_filter(self, db):
         # Add a second order (not paused)
         from datetime import datetime
         await db.upsert_order(
-            order_id="order-002",
+            listing_id="order-002",
             status="open",
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
@@ -70,15 +70,15 @@ class TestOrderPauseHelpers:
             demand_resource={},
             fulfillment_resource=None,
             duration_hours=1,
-            order_maker="http://seller:8001",
+            seller="http://seller:8001",
         )
-        await db.set_order_paused(order_id="order-001", paused=True)
+        await db.set_order_paused(listing_id="order-001", paused=True)
 
         paused_orders = await db.list_orders(paused=True)
         unpaused_orders = await db.list_orders(paused=False)
 
-        paused_ids = {o["order_id"] for o in paused_orders}
-        unpaused_ids = {o["order_id"] for o in unpaused_orders}
+        paused_ids = {o["listing_id"] for o in paused_orders}
+        unpaused_ids = {o["listing_id"] for o in unpaused_orders}
 
         assert "order-001" in paused_ids
         assert "order-002" not in paused_ids
@@ -124,7 +124,7 @@ class TestStartSyncNegotiationPauseGuard:
         with pytest.raises(StorefrontPausedError) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,
-                our_order_id="order-001",
+                our_listing_id="order-001",
                 buyer_address="0xBuyer",
                 their_proposed_price=5000,
                 our_base_url="http://seller:8001",
@@ -136,13 +136,13 @@ class TestStartSyncNegotiationPauseGuard:
         import market_storefront.server as server_mod
         monkeypatch.setattr(server_mod, "_GLOBALLY_PAUSED", False)
 
-        await db.set_order_paused(order_id="order-001", paused=True)
+        await db.set_order_paused(listing_id="order-001", paused=True)
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
         with pytest.raises(StorefrontPausedError) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,
-                our_order_id="order-001",
+                our_listing_id="order-001",
                 buyer_address="0xBuyer",
                 their_proposed_price=5000,
                 our_base_url="http://seller:8001",
@@ -161,7 +161,7 @@ class TestStartSyncNegotiationPauseGuard:
         with pytest.raises((ValueError, Exception)) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,
-                our_order_id="order-001",
+                our_listing_id="order-001",
                 buyer_address="0xBuyer",
                 their_proposed_price=5000,
                 our_base_url="http://seller:8001",

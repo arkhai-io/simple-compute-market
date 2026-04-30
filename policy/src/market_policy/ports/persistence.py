@@ -43,8 +43,8 @@ class NegotiationThreadPersistencePort(Protocol):
         self,
         *,
         negotiation_id: str,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,
@@ -95,8 +95,8 @@ class NegotiationThreadPersistencePort(Protocol):
     async def check_existing_negotiation(
         self,
         *,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
         our_agent_id: str | None = None,
         their_agent_id: str | None = None,
     ) -> dict[str, Any] | None: ...

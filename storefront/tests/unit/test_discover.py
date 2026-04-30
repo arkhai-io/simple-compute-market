@@ -88,7 +88,7 @@ async def test_discover_happy_path_returns_structured_matches():
 
     assert len(matches) == 1
     m = matches[0]
-    assert m["their_order_id"] == "seller-ord-1"
+    assert m["their_listing_id"] == "seller-ord-1"
     assert m["their_agent_url"] == "http://seller:8001"
     assert m["their_order"] is peer_order
 
@@ -117,7 +117,7 @@ async def test_discover_filters_out_our_own_orders():
         matches = await discover(order_id="buyer-ord-1")
 
     assert len(matches) == 1
-    assert matches[0]["their_order_id"] == "seller-ord-1"
+    assert matches[0]["their_listing_id"] == "seller-ord-1"
 
 
 @pytest.mark.asyncio
@@ -139,7 +139,7 @@ async def test_discover_drops_active_negotiations_by_default():
     ):
         matches = await discover(order_id="buyer-ord-1")
 
-    assert [m["their_order_id"] for m in matches] == ["fresh"]
+    assert [m["their_listing_id"] for m in matches] == ["fresh"]
 
 
 @pytest.mark.asyncio
@@ -161,7 +161,7 @@ async def test_discover_include_active_skips_the_filter():
     ):
         matches = await discover(order_id="buyer-ord-1", include_active_negotiations=True)
 
-    assert sorted(m["their_order_id"] for m in matches) == ["already-active", "fresh"]
+    assert sorted(m["their_listing_id"] for m in matches) == ["already-active", "fresh"]
 
 
 @pytest.mark.asyncio
@@ -218,7 +218,7 @@ async def test_discover_raises_when_order_not_in_registry():
 async def test_discover_skips_matches_missing_fields():
     """Registry entries with no maker_agent_id or empty id are silently dropped.
 
-    The guard in discover() is ``if not their_order_id or not their_agent_url``.
+    The guard in discover() is ``if not their_listing_id or not their_agent_url``.
     - Empty string id (``id=""``) → str("") is falsy → dropped.
     - None maker_agent_id → falsy → dropped.
     Note: ``id=None`` produces ``str(None) == "None"`` which is truthy and is NOT
@@ -246,4 +246,4 @@ async def test_discover_skips_matches_missing_fields():
     ):
         matches = await discover(order_id="buyer-ord-1")
 
-    assert [m["their_order_id"] for m in matches] == ["good"]
+    assert [m["their_listing_id"] for m in matches] == ["good"]

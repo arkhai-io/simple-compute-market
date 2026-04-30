@@ -41,7 +41,7 @@ async def db(tmp_path) -> SQLiteClient:
 
 async def _seed_order(db: SQLiteClient, order_id: str) -> None:
     await db.upsert_order(
-        order_id=order_id,
+        listing_id=order_id,
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -49,7 +49,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
         fulfillment_resource=None,
         duration_hours=2,
-        order_maker="http://seller:8001",
+        seller="http://seller:8001",
     )
 
 
@@ -75,7 +75,7 @@ async def _seed_thread(
             conn.execute(
                 """
                 INSERT OR REPLACE INTO negotiation_threads
-                  (negotiation_id, our_order_id, their_order_id,
+                  (negotiation_id, our_listing_id, their_listing_id,
                    our_agent_id, their_agent_id,
                    terminal_state, agreed_price, agreed_duration_hours,
                    agreed_at, created_at, updated_at)

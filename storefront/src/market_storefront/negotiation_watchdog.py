@@ -57,7 +57,7 @@ def _stale_threads(db_path: str, cutoff: datetime) -> list[dict]:
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """SELECT negotiation_id, our_order_id, their_order_id, updated_at
+            """SELECT negotiation_id, our_listing_id, their_listing_id, updated_at
                FROM negotiation_threads
                WHERE terminal_state IS NULL""",
         ).fetchall()
@@ -102,7 +102,7 @@ async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
                 stage="negotiation",
                 event="abandoned",
                 negotiation_id=nid,
-                order_id=thread.get("our_order_id"),
+                order_id=thread.get("our_listing_id"),
                 reason="watchdog_timeout",
                 updated_at=thread.get("updated_at"),
             )

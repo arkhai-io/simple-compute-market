@@ -33,11 +33,11 @@ class NegotiationThreadTransaction:
 
     Example usage:
         async with NegotiationThreadTransaction() as txn:
-            await txn.cancel_competing(order_id, their_order_id, negotiation_id)
+            await txn.cancel_competing(order_id, their_listing_id, negotiation_id)
 
         # Or with custom component name for logging:
         async with NegotiationThreadTransaction("ACCEPT_OFFER") as txn:
-            await txn.cancel_competing(order_id, their_order_id, negotiation_id)
+            await txn.cancel_competing(order_id, their_listing_id, negotiation_id)
     """
 
     def __init__(self, component: str = "NEGOTIATION"):
@@ -77,18 +77,18 @@ class NegotiationThreadTransaction:
     async def cancel_competing(
         self,
         order_id: str | None,
-        their_order_id: str | None,
+        their_listing_id: str | None,
         except_negotiation_id: str | None,
     ) -> list[dict]:
         """Cancel competing negotiations for both orders.
 
         Args:
             order_id: Our order ID
-            their_order_id: Their order ID
+            their_listing_id: Their order ID
             except_negotiation_id: Negotiation ID to exclude from cancellation
 
         Returns:
-            List of dicts with negotiation_id, their_order_id, their_agent_id
+            List of dicts with negotiation_id, their_listing_id, their_agent_id
             for each canceled negotiation (for sending exit notifications).
         """
         if not self.thread_store:
@@ -97,7 +97,7 @@ class NegotiationThreadTransaction:
 
         seen: set[str] = set()
         all_canceled: list[dict] = []
-        for oid in [order_id, their_order_id]:
+        for oid in [order_id, their_listing_id]:
             if not oid:
                 continue
             canceled = await self.thread_store._sqlite.cancel_negotiations_for_order(
@@ -135,23 +135,23 @@ class NegotiationThreadTransaction:
 
         active_order_ids = set()
         for neg in active_negotiations:
-            if neg["our_order_id"] == order_id:
-                active_order_ids.add(neg["their_order_id"])
-            elif neg["their_order_id"] == order_id:
-                active_order_ids.add(neg["our_order_id"])
+            if neg["our_listing_id"] == order_id:
+                active_order_ids.add(neg["their_listing_id"])
+            elif neg["their_listing_id"] == order_id:
+                active_order_ids.add(neg["our_listing_id"])
 
         return active_order_ids
 
     async def check_duplicate(
         self,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
     ) -> bool:
         """Check if a negotiation already exists between two orders.
 
         Args:
-            our_order_id: Our order ID
-            their_order_id: Their order ID
+            our_listing_id: Our order ID
+            their_listing_id: Their order ID
 
         Returns:
             True if negotiation already exists, False otherwise
@@ -161,8 +161,8 @@ class NegotiationThreadTransaction:
             return False
 
         existing = await self.thread_store._sqlite.check_existing_negotiation(
-            our_order_id=our_order_id,
-            their_order_id=their_order_id,
+            our_listing_id=our_listing_id,
+            their_listing_id=their_listing_id,
         )
         return existing is not None
 
@@ -189,8 +189,8 @@ class NegotiationThreadTransaction:
     async def ensure_thread(
         self,
         negotiation_id: str,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
         our_initial_price: int | None = None,
@@ -200,8 +200,8 @@ class NegotiationThreadTransaction:
 
         Args:
             negotiation_id: Unique ID for this negotiation
-            our_order_id: Our order ID
-            their_order_id: Their order ID
+            our_listing_id: Our order ID
+            their_listing_id: Their order ID
             our_agent_id: Our agent ID
             their_agent_id: Their agent ID
             our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
@@ -220,8 +220,8 @@ class NegotiationThreadTransaction:
         if not existing:
             await self.thread_store.create_thread(
                 negotiation_id=negotiation_id,
-                our_order_id=our_order_id,
-                their_order_id=their_order_id,
+                our_listing_id=our_listing_id,
+                their_listing_id=their_listing_id,
                 our_agent_id=our_agent_id,
                 their_agent_id=their_agent_id,
                 owner_id=owner_id,
@@ -295,8 +295,8 @@ class NegotiationThreadStore:
     async def create_thread(
         self,
         negotiation_id: str,
-        our_order_id: str,
-        their_order_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,
@@ -307,8 +307,8 @@ class NegotiationThreadStore:
         
         Args:
             negotiation_id: Unique negotiation identifier
-            our_order_id: Our order ID
-            their_order_id: Their order ID
+            our_listing_id: Our order ID
+            their_listing_id: Their order ID
             our_agent_id: Our agent ID
             their_agent_id: Their agent ID
             owner_id: ID of the agent owning this private state
@@ -317,8 +317,8 @@ class NegotiationThreadStore:
         """
         await self._sqlite.create_negotiation_thread(
             negotiation_id=negotiation_id,
-            our_order_id=our_order_id,
-            their_order_id=their_order_id,
+            our_listing_id=our_listing_id,
+            their_listing_id=their_listing_id,
             our_agent_id=our_agent_id,
             their_agent_id=their_agent_id,
             owner_id=owner_id,
@@ -327,7 +327,7 @@ class NegotiationThreadStore:
         )
         logger.debug(
             f"[NEGOTIATION THREAD] Created thread {negotiation_id} "
-            f"for orders {our_order_id} <-> {their_order_id} "
+            f"for orders {our_listing_id} <-> {their_listing_id} "
             f"agents {our_agent_id} <-> {their_agent_id}"
         )
     

@@ -51,7 +51,7 @@ class NegotiationService:
     async def list_for_order(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         terminal_state: str | None = None,
         buyer_address: str | None = None,
         limit: int = 50,
@@ -61,13 +61,13 @@ class NegotiationService:
 
         Raises ``NegotiationServiceError(404)`` if the order is not found.
         """
-        order = await self._db.load_order(order_id=order_id)
+        order = await self._db.load_order(listing_id=listing_id)
         if not order:
             raise NegotiationServiceError(
-                f"Order {order_id!r} not found", status_code=404
+                f"Order {listing_id!r} not found", status_code=404
             )
         return await self._db.list_negotiations_for_order(
-            order_id=order_id,
+            listing_id=listing_id,
             terminal_state=terminal_state,
             buyer_address=buyer_address,
             limit=limit,
@@ -77,7 +77,7 @@ class NegotiationService:
     async def get_detail(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
     ) -> dict[str, Any]:
         """Return full negotiation detail (thread + messages + stage events).
@@ -86,11 +86,11 @@ class NegotiationService:
         negotiation does not belong to the given order.
         """
         detail = await self._db.load_negotiation_detail(
-            order_id=order_id, neg_id=neg_id
+            listing_id=listing_id, neg_id=neg_id
         )
         if not detail:
             raise NegotiationServiceError(
-                f"Negotiation {neg_id!r} not found for order {order_id!r}",
+                f"Negotiation {neg_id!r} not found for order {listing_id!r}",
                 status_code=404,
             )
         return detail
@@ -102,7 +102,7 @@ class NegotiationService:
     async def advance(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         action: str,
         price: int | None,
@@ -129,7 +129,7 @@ class NegotiationService:
             )
 
         thread = await self._load_and_validate_thread(
-            order_id=order_id, neg_id=neg_id, require_non_terminal=True
+            listing_id=listing_id, neg_id=neg_id, require_non_terminal=True
         )
 
         try:
@@ -150,12 +150,12 @@ class NegotiationService:
                 f"advance failed: {exc}", status_code=500
             ) from exc
 
-        return {"neg_id": neg_id, "order_id": order_id, **result}
+        return {"neg_id": neg_id, "listing_id": listing_id, **result}
 
     async def force_accept(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         price: int,
     ) -> dict[str, Any]:
@@ -169,10 +169,10 @@ class NegotiationService:
             NegotiationServiceError(409) — thread already terminal
         """
         thread = await self._load_and_validate_thread(
-            order_id=order_id, neg_id=neg_id, require_non_terminal=True
+            listing_id=listing_id, neg_id=neg_id, require_non_terminal=True
         )
 
-        our_order = await self._db.load_order(order_id=order_id)
+        our_order = await self._db.load_order(listing_id=listing_id)
         duration_hours = int((our_order or {}).get("duration_hours") or 1)
 
         # Write the acceptance message and terminal state directly via sqlite_client,
@@ -204,14 +204,14 @@ class NegotiationService:
         stage_event(
             "negotiation", "force_accepted",
             negotiation_id=neg_id,
-            order_id=order_id,
+            listing_id=listing_id,
             agreed_price=price,
             source="admin",
         )
 
         return {
             "neg_id": neg_id,
-            "order_id": order_id,
+            "listing_id": listing_id,
             "action": "accept",
             "price": price,
             "source": "admin_force_accept",
@@ -224,11 +224,11 @@ class NegotiationService:
     async def _load_and_validate_thread(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         require_non_terminal: bool = False,
     ) -> dict[str, Any]:
-        """Load a thread and validate it belongs to order_id.
+        """Load a thread and validate it belongs to listing_id.
 
         Raises NegotiationServiceError on any validation failure.
         """
@@ -237,9 +237,9 @@ class NegotiationService:
             raise NegotiationServiceError(
                 f"Negotiation {neg_id!r} not found", status_code=404
             )
-        if thread.get("our_order_id") != order_id:
+        if thread.get("our_listing_id") != listing_id:
             raise NegotiationServiceError(
-                f"Negotiation {neg_id!r} does not belong to order {order_id!r}",
+                f"Negotiation {neg_id!r} does not belong to order {listing_id!r}",
                 status_code=404,
             )
         if require_non_terminal and thread.get("terminal_state"):
