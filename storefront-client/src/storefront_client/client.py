@@ -58,6 +58,8 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     AdminStatusResponse,
+    StageEvent,
+    StageEventListResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -204,6 +206,69 @@ class StorefrontClient(_StorefrontClientBase):
     async def get_system_status(self) -> HealthResponse:
         """GET /api/v1/system/status — includes paused flag."""
         return HealthResponse.from_dict(await self._get("/api/v1/system/status"))
+
+    async def get_events(
+        self,
+        *,
+        since_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> StageEventListResponse:
+        """GET /api/v1/system/events — historical query (admin key required)."""
+        params: dict[str, Any] = {"since_id": since_id, "limit": limit}
+        if stage is not None:
+            params["stage"] = stage
+        if listing_id is not None:
+            params["listing_id"] = listing_id
+        if negotiation_id is not None:
+            params["negotiation_id"] = negotiation_id
+        url = self._url("/api/v1/system/events")
+        resp = await self._client.get(
+            "/api/v1/system/events",
+            params=params,
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return StageEventListResponse.from_dict(resp.json())
+
+    async def wait_for_stage_event(
+        self,
+        stage: str,
+        event: str,
+        *,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+        timeout: float = 30.0,
+        poll_interval: float = 0.5,
+    ) -> StageEvent:
+        """Poll GET /api/v1/system/events until a matching event appears.
+
+        Raises TimeoutError if the event is not seen within *timeout* seconds.
+        """
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        cursor = 0
+        while _time.monotonic() < deadline:
+            result = await self.get_events(
+                since_id=cursor,
+                limit=100,
+                stage=stage,
+                listing_id=listing_id,
+                negotiation_id=negotiation_id,
+            )
+            for ev in result.events:
+                cursor = max(cursor, ev.id)
+                if ev.stage == stage and ev.event == event:
+                    return ev
+            import asyncio as _asyncio
+            await _asyncio.sleep(poll_interval)
+        raise TimeoutError(
+            f"Stage event stage={stage!r} event={event!r} "
+            f"listing_id={listing_id!r} not seen within {timeout}s"
+        )
 
     # ------------------------------------------------------------------
     # Listings API (GET endpoints unauthenticated; write endpoints admin-key)
@@ -549,6 +614,68 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def get_system_status(self) -> HealthResponse:
         """GET /api/v1/system/status — includes paused flag."""
         return HealthResponse.from_dict(self._get("/api/v1/system/status"))
+
+    def get_events(
+        self,
+        *,
+        since_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> StageEventListResponse:
+        """GET /api/v1/system/events — historical query (admin key required)."""
+        params: dict[str, Any] = {"since_id": since_id, "limit": limit}
+        if stage is not None:
+            params["stage"] = stage
+        if listing_id is not None:
+            params["listing_id"] = listing_id
+        if negotiation_id is not None:
+            params["negotiation_id"] = negotiation_id
+        url = self._url("/api/v1/system/events")
+        resp = self._client.get(
+            "/api/v1/system/events",
+            params=params,
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return StageEventListResponse.from_dict(resp.json())
+
+    def wait_for_stage_event(
+        self,
+        stage: str,
+        event: str,
+        *,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+        timeout: float = 30.0,
+        poll_interval: float = 0.5,
+    ) -> StageEvent:
+        """Poll GET /api/v1/system/events until a matching event appears.
+
+        Raises TimeoutError if the event is not seen within *timeout* seconds.
+        """
+        import time as _time
+        deadline = _time.monotonic() + timeout
+        cursor = 0
+        while _time.monotonic() < deadline:
+            result = self.get_events(
+                since_id=cursor,
+                limit=100,
+                stage=stage,
+                listing_id=listing_id,
+                negotiation_id=negotiation_id,
+            )
+            for ev in result.events:
+                cursor = max(cursor, ev.id)
+                if ev.stage == stage and ev.event == event:
+                    return ev
+            _time.sleep(poll_interval)
+        raise TimeoutError(
+            f"Stage event stage={stage!r} event={event!r} "
+            f"listing_id={listing_id!r} not seen within {timeout}s"
+        )
 
     # ------------------------------------------------------------------
     # Listings API

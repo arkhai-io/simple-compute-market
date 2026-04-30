@@ -2504,6 +2504,82 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
     # ------------------------------------------------------------------
+    # Stage events
+    # ------------------------------------------------------------------
+
+    async def list_stage_events(
+        self,
+        *,
+        after_id: int = 0,
+        limit: int = 100,
+        stage: str | None = None,
+        listing_id: str | None = None,
+        negotiation_id: str | None = None,
+    ) -> list[dict]:
+        """Query stage_events rows with optional filters.
+
+        Parameters
+        ----------
+        after_id:
+            Return only rows with id > after_id (for SSE cursor-based tailing).
+        limit:
+            Maximum rows to return (capped at 500).
+        stage:
+            Filter by stage column (e.g. 'discovery', 'negotiation').
+        listing_id:
+            Filter by listing_id column.
+        negotiation_id:
+            Filter by negotiation_id column.
+        """
+        import json as _json
+
+        limit = min(limit, 500)
+
+        def _query() -> list[dict]:
+            conn = sqlite3.connect(self.db_path, timeout=2)
+            try:
+                conditions = ["id > ?"]
+                params: list = [after_id]
+                if stage is not None:
+                    conditions.append("stage = ?")
+                    params.append(stage)
+                if listing_id is not None:
+                    conditions.append("listing_id = ?")
+                    params.append(listing_id)
+                if negotiation_id is not None:
+                    conditions.append("negotiation_id = ?")
+                    params.append(negotiation_id)
+                where = " AND ".join(conditions)
+                params.append(limit)
+                cur = conn.execute(
+                    f"SELECT id, ts, stage, event, negotiation_id, listing_id, escrow_uid, data "
+                    f"FROM stage_events WHERE {where} ORDER BY id ASC LIMIT ?",
+                    params,
+                )
+                rows = []
+                for row in cur.fetchall():
+                    row_id, ts, stg, evt, neg_id, lst_id, escrow, data_str = row
+                    try:
+                        data = _json.loads(data_str) if data_str else {}
+                    except Exception:
+                        data = {"raw": data_str}
+                    rows.append({
+                        "id": row_id,
+                        "ts": ts,
+                        "stage": stg,
+                        "event": evt,
+                        "negotiation_id": neg_id,
+                        "listing_id": lst_id,
+                        "escrow_uid": escrow,
+                        "data": data,
+                    })
+                return rows
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_query)
+
+    # ------------------------------------------------------------------
     # Admin status counts
     # ------------------------------------------------------------------
 

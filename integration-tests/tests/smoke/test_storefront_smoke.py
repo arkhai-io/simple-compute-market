@@ -107,3 +107,39 @@ class TestStorefrontRegistration:
         log.info(
             "✓ Seller registry address matches config: %s", expected_address
         )
+
+    def test_storefront_registry_connectivity(
+        self,
+        seller_api_url: str,
+        seller_settings: dict,
+    ) -> None:
+        """GET /api/v1/system/status must report checks.registry == 'ok'.
+
+        Guards against misconfigured registry.url in config.toml — this
+        failure would cause resume_listing to silently return
+        registry_status='error' and the e2e deal test to fail at stage 05.
+        """
+        import httpx
+        admin_key = seller_settings.get("admin_api_key", "")
+        headers = {"X-Admin-Key": admin_key} if admin_key else {}
+        try:
+            resp = httpx.get(
+                f"{seller_api_url}/api/v1/system/status",
+                headers=headers,
+                timeout=5.0,
+            )
+        except Exception as exc:
+            pytest.fail(f"Could not reach /api/v1/system/status: {exc}")
+
+        assert resp.status_code == 200, (
+            f"GET /api/v1/system/status returned {resp.status_code}: {resp.text[:200]}"
+        )
+        body = resp.json()
+        registry_check = body.get("checks", {}).get("registry", "absent")
+        assert registry_check == "ok", (
+            f"Storefront cannot reach registry. checks.registry={registry_check!r}.\n"
+            f"Verify registry.url in the storefront's config.toml points to a reachable\n"
+            f"indexer endpoint from inside the storefront container.\n"
+            f"Full status response: {body}"
+        )
+        log.info("✓ Storefront registry connectivity ok")

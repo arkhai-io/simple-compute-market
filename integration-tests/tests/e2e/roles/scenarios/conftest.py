@@ -45,15 +45,17 @@ class DealState:
     # Stage 1 — seller order
     seller_listing_id: Optional[str] = None
     _seller_url: str = ""
-    # Stage 2 — paused creation verified
+    # Stage 2 — local paused state verified
     paused_create_confirmed: bool = False
-    # Stage 2 — registry visibility
-    registry_order_confirmed: bool = False
+    # Stage 3 — registry absence confirmed
+    registry_absent_confirmed: bool = False
     # Stage 3-4 — pause/resume
     pause_confirmed: bool = False
     resume_confirmed: bool = False
     # Stage 6-7 — global admin pause/resume
     admin_resume_confirmed: bool = False
+    # Stage 5 — registry visibility confirmed
+    registry_order_confirmed: bool = False
     # Stage 5-8 — negotiation
     negotiation_id: Optional[str] = None
     negotiation_round_count: int = 0
@@ -195,3 +197,65 @@ def buyer_config() -> dict[str, str]:
 def seller_wallet() -> str:
     """Seller wallet address — passed as agent_wallet_address to create_order."""
     return _require_setting(settings.SELLER.WALLET_ADDRESS, "SELLER.WALLET_ADDRESS")
+
+
+# ---------------------------------------------------------------------------
+# Teardown — ensure global pause is cleared after each test module run
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def ensure_storefront_resumed(storefront_admin_client):
+    """Yield to let the module run; then unconditionally clear global pause.
+
+    This prevents a failed stage 06 (which calls admin_pause but whose
+    stage 07 companion may not have run) from leaving the storefront paused
+    and poisoning subsequent test runs.
+    """
+    yield
+    try:
+        status = storefront_admin_client.get_system_status()
+        if status.paused:
+            storefront_admin_client.admin_resume()
+            log.info("[teardown] Cleared residual global pause on storefront")
+    except Exception as exc:
+        log.warning("[teardown] Could not verify/clear global pause: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# wait_for_stage_event helper — wraps storefront_admin_client.wait_for_stage_event
+# ---------------------------------------------------------------------------
+
+def wait_for_stage_event(
+    client,
+    stage: str,
+    event: str,
+    *,
+    listing_id: str | None = None,
+    negotiation_id: str | None = None,
+    timeout: float = 30.0,
+):
+    """Block until the matching stage event appears in /api/v1/system/events.
+
+    Wraps ``SyncStorefrontClient.wait_for_stage_event`` with a friendlier
+    pytest-style timeout error message.
+
+    Parameters
+    ----------
+    client:
+        A ``SyncStorefrontClient`` instance with admin_key configured.
+    stage, event:
+        Stage and event strings to match (e.g. ``"discovery"``, ``"order_published"``).
+    listing_id, negotiation_id:
+        Optional filters passed through to the events query.
+    timeout:
+        Seconds to wait before raising AssertionError.
+    """
+    try:
+        return client.wait_for_stage_event(
+            stage, event,
+            listing_id=listing_id,
+            negotiation_id=negotiation_id,
+            timeout=timeout,
+        )
+    except TimeoutError as exc:
+        pytest.fail(str(exc))

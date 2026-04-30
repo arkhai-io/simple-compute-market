@@ -308,13 +308,29 @@ mounted in `server.py` alongside the legacy `a2a_app` routes.
 
 **System controller** (`controllers/system_controller.py`) — HTTP layer only; all logic in `services/system_service.py`:
 ```
-GET  /health                            Kubernetes liveness/readiness probe
+GET  /health                            Kubernetes liveness/readiness probe (DB ping only — no outbound calls)
 GET  /api/v1/system/health              Versioned alias
-GET  /api/v1/system/status              Diagnostic snapshot: DB health + global pause state
+GET  /api/v1/system/status              Diagnostic snapshot: DB health + registry connectivity check + global pause state
+GET  /api/v1/system/events              Stage event log — historical JSON query or live SSE tail (admin key required)
 POST /admin/policy/seed                 Discover @policy_callable decorators + seed default DB rows (admin key)
 GET  /api/v1/system/policy              Callable registry + seeded policies with components_resolvable flag
 POST /api/v1/system/policy/evaluate     Dry-run a synthetic order_create event through the policy engine (no writes)
 ```
+
+**`/health` vs `/api/v1/system/status`:** `/health` performs only a fast SQLite ping — no outbound HTTP calls, safe as a Kubernetes liveness probe. `/api/v1/system/status` additionally probes `CONFIG.indexer_url/health` with a 2-second timeout and reports the result as `checks.registry` (`"ok"` | `"unreachable"` | `"timeout"` | `"unconfigured"` | `"http_<N>"`). A `checks.registry != "ok"` result means `resume_listing` will silently return `registry_status="error"` — this is the first thing to check when stage 04 or 05 of the e2e test fails.
+
+**`GET /api/v1/system/events`** — admin-key required. Serves the `stage_events` SQLite table as either a historical JSON query or a live Server-Sent Events stream. All significant storefront transitions (listing published, negotiation started, settlement fulfilled, etc.) are written to this table via `stage_event()` in `stage_log.py`. Query parameters:
+
+| Parameter | Default | Description |
+|---|---|---|
+| `since_id` | `0` | Return only rows with `id > since_id`; use last seen `id` as cursor |
+| `limit` | `100` (max 500) | Max rows for historical queries |
+| `stream` | `false` | If `true`, hold connection open and push rows as SSE (`text/event-stream`) |
+| `stage` | — | Filter by stage column (`discovery`, `negotiation`, `settlement`, `provision`) |
+| `listing_id` | — | Filter by listing_id |
+| `negotiation_id` | — | Filter by negotiation_id |
+
+SSE format: `id: <row_id>\ndata: <json>\n\n`. Reconnect with `Last-Event-ID` header to resume without gaps. The SSE stream polls the SQLite table every 200ms — no pub/sub bus required. This endpoint is the foundation for operator dashboards and alerting; the e2e test suite uses it via `SyncStorefrontClient.wait_for_stage_event()` to avoid polling loops at stages 14 and 16.
 
 **Listings controller** (`controllers/listings_controller.py`):
 ```
@@ -324,7 +340,7 @@ POST /api/v1/listings/{listing_id}/pause   Take listing off market — admin key
 POST /api/v1/listings/{listing_id}/resume  Unpause + publish to registry — admin key required
 ```
 
-`resume_listing` calls `publish_order_to_registry(row)` after clearing the paused flag. This is idempotent if the listing was already published, and is the **required step** to push a listing that was created with `paused=True`.
+`resume_listing` calls `publish_order_to_registry(row)` after clearing the paused flag. This is idempotent if the listing was already published, and is the **required step** to push a listing that was created with `paused=True`. The response includes `registry_status`: `"published"` on success, `"error"` if the registry call failed, `"disabled"` if `enable_registry_discovery=false`. Stage 04 of the e2e test asserts `registry_status == "published"` — a failure here is always a registry connectivity or configuration issue, not a storefront bug. Run `GET /api/v1/system/status` and check `checks.registry` to diagnose.
 
 **Negotiations controller** (`controllers/negotiations_controller.py`):
 ```
@@ -1085,9 +1101,11 @@ make build
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
 
-- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops.
+- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops. **Note:** `load_listing` in `sqlite_client.py` previously omitted the `paused` column from its SELECT — this is fixed and covered by `test_load_listing_returns_paused_flag` in `test_order_pause_state.py`. Convention: any time a new column is added to the `listings` table, both `upsert_listing` (write path) and `load_listing` (read path) must be updated together, and a round-trip unit test added.
 
-- **`NegotiationThreadStore` singleton in integration tests:** `NegotiationThreadTransaction` (used by `continue_sync_negotiation` → the `/negotiations/{id}/advance` endpoint) calls `get_thread_store()` on enter, which requires a one-time initialization with `sqlite_client` and `identity`. In production this happens in `TraderAgent._startup_tasks`. In integration tests the singleton must be initialized in the fixture: `import market_policy.negotiation_thread as _nt; _nt._thread_store = None; _nt.get_thread_store(sqlite_client=db, identity=Identity(agent_url="http://test-seller:8001"))`. See `test_negotiations_api.py` for the pattern.
+- **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag is in-process memory, not reset between `pytest` sessions. If a test run ends with the storefront paused (e.g., stage 06 ran but stage 07 did not), the next run immediately fails at stage 08. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running tests against a live environment that may have been left paused by a previous run, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
+
+ `NegotiationThreadTransaction` (used by `continue_sync_negotiation` → the `/negotiations/{id}/advance` endpoint) calls `get_thread_store()` on enter, which requires a one-time initialization with `sqlite_client` and `identity`. In production this happens in `TraderAgent._startup_tasks`. In integration tests the singleton must be initialized in the fixture: `import market_policy.negotiation_thread as _nt; _nt._thread_store = None; _nt.get_thread_store(sqlite_client=db, identity=Identity(agent_url="http://test-seller:8001"))`. See `test_negotiations_api.py` for the pattern.
 
 ---
 
@@ -1397,8 +1415,8 @@ The primary e2e test suite. 18 sequential tests covering the complete buyer-sell
 | 01 | Create paused listing | `POST /orders/create` `{paused:true}` → `listing_id`, local only |
 | 02 | Listing locally visible | `GET /api/v1/listings/{id}` → status=open, paused=True |
 | 03 | Registry absent | `GET registry/orders?status=open` — listing NOT present |
-| 04 | Resume publishes | `POST /api/v1/listings/{id}/resume` → registry_status=published |
-| 05 | Registry present | `GET registry/orders?status=open` — listing NOW present |
+| 04 | Resume publishes | `POST /api/v1/listings/{id}/resume` → `registry_status=published`; stage asserts this explicitly — `"error"` fails fast with diagnosis hint |
+| 05 | Registry present | `GET registry/listings?status=open` — listing NOW present (single query, no poll; synchronous because publish_order_to_registry is awaited inline in resume_listing) |
 | 06 | Admin pause blocks | `POST /negotiate/new` returns 503 |
 | 07 | Admin resume allows | `GET /api/v1/system/status` → paused=false |
 | 08 | Negotiation starts | `POST /negotiate/new` → negotiation_id (EIP-191 signed by buyer) |
@@ -1407,15 +1425,19 @@ The primary e2e test suite. 18 sequential tests covering the complete buyer-sell
 | 11 | Terminal success | `GET .../negotiations/{neg_id}` → terminal_state=success |
 | 12 | Mock escrow | deterministic `escrow_uid` captured (no real chain call) |
 | 13 | Settlement submitted | `POST /settle/{uid}` → status=provisioning |
-| 14 | Provisioning job | `provisioning_job_id` in settle status; job in provisioning API |
+| 14 | Provisioning job | `wait_for_stage_event("provision","resource_reserved")` then single `GET /settle/{uid}/status` for `provisioning_job_id` |
 | 15 | Provisioning completes | `GET /test/jobs/{id}/wait` → succeeded (long-poll) |
-| 16 | Settlement ready | `GET /settle/{uid}/status` → status=ready |
+| 16 | Settlement ready | `wait_for_stage_event("provision","fulfilled")` then single `GET /settle/{uid}/status` → status=ready |
 | 17 | Tenant credentials | `tenant_credentials` non-empty in settlement response |
 | 18 | Seller listing accepted | `GET /api/v1/listings/{id}` → status=accepted or closed |
 
-**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `seller_listing_id`, `negotiation_id`, `agreed_price`, `escrow_uid`, `provisioning_job_id`, `settlement_status`, `tenant_credentials`. Also `_policies_seeded` and `_policy_evaluated` (bool) for the 00a/00b prerequisites.
+**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `seller_listing_id`, `paused_create_confirmed`, `registry_absent_confirmed`, `resume_confirmed`, `registry_order_confirmed`, `admin_resume_confirmed`, `negotiation_id`, `agreed_price`, `escrow_uid`, `provisioning_job_id`, `settlement_status`, `tenant_credentials`. Also `_policies_seeded` and `_policy_evaluated` (bool) for the 00a/00b prerequisites. The `paused_create_confirmed → registry_absent_confirmed → resume_confirmed → registry_order_confirmed → admin_resume_confirmed` chain forms an ordered dependency spine: each field gates the next stage, so the first failure is always the actionable one and no subsequent stage runs with an unresolved precondition.
 
-**`/negotiate/new` signing:** `SyncStorefrontClient` has no `negotiate_new` method. The e2e test calls it via `storefront_client._client.post("/negotiate/new", ...)` with a manually constructed EIP-191 signature using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`.
+**`/negotiate/new` signing:** `SyncStorefrontClient` has no `negotiate_new` method. The e2e test calls it via `storefront_client._client.post("/negotiate/new", ...)` with a manually constructed EIP-191 signature using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`. The body must include `listing_id` (not `seller_listing_id`) and `duration_seconds`.
+
+**`ensure_storefront_resumed` teardown:** An `autouse=True` module-scoped fixture in `conftest.py` that unconditionally calls `admin_resume()` if `get_system_status().paused` is True after the module finishes. This prevents stage 06 (`admin_pause`) from leaving the storefront in a paused state across test runs when stage 07 fails or is skipped. Any test that calls `admin_pause` must rely on this teardown — never assume stage 07 will run.
+
+**`wait_for_stage_event` helper:** In `conftest.py`. Wraps `SyncStorefrontClient.wait_for_stage_event()` with pytest-friendly timeout error. Used at stages 14 and 16 to await async work (provisioning job queued, provisioning fulfilled) without polling loops. The underlying client method polls `GET /api/v1/system/events` with a cursor and 500ms interval.
 
 **Provisioning gate pattern:** Before submitting settlement (stage 13), add a `pause_before_result=True` mock rule via `ProvisioningTestClient.add_mock_rule`. Stage 15 calls `resume_rule` then `wait_for_job` (long-poll, no sleep). Note: the current test skips the gate setup — it's a known gap to wire in stage 12/15 properly.
 
@@ -1683,11 +1705,11 @@ cd registry-service && make reinit && make test-integration
 
 | Package | Wheel | Async client | Sync client | Consumers |
 |---|---|---|---|---|
-| `storefront-client/` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
+| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `StorefrontClient` | `SyncStorefrontClient` | `storefront`, `integration-tests` |
 | `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
-`arkhai-storefront-client` is a separate lightweight package (not bundled with `storefront`) to avoid pulling heavyweight dependencies (`pufferlib`, `torch`, native RL wheels) into consumers that only need the HTTP client and EIP-191 signing.
+`arkhai-storefront-client` is currently at **version 0.3.0**. The bump from 0.2.0 added: `ListingPauseResponse.registry_status` field; `StageEvent` and `StageEventListResponse` models; `get_events()` and `wait_for_stage_event()` methods on both `StorefrontClient` and `SyncStorefrontClient`.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 

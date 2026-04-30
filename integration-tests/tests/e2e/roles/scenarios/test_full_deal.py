@@ -204,6 +204,7 @@ class TestStage03_RegistryDoesNotSeeOrder:
             f"Order {deal_state.seller_listing_id} found in registry before resume. "
             f"The paused=True path did not suppress the publish."
         )
+        deal_state.registry_absent_confirmed = True
         log.info("[03] Confirmed order %s absent from registry (as expected)",
                  deal_state.seller_listing_id)
 
@@ -217,10 +218,15 @@ class TestStage04_ResumePublishesToRegistry:
         self, storefront_admin_client, deal_state: DealState
     ):
         """POST /api/v1/listings/{listing_id}/resume clears paused flag and publishes."""
-        require_state(deal_state, "seller_listing_id", "paused_create_confirmed")
+        require_state(deal_state, "seller_listing_id", "paused_create_confirmed", "registry_absent_confirmed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
         assert result.paused is False, f"Expected paused=False after resume, got: {result}"
+        assert result.registry_status == "published", (
+            f"Registry publish failed during resume. registry_status={result.registry_status!r}.\n"
+            f"Check that registry.url in config.toml is reachable from the storefront container.\n"
+            f"Current response: {result}"
+        )
 
         # Confirm locally
         order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
@@ -228,7 +234,7 @@ class TestStage04_ResumePublishesToRegistry:
 
         deal_state.resume_confirmed = True
         log.info("[04] Order %s resumed; registry_status=%s",
-                 deal_state.seller_listing_id, getattr(result, "registry_status", "?"))
+                 deal_state.seller_listing_id, result.registry_status)
 
 
 # ---------------------------------------------------------------------------
@@ -239,20 +245,20 @@ class TestStage05_RegistrySeesOrder:
     def test_05_registry_now_contains_order(
         self, registry_client, deal_state: DealState
     ):
-        """After resume, the order is visible in the registry."""
+        """After resume, the order is immediately visible in the registry.
+
+        No polling: resume_listing calls publish_order_to_registry synchronously
+        and stage 04 already asserted registry_status=published.  By the time
+        we reach this test the listing is provably in the registry DB.
+        """
         require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
-        deadline = time.monotonic() + 15
-        found = False
-        while time.monotonic() < deadline:
-            result = registry_client.list_listings(status="open", limit=200)
-            if deal_state.seller_listing_id in {o.id for o in result.listings}:
-                found = True
-                break
-            time.sleep(1)
-
-        assert found, (
-            f"Order {deal_state.seller_listing_id} not visible in registry 15s after resume."
+        result = registry_client.list_listings(status="open", limit=200)
+        ids = {o.id for o in result.listings}
+        assert deal_state.seller_listing_id in ids, (
+            f"Order {deal_state.seller_listing_id} not visible in registry immediately after resume.\n"
+            f"registry_status was 'published' but listing is absent — possible registry indexing delay.\n"
+            f"Registry returned {len(ids)} open listings."
         )
         deal_state.registry_order_confirmed = True
         log.info("[05] Order %s confirmed in registry", deal_state.seller_listing_id)
@@ -267,7 +273,7 @@ class TestStage06_AdminPauseBlocks:
         self, storefront_admin_client, storefront_client, deal_state: DealState
     ):
         """POST /admin/pause → /negotiate/new returns 503."""
-        require_state(deal_state, "seller_listing_id")
+        require_state(deal_state, "seller_listing_id", "registry_order_confirmed")
 
         storefront_admin_client.admin_pause()
 
@@ -451,25 +457,32 @@ class TestStage13_SettlementSubmitted:
 
 class TestStage14_ProvisioningJobQueued:
     def test_14_provisioning_job_id_surfaces(
-        self, storefront_client, provisioning_client, buyer_config, deal_state: DealState
+        self, storefront_admin_client, storefront_client, provisioning_client, buyer_config, deal_state: DealState
     ):
-        """provisioning_job_id appears in settle status; job exists in provisioning API."""
+        """provisioning_job_id appears in settle status; job exists in provisioning API.
+
+        Uses wait_for_stage_event (stage=provision, event=resource_reserved) rather
+        than polling /settle/{uid}/status so the test is driven by the storefront's
+        own event log — no arbitrary sleep or deadline needed.
+        """
         require_state(deal_state, "escrow_uid", "settlement_submitted")
 
-        deadline = time.monotonic() + 15
-        prov_job_id = None
-        while time.monotonic() < deadline:
-            resp = storefront_client._client.get(
-                f"/settle/{deal_state.escrow_uid}/status",
-                params={"buyer_address": buyer_config["wallet_address"]},
-            )
-            if resp.status_code == 200:
-                prov_job_id = resp.json().get("provisioning_job_id")
-                if prov_job_id:
-                    break
-            time.sleep(1)
+        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        _wait(
+            storefront_admin_client,
+            "provision", "resource_reserved",
+            listing_id=deal_state.seller_listing_id,
+            timeout=15.0,
+        )
 
-        assert prov_job_id, "provisioning_job_id never appeared in settle status."
+        # Now poll once — the event confirms the job was queued
+        resp = storefront_client._client.get(
+            f"/settle/{deal_state.escrow_uid}/status",
+            params={"buyer_address": buyer_config["wallet_address"]},
+        )
+        assert resp.status_code == 200, f"Settle status returned {resp.status_code}"
+        prov_job_id = resp.json().get("provisioning_job_id")
+        assert prov_job_id, f"provisioning_job_id absent from settle status: {resp.json()}"
 
         job = provisioning_client.get_job(prov_job_id)
         assert job.status in ("queued", "running", "succeeded"), (
@@ -503,26 +516,31 @@ class TestStage15_ProvisioningCompletes:
 
 class TestStage16_SettlementReady:
     def test_16_settlement_status_ready(
-        self, storefront_client, buyer_config, deal_state: DealState
+        self, storefront_admin_client, storefront_client, buyer_config, deal_state: DealState
     ):
-        """GET /settle/{uid}/status shows status=ready after provisioning succeeds."""
+        """GET /settle/{uid}/status shows status=ready after provisioning succeeds.
+
+        Uses wait_for_stage_event (stage=provision, event=fulfilled) to avoid
+        polling /settle/{uid}/status in a tight loop.
+        """
         require_state(deal_state, "escrow_uid", "provisioning_result_injected")
 
-        deadline = time.monotonic() + 20
-        final_status = None
-        while time.monotonic() < deadline:
-            resp = storefront_client._client.get(
-                f"/settle/{deal_state.escrow_uid}/status",
-                params={"buyer_address": buyer_config["wallet_address"]},
-            )
-            if resp.status_code == 200:
-                final_status = resp.json().get("status")
-                if final_status in ("ready", "failed"):
-                    break
-            time.sleep(1)
+        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        _wait(
+            storefront_admin_client,
+            "provision", "fulfilled",
+            listing_id=deal_state.seller_listing_id,
+            timeout=20.0,
+        )
 
+        resp = storefront_client._client.get(
+            f"/settle/{deal_state.escrow_uid}/status",
+            params={"buyer_address": buyer_config["wallet_address"]},
+        )
+        assert resp.status_code == 200, f"Settle status returned {resp.status_code}"
+        final_status = resp.json().get("status")
         assert final_status == "ready", (
-            f"Settlement never reached 'ready'. Last status: {final_status!r}"
+            f"Settlement not 'ready' after provision fulfilled event. Got: {final_status!r}"
         )
         deal_state.settlement_status = final_status
         log.info("[16] Settlement status=ready")

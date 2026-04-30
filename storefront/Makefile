@@ -56,3 +56,6 @@ deploy-seller-agent:
 
 stop:
 	docker kill market-agent-sell
+
+status:
+	curl -s -X GET http://localhost:8001/api/v1/system/status -H "X-Admin-Key: test-api-key" | jq .

@@ -365,17 +365,67 @@ class ListingPauseResponse:
 
     listing_id: str = ""
     paused: bool = False
+    registry_status: str = ""   # "published" | "disabled" | "error" | "" (absent on pause)
     message: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ListingPauseResponse":
-        known = {"listing_id", "paused", "message"}
+        known = {"listing_id", "paused", "registry_status", "message"}
         return cls(
             listing_id=d.get("listing_id", ""),
             paused=bool(d.get("paused", False)),
+            registry_status=d.get("registry_status", ""),
             message=d.get("message", ""),
             extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage events  (GET /api/v1/system/events)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StageEvent:
+    """A single row from the stage_events table."""
+
+    id: int = 0
+    ts: str = ""
+    stage: str = ""
+    event: str = ""
+    negotiation_id: str | None = None
+    listing_id: str | None = None
+    escrow_uid: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "StageEvent":
+        known = {"id", "ts", "stage", "event", "negotiation_id", "listing_id", "escrow_uid", "data"}
+        return cls(
+            id=int(d.get("id", 0)),
+            ts=d.get("ts", ""),
+            stage=d.get("stage", ""),
+            event=d.get("event", ""),
+            negotiation_id=d.get("negotiation_id"),
+            listing_id=d.get("listing_id"),
+            escrow_uid=d.get("escrow_uid"),
+            data=d.get("data", {}),
+        )
+
+
+@dataclass
+class StageEventListResponse:
+    """Response from GET /api/v1/system/events (non-streaming)."""
+
+    events: list[StageEvent] = field(default_factory=list)
+    count: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "StageEventListResponse":
+        return cls(
+            events=[StageEvent.from_dict(e) for e in d.get("events", [])],
+            count=d.get("count", 0),
         )
 
 

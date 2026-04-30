@@ -189,6 +189,41 @@ class TestResumeListing:
         assert result.paused is False
         assert await db.is_listing_paused(listing_id="resumable") is False
 
+    async def test_resume_returns_registry_status(self, client):
+        """resume_listing response must include registry_status field.
+
+        In this integration test the registry is not reachable, so
+        registry_status will be 'error' or 'disabled'. What matters is
+        that the field is present and is a non-empty string — the client
+        model must parse it from the response body without losing it in
+        the `extra` dict.
+        """
+        c, db = client
+        await _seed_listing(db, "resume-registry-check")
+        result = await c.resume_listing("resume-registry-check")
+        assert hasattr(result, "registry_status"), (
+            "ListingPauseResponse missing registry_status attribute. "
+            "Client model needs to be updated."
+        )
+        assert isinstance(result.registry_status, str), (
+            f"registry_status should be a str, got {type(result.registry_status)}"
+        )
+        # Must not be silently dropped into extra
+        assert "registry_status" not in result.extra, (
+            "registry_status is being captured in 'extra' instead of the typed field. "
+            "Check ListingPauseResponse.from_dict known set."
+        )
+
+    async def test_pause_response_has_no_registry_status(self, client):
+        """pause_listing response does not include registry_status (only resume does)."""
+        c, db = client
+        await _seed_listing(db, "pause-no-registry")
+        result = await c.pause_listing("pause-no-registry")
+        # registry_status should be empty string (default) for pause responses
+        assert result.registry_status == "", (
+            f"pause response should have empty registry_status, got {result.registry_status!r}"
+        )
+
     async def test_resume_unknown_listing_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:

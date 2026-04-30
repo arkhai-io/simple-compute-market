@@ -30,6 +30,7 @@ _ADMIN_SUFFIXES = (
     "/resume",
     "/advance",
     "/force-accept",
+    "/system/events",
 )
 
 
