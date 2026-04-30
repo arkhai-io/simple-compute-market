@@ -18,7 +18,7 @@ import typer
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-def resolve_agent_url(
+def resolve_storefront_url(
     agent_url: str | None,
     default_port: int = 8000,
 ) -> str:

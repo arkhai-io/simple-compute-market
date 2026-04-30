@@ -38,7 +38,7 @@ from storefront_client import (
     SyncStorefrontClient,
 )
 
-from .cli_common import REPO_ROOT, resolve_agent_url, _resolve_db_path
+from .cli_common import REPO_ROOT, resolve_storefront_url, _resolve_db_path
 
 
 def _import_csv(csv_path: str, db: Optional[str]) -> None:
@@ -300,7 +300,7 @@ def register(app: typer.Typer) -> None:
             help="Seconds between scans in --watch mode.",
         ),
         agent_url: Optional[str] = typer.Option(
-            None, "--agent-url", "-a",
+            None, "--storefront-url", "-a",
             help="Seller agent base URL (default: seller.base_url from config.toml).",
         ),
         db: Optional[str] = typer.Option(
@@ -313,7 +313,7 @@ def register(app: typer.Typer) -> None:
         console = Console()
         from .utils.config import CONFIG
 
-        base_url = resolve_agent_url(agent_url, default_port=8001)
+        base_url = resolve_storefront_url(agent_url, default_port=8001)
         private_key = CONFIG.agent_priv_key
         wallet_address = CONFIG.agent_wallet_address or ""
         db_path = _resolve_db_path(db)

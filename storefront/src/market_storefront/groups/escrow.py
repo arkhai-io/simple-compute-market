@@ -24,7 +24,7 @@ from rich.table import Table
 
 from storefront_client import StorefrontClientError, SyncStorefrontClient
 
-from ..cli_common import resolve_agent_url
+from ..cli_common import resolve_storefront_url
 
 
 escrow_app = typer.Typer(no_args_is_help=True)
@@ -89,7 +89,7 @@ def claim_cmd(
              "StringObligation attestation landed on-chain but the agent DB is out of sync.",
     ),
     agent_url: Optional[str] = typer.Option(
-        None, "--agent-url", "-a",
+        None, "--storefront-url", "-a",
         help="Provider agent base URL (default: seller.base_url from config.toml).",
     ),
 ) -> None:
@@ -102,7 +102,7 @@ def claim_cmd(
     """
     console = Console()
     from ..utils.config import CONFIG
-    base_url = resolve_agent_url(agent_url, default_port=8001)
+    base_url = resolve_storefront_url(agent_url, default_port=8001)
     private_key = CONFIG.agent_priv_key
 
     header = Table.grid(padding=(0, 2))
@@ -154,7 +154,7 @@ def refund_cmd(
         help="Override the refund token symbol. Defaults to the token on the order.",
     ),
     agent_url: Optional[str] = typer.Option(
-        None, "--agent-url", "-a",
+        None, "--storefront-url", "-a",
         help="Provider agent base URL (default: seller.base_url from config.toml).",
     ),
 ) -> None:
@@ -166,7 +166,7 @@ def refund_cmd(
     """
     console = Console()
     from ..utils.config import CONFIG
-    base_url = resolve_agent_url(agent_url, default_port=8001)
+    base_url = resolve_storefront_url(agent_url, default_port=8001)
     private_key = CONFIG.agent_priv_key
 
     header = Table.grid(padding=(0, 2))
