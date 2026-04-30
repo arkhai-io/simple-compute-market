@@ -12,7 +12,7 @@ When ``_GLOBALLY_PAUSED`` is ``True``:
 * ``POST /negotiate/new`` returns 503 with
   ``{"error": "paused", "hint": "use admin API to advance"}``.
 * ``POST /negotiate/{neg_id}`` returns the same 503.
-* Per-order ``paused`` flag operates independently — an order can be
+* Per-listing ``paused`` flag operates independently — a listing can be
   paused even when the storefront is globally running.
 
 In-flight negotiations that were already mid-round when pause was set
@@ -67,15 +67,17 @@ class AdminController:
         """``GET /admin/status`` — live operational snapshot.
 
         Returns:
-            paused          — global pause flag
+            paused              — global pause flag
             active_negotiations — count of non-terminal negotiation threads
-            open_orders     — count of orders with status='open' and paused=0
-            paused_orders   — count of orders with paused=1
+            open_listings       — count of listings with status='open' and paused=0
+            paused_listings     — count of listings with paused=1
         """
         counts = await self._sqlite_client.get_admin_status_counts()
         return JSONResponse({
             "paused": self._get_paused(),
-            **counts,
+            "active_negotiations": counts.get("active_negotiations", 0),
+            "open_listings": counts.get("open_orders", 0),
+            "paused_listings": counts.get("paused_orders", 0),
         })
 
     # ------------------------------------------------------------------

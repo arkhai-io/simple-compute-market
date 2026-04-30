@@ -102,7 +102,7 @@ class TestAlertViaClient:
 
 
 # ---------------------------------------------------------------------------
-# /orders/create
+# /listings/create
 # ---------------------------------------------------------------------------
 
 
@@ -113,7 +113,7 @@ class TestCreateOrderEndpoint:
             "demand": _TOKEN_DEMAND,
             "duration_hours": 2.0,
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
         data = resp.json()
         # With event queue enabled the response has status=queued or status=created
@@ -126,17 +126,17 @@ class TestCreateOrderEndpoint:
             "demand": _COMPUTE_OFFER,
             "duration_hours": 1.0,
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
 
     async def test_missing_offer_returns_422_or_400(self, agent_app_client):
         body = {"demand": _TOKEN_DEMAND}
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code in (400, 422)
 
     async def test_missing_demand_returns_422_or_400(self, agent_app_client):
         body = {"offer": _COMPUTE_OFFER}
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code in (400, 422)
 
     async def test_two_compute_resources_returns_400(self, agent_app_client):
@@ -144,7 +144,7 @@ class TestCreateOrderEndpoint:
             "offer": _COMPUTE_OFFER,
             "demand": _COMPUTE_OFFER,
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code in (400, 422, 500)
 
     async def test_unknown_token_returns_400(self, agent_app_client):
@@ -152,7 +152,7 @@ class TestCreateOrderEndpoint:
             "offer": _COMPUTE_OFFER,
             "demand": {"token": "NONEXISTENT_TOKEN_XYZ", "amount": 10.0},
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code in (400, 422)
 
     async def test_response_contains_order_request(self, agent_app_client):
@@ -160,10 +160,10 @@ class TestCreateOrderEndpoint:
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
         data = resp.json()
-        assert "order_request" in data
+        assert "listing_request" in data
 
 
 class TestCreateOrderViaClient:
@@ -174,7 +174,7 @@ class TestCreateOrderViaClient:
             "demand": _TOKEN_DEMAND,
             "duration_hours": 1.0,
         }
-        resp = await agent_app_client.post("/orders/create", json=body)
+        resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
         data = resp.json()
         assert "event_id" in data
@@ -182,40 +182,40 @@ class TestCreateOrderViaClient:
 
 
 # ---------------------------------------------------------------------------
-# /orders/close
+# /listings/close
 # ---------------------------------------------------------------------------
 
 
 class TestCloseOrderEndpoint:
     async def test_valid_close_returns_200(self, agent_app_client):
-        body = {"order_id": "test-order-abc123"}
-        resp = await agent_app_client.post("/orders/close", json=body)
+        body = {"listing_id": "test-order-abc123"}
+        resp = await agent_app_client.post("/listings/close", json=body)
         assert resp.status_code == 200
         data = resp.json()
         assert "status" in data
         assert "event_id" in data
 
     async def test_missing_order_id_returns_400(self, agent_app_client):
-        resp = await agent_app_client.post("/orders/close", json={})
+        resp = await agent_app_client.post("/listings/close", json={})
         assert resp.status_code in (400, 422)
 
     async def test_empty_order_id_returns_400(self, agent_app_client):
-        resp = await agent_app_client.post("/orders/close", json={"order_id": ""})
+        resp = await agent_app_client.post("/listings/close", json={"listing_id": ""})
         assert resp.status_code in (400, 422)
 
     async def test_response_contains_order_request(self, agent_app_client):
-        body = {"order_id": "test-order-xyz"}
-        resp = await agent_app_client.post("/orders/close", json=body)
+        body = {"listing_id": "test-order-xyz"}
+        resp = await agent_app_client.post("/listings/close", json=body)
         assert resp.status_code == 200
         data = resp.json()
-        assert "order_request" in data
+        assert "listing_request" in data
 
 
 class TestCloseOrderViaClient:
     async def test_client_close_order_body_matches_endpoint(self, agent_app_client):
         """StorefrontClient.close_order serialises to a body the endpoint accepts."""
-        body = {"order_id": "order-abc"}
-        resp = await agent_app_client.post("/orders/close", json=body)
+        body = {"listing_id": "order-abc"}
+        resp = await agent_app_client.post("/listings/close", json=body)
         assert resp.status_code == 200
 
 

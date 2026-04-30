@@ -141,7 +141,7 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/orders/{order_id}/negotiations
+# GET /api/v1/listings/{order_id}/negotiations
 # ---------------------------------------------------------------------------
 
 class TestListNegotiations:
@@ -188,7 +188,7 @@ class TestListNegotiations:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/orders/{order_id}/negotiations/{neg_id}
+# GET /api/v1/listings/{order_id}/negotiations/{neg_id}
 # ---------------------------------------------------------------------------
 
 class TestGetNegotiation:
@@ -198,7 +198,7 @@ class TestGetNegotiation:
         await _seed_thread(db, "neg-detail", "ord-detail")
         detail = await c.get_negotiation("ord-detail", "neg-detail")
         assert detail.negotiation_id == "neg-detail"
-        assert detail.our_order_id == "ord-detail"
+        assert detail.our_listing_id == "ord-detail"
         assert len(detail.messages) == 2
         assert detail.round_count == 2
 
@@ -256,7 +256,7 @@ class TestForceAccept:
         await _seed_thread(db, "neg-fa3", "ord-fa3")
         # Bypass the typed client to test the API's own 400 handling
         resp = await c._client.post(
-            "/api/v1/orders/ord-fa3/negotiations/neg-fa3/force-accept",
+            "/api/v1/listings/ord-fa3/negotiations/neg-fa3/force-accept",
             json={},
             headers={"X-Admin-Key": ADMIN_KEY},
         )

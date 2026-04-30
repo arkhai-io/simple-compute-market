@@ -9,10 +9,10 @@ transitions) live in ``market_storefront.services.negotiation_service``.
 
 Endpoints
 ---------
-``GET  /api/v1/orders/{order_id}/negotiations``
-``GET  /api/v1/orders/{order_id}/negotiations/{neg_id}``
-``POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance``       admin key
-``POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept``  admin key
+``GET  /api/v1/listings/{listing_id}/negotiations``
+``GET  /api/v1/listings/{listing_id}/negotiations/{neg_id}``
+``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance``       admin key
+``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept``  admin key
 """
 
 from __future__ import annotations
@@ -29,6 +29,20 @@ from market_storefront.services.negotiation_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _row_to_wire(row: dict) -> dict:
+    """Translate negotiation DB rows to the wire vocabulary.
+
+    DB-column ``our_order_id`` → JSON key ``our_listing_id``.
+    DB-column ``order_id``     → JSON key ``listing_id``.
+    """
+    out = dict(row)
+    if "our_order_id" in out and "our_listing_id" not in out:
+        out["our_listing_id"] = out.pop("our_order_id")
+    if "order_id" in out and "listing_id" not in out:
+        out["listing_id"] = out.pop("order_id")
+    return out
 
 
 class NegotiationsController:
@@ -56,12 +70,12 @@ class NegotiationsController:
     # ------------------------------------------------------------------
 
     async def list_negotiations(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/orders/{order_id}/negotiations``"""
-        order_id = request.path_params["order_id"]
+        """``GET /api/v1/listings/{listing_id}/negotiations``"""
+        listing_id = request.path_params["listing_id"]
         limit, offset = self._pagination(request)
         try:
             threads = await self._service.list_for_order(
-                order_id=order_id,
+                order_id=listing_id,
                 terminal_state=request.query_params.get("terminal_state") or None,
                 buyer_address=request.query_params.get("buyer_address") or None,
                 limit=limit,
@@ -71,28 +85,28 @@ class NegotiationsController:
             return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
 
         return JSONResponse({
-            "order_id": order_id,
-            "negotiations": threads,
+            "listing_id": listing_id,
+            "negotiations": [_row_to_wire(t) for t in threads],
             "count": len(threads),
             "limit": limit,
             "offset": offset,
         })
 
     async def get_negotiation(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/orders/{order_id}/negotiations/{neg_id}``"""
-        order_id = request.path_params["order_id"]
+        """``GET /api/v1/listings/{listing_id}/negotiations/{neg_id}``"""
+        listing_id = request.path_params["listing_id"]
         neg_id = request.path_params["neg_id"]
         try:
             detail = await self._service.get_detail(
-                order_id=order_id, neg_id=neg_id
+                order_id=listing_id, neg_id=neg_id
             )
         except NegotiationServiceError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
-        return JSONResponse(detail)
+        return JSONResponse(_row_to_wire(detail))
 
     async def advance_negotiation(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance``"""
-        order_id = request.path_params["order_id"]
+        """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance``"""
+        listing_id = request.path_params["listing_id"]
         neg_id = request.path_params["neg_id"]
 
         try:
@@ -113,7 +127,7 @@ class NegotiationsController:
 
         try:
             result = await self._service.advance(
-                order_id=order_id,
+                order_id=listing_id,
                 neg_id=neg_id,
                 action=action,
                 price=price,
@@ -127,11 +141,11 @@ class NegotiationsController:
                 {"error": "advance failed", "detail": str(exc)}, status_code=500
             )
 
-        return JSONResponse(result)
+        return JSONResponse(_row_to_wire(result))
 
     async def force_accept_negotiation(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept``"""
-        order_id = request.path_params["order_id"]
+        """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept``"""
+        listing_id = request.path_params["listing_id"]
         neg_id = request.path_params["neg_id"]
 
         try:
@@ -148,7 +162,7 @@ class NegotiationsController:
 
         try:
             result = await self._service.force_accept(
-                order_id=order_id, neg_id=neg_id, price=price
+                order_id=listing_id, neg_id=neg_id, price=price
             )
         except NegotiationServiceError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
@@ -160,7 +174,7 @@ class NegotiationsController:
                 {"error": "force-accept failed", "detail": str(exc)}, status_code=500
             )
 
-        return JSONResponse(result)
+        return JSONResponse(_row_to_wire(result))
 
     # ------------------------------------------------------------------
     # Route factory
@@ -169,22 +183,22 @@ class NegotiationsController:
     def routes(self) -> list[Route]:
         return [
             Route(
-                "/api/v1/orders/{order_id}/negotiations",
+                "/api/v1/listings/{listing_id}/negotiations",
                 self.list_negotiations,
                 methods=["GET"],
             ),
             Route(
-                "/api/v1/orders/{order_id}/negotiations/{neg_id}",
+                "/api/v1/listings/{listing_id}/negotiations/{neg_id}",
                 self.get_negotiation,
                 methods=["GET"],
             ),
             Route(
-                "/api/v1/orders/{order_id}/negotiations/{neg_id}/advance",
+                "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
                 self.advance_negotiation,
                 methods=["POST"],
             ),
             Route(
-                "/api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept",
+                "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
                 self.force_accept_negotiation,
                 methods=["POST"],
             ),

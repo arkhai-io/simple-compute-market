@@ -32,20 +32,20 @@ escrow_app = typer.Typer(no_args_is_help=True)
 
 def _submit_claim(
     agent_url: str,
-    order_id: str,
+    listing_id: str,
     fulfillment_uid: Optional[str],
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/claim; returns the storefront's response as a dict."""
+    """POST /listings/claim; returns the storefront's response as a dict."""
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
-            resp = client.claim_order(order_id=order_id, fulfillment_uid=fulfillment_uid)
+            resp = client.claim_listing(listing_id=listing_id, fulfillment_uid=fulfillment_uid)
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
     return {
         "status": resp.status,
-        "order_id": resp.order_id,
+        "listing_id": resp.listing_id,
         "fulfillment_uid": resp.fulfillment_uid,
         "claim_tx": resp.claim_tx,
         **resp.extra,
@@ -54,17 +54,17 @@ def _submit_claim(
 
 def _submit_refund(
     agent_url: str,
-    order_id: str,
+    listing_id: str,
     buyer_address: str,
     amount: Optional[str],
     token: Optional[str],
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/refund; returns the storefront's response as a dict."""
+    """POST /listings/refund; returns the storefront's response as a dict."""
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
-            resp = client.refund_order(
-                order_id=order_id,
+            resp = client.refund_listing(
+                listing_id=listing_id,
                 buyer_address=buyer_address,
                 amount=amount,
                 token=token,
@@ -74,7 +74,7 @@ def _submit_refund(
             raise typer.Exit(code=1)
     return {
         "status": resp.status,
-        "order_id": resp.order_id,
+        "listing_id": resp.listing_id,
         "refund_tx": resp.refund_tx,
         **resp.extra,
     }
@@ -82,23 +82,23 @@ def _submit_refund(
 
 @escrow_app.command("claim")
 def claim_cmd(
-    order_id: str = typer.Argument(..., help="Local order ID on the provider agent."),
+    listing_id: str = typer.Argument(..., help="Local listing ID on the provider storefront."),
     fulfillment_uid: Optional[str] = typer.Option(
         None, "--fulfillment-uid",
         help="Override the fulfillment_uid from local state. Use this if the seller's "
-             "StringObligation attestation landed on-chain but the agent DB is out of sync.",
+             "StringObligation attestation landed on-chain but the storefront DB is out of sync.",
     ),
     agent_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
-        help="Provider agent base URL (default: seller.base_url from config.toml).",
+        help="Provider storefront base URL (default: seller.base_url from config.toml).",
     ),
 ) -> None:
     """Collect an escrow on-chain after fulfillment.
 
-    Once the fulfillment attestation is on-chain, this tells the agent
+    Once the fulfillment attestation is on-chain, this tells the storefront
     to run `escrow.collect(escrow_uid, fulfillment_uid)` and close the
-    order locally. Useful when the automatic post-fulfillment collection
-    path failed or was never triggered (agent restart, RPC outage, etc.).
+    listing locally. Useful when the automatic post-fulfillment collection
+    path failed or was never triggered (storefront restart, RPC outage, etc.).
     """
     console = Console()
     from ..utils.config import CONFIG
@@ -108,14 +108,14 @@ def claim_cmd(
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
-    header.add_row("Agent", base_url)
-    header.add_row("Order", order_id)
+    header.add_row("Storefront", base_url)
+    header.add_row("Listing", listing_id)
     if fulfillment_uid:
         header.add_row("Fulfillment UID override", fulfillment_uid)
     console.print(Panel(header, title="market-storefront escrow claim", border_style="cyan"))
 
     try:
-        resp = _submit_claim(base_url, order_id, fulfillment_uid, private_key)
+        resp = _submit_claim(base_url, listing_id, fulfillment_uid, private_key)
     except typer.Exit:
         raise
 
@@ -130,7 +130,7 @@ def claim_cmd(
     result = Table.grid(padding=(0, 2))
     result.add_column(style="bold")
     result.add_column()
-    result.add_row("Status", "claimed (order closed)")
+    result.add_row("Status", "claimed (listing closed)")
     result.add_row("Escrow UID", str(resp.get("escrow_uid", "-")))
     result.add_row("Fulfillment UID", str(resp.get("fulfillment_uid", "-")))
     result.add_row("Collect result", str(resp.get("collect_result", "-")))
@@ -139,23 +139,23 @@ def claim_cmd(
 
 @escrow_app.command("refund")
 def refund_cmd(
-    order_id: str = typer.Argument(..., help="Local order ID on the provider agent."),
+    listing_id: str = typer.Argument(..., help="Local listing ID on the provider storefront."),
     buyer_address: str = typer.Option(
         ..., "--buyer", "-b",
         help="0x-prefixed wallet address to receive the refund.",
     ),
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
-        help="Refund amount in human token units. Defaults to the order's "
+        help="Refund amount in human token units. Defaults to the listing's "
              "demanded payment (demand.amount * duration_hours).",
     ),
     token: Optional[str] = typer.Option(
         None, "--token",
-        help="Override the refund token symbol. Defaults to the token on the order.",
+        help="Override the refund token symbol. Defaults to the token on the listing.",
     ),
     agent_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
-        help="Provider agent base URL (default: seller.base_url from config.toml).",
+        help="Provider storefront base URL (default: seller.base_url from config.toml).",
     ),
 ) -> None:
     """Refund a deal via direct ERC-20 transfer from the provider wallet.
@@ -172,18 +172,18 @@ def refund_cmd(
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
-    header.add_row("Agent", base_url)
-    header.add_row("Order", order_id)
+    header.add_row("Storefront", base_url)
+    header.add_row("Listing", listing_id)
     header.add_row("Buyer", buyer_address)
     if amount:
-        header.add_row("Amount", f"{amount} {token or '(order default)'}")
+        header.add_row("Amount", f"{amount} {token or '(listing default)'}")
     else:
-        header.add_row("Amount", "[dim]default from order[/dim]")
+        header.add_row("Amount", "[dim]default from listing[/dim]")
     console.print(Panel(header, title="market-storefront escrow refund", border_style="yellow"))
 
     try:
         resp = _submit_refund(
-            base_url, order_id, buyer_address, amount, token, private_key,
+            base_url, listing_id, buyer_address, amount, token, private_key,
         )
     except typer.Exit:
         raise

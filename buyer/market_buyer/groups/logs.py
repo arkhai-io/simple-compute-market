@@ -87,14 +87,14 @@ def runs_list(
 def _negotiation_key(ev: dict) -> str | None:
     """The grouping key for negotiation-scoped events.
 
-    Always ``seller_order_id`` when present — it's sticky from the
+    Always ``listing_id`` when present — it's sticky from the
     negotiation_started event through completion, so events stay in
     one group even when negotiation_id is added partway through.
     Returns ``None`` for run-level events (discover, escrow_*,
     run_started, run_ended, settlement_*, etc.).
     """
-    if "seller_order_id" in ev:
-        return ev["seller_order_id"]
+    if "listing_id" in ev:
+        return ev["listing_id"]
     if "negotiation_id" in ev:
         return ev["negotiation_id"]
     return None
@@ -105,7 +105,7 @@ def _print_event_line(ev: dict, *, indent: int = 0) -> None:
     name = ev.get("event", "?")
     body = {
         k: v for k, v in ev.items()
-        if k not in ("ts", "run_id", "event", "seller_order_id", "negotiation_id")
+        if k not in ("ts", "run_id", "event", "listing_id", "negotiation_id")
     }
     prefix = "  " * indent
     if body:
@@ -139,16 +139,16 @@ def _print_run_events(run_id_prefix: str, raw: bool) -> None:
     header.add_row("Events", str(len(events)))
     console.print(Panel(header, title="market logs show", border_style="cyan"))
 
-    # First pass: resolve seller_order_id → negotiation_id for the
+    # First pass: resolve listing_id → negotiation_id for the
     # heading (the id only shows up after round 0; we want it on the
     # group banner even when the first event in the group doesn't
     # have it yet).
-    soid_to_neg_id: dict[str, str] = {}
+    lid_to_neg_id: dict[str, str] = {}
     for ev in events:
-        soid = ev.get("seller_order_id")
+        lid = ev.get("listing_id")
         nid = ev.get("negotiation_id")
-        if soid and nid and soid not in soid_to_neg_id:
-            soid_to_neg_id[soid] = nid
+        if lid and nid and lid not in lid_to_neg_id:
+            lid_to_neg_id[lid] = nid
 
     # Group consecutive negotiation-scoped events under a single
     # heading per negotiation. Run-level events (no key) print flat.
@@ -161,11 +161,11 @@ def _print_run_events(run_id_prefix: str, raw: bool) -> None:
         else:
             if key != current_key:
                 current_key = key
-                soid = ev.get("seller_order_id") or "?"
-                nid = soid_to_neg_id.get(soid)
+                lid = ev.get("listing_id") or "?"
+                nid = lid_to_neg_id.get(lid)
                 heading = (
-                    f"{nid}  (seller_order={soid})" if nid
-                    else f"seller_order={soid}"
+                    f"{nid}  (listing={lid})" if nid
+                    else f"listing={lid}"
                 )
                 console.print(f"[cyan]┌── negotiation: {heading}[/cyan]")
             _print_event_line(ev, indent=1)

@@ -164,7 +164,7 @@ def register(app: typer.Typer) -> None:
                 seller_url=deal.seller_url,
                 seller_wallet_address=seller_wallet,
                 negotiation_id=deal.negotiation_id,
-                seller_order_id=deal.seller_order_id,
+                listing_id=deal.listing_id,
                 agreed_price=deal.agreed_price,
                 duration_hours=effective_duration,
             )

@@ -29,16 +29,16 @@ from market_storefront.middleware.admin_auth import AdminAuthMiddleware, _requir
     ("/admin/status", True),
     ("/admin/anything", True),
     # Protected suffixes (per-resource admin actions)
-    ("/api/v1/orders/abc/pause", True),
-    ("/api/v1/orders/abc/resume", True),
-    ("/api/v1/orders/abc/negotiations/neg1/advance", True),
-    ("/api/v1/orders/abc/negotiations/neg1/force-accept", True),
+    ("/api/v1/listings/abc/pause", True),
+    ("/api/v1/listings/abc/resume", True),
+    ("/api/v1/listings/abc/negotiations/neg1/advance", True),
+    ("/api/v1/listings/abc/negotiations/neg1/force-accept", True),
     # NOT protected
     ("/health", False),
-    ("/api/v1/orders", False),
-    ("/api/v1/orders/abc", False),
-    ("/api/v1/orders/abc/negotiations", False),
-    ("/api/v1/orders/abc/negotiations/neg1", False),
+    ("/api/v1/listings", False),
+    ("/api/v1/listings/abc", False),
+    ("/api/v1/listings/abc/negotiations", False),
+    ("/api/v1/listings/abc/negotiations/neg1", False),
     ("/negotiate/new", False),
     ("/negotiate/neg1", False),
     ("/settle/uid123", False),
@@ -63,9 +63,9 @@ def _make_app(key: str | None) -> Starlette:
     app = Starlette(routes=[
         Route("/health", _echo, methods=["GET"]),
         Route("/admin/pause", _echo, methods=["POST"]),
-        Route("/api/v1/orders/abc/pause", _echo, methods=["POST"]),
-        Route("/api/v1/orders/abc/negotiations/n1/advance", _echo, methods=["POST"]),
-        Route("/api/v1/orders/abc/negotiations/n1/force-accept", _echo, methods=["POST"]),
+        Route("/api/v1/listings/abc/pause", _echo, methods=["POST"]),
+        Route("/api/v1/listings/abc/negotiations/n1/advance", _echo, methods=["POST"]),
+        Route("/api/v1/listings/abc/negotiations/n1/force-accept", _echo, methods=["POST"]),
     ])
     app.add_middleware(AdminAuthMiddleware, admin_api_key=key)
     return app
@@ -114,25 +114,25 @@ class TestAdminAuthMiddlewareWithKey:
         assert r.json()["ok"] is True
 
     async def test_order_pause_blocked_without_key(self, client_with_key):
-        r = await client_with_key.post("/api/v1/orders/abc/pause")
+        r = await client_with_key.post("/api/v1/listings/abc/pause")
         assert r.status_code == 403
 
     async def test_order_pause_allowed_correct_key(self, client_with_key):
         r = await client_with_key.post(
-            "/api/v1/orders/abc/pause",
+            "/api/v1/listings/abc/pause",
             headers={"X-Admin-Key": CORRECT_KEY},
         )
         assert r.status_code == 200
 
     async def test_advance_blocked_without_key(self, client_with_key):
         r = await client_with_key.post(
-            "/api/v1/orders/abc/negotiations/n1/advance"
+            "/api/v1/listings/abc/negotiations/n1/advance"
         )
         assert r.status_code == 403
 
     async def test_force_accept_blocked_without_key(self, client_with_key):
         r = await client_with_key.post(
-            "/api/v1/orders/abc/negotiations/n1/force-accept"
+            "/api/v1/listings/abc/negotiations/n1/force-accept"
         )
         assert r.status_code == 403
 

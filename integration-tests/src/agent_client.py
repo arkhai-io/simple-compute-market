@@ -56,9 +56,9 @@ class AgentClient:
         return self._client.get_registration()
 
     def create_order(self, order: Any):
-        """POST /orders/create — accepts an AgentOrderCreateRequest object."""
+        """POST /listings/create — accepts an AgentOrderCreateRequest object."""
         body = order.to_dict() if hasattr(order, "to_dict") else dict(order)
-        return self._client.create_order(
+        return self._client.create_listing(
             agent_wallet_address=self._wallet_address,
             offer=body.get("offer", {}),
             demand=body.get("demand", {}),
@@ -66,8 +66,8 @@ class AgentClient:
         )
 
     def close_order(self, order_id: str):
-        """POST /orders/close"""
-        return self._client.close_order(order_id)
+        """POST /listings/close"""
+        return self._client.close_listing(order_id)
 
     def send_resource_alert(self, alert: Any):
         """POST /alerts/resource"""

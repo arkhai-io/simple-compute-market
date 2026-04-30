@@ -18,7 +18,7 @@ Usage (async)::
     client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
     async with client:
         reg = await client.get_registration()
-        resp = await client.create_order(
+        resp = await client.create_listing(
             agent_wallet_address="0xSellerWallet",
             offer={...},
             demand={...},
@@ -43,16 +43,16 @@ import httpx
 
 from storefront_client.models import (
     DiscoverMatch,
-    StorefrontOrderClaimResponse,
-    StorefrontOrderCloseResponse,
-    StorefrontOrderCreateResponse,
-    StorefrontOrderDiscoverResponse,
-    StorefrontOrderRefundResponse,
+    StorefrontListingClaimResponse,
+    StorefrontListingCloseResponse,
+    StorefrontListingCreateResponse,
+    StorefrontListingDiscoverResponse,
+    StorefrontListingRefundResponse,
     ERC8004RegistrationFile,
     HealthResponse,
-    OrderListResponse,
-    OrderSummary,
-    OrderPauseResponse,
+    ListingListResponse,
+    ListingSummary,
+    ListingPauseResponse,
     NegotiationListResponse,
     NegotiationDetail,
     NegotiationActionResponse,
@@ -206,48 +206,48 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(await self._get("/api/v1/system/status"))
 
     # ------------------------------------------------------------------
-    # Orders API (GET endpoints unauthenticated; write endpoints admin-key)
+    # Listings API (GET endpoints unauthenticated; write endpoints admin-key)
     # ------------------------------------------------------------------
 
-    async def list_orders(
+    async def list_listings(
         self,
         *,
         status: str | None = None,
         paused: bool | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> OrderListResponse:
-        """GET /api/v1/orders"""
+    ) -> ListingListResponse:
+        """GET /api/v1/listings"""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
         if paused is not None:
             params["paused"] = "true" if paused else "false"
-        return OrderListResponse.from_dict(
-            await self._get("/api/v1/orders", params=params)
+        return ListingListResponse.from_dict(
+            await self._get("/api/v1/listings", params=params)
         )
 
-    async def get_order(self, order_id: str) -> OrderSummary:
-        """GET /api/v1/orders/{order_id}"""
-        return OrderSummary.from_dict(
-            await self._get(f"/api/v1/orders/{order_id}")
+    async def get_listing(self, listing_id: str) -> ListingSummary:
+        """GET /api/v1/listings/{listing_id}"""
+        return ListingSummary.from_dict(
+            await self._get(f"/api/v1/listings/{listing_id}")
         )
 
-    async def pause_order(self, order_id: str) -> OrderPauseResponse:
-        """POST /api/v1/orders/{order_id}/pause  (admin key required)"""
-        return OrderPauseResponse.from_dict(
+    async def pause_listing(self, listing_id: str) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/pause  (admin key required)"""
+        return ListingPauseResponse.from_dict(
             await self._post(
-                f"/api/v1/orders/{order_id}/pause",
+                f"/api/v1/listings/{listing_id}/pause",
                 {},
                 extra_headers=self._admin_headers(),
             )
         )
 
-    async def resume_order(self, order_id: str) -> OrderPauseResponse:
-        """POST /api/v1/orders/{order_id}/resume  (admin key required)"""
-        return OrderPauseResponse.from_dict(
+    async def resume_listing(self, listing_id: str) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/resume  (admin key required)"""
+        return ListingPauseResponse.from_dict(
             await self._post(
-                f"/api/v1/orders/{order_id}/resume",
+                f"/api/v1/listings/{listing_id}/resume",
                 {},
                 extra_headers=self._admin_headers(),
             )
@@ -259,39 +259,39 @@ class StorefrontClient(_StorefrontClientBase):
 
     async def list_negotiations(
         self,
-        order_id: str,
+        listing_id: str,
         *,
         terminal_state: str | None = None,
         buyer_address: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> "NegotiationListResponse":
-        """GET /api/v1/orders/{order_id}/negotiations"""
+        """GET /api/v1/listings/{listing_id}/negotiations"""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
             params["terminal_state"] = terminal_state
         if buyer_address is not None:
             params["buyer_address"] = buyer_address
         return NegotiationListResponse.from_dict(
-            await self._get(f"/api/v1/orders/{order_id}/negotiations", params=params)
+            await self._get(f"/api/v1/listings/{listing_id}/negotiations", params=params)
         )
 
-    async def get_negotiation(self, order_id: str, neg_id: str) -> "NegotiationDetail":
-        """GET /api/v1/orders/{order_id}/negotiations/{neg_id}"""
+    async def get_negotiation(self, listing_id: str, neg_id: str) -> "NegotiationDetail":
+        """GET /api/v1/listings/{listing_id}/negotiations/{neg_id}"""
         return NegotiationDetail.from_dict(
-            await self._get(f"/api/v1/orders/{order_id}/negotiations/{neg_id}")
+            await self._get(f"/api/v1/listings/{listing_id}/negotiations/{neg_id}")
         )
 
     async def advance_negotiation(
         self,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         *,
         action: str,
         price: int | None = None,
         reason: str | None = None,
     ) -> "NegotiationActionResponse":
-        """POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance  (admin key)"""
+        """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
         body: dict[str, Any] = {"action": action}
         if price is not None:
             body["price"] = price
@@ -299,7 +299,7 @@ class StorefrontClient(_StorefrontClientBase):
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
             await self._post(
-                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/advance",
+                f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
                 body,
                 extra_headers=self._admin_headers(),
             )
@@ -307,15 +307,15 @@ class StorefrontClient(_StorefrontClientBase):
 
     async def force_accept_negotiation(
         self,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         *,
         price: int,
     ) -> "NegotiationActionResponse":
-        """POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept  (admin key)"""
+        """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
             await self._post(
-                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept",
+                f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
                 {"price": price},
                 extra_headers=self._admin_headers(),
             )
@@ -358,73 +358,73 @@ class StorefrontClient(_StorefrontClientBase):
             await self._get("/.well-known/erc-8004-registration.json")
         )
 
-    async def create_order(
+    async def create_listing(
         self,
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
         demand: dict[str, Any],
         duration_hours: float = 1.0,
-    ) -> StorefrontOrderCreateResponse:
-        """POST /orders/create"""
-        headers = self._auth_headers("create_order", agent_wallet_address)
+    ) -> StorefrontListingCreateResponse:
+        """POST /listings/create"""
+        headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-        return StorefrontOrderCreateResponse.from_dict(
-            await self._post("/orders/create", body, extra_headers=headers)
+        return StorefrontListingCreateResponse.from_dict(
+            await self._post("/listings/create", body, extra_headers=headers)
         )
 
-    async def close_order(self, order_id: str) -> StorefrontOrderCloseResponse:
-        """POST /orders/close"""
-        headers = self._auth_headers("close_order", order_id)
-        return StorefrontOrderCloseResponse.from_dict(
-            await self._post("/orders/close", {"order_id": order_id}, extra_headers=headers)
+    async def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
+        """POST /listings/close"""
+        headers = self._auth_headers("close_listing", listing_id)
+        return StorefrontListingCloseResponse.from_dict(
+            await self._post("/listings/close", {"listing_id": listing_id}, extra_headers=headers)
         )
 
-    async def refund_order(
+    async def refund_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         buyer_address: str,
         amount: str | None = None,
         token: str | None = None,
-    ) -> StorefrontOrderRefundResponse:
-        """POST /orders/refund"""
-        headers = self._auth_headers("refund_order", order_id)
-        body: dict[str, Any] = {"order_id": order_id, "buyer_address": buyer_address}
+    ) -> StorefrontListingRefundResponse:
+        """POST /listings/refund"""
+        headers = self._auth_headers("refund_listing", listing_id)
+        body: dict[str, Any] = {"listing_id": listing_id, "buyer_address": buyer_address}
         if amount is not None:
             body["amount"] = amount
         if token is not None:
             body["token"] = token
-        return StorefrontOrderRefundResponse.from_dict(
-            await self._post("/orders/refund", body, extra_headers=headers)
+        return StorefrontListingRefundResponse.from_dict(
+            await self._post("/listings/refund", body, extra_headers=headers)
         )
 
-    async def claim_order(
+    async def claim_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         fulfillment_uid: str | None = None,
-    ) -> StorefrontOrderClaimResponse:
-        """POST /orders/claim"""
-        headers = self._auth_headers("claim_order", order_id)
-        body: dict[str, Any] = {"order_id": order_id}
+    ) -> StorefrontListingClaimResponse:
+        """POST /listings/claim"""
+        headers = self._auth_headers("claim_listing", listing_id)
+        body: dict[str, Any] = {"listing_id": listing_id}
         if fulfillment_uid:
             body["fulfillment_uid"] = fulfillment_uid
-        return StorefrontOrderClaimResponse.from_dict(
-            await self._post("/orders/claim", body, extra_headers=headers)
+        return StorefrontListingClaimResponse.from_dict(
+            await self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    async def discover_orders(
+    async def discover_listings(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         include_active: bool = False,
-    ) -> StorefrontOrderDiscoverResponse:
-        """POST /orders/discover"""
-        headers = self._auth_headers("discover_orders", order_id)
-        body = {"order_id": order_id, "include_active": include_active}
-        return StorefrontOrderDiscoverResponse.from_dict(
-            await self._post("/orders/discover", body, extra_headers=headers)
+    ) -> StorefrontListingDiscoverResponse:
+        """POST /listings/discover"""
+        headers = self._auth_headers("discover_listings", listing_id)
+        body = {"listing_id": listing_id, "include_active": include_active}
+        return StorefrontListingDiscoverResponse.from_dict(
+            await self._post("/listings/discover", body, extra_headers=headers)
         )
 
     async def send_resource_alert(
@@ -522,46 +522,46 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(self._get("/api/v1/system/status"))
 
     # ------------------------------------------------------------------
-    # Orders API
+    # Listings API
     # ------------------------------------------------------------------
 
-    def list_orders(
+    def list_listings(
         self,
         *,
         status: str | None = None,
         paused: bool | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> OrderListResponse:
-        """GET /api/v1/orders"""
+    ) -> ListingListResponse:
+        """GET /api/v1/listings"""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
         if paused is not None:
             params["paused"] = "true" if paused else "false"
-        return OrderListResponse.from_dict(
-            self._get("/api/v1/orders", params=params)
+        return ListingListResponse.from_dict(
+            self._get("/api/v1/listings", params=params)
         )
 
-    def get_order(self, order_id: str) -> OrderSummary:
-        """GET /api/v1/orders/{order_id}"""
-        return OrderSummary.from_dict(self._get(f"/api/v1/orders/{order_id}"))
+    def get_listing(self, listing_id: str) -> ListingSummary:
+        """GET /api/v1/listings/{listing_id}"""
+        return ListingSummary.from_dict(self._get(f"/api/v1/listings/{listing_id}"))
 
-    def pause_order(self, order_id: str) -> OrderPauseResponse:
-        """POST /api/v1/orders/{order_id}/pause  (admin key required)"""
-        return OrderPauseResponse.from_dict(
+    def pause_listing(self, listing_id: str) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/pause  (admin key required)"""
+        return ListingPauseResponse.from_dict(
             self._post(
-                f"/api/v1/orders/{order_id}/pause",
+                f"/api/v1/listings/{listing_id}/pause",
                 {},
                 extra_headers=self._admin_headers(),
             )
         )
 
-    def resume_order(self, order_id: str) -> OrderPauseResponse:
-        """POST /api/v1/orders/{order_id}/resume  (admin key required)"""
-        return OrderPauseResponse.from_dict(
+    def resume_listing(self, listing_id: str) -> ListingPauseResponse:
+        """POST /api/v1/listings/{listing_id}/resume  (admin key required)"""
+        return ListingPauseResponse.from_dict(
             self._post(
-                f"/api/v1/orders/{order_id}/resume",
+                f"/api/v1/listings/{listing_id}/resume",
                 {},
                 extra_headers=self._admin_headers(),
             )
@@ -573,32 +573,32 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
     def list_negotiations(
         self,
-        order_id: str,
+        listing_id: str,
         *,
         terminal_state: str | None = None,
         buyer_address: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> NegotiationListResponse:
-        """GET /api/v1/orders/{order_id}/negotiations"""
+        """GET /api/v1/listings/{listing_id}/negotiations"""
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if terminal_state is not None:
             params["terminal_state"] = terminal_state
         if buyer_address is not None:
             params["buyer_address"] = buyer_address
         return NegotiationListResponse.from_dict(
-            self._get(f"/api/v1/orders/{order_id}/negotiations", params=params)
+            self._get(f"/api/v1/listings/{listing_id}/negotiations", params=params)
         )
 
-    def get_negotiation(self, order_id: str, neg_id: str) -> NegotiationDetail:
-        """GET /api/v1/orders/{order_id}/negotiations/{neg_id}"""
+    def get_negotiation(self, listing_id: str, neg_id: str) -> NegotiationDetail:
+        """GET /api/v1/listings/{listing_id}/negotiations/{neg_id}"""
         return NegotiationDetail.from_dict(
-            self._get(f"/api/v1/orders/{order_id}/negotiations/{neg_id}")
+            self._get(f"/api/v1/listings/{listing_id}/negotiations/{neg_id}")
         )
 
     def advance_negotiation(
         self,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         *,
         action: str,
@@ -613,7 +613,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             body["reason"] = reason
         return NegotiationActionResponse.from_dict(
             self._post(
-                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/advance",
+                f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
                 body,
                 extra_headers=self._admin_headers(),
             )
@@ -621,7 +621,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
     def force_accept_negotiation(
         self,
-        order_id: str,
+        listing_id: str,
         neg_id: str,
         *,
         price: int,
@@ -629,7 +629,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST .../force-accept  (admin key required)"""
         return NegotiationActionResponse.from_dict(
             self._post(
-                f"/api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept",
+                f"/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
                 {"price": price},
                 extra_headers=self._admin_headers(),
             )
@@ -672,73 +672,73 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._get("/.well-known/erc-8004-registration.json")
         )
 
-    def create_order(
+    def create_listing(
         self,
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
         demand: dict[str, Any],
         duration_hours: float = 1.0,
-    ) -> StorefrontOrderCreateResponse:
-        """POST /orders/create"""
-        headers = self._auth_headers("create_order", agent_wallet_address)
+    ) -> StorefrontListingCreateResponse:
+        """POST /listings/create"""
+        headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
-        return StorefrontOrderCreateResponse.from_dict(
-            self._post("/orders/create", body, extra_headers=headers)
+        return StorefrontListingCreateResponse.from_dict(
+            self._post("/listings/create", body, extra_headers=headers)
         )
 
-    def close_order(self, order_id: str) -> StorefrontOrderCloseResponse:
-        """POST /orders/close"""
-        headers = self._auth_headers("close_order", order_id)
-        return StorefrontOrderCloseResponse.from_dict(
-            self._post("/orders/close", {"order_id": order_id}, extra_headers=headers)
+    def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
+        """POST /listings/close"""
+        headers = self._auth_headers("close_listing", listing_id)
+        return StorefrontListingCloseResponse.from_dict(
+            self._post("/listings/close", {"listing_id": listing_id}, extra_headers=headers)
         )
 
-    def refund_order(
+    def refund_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         buyer_address: str,
         amount: str | None = None,
         token: str | None = None,
-    ) -> StorefrontOrderRefundResponse:
-        """POST /orders/refund"""
-        headers = self._auth_headers("refund_order", order_id)
-        body: dict[str, Any] = {"order_id": order_id, "buyer_address": buyer_address}
+    ) -> StorefrontListingRefundResponse:
+        """POST /listings/refund"""
+        headers = self._auth_headers("refund_listing", listing_id)
+        body: dict[str, Any] = {"listing_id": listing_id, "buyer_address": buyer_address}
         if amount is not None:
             body["amount"] = amount
         if token is not None:
             body["token"] = token
-        return StorefrontOrderRefundResponse.from_dict(
-            self._post("/orders/refund", body, extra_headers=headers)
+        return StorefrontListingRefundResponse.from_dict(
+            self._post("/listings/refund", body, extra_headers=headers)
         )
 
-    def claim_order(
+    def claim_listing(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         fulfillment_uid: str | None = None,
-    ) -> StorefrontOrderClaimResponse:
-        """POST /orders/claim"""
-        headers = self._auth_headers("claim_order", order_id)
-        body: dict[str, Any] = {"order_id": order_id}
+    ) -> StorefrontListingClaimResponse:
+        """POST /listings/claim"""
+        headers = self._auth_headers("claim_listing", listing_id)
+        body: dict[str, Any] = {"listing_id": listing_id}
         if fulfillment_uid:
             body["fulfillment_uid"] = fulfillment_uid
-        return StorefrontOrderClaimResponse.from_dict(
-            self._post("/orders/claim", body, extra_headers=headers)
+        return StorefrontListingClaimResponse.from_dict(
+            self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    def discover_orders(
+    def discover_listings(
         self,
         *,
-        order_id: str,
+        listing_id: str,
         include_active: bool = False,
-    ) -> StorefrontOrderDiscoverResponse:
-        """POST /orders/discover"""
-        headers = self._auth_headers("discover_orders", order_id)
-        body = {"order_id": order_id, "include_active": include_active}
-        return StorefrontOrderDiscoverResponse.from_dict(
-            self._post("/orders/discover", body, extra_headers=headers)
+    ) -> StorefrontListingDiscoverResponse:
+        """POST /listings/discover"""
+        headers = self._auth_headers("discover_listings", listing_id)
+        body = {"listing_id": listing_id, "include_active": include_active}
+        return StorefrontListingDiscoverResponse.from_dict(
+            self._post("/listings/discover", body, extra_headers=headers)
         )
 
     def send_resource_alert(

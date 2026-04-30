@@ -32,9 +32,9 @@ def register(app: typer.Typer) -> None:
             ..., "--seller", "-s",
             help="Seller agent base URL (e.g. http://seller:8001).",
         ),
-        seller_order_id: str = typer.Option(
-            ..., "--seller-order",
-            help="The seller's order_id we're negotiating against.",
+        listing_id: str = typer.Option(
+            ..., "--listing-id",
+            help="The seller's listing_id we're negotiating against.",
         ),
         initial_price: int = typer.Option(
             ..., "--initial-price",
@@ -118,7 +118,7 @@ def register(app: typer.Typer) -> None:
         run_log = RunLog.start(
             command="market negotiate",
             seller_url=seller_url,
-            seller_order_id=seller_order_id,
+            listing_id=listing_id,
             buyer_address=addr,
             initial_price=initial_price,
             max_price=max_price,
@@ -134,7 +134,7 @@ def register(app: typer.Typer) -> None:
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
         header.add_row("Seller", seller_url)
-        header.add_row("Seller order", seller_order_id)
+        header.add_row("Listing", listing_id)
         header.add_row("Opening bid", str(initial_price))
         header.add_row("Ceiling", str(max_price))
         header.add_row("Max rounds", str(max_rounds))
@@ -167,7 +167,7 @@ def register(app: typer.Typer) -> None:
                 seller_url=seller_url,
                 buyer_address=addr,
                 buyer_private_key=pk,
-                seller_order_id=seller_order_id,
+                listing_id=listing_id,
                 initial_price=initial_price,
                 max_price=max_price,
                 max_rounds=max_rounds,

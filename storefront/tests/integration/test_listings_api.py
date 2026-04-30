@@ -1,4 +1,4 @@
-"""Integration tests for the Orders API.
+"""Integration tests for the Listings API.
 
 Uses the async ``StorefrontClient`` via ``httpx.ASGITransport`` —
 the same pattern as the provisioning-service integration tests.
@@ -15,7 +15,7 @@ import pytest
 import pytest_asyncio
 from starlette.applications import Starlette
 
-from market_storefront.controllers.orders_controller import OrdersController
+from market_storefront.controllers.listings_controller import ListingsController
 from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -29,12 +29,12 @@ ADMIN_KEY = "test-admin-key"
 
 @pytest_asyncio.fixture
 async def db(tmp_path) -> SQLiteClient:
-    return SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
+    return SQLiteClient(db_path=str(tmp_path / "listings_test.db"))
 
 
-async def _seed_order(db: SQLiteClient, order_id: str, status: str = "open") -> None:
+async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open") -> None:
     await db.upsert_order(
-        order_id=order_id,
+        order_id=listing_id,
         status=status,
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -48,7 +48,7 @@ async def _seed_order(db: SQLiteClient, order_id: str, status: str = "open") -> 
 
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
-    ctrl = OrdersController(sqlite_client=db)
+    ctrl = ListingsController(sqlite_client=db)
     app = Starlette(routes=ctrl.routes())
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
     transport = httpx.ASGITransport(app=app)
@@ -63,7 +63,7 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     """Client without admin key — for testing 403 responses."""
-    ctrl = OrdersController(sqlite_client=db)
+    ctrl = ListingsController(sqlite_client=db)
     app = Starlette(routes=ctrl.routes())
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
     transport = httpx.ASGITransport(app=app)
@@ -72,42 +72,42 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/orders
+# GET /api/v1/listings
 # ---------------------------------------------------------------------------
 
-class TestListOrders:
+class TestListListings:
     async def test_empty_list(self, client):
         c, _ = client
-        result = await c.list_orders()
+        result = await c.list_listings()
         assert result.count == 0
-        assert result.orders == []
+        assert result.listings == []
 
-    async def test_returns_seeded_orders(self, client):
+    async def test_returns_seeded_listings(self, client):
         c, db = client
-        await _seed_order(db, "o1")
-        await _seed_order(db, "o2")
-        result = await c.list_orders()
-        ids = {o.order_id for o in result.orders}
+        await _seed_listing(db, "o1")
+        await _seed_listing(db, "o2")
+        result = await c.list_listings()
+        ids = {o.listing_id for o in result.listings}
         assert {"o1", "o2"} == ids
 
     async def test_status_filter(self, client):
         c, db = client
-        await _seed_order(db, "open1", status="open")
-        await _seed_order(db, "closed1", status="closed")
-        result = await c.list_orders(status="open")
-        ids = {o.order_id for o in result.orders}
+        await _seed_listing(db, "open1", status="open")
+        await _seed_listing(db, "closed1", status="closed")
+        result = await c.list_listings(status="open")
+        ids = {o.listing_id for o in result.listings}
         assert "open1" in ids
         assert "closed1" not in ids
 
     async def test_paused_filter(self, client):
         c, db = client
-        await _seed_order(db, "paused1")
-        await _seed_order(db, "active1")
+        await _seed_listing(db, "paused1")
+        await _seed_listing(db, "active1")
         await db.set_order_paused(order_id="paused1", paused=True)
-        paused_result = await c.list_orders(paused=True)
-        active_result = await c.list_orders(paused=False)
-        paused_ids = {o.order_id for o in paused_result.orders}
-        active_ids = {o.order_id for o in active_result.orders}
+        paused_result = await c.list_listings(paused=True)
+        active_result = await c.list_listings(paused=False)
+        paused_ids = {o.listing_id for o in paused_result.listings}
+        active_ids = {o.listing_id for o in active_result.listings}
         assert "paused1" in paused_ids
         assert "paused1" not in active_ids
         assert "active1" in active_ids
@@ -115,82 +115,82 @@ class TestListOrders:
     async def test_pagination_limit(self, client):
         c, db = client
         for i in range(5):
-            await _seed_order(db, f"ord-{i}")
-        result = await c.list_orders(limit=2)
-        assert len(result.orders) == 2
+            await _seed_listing(db, f"ord-{i}")
+        result = await c.list_listings(limit=2)
+        assert len(result.listings) == 2
         assert result.limit == 2
 
     async def test_paused_field_false_by_default(self, client):
         c, db = client
-        await _seed_order(db, "check-paused")
-        result = await c.list_orders()
-        order = next(o for o in result.orders if o.order_id == "check-paused")
-        assert order.paused is False
+        await _seed_listing(db, "check-paused")
+        result = await c.list_listings()
+        listing = next(o for o in result.listings if o.listing_id == "check-paused")
+        assert listing.paused is False
 
 
 # ---------------------------------------------------------------------------
-# GET /api/v1/orders/{order_id}
+# GET /api/v1/listings/{listing_id}
 # ---------------------------------------------------------------------------
 
-class TestGetOrder:
-    async def test_returns_order(self, client):
+class TestGetListing:
+    async def test_returns_listing(self, client):
         c, db = client
-        await _seed_order(db, "detail-1")
-        order = await c.get_order("detail-1")
-        assert order.order_id == "detail-1"
-        assert order.paused is False
+        await _seed_listing(db, "detail-1")
+        listing = await c.get_listing("detail-1")
+        assert listing.listing_id == "detail-1"
+        assert listing.paused is False
 
-    async def test_404_unknown_order_raises(self, client):
+    async def test_404_unknown_listing_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.get_order("does-not-exist")
+            await c.get_listing("does-not-exist")
         assert "404" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/orders/{order_id}/pause
+# POST /api/v1/listings/{listing_id}/pause
 # ---------------------------------------------------------------------------
 
-class TestPauseOrder:
+class TestPauseListing:
     async def test_requires_admin_key(self, client_no_key):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.pause_order("any-order")
+            await client_no_key.pause_listing("any-listing")
         assert "403" in str(exc_info.value)
 
     async def test_pause_sets_flag(self, client):
         c, db = client
-        await _seed_order(db, "pausable")
-        result = await c.pause_order("pausable")
+        await _seed_listing(db, "pausable")
+        result = await c.pause_listing("pausable")
         assert result.paused is True
         assert await db.is_order_paused(order_id="pausable") is True
 
-    async def test_pause_unknown_order_raises(self, client):
+    async def test_pause_unknown_listing_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.pause_order("ghost")
+            await c.pause_listing("ghost")
         assert "404" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
-# POST /api/v1/orders/{order_id}/resume
+# POST /api/v1/listings/{listing_id}/resume
 # ---------------------------------------------------------------------------
 
-class TestResumeOrder:
+class TestResumeListing:
     async def test_requires_admin_key(self, client_no_key):
         with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.resume_order("any-order")
+            await client_no_key.resume_listing("any-listing")
         assert "403" in str(exc_info.value)
 
     async def test_resume_clears_flag(self, client):
         c, db = client
-        await _seed_order(db, "resumable")
+        await _seed_listing(db, "resumable")
         await db.set_order_paused(order_id="resumable", paused=True)
-        result = await c.resume_order("resumable")
+        result = await c.resume_listing("resumable")
         assert result.paused is False
         assert await db.is_order_paused(order_id="resumable") is False
 
-    async def test_resume_unknown_order_raises(self, client):
+    async def test_resume_unknown_listing_raises(self, client):
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.resume_order("ghost")
+            await c.resume_listing("ghost")
         assert "404" in str(exc_info.value)

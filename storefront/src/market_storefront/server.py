@@ -3,8 +3,8 @@
 Builds the final Starlette app by composing:
 
 1. The existing ``a2a_app`` routes from ``agent.py`` (negotiate, settle,
-   orders/create, orders/close, alerts, well-known endpoints).
-2. New controller routes (system health, orders API, negotiations API,
+   listings/create, listings/close, alerts, well-known endpoints).
+2. New controller routes (system health, listings API, negotiations API,
    admin controls).
 3. ``AdminAuthMiddleware`` — enforces ``X-Admin-Key`` on admin routes.
 
@@ -31,7 +31,7 @@ from market_storefront.utils.sqlite_client import get_sqlite_client
 from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.controllers.system_controller import SystemController
 from market_storefront.controllers.admin_controller import AdminController
-from market_storefront.controllers.orders_controller import OrdersController
+from market_storefront.controllers.listings_controller import ListingsController
 from market_storefront.controllers.negotiations_controller import NegotiationsController
 
 # ---------------------------------------------------------------------------
@@ -71,15 +71,15 @@ def _build_routes() -> list[Route]:
         get_paused_fn=is_globally_paused,
         set_paused_fn=_set_globally_paused,
     )
-    orders_ctrl = OrdersController(sqlite_client=sqlite_client)
+    listings_ctrl = ListingsController(sqlite_client=sqlite_client)
     negotiations_ctrl = NegotiationsController(sqlite_client=sqlite_client)
 
     routes: list[Route] = []
     routes.extend(system_ctrl.routes())
     routes.extend(admin_ctrl.routes())
-    routes.extend(orders_ctrl.routes())
+    routes.extend(listings_ctrl.routes())
     routes.extend(negotiations_ctrl.routes())
-    # Existing agent routes last (includes /negotiate/*, /settle/*, /orders/create…)
+    # Existing agent routes last (includes /negotiate/*, /settle/*, /listings/create…)
     routes.extend(a2a_app.routes)
     return routes
 

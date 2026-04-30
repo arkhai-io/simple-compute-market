@@ -250,7 +250,7 @@ class AgreedTerms:
     seller_url: str
     seller_wallet_address: str
     negotiation_id: str
-    seller_order_id: str
+    listing_id: str
     agreed_price: int               # raw token units
     duration_hours: int
 
@@ -338,19 +338,19 @@ def run_buy(
 
     # --- 2. Try each match ---------------------------------------------
     # Each negotiation attempt is its own sub-stream of events: emitted
-    # with sticky `seller_order_id` (known up-front) plus
-    # `negotiation_id` (server-assigned, captured from round 0).
-    # Consumers (run-log readers, observers) group on those keys.
+    # with sticky `listing_id` (known up-front) plus `negotiation_id`
+    # (server-assigned, captured from round 0). Consumers (run-log
+    # readers, observers) group on those keys.
     for match in matches[:max_matches_to_try]:
         seller_url = match.get("order_maker") or match.get("seller_url") or ""
-        seller_order_id = match.get("order_id") or match.get("seller_order_id") or ""
-        if not seller_url or not seller_order_id:
-            attempts.append({"match": match, "error": "missing_seller_url_or_order_id"})
+        listing_id = match.get("order_id") or match.get("listing_id") or ""
+        if not seller_url or not listing_id:
+            attempts.append({"match": match, "error": "missing_seller_url_or_listing_id"})
             continue
 
-        # Mutable context: starts with seller_order_id, gets
-        # negotiation_id added once round 0 returns.
-        neg_ctx: dict[str, Any] = {"seller_order_id": seller_order_id}
+        # Mutable context: starts with listing_id, gets negotiation_id
+        # added once round 0 returns.
+        neg_ctx: dict[str, Any] = {"listing_id": listing_id}
 
         def _emit_neg(stage: str, **fields: Any) -> None:
             _event(stage, {**neg_ctx, **fields})
@@ -375,7 +375,7 @@ def run_buy(
                 seller_url=seller_url,
                 buyer_address=config.buyer_address,
                 buyer_private_key=config.buyer_private_key,
-                seller_order_id=seller_order_id,
+                listing_id=listing_id,
                 initial_price=constraints.initial_price,
                 max_price=constraints.max_price,
                 max_rounds=max_negotiation_rounds,
@@ -385,7 +385,7 @@ def run_buy(
             _emit_neg("negotiation_failed", error=f"http_error: {exc}")
             attempts.append({
                 "seller_url": seller_url,
-                "seller_order_id": seller_order_id,
+                "listing_id": listing_id,
                 "error": f"negotiation_http_error: {exc}",
             })
             continue
@@ -403,7 +403,7 @@ def run_buy(
         )
         attempts.append({
             "seller_url": seller_url,
-            "seller_order_id": seller_order_id,
+            "listing_id": listing_id,
             "outcome": outcome.to_dict(),
         })
 
@@ -421,7 +421,7 @@ def run_buy(
             seller_url=seller_url,
             seller_wallet_address=seller_wallet,
             negotiation_id=outcome.negotiation_id or "",
-            seller_order_id=seller_order_id,
+            listing_id=listing_id,
             agreed_price=outcome.agreed_price,
             duration_hours=int(match.get("duration_hours") or 1),
         )

@@ -132,15 +132,15 @@ def _publish_offer(
     wallet_address: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/create and return the response as a dict.
+    """POST /listings/create and return the response as a dict.
 
-    Returns a dict (not the typed StorefrontOrderCreateResponse) for
+    Returns a dict (not the typed StorefrontListingCreateResponse) for
     backward compat with `_publish_round`'s callers, which inspect
-    `resp["order_id"]` and `resp["status"]` directly.
+    ``resp["listing_id"]`` and ``resp["status"]`` directly.
     """
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
-            resp = client.create_order(
+            resp = client.create_listing(
                 agent_wallet_address=wallet_address,
                 offer=offer,
                 demand=demand,
@@ -151,10 +151,10 @@ def _publish_offer(
             raise typer.Exit(code=1)
     return {
         "status": resp.status,
-        "order_id": resp.order_id,
+        "listing_id": resp.listing_id,
         "event_id": resp.event_id,
         "root_agent_response": resp.root_agent_response,
-        "order_request": resp.order_request,
+        "listing_request": resp.listing_request,
         **resp.extra,
     }
 
@@ -176,10 +176,10 @@ def _close_order(
     order_id: str,
     private_key: Optional[str],
 ) -> dict:
-    """POST /orders/close on the storefront; returns the response as a dict."""
+    """POST /listings/close on the storefront; returns the response as a dict."""
     with SyncStorefrontClient(agent_url, private_key=private_key) as client:
         try:
-            resp = client.close_order(order_id)
+            resp = client.close_listing(order_id)
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
@@ -187,7 +187,7 @@ def _close_order(
         "status": resp.status,
         "event_id": resp.event_id,
         "root_agent_response": resp.root_agent_response,
-        "order_request": resp.order_request,
+        "listing_request": resp.listing_request,
         **resp.extra,
     }
 
@@ -246,7 +246,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     summary.add_column("Resource", style="bold")
     summary.add_column("GPU")
     summary.add_column("Region")
-    summary.add_column("Order ID", overflow="fold")
+    summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
     for entry in published:
         res = entry["resource"]
@@ -255,7 +255,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
             res["resource_id"],
             f"{res['gpu_model']} x{res['quantity']}",
             res["region"] or "-",
-            str(resp.get("order_id", "-")),
+            str(resp.get("listing_id", "-")),
             str(resp.get("status", "-")),
         )
     for res, reason in failed:

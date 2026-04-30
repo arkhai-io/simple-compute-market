@@ -136,6 +136,36 @@ def _extract_order_id(outcome: dict | None) -> str | None:
     return None
 
 
+def _wire_in(payload: Any) -> Any:
+    """Translate inbound wire body: ``listing_id`` → ``order_id``.
+
+    The HTTP contract uses ``listing_id``; internal helpers (refund,
+    recovery, DB) still key on ``order_id`` until the DB-column rename
+    in a later slice. This single shim performs the rename at the
+    wire boundary.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    if "listing_id" in payload and "order_id" not in payload:
+        payload = dict(payload)
+        payload["order_id"] = payload["listing_id"]
+    return payload
+
+
+def _wire_out(body: dict) -> dict:
+    """Translate outbound wire body: ``order_id`` → ``listing_id``.
+
+    Mirror of ``_wire_in`` — the internal helpers return dicts keyed
+    by ``order_id``, but the HTTP contract surfaces ``listing_id``.
+    """
+    if not isinstance(body, dict):
+        return body
+    if "order_id" in body and "listing_id" not in body:
+        body = dict(body)
+        body["listing_id"] = body.pop("order_id")
+    return body
+
+
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
     """Convert a domain event payload dictionary to a DomainEvent instance.
     
@@ -887,7 +917,7 @@ async def _run_create_order_flow(request: Request) -> dict:
         return {
             "status": "queued",
             "event_id": event_id,
-            "order_request": order_create_event.model_dump(mode="json"),
+            "listing_request": order_create_event.model_dump(mode="json"),
         }
 
     final_response = await root_agent._process_event_with_pipeline(
@@ -900,11 +930,11 @@ async def _run_create_order_flow(request: Request) -> dict:
     response_payload = {
         "status": "created" if order_id else "no_action",
         "event_id": event_id,
-        "order_request": order_create_event.model_dump(mode="json"),
+        "listing_request": order_create_event.model_dump(mode="json"),
         "root_agent_response": final_response or "",
     }
     if order_id:
-        response_payload["order_id"] = order_id
+        response_payload["listing_id"] = order_id
     return response_payload
 
 async def _run_close_order_flow(request: Request) -> dict:
@@ -913,7 +943,7 @@ async def _run_close_order_flow(request: Request) -> dict:
 
     Expected payload:
     {
-      "order_id": "..."
+      "listing_id": "..."
     }
     """
     try:
@@ -921,9 +951,9 @@ async def _run_close_order_flow(request: Request) -> dict:
     except Exception as e:
         raise ValueError(f"Invalid JSON in request body: {e}") from e
 
-    order_id = close_data.get("order_id")
+    order_id = close_data.get("listing_id")
     if not isinstance(order_id, str) or not order_id.strip():
-        raise ValueError("Request must include non-empty 'order_id'")
+        raise ValueError("Request must include non-empty 'listing_id'")
 
     event_id = f"order_close_{uuid.uuid4()}"
     order_close_event = ListingClosedEvent(
@@ -938,7 +968,7 @@ async def _run_close_order_flow(request: Request) -> dict:
         return {
             "status": "queued",
             "event_id": event_id,
-            "order_request": order_close_event.model_dump(mode="json"),
+            "listing_request": order_close_event.model_dump(mode="json"),
         }
 
     final_response = await root_agent._process_event_with_pipeline(
@@ -948,7 +978,7 @@ async def _run_close_order_flow(request: Request) -> dict:
     return {
         "status": "closed",
         "event_id": event_id,
-        "order_request": order_close_event.model_dump(mode="json"),
+        "listing_request": order_close_event.model_dump(mode="json"),
         "root_agent_response": final_response or "",
     }
 
@@ -956,7 +986,7 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
     """
     Expose an endpoint to create market orders via the root agent.
     """
-    auth_error = _check_agent_request_auth(request, "create_order", CONFIG.agent_wallet_address)
+    auth_error = _check_agent_request_auth(request, "create_listing", CONFIG.agent_wallet_address)
     if auth_error:
         return auth_error
 
@@ -984,14 +1014,14 @@ async def create_market_order_endpoint(request: Request) -> JSONResponse:
 
 async def close_market_order_endpoint(request: Request) -> JSONResponse:
     """
-    Expose an endpoint to close market orders via the root agent.
+    Expose an endpoint to close market listings via the root agent.
     """
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "close_order", order_id)
+    auth_error = _check_agent_request_auth(request, "close_listing", order_id)
     if auth_error:
         return auth_error
 
@@ -1037,7 +1067,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
     Returns (status_code, body_dict).
     """
     try:
-        payload = await request.json()
+        payload = _wire_in(await request.json())
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1118,16 +1148,16 @@ async def refund_market_order_endpoint(request: Request) -> JSONResponse:
     """Expose an endpoint for providers to refund a deal via direct token transfer."""
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "refund_order", order_id)
+    auth_error = _check_agent_request_auth(request, "refund_listing", order_id)
     if auth_error:
         return auth_error
 
     try:
         status_code, body_out = await _run_refund_flow(request)
-        return JSONResponse(body_out, status_code=status_code)
+        return JSONResponse(_wire_out(body_out), status_code=status_code)
     except ValueError as exc:
         logger.error(f"[REFUND] Validation error: {exc}")
         return JSONResponse(
@@ -1160,7 +1190,7 @@ def _require_alkahest_client() -> tuple[int, dict] | None:
 async def _run_claim_flow(request: Request) -> tuple[int, dict]:
     """Seller collects an escrow on-chain after fulfillment."""
     try:
-        payload = await request.json()
+        payload = _wire_in(await request.json())
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1222,16 +1252,16 @@ async def claim_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/claim — seller-side escrow collect."""
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "claim_order", order_id)
+    auth_error = _check_agent_request_auth(request, "claim_listing", order_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_claim_flow(request)
-        return JSONResponse(body_out, status_code=status)
+        return JSONResponse(_wire_out(body_out), status_code=status)
     except ValueError as exc:
         logger.error(f"[CLAIM] Validation error: {exc}")
         return JSONResponse(
@@ -1249,7 +1279,7 @@ async def claim_market_order_endpoint(request: Request) -> JSONResponse:
 async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
     """Buyer reclaims an expired escrow on-chain."""
     try:
-        payload = await request.json()
+        payload = _wire_in(await request.json())
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1310,16 +1340,16 @@ async def reclaim_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/reclaim — buyer-side reclaim of an expired escrow."""
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "reclaim_order", order_id)
+    auth_error = _check_agent_request_auth(request, "reclaim_listing", order_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_reclaim_flow(request)
-        return JSONResponse(body_out, status_code=status)
+        return JSONResponse(_wire_out(body_out), status_code=status)
     except ValueError as exc:
         logger.error(f"[RECLAIM] Validation error: {exc}")
         return JSONResponse(
@@ -1343,7 +1373,7 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
     for debugging and for the day we reintroduce oracle-gated arbiters.
     """
     try:
-        payload = await request.json()
+        payload = _wire_in(await request.json())
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1420,16 +1450,16 @@ async def arbitrate_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/arbitrate — buyer-as-oracle records a decision (no-op under RecipientArbiter)."""
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "arbitrate_order", order_id)
+    auth_error = _check_agent_request_auth(request, "arbitrate_listing", order_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_arbitrate_flow(request)
-        return JSONResponse(body_out, status_code=status)
+        return JSONResponse(_wire_out(body_out), status_code=status)
     except ValueError as exc:
         logger.error(f"[ARBITRATE] Validation error: {exc}")
         return JSONResponse(
@@ -1445,16 +1475,16 @@ async def arbitrate_market_order_endpoint(request: Request) -> JSONResponse:
 
 
 async def _run_discover_flow(request: Request) -> tuple[int, dict]:
-    """List registry orders that match a given local order.
+    """List registry listings that match a given local listing.
 
-    Body: {"order_id": "...", "include_active": bool?}
+    Body: {"listing_id": "...", "include_active": bool?}
 
     Pure query: no thread writes, no outbound sends. The orchestrator
     uses this as the first step of a sequential buy/sell flow, then
     decides which matches to start negotiations with.
     """
     try:
-        payload = await request.json()
+        payload = _wire_in(await request.json())
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1474,33 +1504,43 @@ async def _run_discover_flow(request: Request) -> tuple[int, dict]:
     except ValueError as exc:
         return 400, {"error": "Discover request invalid",
                      "detail": str(exc),
-                     "order_id": order_id}
+                     "listing_id": order_id}
     except RuntimeError as exc:
         return 500, {"error": "Discovery unavailable",
                      "detail": str(exc),
-                     "order_id": order_id}
+                     "listing_id": order_id}
+
+    wire_matches = []
+    for m in matches:
+        if isinstance(m, dict):
+            row = dict(m)
+            if "their_order_id" in row and "their_listing_id" not in row:
+                row["their_listing_id"] = row.pop("their_order_id")
+            wire_matches.append(row)
+        else:
+            wire_matches.append(m)
 
     return 200, {
-        "order_id": order_id,
+        "listing_id": order_id,
         "match_count": len(matches),
-        "matches": matches,
+        "matches": wire_matches,
     }
 
 
 async def discover_market_orders_endpoint(request: Request) -> JSONResponse:
-    """POST /orders/discover — pure registry-query step."""
+    """POST /listings/discover — pure registry-query step."""
     try:
         body = await request.json()
-        order_id = body.get("order_id", "")
+        order_id = body.get("listing_id", "")
     except Exception:
         order_id = ""
-    auth_error = _check_agent_request_auth(request, "discover_orders", order_id)
+    auth_error = _check_agent_request_auth(request, "discover_listings", order_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_discover_flow(request)
-        return JSONResponse(body_out, status_code=status)
+        return JSONResponse(_wire_out(body_out), status_code=status)
     except ValueError as exc:
         logger.error(f"[DISCOVER] Validation error: {exc}")
         return JSONResponse(
@@ -1515,13 +1555,13 @@ async def discover_market_orders_endpoint(request: Request) -> JSONResponse:
         )
 
 
-agent_order_creation_route = Route("/orders/create", create_market_order_endpoint, methods=["POST"])
-agent_order_close_route = Route("/orders/close", close_market_order_endpoint, methods=["POST"])
-agent_order_refund_route = Route("/orders/refund", refund_market_order_endpoint, methods=["POST"])
-agent_order_claim_route = Route("/orders/claim", claim_market_order_endpoint, methods=["POST"])
-agent_order_reclaim_route = Route("/orders/reclaim", reclaim_market_order_endpoint, methods=["POST"])
-agent_order_arbitrate_route = Route("/orders/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
-agent_order_discover_route = Route("/orders/discover", discover_market_orders_endpoint, methods=["POST"])
+agent_listing_creation_route = Route("/listings/create", create_market_order_endpoint, methods=["POST"])
+agent_listing_close_route = Route("/listings/close", close_market_order_endpoint, methods=["POST"])
+agent_listing_refund_route = Route("/listings/refund", refund_market_order_endpoint, methods=["POST"])
+agent_listing_claim_route = Route("/listings/claim", claim_market_order_endpoint, methods=["POST"])
+agent_listing_reclaim_route = Route("/listings/reclaim", reclaim_market_order_endpoint, methods=["POST"])
+agent_listing_arbitrate_route = Route("/listings/arbitrate", arbitrate_market_order_endpoint, methods=["POST"])
+agent_listing_discover_route = Route("/listings/discover", discover_market_orders_endpoint, methods=["POST"])
 
 
 # ---------------------------------------------------------------------------
@@ -1534,13 +1574,13 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
 
     Body:
       {
-        "seller_order_id": "...",
-        "buyer_address":   "0x...",
-        "initial_price":   <int, raw token units>
+        "listing_id":    "...",
+        "buyer_address": "0x...",
+        "initial_price": <int, raw token units>
       }
 
     Signed by buyer_address via X-Signature over
-    "negotiate_new:{seller_order_id}:{timestamp}".
+    "negotiate_new:{listing_id}:{timestamp}".
 
     Returns:
       {"negotiation_id": "...",       # server-assigned, used in subsequent /negotiate/{id} calls
@@ -1553,11 +1593,11 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    seller_order_id = body.get("seller_order_id")
+    seller_order_id = body.get("listing_id")
     buyer_address = body.get("buyer_address")
     initial_price_raw = body.get("initial_price")
 
-    for name, val in (("seller_order_id", seller_order_id),
+    for name, val in (("listing_id", seller_order_id),
                       ("buyer_address", buyer_address)):
         if not isinstance(val, str) or not val.strip():
             return JSONResponse({"error": f"Missing or empty '{name}'"}, status_code=400)
@@ -1811,13 +1851,13 @@ from starlette.applications import Starlette
 
 a2a_app = Starlette(routes=[
     alert_route,
-    agent_order_creation_route,
-    agent_order_close_route,
-    agent_order_refund_route,
-    agent_order_claim_route,
-    agent_order_reclaim_route,
-    agent_order_arbitrate_route,
-    agent_order_discover_route,
+    agent_listing_creation_route,
+    agent_listing_close_route,
+    agent_listing_refund_route,
+    agent_listing_claim_route,
+    agent_listing_reclaim_route,
+    agent_listing_arbitrate_route,
+    agent_listing_discover_route,
     agent_negotiate_new_route,
     agent_negotiate_continue_route,
     agent_settle_escrow_route,

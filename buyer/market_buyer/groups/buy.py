@@ -217,15 +217,15 @@ def register(app: typer.Typer) -> None:
             # Append a structured event to the run log so post-mortem
             # `market logs` and (eventually) `market buy --resume` have
             # something to read. Negotiation-scoped events carry
-            # seller_order_id (and negotiation_id once round 0 returns)
-            # so consumers can group per-negotiation.
+            # listing_id (and negotiation_id once round 0 returns) so
+            # consumers can group per-negotiation.
             run_log.event(stage, **body)
 
             # Plus a one-line console summary for the human.
             if stage == "discover":
                 console.print(f"[dim]discover[/dim]  {body.get('match_count', 0)} match(es)")
             elif stage == "negotiation_started":
-                console.print(f"[dim]negotiate →[/dim] {body.get('seller_url')} ({body.get('seller_order_id')})")
+                console.print(f"[dim]negotiate →[/dim] {body.get('seller_url')} ({body.get('listing_id')})")
             elif stage == "negotiation_round":
                 rd = body.get("round", "?")
                 their = body.get("their_reply") or {}

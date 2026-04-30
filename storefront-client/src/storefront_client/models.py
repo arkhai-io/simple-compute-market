@@ -5,7 +5,7 @@ storefront's HTTP endpoints. They live in ``storefront-client``
 because they are part of the API contract — the same contract
 documented in the versioning policy in ``storefront-client/README.md``.
 
-Request builders (``StorefrontOrderCreateRequest``, etc.) remain in
+Request builders (``StorefrontListingCreateRequest``, etc.) remain in
 the consuming test project until the full client migration is
 complete.
 """
@@ -93,48 +93,48 @@ class ERC8004RegistrationFile:
 
 
 # ---------------------------------------------------------------------------
-# Order create response  (POST /orders/create)
+# Listing create response  (POST /listings/create)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class StorefrontOrderCreateResponse:
-    """Response from POST /orders/create.
+class StorefrontListingCreateResponse:
+    """Response from POST /listings/create.
 
     status values:
-        ``"created"``   — storefront processed synchronously; order_id set.
-        ``"no_action"`` — storefront ran but did not create an order.
+        ``"created"``   — storefront processed synchronously; listing_id set.
+        ``"no_action"`` — storefront ran but did not create a listing.
         ``"queued"``    — enable_event_queue is True; processed async.
     """
 
     status: str | None = None
     event_id: str | None = None
-    order_id: str | None = None
+    listing_id: str | None = None
     root_agent_response: str | None = None
-    order_request: dict[str, Any] = field(default_factory=dict)
+    listing_request: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderCreateResponse":
-        known = {"status", "event_id", "order_id", "root_agent_response", "order_request"}
+    def from_dict(cls, d: dict) -> "StorefrontListingCreateResponse":
+        known = {"status", "event_id", "listing_id", "root_agent_response", "listing_request"}
         return cls(
             status=d.get("status"),
             event_id=d.get("event_id"),
-            order_id=d.get("order_id"),
+            listing_id=d.get("listing_id"),
             root_agent_response=d.get("root_agent_response"),
-            order_request=d.get("order_request", {}),
+            listing_request=d.get("listing_request", {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
 
 # ---------------------------------------------------------------------------
-# Order close response  (POST /orders/close)
+# Listing close response  (POST /listings/close)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class StorefrontOrderCloseResponse:
-    """Response from POST /orders/close.
+class StorefrontListingCloseResponse:
+    """Response from POST /listings/close.
 
     status values: ``"closed"`` | ``"queued"``
     """
@@ -142,67 +142,67 @@ class StorefrontOrderCloseResponse:
     status: str | None = None
     event_id: str | None = None
     root_agent_response: str | None = None
-    order_request: dict[str, Any] = field(default_factory=dict)
+    listing_request: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderCloseResponse":
-        known = {"status", "event_id", "root_agent_response", "order_request"}
+    def from_dict(cls, d: dict) -> "StorefrontListingCloseResponse":
+        known = {"status", "event_id", "root_agent_response", "listing_request"}
         return cls(
             status=d.get("status"),
             event_id=d.get("event_id"),
             root_agent_response=d.get("root_agent_response"),
-            order_request=d.get("order_request", {}),
+            listing_request=d.get("listing_request", {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
 
 # ---------------------------------------------------------------------------
-# Order refund response  (POST /orders/refund)
+# Listing refund response  (POST /listings/refund)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class StorefrontOrderRefundResponse:
-    """Response from POST /orders/refund."""
+class StorefrontListingRefundResponse:
+    """Response from POST /listings/refund."""
 
     status: str | None = None
-    order_id: str | None = None
+    listing_id: str | None = None
     refund_tx: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderRefundResponse":
-        known = {"status", "order_id", "refund_tx"}
+    def from_dict(cls, d: dict) -> "StorefrontListingRefundResponse":
+        known = {"status", "listing_id", "refund_tx"}
         return cls(
             status=d.get("status"),
-            order_id=d.get("order_id"),
+            listing_id=d.get("listing_id"),
             refund_tx=d.get("refund_tx"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
 
 # ---------------------------------------------------------------------------
-# Order claim response  (POST /orders/claim)
+# Listing claim response  (POST /listings/claim)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class StorefrontOrderClaimResponse:
-    """Response from POST /orders/claim."""
+class StorefrontListingClaimResponse:
+    """Response from POST /listings/claim."""
 
     status: str | None = None
-    order_id: str | None = None
+    listing_id: str | None = None
     fulfillment_uid: str | None = None
     claim_tx: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderClaimResponse":
-        known = {"status", "order_id", "fulfillment_uid", "claim_tx"}
+    def from_dict(cls, d: dict) -> "StorefrontListingClaimResponse":
+        known = {"status", "listing_id", "fulfillment_uid", "claim_tx"}
         return cls(
             status=d.get("status"),
-            order_id=d.get("order_id"),
+            listing_id=d.get("listing_id"),
             fulfillment_uid=d.get("fulfillment_uid"),
             claim_tx=d.get("claim_tx"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -210,24 +210,24 @@ class StorefrontOrderClaimResponse:
 
 
 # ---------------------------------------------------------------------------
-# Order discover response  (POST /orders/discover)
+# Listing discover response  (POST /listings/discover)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class DiscoverMatch:
-    """A single match returned by /orders/discover."""
+    """A single match returned by /listings/discover."""
 
-    their_order_id: str | None = None
+    their_listing_id: str | None = None
     their_agent_url: str | None = None
     their_price: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "DiscoverMatch":
-        known = {"their_order_id", "their_agent_url", "their_price"}
+        known = {"their_listing_id", "their_agent_url", "their_price"}
         return cls(
-            their_order_id=d.get("their_order_id"),
+            their_listing_id=d.get("their_listing_id"),
             their_agent_url=d.get("their_agent_url"),
             their_price=d.get("their_price"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -235,19 +235,19 @@ class DiscoverMatch:
 
 
 @dataclass
-class StorefrontOrderDiscoverResponse:
-    """Response from POST /orders/discover."""
+class StorefrontListingDiscoverResponse:
+    """Response from POST /listings/discover."""
 
-    order_id: str | None = None
+    listing_id: str | None = None
     match_count: int | None = None
     matches: list[DiscoverMatch] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderDiscoverResponse":
-        known = {"order_id", "match_count", "matches"}
+    def from_dict(cls, d: dict) -> "StorefrontListingDiscoverResponse":
+        known = {"listing_id", "match_count", "matches"}
         return cls(
-            order_id=d.get("order_id"),
+            listing_id=d.get("listing_id"),
             match_count=d.get("match_count"),
             matches=[DiscoverMatch.from_dict(m) for m in d.get("matches", [])],
             extra={k: v for k, v in d.items() if k not in known},
@@ -280,15 +280,15 @@ class HealthResponse:
 
 
 # ---------------------------------------------------------------------------
-# Orders API  (GET /api/v1/orders, GET /api/v1/orders/{id})
+# Listings API  (GET /api/v1/listings, GET /api/v1/listings/{id})
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class OrderSummary:
-    """A single row from GET /api/v1/orders or GET /api/v1/orders/{id}."""
+class ListingSummary:
+    """A single row from GET /api/v1/listings or GET /api/v1/listings/{id}."""
 
-    order_id: str = ""
+    listing_id: str = ""
     status: str = ""
     paused: bool = False
     duration_hours: int = 1
@@ -302,7 +302,7 @@ class OrderSummary:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "OrderSummary":
+    def from_dict(cls, d: dict) -> "ListingSummary":
         import json as _json
 
         def _parse_resource(v: Any) -> dict[str, Any]:
@@ -316,12 +316,12 @@ class OrderSummary:
             return {}
 
         known = {
-            "order_id", "status", "paused", "duration_hours", "order_maker",
+            "listing_id", "status", "paused", "duration_hours", "order_maker",
             "order_taker", "escrow_uid", "created_at", "updated_at",
             "offer_resource", "demand_resource",
         }
         return cls(
-            order_id=d.get("order_id", ""),
+            listing_id=d.get("listing_id", ""),
             status=d.get("status", ""),
             paused=bool(d.get("paused", False)),
             duration_hours=int(d.get("duration_hours", 1)),
@@ -337,20 +337,20 @@ class OrderSummary:
 
 
 @dataclass
-class OrderListResponse:
-    """Response from GET /api/v1/orders."""
+class ListingListResponse:
+    """Response from GET /api/v1/listings."""
 
-    orders: list[OrderSummary] = field(default_factory=list)
+    listings: list[ListingSummary] = field(default_factory=list)
     count: int = 0
     limit: int = 50
     offset: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "OrderListResponse":
-        known = {"orders", "count", "limit", "offset"}
+    def from_dict(cls, d: dict) -> "ListingListResponse":
+        known = {"listings", "count", "limit", "offset"}
         return cls(
-            orders=[OrderSummary.from_dict(o) for o in d.get("orders", [])],
+            listings=[ListingSummary.from_dict(o) for o in d.get("listings", [])],
             count=d.get("count", 0),
             limit=d.get("limit", 50),
             offset=d.get("offset", 0),
@@ -359,19 +359,19 @@ class OrderListResponse:
 
 
 @dataclass
-class OrderPauseResponse:
-    """Response from POST /api/v1/orders/{id}/pause or /resume."""
+class ListingPauseResponse:
+    """Response from POST /api/v1/listings/{id}/pause or /resume."""
 
-    order_id: str = ""
+    listing_id: str = ""
     paused: bool = False
     message: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "OrderPauseResponse":
-        known = {"order_id", "paused", "message"}
+    def from_dict(cls, d: dict) -> "ListingPauseResponse":
+        known = {"listing_id", "paused", "message"}
         return cls(
-            order_id=d.get("order_id", ""),
+            listing_id=d.get("listing_id", ""),
             paused=bool(d.get("paused", False)),
             message=d.get("message", ""),
             extra={k: v for k, v in d.items() if k not in known},
@@ -418,10 +418,10 @@ class NegotiationMessage:
 
 @dataclass
 class NegotiationSummary:
-    """A single row from GET /api/v1/orders/{id}/negotiations."""
+    """A single row from GET /api/v1/listings/{id}/negotiations."""
 
     negotiation_id: str = ""
-    our_order_id: str = ""
+    our_listing_id: str = ""
     buyer_address: str = ""
     status: str = ""
     terminal_state: str | None = None
@@ -433,12 +433,12 @@ class NegotiationSummary:
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationSummary":
         known = {
-            "negotiation_id", "our_order_id", "buyer_address", "status",
+            "negotiation_id", "our_listing_id", "buyer_address", "status",
             "terminal_state", "agreed_price", "agreed_duration_hours", "created_at",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
-            our_order_id=d.get("our_order_id", ""),
+            our_listing_id=d.get("our_listing_id", ""),
             buyer_address=d.get("buyer_address", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
@@ -451,9 +451,9 @@ class NegotiationSummary:
 
 @dataclass
 class NegotiationListResponse:
-    """Response from GET /api/v1/orders/{id}/negotiations."""
+    """Response from GET /api/v1/listings/{id}/negotiations."""
 
-    order_id: str = ""
+    listing_id: str = ""
     negotiations: list[NegotiationSummary] = field(default_factory=list)
     count: int = 0
     limit: int = 50
@@ -462,9 +462,9 @@ class NegotiationListResponse:
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationListResponse":
-        known = {"order_id", "negotiations", "count", "limit", "offset"}
+        known = {"listing_id", "negotiations", "count", "limit", "offset"}
         return cls(
-            order_id=d.get("order_id", ""),
+            listing_id=d.get("listing_id", ""),
             negotiations=[NegotiationSummary.from_dict(n) for n in d.get("negotiations", [])],
             count=d.get("count", 0),
             limit=d.get("limit", 50),
@@ -475,10 +475,10 @@ class NegotiationListResponse:
 
 @dataclass
 class NegotiationDetail:
-    """Response from GET /api/v1/orders/{id}/negotiations/{neg_id}."""
+    """Response from GET /api/v1/listings/{id}/negotiations/{neg_id}."""
 
     negotiation_id: str = ""
-    our_order_id: str = ""
+    our_listing_id: str = ""
     their_agent_id: str = ""
     status: str = ""
     terminal_state: str | None = None
@@ -492,13 +492,13 @@ class NegotiationDetail:
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationDetail":
         known = {
-            "negotiation_id", "our_order_id", "their_agent_id", "status",
+            "negotiation_id", "our_listing_id", "their_agent_id", "status",
             "terminal_state", "agreed_price", "agreed_duration_hours",
             "round_count", "messages", "stage_events",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
-            our_order_id=d.get("our_order_id", ""),
+            our_listing_id=d.get("our_listing_id", ""),
             their_agent_id=d.get("their_agent_id", ""),
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
@@ -516,7 +516,7 @@ class NegotiationActionResponse:
     """Response from POST .../advance or .../force-accept."""
 
     neg_id: str = ""
-    order_id: str = ""
+    listing_id: str = ""
     action: str = ""
     price: int | None = None
     reason: str | None = None
@@ -525,10 +525,10 @@ class NegotiationActionResponse:
 
     @classmethod
     def from_dict(cls, d: dict) -> "NegotiationActionResponse":
-        known = {"neg_id", "order_id", "action", "price", "reason", "source"}
+        known = {"neg_id", "listing_id", "action", "price", "reason", "source"}
         return cls(
             neg_id=d.get("neg_id", ""),
-            order_id=d.get("order_id", ""),
+            listing_id=d.get("listing_id", ""),
             action=d.get("action", ""),
             price=d.get("price"),
             reason=d.get("reason"),
@@ -566,17 +566,17 @@ class AdminStatusResponse:
 
     paused: bool = False
     active_negotiations: int = 0
-    open_orders: int = 0
-    paused_orders: int = 0
+    open_listings: int = 0
+    paused_listings: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "AdminStatusResponse":
-        known = {"paused", "active_negotiations", "open_orders", "paused_orders"}
+        known = {"paused", "active_negotiations", "open_listings", "paused_listings"}
         return cls(
             paused=bool(d.get("paused", False)),
             active_negotiations=int(d.get("active_negotiations", 0)),
-            open_orders=int(d.get("open_orders", 0)),
-            paused_orders=int(d.get("paused_orders", 0)),
+            open_listings=int(d.get("open_listings", 0)),
+            paused_listings=int(d.get("paused_listings", 0)),
             extra={k: v for k, v in d.items() if k not in known},
         )

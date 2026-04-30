@@ -148,7 +148,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     def fake_publish(agent_url, offer, demand, duration_hours, wallet_address, private_key):
         calls.append({"offer": offer, "demand": demand})
         rid = offer["resource_id"]
-        return {"status": "created", "order_id": f"order-for-{rid}"}
+        return {"status": "created", "listing_id": f"listing-for-{rid}"}
 
     monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
@@ -182,7 +182,7 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda *a, **k: {"status": "created", "order_id": "o1"},
+        lambda *a, **k: {"status": "created", "listing_id": "o1"},
     )
 
     published, failed, skipped = _publish_round(

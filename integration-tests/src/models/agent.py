@@ -1,17 +1,17 @@
 """
 arkhai_e2e_tests/models/agent.py
 ---------------------------------
-Typed dataclasses for the Agent REST API request and response shapes.
+Typed dataclasses for the storefront REST API request and response shapes.
 
 Derived from:
   - pydantic_models.py  (ListingCreatedEvent, ListingClosedEvent, ResourceAlertRequest)
   - agent.py            (_run_create_order_flow, _run_close_order_flow response dicts,
                          serve_erc8004_registration_file response shape)
 
-Auth note: the agent validates X-Signature / X-Timestamp headers using
+Auth note: the storefront validates X-Signature / X-Timestamp headers using
 EIP-191 where the message is  "<operation>:<resource_id>:<timestamp>".
-The resource_id for create_order is the agent's BASE_URL_OVERRIDE string;
-for close_order it is the order_id string.
+The resource_id for create_listing is the storefront's BASE_URL_OVERRIDE string;
+for close_listing it is the listing_id string.
 """
 
 from __future__ import annotations
@@ -21,18 +21,17 @@ from typing import Any
 
 
 # ---------------------------------------------------------------------------
-# ERC-8004 registration file and order response models
+# ERC-8004 registration file and listing response models
 #
-# These classes have moved to the ``arkhai-agent-client`` package
+# These classes have moved to the ``arkhai-storefront-client`` package
 # (``storefront_client.models``).  They are re-exported here so that existing
 # imports from ``src.models.agent`` continue to work without changes.
-# See TODO(agent-client-migration) in ARCHITECTURE.md.
 # ---------------------------------------------------------------------------
 
 from storefront_client.models import (  # noqa: F401 — re-exported for backward compat
     StorefrontEndpoint,
-    StorefrontOrderCloseResponse,
-    StorefrontOrderCreateResponse,
+    StorefrontListingCloseResponse,
+    StorefrontListingCreateResponse,
     ERC8004RegistrationFile,
     RegistrationRecord,
 )
@@ -43,7 +42,7 @@ from storefront_client.models import (  # noqa: F401 — re-exported for backwar
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Order create  (POST /orders/create)
+# Listing create  (POST /listings/create)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -74,10 +73,10 @@ class TokenResourcePayload:
 @dataclass
 class AgentOrderCreateRequest:
     """
-    Request body for POST /orders/create.
+    Request body for POST /listings/create.
 
     One of offer/demand must be a ComputeResourcePayload; the other a
-    TokenResourcePayload.  The agent will reject if both are the same type.
+    TokenResourcePayload.  The storefront will reject if both are the same type.
     """
     offer: dict[str, Any]
     demand: dict[str, Any]
@@ -129,72 +128,17 @@ class AgentOrderCreateRequest:
         )
 
 
-@dataclass
-class StorefrontOrderCreateResponse:
-    """
-    Response from POST /orders/create.
-
-    status values observed in agent.py:
-      "created"   — agent processed the event and returned an order_id
-      "no_action" — agent ran but did not create an order
-      "queued"    — enable_event_queue is True; processed asynchronously
-    """
-    status: str | None = None
-    event_id: str | None = None
-    order_id: str | None = None
-    root_agent_response: str | None = None
-    order_request: dict[str, Any] = field(default_factory=dict)
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderCreateResponse":
-        known = {"status", "event_id", "order_id", "root_agent_response", "order_request"}
-        return cls(
-            status=d.get("status"),
-            event_id=d.get("event_id"),
-            order_id=d.get("order_id"),
-            root_agent_response=d.get("root_agent_response"),
-            order_request=d.get("order_request", {}),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
 # ---------------------------------------------------------------------------
-# Order close  (POST /orders/close)
+# Listing close  (POST /listings/close)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class AgentOrderCloseRequest:
-    """Request body for POST /orders/close."""
-    order_id: str
+    """Request body for POST /listings/close."""
+    listing_id: str
 
     def to_dict(self) -> dict:
-        return {"order_id": self.order_id}
-
-
-@dataclass
-class StorefrontOrderCloseResponse:
-    """
-    Response from POST /orders/close.
-
-    status values: "closed" | "queued"
-    """
-    status: str | None = None
-    event_id: str | None = None
-    root_agent_response: str | None = None
-    order_request: dict[str, Any] = field(default_factory=dict)
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontOrderCloseResponse":
-        known = {"status", "event_id", "root_agent_response", "order_request"}
-        return cls(
-            status=d.get("status"),
-            event_id=d.get("event_id"),
-            root_agent_response=d.get("root_agent_response"),
-            order_request=d.get("order_request", {}),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
+        return {"listing_id": self.listing_id}
 
 
 # ---------------------------------------------------------------------------

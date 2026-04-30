@@ -1,7 +1,7 @@
 """Admin API key authentication middleware.
 
 Protects all routes under ``/admin/*`` and any per-resource admin actions
-(order pause/resume, negotiation advance/force-accept) with a shared secret.
+(listing pause/resume, negotiation advance/force-accept) with a shared secret.
 
 The key is read from ``CONFIG.admin_api_key`` at startup.  Callers supply it
 via the ``X-Admin-Key`` request header.

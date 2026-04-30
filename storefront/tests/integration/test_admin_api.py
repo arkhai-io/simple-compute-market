@@ -157,8 +157,8 @@ class TestAdminStatus:
         result = await c.admin_status()
         assert result.paused is False
         assert result.active_negotiations == 0
-        assert result.open_orders == 0
-        assert result.paused_orders == 0
+        assert result.open_listings == 0
+        assert result.paused_listings == 0
 
     async def test_status_counts_open_orders(self, client):
         c, db, _ = client
@@ -175,7 +175,7 @@ class TestAdminStatus:
             order_maker="http://seller:8001",
         )
         result = await c.admin_status()
-        assert result.open_orders == 1
+        assert result.open_listings == 1
 
     async def test_status_counts_paused_orders(self, client):
         c, db, _ = client
@@ -194,5 +194,5 @@ class TestAdminStatus:
         await db.set_order_paused(order_id="pause-count", paused=True)
         result = await c.admin_status()
         # Paused order is excluded from open_orders count
-        assert result.open_orders == 0
-        assert result.paused_orders == 1
+        assert result.open_listings == 0
+        assert result.paused_listings == 1

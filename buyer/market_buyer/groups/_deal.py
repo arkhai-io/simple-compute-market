@@ -23,7 +23,7 @@ from ..run_log import RunLog, read_run
 class DealContext:
     """What we need to drive stages 3-5 of a deal post-negotiation."""
     seller_url: str
-    seller_order_id: str
+    listing_id: str
     negotiation_id: str
     agreed_price: int
     escrow_uid: Optional[str] = None
@@ -53,7 +53,7 @@ def load_deal_context(run_id: str) -> DealContext:
         )
 
     seller_url: Optional[str] = None
-    seller_order_id: Optional[str] = None
+    listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
     agreed_price: Optional[int] = None
     escrow_uid: Optional[str] = None
@@ -81,8 +81,8 @@ def load_deal_context(run_id: str) -> DealContext:
                 agreed_price = int(ev["agreed_price"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
-            if ev.get("seller_order_id"):
-                seller_order_id = str(ev["seller_order_id"])
+            if ev.get("listing_id"):
+                listing_id = str(ev["listing_id"])
         if ev_type == "escrow_created":
             uid = ev.get("escrow_uid")
             if isinstance(uid, str) and uid:
@@ -92,17 +92,17 @@ def load_deal_context(run_id: str) -> DealContext:
             if isinstance(terms, dict):
                 if terms.get("seller_url"):
                     seller_url = terms["seller_url"]
-                if terms.get("seller_order_id"):
-                    seller_order_id = terms["seller_order_id"]
+                if terms.get("listing_id"):
+                    listing_id = terms["listing_id"]
                 if terms.get("duration_hours"):
                     duration_hours = int(terms["duration_hours"])
 
-        # `negotiate`-style log start carries seller_url + order id.
+        # `negotiate`-style log start carries seller_url + listing id.
         if ev_type == "run_started":
             if ev.get("seller_url"):
                 seller_url = ev["seller_url"]
-            if ev.get("seller_order_id"):
-                seller_order_id = ev["seller_order_id"]
+            if ev.get("listing_id"):
+                listing_id = ev["listing_id"]
             if ev.get("duration_hours"):
                 duration_hours = int(ev["duration_hours"])
             if ev.get("seller_wallet_address"):
@@ -118,7 +118,7 @@ def load_deal_context(run_id: str) -> DealContext:
     missing = [
         name for name, v in (
             ("seller_url", seller_url),
-            ("seller_order_id", seller_order_id),
+            ("listing_id", listing_id),
             ("negotiation_id", negotiation_id),
             ("agreed_price", agreed_price),
         ) if not v
@@ -132,7 +132,7 @@ def load_deal_context(run_id: str) -> DealContext:
 
     return DealContext(
         seller_url=seller_url,                # type: ignore[arg-type]
-        seller_order_id=seller_order_id,      # type: ignore[arg-type]
+        listing_id=listing_id,                # type: ignore[arg-type]
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
         agreed_price=agreed_price,            # type: ignore[arg-type]
         escrow_uid=escrow_uid,

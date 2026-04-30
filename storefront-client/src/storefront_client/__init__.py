@@ -11,11 +11,11 @@ from storefront_client.models import (
     ERC8004RegistrationFile,
     RegistrationRecord,
     StorefrontEndpoint,
-    StorefrontOrderClaimResponse,
-    StorefrontOrderCloseResponse,
-    StorefrontOrderCreateResponse,
-    StorefrontOrderDiscoverResponse,
-    StorefrontOrderRefundResponse,
+    StorefrontListingClaimResponse,
+    StorefrontListingCloseResponse,
+    StorefrontListingCreateResponse,
+    StorefrontListingDiscoverResponse,
+    StorefrontListingRefundResponse,
 )
 
 __all__ = [
@@ -27,9 +27,9 @@ __all__ = [
     "ERC8004RegistrationFile",
     "RegistrationRecord",
     "StorefrontEndpoint",
-    "StorefrontOrderClaimResponse",
-    "StorefrontOrderCloseResponse",
-    "StorefrontOrderCreateResponse",
-    "StorefrontOrderDiscoverResponse",
-    "StorefrontOrderRefundResponse",
+    "StorefrontListingClaimResponse",
+    "StorefrontListingCloseResponse",
+    "StorefrontListingCreateResponse",
+    "StorefrontListingDiscoverResponse",
+    "StorefrontListingRefundResponse",
 ]

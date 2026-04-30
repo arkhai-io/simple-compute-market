@@ -115,8 +115,8 @@ async def agent_app_client() -> AsyncIterator[AsyncClient]:
     app = Starlette(
         routes=[
             Route("/alerts/resource", handle_resource_alert, methods=["POST"]),
-            Route("/orders/create", create_market_order_endpoint, methods=["POST"]),
-            Route("/orders/close", close_market_order_endpoint, methods=["POST"]),
+            Route("/listings/create", create_market_order_endpoint, methods=["POST"]),
+            Route("/listings/close", close_market_order_endpoint, methods=["POST"]),
             Route(
                 "/.well-known/erc-8004-registration.json",
                 serve_erc8004_registration_file,

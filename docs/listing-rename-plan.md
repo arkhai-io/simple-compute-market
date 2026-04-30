@@ -51,14 +51,24 @@ cli_publish.py via git mv.
 mentions left alone (agent_card, register_onchain, AgentRegistered,
 etc.).
 
-**Slice 2 — Storefront wire**
+**Slice 2 — Storefront wire** ✅ committed
 Storefront server routes `/orders/...` → `/listings/...`,
 `/api/v1/orders/{id}/negotiations/...` →
 `/api/v1/listings/{id}/negotiations/...`. arkhai-storefront-client
-SDK methods rename. `market-storefront provide` → `publish`. SQLite
-table inside the storefront keeps `orders` for now (out-of-band).
-Buyer-side caller updates (`market settle`, `market escrow
-claim/refund` argument naming).
+SDK methods + types renamed (`create_order`/`StorefrontOrderCreateResponse`
+→ `create_listing`/`StorefrontListingCreateResponse`, etc).
+JSON wire keys: `order_id` → `listing_id`, `order_request` →
+`listing_request`, `seller_order_id` → `listing_id` in
+`/negotiate/new` body, `our_order_id` → `our_listing_id` in
+negotiation responses, `their_order_id` → `their_listing_id` in
+discover matches, `open_orders`/`paused_orders` →
+`open_listings`/`paused_listings` in admin status. EIP-191 signed
+operation strings renamed (`create_order`→`create_listing`, etc).
+Buyer-side `seller_order_id` field flipped to `listing_id`
+across run-log, DealContext, AgreedTerms, CLI flag (`--listing-id`),
+and orchestrator. SQLite table inside the storefront keeps
+`orders`/`order_id` columns for now (Slice 4); translation happens
+at the controller boundary.
 
 **Slice 3 — Registry wire**
 Registry routes `/orders` → `/listings`, `/agents/{id}/orders` →

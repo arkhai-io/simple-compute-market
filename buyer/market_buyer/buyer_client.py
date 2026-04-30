@@ -134,7 +134,7 @@ def negotiate_with_seller(
     seller_url: str,
     buyer_address: str,
     buyer_private_key: str,
-    seller_order_id: str,
+    listing_id: str,
     initial_price: int,
     max_price: int,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
@@ -168,11 +168,11 @@ def negotiate_with_seller(
 
     # --- Round 0: /negotiate/new ---------------------------------------
     new_body = {
-        "seller_order_id": seller_order_id,
+        "listing_id": listing_id,
         "buyer_address": buyer_address,
         "initial_price": int(initial_price),
     }
-    sig, ts = _sign(f"negotiate_new:{seller_order_id}", buyer_private_key)
+    sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
     reply = _post(
         f"{seller_url}/negotiate/new", new_body,
         signature=sig, timestamp=ts,
