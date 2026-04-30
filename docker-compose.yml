@@ -84,6 +84,9 @@ services:
       # e2e-mock-happy). Wired into the agent runtime via TOML override.
       - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+      # The seller agent's policy discovery needs `domain/` on PYTHONPATH
+      # so it can find domain.compute.agent.app.policy callables.
+      - PYTHONPATH=/app:/app/src
     volumes:
       - ./storefront/config.bob.toml:/etc/arkhai/config.toml:ro
       - zerotier-sell:/var/lib/zerotier-one
@@ -99,7 +102,8 @@ services:
       - -c
       - |
         echo "Importing seller resources..."
-        PYTHONPATH="/:/app:/app/src" uv run python scripts/import_resources_csv.py \
+        PYTHONPATH="/:/app:/app/src" /app/.venv/bin/python scripts/import_resources_csv.py \
+          --db-path /app/src/market_storefront/data/sell-agent/agent.db \
           --csv src/market_storefront/data/ww1-machine.csv
         exec ./entrypoint.sh
 
