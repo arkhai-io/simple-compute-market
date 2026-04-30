@@ -33,14 +33,29 @@ pipeline is wired end-to-end before submitting a real order.
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
+import os
+import pkgutil
 import sqlite3
+import sys
+import uuid
 from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from market_policy.registry import CALLABLE_REGISTRY
+from market_policy.store import PolicyStore
+from market_storefront.policy.seeding import ComputePolicySeeder
+from market_storefront.schema.pydantic_models import (
+    ListingCreatedEvent, EventType, ComputeResource, TokenResource,
+)
+from market_storefront.utils.action_executor import parse_resource_from_dict
+from market_storefront.utils.config import CONFIG
+from service.schemas import DecisionContext
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +140,6 @@ class SystemController:
         # Walk the package manually so we can collect per-module import errors
         # and surface them in the response — the stock discover_and_register
         # swallows errors silently into WARNING logs which aren't visible to callers.
-        import importlib
-        import pkgutil
-        import sys
-        import os
-        from market_policy.registry import CALLABLE_REGISTRY
 
         # domain/ lives at /app/domain in the container (WORKDIR=/app).
         # Console-script entry points don't add CWD to sys.path, so we
@@ -165,9 +175,6 @@ class SystemController:
         callables = sorted(CALLABLE_REGISTRY.keys())
 
         # Step 2 — seed default policies into SQLite
-        from market_policy.store import PolicyStore
-        from market_storefront.policy.seeding import ComputePolicySeeder
-        from market_storefront.utils.config import CONFIG
 
         try:
             policy_store = PolicyStore(self._sqlite_client)
@@ -211,7 +218,6 @@ class SystemController:
         in the registry.  Use this to diagnose mismatches between DB rows and
         the live callable registry without reading container logs.
         """
-        from market_policy.registry import CALLABLE_REGISTRY
 
         callables = sorted(CALLABLE_REGISTRY.keys())
 
@@ -276,11 +282,6 @@ class SystemController:
             )
 
         # Parse resources through the same path as the real endpoint
-        from market_storefront.schema.pydantic_models import (
-            ListingCreatedEvent, EventType, ComputeResource, TokenResource,
-        )
-        from service.schemas import DecisionContext
-        from market_storefront.utils.action_executor import parse_resource_from_dict
 
         try:
             offer_resource = parse_resource_from_dict(offer_raw)
@@ -291,9 +292,8 @@ class SystemController:
                 status_code=400,
             )
 
-        import uuid as _uuid
         synthetic_event = ListingCreatedEvent(
-            event_id=f"dry_run_{_uuid.uuid4().hex[:8]}",
+            event_id=f"dry_run_{uuid.uuid4().hex[:8]}",
             source="dry_run",
             offer=offer_resource,
             demand=demand_resource,
@@ -308,10 +308,6 @@ class SystemController:
 
         # Delegate to PolicyStore.evaluate_policy — the same path TraderAgent._consult_policy
         # uses.  Pure read: no SQLite writes, no registry calls.
-        from market_policy.registry import CALLABLE_REGISTRY
-        from market_policy.store import PolicyStore
-        from market_storefront.utils.config import CONFIG
-        from service.schemas import DecisionContext
 
         agent_id = CONFIG.agent_id or "agent"
         policy_store = PolicyStore(self._sqlite_client)
