@@ -88,9 +88,9 @@ COPY policy/ ../policy/
 # now install the project itself so the `market-storefront` console
 # script is written to .venv/bin/.
 # /dist/ carries the internal wheels needed for --find-links resolution.
-COPY storefront/pyproject.toml storefront/uv.lock ./
-COPY storefront/packages/ ./packages/
-COPY storefront-client/ ../storefront-client/
+COPY --chown=appuser:appuser storefront/pyproject.toml storefront/uv.lock ./
+COPY --chown=appuser:appuser storefront/packages/ ./packages/
+COPY --chown=appuser:appuser storefront-client/ ../storefront-client/
 # Copy wheels directly from the build context (not from the builder stage).
 # Using --from=builder here would serve a cached /dist that Docker baked at
 # the last full builder rebuild, silently ignoring any make dist updates since.
