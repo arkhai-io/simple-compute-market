@@ -46,3 +46,9 @@ mode        = "http"
 # rl = trained Arkhai puffer checkpoints (default). Set to "bisection"
 # to drop the model dependency for stripped-down test runs.
 policy_mode = "rl"
+
+[seller.pricing]
+# Defaults applied to inventory rows that don't carry their own
+# min_price/token. Per-row CSV columns override these.
+default_min_price = "100"
+default_token     = "MOCK"

@@ -66,12 +66,17 @@ def _import_csv(csv_path: str, db: Optional[str]) -> None:
 
 
 def _available_resources(db_path: str) -> list[dict]:
-    """Read all `state='available'` compute resources from the agent DB."""
+    """Read all `state='available'` compute resources from the agent DB.
+
+    Returns row dicts including per-resource pricing (min_price, token).
+    NULL pricing means "no per-row override; fall back to config defaults."
+    """
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            """SELECT resource_id, resource_subtype, unit, value, state, attributes
+            """SELECT resource_id, resource_subtype, unit, value, state, attributes,
+                      min_price, token
                FROM resources
                WHERE resource_type = 'compute.gpu' AND state = 'available'
                ORDER BY resource_id""",
@@ -91,6 +96,8 @@ def _available_resources(db_path: str) -> list[dict]:
             "quantity": int(row["value"]) if row["value"] is not None else 1,
             "sla": attrs.get("sla", 0.0),
             "region": attrs.get("region"),
+            "min_price": row["min_price"],
+            "token": row["token"],
         })
     return out
 
@@ -192,17 +199,38 @@ def _close_order(
     }
 
 
+def _resolve_pricing(
+    res: dict,
+    *,
+    default_min_price: Optional[str],
+    default_token: str,
+) -> tuple[Optional[str], str]:
+    """Pick the min_price/token for a resource: row > defaults > None.
+
+    Returns (min_price, token). min_price=None means "skip this row at
+    publish time" — there's no fallback for rows that have neither.
+    """
+    min_price = res.get("min_price") or default_min_price
+    token = res.get("token") or default_token
+    return min_price, token
+
+
 def _publish_round(
     *,
     db_path: str,
     base_url: str,
-    demand: dict,
     duration_hours: int,
     wallet_address: str,
     private_key: Optional[str],
+    default_min_price: Optional[str],
+    default_token: str,
     skip_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
-    """Publish one order for every available resource not in `skip_ids`.
+    """Publish one order for every priced & available resource not in `skip_ids`.
+
+    Pricing is per-row: `resources.min_price` / `resources.token` win over
+    the [seller.pricing] defaults. Rows with no price (row NULL + no default)
+    are reported as failed with a clear reason.
 
     Returns (published, failed, skipped) — each a list of dicts keyed on
     the resource.
@@ -218,6 +246,17 @@ def _publish_round(
         if res["resource_id"] in skip_ids:
             skipped.append(res)
             continue
+        min_price, token = _resolve_pricing(
+            res,
+            default_min_price=default_min_price,
+            default_token=default_token,
+        )
+        if not min_price:
+            failed.append((
+                res,
+                "no min_price (set per-row in CSV or [seller.pricing].default_min_price)",
+            ))
+            continue
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in
         # `--watch` mode.
@@ -228,11 +267,16 @@ def _publish_round(
             "sla": res["sla"],
             "region": res["region"],
         }
+        demand = {"token": token, "amount": min_price}
         try:
             resp = _publish_offer(
                 base_url, offer, demand, duration_hours, wallet_address, private_key,
             )
-            published.append({"resource": res, "response": resp})
+            published.append({
+                "resource": res,
+                "response": resp,
+                "demand": demand,
+            })
         except typer.Exit:
             failed.append((res, "HTTP error (see above)"))
         except Exception as exc:
@@ -241,20 +285,98 @@ def _publish_round(
     return published, failed, skipped
 
 
+def run_watch_loop(
+    *,
+    db_path: str,
+    base_url: str,
+    duration_hours: int,
+    wallet_address: str,
+    private_key: Optional[str],
+    default_min_price: Optional[str],
+    default_token: str,
+    poll_interval: float,
+    console: Optional[Console] = None,
+    log_silent_cycles: bool = True,
+) -> None:
+    """Long-running publish loop. Used by `publish --watch` and by `serve`.
+
+    Each cycle: skip resources that already have an open listing, try to
+    publish the rest (per-row pricing > config defaults). Sleeps
+    ``poll_interval`` seconds between cycles. Exits on KeyboardInterrupt.
+
+    ``log_silent_cycles=False`` quiets cycles where nothing happened —
+    useful when this is running as a background task inside `serve`
+    where the user is also looking at HTTP request logs.
+    """
+    out_console = console or Console()
+    total_published = 0
+    total_failed = 0
+    cycle = 0
+    try:
+        while True:
+            cycle += 1
+            try:
+                covered = _open_order_resource_ids(db_path)
+                published, failed, skipped = _publish_round(
+                    db_path=db_path, base_url=base_url,
+                    duration_hours=duration_hours, wallet_address=wallet_address,
+                    private_key=private_key,
+                    default_min_price=default_min_price, default_token=default_token,
+                    skip_ids=covered,
+                )
+            except Exception as exc:
+                ts = datetime.now().strftime("%H:%M:%S")
+                out_console.print(
+                    f"[dim]{ts}[/dim] cycle {cycle}: "
+                    f"[red]error: {exc!r}[/red] (continuing after poll interval)"
+                )
+                time.sleep(poll_interval)
+                continue
+
+            total_published += len(published)
+            total_failed += len(failed)
+
+            ts = datetime.now().strftime("%H:%M:%S")
+            if published or failed:
+                out_console.print(
+                    f"[dim]{ts}[/dim] cycle {cycle}: "
+                    f"[green]+{len(published)}[/green] new"
+                    + (f" [red]/{len(failed)} failed[/red]" if failed else "")
+                    + (f" [dim](skipped {len(skipped)} already-open)[/dim]" if skipped else "")
+                )
+                _print_publish_table(out_console, published, failed)
+            elif log_silent_cycles:
+                available_count = len(_available_resources(db_path))
+                out_console.print(
+                    f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
+                    f"(available={available_count}, already-open={len(covered)})"
+                )
+
+            time.sleep(poll_interval)
+    except KeyboardInterrupt:
+        out_console.print(
+            f"\n[yellow]Stopped.[/yellow] "
+            f"Total cycles={cycle}, published={total_published}, failed={total_failed}."
+        )
+
+
 def _print_publish_table(console: Console, published: list[dict], failed: list[tuple[dict, str]]) -> None:
     summary = Table(title="Published offers", box=box.SIMPLE_HEAVY, expand=True)
     summary.add_column("Resource", style="bold")
     summary.add_column("GPU")
     summary.add_column("Region")
+    summary.add_column("Demand")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
     for entry in published:
         res = entry["resource"]
         resp = entry["response"]
+        demand = entry["demand"]
         summary.add_row(
             res["resource_id"],
             f"{res['gpu_model']} x{res['quantity']}",
             res["region"] or "-",
+            f"{demand['amount']} {demand['token']}",
             str(resp.get("listing_id", "-")),
             str(resp.get("status", "-")),
         )
@@ -263,6 +385,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
             res["resource_id"],
             f"{res['gpu_model']} x{res['quantity']}",
             res["region"] or "-",
+            "-",
             "-",
             f"[red]failed: {reason}[/red]",
         )
@@ -276,20 +399,17 @@ def register(app: typer.Typer) -> None:
     def provide(
         inventory: Optional[str] = typer.Option(
             None, "--inventory", "-i",
-            help="Path to a CSV file describing compute resources to import before publishing.",
-        ),
-        min_price: Optional[str] = typer.Option(
-            None, "--min-price", "-p",
-            help="Minimum price per order, in human units of --token. Required unless --abort-all is given.",
+            help="Path to a CSV file describing compute resources to import before publishing. "
+                 "Each row may set min_price and token columns; otherwise [seller.pricing] defaults apply.",
         ),
         abort_all: bool = typer.Option(
             False, "--abort-all",
             help="Close every open sell order on this agent instead of publishing. Useful on shutdown.",
         ),
-        token: str = typer.Option("MOCK", "--token", help="Payment token symbol."),
         duration_hours: int = typer.Option(
             1, "--duration-hours", "-t",
-            help="Lease duration offered per order (hours).",
+            help="Lease duration offered per published listing (hours). "
+                 "Buyers may negotiate this further; this is the seller's advertised default.",
         ),
         watch: bool = typer.Option(
             False, "--watch", "-w",
@@ -309,7 +429,12 @@ def register(app: typer.Typer) -> None:
                  "(default: seller.db_path from config.toml).",
         ),
     ) -> None:
-        """Publish sell orders for every available compute resource on the seller's node."""
+        """Publish sell orders for every priced compute resource on the seller's node.
+
+        Pricing is per-resource: each row's `min_price` / `token` columns
+        win over the [seller.pricing] defaults. Resources without either
+        a row-level price or a default are skipped (reported as failed).
+        """
         console = Console()
         from .utils.config import CONFIG
 
@@ -325,12 +450,14 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(1)
 
+        default_min_price = CONFIG.default_min_price
+        default_token = CONFIG.default_token
+
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:
-            if inventory or watch or min_price is not None:
+            if inventory or watch:
                 raise typer.BadParameter(
-                    "--abort-all is mutually exclusive with "
-                    "--inventory, --min-price, and --watch."
+                    "--abort-all is mutually exclusive with --inventory and --watch."
                 )
             order_ids = _open_order_ids(db_path)
             if not order_ids:
@@ -372,11 +499,6 @@ def register(app: typer.Typer) -> None:
                 raise typer.Exit(5)
             return
 
-        if min_price is None:
-            raise typer.BadParameter(
-                "--min-price is required (or pass --abort-all to close open orders)."
-            )
-
         if inventory:
             csv_file = Path(inventory)
             if not csv_file.exists():
@@ -388,16 +510,15 @@ def register(app: typer.Typer) -> None:
                 typer.secho(f"Inventory import failed: {exc}", err=True, fg=typer.colors.RED)
                 raise typer.Exit(2)
 
-        demand = {"token": token, "amount": min_price}
-
         # ------------------------------------------------------------------
-        # One-shot path (original behavior)
+        # One-shot path
         # ------------------------------------------------------------------
         if not watch:
             published, failed, _skipped = _publish_round(
-                db_path=db_path, base_url=base_url, demand=demand,
+                db_path=db_path, base_url=base_url,
                 duration_hours=duration_hours, wallet_address=wallet_address,
                 private_key=private_key,
+                default_min_price=default_min_price, default_token=default_token,
             )
             if not published and not failed:
                 console.print(
@@ -413,7 +534,10 @@ def register(app: typer.Typer) -> None:
             totals.add_row("Published", str(len(published)))
             totals.add_row("Failed", str(len(failed)))
             totals.add_row("Agent", base_url)
-            totals.add_row("Demand per order", f"{min_price} {token}")
+            totals.add_row(
+                "Default demand",
+                f"{default_min_price or '-'} {default_token}",
+            )
             console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
 
             if failed and not published:
@@ -427,44 +551,19 @@ def register(app: typer.Typer) -> None:
         header.add_column(style="bold")
         header.add_column()
         header.add_row("Agent", base_url)
-        header.add_row("Demand per order", f"{min_price} {token}")
+        header.add_row(
+            "Default demand",
+            f"{default_min_price or '-'} {default_token}",
+        )
         header.add_row("Poll interval", f"{poll_interval:.0f}s")
         header.add_row("Duration per lease", f"{duration_hours}h")
-        console.print(Panel(header, title="market provide --watch", border_style="blue"))
+        console.print(Panel(header, title="market-storefront publish --watch", border_style="blue"))
         console.print("[dim]Ctrl-C to stop.[/dim]\n")
 
-        total_published = 0
-        total_failed = 0
-        cycle = 0
-        try:
-            while True:
-                cycle += 1
-                covered = _open_order_resource_ids(db_path)
-                published, failed, skipped = _publish_round(
-                    db_path=db_path, base_url=base_url, demand=demand,
-                    duration_hours=duration_hours, wallet_address=wallet_address,
-                    private_key=private_key, skip_ids=covered,
-                )
-                total_published += len(published)
-                total_failed += len(failed)
-
-                ts = datetime.now().strftime("%H:%M:%S")
-                if published or failed:
-                    console.print(f"[dim]{ts}[/dim] cycle {cycle}: "
-                                  f"[green]+{len(published)}[/green] new"
-                                  + (f" [red]/{len(failed)} failed[/red]" if failed else "")
-                                  + (f" [dim](skipped {len(skipped)} already-open)[/dim]" if skipped else ""))
-                    _print_publish_table(console, published, failed)
-                else:
-                    available_count = len(_available_resources(db_path))
-                    console.print(
-                        f"[dim]{ts}[/dim] cycle {cycle}: no new orders "
-                        f"(available={available_count}, already-open={len(covered)})"
-                    )
-
-                time.sleep(poll_interval)
-        except KeyboardInterrupt:
-            console.print(
-                f"\n[yellow]Stopped.[/yellow] "
-                f"Total cycles={cycle}, published={total_published}, failed={total_failed}.",
-            )
+        run_watch_loop(
+            db_path=db_path, base_url=base_url,
+            duration_hours=duration_hours, wallet_address=wallet_address,
+            private_key=private_key,
+            default_min_price=default_min_price, default_token=default_token,
+            poll_interval=poll_interval, console=console,
+        )

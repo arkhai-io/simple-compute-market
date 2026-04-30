@@ -114,15 +114,34 @@ def serve_cmd(
         None, "--port",
         help="Override seller.port from config.toml.",
     ),
+    no_publish: bool = typer.Option(
+        False, "--no-publish",
+        help="Don't auto-run the publish watch loop alongside the server. "
+             "Use for read-only deployments or when running publish in a separate process.",
+    ),
+    poll_interval: float = typer.Option(
+        30.0, "--publish-poll-interval",
+        help="Seconds between publish cycles (when auto-publish is enabled).",
+    ),
+    duration_hours: int = typer.Option(
+        1, "--publish-duration-hours",
+        help="Lease duration advertised on auto-published listings (hours).",
+    ),
 ) -> None:
     """Run the storefront HTTP server (uvicorn, foreground).
 
-    Reads its own config from `$XDG_CONFIG_HOME/arkhai/config.toml`.
-    Replaces the legacy `start` command which shelled out to make.
+    Auto-publishes available compute inventory in a background thread by
+    default. Pass --no-publish to disable. Reads config from
+    `$XDG_CONFIG_HOME/arkhai/config.toml`.
     """
     from .commands.serve import run_serve
 
-    run_serve(host=host, port=port)
+    run_serve(
+        host=host, port=port,
+        no_publish=no_publish,
+        poll_interval=poll_interval,
+        duration_hours=duration_hours,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,8 @@ def _init_db(path: str) -> None:
                 value NUMERIC,
                 state TEXT,
                 attributes TEXT,
+                min_price TEXT,
+                token TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
@@ -59,14 +61,23 @@ def _init_db(path: str) -> None:
         conn.close()
 
 
-def _insert_resource(path: str, resource_id: str, state: str, attrs: dict) -> None:
+def _insert_resource(
+    path: str,
+    resource_id: str,
+    state: str,
+    attrs: dict,
+    *,
+    min_price: str | None = None,
+    token: str | None = None,
+) -> None:
     conn = sqlite3.connect(path)
     try:
         conn.execute(
             """INSERT INTO resources
-               (resource_id, resource_type, resource_subtype, unit, value, state, attributes)
-               VALUES (?, 'compute.gpu', 'rtx4090', 'count', 1, ?, ?)""",
-            (resource_id, state, json.dumps(attrs)),
+               (resource_id, resource_type, resource_subtype, unit, value, state, attributes,
+                min_price, token)
+               VALUES (?, 'compute.gpu', 'rtx4090', 'count', 1, ?, ?, ?, ?)""",
+            (resource_id, state, json.dumps(attrs), min_price, token),
         )
         conn.commit()
     finally:
@@ -155,10 +166,11 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        demand={"token": "MOCK", "amount": "100"},
         duration_hours=1,
         wallet_address="",
         private_key=None,
+        default_min_price="100",
+        default_token="MOCK",
         skip_ids={"compute-001"},
     )
 
@@ -170,6 +182,8 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     # The publish call carries the explicit resource_id so future `--watch`
     # cycles can tell which resource a given order covers.
     assert calls[0]["offer"]["resource_id"] == "compute-002"
+    # And demand was assembled from the (default) pricing, not a flag.
+    assert calls[0]["demand"] == {"token": "MOCK", "amount": "100"}
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
@@ -188,10 +202,11 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        demand={"token": "MOCK", "amount": "100"},
         duration_hours=1,
         wallet_address="",
         private_key=None,
+        default_min_price="100",
+        default_token="MOCK",
         skip_ids=None,
     )
     assert len(published) == 1
@@ -210,6 +225,87 @@ def test_open_order_ids_returns_only_open(tmp_path):
     assert set(_open_order_ids(db)) == {"o1", "o3"}
 
 
+def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
+    """Row-level min_price/token win over the [seller.pricing] defaults."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-cheap", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        min_price="40", token="USDC",
+    )
+    _insert_resource(
+        db, "compute-default", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+    )
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, demand, *a, **k: (
+            calls.append({"offer": offer, "demand": demand})
+            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
+        ),
+    )
+
+    published, failed, _ = _publish_round(
+        db_path=db,
+        base_url="http://agent",
+        duration_hours=1,
+        wallet_address="",
+        private_key=None,
+        default_min_price="100",
+        default_token="MOCK",
+    )
+
+    by_rid = {c["offer"]["resource_id"]: c["demand"] for c in calls}
+    assert by_rid["compute-cheap"] == {"token": "USDC", "amount": "40"}
+    assert by_rid["compute-default"] == {"token": "MOCK", "amount": "100"}
+    assert len(published) == 2
+    assert not failed
+
+
+def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
+    """Row has no min_price and no default → reported as failed, skipping
+    publish entirely. No HTTP call for that resource."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-priced", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        min_price="50", token="MOCK",
+    )
+    _insert_resource(
+        db, "compute-noprice", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+    )
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, demand, *a, **k: (
+            calls.append({"offer": offer, "demand": demand})
+            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
+        ),
+    )
+
+    published, failed, _ = _publish_round(
+        db_path=db,
+        base_url="http://agent",
+        duration_hours=1,
+        wallet_address="",
+        private_key=None,
+        default_min_price=None,  # no fallback
+        default_token="MOCK",
+    )
+
+    assert [c["offer"]["resource_id"] for c in calls] == ["compute-priced"]
+    assert len(published) == 1
+    assert len(failed) == 1
+    assert failed[0][0]["resource_id"] == "compute-noprice"
+    assert "min_price" in failed[0][1]
+
+
 def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
     """Only `state='available'` resources get offered."""
     db = str(tmp_path / "agent.db")
@@ -226,9 +322,10 @@ def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        demand={"token": "MOCK", "amount": "100"},
         duration_hours=1,
         wallet_address="",
         private_key=None,
+        default_min_price="100",
+        default_token="MOCK",
     )
     assert not published and not failed and not skipped

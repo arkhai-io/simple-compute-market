@@ -20,6 +20,8 @@ CORE_COLUMNS = {
     "unit",
     "value",
     "state",
+    "min_price",
+    "token",
 }
 
 ATTRIBUTE_PREFIX = "attribute."
@@ -108,6 +110,8 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
     unit_raw = _clean_cell(row.get("unit"))
     value_raw = _clean_cell(row.get("value"))
     state_raw = _clean_cell(row.get("state"))
+    min_price_raw = _clean_cell(row.get("min_price"))
+    token_raw = _clean_cell(row.get("token"))
 
     value: int | float | None = None
     if value_raw:
@@ -135,6 +139,8 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "value": value,
         "state": state_raw or None,
         "attributes": attributes or None,
+        "min_price": min_price_raw or None,
+        "token": token_raw or None,
     }
 
 
@@ -194,6 +200,8 @@ async def upsert_resources_from_csv(
                         value=db_resource.get("value"),
                         state=db_resource.get("state"),
                         attributes=db_resource.get("attributes"),
+                        min_price=db_resource.get("min_price"),
+                        token=db_resource.get("token"),
                     )
                 else:
                     row_result.warnings.append("Dry-run mode: row validated but not persisted.")

@@ -170,6 +170,11 @@ class Config:
     negotiation_policy_mode: str
     arkhai_negotiator_seller_model_path: str
     arkhai_negotiator_buyer_model_path: str
+    # Pricing defaults — fallback for resources whose CSV row leaves
+    # min_price / token blank. None means "no default; rows must set it
+    # or they're skipped at publish time."
+    default_min_price: str | None
+    default_token: str
     # Admin API key — protects /admin/* routes and admin-only resource actions.
     # None means unprotected (local dev).  Set via [seller].admin_api_key in
     # config.toml, or injected via the Helm provisioning-secrets profile.
@@ -350,6 +355,11 @@ def load_config() -> Config:
             "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
         )),
         admin_api_key=_resolve("seller.admin_api_key", None) or None,
+
+        # Pricing defaults — applied to resources whose CSV row leaves
+        # min_price / token blank.
+        default_min_price=_resolve("seller.pricing.default_min_price", None) or None,
+        default_token=str(_resolve("seller.pricing.default_token", "MOCK")),
     )
 
 

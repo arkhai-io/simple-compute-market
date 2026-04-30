@@ -297,7 +297,11 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # Resources table (local source of truth across all resource types)
+            # Resources table (local source of truth across all resource types).
+            # min_price/token are per-offering: each row carries the price the
+            # operator wants per published listing for that resource. NULLs fall
+            # back to [seller.pricing] defaults at publish time. Duration is
+            # buyer-driven and lives on the published listing, not the resource.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS resources (
@@ -309,11 +313,24 @@ class SQLiteClient:
                   value NUMERIC,
                   state TEXT,
                   attributes TEXT,
+                  min_price TEXT,
+                  token TEXT,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
                 """
             )
+            # Idempotent migration for existing databases that pre-date the
+            # pricing columns. ALTER TABLE ADD COLUMN raises OperationalError
+            # if the column already exists.
+            for col_ddl in (
+                "ALTER TABLE resources ADD COLUMN min_price TEXT",
+                "ALTER TABLE resources ADD COLUMN token TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
             # Keep resources.updated_at fresh whenever rows are updated.
             cur.execute(
                 """
@@ -540,6 +557,8 @@ class SQLiteClient:
         value: int | float | None = None,
         state: str | None = None,
         attributes: dict[str, Any] | None = None,
+        min_price: str | None = None,
+        token: str | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row."""
         def _save() -> None:
@@ -550,9 +569,10 @@ class SQLiteClient:
                 cur.execute(
                     """
                     INSERT INTO resources(
-                      resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                      resource_id, resource_type, resource_subtype, unit, value, state, attributes,
+                      min_price, token, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -560,6 +580,8 @@ class SQLiteClient:
                       value=excluded.value,
                       state=excluded.state,
                       attributes=excluded.attributes,
+                      min_price=excluded.min_price,
+                      token=excluded.token,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -570,6 +592,8 @@ class SQLiteClient:
                         value,
                         state,
                         json.dumps(attributes) if attributes is not None else None,
+                        min_price,
+                        token,
                         now_iso,
                         now_iso,
                     ),
@@ -605,7 +629,8 @@ class SQLiteClient:
                 where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 cur.execute(
                     f"""
-                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
+                           min_price, token, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -622,6 +647,8 @@ class SQLiteClient:
                     row_value,
                     row_state,
                     row_attributes,
+                    row_min_price,
+                    row_token,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -642,6 +669,8 @@ class SQLiteClient:
                             "value": row_value,
                             "state": row_state,
                             "attributes": attrs,
+                            "min_price": row_min_price,
+                            "token": row_token,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -660,7 +689,8 @@ class SQLiteClient:
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes, created_at, updated_at
+                    SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
+                           min_price, token, created_at, updated_at
                     FROM resources
                     WHERE resource_id = ?
                     LIMIT 1
@@ -679,6 +709,8 @@ class SQLiteClient:
                     row_value,
                     row_state,
                     row_attributes,
+                    row_min_price,
+                    row_token,
                     row_created_at,
                     row_updated_at,
                 ) = row
@@ -699,6 +731,8 @@ class SQLiteClient:
                     "value": row_value,
                     "state": row_state,
                     "attributes": attrs,
+                    "min_price": row_min_price,
+                    "token": row_token,
                     "created_at": row_created_at,
                     "updated_at": row_updated_at,
                 }
