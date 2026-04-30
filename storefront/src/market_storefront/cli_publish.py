@@ -1,4 +1,4 @@
-"""Top-level `market provide` command.
+"""Top-level `market-storefront publish` command.
 
 The seller's counterpart to `market buy`. Wraps the seller's start-of-day
 flow behind a single command:
@@ -270,9 +270,9 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
 
 
 def register(app: typer.Typer) -> None:
-    """Register the top-level `market-storefront provide` command."""
+    """Register the top-level `market-storefront publish` command."""
 
-    @app.command("provide")
+    @app.command("publish")
     def provide(
         inventory: Optional[str] = typer.Option(
             None, "--inventory", "-i",
@@ -341,7 +341,7 @@ def register(app: typer.Typer) -> None:
                 Panel(
                     f"[bold]Aborting {len(order_ids)} open order(s)[/bold]\n"
                     f"Agent: {base_url}",
-                    title="market provide --abort-all",
+                    title="market-storefront publish --abort-all",
                     border_style="yellow",
                 )
             )

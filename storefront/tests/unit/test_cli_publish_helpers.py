@@ -1,4 +1,4 @@
-"""Unit tests for `market provide` DB helpers.
+"""Unit tests for `market-storefront publish` DB helpers.
 
 The `--watch` mode's correctness hinges on these two functions:
 
@@ -19,7 +19,7 @@ import sqlite3
 
 import pytest
 
-from market_storefront.cli_provide import (
+from market_storefront.cli_publish import (
     _open_order_ids,
     _open_order_resource_ids,
     _publish_round,
@@ -150,7 +150,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
         rid = offer["resource_id"]
         return {"status": "created", "order_id": f"order-for-{rid}"}
 
-    monkeypatch.setattr("market_storefront.cli_provide._publish_offer", fake_publish)
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
 
     published, failed, skipped = _publish_round(
         db_path=db,
@@ -181,7 +181,7 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "market_storefront.cli_provide._publish_offer",
+        "market_storefront.cli_publish._publish_offer",
         lambda *a, **k: {"status": "created", "order_id": "o1"},
     )
 
@@ -222,7 +222,7 @@ def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
     def fake_publish(*a, **k):
         pytest.fail("Should not publish a leased resource")
 
-    monkeypatch.setattr("market_storefront.cli_provide._publish_offer", fake_publish)
+    monkeypatch.setattr("market_storefront.cli_publish._publish_offer", fake_publish)
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",

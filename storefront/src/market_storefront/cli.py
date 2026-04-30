@@ -7,9 +7,9 @@ ship as separate wheels; install both if you both buy and sell.
 Subcommands:
     register     Register agent on-chain (one-shot, before `serve`).
     serve        Run the storefront HTTP server in-process.
-    provide      Publish offers from the agent DB. Mirror of
+    publish      Post listings from the agent DB. Mirror of
                  `market buy` on the buyer side.
-    escrow       Seller-side escrow lifecycle (claim, refund).
+    escrow       Seller-side escrow lifecycle (claim, refund, show).
     portfolio    Manage local resource portfolio data.
     network      Join the operator's ZeroTier network and list peers.
     config       Inspect or edit the user config.toml.
@@ -25,7 +25,7 @@ import typer
 
 from .cli_logs import logs_app
 from .cli_portfolio import portfolio_app
-from .cli_provide import register as register_provide_command
+from .cli_publish import register as register_publish_command
 from .groups.config import config_app
 from .groups.escrow import escrow_app
 from .groups.network import network_app
@@ -134,7 +134,7 @@ app.add_typer(network_app, name="network", help="Join the operator's ZeroTier ne
 app.add_typer(portfolio_app, name="portfolio", help="Manage local resource portfolio data.")
 app.add_typer(config_app, name="config", help="Inspect or edit the user config.toml (path/show/get/set/init-user).")
 app.add_typer(escrow_app, name="escrow", help="Seller-side escrow lifecycle (claim, refund).")
-register_provide_command(app)
+register_publish_command(app)
 
 
 if __name__ == "__main__":
