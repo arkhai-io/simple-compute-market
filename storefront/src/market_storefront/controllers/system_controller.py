@@ -127,7 +127,21 @@ class SystemController:
         # swallows errors silently into WARNING logs which aren't visible to callers.
         import importlib
         import pkgutil
+        import sys
+        import os
         from market_policy.registry import CALLABLE_REGISTRY
+
+        # domain/ lives at /app/domain in the container (WORKDIR=/app).
+        # Console-script entry points don't add CWD to sys.path, so we
+        # add the app root explicitly if it's missing. PYTHONPATH="/app" in
+        # the Dockerfile is the primary fix; this is defence-in-depth.
+        _app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Walk up from controllers/ to find the repo root containing domain/
+        for _candidate in ["/app", os.getcwd(), os.path.dirname(_app_root)]:
+            if os.path.isdir(os.path.join(_candidate, "domain")) and _candidate not in sys.path:
+                sys.path.insert(0, _candidate)
+                logger.info("[POLICY SEED] Added %s to sys.path for domain import", _candidate)
+                break
 
         import_errors: list[dict] = []
         pkg_name = "domain.compute.agent.app.policy"
@@ -263,8 +277,9 @@ class SystemController:
 
         # Parse resources through the same path as the real endpoint
         from market_storefront.schema.pydantic_models import (
-            OrderCreateEvent, EventType, ComputeResource, TokenResource,
+            ListingCreatedEvent, EventType, ComputeResource, TokenResource,
         )
+        from service.schemas import DecisionContext
         from market_storefront.utils.action_executor import parse_resource_from_dict
 
         try:
@@ -277,7 +292,7 @@ class SystemController:
             )
 
         import uuid as _uuid
-        synthetic_event = OrderCreateEvent(
+        synthetic_event = ListingCreatedEvent(
             event_id=f"dry_run_{_uuid.uuid4().hex[:8]}",
             source="dry_run",
             offer=offer_resource,
@@ -296,7 +311,7 @@ class SystemController:
         from market_policy.registry import CALLABLE_REGISTRY
         from market_policy.store import PolicyStore
         from market_storefront.utils.config import CONFIG
-        from market_storefront.schema.pydantic_models import DecisionContext
+        from service.schemas import DecisionContext
 
         agent_id = CONFIG.agent_id or "agent"
         policy_store = PolicyStore(self._sqlite_client)
@@ -337,7 +352,7 @@ class SystemController:
             agent_id=agent_id,
             event=synthetic_event,
             market_state={},
-            resource_portfolio=None,
+            available_resources={},
             past_experiences=[],
             negotiation_history=[],
         )

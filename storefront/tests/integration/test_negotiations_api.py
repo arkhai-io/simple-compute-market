@@ -118,6 +118,16 @@ async def _seed_thread(
 
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+    # Initialize the NegotiationThreadStore singleton so that advance()
+    # can call NegotiationThreadTransaction without raising on first call.
+    import market_policy.negotiation_thread as _nt_module
+    from market_policy.identity import Identity
+    _nt_module._thread_store = None  # clear any stale singleton from a previous test
+    _nt_module.get_thread_store(
+        sqlite_client=db,
+        identity=Identity(agent_url="http://test-seller:8001"),
+    )
+
     ctrl = NegotiationsController(sqlite_client=db)
     app = Starlette(routes=ctrl.routes())
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
@@ -132,6 +142,14 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
+    import market_policy.negotiation_thread as _nt_module
+    from market_policy.identity import Identity
+    _nt_module._thread_store = None
+    _nt_module.get_thread_store(
+        sqlite_client=db,
+        identity=Identity(agent_url="http://test-seller:8001"),
+    )
+
     ctrl = NegotiationsController(sqlite_client=db)
     app = Starlette(routes=ctrl.routes())
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)

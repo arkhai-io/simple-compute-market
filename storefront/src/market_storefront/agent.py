@@ -871,7 +871,7 @@ async def _run_create_order_flow(request: Request) -> dict:
     event_id = f"order_create_{uuid.uuid4()}"
     # Read paused flag from request body — if true, the MAKE_OFFER handler will
     # write the order to local SQLite with paused=1 and skip the registry publish.
-    # The operator resumes it explicitly via POST /api/v1/orders/{id}/resume.
+    # The operator resumes it explicitly via POST /api/v1/listings/{listing_id}/resume.
     create_paused = bool(order_data.get("paused", False))
     order_create_event = ListingCreatedEvent(
         event_id=event_id,

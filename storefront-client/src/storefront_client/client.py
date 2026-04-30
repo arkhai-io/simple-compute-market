@@ -714,7 +714,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /listings/create
 
         Pass ``paused=True`` to create the order in local SQLite without
-        publishing to the registry.  Call ``resume_order`` to publish.
+        publishing to the registry.  Call ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {"offer": offer, "demand": demand, "duration_hours": duration_hours, "paused": paused}

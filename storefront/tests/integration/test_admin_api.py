@@ -196,3 +196,112 @@ class TestAdminStatus:
         # Paused order is excluded from open_orders count
         assert result.open_listings == 0
         assert result.paused_listings == 1
+
+
+# ---------------------------------------------------------------------------
+# Policy seed, status, and evaluate
+# ---------------------------------------------------------------------------
+
+class TestPolicySeed:
+    async def test_seed_returns_structured_response(self, client):
+        c, _, _ = client
+        result = await c.policy_seed()
+        # Response must have these keys regardless of whether callables loaded
+        assert "callable_registry_count" in result
+        assert "callables" in result
+        assert "seeded_policies" in result
+        assert "import_errors" in result
+        assert isinstance(result["callables"], list)
+        assert isinstance(result["import_errors"], list)
+
+    async def test_seed_requires_admin_key(self, client_no_key):
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.policy_seed()
+        assert "403" in str(exc_info.value)
+
+    async def test_seed_seeds_order_create_policy(self, client):
+        c, _, _ = client
+        result = await c.policy_seed()
+        seeded = result.get("seeded_policies", [])
+        assert any("order_create" in p for p in seeded), (
+            f"order_create policy not seeded. Got: {seeded}"
+        )
+
+    async def test_seed_idempotent(self, client):
+        """Calling seed twice should not fail or duplicate policies."""
+        c, _, _ = client
+        r1 = await c.policy_seed()
+        r2 = await c.policy_seed()
+        assert r1["seeded_policies"] == r2["seeded_policies"]
+
+
+class TestPolicyStatus:
+    async def test_policy_status_returns_structured_response(self, client):
+        c, _, _ = client
+        # Seed first so there is something to read
+        await c.policy_seed()
+        result = await c.policy_status()
+        assert "callable_count" in result
+        assert "callable_registry" in result
+        assert "seeded_policies" in result
+        assert isinstance(result["seeded_policies"], list)
+
+    async def test_policy_status_lists_seeded_policies(self, client):
+        c, _, _ = client
+        await c.policy_seed()
+        result = await c.policy_status()
+        names = [p["policy_name"] for p in result["seeded_policies"]]
+        assert any("order_create" in n for n in names), (
+            f"order_create policy not in status. Got: {names}"
+        )
+
+    async def test_policy_status_includes_resolvable_flag(self, client):
+        c, _, _ = client
+        await c.policy_seed()
+        result = await c.policy_status()
+        for policy in result["seeded_policies"]:
+            assert "components_resolvable" in policy, (
+                f"Missing components_resolvable in {policy}"
+            )
+
+
+class TestPolicyEvaluate:
+    async def test_evaluate_returns_structured_response(self, client):
+        c, _, _ = client
+        await c.policy_seed()
+        result = await c.policy_evaluate(
+            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "California, US"},
+            demand={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 10000},
+        )
+        assert "action" in result
+        assert "policy_used" in result
+        assert "resolvable" in result
+        assert "reason" in result
+
+    async def test_evaluate_no_policies_returns_no_action(self, client):
+        """Fresh DB with no seeded policies → no_action with clear reason."""
+        c, _, _ = client
+        # Don't seed — fresh DB has no policies
+        result = await c.policy_evaluate(
+            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "California, US"},
+            demand={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 10000},
+        )
+        # With no policies seeded, must return no_action and a reason
+        assert result["action"] == "no_action"
+        assert result["reason"] is not None
+
+    async def test_evaluate_rejects_bad_event_type(self, client):
+        c, _, _ = client
+        resp = await c._client.post(
+            "/api/v1/system/policy/evaluate",
+            json={"event_type": "totally_unknown", "offer": {}, "demand": {}},
+        )
+        assert resp.status_code == 400
+
+    async def test_evaluate_rejects_missing_offer(self, client):
+        c, _, _ = client
+        resp = await c._client.post(
+            "/api/v1/system/policy/evaluate",
+            json={"event_type": "order_create", "demand": {}},
+        )
+        assert resp.status_code == 400

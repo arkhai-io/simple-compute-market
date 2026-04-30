@@ -7,7 +7,7 @@ Stage map
 01   Seller creates order with paused=True (local only, not in registry)
 02   Storefront health ok; order visible locally with paused=True
 03   Registry does NOT yet contain the order (publish was skipped)
-04   POST /api/v1/orders/{id}/resume → publishes to registry
+04   POST /api/v1/listings/{listing_id}/resume → publishes to registry
 05   Registry now contains the order
 06   Admin pause blocks /negotiate/new (503)
 07   Admin resume re-enables negotiations
@@ -159,7 +159,7 @@ class TestStage01_CreateOrderPaused:
             f"Response: {resp}\n"
             f"Ensure stage 00a (policy seed) passed."
         )
-        deal_state.seller_order_id = order_id
+        deal_state.seller_listing_id = order_id
         log.info("[01] Order %s created (paused, not yet in registry)", order_id)
 
 
@@ -171,19 +171,19 @@ class TestStage02_OrderLocallyPaused:
     def test_02_order_visible_locally_and_paused(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/orders/{id} shows the order as paused=True locally."""
-        require_state(deal_state, "seller_order_id")
+        """GET /api/v1/listings/{listing_id} shows the order as paused=True locally."""
+        require_state(deal_state, "seller_listing_id")
 
         health = storefront_admin_client.get_health()
         assert health.status == "ok", f"Storefront health degraded: {health}"
 
-        order = storefront_admin_client.get_order(deal_state.seller_order_id)
+        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert order.status == "open", f"Expected status=open, got {order.status!r}"
         assert order.paused is True, (
             f"Expected paused=True after paused create, got paused={order.paused}"
         )
         log.info("[02] Order %s visible locally: status=%s paused=%s",
-                 deal_state.seller_order_id, order.status, order.paused)
+                 deal_state.seller_listing_id, order.status, order.paused)
 
 
 # ---------------------------------------------------------------------------
@@ -195,16 +195,16 @@ class TestStage03_RegistryDoesNotSeeOrder:
         self, registry_client, deal_state: DealState
     ):
         """The registry has no record of this order_id — publish was skipped."""
-        require_state(deal_state, "seller_order_id")
+        require_state(deal_state, "seller_listing_id")
 
         result = registry_client.list_orders(status="open", limit=200)
         ids = {o.order_id for o in result.orders}
-        assert deal_state.seller_order_id not in ids, (
-            f"Order {deal_state.seller_order_id} found in registry before resume. "
+        assert deal_state.seller_listing_id not in ids, (
+            f"Order {deal_state.seller_listing_id} found in registry before resume. "
             f"The paused=True path did not suppress the publish."
         )
         log.info("[03] Confirmed order %s absent from registry (as expected)",
-                 deal_state.seller_order_id)
+                 deal_state.seller_listing_id)
 
 
 # ---------------------------------------------------------------------------
@@ -215,19 +215,19 @@ class TestStage04_ResumePublishesToRegistry:
     def test_04_resume_order_publishes_to_registry(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /api/v1/orders/{id}/resume clears paused flag and publishes."""
-        require_state(deal_state, "seller_order_id")
+        """POST /api/v1/listings/{listing_id}/resume clears paused flag and publishes."""
+        require_state(deal_state, "seller_listing_id")
 
-        result = storefront_admin_client.resume_order(deal_state.seller_order_id)
+        result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
         assert result.paused is False, f"Expected paused=False after resume, got: {result}"
 
         # Confirm locally
-        order = storefront_admin_client.get_order(deal_state.seller_order_id)
+        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert order.paused is False, f"Local order still paused after resume: {order}"
 
         deal_state.resume_confirmed = True
         log.info("[04] Order %s resumed; registry_status=%s",
-                 deal_state.seller_order_id, getattr(result, "registry_status", "?"))
+                 deal_state.seller_listing_id, getattr(result, "registry_status", "?"))
 
 
 # ---------------------------------------------------------------------------
@@ -239,22 +239,22 @@ class TestStage05_RegistrySeesOrder:
         self, registry_client, deal_state: DealState
     ):
         """After resume, the order is visible in the registry."""
-        require_state(deal_state, "seller_order_id", "resume_confirmed")
+        require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
         deadline = time.monotonic() + 15
         found = False
         while time.monotonic() < deadline:
             result = registry_client.list_orders(status="open", limit=200)
-            if deal_state.seller_order_id in {o.order_id for o in result.orders}:
+            if deal_state.seller_listing_id in {o.order_id for o in result.orders}:
                 found = True
                 break
             time.sleep(1)
 
         assert found, (
-            f"Order {deal_state.seller_order_id} not visible in registry 15s after resume."
+            f"Order {deal_state.seller_listing_id} not visible in registry 15s after resume."
         )
         deal_state.registry_order_confirmed = True
-        log.info("[05] Order %s confirmed in registry", deal_state.seller_order_id)
+        log.info("[05] Order %s confirmed in registry", deal_state.seller_listing_id)
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +266,7 @@ class TestStage06_AdminPauseBlocks:
         self, storefront_admin_client, storefront_client, deal_state: DealState
     ):
         """POST /admin/pause → /negotiate/new returns 503."""
-        require_state(deal_state, "seller_order_id")
+        require_state(deal_state, "seller_listing_id")
 
         storefront_admin_client.admin_pause()
 
@@ -274,12 +274,12 @@ class TestStage06_AdminPauseBlocks:
         ts = str(int(time.time()))
         sig = _sign_eip191(
             str(settings.BUYER.PRIVATE_KEY),
-            f"negotiate_new:{deal_state.seller_order_id}:{ts}",
+            f"negotiate_new:{deal_state.seller_listing_id}:{ts}",
         )
         resp = storefront_client._client.post(
             "/negotiate/new",
             json={
-                "seller_order_id": deal_state.seller_order_id,
+                "seller_listing_id": deal_state.seller_listing_id,
                 "buyer_address": "0x0000000000000000000000000000000000000001",
                 "initial_price": BUYER_INITIAL_PRICE,
             },
@@ -318,18 +318,18 @@ class TestStage08_NegotiationStarts:
         self, storefront_client, buyer_config, deal_state: DealState
     ):
         """POST /negotiate/new — buyer opens with initial_price."""
-        require_state(deal_state, "seller_order_id", "resume_confirmed")
+        require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
         from storefront_client.client import _sign_eip191
         ts = str(int(time.time()))
         sig = _sign_eip191(
             buyer_config["private_key"],
-            f"negotiate_new:{deal_state.seller_order_id}:{ts}",
+            f"negotiate_new:{deal_state.seller_listing_id}:{ts}",
         )
         resp = storefront_client._client.post(
             "/negotiate/new",
             json={
-                "seller_order_id": deal_state.seller_order_id,
+                "seller_listing_id": deal_state.seller_listing_id,
                 "buyer_address": buyer_config["wallet_address"],
                 "initial_price": BUYER_INITIAL_PRICE,
             },
@@ -352,14 +352,14 @@ class TestStage09_NegotiationVisible:
     def test_09_negotiation_visible_on_storefront_api(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/orders/{id}/negotiations lists the active thread."""
-        require_state(deal_state, "seller_order_id", "negotiation_id")
+        """GET /api/v1/listings/{listing_id}/negotiations lists the active thread."""
+        require_state(deal_state, "seller_listing_id", "negotiation_id")
 
-        result = storefront_admin_client.list_negotiations(deal_state.seller_order_id)
+        result = storefront_admin_client.list_negotiations(deal_state.seller_listing_id)
         ids = {n.negotiation_id for n in result.negotiations}
         assert deal_state.negotiation_id in ids, (
             f"Negotiation {deal_state.negotiation_id} not in "
-            f"GET /orders/{deal_state.seller_order_id}/negotiations. Found: {ids}"
+            f"GET /orders/{deal_state.seller_listing_id}/negotiations. Found: {ids}"
         )
         log.info("[09] Negotiation %s visible on storefront API", deal_state.negotiation_id)
 
@@ -369,11 +369,11 @@ class TestStage10_NegotiationForceAccepted:
         self, storefront_admin_client, deal_state: DealState
     ):
         """Admin force-accepts at agreed_price to converge without round-trips."""
-        require_state(deal_state, "seller_order_id", "negotiation_id")
+        require_state(deal_state, "seller_listing_id", "negotiation_id")
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
         result = storefront_admin_client.force_accept_negotiation(
-            deal_state.seller_order_id,
+            deal_state.seller_listing_id,
             deal_state.negotiation_id,
             price=agreed,
         )
@@ -389,10 +389,10 @@ class TestStage11_NegotiationTerminal:
         self, storefront_admin_client, deal_state: DealState
     ):
         """GET .../negotiations/{neg_id} shows terminal_state=success."""
-        require_state(deal_state, "seller_order_id", "negotiation_id", "agreed_price")
+        require_state(deal_state, "seller_listing_id", "negotiation_id", "agreed_price")
 
         detail = storefront_admin_client.get_negotiation(
-            deal_state.seller_order_id, deal_state.negotiation_id
+            deal_state.seller_listing_id, deal_state.negotiation_id
         )
         assert detail.terminal_state == "success", (
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
@@ -548,13 +548,13 @@ class TestStage18_SellerOrderAccepted:
     def test_18_seller_order_status_accepted(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/orders/{id} shows status=accepted after settlement."""
-        require_state(deal_state, "seller_order_id", "settlement_submitted")
+        """GET /api/v1/listings/{listing_id} shows status=accepted after settlement."""
+        require_state(deal_state, "seller_listing_id", "settlement_submitted")
 
-        order = storefront_admin_client.get_order(deal_state.seller_order_id)
+        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert order.status in ("accepted", "closed"), (
             f"Expected accepted/closed, got {order.status!r}"
         )
         deal_state.seller_order_final_status = order.status
         log.info("[18] Seller order %s status=%s",
-                 deal_state.seller_order_id, order.status)
+                 deal_state.seller_listing_id, order.status)

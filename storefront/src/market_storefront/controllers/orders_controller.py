@@ -66,7 +66,7 @@ class OrdersController:
             paused_filter = paused_raw.lower() in ("true", "1", "yes")
         limit, offset = self._parse_pagination(request)
 
-        orders = await self._sqlite_client.list_orders(
+        orders = await self._sqlite_client.list_listings(
             status=status_filter,
             paused=paused_filter,
             limit=limit,
@@ -82,7 +82,7 @@ class OrdersController:
     async def get_order(self, request: Request) -> JSONResponse:
         """``GET /api/v1/orders/{order_id}``"""
         order_id = request.path_params["order_id"]
-        order = await self._sqlite_client.load_order(order_id=order_id)
+        order = await self._sqlite_client.load_listing(listing_id=order_id)
         if not order:
             return JSONResponse(
                 {"error": "Not found", "order_id": order_id},
@@ -100,13 +100,13 @@ class OrdersController:
         this order will receive 503 while it is paused.
         """
         order_id = request.path_params["order_id"]
-        order = await self._sqlite_client.load_order(order_id=order_id)
+        order = await self._sqlite_client.load_listing(listing_id=order_id)
         if not order:
             return JSONResponse(
                 {"error": "Not found", "order_id": order_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(order_id=order_id, paused=True)
+        await self._sqlite_client.set_listing_paused(listing_id=order_id, paused=True)
         return JSONResponse({
             "order_id": order_id,
             "paused": True,
@@ -121,13 +121,13 @@ class OrdersController:
         or when it was previously published and temporarily paused.
         """
         order_id = request.path_params["order_id"]
-        order = await self._sqlite_client.load_order(order_id=order_id)
+        order = await self._sqlite_client.load_listing(listing_id=order_id)
         if not order:
             return JSONResponse(
                 {"error": "Not found", "order_id": order_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(order_id=order_id, paused=False)
+        await self._sqlite_client.set_listing_paused(listing_id=order_id, paused=False)
 
         # Publish to registry — idempotent if already published; required if
         # this is the first resume after a paused-at-creation order.

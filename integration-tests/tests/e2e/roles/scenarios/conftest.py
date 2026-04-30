@@ -43,8 +43,8 @@ class DealState:
     _policies_seeded: bool = False
     _policy_evaluated: bool = False
     # Stage 1 — seller order
-    seller_order_id: Optional[str] = None
-    _seller_url: str = ""  # order_maker URL from the registry order
+    seller_listing_id: Optional[str] = None
+    _seller_url: str = ""
     # Stage 2 — registry visibility
     registry_order_confirmed: bool = False
     # Stage 3-4 — pause/resume

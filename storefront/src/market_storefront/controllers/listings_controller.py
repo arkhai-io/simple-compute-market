@@ -109,7 +109,12 @@ class ListingsController:
         })
 
     async def resume_listing(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/listings/{listing_id}/resume``"""
+        """``POST /api/v1/listings/{listing_id}/resume``
+
+        Clears the paused flag then publishes the listing to the registry.
+        Safe to call when the listing was created with ``paused=true`` and
+        has never been published, or when it was previously paused.
+        """
         listing_id = request.path_params["listing_id"]
         row = await self._sqlite_client.load_listing(listing_id=listing_id)
         if not row:
@@ -118,10 +123,18 @@ class ListingsController:
                 status_code=404,
             )
         await self._sqlite_client.set_listing_paused(listing_id=listing_id, paused=False)
+
+        # Publish to registry — idempotent if already published; required if
+        # this is the first resume after a paused-at-creation listing.
+        from market_storefront.utils.action_executor import publish_order_to_registry
+        publish_result = await publish_order_to_registry(row)
+        registry_status = publish_result.get("status", "unknown")
+
         return JSONResponse({
             "listing_id": listing_id,
             "paused": False,
-            "message": "Listing resumed.",
+            "registry_status": registry_status,
+            "message": f"Listing resumed and {registry_status} to registry.",
         })
 
     # ------------------------------------------------------------------
