@@ -242,6 +242,21 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_at TEXT")
             except sqlite3.OperationalError:
                 pass
+            existing_neg_cols = {
+                r[1] for r in cur.execute("PRAGMA table_info(negotiation_threads)")
+            }
+            if "agreed_duration_hours" in existing_neg_cols:
+                cur.execute(
+                    "UPDATE negotiation_threads SET agreed_duration_seconds = "
+                    "CAST(agreed_duration_hours * 3600 AS INTEGER) "
+                    "WHERE agreed_duration_seconds IS NULL AND agreed_duration_hours IS NOT NULL"
+                )
+                try:
+                    cur.execute(
+                        "ALTER TABLE negotiation_threads DROP COLUMN agreed_duration_hours"
+                    )
+                except sqlite3.OperationalError:
+                    pass
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_local_state (
@@ -310,6 +325,23 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            # Migrate: add max_duration_seconds; backfill from legacy
+            # duration_hours if it's still around. NULL = unlimited.
+            try:
+                cur.execute("ALTER TABLE listings ADD COLUMN max_duration_seconds INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            existing_cols = {r[1] for r in cur.execute("PRAGMA table_info(listings)")}
+            if "duration_hours" in existing_cols:
+                cur.execute(
+                    "UPDATE listings SET max_duration_seconds = "
+                    "CAST(duration_hours * 3600 AS INTEGER) "
+                    "WHERE max_duration_seconds IS NULL AND duration_hours IS NOT NULL"
+                )
+                try:
+                    cur.execute("ALTER TABLE listings DROP COLUMN duration_hours")
+                except sqlite3.OperationalError:
+                    pass
             # Resources table (local source of truth across all resource types).
             # min_price/token/max_duration_seconds are per-offering: each row
             # carries the price + max-duration ceiling the operator wants per
