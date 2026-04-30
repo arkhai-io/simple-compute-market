@@ -293,29 +293,22 @@ def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
         return None
 
 
-def order_to_dict(order: Listing) -> dict:
-    """Convert Listing model to API response dict (wire shape).
-
-    DB columns still use the legacy ``order_*`` / ``*_attestation``
-    names (see Slice 4 plan). This function performs the wire-level
-    translation: ``order_id`` → ``listing_id``, ``order_maker`` →
-    ``seller``, ``order_taker`` → ``buyer``, ``maker_attestation`` →
-    ``seller_attestation``, ``taker_attestation`` → ``buyer_attestation``.
-    """
+def order_to_dict(listing: Listing) -> dict:
+    """Convert a Listing ORM row to its wire-shape dict."""
     return {
-        "listing_id": order.order_id,
-        "agent_id": order.agent_id,
-        "seller": order.order_maker,
-        "buyer": order.order_taker,
-        "offer_resource": order.offer_resource or {},
-        "demand_resource": order.demand_resource or {},
-        "duration_hours": order.duration_hours,
-        "seller_attestation": order.maker_attestation,
-        "buyer_attestation": order.taker_attestation,
-        "oracle_address": order.oracle_address,
-        "status": order.status.value,
-        "created_at": order.created_at.isoformat(),
-        "updated_at": order.updated_at.isoformat(),
+        "listing_id": listing.listing_id,
+        "agent_id": listing.agent_id,
+        "seller": listing.seller,
+        "buyer": listing.buyer,
+        "offer_resource": listing.offer_resource or {},
+        "demand_resource": listing.demand_resource or {},
+        "duration_hours": listing.duration_hours,
+        "seller_attestation": listing.seller_attestation,
+        "buyer_attestation": listing.buyer_attestation,
+        "oracle_address": listing.oracle_address,
+        "status": listing.status.value,
+        "created_at": listing.created_at.isoformat(),
+        "updated_at": listing.updated_at.isoformat(),
     }
 
 
@@ -367,28 +360,28 @@ def matches_resource_filters(
     return True
 
 
-def find_symmetric_order(db: Session, order: Listing, original_offer_resource: dict, original_demand_resource: dict) -> Optional[Listing]:
-    """Find the symmetric order for a given order.
-    
-    A symmetric order is one where:
-    - offer_resource == original_order.demand_resource
-    - demand_resource == original_order.offer_resource
-    - order_maker == original_order.order_taker (the agent accepting)
+def find_symmetric_order(db: Session, listing: Listing, original_offer_resource: dict, original_demand_resource: dict) -> Optional[Listing]:
+    """Find the symmetric listing for a given listing.
+
+    A symmetric listing is one where:
+    - offer_resource == original.demand_resource
+    - demand_resource == original.offer_resource
+    - seller == original.buyer (the agent accepting)
     """
-    if not order.order_taker:
+    if not listing.buyer:
         return None
-    
-    symmetric_orders = db.query(Listing).filter(
+
+    candidates = db.query(Listing).filter(
         and_(
-            Listing.order_id != order.order_id,
-            Listing.order_maker == order.order_taker,
+            Listing.listing_id != listing.listing_id,
+            Listing.seller == listing.buyer,
             Listing.status.in_([OrderStatusEnum.open, OrderStatusEnum.accepted]),
         )
     ).all()
-    
-    for candidate in symmetric_orders:
+
+    for candidate in candidates:
         if (resources_match(candidate.offer_resource, original_demand_resource) and
             resources_match(candidate.demand_resource, original_offer_resource)):
             return candidate
-    
+
     return None

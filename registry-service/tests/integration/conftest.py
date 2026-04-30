@@ -138,9 +138,9 @@ def taker_agent(db_session):
 def open_order(db_session, agent_no_owner):
     from src.db.models import Listing, OrderStatusEnum
     order = Listing(
-        order_id="integ-open-order-1",
+        listing_id="integ-open-order-1",
         agent_id=agent_no_owner.agent_id,
-        order_maker=agent_no_owner.token_uri,
+        seller=agent_no_owner.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
         demand_resource={"token": "USDC", "amount": 100.0},
         duration_hours=1,
@@ -156,9 +156,9 @@ def open_order(db_session, agent_no_owner):
 def authenticated_open_order(db_session, maker_agent):
     from src.db.models import Listing, OrderStatusEnum
     order = Listing(
-        order_id="integ-auth-order-1",
+        listing_id="integ-auth-order-1",
         agent_id=maker_agent.agent_id,
-        order_maker=maker_agent.token_uri,
+        seller=maker_agent.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
         demand_resource={"token": "USDC", "amount": 100.0},
         duration_hours=1,

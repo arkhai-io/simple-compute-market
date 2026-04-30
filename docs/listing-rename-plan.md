@@ -90,11 +90,26 @@ AttestationStats fields: `settled_order_count`/`maker_attestation_count`/
 columns on the legacy `order_*`/`*_attestation` names; `_listing_body_to_columns`
 flips inbound, `order_to_dict` flips outbound.
 
-**Slice 4 — DB**
-Alembic migration renaming `market_orders` → `listings` and
-`maker_attestation` → `seller_attestation`,
-`taker_attestation` → `buyer_attestation`. Both repositories'
-SQLite local DBs migrated.
+**Slice 4 — DB (registry)** ✅ committed
+Alembic migration `008_rename_orders_to_listings`: table
+`market_orders` → `listings`; columns `order_id` → `listing_id`,
+`order_maker` → `seller`, `order_taker` → `buyer`,
+`maker_attestation` → `seller_attestation`, `taker_attestation` →
+`buyer_attestation`; indexes renamed; Postgres enum
+`orderstatusenum` → `liststatusenum`. SQLAlchemy model + API code +
+tests updated to use the new column names directly. Wire-translation
+helpers (`_listing_body_to_columns`, `order_to_dict`) deleted now that
+the DB matches the wire.
+
+**Slice 4b — DB (storefront SQLite)** ⏳ deferred
+The storefront's local SQLite has the same schema rename pending.
+Has high blast radius (~2500 lines of `sqlite_client.py` + ~30
+internal callers passing kwargs like `order_id`/`order_maker`). The
+wire-translation shims added in Slice 2 (`_row_to_wire`/`_wire_in`/
+`_wire_out` in `agent.py` and `listings_controller.py`) keep the
+storefront wire on the listings vocabulary while the SQLite columns
+stay legacy. Migration block scaffolding exists; full rewrite
+deferred to a follow-up commit.
 
 **Slice 5 — Docs + helm**
 ARCHITECTURE.md, READMEs, helm values comments,

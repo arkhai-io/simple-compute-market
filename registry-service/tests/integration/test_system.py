@@ -109,9 +109,9 @@ class TestSystemStats:
     async def test_closed_order_counted(self, registry_client, db_session, agent_no_owner):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
-            order_id="stats-closed-1",
+            listing_id="stats-closed-1",
             agent_id=agent_no_owner.agent_id,
-            order_maker=agent_no_owner.token_uri,
+            seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
             duration_hours=1,
@@ -150,15 +150,15 @@ class TestAttestationStats:
     ):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
-            order_id="attest-maker-only-1",
+            listing_id="attest-maker-only-1",
             agent_id=agent_no_owner.agent_id,
-            order_maker=agent_no_owner.token_uri,
+            seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
             duration_hours=1,
             status=OrderStatusEnum.accepted,
-            maker_attestation="0xmaker_uid_abc",
-            taker_attestation=None,
+            seller_attestation="0xmaker_uid_abc",
+            buyer_attestation=None,
         ))
         db_session.commit()
 
@@ -173,15 +173,15 @@ class TestAttestationStats:
     ):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
-            order_id="attest-taker-only-1",
+            listing_id="attest-taker-only-1",
             agent_id=agent_no_owner.agent_id,
-            order_maker=agent_no_owner.token_uri,
+            seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
             duration_hours=1,
             status=OrderStatusEnum.accepted,
-            maker_attestation=None,
-            taker_attestation="0xtaker_uid_xyz",
+            seller_attestation=None,
+            buyer_attestation="0xtaker_uid_xyz",
         ))
         db_session.commit()
 
@@ -196,15 +196,15 @@ class TestAttestationStats:
     ):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
-            order_id="attest-settled-1",
+            listing_id="attest-settled-1",
             agent_id=agent_no_owner.agent_id,
-            order_maker=agent_no_owner.token_uri,
+            seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
             duration_hours=1,
             status=OrderStatusEnum.closed,
-            maker_attestation="0xmaker_uid_001",
-            taker_attestation="0xtaker_uid_001",
+            seller_attestation="0xmaker_uid_001",
+            buyer_attestation="0xtaker_uid_001",
         ))
         db_session.commit()
 
@@ -225,25 +225,25 @@ class TestAttestationStats:
 
         db_session.add_all([
             Listing(
-                order_id="mix-open",
-                agent_id=agent_id, order_maker=maker,
+                listing_id="mix-open",
+                agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.open,
-                maker_attestation=None, taker_attestation=None,
+                seller_attestation=None, buyer_attestation=None,
             ),
             Listing(
-                order_id="mix-maker-only",
-                agent_id=agent_id, order_maker=maker,
+                listing_id="mix-maker-only",
+                agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.accepted,
-                maker_attestation="0xmaker_mix_001", taker_attestation=None,
+                seller_attestation="0xmaker_mix_001", buyer_attestation=None,
             ),
             Listing(
-                order_id="mix-settled",
-                agent_id=agent_id, order_maker=maker,
+                listing_id="mix-settled",
+                agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.closed,
-                maker_attestation="0xmaker_mix_002", taker_attestation="0xtaker_mix_002",
+                seller_attestation="0xmaker_mix_002", buyer_attestation="0xtaker_mix_002",
             ),
         ])
         db_session.commit()
@@ -264,18 +264,18 @@ class TestAttestationStats:
 
         db_session.add_all([
             Listing(
-                order_id="double-settled-1",
-                agent_id=agent_id, order_maker=maker,
+                listing_id="double-settled-1",
+                agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.closed,
-                maker_attestation="0xm1", taker_attestation="0xt1",
+                seller_attestation="0xm1", buyer_attestation="0xt1",
             ),
             Listing(
-                order_id="double-settled-2",
-                agent_id=agent_id, order_maker=maker,
+                listing_id="double-settled-2",
+                agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.closed,
-                maker_attestation="0xm2", taker_attestation="0xt2",
+                seller_attestation="0xm2", buyer_attestation="0xt2",
             ),
         ])
         db_session.commit()

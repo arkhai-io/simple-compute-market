@@ -22,12 +22,12 @@ class TestListOrders:
     async def test_open_order_appears_in_default_listing(self, registry_client, open_order):
         result = await registry_client.list_listings()
         ids = [str(o.id) for o in result.listings]
-        assert open_order.order_id in ids
+        assert open_order.listing_id in ids
 
     async def test_status_filter_excludes_non_matching(self, registry_client, open_order):
         result = await registry_client.list_listings(status="closed")
         ids = [str(o.id) for o in result.listings]
-        assert open_order.order_id not in ids
+        assert open_order.listing_id not in ids
 
     async def test_all_items_are_order_summary(self, registry_client, open_order):
         result = await registry_client.list_listings()
@@ -35,16 +35,16 @@ class TestListOrders:
 
     async def test_order_summary_fields_populated(self, registry_client, open_order):
         result = await registry_client.list_listings()
-        order = next(o for o in result.listings if str(o.id) == open_order.order_id)
+        order = next(o for o in result.listings if str(o.id) == open_order.listing_id)
         assert order.status == "open"
         assert order.maker_agent_id is not None
 
 
 class TestGetOrder:
     async def test_returns_typed_order_summary(self, registry_client, open_order):
-        order = await registry_client.get_listing(open_order.order_id)
+        order = await registry_client.get_listing(open_order.listing_id)
         assert isinstance(order, ListingSummary)
-        assert str(order.id) == open_order.order_id
+        assert str(order.id) == open_order.listing_id
         assert order.status == "open"
 
     async def test_404_raises_registry_client_error(self, registry_client):
@@ -53,7 +53,7 @@ class TestGetOrder:
         assert exc_info.value.status_code == 404
 
     async def test_offer_and_demand_populated(self, registry_client, open_order):
-        order = await registry_client.get_listing(open_order.order_id)
+        order = await registry_client.get_listing(open_order.listing_id)
         assert order.offer
         assert order.demand
 
@@ -106,7 +106,7 @@ class TestPublishOrder:
 class TestGetAgentOrders:
     async def test_returns_agent_orders(self, registry_client, open_order, agent_no_owner):
         result = await registry_client.get_agent_listings(agent_no_owner.agent_id)
-        assert open_order.order_id in [str(o.id) for o in result.listings]
+        assert open_order.listing_id in [str(o.id) for o in result.listings]
 
     async def test_empty_for_agent_with_no_orders(self, registry_client, maker_agent):
         result = await registry_client.get_agent_listings(maker_agent.agent_id)
@@ -115,9 +115,9 @@ class TestGetAgentOrders:
     async def test_status_filter(self, registry_client, open_order, agent_no_owner, db_session):
         from src.db.models import Listing, OrderStatusEnum
         db_session.add(Listing(
-            order_id="agent-orders-closed",
+            listing_id="agent-orders-closed",
             agent_id=agent_no_owner.agent_id,
-            order_maker=agent_no_owner.token_uri,
+            seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
             duration_hours=1,
@@ -132,7 +132,7 @@ class TestGetAgentOrders:
                       (await registry_client.get_agent_listings(agent_no_owner.agent_id,
                                                               status="closed")).listings]
 
-        assert open_order.order_id in open_ids
+        assert open_order.listing_id in open_ids
         assert "agent-orders-closed" not in open_ids
         assert "agent-orders-closed" in closed_ids
 
@@ -143,26 +143,26 @@ class TestGetAgentOrders:
 
 class TestDeleteOrder:
     async def test_unauthenticated_order_deleted(self, registry_client, open_order):
-        await registry_client.delete_listing(open_order.order_id, private_key=MAKER_PRIVATE_KEY)
+        await registry_client.delete_listing(open_order.listing_id, private_key=MAKER_PRIVATE_KEY)
         with pytest.raises(RegistryClientError) as exc_info:
-            await registry_client.get_listing(open_order.order_id)
+            await registry_client.get_listing(open_order.listing_id)
         assert exc_info.value.status_code == 404
 
     async def test_authenticated_valid_key_deletes(
         self, registry_client, authenticated_open_order
     ):
         await registry_client.delete_listing(
-            authenticated_open_order.order_id, private_key=MAKER_PRIVATE_KEY
+            authenticated_open_order.listing_id, private_key=MAKER_PRIVATE_KEY
         )
         with pytest.raises(RegistryClientError):
-            await registry_client.get_listing(authenticated_open_order.order_id)
+            await registry_client.get_listing(authenticated_open_order.listing_id)
 
     async def test_authenticated_wrong_key_raises_401(
         self, registry_client, authenticated_open_order
     ):
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.delete_listing(
-                authenticated_open_order.order_id, private_key=TAKER_PRIVATE_KEY
+                authenticated_open_order.listing_id, private_key=TAKER_PRIVATE_KEY
             )
         assert exc_info.value.status_code == 401
 

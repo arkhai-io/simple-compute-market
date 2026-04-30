@@ -167,7 +167,7 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
 
     order_counts: dict[str, int] = {s.value: 0 for s in OrderStatusEnum}
     rows = (
-        db.query(Listing.status, func.count(Listing.order_id))
+        db.query(Listing.status, func.count(Listing.listing_id))
         .group_by(Listing.status)
         .all()
     )
@@ -203,22 +203,22 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
 )
 def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse:
     seller_count: int = (
-        db.query(func.count(Listing.order_id))
-        .filter(Listing.maker_attestation.isnot(None))
+        db.query(func.count(Listing.listing_id))
+        .filter(Listing.seller_attestation.isnot(None))
         .scalar()
         or 0
     )
     buyer_count: int = (
-        db.query(func.count(Listing.order_id))
-        .filter(Listing.taker_attestation.isnot(None))
+        db.query(func.count(Listing.listing_id))
+        .filter(Listing.buyer_attestation.isnot(None))
         .scalar()
         or 0
     )
     settled_count: int = (
-        db.query(func.count(Listing.order_id))
+        db.query(func.count(Listing.listing_id))
         .filter(
-            Listing.maker_attestation.isnot(None),
-            Listing.taker_attestation.isnot(None),
+            Listing.seller_attestation.isnot(None),
+            Listing.buyer_attestation.isnot(None),
         )
         .scalar()
         or 0

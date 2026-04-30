@@ -100,28 +100,28 @@ class OrderStatusEnum(str, enum.Enum):
 
 
 class Listing(Base):
-    __tablename__ = "market_orders"
-    
-    order_id = Column(String, primary_key=True)
+    __tablename__ = "listings"
+
+    listing_id = Column(String, primary_key=True)
     agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
-    order_maker = Column(Text, nullable=False)  # Agent card URL
-    order_taker = Column(Text, nullable=True)  # Agent card URL of taker
+    seller = Column(Text, nullable=False)  # Agent card URL of the listing seller
+    buyer = Column(Text, nullable=True)    # Agent card URL of the buyer (when accepted)
     offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
     demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
     duration_hours = Column(Integer, nullable=False)
-    maker_attestation = Column(Text, nullable=True)
-    taker_attestation = Column(Text, nullable=True)
+    seller_attestation = Column(Text, nullable=True)  # fulfillment attestation UID posted by seller
+    buyer_attestation = Column(Text, nullable=True)   # escrow attestation UID locked by buyer
     oracle_address = Column(Text, nullable=True)
-    status = Column(SQLEnum(OrderStatusEnum), nullable=False, default=OrderStatusEnum.open)
+    status = Column(SQLEnum(OrderStatusEnum, name="liststatusenum"), nullable=False, default=OrderStatusEnum.open)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     agent = relationship("Agent")
-    
+
     __table_args__ = (
-        Index("idx_market_orders_agent_id", "agent_id"),
-        Index("idx_market_orders_status", "status"),
-        Index("idx_market_orders_created_at", "created_at"),
+        Index("idx_listings_agent_id", "agent_id"),
+        Index("idx_listings_status", "status"),
+        Index("idx_listings_created_at", "created_at"),
     )
 

@@ -9,10 +9,10 @@ def test_find_symmetric_order(db_session, sample_agent):
     """Test finding symmetric order."""
     # Create order A: offer GPU, demand token
     order_a = Listing(
-        order_id="order-a",
+        listing_id="order-a",
         agent_id=sample_agent.agent_id,
-        order_maker="http://localhost:8001/.well-known/agent-card.json",
-        order_taker="http://localhost:8002/.well-known/agent-card.json",
+        seller="http://localhost:8001/.well-known/agent-card.json",
+        buyer="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
         duration_hours=3600,
@@ -22,9 +22,9 @@ def test_find_symmetric_order(db_session, sample_agent):
     
     # Create order B: offer token, demand GPU (symmetric)
     order_b = Listing(
-        order_id="order-b",
+        listing_id="order-b",
         agent_id=sample_agent.agent_id,
-        order_maker="http://localhost:8002/.well-known/agent-card.json",
+        seller="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"token": "USDC"},
         demand_resource={"gpu_model": "A100", "region": "us-west"},
         duration_hours=3600,
@@ -38,16 +38,16 @@ def test_find_symmetric_order(db_session, sample_agent):
     
     symmetric = find_symmetric_order(db_session, order_a, original_offer, original_demand)
     assert symmetric is not None
-    assert symmetric.order_id == "order-b"
+    assert symmetric.listing_id == "order-b"
 
 
 def test_find_symmetric_order_not_found(db_session, sample_agent):
     """Test symmetric order not found."""
     order = Listing(
-        order_id="order-no-match",
+        listing_id="order-no-match",
         agent_id=sample_agent.agent_id,
-        order_maker="http://localhost:8001/.well-known/agent-card.json",
-        order_taker="http://localhost:8002/.well-known/agent-card.json",
+        seller="http://localhost:8001/.well-known/agent-card.json",
+        buyer="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
         duration_hours=3600,
@@ -66,10 +66,10 @@ def test_find_symmetric_order_not_found(db_session, sample_agent):
 def test_find_symmetric_order_no_taker(db_session, sample_agent):
     """Test symmetric order finding when order has no taker."""
     order = Listing(
-        order_id="order-no-taker",
+        listing_id="order-no-taker",
         agent_id=sample_agent.agent_id,
-        order_maker="http://localhost:8001/.well-known/agent-card.json",
-        order_taker=None,
+        seller="http://localhost:8001/.well-known/agent-card.json",
+        buyer=None,
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
         duration_hours=3600,

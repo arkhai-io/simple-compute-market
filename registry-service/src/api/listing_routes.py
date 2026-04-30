@@ -1,11 +1,8 @@
 """Marketplace listing API routes.
 
-Wire vocabulary uses ``listing_id`` / ``seller`` / ``buyer`` /
-``seller_attestation`` / ``buyer_attestation``. The DB columns are
-still on the legacy ``order_*`` / ``*_attestation`` names; the
-translation lives in :func:`order_to_dict` (response shaping) and
-:func:`_listing_body_to_columns` here (request shaping). The DB
-column rename happens in a later slice.
+Wire vocabulary and DB column names are now in sync (post-Slice 4):
+``listing_id`` / ``seller`` / ``buyer`` / ``seller_attestation`` /
+``buyer_attestation``. No translation layer.
 """
 
 import logging
@@ -15,7 +12,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_
+from sqlalchemy import desc
 
 from src.db.database import get_db
 from src.db.models import Agent, Listing, OrderStatusEnum
@@ -39,34 +36,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
-# Wire ↔ DB column translation
-# ---------------------------------------------------------------------------
-
-_WIRE_TO_DB_KEYS = {
-    "listing_id": "order_id",
-    "seller": "order_maker",
-    "buyer": "order_taker",
-    "seller_attestation": "maker_attestation",
-    "buyer_attestation": "taker_attestation",
-}
-
-
-def _listing_body_to_columns(body: dict) -> dict:
-    """Translate a wire request body to DB column keys.
-
-    Accepts the listings vocabulary (``listing_id``, ``seller``,
-    ``buyer``, ``seller_attestation``, ``buyer_attestation``) and
-    returns a dict using the legacy DB column names so the existing
-    SQLAlchemy code can keep using them unchanged.
-    """
-    out = dict(body)
-    for wire_key, db_key in _WIRE_TO_DB_KEYS.items():
-        if wire_key in out and db_key not in out:
-            out[db_key] = out.pop(wire_key)
-    return out
-
-
 @router.post("/agents/{agent_id}/listings", status_code=201)
 async def publish_listing(
     agent_id: str = Path(..., description="Agent ID (canonical eip155:... format)"),
@@ -78,7 +47,6 @@ async def publish_listing(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Verify signature if agent has an owner
     signature = body.pop("signature", None)
     timestamp = body.pop("timestamp", None)
     if agent.owner:
@@ -88,64 +56,59 @@ async def publish_listing(
         if not verify_order_signature("create_listing", agent.agent_id, timestamp, signature, agent.owner):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Translate wire keys to DB column names
-    order_data = _listing_body_to_columns(body)
+    agent_id_for_listing = agent.agent_id
 
-    # Use canonical agent_id for FK in Listing
-    agent_id_for_order = agent.agent_id
-
-    # Extract listing identifier
-    order_id = order_data.get("order_id")
-    if not order_id:
+    listing_id = body.get("listing_id")
+    if not listing_id:
         raise HTTPException(status_code=400, detail="listing_id is required")
 
-    existing_order = db.query(Listing).filter(Listing.order_id == order_id).first()
+    existing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
 
-    if existing_order:
+    if existing:
         update_fields = {
-            "order_maker": order_data.get("order_maker"),
-            "offer_resource": order_data.get("offer_resource"),
-            "demand_resource": order_data.get("demand_resource"),
-            "duration_hours": order_data.get("duration_hours"),
-            "maker_attestation": order_data.get("maker_attestation"),
-            "taker_attestation": order_data.get("taker_attestation"),
-            "oracle_address": order_data.get("oracle_address"),
+            "seller": body.get("seller"),
+            "offer_resource": body.get("offer_resource"),
+            "demand_resource": body.get("demand_resource"),
+            "duration_hours": body.get("duration_hours"),
+            "seller_attestation": body.get("seller_attestation"),
+            "buyer_attestation": body.get("buyer_attestation"),
+            "oracle_address": body.get("oracle_address"),
         }
         for field, value in update_fields.items():
             if value is not None:
-                setattr(existing_order, field, value)
+                setattr(existing, field, value)
 
-        if "status" in order_data:
-            existing_order.status = validate_order_status(order_data["status"])
+        if "status" in body:
+            existing.status = validate_order_status(body["status"])
 
-        existing_order.updated_at = datetime.utcnow()
-        order = existing_order
+        existing.updated_at = datetime.utcnow()
+        listing = existing
     else:
-        status_str = order_data.get("status", "open")
-        order = Listing(
-            order_id=order_id,
-            agent_id=agent_id_for_order,
-            order_maker=order_data.get("order_maker", ""),
-            order_taker=order_data.get("order_taker"),
-            offer_resource=order_data.get("offer_resource", {}),
-            demand_resource=order_data.get("demand_resource", {}),
-            duration_hours=order_data.get("duration_hours", 1),
-            maker_attestation=order_data.get("maker_attestation"),
-            taker_attestation=order_data.get("taker_attestation"),
-            oracle_address=order_data.get("oracle_address"),
+        status_str = body.get("status", "open")
+        listing = Listing(
+            listing_id=listing_id,
+            agent_id=agent_id_for_listing,
+            seller=body.get("seller", ""),
+            buyer=body.get("buyer"),
+            offer_resource=body.get("offer_resource", {}),
+            demand_resource=body.get("demand_resource", {}),
+            duration_hours=body.get("duration_hours", 1),
+            seller_attestation=body.get("seller_attestation"),
+            buyer_attestation=body.get("buyer_attestation"),
+            oracle_address=body.get("oracle_address"),
             status=validate_order_status(status_str),
         )
-        db.add(order)
+        db.add(listing)
 
     db.commit()
-    db.refresh(order)
+    db.refresh(listing)
 
     return {
-        "listing_id": order.order_id,
+        "listing_id": listing.listing_id,
         "agentId": agent.agent_id,
-        "status": order.status.value,
-        "created_at": order.created_at.isoformat(),
-        "updated_at": order.updated_at.isoformat(),
+        "status": listing.status.value,
+        "created_at": listing.created_at.isoformat(),
+        "updated_at": listing.updated_at.isoformat(),
     }
 
 
@@ -168,11 +131,11 @@ async def get_agent_listings(
         status_enum = validate_order_status(status)
         query = query.filter(Listing.status == status_enum)
 
-    orders = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
+    listings = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
 
     return {
-        "items": [order_to_dict(order) for order in orders],
-        "count": len(orders),
+        "items": [order_to_dict(listing) for listing in listings],
+        "count": len(listings),
     }
 
 
@@ -196,13 +159,13 @@ async def query_listings(
         status_enum = validate_order_status(status)
         query = query.filter(Listing.status == status_enum)
 
-    orders = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
+    listings = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
 
     filtered_items = [
-        order_to_dict(order)
-        for order in orders
+        order_to_dict(listing)
+        for listing in listings
         if matches_resource_filters(
-            order,
+            listing,
             offer_resource_type=offer_resource_type,
             demand_resource_type=demand_resource_type,
             region=region,
@@ -226,18 +189,17 @@ async def update_listing(
     db: Session = Depends(get_db),
 ):
     """Update a listing (e.g., mark as accepted). Also updates the corresponding symmetric listing."""
-    order = db.query(Listing).filter(Listing.order_id == listing_id).first()
+    listing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
 
-    if not order:
+    if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    # Verify signature if the maker agent has an owner
     signature = body.pop("signature", None)
     timestamp = body.pop("timestamp", None)
     signer_agent_id = body.pop("signer_agent_id", None)
 
-    maker_agent = find_agent_by_id(db, order.agent_id)
-    if maker_agent and maker_agent.owner:
+    seller_agent = find_agent_by_id(db, listing.agent_id)
+    if seller_agent and seller_agent.owner:
         if not signature or timestamp is None or not signer_agent_id:
             raise HTTPException(
                 status_code=401,
@@ -249,83 +211,80 @@ async def update_listing(
         if not signer_agent or not signer_agent.owner:
             raise HTTPException(status_code=403, detail="Signer agent not registered or has no owner")
 
-        is_maker = (signer_agent.agent_id == order.agent_id)
-        if not is_maker and order.order_taker is not None:
+        is_seller = (signer_agent.agent_id == listing.agent_id)
+        if not is_seller and listing.buyer is not None:
             raise HTTPException(status_code=403, detail="Only the listing seller can update after a buyer is assigned")
 
         if not verify_order_signature("update_listing", listing_id, timestamp, signature, signer_agent.owner):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Translate wire keys to DB column names for the update set
-    updates = _listing_body_to_columns(body)
+    original_seller = listing.seller
+    original_offer_resource = listing.offer_resource
+    original_demand_resource = listing.demand_resource
 
-    original_order_maker = order.order_maker
-    original_offer_resource = order.offer_resource
-    original_demand_resource = order.demand_resource
-
-    symmetric_order = None
+    symmetric_listing = None
     needs_symmetric_lookup = (
-        "order_taker" in updates
-        or ("maker_attestation" in updates and order.order_taker)
-        or ("taker_attestation" in updates and order.order_taker)
-        or ("oracle_address" in updates and order.order_taker)
+        "buyer" in body
+        or ("seller_attestation" in body and listing.buyer)
+        or ("buyer_attestation" in body and listing.buyer)
+        or ("oracle_address" in body and listing.buyer)
     )
     if needs_symmetric_lookup:
-        if "order_taker" in updates:
-            temp_taker = updates["order_taker"]
-            original_taker = order.order_taker
-            order.order_taker = temp_taker
+        if "buyer" in body:
+            temp_buyer = body["buyer"]
+            original_buyer = listing.buyer
+            listing.buyer = temp_buyer
             try:
-                symmetric_order = find_symmetric_order(
-                    db, order, original_offer_resource, original_demand_resource
+                symmetric_listing = find_symmetric_order(
+                    db, listing, original_offer_resource, original_demand_resource
                 )
             finally:
-                order.order_taker = original_taker
+                listing.buyer = original_buyer
         else:
-            symmetric_order = find_symmetric_order(
-                db, order, original_offer_resource, original_demand_resource
+            symmetric_listing = find_symmetric_order(
+                db, listing, original_offer_resource, original_demand_resource
             )
 
-    if "status" in updates:
-        order.status = validate_order_status(updates["status"])
-    if "order_taker" in updates:
-        order.order_taker = updates["order_taker"]
-    if "taker_attestation" in updates:
-        order.taker_attestation = updates["taker_attestation"]
-    if "maker_attestation" in updates:
-        order.maker_attestation = updates["maker_attestation"]
-    if "oracle_address" in updates:
-        order.oracle_address = updates["oracle_address"]
-    order.updated_at = datetime.utcnow()
+    if "status" in body:
+        listing.status = validate_order_status(body["status"])
+    if "buyer" in body:
+        listing.buyer = body["buyer"]
+    if "buyer_attestation" in body:
+        listing.buyer_attestation = body["buyer_attestation"]
+    if "seller_attestation" in body:
+        listing.seller_attestation = body["seller_attestation"]
+    if "oracle_address" in body:
+        listing.oracle_address = body["oracle_address"]
+    listing.updated_at = datetime.utcnow()
 
-    if symmetric_order:
-        if "status" in updates:
-            symmetric_order.status = validate_order_status(updates["status"])
-        if "order_taker" in updates:
-            symmetric_order.order_taker = original_order_maker
-        if "maker_attestation" in updates and order.maker_attestation:
-            symmetric_order.taker_attestation = order.maker_attestation
-        if "taker_attestation" in updates and order.taker_attestation:
-            symmetric_order.maker_attestation = order.taker_attestation
-        if "oracle_address" in updates and order.oracle_address:
-            symmetric_order.oracle_address = order.oracle_address
-        symmetric_order.updated_at = datetime.utcnow()
+    if symmetric_listing:
+        if "status" in body:
+            symmetric_listing.status = validate_order_status(body["status"])
+        if "buyer" in body:
+            symmetric_listing.buyer = original_seller
+        if "seller_attestation" in body and listing.seller_attestation:
+            symmetric_listing.buyer_attestation = listing.seller_attestation
+        if "buyer_attestation" in body and listing.buyer_attestation:
+            symmetric_listing.seller_attestation = listing.buyer_attestation
+        if "oracle_address" in body and listing.oracle_address:
+            symmetric_listing.oracle_address = listing.oracle_address
+        symmetric_listing.updated_at = datetime.utcnow()
 
     try:
         db.commit()
-        db.refresh(order)
-        if symmetric_order:
-            db.refresh(symmetric_order)
+        db.refresh(listing)
+        if symmetric_listing:
+            db.refresh(symmetric_listing)
     except Exception as e:
         db.rollback()
         logger.error(f"[REGISTRY] Failed to update listings: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update listings: {e}")
 
     return {
-        "listing_id": order.order_id,
-        "status": order.status.value,
-        "updated_at": order.updated_at.isoformat(),
-        "symmetric_listing_updated": symmetric_order.order_id if symmetric_order else None,
+        "listing_id": listing.listing_id,
+        "status": listing.status.value,
+        "updated_at": listing.updated_at.isoformat(),
+        "symmetric_listing_updated": symmetric_listing.listing_id if symmetric_listing else None,
     }
 
 
@@ -335,13 +294,13 @@ async def get_listing(
     db: Session = Depends(get_db),
 ):
     """Get a single listing by ID."""
-    order = db.query(Listing).filter(Listing.order_id == listing_id).first()
+    listing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
 
-    if not order:
+    if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
     return {
-        "listing": order_to_dict(order),
+        "listing": order_to_dict(listing),
     }
 
 
@@ -353,20 +312,20 @@ async def delete_listing(
     db: Session = Depends(get_db),
 ):
     """Remove a listing from the registry. Requires signature from the listing seller's owner."""
-    order = db.query(Listing).filter(Listing.order_id == listing_id).first()
+    listing = db.query(Listing).filter(Listing.listing_id == listing_id).first()
 
-    if not order:
+    if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    maker_agent = find_agent_by_id(db, order.agent_id)
-    if maker_agent and maker_agent.owner:
+    seller_agent = find_agent_by_id(db, listing.agent_id)
+    if seller_agent and seller_agent.owner:
         if not signature or timestamp is None:
             raise HTTPException(status_code=401, detail="Signature and timestamp required for authenticated listings")
         _check_timestamp(timestamp)
-        if not verify_order_signature("delete_listing", listing_id, timestamp, signature, maker_agent.owner):
+        if not verify_order_signature("delete_listing", listing_id, timestamp, signature, seller_agent.owner):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    db.delete(order)
+    db.delete(listing)
     db.commit()
 
     return None
