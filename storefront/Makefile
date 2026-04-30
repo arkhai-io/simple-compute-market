@@ -53,3 +53,6 @@ deploy-seller-agent:
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
 	arkhai:storefront
+
+stop:
+	docker kill market-agent-sell

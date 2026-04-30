@@ -1256,7 +1256,8 @@ class SQLiteClient:
                            offer_resource, demand_resource, fulfillment_resource,
                            max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address
+                           escrow_uid, oracle_address,
+                           COALESCE(paused, 0) AS paused
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1269,9 +1270,11 @@ class SQLiteClient:
                     "offer_resource", "demand_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address",
+                    "escrow_uid", "oracle_address", "paused",
                 ]
-                return dict(zip(keys, row))
+                d = dict(zip(keys, row))
+                d["paused"] = bool(d["paused"])
+                return d
             finally:
                 conn.close()
 

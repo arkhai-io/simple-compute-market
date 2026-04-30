@@ -58,6 +58,34 @@ class TestOrderPauseHelpers:
     async def test_unknown_order_not_paused(self, db):
         assert await db.is_listing_paused(listing_id="does-not-exist") is False
 
+    async def test_load_listing_returns_paused_flag(self, db):
+        """load_listing must surface the paused column.
+
+        Regression guard: load_listing previously omitted 'paused' from its
+        SELECT, so the controller always fell back to paused=False regardless
+        of what set_listing_paused had written.
+        """
+        # Default: paused should be False
+        row = await db.load_listing(listing_id="order-001")
+        assert row is not None
+        assert row.get("paused") is False, (
+            f"Expected paused=False on a freshly created listing, got {row.get('paused')!r}"
+        )
+
+        # After set_listing_paused: load_listing must reflect the change
+        await db.set_listing_paused(listing_id="order-001", paused=True)
+        row = await db.load_listing(listing_id="order-001")
+        assert row is not None
+        assert row.get("paused") is True, (
+            f"Expected paused=True after set_listing_paused, got {row.get('paused')!r}. "
+            f"'paused' key present: {'paused' in row}"
+        )
+
+        # And it round-trips back to False
+        await db.set_listing_paused(listing_id="order-001", paused=False)
+        row = await db.load_listing(listing_id="order-001")
+        assert row["paused"] is False
+
     async def test_list_orders_paused_filter(self, db):
         # Add a second order (not paused)
         from datetime import datetime

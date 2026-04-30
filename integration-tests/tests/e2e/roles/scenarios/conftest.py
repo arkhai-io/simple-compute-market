@@ -45,11 +45,15 @@ class DealState:
     # Stage 1 — seller order
     seller_listing_id: Optional[str] = None
     _seller_url: str = ""
+    # Stage 2 — paused creation verified
+    paused_create_confirmed: bool = False
     # Stage 2 — registry visibility
     registry_order_confirmed: bool = False
     # Stage 3-4 — pause/resume
     pause_confirmed: bool = False
     resume_confirmed: bool = False
+    # Stage 6-7 — global admin pause/resume
+    admin_resume_confirmed: bool = False
     # Stage 5-8 — negotiation
     negotiation_id: Optional[str] = None
     negotiation_round_count: int = 0

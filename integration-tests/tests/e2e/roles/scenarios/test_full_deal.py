@@ -119,7 +119,7 @@ class TestStage00b_PolicyDryRun:
         result = storefront_admin_client.policy_evaluate(
             offer=OFFER_RESOURCE,
             demand=DEMAND_RESOURCE,
-            duration_hours=DURATION_HOURS,
+            max_duration_seconds=DURATION_HOURS * 3600,
         )
         assert isinstance(result, dict), f"Unexpected response: {result}"
         assert result.get("resolvable") is True, (
@@ -146,14 +146,14 @@ class TestStage01_CreateOrderPaused:
         but does NOT publish to the registry.
         """
         require_state(deal_state, "_policy_evaluated")
-        resp = storefront_admin_client.create_order(
+        resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
             demand=DEMAND_RESOURCE,
-            duration_hours=DURATION_HOURS,
+            max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
-        order_id = resp.order_id
+        order_id = resp.listing_id
         assert order_id, (
             f"No order_id in response — policy pipeline returned no action.\n"
             f"Response: {resp}\n"
@@ -182,6 +182,7 @@ class TestStage02_OrderLocallyPaused:
         assert order.paused is True, (
             f"Expected paused=True after paused create, got paused={order.paused}"
         )
+        deal_state.paused_create_confirmed = True
         log.info("[02] Order %s visible locally: status=%s paused=%s",
                  deal_state.seller_listing_id, order.status, order.paused)
 
@@ -197,8 +198,8 @@ class TestStage03_RegistryDoesNotSeeOrder:
         """The registry has no record of this order_id — publish was skipped."""
         require_state(deal_state, "seller_listing_id")
 
-        result = registry_client.list_orders(status="open", limit=200)
-        ids = {o.order_id for o in result.orders}
+        result = registry_client.list_listings(status="open", limit=200)
+        ids = {o.id for o in result.listings}
         assert deal_state.seller_listing_id not in ids, (
             f"Order {deal_state.seller_listing_id} found in registry before resume. "
             f"The paused=True path did not suppress the publish."
@@ -216,7 +217,7 @@ class TestStage04_ResumePublishesToRegistry:
         self, storefront_admin_client, deal_state: DealState
     ):
         """POST /api/v1/listings/{listing_id}/resume clears paused flag and publishes."""
-        require_state(deal_state, "seller_listing_id")
+        require_state(deal_state, "seller_listing_id", "paused_create_confirmed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
         assert result.paused is False, f"Expected paused=False after resume, got: {result}"
@@ -244,8 +245,8 @@ class TestStage05_RegistrySeesOrder:
         deadline = time.monotonic() + 15
         found = False
         while time.monotonic() < deadline:
-            result = registry_client.list_orders(status="open", limit=200)
-            if deal_state.seller_listing_id in {o.order_id for o in result.orders}:
+            result = registry_client.list_listings(status="open", limit=200)
+            if deal_state.seller_listing_id in {o.id for o in result.listings}:
                 found = True
                 break
             time.sleep(1)
@@ -279,9 +280,10 @@ class TestStage06_AdminPauseBlocks:
         resp = storefront_client._client.post(
             "/negotiate/new",
             json={
-                "seller_listing_id": deal_state.seller_listing_id,
+                "listing_id": deal_state.seller_listing_id,
                 "buyer_address": "0x0000000000000000000000000000000000000001",
                 "initial_price": BUYER_INITIAL_PRICE,
+                "duration_seconds": DURATION_HOURS * 3600,
             },
             headers={"X-Signature": sig, "X-Timestamp": ts},
         )
@@ -305,7 +307,7 @@ class TestStage07_AdminResumeAllows:
         status = storefront_admin_client.get_system_status()
         assert status.paused is False
 
-        deal_state.resume_confirmed = True
+        deal_state.admin_resume_confirmed = True
         log.info("[07] Admin resume: storefront accepting negotiations")
 
 
@@ -318,7 +320,7 @@ class TestStage08_NegotiationStarts:
         self, storefront_client, buyer_config, deal_state: DealState
     ):
         """POST /negotiate/new — buyer opens with initial_price."""
-        require_state(deal_state, "seller_listing_id", "resume_confirmed")
+        require_state(deal_state, "seller_listing_id", "admin_resume_confirmed")
 
         from storefront_client.client import _sign_eip191
         ts = str(int(time.time()))
@@ -329,9 +331,10 @@ class TestStage08_NegotiationStarts:
         resp = storefront_client._client.post(
             "/negotiate/new",
             json={
-                "seller_listing_id": deal_state.seller_listing_id,
+                "listing_id": deal_state.seller_listing_id,
                 "buyer_address": buyer_config["wallet_address"],
                 "initial_price": BUYER_INITIAL_PRICE,
+                "duration_seconds": DURATION_HOURS * 3600,
             },
             headers={"X-Signature": sig, "X-Timestamp": ts},
         )
