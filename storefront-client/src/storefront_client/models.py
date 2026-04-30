@@ -291,9 +291,9 @@ class ListingSummary:
     listing_id: str = ""
     status: str = ""
     paused: bool = False
-    duration_hours: int = 1
-    order_maker: str = ""
-    order_taker: str | None = None
+    max_duration_seconds: int | None = None
+    seller: str = ""
+    buyer: str | None = None
     escrow_uid: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -316,17 +316,18 @@ class ListingSummary:
             return {}
 
         known = {
-            "listing_id", "status", "paused", "duration_hours", "order_maker",
-            "order_taker", "escrow_uid", "created_at", "updated_at",
+            "listing_id", "status", "paused", "max_duration_seconds", "seller",
+            "buyer", "escrow_uid", "created_at", "updated_at",
             "offer_resource", "demand_resource",
         }
+        max_dur = d.get("max_duration_seconds")
         return cls(
             listing_id=d.get("listing_id", ""),
             status=d.get("status", ""),
             paused=bool(d.get("paused", False)),
-            duration_hours=int(d.get("duration_hours", 1)),
-            order_maker=d.get("order_maker", ""),
-            order_taker=d.get("order_taker"),
+            max_duration_seconds=int(max_dur) if max_dur is not None else None,
+            seller=d.get("seller", ""),
+            buyer=d.get("buyer"),
             escrow_uid=d.get("escrow_uid"),
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
@@ -426,7 +427,8 @@ class NegotiationSummary:
     status: str = ""
     terminal_state: str | None = None
     agreed_price: int | None = None
-    agreed_duration_hours: int | None = None
+    agreed_duration_seconds: int | None = None
+    requested_duration_seconds: int | None = None
     created_at: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -434,7 +436,8 @@ class NegotiationSummary:
     def from_dict(cls, d: dict) -> "NegotiationSummary":
         known = {
             "negotiation_id", "our_listing_id", "buyer_address", "status",
-            "terminal_state", "agreed_price", "agreed_duration_hours", "created_at",
+            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "requested_duration_seconds", "created_at",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
@@ -443,7 +446,8 @@ class NegotiationSummary:
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
             agreed_price=d.get("agreed_price"),
-            agreed_duration_hours=d.get("agreed_duration_hours"),
+            agreed_duration_seconds=d.get("agreed_duration_seconds"),
+            requested_duration_seconds=d.get("requested_duration_seconds"),
             created_at=d.get("created_at", ""),
             extra={k: v for k, v in d.items() if k not in known},
         )
@@ -483,7 +487,8 @@ class NegotiationDetail:
     status: str = ""
     terminal_state: str | None = None
     agreed_price: int | None = None
-    agreed_duration_hours: int | None = None
+    agreed_duration_seconds: int | None = None
+    requested_duration_seconds: int | None = None
     round_count: int = 0
     messages: list[NegotiationMessage] = field(default_factory=list)
     stage_events: list[dict[str, Any]] = field(default_factory=list)
@@ -493,8 +498,8 @@ class NegotiationDetail:
     def from_dict(cls, d: dict) -> "NegotiationDetail":
         known = {
             "negotiation_id", "our_listing_id", "their_agent_id", "status",
-            "terminal_state", "agreed_price", "agreed_duration_hours",
-            "round_count", "messages", "stage_events",
+            "terminal_state", "agreed_price", "agreed_duration_seconds",
+            "requested_duration_seconds", "round_count", "messages", "stage_events",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
@@ -503,7 +508,8 @@ class NegotiationDetail:
             status=d.get("status", ""),
             terminal_state=d.get("terminal_state"),
             agreed_price=d.get("agreed_price"),
-            agreed_duration_hours=d.get("agreed_duration_hours"),
+            agreed_duration_seconds=d.get("agreed_duration_seconds"),
+            requested_duration_seconds=d.get("requested_duration_seconds"),
             round_count=d.get("round_count", 0),
             messages=[NegotiationMessage.from_dict(m) for m in d.get("messages", [])],
             stage_events=d.get("stage_events", []),

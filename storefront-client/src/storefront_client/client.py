@@ -356,11 +356,11 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
         return await self._get("/api/v1/system/policy")
 
-    async def policy_evaluate(self, *, offer: dict, demand: dict, duration_hours: float = 1.0) -> dict:
+    async def policy_evaluate(self, *, offer: dict, demand: dict, max_duration_seconds: int | None = None) -> dict:
         """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
         return await self._post(
             "/api/v1/system/policy/evaluate",
-            {"event_type": "order_create", "offer": offer, "demand": demand, "duration_hours": duration_hours},
+            {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
         )
 
     # ------------------------------------------------------------------
@@ -699,11 +699,11 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
         return self._get("/api/v1/system/policy")
 
-    def policy_evaluate(self, *, offer: dict, demand: dict, duration_hours: float = 1.0) -> dict:
+    def policy_evaluate(self, *, offer: dict, demand: dict, max_duration_seconds: int | None = None) -> dict:
         """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
         return self._post(
             "/api/v1/system/policy/evaluate",
-            {"event_type": "order_create", "offer": offer, "demand": demand, "duration_hours": duration_hours},
+            {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
         )
 
     # ------------------------------------------------------------------

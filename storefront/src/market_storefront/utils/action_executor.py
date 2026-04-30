@@ -488,8 +488,7 @@ def _make_registry_client() -> RegistryClient:
     change between calls during testing.
     """
     return RegistryClient(
-        CONFIG.registry_url or CONFIG.indexer_url or "http://localhost:8080",
-        private_key=CONFIG.agent_priv_key,
+        CONFIG.indexer_url or "http://localhost:8080",
     )
 
 
@@ -702,7 +701,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         order_id = order.listing_id
     else:
         order_dict = order
-        order_id = order_dict.get("order_id", "unknown")
+        order_id = order_dict.get("listing_id", "unknown")
 
     if order_dict.get("maker_attestation"):
         logger.warning(

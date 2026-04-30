@@ -92,7 +92,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
 
     offer = context.event.offer
     demand = context.event.demand
-    duration_hours = context.event.duration_hours
+    max_duration_seconds = context.event.max_duration_seconds
 
     # Enrich a bare ComputeResource offer (no resource_id) with the actual registered
     # portfolio resource so that resource_id and vm_host are populated.
@@ -117,7 +117,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
         parameters={
             "offer": offer_payload,
             "demand": demand_payload,
-            "duration_hours": duration_hours,
+            "max_duration_seconds": max_duration_seconds,
             # Propagate paused flag so action_executor skips the registry publish.
             "paused": bool(context.event.data.get("paused", False)) if isinstance(context.event.data, dict) else False,
         },
@@ -130,7 +130,7 @@ def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
         return None
     return DomainAction(
         action_type=DomainActionType.CLOSE_ORDER,
-        parameters={"order_id": context.event.order_id},
+        parameters={"listing_id": context.event.listing_id},
     )
 
 

@@ -144,7 +144,7 @@ class SystemController:
             result = await self._service.evaluate_order_create(
                 offer_raw=offer_raw,
                 demand_raw=demand_raw,
-                duration_hours=body.get("duration_hours", 1),
+                max_duration_seconds=body.get("max_duration_seconds"),
             )
         except ValueError as exc:
             return JSONResponse({"error": "Invalid offer/demand resource", "detail": str(exc)}, status_code=400)

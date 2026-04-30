@@ -255,13 +255,14 @@ class SystemService:
         *,
         offer_raw: dict[str, Any],
         demand_raw: dict[str, Any],
-        duration_hours: float = 1.0,
+        max_duration_seconds: int | None = None,
     ) -> EvalResult:
         """Dry-run a synthetic order_create event through the policy engine.
 
         Parses ``offer_raw`` and ``demand_raw`` through the same resource
-        coercion path as ``POST /orders/create``, constructs a ListingCreatedEvent,
-        and calls PolicyStore.evaluate_policy with a wired PolicyStore instance.
+        coercion path as ``POST /listings/create``, constructs a
+        ListingCreatedEvent, and calls PolicyStore.evaluate_policy with a
+        wired PolicyStore instance.
 
         No SQLite writes.  No registry API calls.
 
@@ -285,11 +286,11 @@ class SystemService:
             source="dry_run",
             offer=offer_resource,
             demand=demand_resource,
-            duration_hours=int(duration_hours),
+            max_duration_seconds=max_duration_seconds,
             data={
                 "offer": offer_raw,
                 "demand": demand_raw,
-                "duration_hours": duration_hours,
+                "max_duration_seconds": max_duration_seconds,
                 "paused": False,
             },
         )
