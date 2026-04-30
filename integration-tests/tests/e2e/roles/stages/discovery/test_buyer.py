@@ -65,12 +65,12 @@ class TestBuyerCanFindMatchingOffers:
         # Apply the buyer agent's own matching logic.
         matches = match_orders(buyer_order, candidates, bidirectional=True)
 
-        # seller_order comes from the seller's local SQLite (DB column
-        # `order_id`); matches come from the registry wire response
-        # (key `listing_id`). The values are the same UUID per listing.
+        # seller_order comes from the seller's local SQLite (column
+        # `listing_id` post-Slice-4b); matches come from the registry
+        # wire (key `listing_id`). Same UUID per listing.
         match_ids = {m["listing_id"] for m in matches}
-        assert seller_order["order_id"] in match_ids, (
-            f"Buyer's matching logic did not find seller's listing {seller_order['order_id']}. "
+        assert seller_order["listing_id"] in match_ids, (
+            f"Buyer's matching logic did not find seller's listing {seller_order['listing_id']}. "
             f"Candidates: {[c['listing_id'] for c in candidates]}. "
             f"Matches: {match_ids}."
         )
@@ -80,7 +80,7 @@ class TestBuyerCanFindMatchingOffers:
     ):
         """The seller URL on the discovered listing is one the buyer can contact."""
         seller_order = discovery_output["seller_order"]
-        maker_url = seller_order.get("seller") or seller_order.get("order_maker")
+        maker_url = seller_order.get("seller")
 
         assert maker_url.startswith(("http://", "https://")), (
             f"Maker URL is not HTTP(S): {maker_url!r}"

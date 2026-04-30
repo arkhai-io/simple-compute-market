@@ -5,7 +5,7 @@ flow behind a single command:
 
   1. (optional) Import a CSV of compute resources into the agent DB.
   2. Read the DB for `state='available'` compute rows.
-  3. POST /orders/create on the agent, once per resource, offering the
+  3. POST /listings/create on the agent, once per resource, offering the
      compute and demanding the configured token amount.
   4. Print a table of published orders.
 

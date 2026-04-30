@@ -54,7 +54,7 @@ The stack is designed so that in production, multiple independent seller nodes e
          │  FastAPI indexer   │◄──┤  FastAPI/Starlette     │
          │  SQLite/Postgres   │   │  market-storefront serve│
          └─────────▲──────────┘   └───────┬────────────────┘
-                   │  GET /orders            │ HTTP (provisioning API)
+                   │  GET /listings            │ HTTP (provisioning API)
                    │  signed reqs    ┌────────▼────────────────┐
                    │                 │ provisioning-service    │
          ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
@@ -79,7 +79,7 @@ The stack is designed so that in production, multiple independent seller nodes e
 Negotiation flow: the buyer's `market buy`/`market negotiate`
 discovers seller orders from `registry-service`, then issues
 synchronous signed POSTs against the seller's storefront
-(`/negotiate`, `/orders/...`, `/settle/{escrow_uid}`). The seller's
+(`/negotiate`, `/listings/...`, `/settle/{escrow_uid}`). The seller's
 storefront evaluates each request through the policy engine, decides
 counter/accept/exit, and returns the next round inline. There are no
 push messages and no symmetric agent-to-agent protocol — the buyer
@@ -122,9 +122,9 @@ FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered
 - `GET /agents` — discover registered agents
 - `GET /agents/{agentId}` — agent detail + health status
 - `POST /agents/{agentId}/heartbeat` — agents POST signed heartbeats to stay "healthy"
-- `POST /agents/{agentId}/orders` — publish/update an order
-- `GET /orders` — global order book query (filter by resource type, region, GPU model, SLA, status)
-- `PUT /orders/{order_id}` — update order status (e.g., mark accepted/closed)
+- `POST /agents/{agentId}/listings` — publish/update an order
+- `GET /listings` — global order book query (filter by resource type, region, GPU model, SLA, status)
+- `PUT /listings/{listing_id}` — update order status (e.g., mark accepted/closed)
 
 **Agent identity format (ERC-8004 canonical):**
 ```
@@ -150,7 +150,7 @@ registry-service/src/
 
 ### `storefront` (Seller-side server)
 
-**Role:** The seller's HTTP server. Hosts the `/orders/...`,
+**Role:** The seller's HTTP server. Hosts the `/listings/...`,
 `/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
 `.well-known/erc-8004-registration.json` endpoints that buyers and the
 provisioning service call. Runs as `market-storefront serve` (uvicorn,
@@ -309,20 +309,20 @@ GET /api/v1/system/health     Versioned alias
 GET /api/v1/system/status     Diagnostic snapshot: DB health + global pause state
 ```
 
-**Orders controller** (`controllers/orders_controller.py`):
+**Listings controller** (`controllers/listings_controller.py`):
 ```
-GET  /api/v1/orders                    List local orders (filter: status, paused, limit, offset)
-GET  /api/v1/orders/{order_id}         Single order detail (includes paused flag)
-POST /api/v1/orders/{order_id}/pause   Take order off market — admin key required
-POST /api/v1/orders/{order_id}/resume  Put order back on market — admin key required
+GET  /api/v1/listings                    List local orders (filter: status, paused, limit, offset)
+GET  /api/v1/listings/{listing_id}         Single order detail (includes paused flag)
+POST /api/v1/listings/{listing_id}/pause   Take order off market — admin key required
+POST /api/v1/listings/{listing_id}/resume  Put order back on market — admin key required
 ```
 
 **Negotiations controller** (`controllers/negotiations_controller.py`):
 ```
-GET  /api/v1/orders/{order_id}/negotiations                        List threads (filter: terminal_state, buyer_address)
-GET  /api/v1/orders/{order_id}/negotiations/{neg_id}               Full detail: thread + messages + stage_events
-POST /api/v1/orders/{order_id}/negotiations/{neg_id}/advance       Admin: drive one round — admin key required
-POST /api/v1/orders/{order_id}/negotiations/{neg_id}/force-accept  Admin: commit terminal-success — admin key required
+GET  /api/v1/listings/{listing_id}/negotiations                        List threads (filter: terminal_state, buyer_address)
+GET  /api/v1/listings/{listing_id}/negotiations/{neg_id}               Full detail: thread + messages + stage_events
+POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance       Admin: drive one round — admin key required
+POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  Admin: commit terminal-success — admin key required
 ```
 
 **Admin controller** (`controllers/admin_controller.py`):
@@ -356,9 +356,9 @@ negotiations are not interrupted. Toggled via `POST /admin/pause|resume`.
 
 **Per-order pause** (`paused` INTEGER column on the `orders` table, default 0):
 when set for a specific order, `POST /negotiate/new` against that order returns
-503 with `{"reason": "order:<order_id>"}`. Toggled via
-`POST /api/v1/orders/{id}/pause|resume`. Orders can be created already-paused
-by passing `"paused": true` in the `POST /orders/create` body.
+503 with `{"reason": "order:<listing_id>"}`. Toggled via
+`POST /api/v1/listings/{id}/pause|resume`. Orders can be created already-paused
+by passing `"paused": true` in the `POST /listings/create` body.
 
 Both flags are checked at the top of `start_sync_negotiation()` in
 `sync_negotiation.py`, raising `StorefrontPausedError` which the negotiate
@@ -370,13 +370,13 @@ before submitting the buyer order, asserts registry visibility, then uses
 
 #### Negotiation Detail Response Shape
 
-`GET /api/v1/orders/{order_id}/negotiations/{neg_id}` returns the full
+`GET /api/v1/listings/{listing_id}/negotiations/{neg_id}` returns the full
 buyer↔seller conversation in one call (no DB access required from callers):
 
 ```json
 {
   "negotiation_id": "neg_abc",
-  "our_order_id": "ord_xyz",
+  "our_listing_id": "listing_xyz",
   "their_agent_id": "0xBuyerAddress",
   "terminal_state": "success",
   "agreed_price": 9000,
@@ -1126,7 +1126,7 @@ pattern:
 controllers/
   negotiate_controller.py   — POST /negotiate/new, POST /negotiate/{neg_id}
   settle_controller.py      — POST /settle/{escrow_uid}, GET /settle/{escrow_uid}/status
-  orders_legacy_controller.py — POST /orders/create, /close, /claim, /reclaim,
+  orders_legacy_controller.py — POST /listings/create, /close, /claim, /reclaim,
                                   /refund, /arbitrate, /discover
   alerts_controller.py      — POST /alerts/resource
   identity_controller.py    — GET /.well-known/*, GET /.well-known/agent-wallet.json
@@ -1352,8 +1352,8 @@ registry-service/tests/
     │                            # shared agent/order fixtures; Hardhat key constants
     ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
     │                            # POST /agents/register, POST /agents/{id}/heartbeat
-    ├── test_orders.py           # GET /orders, GET /orders/{id}, POST /agents/{id}/orders,
-    │                            # GET /agents/{id}/orders, DELETE /orders/{id}, full lifecycle
+    ├── test_listings.py           # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
+    │                            # GET /agents/{id}/listings, DELETE /listings/{id}, full lifecycle
     └── test_system.py           # GET /health (including 503 on DB failure),
                                  # GET /api/v1/system/config, /sync, /stats
 ```
@@ -1367,7 +1367,7 @@ changes a response shape, the client's `from_dict` parser will either raise or s
 the field, and the assertion will fail immediately.  The `get_db` dependency is overridden
 per-test to yield the fixture's isolated in-memory SQLite session.
 
-Routes not yet surfaced on `RegistryClient` (PUT /orders/{id}, POST /agents/register details)
+Routes not yet surfaced on `RegistryClient` (PUT /listings/{id}, POST /agents/register details)
 are exercised via `registry_client._http` — the raw httpx client — which still traverses the
 full stack.  These are marked as candidates for client extension in follow-on work.
 
@@ -1474,9 +1474,9 @@ Three pure-Python internal packages are distributed as wheels:
 
 1. **Auth message format** — `_build_auth_headers` must match `_check_agent_request_auth` in `agent.py`:
    - `create_order` → `"create_order:<agent_wallet_address>:<timestamp>"`
-   - `close_order` → `"close_order:<order_id>:<timestamp>"`
+   - `close_listing` → `"close_order:<listing_id>:<timestamp>"`
 
-2. **Endpoint signatures** — `/orders/create`, `/orders/close`, `/alerts/resource` request/response shapes.
+2. **Endpoint signatures** — `/listings/create`, `/listings/close`, `/alerts/resource` request/response shapes.
 
 When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
 

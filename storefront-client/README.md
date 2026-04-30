@@ -15,7 +15,7 @@ from storefront_client import StorefrontClient
 client = StorefrontClient("http://seller-storefront:8001", private_key="0x...")
 async with client:
     reg = await client.get_registration()
-    resp = await client.create_order(
+    resp = await client.create_listing(
         agent_wallet_address="0xSellerWallet",
         offer={...},
         demand={...},
@@ -29,7 +29,7 @@ from storefront_client import SyncStorefrontClient
 
 with SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...") as client:
     reg = client.get_registration()
-    resp = client.create_order(
+    resp = client.create_listing(
         agent_wallet_address="0xSellerWallet",
         offer={...},
         demand={...},
@@ -41,11 +41,11 @@ with SyncStorefrontClient("http://seller-storefront:8001", private_key="0x...") 
 Both clients cover:
 
 - `GET  /.well-known/erc-8004-registration.json`  → `get_registration`
-- `POST /orders/create`                            → `create_order`
-- `POST /orders/close`                             → `close_order`
-- `POST /orders/refund`                            → `refund_order`
-- `POST /orders/claim`                             → `claim_order`
-- `POST /orders/discover`                          → `discover_orders`
+- `POST /listings/create`                            → `create_listing`
+- `POST /listings/close`                             → `close_listing`
+- `POST /listings/refund`                            → `refund_listing`
+- `POST /listings/claim`                             → `claim_listing`
+- `POST /listings/discover`                          → `discover_listings`
 - `POST /alerts/resource`                          → `send_resource_alert`
 
 Responses parse into typed dataclasses (`StorefrontOrderCreateResponse`,
@@ -62,11 +62,11 @@ at runtime, not import errors:
 ### 1. Auth message format
 
 ```
-create_order   →  "create_order:<agent_wallet_address>:<timestamp>"
-close_order    →  "close_order:<order_id>:<timestamp>"
-refund_order   →  "refund_order:<order_id>:<timestamp>"
-claim_order    →  "claim_order:<order_id>:<timestamp>"
-discover_orders → "discover_orders:<order_id>:<timestamp>"
+create_listing   →  "create_listing:<agent_wallet_address>:<timestamp>"
+close_listing    →  "close_listing:<listing_id>:<timestamp>"
+refund_listing   →  "refund_listing:<listing_id>:<timestamp>"
+claim_listing    →  "claim_listing:<listing_id>:<timestamp>"
+discover_listings → "discover_listings:<listing_id>:<timestamp>"
 ```
 
 If this format changes in `storefront/src/market_storefront/agent.py`,
@@ -75,7 +75,7 @@ bump `storefront-client` version and update `_build_auth_headers` in
 
 ### 2. Endpoint signatures
 
-`/orders/{create,close,refund,claim,discover}`, `/alerts/resource`
+`/listings/{create,close,refund,claim,discover}`, `/alerts/resource`
 request and response shapes. If any field is added, removed, or
 renamed, bump the version and update the corresponding method in
 `client.py`.

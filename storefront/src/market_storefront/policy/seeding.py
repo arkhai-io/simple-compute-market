@@ -17,9 +17,9 @@ class ComputePolicySeeder:
     policy triggers are the *local* events a seller still reacts to via
     `_process_event_with_pipeline`:
 
-        ORDER_CREATE       — POST /orders/create → policy → make_offer
+        ORDER_CREATE       — POST /listings/create → policy → make_offer
                              action (registry publish, no fan-out)
-        ORDER_CLOSE        — POST /orders/close  → policy → close_order
+        ORDER_CLOSE        — POST /listings/close  → policy → close_order
                              action (local + registry unpublish)
         RESOURCE_IMBALANCE — POST /alerts/resource → policy → rebalance
                              (resource poller / reactive rebalance path)

@@ -130,7 +130,7 @@ anymore."* It's a plain Starlette ASGI app and what we're calling the
 
 Endpoints (`core/agent/app/agent.py`):
 
-- `/orders/{create,close,refund,claim,reclaim,arbitrate,discover}`
+- `/listings/{create,close,refund,claim,reclaim,arbitrate,discover}`
 - `/negotiate/new`, `/negotiate/{neg_id}` (continue)
 - `/settle/escrow`, `/settle/status`
 - `/alerts/resource`

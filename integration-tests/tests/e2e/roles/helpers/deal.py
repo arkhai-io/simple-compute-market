@@ -39,17 +39,17 @@ def _ro_connect(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
 
 
-def _load_order(db_path: str, order_id: str) -> dict[str, Any] | None:
+def _load_order(db_path: str, listing_id: str) -> dict[str, Any] | None:
     conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
         cur.execute(
-            """SELECT order_id, status, order_maker, order_taker, matched_offer_id,
-                      maker_attestation, taker_attestation, escrow_uid, oracle_address,
+            """SELECT listing_id, status, seller, buyer, matched_offer_id,
+                      seller_attestation, buyer_attestation, escrow_uid, oracle_address,
                       offer_resource, demand_resource, fulfillment_resource, duration_hours
-               FROM orders WHERE order_id = ?""",
-            (order_id,),
+               FROM listings WHERE listing_id = ?""",
+            (listing_id,),
         )
         row = cur.fetchone()
         return dict(row) if row else None
@@ -57,16 +57,16 @@ def _load_order(db_path: str, order_id: str) -> dict[str, Any] | None:
         conn.close()
 
 
-def _load_negotiation_terminal_state(db_path: str, our_order_id: str) -> str | None:
-    """Return the terminal_state for the negotiation thread tied to our order, or None."""
+def _load_negotiation_terminal_state(db_path: str, our_listing_id: str) -> str | None:
+    """Return the terminal_state for the negotiation thread tied to our listing, or None."""
     conn = _ro_connect(db_path)
     try:
         cur = conn.cursor()
         cur.execute(
             """SELECT terminal_state FROM negotiation_threads
-               WHERE our_order_id = ? AND terminal_state IS NOT NULL
+               WHERE our_listing_id = ? AND terminal_state IS NOT NULL
                LIMIT 1""",
-            (our_order_id,),
+            (our_listing_id,),
         )
         row = cur.fetchone()
         return row[0] if row else None
@@ -74,15 +74,15 @@ def _load_negotiation_terminal_state(db_path: str, our_order_id: str) -> str | N
         conn.close()
 
 
-def _load_credentials(db_path: str, order_id: str, role: str) -> dict[str, Any] | None:
+def _load_credentials(db_path: str, listing_id: str, role: str) -> dict[str, Any] | None:
     conn = _ro_connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         cur = conn.cursor()
         cur.execute(
             """SELECT password, ssh_commands, key_type FROM credentials
-               WHERE order_id = ? AND role = ? LIMIT 1""",
-            (order_id, role),
+               WHERE listing_id = ? AND role = ? LIMIT 1""",
+            (listing_id, role),
         )
         row = cur.fetchone()
         return dict(row) if row else None
@@ -94,7 +94,7 @@ def _load_credentials(db_path: str, order_id: str, role: str) -> dict[str, Any] 
 class Deal:
     """One buyer-seller transaction lifecycle.
 
-    The buyer_order_id and seller_order_id are the two sides of the matched
+    The buyer_listing_id and seller_listing_id are the two sides of the matched
     pair. Both agent DBs record the same deal, one as buyer (maker) and
     one as seller (taker), or vice versa depending on who created first.
 
@@ -104,8 +104,8 @@ class Deal:
     """
     buyer_node: dict
     seller_node: dict
-    buyer_order_id: str
-    seller_order_id: str
+    buyer_listing_id: str
+    seller_listing_id: str
     registry_url: str
     # On-chain context for balance assertions
     w3: Any
@@ -146,10 +146,10 @@ class Deal:
         """
         def _check():
             buyer_state = _load_negotiation_terminal_state(
-                self.buyer_node["agent_db_path"], self.buyer_order_id,
+                self.buyer_node["agent_db_path"], self.buyer_listing_id,
             )
             seller_state = _load_negotiation_terminal_state(
-                self.seller_node["agent_db_path"], self.seller_order_id,
+                self.seller_node["agent_db_path"], self.seller_listing_id,
             )
             if buyer_state == "success" and seller_state == "success":
                 return {"buyer_terminal_state": buyer_state,
@@ -175,8 +175,8 @@ class Deal:
         POST_SETTLEMENT_STATES = ("accepted", "closed")
 
         def _check():
-            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_order_id)
-            seller = _load_order(self.seller_node["agent_db_path"], self.seller_order_id)
+            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_listing_id)
+            seller = _load_order(self.seller_node["agent_db_path"], self.seller_listing_id)
             if not buyer or not seller:
                 return None
             if (buyer.get("escrow_uid") and buyer["status"] in POST_SETTLEMENT_STATES
@@ -192,17 +192,17 @@ class Deal:
     def wait_for_provision(
         self, *, timeout_s: float = 120, interval_s: float = 3,
     ) -> dict:
-        """Block until the buyer has taker_attestation set and credentials stored.
+        """Block until the buyer has buyer_attestation set and credentials stored.
 
         Returns a snapshot including the tenant credentials the buyer can
         use to SSH into the provisioned machine.
         """
         def _check():
-            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_order_id)
-            if not buyer or not buyer.get("taker_attestation"):
+            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_listing_id)
+            if not buyer or not buyer.get("buyer_attestation"):
                 return None
             tenant = _load_credentials(
-                self.buyer_node["agent_db_path"], self.buyer_order_id, role="tenant",
+                self.buyer_node["agent_db_path"], self.buyer_listing_id, role="tenant",
             )
             if not tenant:
                 return None
@@ -210,7 +210,7 @@ class Deal:
 
         return poll_until(
             _check, timeout_s=timeout_s, interval_s=interval_s,
-            description="buyer has taker_attestation and tenant credentials",
+            description="buyer has buyer_attestation and tenant credentials",
         )
 
     def wait_for_closed(
@@ -218,8 +218,8 @@ class Deal:
     ) -> dict:
         """Block until both orders reach status=closed (deal fully complete)."""
         def _check():
-            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_order_id)
-            seller = _load_order(self.seller_node["agent_db_path"], self.seller_order_id)
+            buyer = _load_order(self.buyer_node["agent_db_path"], self.buyer_listing_id)
+            seller = _load_order(self.seller_node["agent_db_path"], self.seller_listing_id)
             if buyer and seller and buyer["status"] == "closed" and seller["status"] == "closed":
                 return {"buyer_order": buyer, "seller_order": seller}
             return None

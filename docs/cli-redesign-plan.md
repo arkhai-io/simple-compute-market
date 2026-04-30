@@ -220,7 +220,7 @@ market settle --run <run_id>
 
 Behaviour:
 1. Open the buyer run-log for `<run_id>` and pull `seller_url`,
-   `negotiation_id`, `agreed_price`, `seller_order_id`. If any are
+   `negotiation_id`, `agreed_price`, `listing_id`. If any are
    missing or the prior negotiation didn't reach `agreed`, exit
    non-zero.
 2. If `--escrow-uid` not passed AND no `escrow_uid` event recorded:

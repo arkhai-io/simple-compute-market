@@ -428,21 +428,21 @@ The Orders API is served by the Indexer (FastAPI). When running locally on the d
 ### Publish or Update an Order
 
 ```http
-POST /agents/{agent_id}/orders
+POST /agents/{agent_id}/listings
 ```
 
 - `agent_id` must be the canonical ERC-8004 agent ID (`eip155:...`).
-- `order_id` is required and unique; reusing an `order_id` updates the existing order.
+- `listing_id` is required and unique; reusing an `listing_id` updates the existing order.
 - `status` defaults to `open` if not provided.
 
 Example:
 
 ```bash
-curl -X POST "http://localhost:8080/agents/{agent_id}/orders" \
+curl -X POST "http://localhost:8080/agents/{agent_id}/listings" \
   -H "Content-Type: application/json" \
   -d '{
-    "order_id": "order-123",
-    "order_maker": "http://localhost:8001/.well-known/agent-card.json",
+    "listing_id": "listing-123",
+    "seller": "http://localhost:8001/.well-known/agent-card.json",
     "offer_resource": {"type": "compute", "region": "us-west"},
     "demand_resource": {"type": "token", "symbol": "USDC"},
     "duration_hours": 1,
@@ -453,7 +453,7 @@ curl -X POST "http://localhost:8080/agents/{agent_id}/orders" \
 ### List Orders for an Agent
 
 ```http
-GET /agents/{agent_id}/orders
+GET /agents/{agent_id}/listings
 ```
 
 Query params:
@@ -465,13 +465,13 @@ Query params:
 Example:
 
 ```bash
-curl "http://localhost:8080/agents/{agent_id}/orders?status=open"
+curl "http://localhost:8080/agents/{agent_id}/listings?status=open"
 ```
 
 ### Query Orders (Global)
 
 ```http
-GET /orders
+GET /listings
 ```
 
 Query params:
@@ -489,35 +489,35 @@ Query params:
 Example:
 
 ```bash
-curl "http://localhost:8080/orders?status=open&offer_resource_type=compute&region=us-west"
+curl "http://localhost:8080/listings?status=open&offer_resource_type=compute&region=us-west"
 ```
 
 ### Update an Order
 
 ```http
-PUT /orders/{order_id}
+PUT /listings/{listing_id}
 ```
 
-Use this to mark an order as accepted/closed/expired or to set `order_taker` and attestations. Updating one order can also update its symmetric counterpart.
+Use this to mark an order as accepted/closed/expired or to set `buyer` and attestations. Updating one order can also update its symmetric counterpart.
 
 Example:
 
 ```bash
-curl -X PUT "http://localhost:8080/orders/{order_id}" \
+curl -X PUT "http://localhost:8080/listings/{listing_id}" \
   -H "Content-Type: application/json" \
-  -d '{"status":"accepted","order_taker":"http://localhost:8002/.well-known/agent-card.json"}'
+  -d '{"status":"accepted","buyer":"http://localhost:8002/.well-known/agent-card.json"}'
 ```
 
 ### Delete an Order
 
 ```http
-DELETE /orders/{order_id}
+DELETE /listings/{listing_id}
 ```
 
 Example:
 
 ```bash
-curl -X DELETE "http://localhost:8080/orders/{order_id}"
+curl -X DELETE "http://localhost:8080/listings/{listing_id}"
 ```
 
 ## Development

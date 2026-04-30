@@ -49,7 +49,7 @@ If `market` isn't found, ensure the dist folder is on PATH.
 Create a market order via the agent endpoint:
 
 ```bash
-market order create \
+market listing create \
   -o '{"gpu_model":"H200","quantity":1,"sla":99.9,"region":"California, US"}' \
   -d '{"token":"MOCK","amount":9.0}'
 ```

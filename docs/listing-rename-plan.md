@@ -122,9 +122,20 @@ negotiations_controller). `action_executor.discover()` now returns
 `their_listing_id` keys. Tests green: storefront 290 unit + integration,
 registry 84, buyer 17, policy 21.
 
-**Slice 5 — Docs + helm**
-ARCHITECTURE.md, READMEs, helm values comments,
-cli-redesign-plan.md, integration-test fixture names.
+**Slice 5 — Docs + helm** ✅ committed
+Doc-level vocabulary swap. ARCHITECTURE.md routes/columns/JSON keys
+flipped (`/api/v1/orders` → `/api/v1/listings`,
+`orders_controller.py` → `listings_controller.py`, `our_order_id` →
+`our_listing_id`, etc). README.md, registry-service/README.md,
+storefront-client/README.md, integration-tests/README.md updated:
+SDK method names (`create_order` → `create_listing`, etc), curl
+examples, EIP-191 message formats, sample JSON payloads. Code-level
+docstrings updated where they still referenced legacy paths
+(cli_publish.py, action_executor.py, policy/seeding.py).
+integration-tests fixtures: sqlite_reader.py columns, deal.py
+queries + Deal dataclass fields (`buyer_listing_id`/`seller_listing_id`),
+test_buyer.py reads. Helm has no order/listing references.
+cli-redesign-plan.md, buyer-seller-split-plan.md updated.
 
 ## agent → storefront (parallel pass, smaller)
 
