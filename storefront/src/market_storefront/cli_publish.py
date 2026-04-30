@@ -112,7 +112,7 @@ def _open_order_resource_ids(db_path: str) -> set[str]:
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
-            "SELECT offer_resource FROM orders WHERE status = 'open'",
+            "SELECT offer_resource FROM listings WHERE status = 'open'",
         ).fetchall()
     finally:
         conn.close()
@@ -166,12 +166,12 @@ def _publish_offer(
     }
 
 
-def _open_order_ids(db_path: str) -> list[str]:
-    """Return every status='open' order_id from the agent DB."""
+def _open_listing_ids(db_path: str) -> list[str]:
+    """Return every status='open' listing_id from the agent DB."""
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
-            "SELECT order_id FROM orders WHERE status = 'open' ORDER BY created_at",
+            "SELECT listing_id FROM listings WHERE status = 'open' ORDER BY created_at",
         ).fetchall()
     finally:
         conn.close()
@@ -467,7 +467,7 @@ def register(app: typer.Typer) -> None:
                 raise typer.BadParameter(
                     "--abort-all is mutually exclusive with --inventory and --watch."
                 )
-            order_ids = _open_order_ids(db_path)
+            order_ids = _open_listing_ids(db_path)
             if not order_ids:
                 console.print("[green]No open sell orders — nothing to abort.[/green]")
                 return
