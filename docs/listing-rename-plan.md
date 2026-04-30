@@ -32,12 +32,24 @@ order→listing; negotiation is already the right word.
 
 Each slice ships green tests + green smoke; cold-cut at slice boundaries.
 
-**Slice 1 — ORM model + event class names** (this commit)
+**Slice 1 — ORM model + event class names** ✅ committed (`9511ce2`)
 Lowest-blast-radius rename: ORM class + top-level pydantic event
 classes only. Wire surface (route paths, JSON keys, DB column
 names, event_type strings) all unchanged. Pure Python identifier
 rename. After this, the codebase reads as "Listing" internally
 even though the wire still says "order".
+
+**Slice 1b — Storefront CLI verb rename** ✅ committed
+`market-storefront provide` → `market-storefront publish`. Pure CLI
+verb rename, no wire change. File renamed cli_provide.py →
+cli_publish.py via git mv.
+
+**Slice 1c — agent → storefront CLI flag** ✅ committed
+`--agent-url` → `--storefront-url` on the `escrow claim` /
+`escrow refund` / `publish` commands. Helper `resolve_agent_url` →
+`resolve_storefront_url`. ERC-8004-protocol-flavored "agent"
+mentions left alone (agent_card, register_onchain, AgentRegistered,
+etc.).
 
 **Slice 2 — Storefront wire**
 Storefront server routes `/orders/...` → `/listings/...`,
