@@ -24,7 +24,7 @@ from market_storefront.schema.pydantic_models import (
     Action,
     ActionType,
     ComputeResource,
-    MarketOrder,
+    Listing,
     TokenResource,
 )
 from market_storefront.resources import parse_resource_from_dict
@@ -506,7 +506,7 @@ def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
     return compute_resource, token_resource
 
 
-def _extract_initial_price_from_order(order: MarketOrder | dict) -> int:
+def _extract_initial_price_from_order(order: Listing | dict) -> int:
     """Extract the initial price from an order's token resource.
 
     The token amount represents:
@@ -514,7 +514,7 @@ def _extract_initial_price_from_order(order: MarketOrder | dict) -> int:
     - For deficit (demanding compute): The ceiling price (maximum willing to pay)
     """
     if isinstance(order, dict):
-        order = MarketOrder.model_validate(order)
+        order = Listing.model_validate(order)
 
     if isinstance(order.offer_resource, TokenResource):
         return order.offer_resource.amount
@@ -563,7 +563,7 @@ def create_order(
     )
     oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
 
-    order = MarketOrder(
+    order = Listing(
         order_id=str(uuid.uuid4()),
         order_maker=BASE_URL_OVERRIDE,
         order_taker=None,
@@ -668,7 +668,7 @@ async def discover(
     return matches
 
 
-async def publish_order_to_registry(order: MarketOrder | dict) -> dict[str, Any]:
+async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """Publish a new order to the registry so discoverers can find it.
 
     Called by the MAKE_OFFER action path when /orders/create runs. No
@@ -679,7 +679,7 @@ async def publish_order_to_registry(order: MarketOrder | dict) -> dict[str, Any]
     registry errors; logs them. Callers interpret `status` to decide
     whether to bubble up.
     """
-    if isinstance(order, MarketOrder):
+    if isinstance(order, Listing):
         order_dict = order.model_dump(mode="json")
         order_id = order.order_id
     else:

@@ -10,7 +10,7 @@ from typing import Any
 
 from market_storefront.schema.pydantic_models import (
     ResourceAlertRequest,
-    MarketOrder,
+    Listing,
     ComputeResource,
     ComputeDomainResource,
     TokenResource,
@@ -27,9 +27,9 @@ def validate_alert(alert_dict: dict[str, Any]) -> ResourceAlertRequest:
     return validate_model(ResourceAlertRequest, alert_dict)
 
 
-def validate_market_order(order_dict: dict[str, Any]) -> MarketOrder:
-    """Validate and convert market order dictionary to MarketOrder."""
-    return validate_model(MarketOrder, order_dict)
+def validate_market_order(order_dict: dict[str, Any]) -> Listing:
+    """Validate and convert market order dictionary to Listing."""
+    return validate_model(Listing, order_dict)
 
 
 def extract_compute_resource(resource: ComputeDomainResource) -> ComputeResource | None:
@@ -64,8 +64,8 @@ def determine_strategy_from_resources(
     return None
 
 
-def determine_strategy_from_order(order: MarketOrder | None) -> str | None:
-    """Determine negotiation strategy from a MarketOrder."""
+def determine_strategy_from_order(order: Listing | None) -> str | None:
+    """Determine negotiation strategy from a Listing."""
     if not order:
         return None
 

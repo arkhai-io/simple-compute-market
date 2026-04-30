@@ -187,7 +187,7 @@ class ComputeResourcePortfolio(BaseModel):
         return False
 
 
-class MarketOrder(BaseModel):
+class Listing(BaseModel):
     """Market order for trading compute resources and tokens."""
 
     order_id: str = Field(description="The id of the order")
@@ -261,7 +261,7 @@ class EventType(str, Enum):
 DomainEvent = CoreDomainEvent
 
 
-class OrderCreateEvent(DomainEvent):
+class ListingCreatedEvent(DomainEvent):
     """Event triggered when a local client requests order creation."""
 
     event_type: EventType = Field(default=EventType.ORDER_CREATE)
@@ -285,7 +285,7 @@ class OrderCreateEvent(DomainEvent):
         return data
 
 
-class OrderCloseEvent(DomainEvent):
+class ListingClosedEvent(DomainEvent):
     """Event triggered when a local client requests order closure."""
 
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)

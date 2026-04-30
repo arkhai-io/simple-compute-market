@@ -136,8 +136,8 @@ def taker_agent(db_session):
 
 @pytest.fixture
 def open_order(db_session, agent_no_owner):
-    from src.db.models import MarketOrder, OrderStatusEnum
-    order = MarketOrder(
+    from src.db.models import Listing, OrderStatusEnum
+    order = Listing(
         order_id="integ-open-order-1",
         agent_id=agent_no_owner.agent_id,
         order_maker=agent_no_owner.token_uri,
@@ -154,8 +154,8 @@ def open_order(db_session, agent_no_owner):
 
 @pytest.fixture
 def authenticated_open_order(db_session, maker_agent):
-    from src.db.models import MarketOrder, OrderStatusEnum
-    order = MarketOrder(
+    from src.db.models import Listing, OrderStatusEnum
+    order = Listing(
         order_id="integ-auth-order-1",
         agent_id=maker_agent.agent_id,
         order_maker=maker_agent.token_uri,

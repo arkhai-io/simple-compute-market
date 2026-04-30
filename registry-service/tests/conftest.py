@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.db.database import Base
-from src.db.models import Agent, MarketOrder, OrderStatusEnum
+from src.db.models import Agent, Listing, OrderStatusEnum
 
 
 @pytest.fixture(scope="session")
@@ -68,7 +68,7 @@ def sample_agent(db_session):
 @pytest.fixture
 def sample_order(db_session, sample_agent):
     """Create a sample order for testing (agent has owner — auth required)."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-1",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -105,7 +105,7 @@ def sample_agent_no_owner(db_session):
 @pytest.fixture
 def sample_order_no_owner(db_session, sample_agent_no_owner):
     """Create a sample order for an agent with no owner (auth not required)."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-no-owner",
         agent_id=sample_agent_no_owner.agent_id,
         order_maker="http://localhost:8002/.well-known/agent-card.json",

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from src.types import AgentCard, ERC8004RegistrationFile, Endpoint
-from src.db.models import Agent, MarketOrder, OrderStatusEnum
+from src.db.models import Agent, Listing, OrderStatusEnum
 
 # Import for signature verification
 try:
@@ -293,8 +293,8 @@ def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
         return None
 
 
-def order_to_dict(order: MarketOrder) -> dict:
-    """Convert MarketOrder model to API response dict"""
+def order_to_dict(order: Listing) -> dict:
+    """Convert Listing model to API response dict"""
     return {
         "order_id": order.order_id,
         "agent_id": order.agent_id,
@@ -321,7 +321,7 @@ def validate_order_status(status: str) -> OrderStatusEnum:
 
 
 def matches_resource_filters(
-    order: MarketOrder,
+    order: Listing,
     offer_resource_type: Optional[str] = None,
     demand_resource_type: Optional[str] = None,
     region: Optional[str] = None,
@@ -360,7 +360,7 @@ def matches_resource_filters(
     return True
 
 
-def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resource: dict, original_demand_resource: dict) -> Optional[MarketOrder]:
+def find_symmetric_order(db: Session, order: Listing, original_offer_resource: dict, original_demand_resource: dict) -> Optional[Listing]:
     """Find the symmetric order for a given order.
     
     A symmetric order is one where:
@@ -371,11 +371,11 @@ def find_symmetric_order(db: Session, order: MarketOrder, original_offer_resourc
     if not order.order_taker:
         return None
     
-    symmetric_orders = db.query(MarketOrder).filter(
+    symmetric_orders = db.query(Listing).filter(
         and_(
-            MarketOrder.order_id != order.order_id,
-            MarketOrder.order_maker == order.order_taker,
-            MarketOrder.status.in_([OrderStatusEnum.open, OrderStatusEnum.accepted]),
+            Listing.order_id != order.order_id,
+            Listing.order_maker == order.order_taker,
+            Listing.status.in_([OrderStatusEnum.open, OrderStatusEnum.accepted]),
         )
     ).all()
     

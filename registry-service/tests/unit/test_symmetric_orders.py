@@ -2,13 +2,13 @@
 
 import pytest
 from src.api.utils import find_symmetric_order
-from src.db.models import MarketOrder, OrderStatusEnum
+from src.db.models import Listing, OrderStatusEnum
 
 
 def test_find_symmetric_order(db_session, sample_agent):
     """Test finding symmetric order."""
     # Create order A: offer GPU, demand token
-    order_a = MarketOrder(
+    order_a = Listing(
         order_id="order-a",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -21,7 +21,7 @@ def test_find_symmetric_order(db_session, sample_agent):
     db_session.add(order_a)
     
     # Create order B: offer token, demand GPU (symmetric)
-    order_b = MarketOrder(
+    order_b = Listing(
         order_id="order-b",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8002/.well-known/agent-card.json",
@@ -43,7 +43,7 @@ def test_find_symmetric_order(db_session, sample_agent):
 
 def test_find_symmetric_order_not_found(db_session, sample_agent):
     """Test symmetric order not found."""
-    order = MarketOrder(
+    order = Listing(
         order_id="order-no-match",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -65,7 +65,7 @@ def test_find_symmetric_order_not_found(db_session, sample_agent):
 
 def test_find_symmetric_order_no_taker(db_session, sample_agent):
     """Test symmetric order finding when order has no taker."""
-    order = MarketOrder(
+    order = Listing(
         order_id="order-no-taker",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",

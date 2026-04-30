@@ -99,7 +99,7 @@ class OrderStatusEnum(str, enum.Enum):
     expired = "expired"
 
 
-class MarketOrder(Base):
+class Listing(Base):
     __tablename__ = "market_orders"
     
     order_id = Column(String, primary_key=True)

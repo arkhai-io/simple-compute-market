@@ -2,12 +2,12 @@
 
 import pytest
 from src.api.utils import matches_resource_filters
-from src.db.models import MarketOrder, OrderStatusEnum
+from src.db.models import Listing, OrderStatusEnum
 
 
 def test_matches_resource_filters_compute(db_session, sample_agent):
     """Test compute resource filtering."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-compute",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -23,7 +23,7 @@ def test_matches_resource_filters_compute(db_session, sample_agent):
 
 def test_matches_resource_filters_region(db_session, sample_agent):
     """Test region filtering."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-region",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -39,7 +39,7 @@ def test_matches_resource_filters_region(db_session, sample_agent):
 
 def test_matches_resource_filters_bidirectional(db_session, sample_agent):
     """Test bidirectional filtering skips resource type check."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-bidirectional",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -56,7 +56,7 @@ def test_matches_resource_filters_bidirectional(db_session, sample_agent):
 
 def test_matches_resource_filters_gpu_model(db_session, sample_agent):
     """Test GPU model filtering."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-gpu",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",
@@ -72,7 +72,7 @@ def test_matches_resource_filters_gpu_model(db_session, sample_agent):
 
 def test_matches_resource_filters_sla(db_session, sample_agent):
     """Test SLA filtering."""
-    order = MarketOrder(
+    order = Listing(
         order_id="test-order-sla",
         agent_id=sample_agent.agent_id,
         order_maker="http://localhost:8001/.well-known/agent-card.json",

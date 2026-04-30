@@ -145,7 +145,7 @@ async def start_sync_negotiation(
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.schema.pydantic_models import MarketOrder
+    from market_storefront.schema.pydantic_models import Listing
     from market_storefront.utils.action_executor import (
         _extract_initial_price_from_order,
         determine_strategy_from_order,
@@ -164,7 +164,7 @@ async def start_sync_negotiation(
     if not our_order_dict:
         raise ValueError(f"Order {our_order_id} not found locally; seller has no matching listing")
 
-    our_order = MarketOrder.model_validate(our_order_dict)
+    our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     if not strategy:
         raise ValueError(f"Order {our_order_id} has no usable strategy for negotiation")
@@ -233,7 +233,7 @@ async def continue_sync_negotiation(
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.schema.pydantic_models import MarketOrder
+    from market_storefront.schema.pydantic_models import Listing
     from market_storefront.utils.action_executor import (
         _extract_initial_price_from_order,
         determine_strategy_from_order,
@@ -253,7 +253,7 @@ async def continue_sync_negotiation(
     our_order_dict = await sqlite_client.load_order(order_id=our_order_id) if our_order_id else None
     if not our_order_dict:
         raise ValueError(f"Seller's order {our_order_id} is gone from local DB")
-    our_order = MarketOrder.model_validate(our_order_dict)
+    our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     our_price = _extract_initial_price_from_order(our_order)
 

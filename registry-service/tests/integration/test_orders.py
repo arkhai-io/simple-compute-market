@@ -113,8 +113,8 @@ class TestGetAgentOrders:
         assert result.orders == []
 
     async def test_status_filter(self, registry_client, open_order, agent_no_owner, db_session):
-        from src.db.models import MarketOrder, OrderStatusEnum
-        db_session.add(MarketOrder(
+        from src.db.models import Listing, OrderStatusEnum
+        db_session.add(Listing(
             order_id="agent-orders-closed",
             agent_id=agent_no_owner.agent_id,
             order_maker=agent_no_owner.token_uri,

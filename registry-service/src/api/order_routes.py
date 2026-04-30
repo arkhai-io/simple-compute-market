@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
 from src.db.database import get_db
-from src.db.models import Agent, MarketOrder, OrderStatusEnum
+from src.db.models import Agent, Listing, OrderStatusEnum
 from src.api.utils import (
     find_agent_by_id,
     order_to_dict,
@@ -52,7 +52,7 @@ async def publish_order(
         if not verify_order_signature("create_order", agent.agent_id, timestamp, signature, agent.owner):
             raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Use canonical agent_id for FK in MarketOrder
+    # Use canonical agent_id for FK in Listing
     agent_id_for_order = agent.agent_id
 
     # Extract order fields
@@ -61,7 +61,7 @@ async def publish_order(
         raise HTTPException(status_code=400, detail="order_id is required")
     
     # Check if order already exists
-    existing_order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
+    existing_order = db.query(Listing).filter(Listing.order_id == order_id).first()
     
     if existing_order:
         # Update existing order
@@ -86,7 +86,7 @@ async def publish_order(
     else:
         # Create new order
         status_str = order_data.get("status", "open")
-        order = MarketOrder(
+        order = Listing(
             order_id=order_id,
             agent_id=agent_id_for_order,
             order_maker=order_data.get("order_maker", ""),
@@ -127,13 +127,13 @@ async def get_agent_orders(
         raise HTTPException(status_code=404, detail="Agent not found")
     
     # Use canonical agent_id for FK lookup
-    query = db.query(MarketOrder).filter(MarketOrder.agent_id == agent.agent_id)
+    query = db.query(Listing).filter(Listing.agent_id == agent.agent_id)
     
     if status:
         status_enum = validate_order_status(status)
-        query = query.filter(MarketOrder.status == status_enum)
+        query = query.filter(Listing.status == status_enum)
     
-    orders = query.order_by(desc(MarketOrder.created_at)).offset(offset).limit(limit).all()
+    orders = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
     
     return {
         "items": [order_to_dict(order) for order in orders],
@@ -155,14 +155,14 @@ async def query_orders(
     db: Session = Depends(get_db),
 ):
     """Query orders with filters (supports bidirectional matching)"""
-    query = db.query(MarketOrder)
+    query = db.query(Listing)
     
     # Filter by status
     if status:
         status_enum = validate_order_status(status)
-        query = query.filter(MarketOrder.status == status_enum)
+        query = query.filter(Listing.status == status_enum)
     
-    orders = query.order_by(desc(MarketOrder.created_at)).offset(offset).limit(limit).all()
+    orders = query.order_by(desc(Listing.created_at)).offset(offset).limit(limit).all()
     
     # Filter in Python for complex resource matching
     filtered_items = [
@@ -193,7 +193,7 @@ async def update_order(
     db: Session = Depends(get_db),
 ):
     """Update an order (e.g., mark as accepted). Also updates the corresponding symmetric order."""
-    order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
+    order = db.query(Listing).filter(Listing.order_id == order_id).first()
 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -300,7 +300,7 @@ async def get_order(
     db: Session = Depends(get_db),
 ):
     """Get a single order by ID."""
-    order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
+    order = db.query(Listing).filter(Listing.order_id == order_id).first()
 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -318,7 +318,7 @@ async def delete_order(
     db: Session = Depends(get_db),
 ):
     """Remove an order from the registry. Requires signature from the order maker's owner."""
-    order = db.query(MarketOrder).filter(MarketOrder.order_id == order_id).first()
+    order = db.query(Listing).filter(Listing.order_id == order_id).first()
 
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")

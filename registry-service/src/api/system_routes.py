@@ -42,7 +42,7 @@ from src.api.system_model import (
 )
 from src.config import settings
 from src.db.database import get_db
-from src.db.models import Agent, MarketOrder, OrderStatusEnum
+from src.db.models import Agent, Listing, OrderStatusEnum
 _health_router = APIRouter(tags=["system"])
 _system_router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
@@ -167,8 +167,8 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
 
     order_counts: dict[str, int] = {s.value: 0 for s in OrderStatusEnum}
     rows = (
-        db.query(MarketOrder.status, func.count(MarketOrder.order_id))
-        .group_by(MarketOrder.status)
+        db.query(Listing.status, func.count(Listing.order_id))
+        .group_by(Listing.status)
         .all()
     )
     for status, count in rows:
@@ -203,22 +203,22 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
 )
 def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse:
     maker_count: int = (
-        db.query(func.count(MarketOrder.order_id))
-        .filter(MarketOrder.maker_attestation.isnot(None))
+        db.query(func.count(Listing.order_id))
+        .filter(Listing.maker_attestation.isnot(None))
         .scalar()
         or 0
     )
     taker_count: int = (
-        db.query(func.count(MarketOrder.order_id))
-        .filter(MarketOrder.taker_attestation.isnot(None))
+        db.query(func.count(Listing.order_id))
+        .filter(Listing.taker_attestation.isnot(None))
         .scalar()
         or 0
     )
     settled_count: int = (
-        db.query(func.count(MarketOrder.order_id))
+        db.query(func.count(Listing.order_id))
         .filter(
-            MarketOrder.maker_attestation.isnot(None),
-            MarketOrder.taker_attestation.isnot(None),
+            Listing.maker_attestation.isnot(None),
+            Listing.taker_attestation.isnot(None),
         )
         .scalar()
         or 0

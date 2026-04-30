@@ -107,8 +107,8 @@ class TestSystemStats:
         assert resp["orders_by_status"]["closed"] == 0
 
     async def test_closed_order_counted(self, registry_client, db_session, agent_no_owner):
-        from src.db.models import MarketOrder, OrderStatusEnum
-        db_session.add(MarketOrder(
+        from src.db.models import Listing, OrderStatusEnum
+        db_session.add(Listing(
             order_id="stats-closed-1",
             agent_id=agent_no_owner.agent_id,
             order_maker=agent_no_owner.token_uri,
@@ -148,8 +148,8 @@ class TestAttestationStats:
     async def test_only_maker_attestation_counted_separately(
         self, registry_client, db_session, agent_no_owner
     ):
-        from src.db.models import MarketOrder, OrderStatusEnum
-        db_session.add(MarketOrder(
+        from src.db.models import Listing, OrderStatusEnum
+        db_session.add(Listing(
             order_id="attest-maker-only-1",
             agent_id=agent_no_owner.agent_id,
             order_maker=agent_no_owner.token_uri,
@@ -171,8 +171,8 @@ class TestAttestationStats:
     async def test_only_taker_attestation_counted_separately(
         self, registry_client, db_session, agent_no_owner
     ):
-        from src.db.models import MarketOrder, OrderStatusEnum
-        db_session.add(MarketOrder(
+        from src.db.models import Listing, OrderStatusEnum
+        db_session.add(Listing(
             order_id="attest-taker-only-1",
             agent_id=agent_no_owner.agent_id,
             order_maker=agent_no_owner.token_uri,
@@ -194,8 +194,8 @@ class TestAttestationStats:
     async def test_both_attestations_counted_as_settled(
         self, registry_client, db_session, agent_no_owner
     ):
-        from src.db.models import MarketOrder, OrderStatusEnum
-        db_session.add(MarketOrder(
+        from src.db.models import Listing, OrderStatusEnum
+        db_session.add(Listing(
             order_id="attest-settled-1",
             agent_id=agent_no_owner.agent_id,
             order_maker=agent_no_owner.token_uri,
@@ -218,27 +218,27 @@ class TestAttestationStats:
     ):
         """Three orders in different attestation states — each counter
         reflects only its own condition, settled requires both."""
-        from src.db.models import MarketOrder, OrderStatusEnum
+        from src.db.models import Listing, OrderStatusEnum
 
         agent_id = agent_no_owner.agent_id
         maker = agent_no_owner.token_uri
 
         db_session.add_all([
-            MarketOrder(
+            Listing(
                 order_id="mix-open",
                 agent_id=agent_id, order_maker=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.open,
                 maker_attestation=None, taker_attestation=None,
             ),
-            MarketOrder(
+            Listing(
                 order_id="mix-maker-only",
                 agent_id=agent_id, order_maker=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.accepted,
                 maker_attestation="0xmaker_mix_001", taker_attestation=None,
             ),
-            MarketOrder(
+            Listing(
                 order_id="mix-settled",
                 agent_id=agent_id, order_maker=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
@@ -257,20 +257,20 @@ class TestAttestationStats:
         self, registry_client, db_session, agent_no_owner
     ):
         """Two fully settled orders → settled_order_count == 2, not 4."""
-        from src.db.models import MarketOrder, OrderStatusEnum
+        from src.db.models import Listing, OrderStatusEnum
 
         agent_id = agent_no_owner.agent_id
         maker = agent_no_owner.token_uri
 
         db_session.add_all([
-            MarketOrder(
+            Listing(
                 order_id="double-settled-1",
                 agent_id=agent_id, order_maker=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 duration_hours=1, status=OrderStatusEnum.closed,
                 maker_attestation="0xm1", taker_attestation="0xt1",
             ),
-            MarketOrder(
+            Listing(
                 order_id="double-settled-2",
                 agent_id=agent_id, order_maker=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},

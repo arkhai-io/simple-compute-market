@@ -12,7 +12,7 @@ from market_storefront.schema.pydantic_models import (
     ArbitrationCompleteEvent,
     DecisionContext,
     MakeOfferEvent,
-    MarketOrder,
+    Listing,
     NegotiationEvent,
     ComputeResource,
     TokenResource,
@@ -86,9 +86,9 @@ def ri_guard_resource_present(context: DecisionContext) -> DomainAction | None:
 
 @policy_callable("oc.action.make_offer_from_order_create")
 def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAction | None:
-    from market_storefront.schema.pydantic_models import ActionType, OrderCreateEvent
+    from market_storefront.schema.pydantic_models import ActionType, ListingCreatedEvent
 
-    if not isinstance(context.event, OrderCreateEvent):
+    if not isinstance(context.event, ListingCreatedEvent):
         return None
 
     offer = context.event.offer
@@ -124,9 +124,9 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
 
 @policy_callable("oc.action.close_order")
 def oc_action_close_order(context: DecisionContext) -> DomainAction | None:
-    from market_storefront.schema.pydantic_models import ActionType, OrderCloseEvent
+    from market_storefront.schema.pydantic_models import ActionType, ListingClosedEvent
 
-    if not isinstance(context.event, OrderCloseEvent):
+    if not isinstance(context.event, ListingClosedEvent):
         return None
 
     return DomainAction(
@@ -643,8 +643,8 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
     if not order_obj:
         return None
 
-    # Convert to dict if it's a MarketOrder model
-    if isinstance(order_obj, MarketOrder):
+    # Convert to dict if it's a Listing model
+    if isinstance(order_obj, Listing):
         incoming_order = order_obj.model_dump(mode="json")
     else:
         incoming_order = order_obj
@@ -685,7 +685,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         }
         if order_dict.get("order_id") == incoming_order.get("order_id"):
             continue
-        order = MarketOrder.model_validate(order_dict)
+        order = Listing.model_validate(order_dict)
         if determine_strategy_from_order(order):
             our_order = order_dict
             break
@@ -694,7 +694,7 @@ async def negotiation_respond_to_make_offer(context: DecisionContext) -> DomainA
         actions = NegotiationActionBuilder({})
         return actions.reject("no_matching_order")
 
-    market_order = MarketOrder.model_validate(our_order)
+    market_order = Listing.model_validate(our_order)
     strategy = determine_strategy_from_order(market_order)
     our_price = _extract_initial_price_from_order(our_order)
 

@@ -49,7 +49,7 @@ from market_storefront.schema.pydantic_models import (
     ActionType,
     EventType,
     DomainEvent,
-    MarketOrder,
+    Listing,
     ReceiveComputeObligationFulfillmentEvent,
     FulfillmentFailedEvent,
     ArbitrationCompleteEvent,
@@ -57,8 +57,8 @@ from market_storefront.schema.pydantic_models import (
     ResourceAlertRequest,
     ComputeResource,
     TokenResource,
-    OrderCreateEvent,
-    OrderCloseEvent,
+    ListingCreatedEvent,
+    ListingClosedEvent,
 )
 from market_storefront.resources import (
     adapt_db_resource_to_domain_resource,
@@ -188,7 +188,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             offer_data = data.get("offer", data.get("offer_resource"))
             demand_data = data.get("demand", data.get("demand_resource"))
             if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
-                raise ValueError("OrderCreateEvent requires 'offer' and 'demand' dictionaries")
+                raise ValueError("ListingCreatedEvent requires 'offer' and 'demand' dictionaries")
 
             duration_hours = data.get("duration_hours", payload.get("duration_hours", 1))
             order_create_payload = {
@@ -200,12 +200,12 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 "duration_hours": duration_hours,
                 "data": data,
             }
-            return OrderCreateEvent.model_validate(order_create_payload)
+            return ListingCreatedEvent.model_validate(order_create_payload)
 
         elif event_type == EventType.ORDER_CLOSE:
             order_id = data.get("order_id", payload.get("order_id"))
             if not isinstance(order_id, str) or not order_id.strip():
-                raise ValueError("OrderCloseEvent requires 'order_id'")
+                raise ValueError("ListingClosedEvent requires 'order_id'")
             order_close_payload = {
                 "event_id": payload.get("event_id") or f"order_close_{uuid.uuid4()}",
                 "event_type": EventType.ORDER_CLOSE.value,
@@ -213,7 +213,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 "order_id": order_id,
                 "data": data,
             }
-            return OrderCloseEvent.model_validate(order_close_payload)
+            return ListingClosedEvent.model_validate(order_close_payload)
 
         elif event_type == EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT:
             # Merge top-level source (A2A sender URL) into data so counterparty is known for reply routing
@@ -869,7 +869,7 @@ async def _run_create_order_flow(request: Request) -> dict:
         raise ValueError("Offer and demand must be one compute and one token resource")
 
     event_id = f"order_create_{uuid.uuid4()}"
-    order_create_event = OrderCreateEvent(
+    order_create_event = ListingCreatedEvent(
         event_id=event_id,
         source=BASE_URL_OVERRIDE,
         offer=offer_resource,
@@ -926,7 +926,7 @@ async def _run_close_order_flow(request: Request) -> dict:
         raise ValueError("Request must include non-empty 'order_id'")
 
     event_id = f"order_close_{uuid.uuid4()}"
-    order_close_event = OrderCloseEvent(
+    order_close_event = ListingClosedEvent(
         event_id=event_id,
         source=BASE_URL_OVERRIDE,
         order_id=order_id,
