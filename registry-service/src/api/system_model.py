@@ -89,8 +89,8 @@ class AttestationStatsResponse(BaseModel):
         description="Listings with both seller_attestation and buyer_attestation set"
     )
     seller_attestation_count: int = Field(
-        description="Listings with seller_attestation set (escrow created by buyer)"
+        description="Listings with seller_attestation set (fulfillment attested by seller)"
     )
     buyer_attestation_count: int = Field(
-        description="Listings with buyer_attestation set (fulfillment attested by seller)"
+        description="Listings with buyer_attestation set (escrow locked by buyer)"
     )

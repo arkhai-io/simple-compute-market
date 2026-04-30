@@ -361,8 +361,8 @@ class AttestationStats:
     """Settlement activity counts from GET /api/v1/system/stats/attestations.
 
     settled_listing_count > 0 means at least one full Alkahest deal cycle
-    has completed: buyer locked escrow (seller_attestation) and seller
-    attested fulfillment (buyer_attestation).
+    has completed: buyer locked escrow (buyer_attestation) and seller
+    attested fulfillment (seller_attestation).
     """
 
     settled_listing_count: int = 0

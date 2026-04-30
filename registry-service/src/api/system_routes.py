@@ -196,8 +196,8 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
         "Returns counts of listings with Alkahest attestation UIDs written back "
         "by agents after on-chain settlement. A non-zero settled_listing_count "
         "confirms that at least one full deal cycle has completed: escrow locked "
-        "by the buyer (seller_attestation) and compute obligation fulfilled by the "
-        "seller (buyer_attestation). Intended as a smoke-test signal that the "
+        "by the buyer (buyer_attestation) and compute obligation fulfilled by the "
+        "seller (seller_attestation). Intended as a smoke-test signal that the "
         "market is functioning end-to-end, not just deployed."
     ),
 )
