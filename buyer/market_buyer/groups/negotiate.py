@@ -68,11 +68,12 @@ def register(app: typer.Typer) -> None:
             None, "--buyer-priv-key",
             help="Override buyer private key (default: wallet.private_key).",
         ),
-        duration_hours: Optional[int] = typer.Option(
+        duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
-            help="Lease duration the deal funds. Logged so a follow-on "
-                 "`market settle --run <id>` can drive escrow.create "
-                 "without re-passing it.",
+            help="Lease duration the buyer wants (hours, fractional ok). "
+                 "Required for fresh runs — sent on /negotiate/new and "
+                 "validated server-side against the listing's max_duration_seconds. "
+                 "Resumed runs read it from the run-log.",
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
@@ -142,6 +143,15 @@ def register(app: typer.Typer) -> None:
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+        if resume_state is None and (duration_hours is None or duration_hours <= 0):
+            typer.secho(
+                "Fresh runs require --duration-hours (the buyer's lease ask).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        duration_seconds = (
+            int(round(duration_hours * 3600)) if duration_hours is not None else None
+        )
 
         # Best-effort: fetch the seller's on-chain wallet from the
         # /.well-known/agent-wallet.json endpoint and log it. Failure
@@ -170,7 +180,7 @@ def register(app: typer.Typer) -> None:
             max_price=max_price,
             max_rounds=max_rounds,
             seller_wallet_address=seller_wallet,
-            duration_hours=duration_hours,
+            duration_seconds=duration_seconds,
             token_contract=token_contract,
             token_decimals=token_decimals,
             resumed_from=from_run,
@@ -220,6 +230,7 @@ def register(app: typer.Typer) -> None:
                 listing_id=listing_id,
                 initial_price=initial_price or 0,
                 max_price=max_price,
+                duration_seconds=duration_seconds,
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,

@@ -33,6 +33,7 @@ def _thread(
     *,
     terminal_state: str | None = None,
     agreed_price: int | None = None,
+    requested_duration_seconds: int | None = None,
 ) -> dict:
     return {
         "negotiation_id": neg_id,
@@ -40,14 +41,14 @@ def _thread(
         "their_agent_id": "0xBuyer",
         "terminal_state": terminal_state,
         "agreed_price": agreed_price,
+        "requested_duration_seconds": requested_duration_seconds,
         "status": "active",
     }
 
 
 def _order(order_id: str = "ord-1", duration_hours: int = 2) -> dict:
-    # Slice C will replace this with agreed_duration_seconds from the
-    # negotiation thread. For now: encode test hours via the listing's
-    # max_duration_seconds (the agreement code reads it / 3600).
+    # `duration_hours` here is just the test fixture knob; it controls the
+    # listing's max_duration_seconds ceiling that the negotiation respects.
     return {
         "order_id": order_id,
         "status": "open",
@@ -247,7 +248,7 @@ class TestForceAccept:
         db.commit_agreed_terms.assert_awaited_once_with(
             negotiation_id="neg-1",
             agreed_price=8500,
-            agreed_duration_hours=3,
+            agreed_duration_seconds=3 * 3600,
         )
         assert result["action"] == "accept"
         assert result["price"] == 8500

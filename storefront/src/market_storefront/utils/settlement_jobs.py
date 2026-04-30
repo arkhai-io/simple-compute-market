@@ -97,12 +97,24 @@ async def start_settlement_job(
             our_listing_id, exc,
         )
 
+    # The buyer's lease ask was committed on the negotiation thread when
+    # the round terminated `agreed`. Fall back to the listing's max
+    # ceiling, then 1h, only for legacy threads from before duration
+    # became buyer-supplied.
+    duration_seconds = (
+        thread.get("agreed_duration_seconds")
+        or thread.get("requested_duration_seconds")
+        or our_order_dict.get("max_duration_seconds")
+        or 3600
+    )
+
     asyncio.create_task(
         _run_settlement_job_bg(
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
             listing_id=our_listing_id,
             order_dict=our_order_dict,
+            duration_seconds=int(duration_seconds),
             sqlite_client=sqlite_client,
             alkahest_client=alkahest_client,
         )
@@ -121,6 +133,7 @@ async def _run_settlement_job_bg(
     ssh_public_key: str,
     listing_id: str,
     order_dict: dict[str, Any],
+    duration_seconds: int,
     sqlite_client: Any,
     alkahest_client: Any,
 ) -> None:
@@ -137,6 +150,7 @@ async def _run_settlement_job_bg(
             ssh_public_key=ssh_public_key,
             oracle_address=CONFIG.agent_wallet_address,
             order=order_dict,
+            duration_seconds=duration_seconds,
             listing_id=listing_id,
         )
     except Exception as exc:

@@ -196,10 +196,10 @@ def create_cmd(
         help="Buyer run-id from a prior `market negotiate` "
              "(see `market logs runs`).",
     ),
-    duration_hours: Optional[int] = typer.Option(
+    duration_hours: Optional[float] = typer.Option(
         None, "--duration-hours", "-t",
-        help="Lease duration the escrow funds. Default: from the run-log if "
-             "recorded, else 1.",
+        help="Override the lease duration the escrow funds (hours, fractional ok). "
+             "Default: from the run-log if recorded.",
     ),
     expiration_seconds: int = typer.Option(
         3600, "--expiration",
@@ -273,8 +273,13 @@ def create_cmd(
         token_decimals=effective_token_decimals,
         require_ssh=False,
     )
-    effective_duration = (
-        duration_hours if duration_hours is not None else deal.duration_hours
+    duration_seconds_override = (
+        int(round(duration_hours * 3600)) if duration_hours is not None else None
+    )
+    effective_duration_seconds = (
+        duration_seconds_override
+        if duration_seconds_override is not None
+        else deal.duration_seconds
     )
 
     log = open_run_log(run_id)
@@ -298,7 +303,7 @@ def create_cmd(
         negotiation_id=deal.negotiation_id,
         listing_id=deal.listing_id,
         agreed_price=deal.agreed_price,
-        duration_hours=effective_duration,
+        duration_seconds=effective_duration_seconds,
     )
     log.event("escrow_create_start", terms=terms.__dict__)
 
@@ -309,7 +314,7 @@ def create_cmd(
     header.add_row("Seller", deal.seller_url)
     header.add_row("Seller wallet", seller_wallet)
     header.add_row("Agreed price", str(deal.agreed_price))
-    header.add_row("Duration (hours)", str(effective_duration))
+    header.add_row("Duration (seconds)", str(effective_duration_seconds))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     console.print(Panel(header, title="market escrow create", border_style="cyan"))
 

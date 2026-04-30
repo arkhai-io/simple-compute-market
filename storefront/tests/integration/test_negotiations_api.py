@@ -77,7 +77,7 @@ async def _seed_thread(
                 INSERT OR REPLACE INTO negotiation_threads
                   (negotiation_id, our_listing_id, their_listing_id,
                    our_agent_id, their_agent_id,
-                   terminal_state, agreed_price, agreed_duration_hours,
+                   terminal_state, agreed_price, agreed_duration_seconds,
                    agreed_at, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -86,7 +86,7 @@ async def _seed_thread(
                     "http://seller:8001", "0xBuyer",
                     terminal_state,
                     agreed_price,
-                    2 if agreed_price else None,
+                    7200 if agreed_price else None,
                     now if agreed_price else None,
                     now, now,
                 ),

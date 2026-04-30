@@ -36,7 +36,7 @@ def run_settle_from_log(
     escrow_uid: Optional[str],
     token_contract: Optional[str],
     token_decimals: int,
-    duration_hours: Optional[int],
+    duration_seconds: Optional[int],
     expiration_seconds: int,
     ssh_public_key: Optional[str],
     buyer_address: Optional[str],
@@ -82,7 +82,7 @@ def run_settle_from_log(
 
     resolved_uid = escrow_uid or deal.escrow_uid
     effective_duration = (
-        duration_hours if duration_hours is not None else deal.duration_hours
+        duration_seconds if duration_seconds is not None else deal.duration_seconds
     )
 
     header = Table.grid(padding=(0, 2))
@@ -91,8 +91,8 @@ def run_settle_from_log(
     header.add_row("Run ID", run_id)
     header.add_row("Seller", deal.seller_url)
     header.add_row("Negotiation", deal.negotiation_id)
-    header.add_row("Agreed price", str(deal.agreed_price))
-    header.add_row("Duration (hours)", str(effective_duration))
+    header.add_row("Agreed price (per hour)", str(deal.agreed_price))
+    header.add_row("Duration (seconds)", str(effective_duration))
     header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
     if resolved_uid:
         header.add_row("Escrow UID", resolved_uid + " (skip create)")
@@ -120,7 +120,7 @@ def run_settle_from_log(
             negotiation_id=deal.negotiation_id,
             listing_id=deal.listing_id,
             agreed_price=deal.agreed_price,
-            duration_hours=effective_duration,
+            duration_seconds=effective_duration,
         )
         log.event("escrow_create_start", terms=terms.__dict__)
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
@@ -236,10 +236,10 @@ def register(app: typer.Typer) -> None:
             18, "--token-decimals",
             help="ERC-20 token decimals.",
         ),
-        duration_hours: Optional[int] = typer.Option(
+        duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
-            help="Lease duration the escrow funds. Default: from the run-log "
-                 "if recorded, else 1.",
+            help="Override the lease duration the escrow funds (hours, fractional ok). "
+                 "Default: from the run-log if recorded.",
         ),
         expiration_seconds: int = typer.Option(
             3600, "--expiration",
@@ -289,12 +289,16 @@ def register(app: typer.Typer) -> None:
         Requires the run-log to contain an `agreed` negotiation outcome.
         For mid-negotiation resume use `market buy --from <id>` instead.
         """
+        # Convert user-friendly hours flag to the wire's seconds.
+        duration_seconds_override = (
+            int(round(duration_hours * 3600)) if duration_hours is not None else None
+        )
         run_settle_from_log(
             run_id=run_id,
             escrow_uid=escrow_uid,
             token_contract=token_contract,
             token_decimals=token_decimals,
-            duration_hours=duration_hours,
+            duration_seconds=duration_seconds_override,
             expiration_seconds=expiration_seconds,
             ssh_public_key=ssh_public_key,
             buyer_address=buyer_address,

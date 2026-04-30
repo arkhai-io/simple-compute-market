@@ -743,14 +743,14 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
 def encode_compute_lease(
     compute_resource: ComputeResource | dict[str, Any],
     token_resource: TokenResource | dict[str, Any],
-    duration_hours: int,
+    duration_seconds: int,
 ) -> bytes:
     """Encode a compute-for-token trade as JSON bytes for use as Alkahest demand payload.
 
     Args:
         compute_resource: ComputeResource (or dict payload) describing the offered compute.
-        token_resource: TokenResource (or dict) describing the payment token and amount (base units) for the hourly rate.
-        duration_hours: Lease duration in hours (defaults to 1, must be >=1).
+        token_resource: TokenResource (or dict) describing the payment token and amount (base units) for the per-hour rate.
+        duration_seconds: Lease duration in seconds (must be > 0).
     """
     compute = compute_resource
     if isinstance(compute_resource, dict):
@@ -764,13 +764,15 @@ def encode_compute_lease(
     if not isinstance(hourly_rate, TokenResource):
         raise ValueError("encode_compute_lease expects a TokenResource")
 
-    if duration_hours < 1:
-        raise ValueError("duration_hours must be >= 1")
+    if duration_seconds < 1:
+        raise ValueError("duration_seconds must be >= 1")
 
     token_meta = hourly_rate.token
-    total_price = hourly_rate.amount * duration_hours
+    # Total payment = per-hour rate × seconds / 3600. Integer division keeps
+    # the result in whole base units; fractional sub-units are not representable.
+    total_price = hourly_rate.amount * duration_seconds // 3600
     total_payment_resource = TokenResource(token=token_meta, amount=total_price)
-    
+
     # Human-readable prices
     human_total_payment = Decimal(total_payment_resource.amount) / Decimal(10**token_meta.decimals)
     human_price_per_hour = Decimal(hourly_rate.amount) / (10**token_meta.decimals)
@@ -780,7 +782,7 @@ def encode_compute_lease(
         "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
         "quantity": compute.quantity,
         "sla": compute.sla,
-        "duration_hours": duration_hours,
+        "duration_seconds": duration_seconds,
         "token_symbol": token_meta.symbol,
         "token_address": token_meta.contract_address,
         "price_per_hour_decimal": float(human_price_per_hour),
@@ -799,15 +801,21 @@ async def fulfill_compute_obligation(
     ssh_public_key: str,
     oracle_address: str | None = None,
     order: str | dict | None = None,
+    duration_seconds: int = 3600,
+    listing_id: str | None = None,
     seller_order_id: str | None = None,
 ):
     """Provision compute and fulfill the obligation. Falls back to simulated flow if no client.
-    
+
+    ``duration_seconds`` is the buyer's negotiated lease window — passed
+    through from `start_settlement_job`, which reads it off the
+    negotiation thread's `agreed_duration_seconds`. Falls back to 1h
+    only if the caller didn't provide one (recovery / legacy paths).
+
     When the maker fulfills, this sets maker_attestation in the registry.
     """
     fulfillment_uid = None
     maker_attestation = None
-    duration_hours = 1
     connection_details: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
@@ -831,11 +839,6 @@ async def fulfill_compute_obligation(
 
     if order_dict:
         order_id = order_dict.get("order_id")
-        # Slice C will replace this with the buyer-supplied agreed_duration_seconds
-        # from the negotiation thread. For now: derive from listing's
-        # max_duration_seconds with 1h default for backward compat.
-        max_seconds = order_dict.get("max_duration_seconds")
-        duration_hours = int(max_seconds // 3600) if max_seconds else 1
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("region", "gpu_model"):
@@ -844,7 +847,7 @@ async def fulfill_compute_obligation(
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
-            duration_hours=duration_hours,
+            duration_seconds=duration_seconds,
         )
         if order_id:
             try:
@@ -916,7 +919,7 @@ async def fulfill_compute_obligation(
             "ssh_public_key": ssh_public_key,
         }
 
-    lease_end_utc = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M")
+    lease_end_utc = (datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)).strftime("%Y-%m-%d %H:%M")
 
     if reserved_resource_id:
         try:

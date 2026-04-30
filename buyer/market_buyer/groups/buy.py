@@ -182,7 +182,7 @@ def _run_resume_from(
         escrow_uid=None,
         token_contract=token_contract,
         token_decimals=token_decimals,
-        duration_hours=None,
+        duration_seconds=None,
         expiration_seconds=expiration_seconds,
         ssh_public_key=ssh_public_key,
         buyer_address=buyer_address,
@@ -213,6 +213,13 @@ def register(app: typer.Typer) -> None:
                  "for fresh runs; required for --from runs only when "
                  "the negotiation is still mid-stream (the strategy "
                  "needs the buyer's ceiling).",
+        ),
+        duration_hours: Optional[float] = typer.Option(
+            None, "--duration-hours", "-t",
+            help="Lease duration the buyer wants (hours, fractional ok). "
+                 "Required for fresh runs — sent to the seller's "
+                 "/negotiate/new and validated against the listing's "
+                 "max_duration_seconds. Resumed runs read it from the run-log.",
         ),
         from_run: Optional[str] = typer.Option(
             None, "--from",
@@ -322,6 +329,14 @@ def register(app: typer.Typer) -> None:
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+        if duration_hours is None or duration_hours <= 0:
+            typer.secho(
+                "Fresh `market buy` runs require --duration-hours "
+                "(the buyer's lease ask).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        duration_seconds = int(round(duration_hours * 3600))
 
         # Resolution: CLI flag > config.toml > default.
         addr = resolve_config_value(
@@ -397,7 +412,9 @@ def register(app: typer.Typer) -> None:
             ssh_public_key=ssh,
         )
         constraints = BuyConstraints(
-            max_price=max_price, initial_price=initial_price,
+            max_price=max_price,
+            initial_price=initial_price,
+            duration_seconds=duration_seconds,
         )
 
         run_log = RunLog.start(
@@ -406,6 +423,7 @@ def register(app: typer.Typer) -> None:
             registry_url=reg,
             initial_price=initial_price,
             max_price=max_price,
+            duration_seconds=duration_seconds,
             max_matches=max_matches,
             max_rounds=max_rounds,
         )

@@ -128,6 +128,7 @@ async def start_sync_negotiation(
     our_listing_id: str,
     buyer_address: str,
     their_proposed_price: int,
+    requested_duration_seconds: int | None = None,
     our_base_url: str,
     their_agent_url: str,
 ) -> dict[str, Any]:
@@ -138,9 +139,15 @@ async def start_sync_negotiation(
     uses it for all subsequent ``/negotiate/{neg_id}`` rounds — the
     canonical id is server-assigned, not client-derived.
 
+    ``requested_duration_seconds`` is the buyer's lease ask, validated
+    against the listing's ``max_duration_seconds`` ceiling (NULL there
+    means unlimited). Stored on the thread so settlement reads it back
+    without re-querying the buyer.
+
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
-    listing).
+    listing) or if ``requested_duration_seconds`` exceeds the listing's
+    advertised max.
     """
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
@@ -164,6 +171,21 @@ async def start_sync_negotiation(
     if not our_order_dict:
         raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
+    # Validate the buyer's duration ask against the listing's advertised
+    # ceiling. NULL on the listing means "unlimited" — accept any positive
+    # duration. A buyer ask exceeding the cap is rejected before any thread
+    # state is written.
+    listing_max_seconds = our_order_dict.get("max_duration_seconds")
+    if (
+        requested_duration_seconds is not None
+        and listing_max_seconds is not None
+        and int(requested_duration_seconds) > int(listing_max_seconds)
+    ):
+        raise ValueError(
+            f"Requested duration {requested_duration_seconds}s exceeds "
+            f"listing's max_duration_seconds={listing_max_seconds}s"
+        )
+
     our_order = Listing.model_validate(our_order_dict)
     strategy = determine_strategy_from_order(our_order)
     if not strategy:
@@ -181,6 +203,7 @@ async def start_sync_negotiation(
             their_agent_id=their_agent_url,
             our_initial_price=our_price,
             our_strategy=strategy,
+            requested_duration_seconds=requested_duration_seconds,
         )
         # Round-0 record of the buyer's opening proposal.
         await txn.add_message(
@@ -284,10 +307,19 @@ async def continue_sync_negotiation(
                 message_type="accepted",
             )
             await txn.mark_terminal(neg_id, "success")
+        # The buyer's lease ask was captured on /negotiate/new and lives on
+        # the thread row; echo it as the agreed duration. Falls back to the
+        # listing's max ceiling, then 1h, only for legacy threads with no
+        # recorded request (would mean a /negotiate/new from before this slice).
+        agreed_duration_seconds = (
+            thread.get("requested_duration_seconds")
+            or our_order_dict.get("max_duration_seconds")
+            or 3600
+        )
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
             agreed_price=last_seller_price,
-            agreed_duration_hours=int((our_order_dict.get("max_duration_seconds") or 3600) // 3600),
+            agreed_duration_seconds=int(agreed_duration_seconds),
         )
         stage_event(
             "negotiation", "accepted",
@@ -349,10 +381,15 @@ async def continue_sync_negotiation(
         their_price=int(buyer_price), decision=decision,
     )
     if decision.action == "accept":
+        agreed_duration_seconds = (
+            thread.get("requested_duration_seconds")
+            or our_order_dict.get("max_duration_seconds")
+            or 3600
+        )
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
             agreed_price=int(decision.price),
-            agreed_duration_hours=int((our_order_dict.get("max_duration_seconds") or 3600) // 3600),
+            agreed_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
         "negotiation", "round_decided",

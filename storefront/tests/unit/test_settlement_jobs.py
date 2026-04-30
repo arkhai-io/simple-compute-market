@@ -98,7 +98,7 @@ async def _seed_negotiation(
     our_listing_id: str = "seller-ord-1",
     terminal: str | None = "success",
     agreed_price: int | None = 10**18,
-    agreed_duration_hours: int | None = 1,
+    agreed_duration_seconds: int | None = 3600,
 ) -> None:
     conn = sqlite3.connect(client.db_path)
     try:
@@ -107,14 +107,14 @@ async def _seed_negotiation(
                (negotiation_id, our_listing_id, their_listing_id,
                 our_agent_id, their_agent_id, status,
                 created_at, updated_at, terminal_state,
-                agreed_price, agreed_duration_hours, agreed_at)
+                agreed_price, agreed_duration_seconds, agreed_at)
                VALUES (?, ?, 'buyer-ord-1',
                        'http://seller:8001', 'http://buyer:8000', 'active',
                        '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z', ?,
                        ?, ?, ?)""",
             (
                 neg_id, our_listing_id, terminal,
-                agreed_price, agreed_duration_hours,
+                agreed_price, agreed_duration_seconds,
                 "2026-04-23T00:00:00Z" if agreed_price is not None else None,
             ),
         )
@@ -274,6 +274,7 @@ async def test_background_task_writes_ready_on_success(client):
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -299,6 +300,7 @@ async def test_background_task_writes_failed_on_exception(client):
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -326,6 +328,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
+            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )

@@ -173,11 +173,15 @@ class NegotiationService:
         )
 
         our_order = await self._db.load_listing(listing_id=listing_id)
-        # Slice C will replace this with agreed_duration_seconds from the
-        # negotiation init. For now: derive hours from the listing's
-        # max_duration_seconds ceiling, defaulting to 1h.
-        max_seconds = (our_order or {}).get("max_duration_seconds")
-        duration_hours = int(max_seconds // 3600) if max_seconds else 1
+        # Echo the buyer's recorded duration ask. The thread row was loaded
+        # above and carries `requested_duration_seconds` from /negotiate/new.
+        # Falls back to the listing's max_duration_seconds, then 3600s, only
+        # for legacy threads that pre-date this slice.
+        agreed_duration_seconds = (
+            thread.get("requested_duration_seconds")
+            or (our_order or {}).get("max_duration_seconds")
+            or 3600
+        )
 
         # Write the acceptance message and terminal state directly via sqlite_client,
         # bypassing NegotiationThreadTransaction which requires the thread-store
@@ -202,7 +206,7 @@ class NegotiationService:
         await self._db.commit_agreed_terms(
             negotiation_id=neg_id,
             agreed_price=price,
-            agreed_duration_hours=duration_hours,
+            agreed_duration_seconds=int(agreed_duration_seconds),
         )
 
         stage_event(

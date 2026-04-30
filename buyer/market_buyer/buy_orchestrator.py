@@ -45,8 +45,9 @@ class BuyConfig:
 @dataclass
 class BuyConstraints:
     """What the buyer wants, enforced locally during negotiation."""
-    max_price: int          # ceiling per order (raw token units)
+    max_price: int          # ceiling per order (base units, per-hour rate)
     initial_price: int      # opening bid per order
+    duration_seconds: int   # buyer's lease ask, sent on /negotiate/new
 
 
 @dataclass
@@ -251,8 +252,8 @@ class AgreedTerms:
     seller_wallet_address: str
     negotiation_id: str
     listing_id: str
-    agreed_price: int               # raw token units
-    duration_hours: int
+    agreed_price: int               # base units, per-hour rate
+    duration_seconds: int           # buyer's lease ask (negotiation init)
 
 
 CreateEscrowFn = Callable[[AgreedTerms], str]
@@ -378,6 +379,7 @@ def run_buy(
                 listing_id=listing_id,
                 initial_price=constraints.initial_price,
                 max_price=constraints.max_price,
+                duration_seconds=constraints.duration_seconds,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
             )
@@ -417,18 +419,13 @@ def run_buy(
             _event("escrow_resolve_wallet_failed", {"seller_url": seller_url, "error": str(exc)})
             continue
 
-        # Slice C will replace this with the buyer-supplied duration from
-        # the negotiation init. For now: derive hours from the listing's
-        # advertised max_duration_seconds ceiling (NULL → 1h default).
-        max_seconds = match.get("max_duration_seconds")
-        derived_hours = int(max_seconds // 3600) if max_seconds else 1
         terms = AgreedTerms(
             seller_url=seller_url,
             seller_wallet_address=seller_wallet,
             negotiation_id=outcome.negotiation_id or "",
             listing_id=listing_id,
             agreed_price=outcome.agreed_price,
-            duration_hours=derived_hours,
+            duration_seconds=constraints.duration_seconds,
         )
         _event("escrow_create_start", {"terms": terms.__dict__})
         try:

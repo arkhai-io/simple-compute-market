@@ -195,6 +195,7 @@ class NegotiationThreadTransaction:
         their_agent_id: str,
         our_initial_price: int | None = None,
         our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
     ) -> None:
         """Get or create negotiation thread
 
@@ -206,6 +207,7 @@ class NegotiationThreadTransaction:
             their_agent_id: Their agent ID
             our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
             our_strategy: Our strategy ('minimize' or 'maximize')
+            requested_duration_seconds: Buyer's lease ask, recorded on thread creation.
         """
         if not self.thread_store:
             logger.warning(f"[{self.component}] No thread store available")
@@ -227,6 +229,7 @@ class NegotiationThreadTransaction:
                 owner_id=owner_id,
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
+                requested_duration_seconds=requested_duration_seconds,
             )
             logger.debug(f"[{self.component}] Created thread {negotiation_id}")
 
@@ -302,9 +305,10 @@ class NegotiationThreadStore:
         owner_id: str,
         our_initial_price: int | None = None,
         our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
-        
+
         Args:
             negotiation_id: Unique negotiation identifier
             our_listing_id: Our order ID
@@ -314,6 +318,7 @@ class NegotiationThreadStore:
             owner_id: ID of the agent owning this private state
             our_initial_price: Private initial price
             our_strategy: Private strategy
+            requested_duration_seconds: Buyer's lease ask from /negotiate/new.
         """
         await self._sqlite.create_negotiation_thread(
             negotiation_id=negotiation_id,
@@ -324,6 +329,7 @@ class NegotiationThreadStore:
             owner_id=owner_id,
             our_initial_price=our_initial_price,
             our_strategy=our_strategy,
+            requested_duration_seconds=requested_duration_seconds,
         )
         logger.debug(
             f"[NEGOTIATION THREAD] Created thread {negotiation_id} "

@@ -1542,9 +1542,10 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
 
     Body:
       {
-        "listing_id":    "...",
-        "buyer_address": "0x...",
-        "initial_price": <int, raw token units>
+        "listing_id":       "...",
+        "buyer_address":    "0x...",
+        "initial_price":    <int, base units, per-hour rate>,
+        "duration_seconds": <int>0, buyer's lease ask>
       }
 
     Signed by buyer_address via X-Signature over
@@ -1564,6 +1565,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     listing_id = body.get("listing_id")
     buyer_address = body.get("buyer_address")
     initial_price_raw = body.get("initial_price")
+    duration_seconds_raw = body.get("duration_seconds")
 
     for name, val in (("listing_id", listing_id),
                       ("buyer_address", buyer_address)):
@@ -1573,6 +1575,17 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
         initial_price = int(initial_price_raw)
     except (TypeError, ValueError):
         return JSONResponse({"error": "initial_price must be an integer"}, status_code=400)
+    try:
+        duration_seconds = int(duration_seconds_raw)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"error": "duration_seconds must be a positive integer"},
+            status_code=400,
+        )
+    if duration_seconds <= 0:
+        return JSONResponse(
+            {"error": "duration_seconds must be > 0"}, status_code=400,
+        )
 
     auth_error = _check_buyer_signature(
         request, operation="negotiate_new",
@@ -1590,6 +1603,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
             our_listing_id=listing_id,
             buyer_address=buyer_address,
             their_proposed_price=initial_price,
+            requested_duration_seconds=duration_seconds,
             our_base_url=BASE_URL_OVERRIDE or "",
             their_agent_url=buyer_agent_url or buyer_address,
         )

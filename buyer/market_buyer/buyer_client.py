@@ -59,6 +59,7 @@ class NegotiationOutcome:
     status: str                     # "agreed" | "exited"
     negotiation_id: Optional[str]   # None only if /new itself failed
     agreed_price: Optional[int] = None
+    duration_seconds: Optional[int] = None  # echoed from buyer's negotiation-init ask
     reason: Optional[str] = None    # populated on exit
     rounds: int = 0
 
@@ -68,6 +69,8 @@ class NegotiationOutcome:
             d["negotiation_id"] = self.negotiation_id
         if self.agreed_price is not None:
             d["agreed_price"] = self.agreed_price
+        if self.duration_seconds is not None:
+            d["duration_seconds"] = self.duration_seconds
         if self.reason is not None:
             d["reason"] = self.reason
         return d
@@ -153,6 +156,7 @@ def negotiate_with_seller(
     listing_id: str,
     initial_price: int,
     max_price: int,
+    duration_seconds: int | None = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     strategy: Optional[NegotiationStrategy] = None,
@@ -163,6 +167,12 @@ def negotiate_with_seller(
     `initial_price` is what the buyer opens with (can be lower than max
     to haggle). `max_price` is the buyer's absolute ceiling — any seller
     counter at or below convergence to this gets accepted.
+
+    `duration_seconds` is the buyer's lease ask, sent on /negotiate/new
+    and validated server-side against the listing's max_duration_seconds
+    (if set). Required for fresh starts; ignored in resume mode (the
+    duration was already recorded on the seller's negotiation thread
+    when the original /negotiate/new fired).
 
     The negotiation_id is server-assigned (returned in the
     /negotiate/new response) and threaded through every subsequent
@@ -202,10 +212,16 @@ def negotiate_with_seller(
         round_idx = max(1, resume.rounds_completed)
     else:
         # --- Round 0: /negotiate/new ---------------------------------------
+        if duration_seconds is None or duration_seconds <= 0:
+            raise RuntimeError(
+                "duration_seconds is required for fresh negotiations "
+                "(buyer's lease ask, in seconds)"
+            )
         new_body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
             "initial_price": int(initial_price),
+            "duration_seconds": int(duration_seconds),
         }
         sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
         reply = _post(
@@ -223,6 +239,7 @@ def negotiate_with_seller(
                 status="agreed",
                 negotiation_id=neg_id,
                 agreed_price=int(reply.get("price", initial_price)),
+                duration_seconds=duration_seconds,
                 rounds=0,
             )
         if seller_action in ("exit", "reject"):
@@ -230,6 +247,7 @@ def negotiate_with_seller(
                 status="exited",
                 negotiation_id=neg_id,
                 reason=reply.get("reason"),
+                duration_seconds=duration_seconds,
                 rounds=0,
             )
         # From here on seller_action should be "counter".
@@ -288,6 +306,7 @@ def negotiate_with_seller(
                     status="agreed",
                     negotiation_id=neg_id,
                     agreed_price=int(reply.get("price", seller_counter_price)),
+                    duration_seconds=duration_seconds,
                     rounds=round_idx,
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
@@ -295,6 +314,7 @@ def negotiate_with_seller(
                 status="exited",
                 negotiation_id=neg_id,
                 reason=f"seller_non_accept_after_buyer_accept:{reply.get('action')!r}",
+                duration_seconds=duration_seconds,
                 rounds=round_idx,
             )
         if next_move.action == "exit":
@@ -302,6 +322,7 @@ def negotiate_with_seller(
                 status="exited",
                 negotiation_id=neg_id,
                 reason=next_move.reason or "buyer_exit",
+                duration_seconds=duration_seconds,
                 rounds=round_idx,
             )
 
@@ -326,6 +347,7 @@ def negotiate_with_seller(
                 status="agreed",
                 negotiation_id=neg_id,
                 agreed_price=int(reply.get("price", next_move.price)),
+                duration_seconds=duration_seconds,
                 rounds=round_idx,
             )
         if seller_action in ("exit", "reject"):
@@ -333,6 +355,7 @@ def negotiate_with_seller(
                 status="exited",
                 negotiation_id=neg_id,
                 reason=reply.get("reason"),
+                duration_seconds=duration_seconds,
                 rounds=round_idx,
             )
         if seller_action != "counter":
@@ -345,5 +368,6 @@ def negotiate_with_seller(
         status="exited",
         negotiation_id=neg_id,
         reason="max_rounds",
+        duration_seconds=duration_seconds,
         rounds=max_rounds,
     )

@@ -178,11 +178,16 @@ class SQLiteClient:
                   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   terminal_state TEXT,
+                  -- Buyer's duration ask, captured at /negotiate/new and validated
+                  -- against the listing's max_duration_seconds (NULL there means
+                  -- unlimited). Stays for the lifetime of the thread; the agreed
+                  -- value below is just an echo when the negotiation succeeds.
+                  requested_duration_seconds INTEGER,
                   -- Committed agreement artifact: populated when terminal_state='success'.
                   -- Captures the negotiation's output as queryable state so settlement
                   -- can run (or be retried) as a separate step without replaying rounds.
                   agreed_price INTEGER,
-                  agreed_duration_hours INTEGER,
+                  agreed_duration_seconds INTEGER,
                   agreed_at TEXT
                 )
                 """
@@ -226,7 +231,11 @@ class SQLiteClient:
             except sqlite3.OperationalError:
                 pass
             try:
-                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_duration_hours INTEGER")
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_duration_seconds INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN requested_duration_seconds INTEGER")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -1643,13 +1652,16 @@ class SQLiteClient:
         *,
         negotiation_id: str,
         agreed_price: int,
-        agreed_duration_hours: int,
+        agreed_duration_seconds: int,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
 
         Called before any settlement step touches the chain. Lets settlement
         run (or be retried) as a separate step by reading these columns,
         without replaying the round-by-round message history.
+
+        ``agreed_duration_seconds`` echoes the buyer's negotiation-init ask;
+        total payment = agreed_price (per-hour) × agreed_duration_seconds / 3600.
         """
         def _save() -> None:
             now = datetime.now().isoformat()
@@ -1660,14 +1672,14 @@ class SQLiteClient:
                     """
                     UPDATE negotiation_threads
                     SET agreed_price = ?,
-                        agreed_duration_hours = ?,
+                        agreed_duration_seconds = ?,
                         agreed_at = ?,
                         updated_at = ?
                     WHERE negotiation_id = ?
                     """,
                     (
                         int(agreed_price),
-                        int(agreed_duration_hours),
+                        int(agreed_duration_seconds),
                         now,
                         now,
                         negotiation_id,
@@ -1694,7 +1706,8 @@ class SQLiteClient:
                     SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status,
                            created_at, updated_at, terminal_state,
-                           agreed_price, agreed_duration_hours, agreed_at
+                           requested_duration_seconds,
+                           agreed_price, agreed_duration_seconds, agreed_at
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
                     (negotiation_id,),
@@ -1706,7 +1719,8 @@ class SQLiteClient:
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
-                    "agreed_price", "agreed_duration_hours", "agreed_at",
+                    "requested_duration_seconds",
+                    "agreed_price", "agreed_duration_seconds", "agreed_at",
                 ]
                 return dict(zip(keys, row))
             finally:
@@ -1867,9 +1881,10 @@ class SQLiteClient:
         status: str = "active",
         our_initial_price: int | None = None,
         our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
-        
+
         Args:
             negotiation_id: Unique negotiation identifier
             our_listing_id: Our order ID
@@ -1880,25 +1895,31 @@ class SQLiteClient:
             status: Initial status (default: 'active')
             our_initial_price: Private initial price
             our_strategy: Private strategy
+            requested_duration_seconds: Buyer's duration ask from /negotiate/new.
+                Validated against the listing's max_duration_seconds upstream.
         """
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 timestamp = datetime.now().isoformat()
-                
+
                 # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO negotiation_threads(
                         negotiation_id, our_listing_id, their_listing_id,
-                        our_agent_id, their_agent_id, status, created_at, updated_at
+                        our_agent_id, their_agent_id, status,
+                        requested_duration_seconds,
+                        created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id, our_listing_id, their_listing_id,
-                        our_agent_id, their_agent_id, status, timestamp, timestamp
+                        our_agent_id, their_agent_id, status,
+                        requested_duration_seconds,
+                        timestamp, timestamp,
                     ),
                 )
                 
@@ -2332,7 +2353,9 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT negotiation_id, our_listing_id, their_agent_id,
-                           status, terminal_state, agreed_price, agreed_duration_hours,
+                           status, terminal_state,
+                           requested_duration_seconds,
+                           agreed_price, agreed_duration_seconds,
                            agreed_at, created_at, updated_at
                     FROM negotiation_threads
                     {where}
@@ -2343,7 +2366,9 @@ class SQLiteClient:
                 )
                 keys = [
                     "negotiation_id", "our_listing_id", "buyer_address",
-                    "status", "terminal_state", "agreed_price", "agreed_duration_hours",
+                    "status", "terminal_state",
+                    "requested_duration_seconds",
+                    "agreed_price", "agreed_duration_seconds",
                     "agreed_at", "created_at", "updated_at",
                 ]
                 return [dict(zip(keys, row)) for row in cur.fetchall()]
@@ -2373,7 +2398,8 @@ class SQLiteClient:
                     """
                     SELECT negotiation_id, our_listing_id, their_listing_id,
                            our_agent_id, their_agent_id, status, terminal_state,
-                           agreed_price, agreed_duration_hours, agreed_at,
+                           requested_duration_seconds,
+                           agreed_price, agreed_duration_seconds, agreed_at,
                            created_at, updated_at
                     FROM negotiation_threads
                     WHERE negotiation_id = ? AND our_listing_id = ?
@@ -2387,7 +2413,8 @@ class SQLiteClient:
                 thread_keys = [
                     "negotiation_id", "our_listing_id", "their_listing_id",
                     "our_agent_id", "their_agent_id", "status", "terminal_state",
-                    "agreed_price", "agreed_duration_hours", "agreed_at",
+                    "requested_duration_seconds",
+                    "agreed_price", "agreed_duration_seconds", "agreed_at",
                     "created_at", "updated_at",
                 ]
                 thread = dict(zip(thread_keys, thread_row))

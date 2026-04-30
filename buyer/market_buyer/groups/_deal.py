@@ -27,7 +27,10 @@ class DealContext:
     negotiation_id: str
     agreed_price: int
     escrow_uid: Optional[str] = None
-    duration_hours: int = 1
+    # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
+    # echoed by the seller in the agreement; settlement multiplies the
+    # per-hour price by duration_seconds/3600 to compute total payment.
+    duration_seconds: int = 3600
     # Settlement-time enrichments captured by `market negotiate` when
     # available. None means the field wasn't logged — caller falls
     # back to flags / config.toml defaults / a fresh HTTP lookup.
@@ -57,7 +60,7 @@ def load_deal_context(run_id: str) -> DealContext:
     negotiation_id: Optional[str] = None
     agreed_price: Optional[int] = None
     escrow_uid: Optional[str] = None
-    duration_hours: int = 1
+    duration_seconds: int = 3600
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
     token_decimals: Optional[int] = None
@@ -94,8 +97,8 @@ def load_deal_context(run_id: str) -> DealContext:
                     seller_url = terms["seller_url"]
                 if terms.get("listing_id"):
                     listing_id = terms["listing_id"]
-                if terms.get("duration_hours"):
-                    duration_hours = int(terms["duration_hours"])
+                if terms.get("duration_seconds"):
+                    duration_seconds = int(terms["duration_seconds"])
 
         # `negotiate`-style log start carries seller_url + listing id.
         if ev_type == "run_started":
@@ -103,8 +106,8 @@ def load_deal_context(run_id: str) -> DealContext:
                 seller_url = ev["seller_url"]
             if ev.get("listing_id"):
                 listing_id = ev["listing_id"]
-            if ev.get("duration_hours"):
-                duration_hours = int(ev["duration_hours"])
+            if ev.get("duration_seconds"):
+                duration_seconds = int(ev["duration_seconds"])
             if ev.get("seller_wallet_address"):
                 seller_wallet_address = str(ev["seller_wallet_address"])
             if ev.get("token_contract"):
@@ -136,7 +139,7 @@ def load_deal_context(run_id: str) -> DealContext:
         negotiation_id=negotiation_id,        # type: ignore[arg-type]
         agreed_price=agreed_price,            # type: ignore[arg-type]
         escrow_uid=escrow_uid,
-        duration_hours=duration_hours,
+        duration_seconds=duration_seconds,
         seller_wallet_address=seller_wallet_address,
         token_contract=token_contract,
         token_decimals=token_decimals,

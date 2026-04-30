@@ -74,9 +74,13 @@ def make_create_escrow_fn(
             chain_name, config_path=addr_config_path,
         )
 
-        # Total payment = agreed_price × duration. agreed_price is already
-        # in raw token units (see negotiation_threads.agreed_price).
-        amount_raw = int(terms.agreed_price) * int(max(terms.duration_hours, 1))
+        # Total payment = per-hour rate × duration_seconds / 3600.
+        # agreed_price is per-hour in base token units; duration_seconds is
+        # the buyer's negotiation-init ask, echoed by the seller. Integer
+        # math truncates fractional sub-second base units, which is fine
+        # for token amounts (tokens have decimals; final raw amount is
+        # always an integer).
+        amount_raw = int(terms.agreed_price) * int(max(terms.duration_seconds, 1)) // 3600
         price_data = {"address": token_contract_address, "value": amount_raw}
         arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
         expiration = int(time.time()) + int(expiration_seconds)

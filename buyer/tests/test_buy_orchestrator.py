@@ -46,8 +46,12 @@ def _config(order_id: str = "buyer-1") -> BuyConfig:
     )
 
 
-def _constraints(max_price=100, initial_price=50) -> BuyConstraints:
-    return BuyConstraints(max_price=max_price, initial_price=initial_price)
+def _constraints(max_price=100, initial_price=50, duration_seconds=7200) -> BuyConstraints:
+    return BuyConstraints(
+        max_price=max_price,
+        initial_price=initial_price,
+        duration_seconds=duration_seconds,
+    )
 
 
 @dataclass
@@ -178,7 +182,7 @@ def test_happy_path_drives_to_ready():
     terms = escrow_calls[0]
     assert terms.agreed_price == 50
     assert terms.seller_wallet_address == _SELLER_WALLET
-    assert terms.duration_hours == 2
+    assert terms.duration_seconds == 7200
     assert terms.negotiation_id == "neg-1"
 
     # Observer saw the key stages.
