@@ -1881,12 +1881,62 @@ async def _ensure_agent_identity() -> int:
             logger.info(
                 "[IDENTITY] Using pinned agent ID %d from config", _AGENT_ID
             )
-            return _AGENT_ID
         except ValueError:
             raise RuntimeError(
                 f"[IDENTITY] seller.onchain_agent_id '{CONFIG.onchain_agent_id}' "
                 "is not a valid integer."
             )
+
+        # Validate that this wallet actually owns the pinned ID on-chain.
+        # Skipped when chain config is absent (local dev without a node).
+        if CONFIG.chain_rpc_url and CONFIG.identity_registry_address and CONFIG.agent_wallet_address:
+            try:
+                from service.clients.erc8004.blockchain import (
+                    build_erc8004_canonical_id,
+                    get_identity_registry_contract,
+                )
+                from web3 import Web3
+                from web3.providers import WebsocketProviderV2, HTTPProvider
+
+                rpc = CONFIG.chain_rpc_url
+                if rpc.startswith("ws"):
+                    # Use HTTP fallback for the ownership check — websocket is
+                    # only needed for event subscriptions, not one-shot calls.
+                    rpc_http = rpc.replace("ws://", "http://").replace("wss://", "https://")
+                    w3 = Web3(HTTPProvider(rpc_http, request_kwargs={"timeout": 5}))
+                else:
+                    w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 5}))
+
+                contract = get_identity_registry_contract(w3, CONFIG.identity_registry_address)
+                owner = contract.functions.ownerOf(_AGENT_ID).call()
+                expected = CONFIG.agent_wallet_address
+
+                if owner.lower() != expected.lower():
+                    raise RuntimeError(
+                        f"[IDENTITY] Pinned onchain_agent_id={_AGENT_ID} is owned by "
+                        f"{owner} on-chain, but [seller].wallet_address in config is "
+                        f"{expected}. These must match.\n"
+                        "Fix: either update [seller].onchain_agent_id to the correct "
+                        "agent ID for this wallet, or correct [seller].wallet_address."
+                    )
+                logger.info(
+                    "[IDENTITY] Ownership confirmed: agent %d owned by %s",
+                    _AGENT_ID, owner,
+                )
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                # Chain unreachable / contract not deployed — log but don't block
+                # startup.  This matches the existing behaviour for ZeroTier
+                # environments where the chain may not be reachable until the
+                # ZeroTier IP is assigned.
+                logger.warning(
+                    "[IDENTITY] Could not verify ownership of agent %d on-chain: %s. "
+                    "Proceeding with pinned ID.",
+                    _AGENT_ID, exc,
+                )
+
+        return _AGENT_ID
 
     if not CONFIG.auto_register:
         raise RuntimeError(

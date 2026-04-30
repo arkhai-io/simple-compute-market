@@ -204,8 +204,21 @@ class StorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(await self._get("/health"))
 
     async def get_system_status(self) -> HealthResponse:
-        """GET /api/v1/system/status — includes paused flag."""
-        return HealthResponse.from_dict(await self._get("/api/v1/system/status"))
+        """GET /api/v1/system/status — includes paused flag and check results.
+
+        Does NOT raise on HTTP 503.  A 503 from this endpoint means the
+        storefront is degraded (e.g. registry unreachable) but still returns a
+        structured HealthResponse that callers can inspect.  Only unexpected
+        status codes (4xx, non-503 5xx) raise StorefrontClientError.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = await self._client.get(
+            "/api/v1/system/status", timeout=self._timeout,
+            headers=self._admin_headers(),
+        )
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return HealthResponse.from_dict(resp.json())
 
     async def get_events(
         self,
@@ -612,8 +625,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return HealthResponse.from_dict(self._get("/health"))
 
     def get_system_status(self) -> HealthResponse:
-        """GET /api/v1/system/status — includes paused flag."""
-        return HealthResponse.from_dict(self._get("/api/v1/system/status"))
+        """GET /api/v1/system/status — includes paused flag and check results.
+
+        Does NOT raise on HTTP 503.  A 503 from this endpoint means the
+        storefront is degraded but still returns a structured HealthResponse.
+        Only unexpected status codes (4xx, non-503 5xx) raise StorefrontClientError.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = self._client.get(
+            "/api/v1/system/status", timeout=self._timeout,
+            headers=self._admin_headers(),
+        )
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return HealthResponse.from_dict(resp.json())
 
     def get_events(
         self,

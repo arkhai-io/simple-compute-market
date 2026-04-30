@@ -86,129 +86,47 @@ class TestHealthEndpoint:
         result = await c.get_health()
         assert result.status == "ok"
         assert result.checks.get("database") == "ok"
-        # /health must NOT include a registry check (would make liveness probes slow)
+        # /health must NOT include a registry check (keeps liveness probes fast)
         assert "registry" not in result.checks
 
     async def test_system_status_includes_paused(self, client):
+        """GET /api/v1/system/status includes paused flag regardless of registry state."""
         c, _, _ = client
         result = await c.get_system_status()
-        assert result.status == "ok"
         assert result.paused is False
 
     async def test_system_status_includes_registry_check(self, client):
         """GET /api/v1/system/status must include checks.registry.
 
-        In the integration test environment the registry URL is either
-        unconfigured (CONFIG.indexer_url is empty) or unreachable.
-        We assert the key is present and is a non-empty string; the
-        exact value is environment-dependent.
+        In the integration test environment the registry URL is unconfigured,
+        so the value will be 'unconfigured'. What matters is the key is present
+        and is a non-empty string.
         """
         c, _, _ = client
         result = await c.get_system_status()
         registry_check = result.checks.get("registry")
         assert registry_check is not None, (
-            "checks.registry absent from /api/v1/system/status response. "
+            "checks.registry absent from /api/v1/system/status. "
             "SystemController._health_impl must be called with include_registry=True "
             "from system_status."
         )
-        assert isinstance(registry_check, str) and registry_check, (
-            f"checks.registry must be a non-empty string, got {registry_check!r}"
-        )
+        assert isinstance(registry_check, str) and registry_check
 
+    async def test_system_status_includes_registry_auth_check(self, client):
+        """GET /api/v1/system/status must include checks.registry_auth.
 
-# ---------------------------------------------------------------------------
-# GET /api/v1/system/events
-# ---------------------------------------------------------------------------
-
-class TestStreamEvents:
-    async def test_requires_admin_key(self, client_no_key):
-        resp = await client_no_key._client.get("/api/v1/system/events")
-        assert resp.status_code == 403
-
-    async def test_returns_empty_list_on_fresh_db(self, client):
+        Guards against the silent-401 failure mode where the agent's wallet
+        doesn't own the pinned onchain_agent_id. In integration tests the
+        registry URL is unconfigured so the value will be 'unconfigured'.
+        """
         c, _, _ = client
-        result = await c.get_events()
-        assert result.count == 0
-        assert result.events == []
-
-    async def test_returns_seeded_events(self, client):
-        """Events written via stage_log.stage_event() appear in get_events()."""
-        c, db, _ = client
-        # Write a stage event directly via the sqlite_client
-        import json as _json
-        import sqlite3
-
-        conn = sqlite3.connect(db.db_path)
-        try:
-            conn.execute(
-                "INSERT INTO stage_events (ts, stage, event, listing_id, data) "
-                "VALUES (?, ?, ?, ?, ?)",
-                ("2025-01-01T00:00:00Z", "discovery", "order_published", "listing-1",
-                 _json.dumps({"listing_id": "listing-1"})),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        result = await c.get_events()
-        assert result.count == 1
-        assert result.events[0].stage == "discovery"
-        assert result.events[0].event == "order_published"
-        assert result.events[0].listing_id == "listing-1"
-
-    async def test_since_id_cursor(self, client):
-        """since_id filters to only rows with id > since_id."""
-        c, db, _ = client
-        import json as _json
-        import sqlite3
-
-        conn = sqlite3.connect(db.db_path)
-        try:
-            for i in range(3):
-                conn.execute(
-                    "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
-                    (f"2025-01-0{i+1}T00:00:00Z", "discovery", f"event_{i}",
-                     _json.dumps({"seq": i})),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-
-        all_events = await c.get_events()
-        assert all_events.count == 3
-
-        first_id = all_events.events[0].id
-        tail = await c.get_events(since_id=first_id)
-        assert tail.count == 2
-        assert all(ev.id > first_id for ev in tail.events)
-
-    async def test_stage_filter(self, client):
-        """stage= query param restricts results to that stage."""
-        c, db, _ = client
-        import json as _json
-        import sqlite3
-
-        conn = sqlite3.connect(db.db_path)
-        try:
-            conn.execute(
-                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
-                ("2025-01-01T00:00:00Z", "discovery", "published", _json.dumps({})),
-            )
-            conn.execute(
-                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
-                ("2025-01-01T00:00:01Z", "negotiation", "started", _json.dumps({})),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-        disc_events = await c.get_events(stage="discovery")
-        assert all(ev.stage == "discovery" for ev in disc_events.events)
-        assert disc_events.count == 1
-
-        neg_events = await c.get_events(stage="negotiation")
-        assert neg_events.count == 1
-        assert neg_events.events[0].stage == "negotiation"
+        result = await c.get_system_status()
+        auth_check = result.checks.get("registry_auth")
+        assert auth_check is not None, (
+            "checks.registry_auth absent from /api/v1/system/status. "
+            "SystemController._health_impl must call _registry_auth_check()."
+        )
+        assert isinstance(auth_check, str) and auth_check
 
 
 # ---------------------------------------------------------------------------
@@ -423,3 +341,97 @@ class TestPolicyEvaluate:
             json={"event_type": "order_create", "demand": {}},
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/system/events
+# ---------------------------------------------------------------------------
+
+class TestStreamEvents:
+    async def test_requires_admin_key(self, client_no_key):
+        resp = await client_no_key._client.get("/api/v1/system/events")
+        assert resp.status_code == 403
+
+    async def test_returns_empty_list_on_fresh_db(self, client):
+        c, _, _ = client
+        result = await c.get_events()
+        assert result.count == 0
+        assert result.events == []
+
+    async def test_returns_seeded_events(self, client):
+        """Events written via stage_log.stage_event() appear in get_events()."""
+        c, db, _ = client
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO stage_events (ts, stage, event, listing_id, data) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("2025-01-01T00:00:00Z", "discovery", "order_published", "listing-1",
+                 _json.dumps({"listing_id": "listing-1"})),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = await c.get_events()
+        assert result.count == 1
+        assert result.events[0].stage == "discovery"
+        assert result.events[0].event == "order_published"
+        assert result.events[0].listing_id == "listing-1"
+
+    async def test_since_id_cursor(self, client):
+        """since_id filters to only rows with id > since_id."""
+        c, db, _ = client
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(db.db_path)
+        try:
+            for i in range(3):
+                conn.execute(
+                    "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
+                    (f"2025-01-0{i+1}T00:00:00Z", "discovery", f"event_{i}",
+                     _json.dumps({"seq": i})),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        all_events = await c.get_events()
+        assert all_events.count == 3
+
+        first_id = all_events.events[0].id
+        tail = await c.get_events(since_id=first_id)
+        assert tail.count == 2
+        assert all(ev.id > first_id for ev in tail.events)
+
+    async def test_stage_filter(self, client):
+        """stage= query param restricts results to that stage."""
+        c, db, _ = client
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
+                ("2025-01-01T00:00:00Z", "discovery", "published", _json.dumps({})),
+            )
+            conn.execute(
+                "INSERT INTO stage_events (ts, stage, event, data) VALUES (?, ?, ?, ?)",
+                ("2025-01-01T00:00:01Z", "negotiation", "started", _json.dumps({})),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        disc_events = await c.get_events(stage="discovery")
+        assert all(ev.stage == "discovery" for ev in disc_events.events)
+        assert disc_events.count == 1
+
+        neg_events = await c.get_events(stage="negotiation")
+        assert neg_events.count == 1
+        assert neg_events.events[0].stage == "negotiation"

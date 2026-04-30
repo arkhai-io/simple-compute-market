@@ -55,8 +55,9 @@ class SystemController:
 
         if include_registry:
             checks["registry"] = await self._registry_check()
+            checks["registry_auth"] = await self._registry_auth_check()
 
-        all_ok = all(v == "ok" for v in checks.values())
+        all_ok = all(v in ("ok", "unconfigured") for v in checks.values())
         return JSONResponse(
             {"status": "ok" if all_ok else "degraded", "checks": checks},
             status_code=200 if all_ok else 503,
@@ -83,6 +84,51 @@ class SystemController:
         except httpx.TimeoutException:
             return "timeout"
         except Exception as exc:
+            return f"error: {exc}"
+
+    async def _registry_auth_check(self) -> str:
+        """Verify this agent's wallet owns its configured on-chain agent ID.
+
+        Calls GET /agents/<canonical_id> on the registry and compares the
+        returned ``owner`` field against CONFIG.agent_wallet_address.
+
+        Returns one of:
+          'ok'                — owner matches wallet address
+          'unconfigured'      — indexer_url or agent config missing
+          'agent_not_found'   — canonical ID not indexed in registry yet
+          'owner_mismatch'    — registry owner != configured wallet (401 at publish)
+          'error: <msg>'      — unexpected failure
+
+        This check catches the case where onchain_agent_id is pinned to an ID
+        owned by a different wallet, which produces silent 401s on publish_listing
+        but passes the connectivity check.
+        """
+        from market_storefront.utils.config import CONFIG
+        from market_storefront.utils.action_executor import _canonical_agent_id, _make_registry_client
+
+        url = (CONFIG.indexer_url or "").rstrip("/")
+        wallet = (CONFIG.agent_wallet_address or "").lower()
+        if not url or not wallet:
+            return "unconfigured"
+
+        canonical_id = _canonical_agent_id()
+        if not canonical_id:
+            return "unconfigured"
+
+        try:
+            async with _make_registry_client() as rc:
+                agent = await rc.get_agent(canonical_id)
+            owner = (agent.owner or "").lower()
+            if not owner:
+                # Agent exists but has no owner — unauthenticated; publish will work
+                return "ok"
+            if owner == wallet:
+                return "ok"
+            return f"owner_mismatch: registry={agent.owner} config={CONFIG.agent_wallet_address}"
+        except Exception as exc:
+            body = getattr(exc, "body", "") or str(exc)
+            if "404" in str(exc) or "not found" in body.lower():
+                return "agent_not_found"
             return f"error: {exc}"
 
     async def health_bare(self, request: Request) -> JSONResponse:
