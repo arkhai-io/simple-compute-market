@@ -119,6 +119,9 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
             "offer": offer_payload,
             "demand": demand_payload,
             "duration_hours": duration_hours,
+            # Propagate paused flag from the original request so action_executor
+            # can write the order as paused and skip the registry publish.
+            "paused": bool(context.event.data.get("paused", False)) if isinstance(context.event.data, dict) else False,
         },
     )
 

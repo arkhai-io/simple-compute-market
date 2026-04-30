@@ -34,6 +34,7 @@ db_path             = "./src/market_storefront/data/sell-agent/agent.db"
 log_file_path       = "./logs/bob.log"
 token_registry_path = "/app/src/market_storefront/data/token_registry_docker_compose.json"
 enable_event_queue  = false
+admin_api_key       = "test-api-key"
 
 [seller.provisioning]
 service_url = "http://provisioning:8081"

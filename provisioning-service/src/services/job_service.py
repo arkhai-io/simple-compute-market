@@ -100,6 +100,7 @@ class AnsibleJobService:
                 params=raw_params,
                 agent_id=agent_id,
                 buyer_agent_id=params.buyer_agent_id,
+                escrow_uid=params.escrow_uid,
                 retry_count=0,
                 max_retries=max_retries,
                 next_retry_at=None,
@@ -117,6 +118,7 @@ class AnsibleJobService:
         limit: int = 20,
         status_filter: str | None = None,
         sort: str = "created_at_desc",
+        escrow_uid: str | None = None,
     ) -> JobListResponse:
         sort_map = {
             "created_at_asc": AnsibleJob.created_at.asc(),
@@ -133,6 +135,8 @@ class AnsibleJobService:
                 )
             if status_filter:
                 query = query.filter(AnsibleJob.status == status_filter)
+            if escrow_uid:
+                query = query.filter(AnsibleJob.escrow_uid == escrow_uid)
             total = query.count()
             order_fn = sort_map.get(sort, sort_map["created_at_desc"])
             jobs = query.order_by(order_fn).offset(offset).limit(limit).all()
@@ -334,6 +338,9 @@ class AnsibleJobService:
                 extra_vars_path=vars_path,
                 limit=params.vm_host,
             )
+            # Inject params onto the run handle so ProgrammableMockAnsibleService
+            # can match rules in wait_for_playbook. Real AnsibleRun ignores it.
+            run._params = params  # type: ignore[attr-defined]
             self._update_job(
                 db, job, status=JobStatus.running.value, process_id=str(run.process_id)
             )
@@ -462,6 +469,12 @@ class AnsibleJobService:
                 except Exception as _exc:
                     logger.warning("Failed to remove temp inventory %s: %s", rendered_inv_path, _exc)
             db.close()
+            # Notify ProgrammableMockAnsibleService that this job has reached a
+            # terminal state so wait_for_job can fire an event instead of polling.
+            # No-op on the real AnsibleService which does not have this method.
+            notify = getattr(self._ansible, "notify_job_done", None)
+            if notify is not None:
+                notify(job_id)
 
     # ------------------------------------------------------------------
     # Private utilities
@@ -688,4 +701,5 @@ class AnsibleJobService:
             next_retry_at=job.next_retry_at,
             agent_id=job.agent_id,
             buyer_agent_id=job.buyer_agent_id,
+            escrow_uid=job.escrow_uid,
         )

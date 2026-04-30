@@ -68,7 +68,7 @@ dist-clean: ## Remove .dist/ directory
 #Build should construct all deployment and runtime arifacts locally.
 # build-test-env must run after build-market-contract-deployer (uses the image).
 # build-runtime-images parallelizes the three independent service images.
-build: build-buyer build-market-contract-deployer build-test-env build-runtime-images
+build: build-buyer build-market-contract-deployer build-test-env build-runtime-images build-test-image
 
 build-runtime-images: dist
 	$(MAKE) -j3 build-registry build-storefront build-provisioning
@@ -101,6 +101,9 @@ build-storefront:
 
 build-provisioning:
 	cd provisioning-service && make build
+
+build-test-image:
+	cd integration-tests && make build
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

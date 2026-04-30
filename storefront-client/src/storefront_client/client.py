@@ -348,6 +348,21 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return AdminStatusResponse.from_dict(resp.json())
 
+    async def policy_seed(self) -> dict:
+        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
+        return await self._post("/admin/policy/seed", {}, extra_headers=self._admin_headers())
+
+    async def policy_status(self) -> dict:
+        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
+        return await self._get("/api/v1/system/policy")
+
+    async def policy_evaluate(self, *, offer: dict, demand: dict, duration_hours: float = 1.0) -> dict:
+        """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
+        return await self._post(
+            "/api/v1/system/policy/evaluate",
+            {"event_type": "order_create", "offer": offer, "demand": demand, "duration_hours": duration_hours},
+        )
+
     # ------------------------------------------------------------------
     # Existing methods (unchanged)
     # ------------------------------------------------------------------
@@ -662,6 +677,21 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return AdminStatusResponse.from_dict(resp.json())
 
+    def policy_seed(self) -> dict:
+        """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
+        return self._post("/admin/policy/seed", {}, extra_headers=self._admin_headers())
+
+    def policy_status(self) -> dict:
+        """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
+        return self._get("/api/v1/system/policy")
+
+    def policy_evaluate(self, *, offer: dict, demand: dict, duration_hours: float = 1.0) -> dict:
+        """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
+        return self._post(
+            "/api/v1/system/policy/evaluate",
+            {"event_type": "order_create", "offer": offer, "demand": demand, "duration_hours": duration_hours},
+        )
+
     # ------------------------------------------------------------------
     # Existing methods (unchanged)
     # ------------------------------------------------------------------
@@ -679,10 +709,15 @@ class SyncStorefrontClient(_StorefrontClientBase):
         offer: dict[str, Any],
         demand: dict[str, Any],
         duration_hours: float = 1.0,
+        paused: bool = False,
     ) -> StorefrontListingCreateResponse:
-        """POST /listings/create"""
+        """POST /listings/create
+
+        Pass ``paused=True`` to create the order in local SQLite without
+        publishing to the registry.  Call ``resume_order`` to publish.
+        """
         headers = self._auth_headers("create_listing", agent_wallet_address)
-        body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
+        body = {"offer": offer, "demand": demand, "duration_hours": duration_hours, "paused": paused}
         return StorefrontListingCreateResponse.from_dict(
             self._post("/listings/create", body, extra_headers=headers)
         )

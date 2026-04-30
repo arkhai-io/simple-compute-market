@@ -1286,7 +1286,49 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
-    
+
+    async def list_seeded_policies(self) -> list[dict]:
+        """Return all seeded policies joined with their ordered components.
+
+        Used by the system controller's policy diagnostic and dry-run endpoints.
+        Each row has: policy_name, trigger_type, callable_ref, components (list[str]).
+
+        Note: policy_composites rows are keyed by callable_ref (the indirection
+        pointer stored in the policies.callable_ref column), NOT by policies.name.
+        """
+        def _list() -> list[dict]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT p.name, p.trigger_type, p.callable_ref,
+                           GROUP_CONCAT(pc.component_name, '||') as components_concat
+                    FROM policies p
+                    LEFT JOIN policy_composites pc
+                           ON pc.agent_id = p.agent_id
+                           AND pc.policy_name = p.callable_ref
+                    GROUP BY p.agent_id, p.name, p.trigger_type, p.callable_ref
+                    ORDER BY p.name
+                    """
+                )
+                rows = []
+                for name, trigger_type, callable_ref, components_concat in cur.fetchall():
+                    components = (
+                        components_concat.split("||") if components_concat else []
+                    )
+                    rows.append({
+                        "policy_name": name,
+                        "trigger_type": trigger_type,
+                        "callable_ref": callable_ref,
+                        "components": components,
+                    })
+                return rows
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
     async def save_decision(
         self,
         *,

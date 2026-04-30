@@ -334,11 +334,14 @@ class ProvisioningClient(_ProvisioningClientBase):
         return await self._post(f"/api/v1/jobs/{job_id}/cancel", {})
 
     async def list_jobs(self, *, status: Optional[str] = None,
-                        offset: int = 0, limit: int = 20) -> JobListResponse:
+                        offset: int = 0, limit: int = 20,
+                        escrow_uid: Optional[str] = None) -> JobListResponse:
         """GET /api/v1/jobs/"""
         params: dict[str, Any] = {"offset": offset, "limit": limit}
         if status:
             params["status"] = status
+        if escrow_uid:
+            params["escrow_uid"] = escrow_uid
         return JobListResponse(**(await self._get("/api/v1/jobs/", params=params)))
 
     # ------------------------------------------------------------------
@@ -533,10 +536,13 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         return JobLogsResponse(**(self._get(f"/api/v1/jobs/{job_id}/logs")))
 
     def list_jobs(self, *, status: Optional[str] = None,
-                  offset: int = 0, limit: int = 20) -> JobListResponse:
+                  offset: int = 0, limit: int = 20,
+                  escrow_uid: Optional[str] = None) -> JobListResponse:
         params: dict[str, Any] = {"offset": offset, "limit": limit}
         if status:
             params["status"] = status
+        if escrow_uid:
+            params["escrow_uid"] = escrow_uid
         return JobListResponse(**(self._get("/api/v1/jobs/", params=params)))
 
     def sync_poll_until_complete(

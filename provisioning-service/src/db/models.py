@@ -37,6 +37,7 @@ class AnsibleJob(Base):
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retry attempts made
     max_retries = Column(Integer, default=3, nullable=False)  # Maximum retry attempts allowed
     next_retry_at = Column(DateTime(timezone=True), nullable=True)  # Scheduled time for next retry
+    escrow_uid = Column(String, nullable=True, index=True)  # On-chain escrow UID linking this job to a deal
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

@@ -202,6 +202,15 @@ app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")       
 app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
 app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
 
+# Test controller — only mounted when mock profile is active.
+# Never present in production or staging.
+import os as _os
+_active_profiles = [p.strip() for p in _os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
+if "mock" in _active_profiles:
+    from controllers.test_controller import make_router as _make_test_router
+    app.include_router(_make_test_router())                                         # /test/*
+    logger.info("Test controller mounted at /test/* (mock profile active)")
+
 # Expose the container on the app instance for integration test overrides.
 app.container = container  # type: ignore[attr-defined]
 

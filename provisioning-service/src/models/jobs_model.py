@@ -69,6 +69,9 @@ class AnsibleJobParams:
     # Buyer identity (stored on the job record)
     buyer_agent_id: Optional[str] = None
 
+    # Deal linkage — on-chain escrow UID for recovery queries
+    escrow_uid: Optional[str] = None
+
     # Retry policy (per-job override)
     max_retries: Optional[int] = None
 
@@ -135,6 +138,10 @@ class JobStatusResponse(BaseModel):
     )
     buyer_agent_id: Optional[str] = Field(
         default=None, description="ERC-8004 agent ID of the buyer"
+    )
+    escrow_uid: Optional[str] = Field(
+        default=None,
+        description="On-chain escrow UID linking this job to a deal (set at submission time)",
     )
 
 

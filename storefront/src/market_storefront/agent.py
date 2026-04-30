@@ -869,6 +869,10 @@ async def _run_create_order_flow(request: Request) -> dict:
         raise ValueError("Offer and demand must be one compute and one token resource")
 
     event_id = f"order_create_{uuid.uuid4()}"
+    # Read paused flag from request body — if true, the MAKE_OFFER handler will
+    # write the order to local SQLite with paused=1 and skip the registry publish.
+    # The operator resumes it explicitly via POST /api/v1/orders/{id}/resume.
+    create_paused = bool(order_data.get("paused", False))
     order_create_event = ListingCreatedEvent(
         event_id=event_id,
         source=BASE_URL_OVERRIDE,
@@ -879,6 +883,7 @@ async def _run_create_order_flow(request: Request) -> dict:
             "offer": offer_resource.model_dump(mode="json"),
             "demand": demand_resource.model_dump(mode="json"),
             "duration_hours": duration_hours,
+            "paused": create_paused,
         },
     )
 

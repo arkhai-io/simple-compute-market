@@ -207,3 +207,168 @@ class MockAnsibleService:
         p = Path(tempfile.gettempdir()) / "mock_inventory.ini"
         p.write_text("[kvm_hosts]\n", encoding="utf-8")
         return p
+
+
+# ---------------------------------------------------------------------------
+# ProgrammableMockAnsibleService — when→then rule-based mock
+# ---------------------------------------------------------------------------
+
+
+from dataclasses import dataclass, field as dc_field
+from typing import Optional as _Optional
+
+
+@dataclass
+class MockRule:
+    """A single when→then mock rule.
+
+    ``match`` is a dict of ``AnsibleJobParams`` field names → expected values.
+    A job matches this rule when **all** match entries are present and equal
+    in the job params.  An empty ``match`` dict matches every job (catch-all).
+
+    ``pause_before_result`` — if True, ``wait_for_playbook`` blocks on an
+    ``asyncio.Event`` until ``resume_rule`` is called on the test controller.
+    This lets tests assert on mid-flight job state without polling loops.
+
+    ``result_stdout`` — Ansible stdout to return on success.  If None, falls
+    back to the class-level ``_FAKE_STDOUT``.
+
+    ``fail_with`` — if set, ``wait_for_playbook`` raises ``AnsibleError`` with
+    this message instead of returning a result.  Takes precedence over
+    ``result_stdout``.
+
+    ``rule_id`` — caller-chosen identifier used to resume and delete rules.
+    """
+
+    match: dict = dc_field(default_factory=dict)
+    pause_before_result: bool = False
+    result_stdout: _Optional[str] = None
+    fail_with: _Optional[str] = None
+    rule_id: str = ""
+
+    # Internal gate — created in ProgrammableMockAnsibleService.add_rule
+    _gate: _Optional[asyncio.Event] = dc_field(default=None, repr=False)
+
+
+class ProgrammableMockAnsibleService(MockAnsibleService):
+    """Drop-in replacement for MockAnsibleService with when→then rule support.
+
+    Activated when ``mock`` is in ``ACTIVE_PROFILES`` (same condition as
+    ``MockAnsibleService``).  The test controller mounts at ``/test/*`` and
+    provides the HTTP API for configuring rules and waiting for jobs.
+
+    Rule matching
+    -------------
+    Rules are evaluated in insertion order; the first rule whose ``match``
+    dict is a subset of the incoming ``AnsibleJobParams`` dict wins.
+    A rule with ``match={}`` is a catch-all.  If no rule matches, behaviour
+    falls through to the base ``MockAnsibleService`` (instant success with
+    ``_FAKE_STDOUT``).
+
+    Thread safety
+    -------------
+    Rules are stored in a plain ``dict`` keyed by ``rule_id``.  Mutation
+    (add/delete) happens on the asyncio event loop via the test controller
+    endpoints — no locking needed.
+    """
+
+    def __init__(self, settings, **kwargs) -> None:
+        super().__init__(settings, **kwargs)
+        self._rules: dict[str, MockRule] = {}
+        # job_id → asyncio.Event; set when the job reaches a terminal state
+        self._job_done_events: dict[str, asyncio.Event] = {}
+
+    # ------------------------------------------------------------------
+    # Rule management (called by test controller)
+    # ------------------------------------------------------------------
+
+    def add_rule(self, rule: MockRule) -> None:
+        if not rule.rule_id:
+            import uuid as _uuid
+            rule.rule_id = str(_uuid.uuid4())[:8]
+        if rule.pause_before_result:
+            rule._gate = asyncio.Event()
+        self._rules[rule.rule_id] = rule
+
+    def delete_rule(self, rule_id: str) -> bool:
+        return self._rules.pop(rule_id, None) is not None
+
+    def list_rules(self) -> list[dict]:
+        return [
+            {
+                "rule_id": r.rule_id,
+                "match": r.match,
+                "pause_before_result": r.pause_before_result,
+                "fail_with": r.fail_with,
+                "result_stdout": r.result_stdout is not None,
+                "paused": r._gate is not None and not r._gate.is_set(),
+            }
+            for r in self._rules.values()
+        ]
+
+    def resume_rule(self, rule_id: str) -> bool:
+        rule = self._rules.get(rule_id)
+        if rule and rule._gate:
+            rule._gate.set()
+            return True
+        return False
+
+    def notify_job_done(self, job_id: str) -> None:
+        """Called by wait_for_playbook when a job completes — fires wait_for_job."""
+        evt = self._job_done_events.get(job_id)
+        if evt:
+            evt.set()
+
+    def get_or_create_job_event(self, job_id: str) -> asyncio.Event:
+        if job_id not in self._job_done_events:
+            self._job_done_events[job_id] = asyncio.Event()
+        return self._job_done_events[job_id]
+
+    # ------------------------------------------------------------------
+    # Rule lookup
+    # ------------------------------------------------------------------
+
+    def _find_rule(self, params: "AnsibleJobParams") -> _Optional[MockRule]:
+        import dataclasses as _dc
+        params_dict = _dc.asdict(params)
+        for rule in self._rules.values():
+            if all(params_dict.get(k) == v for k, v in rule.match.items()):
+                return rule
+        return None
+
+    # ------------------------------------------------------------------
+    # AnsibleService interface override
+    # ------------------------------------------------------------------
+
+    def start_playbook(self, playbook_path, inventory_path, extra_vars_path,
+                       limit, extra_cli_vars=None) -> "AnsibleRun":
+        # Store the job_id from extra_vars_path stem for event notification.
+        # The vars file is named after the job_id by build_vars_file.
+        return super().start_playbook(
+            playbook_path, inventory_path, extra_vars_path, limit, extra_cli_vars
+        )
+
+    async def wait_for_playbook(self, run: "AnsibleRun", timeout_seconds: int,
+                                log_callback=None) -> "AnsibleResult":
+        """Apply the first matching rule, then either pause, fail, or succeed."""
+        # Recover the params from the vars file path — it holds the AnsibleJobParams
+        # serialised by build_vars_file.  For rule matching we read the params back.
+        # We inject params via a side-channel set in start_playbook_with_params.
+        params = getattr(run, "_params", None)
+        rule = self._find_rule(params) if params is not None else None
+
+        if rule:
+            if rule.pause_before_result and rule._gate:
+                await rule._gate.wait()
+            if rule.fail_with:
+                from services.ansible_service import AnsibleError
+                raise AnsibleError(rule.fail_with, stdout="", stderr=rule.fail_with)
+            if rule.result_stdout:
+                original_stdout = self._stdout
+                self._stdout = rule.result_stdout
+                result = await super().wait_for_playbook(run, timeout_seconds, log_callback)
+                self._stdout = original_stdout
+                return result
+
+        result = await super().wait_for_playbook(run, timeout_seconds, log_callback)
+        return result

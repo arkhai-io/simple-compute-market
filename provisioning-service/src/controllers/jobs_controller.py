@@ -67,6 +67,10 @@ class AnsibleJobsController:
             default="created_at_desc",
             description="Sort order: created_at_asc or created_at_desc",
         ),
+        escrow_uid: str | None = Query(
+            default=None,
+            description="Filter jobs by on-chain escrow UID (recovery query pattern)",
+        ),
     ) -> JobListResponse:
         """List Ansible jobs with pagination, filtering, and sorting.
 
@@ -80,6 +84,7 @@ class AnsibleJobsController:
             limit=limit,
             status_filter=status_filter,
             sort=sort,
+            escrow_uid=escrow_uid,
         )
 
     # ------------------------------------------------------------------

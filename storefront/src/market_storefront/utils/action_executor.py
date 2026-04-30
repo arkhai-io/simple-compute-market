@@ -222,6 +222,11 @@ async def execute_action(
             )
             created_listing_id = order.get("listing_id") if isinstance(order, dict) else None
 
+            # paused=True: write order locally with paused=1, skip registry publish.
+            # Operator unblocks via POST /api/v1/orders/{id}/resume which clears
+            # the flag and calls publish_order_to_registry.
+            create_paused = bool(parameters.get("paused", False))
+
             # Mirror the order in the local DB for the seller's own
             # bookkeeping (policies read from here, not from the registry).
             if isinstance(order, dict) and order.get("listing_id"):
@@ -245,10 +250,21 @@ async def execute_action(
                         oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
                     )
+                    if create_paused:
+                        await sqlite_client.set_order_paused(
+                            order_id=order.get("order_id"), paused=True
+                        )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_listing_id, exc)
 
-            publish_result = await publish_order_to_registry(order)
+            if create_paused:
+                logger.info(
+                    "[MAKE_OFFER] Order %s created locally with paused=True; skipping registry publish",
+                    created_order_id,
+                )
+                publish_result = {"status": "paused", "order_id": created_order_id}
+            else:
+                publish_result = await publish_order_to_registry(order)
             outcome["result"] = publish_result
             outcome["message"] = publish_result.get(
                 "message",

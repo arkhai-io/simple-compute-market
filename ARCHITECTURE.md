@@ -1205,6 +1205,61 @@ The following items represent known architectural deficiencies in `provisioning-
 
 > **TODO(client-compat): The provisioning-service package currently exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`). Until that refactor is done, `service/clients/provisioning.py` imports from `client.provisioning_client` rather than `provisioning_service.client.provisioning_client`.
 
+> **TODO(smoke-tests):** The provisioning smoke tests in `integration-tests/tests/smoke/test_provisioning_smoke.py` use raw `httpx` calls rather than `SyncProvisioningClient`. They should be updated to use the canonical client following the pattern established in `registry-service/tests/integration/` and the storefront integration tests.
+
+#### `escrow_uid` on jobs — deal linkage and recovery
+
+The `ansible_jobs` table now carries an `escrow_uid` column (nullable, indexed). The storefront passes this when submitting a provisioning job for a settled deal. It enables the storefront to recover the provisioning job_id after a crash by querying `GET /api/v1/jobs?escrow_uid=<uid>` rather than losing the mapping.
+
+`escrow_uid` is surfaced in:
+- `AnsibleJobParams.escrow_uid` (internal DTO)
+- `JobStatusResponse.escrow_uid` (HTTP response)
+- `GET /api/v1/jobs?escrow_uid=<uid>` filter on the list endpoint
+- `ProvisioningClient.list_jobs(escrow_uid=...)` on both async and sync clients
+
+The `provisioning_job_id` is surfaced in `GET /settle/{escrow_uid}/status` on the storefront so the buyer can traverse: storefront settle status → `provisioning_job_id` → provisioning `GET /jobs/{id}`.
+
+#### Test controller (`/test/*`)
+
+Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or staging.
+
+Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
+
+**Endpoints:**
+
+```
+POST   /test/mock-rules                    Add a when→then mock rule
+GET    /test/mock-rules                    List active rules
+DELETE /test/mock-rules/{rule_id}          Remove a rule
+POST   /test/mock-rules/{rule_id}/resume   Release a paused job gate
+GET    /test/jobs/summary                  Status counts (non-blocking)
+GET    /test/jobs/drain                    Long-poll until all jobs terminal
+GET    /test/jobs/{job_id}/wait            Long-poll until one job is terminal
+```
+
+**Mock rule schema:**
+```json
+{
+  "rule_id": "my-ww1-create",
+  "match": {"vm_action": "create", "vm_host": "ww1"},
+  "pause_before_result": true,
+  "result_stdout": "...",
+  "fail_with": null
+}
+```
+
+Rules are evaluated in insertion order. The first rule whose `match` dict is a subset of the incoming `AnsibleJobParams` fields wins. `match: {}` is a catch-all. If no rule matches, `_FAKE_STDOUT` success path runs.
+
+`pause_before_result: true` makes `wait_for_playbook` block on an `asyncio.Event` until `POST /test/mock-rules/{rule_id}/resume` is called. This allows tests to assert on mid-flight job state without any `asyncio.sleep` polling.
+
+**`ProgrammableMockAnsibleService`** is activated instead of `MockAnsibleService` when `mock` is in `ACTIVE_PROFILES`. It extends `MockAnsibleService` with the rule dict and per-rule `asyncio.Event` gates. Both are in `services/mock_ansible_service.py`.
+
+**Rule matching seam:** `AnsibleJobService._process_job` injects the `AnsibleJobParams` onto the `AnsibleRun` handle as `run._params` immediately after `start_playbook`. `ProgrammableMockAnsibleService.wait_for_playbook` reads `getattr(run, "_params", None)` to match rules. The real `AnsibleRun` dataclass ignores unknown attributes; this is a zero-cost test seam.
+
+**Job-done event seam:** After every job reaches a terminal state, `_process_job` calls `getattr(self._ansible, "notify_job_done", None)` — a no-op on the real `AnsibleService`. `ProgrammableMockAnsibleService.notify_job_done` fires a per-job `asyncio.Event` stored in `_job_done_events`, which `GET /test/jobs/{job_id}/wait` awaits. This replaces any `asyncio.sleep` polling in test code.
+
+**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into `config-provisioning-secrets.yml` so the e2e test pod can authenticate to the test controller (same key used for storefront admin endpoints).
+
 #### 1. Golden image configuration (`management-vars.yaml`)
 
 **Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
@@ -1308,6 +1363,43 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 **What they do not cover:** Anything already covered by the three levels above. System integration tests are expensive to run and brittle to maintain; they should be minimal in count and cover only the cross-service contract, not any service's internal logic.
 
 **Current location:** `integration-tests/tests/e2e/` — the `roles/` subtree organises tests by deployment layer (external chain, market registry, seller node) and negotiation stage (discovery, negotiation, settlement). This is planned to move to a separate project as the stack matures.
+
+#### Full-Deal E2E Test (`tests/e2e/roles/scenarios/test_full_deal.py`)
+
+The primary e2e test suite. 16 sequential tests, each asserting one observable stage boundary of a complete buyer-seller deal lifecycle. Tests run in numbered order; later tests skip automatically via `require_state(deal_state, "field_name")` if a prerequisite field was not populated (indicating the earlier test failed), so the first failure is always the actionable one.
+
+**Stage map:**
+
+| Test | Stage | Observable |
+|---|---|---|
+| 01 | Seller creates order | `order_id` returned from `POST /orders/create` |
+| 02 | Registry indexes order | Order visible in `GET /orders?status=open` |
+| 03 | Admin pause blocks | `/negotiate/new` returns 503 |
+| 04 | Admin resume allows | `GET /api/v1/system/status` shows `paused=false` |
+| 05 | Negotiation starts | `negotiation_id` returned from `POST /negotiate/new` |
+| 06 | Negotiation visible | Thread present in `GET /orders/{id}/negotiations` |
+| 07 | Force-accept converges | Admin calls `POST .../force-accept` with agreed price |
+| 08 | Terminal success | `GET .../negotiations/{neg_id}` shows `terminal_state=success` |
+| 09 | Mock escrow created | Deterministic `escrow_uid` captured (no real chain call) |
+| 10 | Settlement submitted | `POST /settle/{uid}` returns `status=provisioning` |
+| 11 | Provisioning job queued | `provisioning_job_id` in settle status; job visible via provisioning API |
+| 12 | Provisioning paused | Job in `running` state (mock gate held at `wait_for_playbook`) |
+| 13 | Gate released | `GET /test/jobs/{id}/wait` resolves to `succeeded` |
+| 14 | Settlement ready | `GET /settle/{uid}/status` shows `status=ready` |
+| 15 | Credentials present | `tenant_credentials` field non-empty in settlement response |
+| 16 | Seller order accepted | `GET /api/v1/orders/{id}` shows `status=accepted` or `closed` |
+
+**`DealState`** — a module-scoped dataclass that accumulates IDs and snapshots across all 16 tests. Each test reads prerequisite fields and writes its own outputs. `require_state(deal_state, "field")` calls `pytest.skip` if the field is None, cleanly propagating first-failure without cascading.
+
+**Provisioning gate pattern:** Test 09 should add a `pause_before_result=True` mock rule via `ProvisioningTestClient.add_mock_rule` before submitting settlement in test 10. Test 12 then asserts the job is in `running` state (held at the gate). Test 13 calls `resume_rule` and uses `wait_for_job` (long-poll, no sleep) to confirm `succeeded`.
+
+**Topology requirements:**
+- Storefront running with `admin_api_key` configured; value in `settings.SELLER.ADMIN_API_KEY`
+- Registry service reachable; URL in `settings.REGISTRY.API_URL`
+- Provisioning service running with `ACTIVE_PROFILES=mock`; URL in `settings.PROVISIONING.API_URL`
+- Buyer wallet keys in `settings.BUYER.PRIVATE_KEY` / `settings.BUYER.WALLET_ADDRESS`
+
+**`ProvisioningTestClient`** (`integration-tests/src/provisioning_test_client.py`) — sync HTTP client for the `/test/*` endpoints. Not part of the canonical `SyncProvisioningClient`; test infrastructure only. Wraps: `add_mock_rule`, `list_mock_rules`, `delete_mock_rule`, `resume_rule`, `job_summary`, `wait_for_job` (long-poll), `drain` (long-poll).
 
 ### Coverage Contract Between Levels
 

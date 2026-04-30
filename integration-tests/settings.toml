@@ -41,6 +41,8 @@ api_url           = ""
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
+agent_id          = ""        # ERC-8004 canonical ID; used as X-Agent-ID for provisioning auth
+admin_api_key     = ""        # X-Admin-Key for /admin/* and admin-only resource endpoints
 
 # ---------------------------------------------------------------------------
 # Agent / registry endpoints (e2e tests)

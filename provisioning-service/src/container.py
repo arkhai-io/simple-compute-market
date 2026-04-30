@@ -12,12 +12,12 @@ from services.system_service import SystemService
 
 
 def _make_ansible_service(cfg):
-    """Return MockAnsibleService when ACTIVE_PROFILES includes 'mock'."""
+    """Return ProgrammableMockAnsibleService when ACTIVE_PROFILES includes 'mock'."""
     import os
     active = [p.strip() for p in os.environ.get("ACTIVE_PROFILES", "").split(",") if p.strip()]
     if "mock" in active:
-        from services.mock_ansible_service import MockAnsibleService
-        return MockAnsibleService(cfg)
+        from services.mock_ansible_service import ProgrammableMockAnsibleService
+        return ProgrammableMockAnsibleService(cfg)
     return AnsibleService(cfg)
 
 
