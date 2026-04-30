@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from .groups.order import order_app
+from .groups.listing import listing_app
 from .groups.config import config_app
 from .groups.logs import logs_app
 from .groups.escrow import escrow_app
@@ -73,7 +73,7 @@ def main(
 # Subcommands
 # ---------------------------------------------------------------------------
 
-app.add_typer(order_app, name="order", help="Manage orders (see subcommands).")
+app.add_typer(listing_app, name="listing", help="Browse marketplace listings (list/show).")
 app.add_typer(
     config_app,
     name="config",

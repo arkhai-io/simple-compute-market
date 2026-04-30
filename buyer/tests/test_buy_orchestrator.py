@@ -90,7 +90,7 @@ def _urlopen_sequence(responses):
 def test_no_matches_returns_no_matches_status():
     with patch(
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
-        side_effect=_urlopen_sequence([{"orders": []}]),
+        side_effect=_urlopen_sequence([{"items": []}]),
     ):
         result = run_buy(
             config=_config(),
@@ -115,7 +115,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
             config=_config(),
             constraints=_constraints(),
             create_escrow=lambda terms: "0xnever",
-            matches=[{"order_id": "seller-1", "order_maker": _SELLER_URL}],
+            matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
         )
     assert result.status == "exited"
     assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
@@ -130,7 +130,7 @@ def test_happy_path_drives_to_ready():
     """Full flow: discovery → negotiation (immediate accept) → escrow → submit → poll ready."""
     responses = [
         # 1. registry GET
-        {"orders": [{"order_id": "seller-1", "order_maker": _SELLER_URL,
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL,
                       "duration_hours": 2}]},
         # 2. /negotiate/new — seller accepts immediately
         {"negotiation_id": "neg-1", "action": "accept", "price": 50},
@@ -199,9 +199,9 @@ def test_happy_path_drives_to_ready():
 def test_first_match_exits_second_agrees():
     responses = [
         # Registry returns two matches
-        {"orders": [
-            {"order_id": "seller-1", "order_maker": "http://seller1:8001"},
-            {"order_id": "seller-2", "order_maker": "http://seller2:8001",
+        {"items": [
+            {"listing_id": "seller-1", "seller": "http://seller1:8001"},
+            {"listing_id": "seller-2", "seller": "http://seller2:8001",
              "duration_hours": 1},
         ]},
         # /negotiate/new on seller1 — exits
@@ -240,7 +240,7 @@ def test_first_match_exits_second_agrees():
 
 def test_escrow_hook_failure_returns_exited_with_reason():
     responses = [
-        {"orders": [{"order_id": "seller-1", "order_maker": _SELLER_URL}]},
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "price": 50},
         {"agent_wallet_address": _SELLER_WALLET},
     ]
@@ -269,7 +269,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
 
 def test_provisioning_failed_returns_failed_status():
     responses = [
-        {"orders": [{"order_id": "seller-1", "order_maker": _SELLER_URL}]},
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "price": 50},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -298,7 +298,7 @@ def test_provisioning_failed_returns_failed_status():
 def test_settlement_timeout_returns_timeout_status():
     """Seller stays provisioning past the timeout → status=timeout."""
     responses = [
-        {"orders": [{"order_id": "seller-1", "order_maker": _SELLER_URL}]},
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
         {"negotiation_id": "neg-1", "action": "accept", "price": 50},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},

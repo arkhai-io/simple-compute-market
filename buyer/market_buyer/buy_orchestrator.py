@@ -87,13 +87,13 @@ def query_registry_for_matches(
     registry_url: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
 ) -> list[dict[str, Any]]:
-    """Ask the registry for open seller offers.
+    """Ask the registry for open seller listings.
 
-    Returns the raw list of order dicts the registry gave us. Buyers
+    Returns the raw list of listing dicts the registry gave us. Buyers
     don't have anything in the registry to filter against — they pick
     one (or several) offers to negotiate with.
     """
-    url = registry_url.rstrip("/") + "/orders?status=open"
+    url = registry_url.rstrip("/") + "/listings?status=open"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -109,15 +109,15 @@ def query_registry_for_matches(
     except ValueError as exc:
         raise RuntimeError(f"Registry returned non-JSON: {text[:200]!r}") from exc
 
-    # Registry may wrap the list or return it raw; normalize.
+    # Registry returns {"items": [...]}; tolerate raw list / "listings" / "data".
     if isinstance(payload, dict):
-        orders = payload.get("orders") or payload.get("data") or []
+        items = payload.get("items") or payload.get("listings") or payload.get("data") or []
     else:
-        orders = payload
-    if not isinstance(orders, list):
+        items = payload
+    if not isinstance(items, list):
         return []
 
-    return orders
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -342,8 +342,8 @@ def run_buy(
     # (server-assigned, captured from round 0). Consumers (run-log
     # readers, observers) group on those keys.
     for match in matches[:max_matches_to_try]:
-        seller_url = match.get("order_maker") or match.get("seller_url") or ""
-        listing_id = match.get("order_id") or match.get("listing_id") or ""
+        seller_url = match.get("seller") or match.get("order_maker") or match.get("seller_url") or ""
+        listing_id = match.get("listing_id") or match.get("order_id") or ""
         if not seller_url or not listing_id:
             attempts.append({"match": match, "error": "missing_seller_url_or_listing_id"})
             continue

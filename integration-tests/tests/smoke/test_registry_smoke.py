@@ -185,15 +185,15 @@ class TestAttestationStats:
         assert isinstance(stats, AttestationStats), (
             f"Expected AttestationStats, got {type(stats)}"
         )
-        assert stats.settled_order_count >= 0
-        assert stats.maker_attestation_count >= 0
-        assert stats.taker_attestation_count >= 0
+        assert stats.settled_listing_count >= 0
+        assert stats.seller_attestation_count >= 0
+        assert stats.buyer_attestation_count >= 0
 
         log.info(
             "Attestation stats — settled=%d maker=%d taker=%d",
-            stats.settled_order_count,
-            stats.maker_attestation_count,
-            stats.taker_attestation_count,
+            stats.settled_listing_count,
+            stats.seller_attestation_count,
+            stats.buyer_attestation_count,
         )
 
     def test_settled_orders_exist(self, registry_client: RegistryClient) -> None:
@@ -222,14 +222,14 @@ class TestAttestationStats:
 
         log.info(
             "Settlement check — settled_order_count=%d",
-            stats.settled_order_count,
+            stats.settled_listing_count,
         )
 
-        if stats.settled_order_count == 0:
+        if stats.settled_listing_count == 0:
             warnings.warn(
                 "No settled orders found in the registry "
-                f"(maker_attestation_count={stats.maker_attestation_count}, "
-                f"taker_attestation_count={stats.taker_attestation_count}).\n"
+                f"(seller_attestation_count={stats.seller_attestation_count}, "
+                f"buyer_attestation_count={stats.buyer_attestation_count}).\n"
                 "This is expected in a fresh test-env deployment where no agent "
                 "negotiations have completed yet. In a long-running production or "
                 "staging environment this indicates no deals have fully settled.",
@@ -240,5 +240,5 @@ class TestAttestationStats:
 
         log.info(
             "✓ Registry contains %d settled order(s) — market is functioning end-to-end",
-            stats.settled_order_count,
+            stats.settled_listing_count,
         )

@@ -33,7 +33,7 @@ from market_storefront.utils.config import CONFIG
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
-from registry_client import RegistryClient, RegistryClientError, OrderRequest, UpdateOrderRequest
+from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
 from market_storefront.utils.order_matching import match_orders
 from market_policy.negotiation_thread import (
     get_thread_store,
@@ -331,9 +331,9 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 
     try:
         async with _make_registry_client() as registry_client:
-            result = await registry_client.update_order(
+            result = await registry_client.update_listing(
                 order_id,
-                UpdateOrderRequest(
+                UpdateListingRequest(
                     updates={"status": "closed"},
                     private_key=CONFIG.agent_priv_key,
                     agent_id=_canonical_agent_id(),
@@ -615,17 +615,17 @@ async def discover(
 
     async with _make_registry_client() as registry_client:
         try:
-            our_order = await registry_client.get_order(order_id)
+            our_order = await registry_client.get_listing(order_id)
         except RegistryClientError as exc:
             if exc.status_code == 404:
                 raise ValueError(f"Order {order_id} not found in registry") from exc
             raise
 
-        candidates_resp = await registry_client.list_orders(
+        candidates_resp = await registry_client.list_listings(
             status="open",
             limit=CONFIG.max_discovery_agents,
         )
-        matching_orders = match_orders(our_order, candidates_resp.orders, bidirectional=True)
+        matching_orders = match_orders(our_order, candidates_resp.listings, bidirectional=True)
     # Drop our own orders.
     matching_orders = [
         m for m in matching_orders
@@ -698,13 +698,13 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     try:
         agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
         async with _make_registry_client() as registry_client:
-            order_request = OrderRequest(
-                order_id=order_id,
+            order_request = ListingRequest(
+                listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
                 demand=order_dict.get("demand_resource", {}),
                 duration_hours=float(order_dict.get("duration_hours", 1.0)),
             )
-            await registry_client.publish_order(
+            await registry_client.publish_listing(
                 agent_id_for_registry, order_request, private_key=CONFIG.agent_priv_key
             )
         logger.info("[REGISTRY] Published order %s", order_id)
@@ -970,10 +970,10 @@ async def fulfill_compute_obligation(
     if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
         try:
             async with _make_registry_client() as registry_client:
-                result = await registry_client.update_order(
+                result = await registry_client.update_listing(
                     order_id,
-                    UpdateOrderRequest(
-                        updates={"maker_attestation": maker_attestation},
+                    UpdateListingRequest(
+                        updates={"seller_attestation": maker_attestation},
                         private_key=CONFIG.agent_priv_key,
                         agent_id=_canonical_agent_id(),
                     ),

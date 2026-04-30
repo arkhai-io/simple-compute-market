@@ -60,14 +60,14 @@ class TestMarketRegistry:
         )
 
     def test_registry_has_orders_endpoint(self, market_registry: dict):
-        """Registry exposes /orders for querying."""
-        status, body = _http_get(f"{market_registry['url']}/orders")
+        """Registry exposes /listings for querying."""
+        status, body = _http_get(f"{market_registry['url']}/listings")
         assert status == 200, (
-            f"GET {market_registry['url']}/orders failed: status={status}"
+            f"GET {market_registry['url']}/listings failed: status={status}"
         )
         data = json.loads(body)
         # Response shape: {"items": [...], "count": N} or similar
-        assert isinstance(data, dict), f"Unexpected /orders response: {data!r}"
+        assert isinstance(data, dict), f"Unexpected /listings response: {data!r}"
 
     def test_registry_has_agents_endpoint(self, market_registry: dict):
         """Registry exposes /agents for querying."""

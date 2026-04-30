@@ -132,18 +132,18 @@ class TestAttestationStats:
 
     async def test_empty_db_returns_zero_counts(self, registry_client):
         stats = await registry_client.get_attestation_stats()
-        assert stats.settled_order_count == 0
-        assert stats.maker_attestation_count == 0
-        assert stats.taker_attestation_count == 0
+        assert stats.settled_listing_count == 0
+        assert stats.seller_attestation_count == 0
+        assert stats.buyer_attestation_count == 0
 
     async def test_order_with_no_attestations_not_counted(
         self, registry_client, open_order
     ):
         # open_order has neither attestation set
         stats = await registry_client.get_attestation_stats()
-        assert stats.settled_order_count == 0
-        assert stats.maker_attestation_count == 0
-        assert stats.taker_attestation_count == 0
+        assert stats.settled_listing_count == 0
+        assert stats.seller_attestation_count == 0
+        assert stats.buyer_attestation_count == 0
 
     async def test_only_maker_attestation_counted_separately(
         self, registry_client, db_session, agent_no_owner
@@ -163,10 +163,10 @@ class TestAttestationStats:
         db_session.commit()
 
         stats = await registry_client.get_attestation_stats()
-        assert stats.maker_attestation_count == 1
-        assert stats.taker_attestation_count == 0
+        assert stats.seller_attestation_count == 1
+        assert stats.buyer_attestation_count == 0
         # Not settled — taker_attestation is missing
-        assert stats.settled_order_count == 0
+        assert stats.settled_listing_count == 0
 
     async def test_only_taker_attestation_counted_separately(
         self, registry_client, db_session, agent_no_owner
@@ -186,10 +186,10 @@ class TestAttestationStats:
         db_session.commit()
 
         stats = await registry_client.get_attestation_stats()
-        assert stats.maker_attestation_count == 0
-        assert stats.taker_attestation_count == 1
+        assert stats.seller_attestation_count == 0
+        assert stats.buyer_attestation_count == 1
         # Not settled — maker_attestation is missing
-        assert stats.settled_order_count == 0
+        assert stats.settled_listing_count == 0
 
     async def test_both_attestations_counted_as_settled(
         self, registry_client, db_session, agent_no_owner
@@ -209,9 +209,9 @@ class TestAttestationStats:
         db_session.commit()
 
         stats = await registry_client.get_attestation_stats()
-        assert stats.maker_attestation_count == 1
-        assert stats.taker_attestation_count == 1
-        assert stats.settled_order_count == 1
+        assert stats.seller_attestation_count == 1
+        assert stats.buyer_attestation_count == 1
+        assert stats.settled_listing_count == 1
 
     async def test_mixed_orders_counted_independently(
         self, registry_client, db_session, agent_no_owner
@@ -249,9 +249,9 @@ class TestAttestationStats:
         db_session.commit()
 
         stats = await registry_client.get_attestation_stats()
-        assert stats.maker_attestation_count == 2  # maker-only + settled
-        assert stats.taker_attestation_count == 1  # settled only
-        assert stats.settled_order_count == 1       # only the fully settled one
+        assert stats.seller_attestation_count == 2  # maker-only + settled
+        assert stats.buyer_attestation_count == 1  # settled only
+        assert stats.settled_listing_count == 1       # only the fully settled one
 
     async def test_settled_count_does_not_double_count(
         self, registry_client, db_session, agent_no_owner
@@ -281,6 +281,6 @@ class TestAttestationStats:
         db_session.commit()
 
         stats = await registry_client.get_attestation_stats()
-        assert stats.maker_attestation_count == 2
-        assert stats.taker_attestation_count == 2
-        assert stats.settled_order_count == 2
+        assert stats.seller_attestation_count == 2
+        assert stats.buyer_attestation_count == 2
+        assert stats.settled_listing_count == 2

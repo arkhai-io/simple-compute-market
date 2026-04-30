@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from registry_client.models import OrderListResponse, OrderSummary
+from registry_client.models import ListingListResponse, ListingSummary
 
 from market_storefront.utils.action_executor import discover
 
@@ -24,9 +24,9 @@ _SELLER_OFFER = {"gpu_model": "H200"}
 _SELLER_DEMAND = {"token": "USDC"}
 
 
-def _buyer_order(order_id: str, order_maker: str) -> OrderSummary:
-    """Construct a buyer-role OrderSummary (demands compute, offers token)."""
-    return OrderSummary(
+def _buyer_order(order_id: str, order_maker: str) -> ListingSummary:
+    """Construct a buyer-role ListingSummary (demands compute, offers token)."""
+    return ListingSummary(
         id=order_id,
         maker_agent_id=order_maker,
         offer=_BUYER_OFFER,
@@ -34,9 +34,9 @@ def _buyer_order(order_id: str, order_maker: str) -> OrderSummary:
     )
 
 
-def _seller_order(order_id: str, order_maker: str) -> OrderSummary:
-    """Construct a seller-role OrderSummary (offers compute, demands token)."""
-    return OrderSummary(
+def _seller_order(order_id: str, order_maker: str) -> ListingSummary:
+    """Construct a seller-role ListingSummary (offers compute, demands token)."""
+    return ListingSummary(
         id=order_id,
         maker_agent_id=order_maker,
         offer=_SELLER_OFFER,
@@ -44,16 +44,16 @@ def _seller_order(order_id: str, order_maker: str) -> OrderSummary:
     )
 
 
-def _mock_registry(*, our_order: OrderSummary, candidates: list[OrderSummary]):
+def _mock_registry(*, our_order: ListingSummary, candidates: list[ListingSummary]):
     """Build a registry_client mock that returns the given fixtures.
 
     Wraps the client in an async context manager to match the
     ``async with _make_registry_client() as registry_client:`` pattern.
     """
     client = MagicMock()
-    client.get_order = AsyncMock(return_value=our_order)
-    client.list_orders = AsyncMock(
-        return_value=OrderListResponse(orders=candidates)
+    client.get_listing = AsyncMock(return_value=our_order)
+    client.list_listings = AsyncMock(
+        return_value=ListingListResponse(listings=candidates)
     )
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=client)
@@ -198,7 +198,7 @@ async def test_discover_raises_when_order_not_in_registry():
     from registry_client import RegistryClientError
 
     client = MagicMock()
-    client.get_order = AsyncMock(
+    client.get_listing = AsyncMock(
         side_effect=RegistryClientError("GET", "/orders/phantom", 404, "not found")
     )
     cm = MagicMock()
@@ -227,10 +227,10 @@ async def test_discover_skips_matches_missing_fields():
     our_order = _buyer_order("buyer-ord-1", "http://buyer:8000")
     candidates = [
         # Empty id string → str("") is falsy → dropped.
-        OrderSummary(id="", maker_agent_id="http://peer1:8000",
+        ListingSummary(id="", maker_agent_id="http://peer1:8000",
                      offer=_SELLER_OFFER, demand=_SELLER_DEMAND),
         # Missing maker_agent_id → None is falsy → dropped.
-        OrderSummary(id="no-maker", maker_agent_id=None,
+        ListingSummary(id="no-maker", maker_agent_id=None,
                      offer=_SELLER_OFFER, demand=_SELLER_DEMAND),
         _seller_order("good", "http://peer2:8000"),
     ]

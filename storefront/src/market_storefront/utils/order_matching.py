@@ -1,15 +1,12 @@
-"""Bidirectional order matching logic.
+"""Bidirectional listing matching logic.
 
-Pure Python — no HTTP, no database.  Given a local order and a list of
-candidate orders fetched from the registry, returns the subset whose
-offer/demand resources are complementary.
+Pure Python — no HTTP, no database. Given a local listing and a list
+of candidate listings fetched from the registry, returns the subset
+whose offer/demand resources are complementary.
 
-Accepts either ``OrderSummary`` instances (from the canonical registry client)
-or plain dicts (for backward compatibility with legacy callers).
-
-Previously this lived in ``service.clients.indexer.RegistryClient.match_orders``
-as an instance method.  It has no dependency on the registry HTTP client and
-belongs here alongside the callers that use it.
+Accepts either ``ListingSummary`` instances (from the canonical
+registry client) or plain dicts (for backward compatibility with
+legacy callers).
 """
 
 from __future__ import annotations

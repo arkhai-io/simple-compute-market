@@ -193,22 +193,22 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
     response_model=AttestationStatsResponse,
     summary="Settlement activity counts",
     description=(
-        "Returns counts of orders with Alkahest attestation UIDs written back "
-        "by agents after on-chain settlement. A non-zero settled_order_count "
+        "Returns counts of listings with Alkahest attestation UIDs written back "
+        "by agents after on-chain settlement. A non-zero settled_listing_count "
         "confirms that at least one full deal cycle has completed: escrow locked "
-        "by the buyer (maker_attestation) and compute obligation fulfilled by the "
-        "seller (taker_attestation). Intended as a smoke-test signal that the "
+        "by the buyer (seller_attestation) and compute obligation fulfilled by the "
+        "seller (buyer_attestation). Intended as a smoke-test signal that the "
         "market is functioning end-to-end, not just deployed."
     ),
 )
 def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse:
-    maker_count: int = (
+    seller_count: int = (
         db.query(func.count(Listing.order_id))
         .filter(Listing.maker_attestation.isnot(None))
         .scalar()
         or 0
     )
-    taker_count: int = (
+    buyer_count: int = (
         db.query(func.count(Listing.order_id))
         .filter(Listing.taker_attestation.isnot(None))
         .scalar()
@@ -224,9 +224,9 @@ def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse
         or 0
     )
     return AttestationStatsResponse(
-        settled_order_count=settled_count,
-        maker_attestation_count=maker_count,
-        taker_attestation_count=taker_count,
+        settled_listing_count=settled_count,
+        seller_attestation_count=seller_count,
+        buyer_attestation_count=buyer_count,
     )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from registry_client import RegistryClientError
-from registry_client.models import AgentListResponse, AgentSummary, OrderRequest
+from registry_client.models import AgentListResponse, AgentSummary, ListingRequest
 from tests.integration.conftest import (
     IDENTITY_REGISTRY,
     MAKER_PRIVATE_KEY,

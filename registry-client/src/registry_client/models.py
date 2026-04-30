@@ -177,7 +177,7 @@ class AgentListResponse:
 
 
 # ---------------------------------------------------------------------------
-# Orders
+# Listings
 # ---------------------------------------------------------------------------
 
 
@@ -220,17 +220,17 @@ class TokenResource:
 
 
 @dataclass
-class OrderRequest:
-    """Request body for POST /agents/{agent_id}/orders."""
+class ListingRequest:
+    """Request body for POST /agents/{agent_id}/listings."""
 
     offer: dict[str, Any]
     demand: dict[str, Any]
     duration_hours: float
-    order_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
+    listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
 
     def to_dict(self) -> dict:
         return {
-            "order_id": self.order_id,
+            "listing_id": self.listing_id,
             "offer_resource": self.offer,
             "demand_resource": self.demand,
             "duration_hours": self.duration_hours,
@@ -238,10 +238,11 @@ class OrderRequest:
 
 
 @dataclass
-class OrderSummary:
+class ListingSummary:
     """
-    Single order record as returned by GET /orders or GET /agents/{id}/orders.
-    Schema is ``{}`` in the spec; we capture common fields defensively.
+    Single listing record as returned by GET /listings or
+    GET /agents/{id}/listings. Schema is ``{}`` in the spec; we capture
+    common fields defensively.
     """
 
     id: str | int | None = None
@@ -254,32 +255,33 @@ class OrderSummary:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "OrderSummary":
+    def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
-            # registry snake_case names (actual API)
-            "order_id", "agent_id", "order_maker", "offer_resource",
-            "demand_resource", "duration_hours", "created_at", "updated_at",
-            "status", "maker_attestation", "taker_attestation",
-            "order_taker",
+            # Listings vocabulary (current registry wire)
+            "listing_id", "agent_id", "seller", "buyer",
+            "offer_resource", "demand_resource", "duration_hours",
+            "created_at", "updated_at", "status",
+            "seller_attestation", "buyer_attestation",
             # camelCase alternatives
             "id", "makerAgentId", "offer", "demand", "durationHours", "createdAt",
             "maker_agent_id",
         }
-        # Registry uses "order_id" as the primary key; fall back to "id"
-        order_id = d.get("order_id") or d.get("id")
-        # "agent_id" is the canonical agent who made the order in registry responses;
-        # camelCase APIs use "makerAgentId"
+        # Registry uses "listing_id" as the primary key; fall back to "id"
+        listing_id = d.get("listing_id") or d.get("id")
+        # "agent_id" is the canonical agent who owns the listing in registry
+        # responses; camelCase APIs use "makerAgentId"; "seller" is the
+        # agent's base URL.
         maker = (
             d.get("agent_id")
             or d.get("makerAgentId")
             or d.get("maker_agent_id")
-            or d.get("order_maker")   # order_maker is the agent's base URL
+            or d.get("seller")
         )
         # offer/demand may be nested as offer_resource/demand_resource
         offer = d.get("offer") or d.get("offer_resource") or {}
         demand = d.get("demand") or d.get("demand_resource") or {}
         return cls(
-            id=order_id,
+            id=listing_id,
             status=d.get("status"),
             maker_agent_id=maker,
             offer=offer,
@@ -291,22 +293,22 @@ class OrderSummary:
 
 
 @dataclass
-class OrderListResponse:
-    """Wrapper around GET /orders response (list or paginated envelope)."""
+class ListingListResponse:
+    """Wrapper around GET /listings response (list or paginated envelope)."""
 
-    orders: list[OrderSummary]
+    listings: list[ListingSummary]
     total: int | None = None
     limit: int | None = None
     offset: int | None = None
 
     @classmethod
-    def from_raw(cls, raw: list | dict) -> "OrderListResponse":
+    def from_raw(cls, raw: list | dict) -> "ListingListResponse":
         if isinstance(raw, list):
-            return cls(orders=[OrderSummary.from_dict(o) for o in raw])
-        # Registry returns {"items": [...]} — also handle "orders" / "data"
-        items = raw.get("items") or raw.get("orders") or raw.get("data") or []
+            return cls(listings=[ListingSummary.from_dict(o) for o in raw])
+        # Registry returns {"items": [...]} — also handle "listings" / "data"
+        items = raw.get("items") or raw.get("listings") or raw.get("data") or []
         return cls(
-            orders=[OrderSummary.from_dict(o) for o in items],
+            listings=[ListingSummary.from_dict(o) for o in items],
             total=raw.get("total"),
             limit=raw.get("limit"),
             offset=raw.get("offset"),
@@ -314,13 +316,13 @@ class OrderListResponse:
 
 
 # ---------------------------------------------------------------------------
-# Agent registration (request)
+# Listing update + heartbeat (request)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class UpdateOrderRequest:
-    """Request body for PUT /orders/{order_id}.
+class UpdateListingRequest:
+    """Request body for PUT /listings/{listing_id}.
 
     Constructs the signed body that the registry route expects.
     Auth fields (signature, timestamp, signer_agent_id) are embedded
@@ -335,8 +337,8 @@ class UpdateOrderRequest:
         from registry_client.auth import build_auth_headers
         body = dict(self.updates)
         if self.private_key:
-            auth = build_auth_headers(self.private_key, "update_order",
-                                      self.updates.get("order_id", ""))
+            auth = build_auth_headers(self.private_key, "update_listing",
+                                      self.updates.get("listing_id", ""))
             body["signature"] = auth["X-Signature"]
             body["timestamp"] = int(auth["X-Timestamp"])
         if self.agent_id:
@@ -358,19 +360,25 @@ class HeartbeatRequest:
 class AttestationStats:
     """Settlement activity counts from GET /api/v1/system/stats/attestations.
 
-    settled_order_count > 0 means at least one full Alkahest deal cycle has
-    completed: buyer locked escrow (maker_attestation) and seller attested
-    fulfillment (taker_attestation).
+    settled_listing_count > 0 means at least one full Alkahest deal cycle
+    has completed: buyer locked escrow (seller_attestation) and seller
+    attested fulfillment (buyer_attestation).
     """
 
-    settled_order_count: int = 0
-    maker_attestation_count: int = 0
-    taker_attestation_count: int = 0
+    settled_listing_count: int = 0
+    seller_attestation_count: int = 0
+    buyer_attestation_count: int = 0
 
     @classmethod
     def from_dict(cls, d: dict) -> "AttestationStats":
         return cls(
-            settled_order_count=int(d.get("settled_order_count", 0)),
-            maker_attestation_count=int(d.get("maker_attestation_count", 0)),
-            taker_attestation_count=int(d.get("taker_attestation_count", 0)),
+            settled_listing_count=int(
+                d.get("settled_listing_count", d.get("settled_order_count", 0))
+            ),
+            seller_attestation_count=int(
+                d.get("seller_attestation_count", d.get("maker_attestation_count", 0))
+            ),
+            buyer_attestation_count=int(
+                d.get("buyer_attestation_count", d.get("taker_attestation_count", 0))
+            ),
         )

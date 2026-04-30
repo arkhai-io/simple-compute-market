@@ -1,8 +1,8 @@
 """EIP-191 signing helpers and shared error type for the registry client.
 
 The registry API uses signed ``X-Signature`` / ``X-Timestamp`` headers on
-mutation endpoints (heartbeat, publish_order, delete_order).  The message
-format is::
+mutation endpoints (heartbeat, publish_listing, delete_listing). The
+message format is::
 
     "<operation>:<resource_id>:<timestamp>"
 

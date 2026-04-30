@@ -21,11 +21,11 @@ def query_registry_orders(
     status: str | None = None,
     timeout: float = 10,
 ) -> dict:
-    """GET /orders from the registry.
+    """GET /listings from the registry.
 
     Returns ``{"items": [...], "count": N}``.
     """
-    url = f"{registry_url.rstrip('/')}/orders"
+    url = f"{registry_url.rstrip('/')}/listings"
     if status:
         url += f"?status={status}"
     req = urllib.request.Request(url, method="GET")
@@ -38,11 +38,11 @@ def get_registry_order(
     order_id: str,
     timeout: float = 10,
 ) -> dict:
-    """GET /orders/{order_id} from the registry.
+    """GET /listings/{listing_id} from the registry.
 
-    Returns ``{"order": {...}}``.
+    Returns ``{"listing": {...}}``.
     """
-    url = f"{registry_url.rstrip('/')}/orders/{order_id}"
+    url = f"{registry_url.rstrip('/')}/listings/{order_id}"
     req = urllib.request.Request(url, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())

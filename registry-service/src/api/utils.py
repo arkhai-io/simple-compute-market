@@ -161,11 +161,11 @@ def verify_heartbeat_signature(agent_id: str, timestamp: int, signature: str, ow
 
 
 def verify_order_signature(operation: str, resource_id: str, timestamp: int, signature: str, owner_address: str) -> bool:
-    """Verify an order mutation signature.
+    """Verify a listing mutation signature.
 
     Message format: '{operation}:{resource_id}:{timestamp}'
-    operation: 'create_order', 'update_order', or 'delete_order'
-    resource_id: agent_id for create_order, order_id for update/delete
+    operation: 'create_listing', 'update_listing', or 'delete_listing'
+    resource_id: agent_id for create_listing, listing_id for update/delete
     """
     if not HAS_ETH_ACCOUNT:
         logger.warning("[Order] eth_account not available, signature verification disabled")
@@ -294,17 +294,24 @@ def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
 
 
 def order_to_dict(order: Listing) -> dict:
-    """Convert Listing model to API response dict"""
+    """Convert Listing model to API response dict (wire shape).
+
+    DB columns still use the legacy ``order_*`` / ``*_attestation``
+    names (see Slice 4 plan). This function performs the wire-level
+    translation: ``order_id`` → ``listing_id``, ``order_maker`` →
+    ``seller``, ``order_taker`` → ``buyer``, ``maker_attestation`` →
+    ``seller_attestation``, ``taker_attestation`` → ``buyer_attestation``.
+    """
     return {
-        "order_id": order.order_id,
+        "listing_id": order.order_id,
         "agent_id": order.agent_id,
-        "order_maker": order.order_maker,
-        "order_taker": order.order_taker,
+        "seller": order.order_maker,
+        "buyer": order.order_taker,
         "offer_resource": order.offer_resource or {},
         "demand_resource": order.demand_resource or {},
         "duration_hours": order.duration_hours,
-        "maker_attestation": order.maker_attestation,
-        "taker_attestation": order.taker_attestation,
+        "seller_attestation": order.maker_attestation,
+        "buyer_attestation": order.taker_attestation,
         "oracle_address": order.oracle_address,
         "status": order.status.value,
         "created_at": order.created_at.isoformat(),

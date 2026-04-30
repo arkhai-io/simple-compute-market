@@ -2,7 +2,7 @@
 
 Covers:
 - match_orders with plain dicts (backward compat)
-- match_orders with OrderSummary instances (canonical path)
+- match_orders with ListingSummary instances (canonical path)
 - Bidirectional matching both cases (A and B)
 - Non-bidirectional (direct) matching
 - Non-matching candidates are excluded
@@ -21,9 +21,9 @@ def _dict_order(offer: dict, demand: dict, order_id: str = "ord") -> dict:
 
 
 def _summary_order(offer: dict, demand: dict, order_id: str = "ord"):
-    """Create a minimal OrderSummary-like object."""
-    from registry_client.models import OrderSummary
-    return OrderSummary(id=order_id, offer=offer, demand=demand, status="open")
+    """Create a minimal ListingSummary-like object."""
+    from registry_client.models import ListingSummary
+    return ListingSummary(id=order_id, offer=offer, demand=demand, status="open")
 
 
 COMPUTE = {"gpu_model": "A100", "quantity": 1, "sla": 99.0, "region": "us-west"}
@@ -78,8 +78,8 @@ class TestMatchOrdersDicts:
         assert result[0]["order_id"] == "match"
 
 
-class TestMatchOrdersOrderSummary:
-    """match_orders with OrderSummary instances (canonical path)."""
+class TestMatchOrdersListingSummary:
+    """match_orders with ListingSummary instances (canonical path)."""
 
     def test_case_a_with_order_summary(self):
         our = _summary_order(COMPUTE, TOKEN, "our-s1")
@@ -100,11 +100,11 @@ class TestMatchOrdersOrderSummary:
         assert match_orders(our, [candidate]) == []
 
     def test_returns_order_summary_instances(self):
-        from registry_client.models import OrderSummary
+        from registry_client.models import ListingSummary
         our = _summary_order(COMPUTE, TOKEN)
         candidate = _summary_order(TOKEN, COMPUTE)
         result = match_orders(our, [candidate])
-        assert all(isinstance(r, OrderSummary) for r in result)
+        assert all(isinstance(r, ListingSummary) for r in result)
 
 
 class TestMatchOrdersNonBidirectional:

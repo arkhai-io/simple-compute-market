@@ -16,10 +16,10 @@ from registry_client.models import (
     AttestationStats,
     HealthResponse,
     HeartbeatRequest,
-    OrderListResponse,
-    OrderRequest,
-    OrderSummary,
-    UpdateOrderRequest,
+    ListingListResponse,
+    ListingRequest,
+    ListingSummary,
+    UpdateListingRequest,
 )
 
 __all__ = [
@@ -33,8 +33,8 @@ __all__ = [
     "AttestationStats",
     "HealthResponse",
     "HeartbeatRequest",
-    "OrderListResponse",
-    "OrderRequest",
-    "OrderSummary",
-    "UpdateOrderRequest",
+    "ListingListResponse",
+    "ListingRequest",
+    "ListingSummary",
+    "UpdateListingRequest",
 ]

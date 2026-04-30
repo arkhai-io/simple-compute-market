@@ -70,12 +70,25 @@ and orchestrator. SQLite table inside the storefront keeps
 `orders`/`order_id` columns for now (Slice 4); translation happens
 at the controller boundary.
 
-**Slice 3 — Registry wire**
+**Slice 3 — Registry wire** ✅ committed
 Registry routes `/orders` → `/listings`, `/agents/{id}/orders` →
-`/agents/{id}/listings`. arkhai-registry-client SDK rename.
-`market order list/show` → `market listing list/show`. JSON
-response field `order_id` → `listing_id` (and the maker/taker rename
-is bundled here).
+`/agents/{id}/listings`, `/orders/{id}` → `/listings/{id}`.
+arkhai-registry-client SDK methods + types (`OrderRequest`/`OrderSummary`/
+`OrderListResponse`/`UpdateOrderRequest` → `ListingRequest`/`ListingSummary`/
+`ListingListResponse`/`UpdateListingRequest`; `publish_order`/`list_orders`/
+`get_order`/`update_order`/`delete_order`/`get_agent_orders` → ...listing).
+JSON wire keys: `order_id` → `listing_id`, `order_maker` → `seller`,
+`order_taker` → `buyer`, `maker_attestation` → `seller_attestation`,
+`taker_attestation` → `buyer_attestation`. Wrapper `{"order": ...}`
+→ `{"listing": ...}`. EIP-191 op strings: `create_order`/`update_order`/
+`delete_order` → `create_listing`/`update_listing`/`delete_listing`.
+AttestationStats fields: `settled_order_count`/`maker_attestation_count`/
+`taker_attestation_count` → `settled_listing_count`/`seller_attestation_count`/
+`buyer_attestation_count`. Buyer CLI `market order list/show` →
+`market listing list/show` (file renamed `groups/order.py` →
+`groups/listing.py`). Translation at the FastAPI boundary keeps the DB
+columns on the legacy `order_*`/`*_attestation` names; `_listing_body_to_columns`
+flips inbound, `order_to_dict` flips outbound.
 
 **Slice 4 — DB**
 Alembic migration renaming `market_orders` → `listings` and

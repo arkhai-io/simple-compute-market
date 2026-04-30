@@ -1,12 +1,12 @@
-"""`market order` — read-only views over the registry indexer.
+"""`market listing` — read-only views over the registry indexer.
 
 Pure buyers don't run a storefront, so this module only covers
 operations that hit the operator-run registry indexer:
 
-    market order list           # browse open orders
-    market order show <id>      # inspect a single order
+    market listing list           # browse open listings
+    market listing show <id>      # inspect a single listing
 
-Order publication, closing, refunds, claims, and discovery used to
+Listing publication, closing, refunds, claims, and discovery used to
 live here too, but those endpoints live on a storefront and only made
 sense in the symmetric era when buyers also ran agents. They moved
 out with the buyer-as-pure-client refactor.
@@ -28,7 +28,7 @@ from rich.table import Table
 from ..common import resolve_config_value
 
 
-order_app = typer.Typer(no_args_is_help=True)
+listing_app = typer.Typer(no_args_is_help=True)
 
 
 # ---------------------------------------------------------------------------
@@ -105,28 +105,28 @@ def _fetch_json(url: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# market order list
+# market listing list
 # ---------------------------------------------------------------------------
 
 
-@order_app.command("list")
-def order_list(
+@listing_app.command("list")
+def listing_list(
     registry_url: str = typer.Option(
         None,
         "--registry-url",
         "-r",
         help="Registry indexer base URL (config.toml: registry.url).",
     ),
-    order_id: str | None = typer.Option(
+    listing_id: str | None = typer.Option(
         None,
-        "--order-id",
-        help="Filter by order ID.",
+        "--listing-id",
+        help="Filter by listing ID.",
     ),
     limit: int = typer.Option(
         50,
         "--limit",
         "-l",
-        help="Maximum orders to fetch (1-200).",
+        help="Maximum listings to fetch (1-200).",
     ),
     offset: int = typer.Option(
         0,
@@ -135,7 +135,7 @@ def order_list(
         help="Pagination offset.",
     ),
 ) -> None:
-    """List open orders from the registry indexer."""
+    """List open listings from the registry indexer."""
     base_url = (
         registry_url
         or resolve_config_value(toml_path="registry.url")
@@ -148,52 +148,52 @@ def order_list(
         raise typer.BadParameter("offset must be >= 0")
 
     query_params: dict[str, str | int] = {"status": "open", "limit": limit, "offset": offset}
-    if order_id:
-        query_params["order_id"] = order_id
+    if listing_id:
+        query_params["listing_id"] = listing_id
     params = urllib.parse.urlencode(query_params)
-    url = f"{base_url}/orders?{params}"
+    url = f"{base_url}/listings?{params}"
 
     payload = _fetch_json(url)
 
     items = payload.get("items", [])
     console = Console()
-    table = Table(title="Open Orders", box=box.SIMPLE_HEAVY, expand=True)
-    table.add_column("Order ID", style="bold", overflow="fold")
+    table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
+    table.add_column("Listing ID", style="bold", overflow="fold")
     table.add_column("Agent ID")
-    table.add_column("Maker")
-    table.add_column("Taker")
+    table.add_column("Seller")
+    table.add_column("Buyer")
     table.add_column("Offer")
     table.add_column("Demand")
     table.add_column("Created", justify="right")
 
-    for order in items:
-        offer_display = _format_resource(order.get("offer_resource", {}))
-        demand_display = _format_resource(order.get("demand_resource", {}))
+    for row in items:
+        offer_display = _format_resource(row.get("offer_resource", {}))
+        demand_display = _format_resource(row.get("demand_resource", {}))
         table.add_row(
-            str(order.get("order_id", "-")),
-            _shorten(str(order.get("agent_id", "-")), 32),
-            _shorten(str(order.get("order_maker", "-")), 40),
-            _shorten(str(order.get("order_taker", "-")), 40),
+            str(row.get("listing_id", "-")),
+            _shorten(str(row.get("agent_id", "-")), 32),
+            _shorten(str(row.get("seller", "-")), 40),
+            _shorten(str(row.get("buyer", "-")), 40),
             offer_display if "\n" in offer_display else _shorten(offer_display, 120),
             demand_display if "\n" in demand_display else _shorten(demand_display, 120),
-            _short_ts(order.get("created_at")),
+            _short_ts(row.get("created_at")),
         )
 
     if not items:
-        console.print("No open orders found.")
+        console.print("No open listings found.")
         return
 
     console.print(table)
 
 
 # ---------------------------------------------------------------------------
-# market order show
+# market listing show
 # ---------------------------------------------------------------------------
 
 
-@order_app.command("show")
-def order_show(
-    order_id: str = typer.Argument(..., help="Order ID"),
+@listing_app.command("show")
+def listing_show(
+    listing_id: str = typer.Argument(..., help="Listing ID"),
     registry_url: str = typer.Option(
         None,
         "--registry-url",
@@ -201,30 +201,30 @@ def order_show(
         help="Registry indexer base URL (config.toml: registry.url).",
     ),
 ) -> None:
-    """Show a single order by ID, fetched from the registry indexer."""
+    """Show a single listing by ID, fetched from the registry indexer."""
     base_url = (
         registry_url
         or resolve_config_value(toml_path="registry.url")
         or "http://localhost:8080"
     )
     base_url = _normalize_registry_url(base_url)
-    url = f"{base_url}/orders/{order_id}"
+    url = f"{base_url}/listings/{listing_id}"
     payload = _fetch_json(url)
-    found = payload.get("order", payload)
+    found = payload.get("listing", payload)
 
     console = Console()
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold", no_wrap=True)
     table.add_column()
-    table.add_row("Order ID", str(found.get("order_id", "-")))
+    table.add_row("Listing ID", str(found.get("listing_id", "-")))
     table.add_row("Agent ID", str(found.get("agent_id", "-")))
     table.add_row("Status", str(found.get("status", "-")))
-    table.add_row("Maker", str(found.get("order_maker", "-")))
-    table.add_row("Taker", str(found.get("order_taker", "-")))
+    table.add_row("Seller", str(found.get("seller", "-")))
+    table.add_row("Buyer", str(found.get("buyer", "-")))
     table.add_row("Duration (h)", str(found.get("duration_hours", "-")))
     table.add_row("Created", _short_ts(found.get("created_at")))
     table.add_row("Updated", _short_ts(found.get("updated_at")))
     table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
     table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
 
-    console.print(Panel(table, title="Market Order", border_style="blue"))
+    console.print(Panel(table, title="Marketplace Listing", border_style="blue"))
