@@ -262,6 +262,20 @@ class NegotiationResumePoint:
     last_status: Optional[str]
 
 
+def is_negotiation_complete(run_id: str) -> bool:
+    """True iff the run-log already contains an `agreed` negotiation outcome.
+
+    Used by ``market buy --from`` to decide whether to resume the
+    negotiation round loop or jump straight to settlement.
+    """
+    for ev in read_run(run_id):
+        if ev.get("event") == "negotiation_completed" and ev.get("status") == "agreed":
+            return True
+        if ev.get("event") == "run_ended" and ev.get("status") == "agreed":
+            return True
+    return False
+
+
 def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     """Reconstruct a partial negotiation from a prior run-log.
 

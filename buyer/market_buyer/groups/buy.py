@@ -30,8 +30,170 @@ from ..buy_orchestrator import (
     BuyConstraints,
     run_buy,
 )
+from ..buyer_client import ResumeState, negotiate_with_seller
 from ..common import resolve_config_value
 from ..run_log import RunLog
+from ._deal import (
+    is_negotiation_complete,
+    load_negotiation_resume_point,
+    open_run_log,
+)
+from .settle import run_settle_from_log
+
+
+def _run_resume_from(
+    *,
+    from_run: str,
+    max_price: Optional[int],
+    buyer_address: Optional[str],
+    buyer_private_key: Optional[str],
+    ssh_public_key: Optional[str],
+    token_contract: Optional[str],
+    token_decimals: int,
+    rpc_url: Optional[str],
+    chain_name: Optional[str],
+    alkahest_addr_config: Optional[str],
+    expiration_seconds: int,
+    max_rounds: int,
+    poll_interval: float,
+    settlement_timeout: float,
+    console: Console,
+) -> None:
+    """Composite resume: finish negotiation if mid-stream, then settle.
+
+    The same run-log is appended throughout — fresh `negotiate`-style
+    events when finishing the negotiation, then `settle_*` events from
+    ``run_settle_from_log``.
+    """
+    if not is_negotiation_complete(from_run):
+        if max_price is None:
+            typer.secho(
+                "--max-price is required when resuming a mid-stream "
+                "negotiation (the strategy needs the buyer's ceiling).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+        addr = resolve_config_value(
+            override=buyer_address, toml_path="wallet.address",
+        )
+        pk = resolve_config_value(
+            override=buyer_private_key, toml_path="wallet.private_key",
+        )
+        if not addr or not pk:
+            typer.secho(
+                "Missing buyer wallet config. Pass --buyer-address + "
+                "--buyer-priv-key or set wallet.address + "
+                "wallet.private_key in config.toml.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+        resume_point = load_negotiation_resume_point(from_run)
+        run_log = open_run_log(from_run)
+        run_log.event(
+            "negotiation_resumed",
+            from_run=from_run,
+            negotiation_id=resume_point.negotiation_id,
+            rounds_completed=resume_point.rounds_completed,
+        )
+
+        header = Table.grid(padding=(0, 2))
+        header.add_column(style="bold")
+        header.add_column()
+        header.add_row("Run ID", from_run)
+        header.add_row("Mode", "resume (mid-negotiation)")
+        header.add_row("Seller", resume_point.seller_url)
+        header.add_row("Listing", resume_point.listing_id)
+        header.add_row("Negotiation", resume_point.negotiation_id)
+        header.add_row("Rounds completed", str(resume_point.rounds_completed))
+        header.add_row("Ceiling", str(max_price))
+        console.print(Panel(header, title="market buy --from", border_style="cyan"))
+
+        def _observe(round_idx: int, our_msg: dict, reply: dict) -> None:
+            run_log.event(
+                "negotiation_round",
+                round=round_idx,
+                our_message=our_msg,
+                their_reply=reply,
+            )
+            their = reply or {}
+            console.print(
+                f"[dim]  round {round_idx}[/dim]  → "
+                f"{their.get('action', '-')} @ {their.get('price', '-')}"
+            )
+
+        try:
+            outcome = negotiate_with_seller(
+                seller_url=resume_point.seller_url,
+                buyer_address=addr,
+                buyer_private_key=pk,
+                listing_id=resume_point.listing_id,
+                initial_price=0,
+                max_price=max_price,
+                max_rounds=max_rounds,
+                on_round=_observe,
+                resume=ResumeState(
+                    negotiation_id=resume_point.negotiation_id,
+                    transcript=resume_point.transcript,
+                    last_seller_price=resume_point.last_seller_price,
+                    rounds_completed=resume_point.rounds_completed,
+                ),
+            )
+        except RuntimeError as exc:
+            run_log.event("negotiation_failed", error=str(exc))
+            run_log.end("error", error=str(exc))
+            typer.secho(f"Resumed negotiation failed: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(3)
+
+        run_log.event(
+            "negotiation_completed",
+            seller_url=resume_point.seller_url,
+            status=outcome.status,
+            agreed_price=outcome.agreed_price,
+            rounds=outcome.rounds,
+            reason=outcome.reason,
+            negotiation_id=outcome.negotiation_id,
+            listing_id=resume_point.listing_id,
+        )
+
+        if outcome.status != "agreed" or outcome.agreed_price is None:
+            run_log.end(
+                outcome.status,
+                negotiation_id=outcome.negotiation_id,
+                rounds=outcome.rounds,
+                reason=outcome.reason,
+            )
+            color = "yellow" if outcome.status == "exited" else "red"
+            typer.secho(
+                f"Negotiation did not agree (status={outcome.status}, "
+                f"reason={outcome.reason!r}). Settlement skipped.",
+                err=True, fg=getattr(typer.colors, color.upper(), typer.colors.YELLOW),
+            )
+            raise typer.Exit(4)
+
+        console.print(
+            f"[green]negotiation agreed[/green]  price={outcome.agreed_price} "
+            f"rounds={outcome.rounds}"
+        )
+
+    run_settle_from_log(
+        run_id=from_run,
+        escrow_uid=None,
+        token_contract=token_contract,
+        token_decimals=token_decimals,
+        duration_hours=None,
+        expiration_seconds=expiration_seconds,
+        ssh_public_key=ssh_public_key,
+        buyer_address=buyer_address,
+        buyer_private_key=buyer_private_key,
+        rpc_url=rpc_url,
+        chain_name=chain_name,
+        alkahest_addr_config=alkahest_addr_config,
+        poll_interval=poll_interval,
+        settlement_timeout=settlement_timeout,
+        console=console,
+    )
 
 
 def register(app: typer.Typer) -> None:
@@ -39,13 +201,26 @@ def register(app: typer.Typer) -> None:
 
     @app.command("buy")
     def buy(
-        initial_price: int = typer.Option(
-            ..., "--initial-price",
-            help="Opening bid per negotiation (raw token units).",
+        initial_price: Optional[int] = typer.Option(
+            None, "--initial-price",
+            help="Opening bid per negotiation (raw token units). "
+                 "Required for fresh runs; resumed runs (--from) "
+                 "carry it forward from the run-log.",
         ),
-        max_price: int = typer.Option(
-            ..., "--max-price",
-            help="Ceiling per negotiation (raw token units).",
+        max_price: Optional[int] = typer.Option(
+            None, "--max-price",
+            help="Ceiling per negotiation (raw token units). Required "
+                 "for fresh runs; required for --from runs only when "
+                 "the negotiation is still mid-stream (the strategy "
+                 "needs the buyer's ceiling).",
+        ),
+        from_run: Optional[str] = typer.Option(
+            None, "--from",
+            help="Resume a partial buy run-id end-to-end. Continues "
+                 "negotiation if it stopped mid-stream, then drives "
+                 "escrow.create + /settle + poll. The same run-log is "
+                 "appended to so `market logs show <id>` captures the "
+                 "full lifecycle.",
         ),
         registry_url: Optional[str] = typer.Option(
             None, "--registry-url",
@@ -113,8 +288,40 @@ def register(app: typer.Typer) -> None:
         No buyer agent is started or consulted; every step is either a
         signed HTTP call to a seller, a registry query, or a direct
         on-chain call.
+
+        When ``--from <run_id>`` is supplied, picks up wherever the
+        prior run left off: finishes the negotiation if it stopped
+        mid-stream, then drives stages 3-5 (escrow → submit → poll).
         """
         console = Console()
+
+        if from_run:
+            _run_resume_from(
+                from_run=from_run,
+                max_price=max_price,
+                buyer_address=buyer_address,
+                buyer_private_key=buyer_private_key,
+                ssh_public_key=ssh_public_key,
+                token_contract=token_contract,
+                token_decimals=token_decimals,
+                rpc_url=rpc_url,
+                chain_name=chain_name,
+                alkahest_addr_config=alkahest_addr_config,
+                expiration_seconds=expiration_seconds,
+                max_rounds=max_rounds,
+                poll_interval=poll_interval,
+                settlement_timeout=settlement_timeout,
+                console=console,
+            )
+            return
+
+        if initial_price is None or max_price is None:
+            typer.secho(
+                "Fresh `market buy` runs require --initial-price and "
+                "--max-price. To resume a prior run pass --from <run-id>.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
 
         # Resolution: CLI flag > config.toml > default.
         addr = resolve_config_value(

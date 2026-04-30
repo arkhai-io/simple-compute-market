@@ -30,6 +30,189 @@ from ..buy_orchestrator import (
 from ._deal import load_deal_context, open_run_log, resolve_chain_settings
 
 
+def run_settle_from_log(
+    *,
+    run_id: str,
+    escrow_uid: Optional[str],
+    token_contract: Optional[str],
+    token_decimals: int,
+    duration_hours: Optional[int],
+    expiration_seconds: int,
+    ssh_public_key: Optional[str],
+    buyer_address: Optional[str],
+    buyer_private_key: Optional[str],
+    rpc_url: Optional[str],
+    chain_name: Optional[str],
+    alkahest_addr_config: Optional[str],
+    poll_interval: float,
+    settlement_timeout: float,
+    console: Optional[Console] = None,
+) -> dict:
+    """Drive stages 3-5 of a deal from a buyer run-log.
+
+    Reusable by both ``market settle`` and ``market buy --from``.
+    Reads the run-log for ``run_id``, creates the on-chain escrow if
+    not already present, POSTs ``/settle/{escrow_uid}`` to the seller,
+    and polls until terminal. Logs each stage transition back into
+    the same run-log.
+
+    Returns the final settle-status body. Raises ``typer.Exit`` on
+    fatal errors (resolution failures, on-chain failures, polling
+    timeout, non-``ready`` terminal status).
+    """
+    console = console or Console()
+    deal = load_deal_context(run_id)
+    effective_token = token_contract or deal.token_contract
+    effective_token_decimals = (
+        token_decimals if token_decimals != 18 else (deal.token_decimals or 18)
+    )
+    chain = resolve_chain_settings(
+        buyer_address=buyer_address,
+        buyer_private_key=buyer_private_key,
+        ssh_public_key=ssh_public_key,
+        rpc_url=rpc_url,
+        chain_name=chain_name,
+        alkahest_addr_config=alkahest_addr_config,
+        token_contract=effective_token,
+        token_decimals=effective_token_decimals,
+    )
+
+    log = open_run_log(run_id)
+    log.event("settle_resumed", run_id=run_id)
+
+    resolved_uid = escrow_uid or deal.escrow_uid
+    effective_duration = (
+        duration_hours if duration_hours is not None else deal.duration_hours
+    )
+
+    header = Table.grid(padding=(0, 2))
+    header.add_column(style="bold")
+    header.add_column()
+    header.add_row("Run ID", run_id)
+    header.add_row("Seller", deal.seller_url)
+    header.add_row("Negotiation", deal.negotiation_id)
+    header.add_row("Agreed price", str(deal.agreed_price))
+    header.add_row("Duration (hours)", str(effective_duration))
+    header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
+    if resolved_uid:
+        header.add_row("Escrow UID", resolved_uid + " (skip create)")
+    console.print(Panel(header, title="market settle", border_style="cyan"))
+
+    # --- Stage 3: escrow.create (skip if uid already known) -------
+    if not resolved_uid:
+        seller_wallet = deal.seller_wallet_address
+        if not seller_wallet:
+            try:
+                seller_wallet = _resolve_seller_wallet(deal.seller_url)
+            except RuntimeError as exc:
+                log.event("escrow_resolve_wallet_failed", error=str(exc))
+                log.end("error", error=f"resolve_seller_wallet: {exc}")
+                typer.secho(
+                    f"Could not resolve seller wallet from "
+                    f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(3)
+
+        terms = AgreedTerms(
+            seller_url=deal.seller_url,
+            seller_wallet_address=seller_wallet,
+            negotiation_id=deal.negotiation_id,
+            listing_id=deal.listing_id,
+            agreed_price=deal.agreed_price,
+            duration_hours=effective_duration,
+        )
+        log.event("escrow_create_start", terms=terms.__dict__)
+        console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
+
+        from ..escrow_client import make_create_escrow_fn
+        create_escrow = make_create_escrow_fn(
+            private_key=chain.buyer_private_key,
+            rpc_url=chain.rpc_url,
+            chain_name=chain.chain_name,
+            addr_config_path=chain.alkahest_addr_config,
+            token_contract_address=chain.token_contract,
+            token_decimals=chain.token_decimals,
+            expiration_seconds=expiration_seconds,
+        )
+        try:
+            resolved_uid = create_escrow(terms)
+        except Exception as exc:
+            log.event("escrow_create_failed", error=str(exc))
+            log.end("error", error=f"escrow_create: {exc}")
+            typer.secho(
+                f"escrow.create failed on-chain: {exc}",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(4) from exc
+        log.event("escrow_created", escrow_uid=resolved_uid)
+        console.print(f"[green]escrow created[/green]  {resolved_uid}")
+
+    # --- Stage 4: submit settlement -------------------------------
+    try:
+        submit_body = submit_settlement(
+            seller_url=deal.seller_url,
+            escrow_uid=resolved_uid,
+            negotiation_id=deal.negotiation_id,
+            ssh_public_key=chain.ssh_public_key,
+            buyer_address=chain.buyer_address,
+            buyer_private_key=chain.buyer_private_key,
+        )
+    except RuntimeError as exc:
+        log.event("settle_submit_failed", error=str(exc))
+        log.end("error", error=f"settle_submit: {exc}")
+        typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(5) from exc
+    log.event("settle_submitted", body=submit_body)
+    console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
+
+    # --- Stage 5: poll status until terminal ----------------------
+    def _on_poll(attempt: int, body: dict) -> None:
+        log.event("settle_status", attempt=attempt, body=body)
+
+    try:
+        final = wait_for_settlement(
+            seller_url=deal.seller_url,
+            escrow_uid=resolved_uid,
+            buyer_address=chain.buyer_address,
+            buyer_private_key=chain.buyer_private_key,
+            poll_interval=poll_interval,
+            total_timeout=settlement_timeout,
+            on_poll=_on_poll,
+        )
+    except TimeoutError as exc:
+        log.event("settle_terminal", status="timeout", error=str(exc))
+        log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
+        typer.secho(f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW)
+        raise typer.Exit(6) from exc
+
+    log.event("settle_terminal", body=final)
+    log.end(
+        final.get("status") or "unknown",
+        escrow_uid=resolved_uid,
+        attestation_uid=final.get("attestation_uid"),
+    )
+
+    result = Table.grid(padding=(0, 2))
+    result.add_column(style="bold")
+    result.add_column()
+    result.add_row("Status", str(final.get("status")))
+    result.add_row("Escrow UID", resolved_uid)
+    if final.get("attestation_uid"):
+        result.add_row("Attestation UID", str(final["attestation_uid"]))
+    if final.get("connection_details"):
+        result.add_row("Connection", str(final["connection_details"]))
+    if final.get("reason"):
+        result.add_row("Reason", str(final["reason"]))
+    border = "green" if final.get("status") == "ready" else "yellow"
+    console.print(Panel(result, title="Settlement complete", border_style=border))
+
+    if final.get("status") != "ready":
+        raise typer.Exit(7)
+
+    return final
+
+
 def register(app: typer.Typer) -> None:
     """Register the top-level `market settle` command."""
 
@@ -102,157 +285,23 @@ def register(app: typer.Typer) -> None:
         the seller, and polls until terminal. Logs each stage transition
         back into the same run-log so a future `market logs show <id>`
         captures the full deal history.
+
+        Requires the run-log to contain an `agreed` negotiation outcome.
+        For mid-negotiation resume use `market buy --from <id>` instead.
         """
-        console = Console()
-        deal = load_deal_context(run_id)
-        # Run-log enrichments (when `market negotiate` was given the
-        # corresponding flags) become defaults if the operator didn't
-        # pass them on `settle`. Explicit flags still win.
-        effective_token = token_contract or deal.token_contract
-        effective_token_decimals = (
-            token_decimals if token_decimals != 18 else (deal.token_decimals or 18)
-        )
-        chain = resolve_chain_settings(
+        run_settle_from_log(
+            run_id=run_id,
+            escrow_uid=escrow_uid,
+            token_contract=token_contract,
+            token_decimals=token_decimals,
+            duration_hours=duration_hours,
+            expiration_seconds=expiration_seconds,
+            ssh_public_key=ssh_public_key,
             buyer_address=buyer_address,
             buyer_private_key=buyer_private_key,
-            ssh_public_key=ssh_public_key,
             rpc_url=rpc_url,
             chain_name=chain_name,
             alkahest_addr_config=alkahest_addr_config,
-            token_contract=effective_token,
-            token_decimals=effective_token_decimals,
+            poll_interval=poll_interval,
+            settlement_timeout=settlement_timeout,
         )
-
-        log = open_run_log(run_id)
-        log.event("settle_resumed", run_id=run_id)
-
-        # Apply --escrow-uid override or fall back to run-log.
-        resolved_uid = escrow_uid or deal.escrow_uid
-        effective_duration = (
-            duration_hours if duration_hours is not None else deal.duration_hours
-        )
-
-        header = Table.grid(padding=(0, 2))
-        header.add_column(style="bold")
-        header.add_column()
-        header.add_row("Run ID", run_id)
-        header.add_row("Seller", deal.seller_url)
-        header.add_row("Negotiation", deal.negotiation_id)
-        header.add_row("Agreed price", str(deal.agreed_price))
-        header.add_row("Duration (hours)", str(effective_duration))
-        header.add_row("Token", f"{chain.token_contract} (decimals={chain.token_decimals})")
-        if resolved_uid:
-            header.add_row("Escrow UID", resolved_uid + " (skip create)")
-        console.print(Panel(header, title="market settle", border_style="cyan"))
-
-        # --- Stage 3: escrow.create (skip if uid already known) -------
-        if not resolved_uid:
-            seller_wallet = deal.seller_wallet_address
-            if not seller_wallet:
-                try:
-                    seller_wallet = _resolve_seller_wallet(deal.seller_url)
-                except RuntimeError as exc:
-                    log.event("escrow_resolve_wallet_failed", error=str(exc))
-                    log.end("error", error=f"resolve_seller_wallet: {exc}")
-                    typer.secho(
-                        f"Could not resolve seller wallet from "
-                        f"{deal.seller_url}/.well-known/agent-wallet.json: {exc}",
-                        err=True, fg=typer.colors.RED,
-                    )
-                    raise typer.Exit(3)
-
-            terms = AgreedTerms(
-                seller_url=deal.seller_url,
-                seller_wallet_address=seller_wallet,
-                negotiation_id=deal.negotiation_id,
-                listing_id=deal.listing_id,
-                agreed_price=deal.agreed_price,
-                duration_hours=effective_duration,
-            )
-            log.event("escrow_create_start", terms=terms.__dict__)
-            console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
-
-            from ..escrow_client import make_create_escrow_fn
-            create_escrow = make_create_escrow_fn(
-                private_key=chain.buyer_private_key,
-                rpc_url=chain.rpc_url,
-                chain_name=chain.chain_name,
-                addr_config_path=chain.alkahest_addr_config,
-                token_contract_address=chain.token_contract,
-                token_decimals=chain.token_decimals,
-                expiration_seconds=expiration_seconds,
-            )
-            try:
-                resolved_uid = create_escrow(terms)
-            except Exception as exc:
-                log.event("escrow_create_failed", error=str(exc))
-                log.end("error", error=f"escrow_create: {exc}")
-                typer.secho(
-                    f"escrow.create failed on-chain: {exc}",
-                    err=True, fg=typer.colors.RED,
-                )
-                raise typer.Exit(4) from exc
-            log.event("escrow_created", escrow_uid=resolved_uid)
-            console.print(f"[green]escrow created[/green]  {resolved_uid}")
-
-        # --- Stage 4: submit settlement -------------------------------
-        try:
-            submit_body = submit_settlement(
-                seller_url=deal.seller_url,
-                escrow_uid=resolved_uid,
-                negotiation_id=deal.negotiation_id,
-                ssh_public_key=chain.ssh_public_key,
-                buyer_address=chain.buyer_address,
-                buyer_private_key=chain.buyer_private_key,
-            )
-        except RuntimeError as exc:
-            log.event("settle_submit_failed", error=str(exc))
-            log.end("error", error=f"settle_submit: {exc}")
-            typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
-            raise typer.Exit(5) from exc
-        log.event("settle_submitted", body=submit_body)
-        console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
-
-        # --- Stage 5: poll status until terminal ----------------------
-        def _on_poll(attempt: int, body: dict) -> None:
-            log.event("settle_status", attempt=attempt, body=body)
-
-        try:
-            final = wait_for_settlement(
-                seller_url=deal.seller_url,
-                escrow_uid=resolved_uid,
-                buyer_address=chain.buyer_address,
-                buyer_private_key=chain.buyer_private_key,
-                poll_interval=poll_interval,
-                total_timeout=settlement_timeout,
-                on_poll=_on_poll,
-            )
-        except TimeoutError as exc:
-            log.event("settle_terminal", status="timeout", error=str(exc))
-            log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
-            typer.secho(f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW)
-            raise typer.Exit(6) from exc
-
-        log.event("settle_terminal", body=final)
-        log.end(
-            final.get("status") or "unknown",
-            escrow_uid=resolved_uid,
-            attestation_uid=final.get("attestation_uid"),
-        )
-
-        result = Table.grid(padding=(0, 2))
-        result.add_column(style="bold")
-        result.add_column()
-        result.add_row("Status", str(final.get("status")))
-        result.add_row("Escrow UID", resolved_uid)
-        if final.get("attestation_uid"):
-            result.add_row("Attestation UID", str(final["attestation_uid"]))
-        if final.get("connection_details"):
-            result.add_row("Connection", str(final["connection_details"]))
-        if final.get("reason"):
-            result.add_row("Reason", str(final["reason"]))
-        border = "green" if final.get("status") == "ready" else "yellow"
-        console.print(Panel(result, title="Settlement complete", border_style=border))
-
-        if final.get("status") != "ready":
-            raise typer.Exit(7)
