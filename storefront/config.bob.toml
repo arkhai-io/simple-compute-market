@@ -23,11 +23,7 @@ identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 
 [seller]
 agent_id            = "bob"
-# Deterministic CREATE2 vanity contracts allocate id=0 to the first
-# registrant; bob is the only seller in this stack. After
-# `market-storefront register` runs the agent serves its on-chain
-# identity at .well-known/erc-8004-registration.json.
-onchain_agent_id    = "0"
+onchain_agent_id    = "1"
 port                = 8001
 base_url            = "http://sell_agent:8001/"
 db_path             = "./src/market_storefront/data/sell-agent/agent.db"

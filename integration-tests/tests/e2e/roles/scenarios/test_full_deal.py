@@ -270,9 +270,15 @@ class TestStage05_RegistrySeesOrder:
 
 class TestStage06_AdminPauseBlocks:
     def test_06_admin_pause_blocks_negotiations(
-        self, storefront_admin_client, storefront_client, deal_state: DealState
+        self, storefront_admin_client, storefront_client, buyer_config, deal_state: DealState
     ):
-        """POST /admin/pause → /negotiate/new returns 503."""
+        """POST /admin/pause → /negotiate/new returns 503.
+
+        Must use real buyer credentials: the storefront validates the EIP-191
+        signature before checking the global pause flag, so an invalid signature
+        produces 403 rather than 503.  We need the signature to pass so the
+        pause check is reached.
+        """
         require_state(deal_state, "seller_listing_id", "registry_order_confirmed")
 
         storefront_admin_client.admin_pause()
@@ -280,14 +286,14 @@ class TestStage06_AdminPauseBlocks:
         from storefront_client.client import _sign_eip191
         ts = str(int(time.time()))
         sig = _sign_eip191(
-            str(settings.BUYER.PRIVATE_KEY),
+            buyer_config["private_key"],
             f"negotiate_new:{deal_state.seller_listing_id}:{ts}",
         )
         resp = storefront_client._client.post(
             "/negotiate/new",
             json={
                 "listing_id": deal_state.seller_listing_id,
-                "buyer_address": "0x0000000000000000000000000000000000000001",
+                "buyer_address": buyer_config["wallet_address"],
                 "initial_price": BUYER_INITIAL_PRICE,
                 "duration_seconds": DURATION_HOURS * 3600,
             },
