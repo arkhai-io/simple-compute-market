@@ -20,7 +20,7 @@ import sqlite3
 import pytest
 
 from market_storefront.cli_publish import (
-    _open_order_ids,
+    _open_listing_ids,
     _open_order_resource_ids,
     _publish_round,
 )
@@ -46,8 +46,8 @@ def _init_db(path: str) -> None:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE TABLE orders (
-                order_id TEXT PRIMARY KEY,
+            CREATE TABLE listings (
+                listing_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL,
                 offer_resource TEXT,
                 demand_resource TEXT,
@@ -91,7 +91,7 @@ def _insert_order(path: str, order_id: str, status: str, resource_id: str | None
     conn = sqlite3.connect(path)
     try:
         conn.execute(
-            "INSERT INTO orders (order_id, status, offer_resource) VALUES (?, ?, ?)",
+            "INSERT INTO listings (listing_id, status, offer_resource) VALUES (?, ?, ?)",
             (order_id, status, json.dumps(offer)),
         )
         conn.commit()
@@ -215,14 +215,14 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
 
 
 def test_open_order_ids_returns_only_open(tmp_path):
-    """--abort-all's target set is just `status='open'` orders."""
+    """--abort-all's target set is just `status='open'` listings."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_order(db, "o1", "open", "compute-001")
     _insert_order(db, "o2", "closed", "compute-002")
     _insert_order(db, "o3", "open", None)  # no resource_id in offer is fine for abort
     _insert_order(db, "o4", "accepted", "compute-004")
-    assert set(_open_order_ids(db)) == {"o1", "o3"}
+    assert set(_open_listing_ids(db)) == {"o1", "o3"}
 
 
 def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
