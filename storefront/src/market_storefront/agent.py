@@ -190,14 +190,17 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             if not isinstance(offer_data, dict) or not isinstance(demand_data, dict):
                 raise ValueError("ListingCreatedEvent requires 'offer' and 'demand' dictionaries")
 
-            duration_hours = data.get("duration_hours", payload.get("duration_hours", 1))
+            max_duration_seconds = data.get(
+                "max_duration_seconds",
+                payload.get("max_duration_seconds"),
+            )
             order_create_payload = {
                 "event_id": payload.get("event_id") or f"order_create_{uuid.uuid4()}",
                 "event_type": EventType.ORDER_CREATE.value,
                 "source": payload.get("source") or BASE_URL_OVERRIDE,
                 "offer": offer_data,
                 "demand": demand_data,
-                "duration_hours": duration_hours,
+                "max_duration_seconds": max_duration_seconds,
                 "data": data,
             }
             return ListingCreatedEvent.model_validate(order_create_payload)
@@ -802,7 +805,7 @@ async def _run_create_order_flow(request: Request) -> dict:
 
     offer_data = order_data.get("offer")
     demand_data = order_data.get("demand")
-    duration_hours = order_data.get("duration_hours", 1)
+    max_duration_seconds = order_data.get("max_duration_seconds")
 
     if offer_data is None or demand_data is None:
         raise ValueError("Request must include both 'offer' and 'demand'")
@@ -878,11 +881,11 @@ async def _run_create_order_flow(request: Request) -> dict:
         source=BASE_URL_OVERRIDE,
         offer=offer_resource,
         demand=demand_resource,
-        duration_hours=duration_hours,
+        max_duration_seconds=max_duration_seconds,
         data={
             "offer": offer_resource.model_dump(mode="json"),
             "demand": demand_resource.model_dump(mode="json"),
-            "duration_hours": duration_hours,
+            "max_duration_seconds": max_duration_seconds,
             "paused": create_paused,
         },
     )
@@ -1030,7 +1033,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
       {
         "listing_id": "<required>",
         "buyer_address": "0x...  (required; the provider explicitly names the recipient)",
-        "amount":        "<optional decimal; defaults to order.demand_resource.amount * duration_hours>",
+        "amount":        "<optional decimal; defaults to order.demand_resource.amount * (agreed_duration_seconds/3600)>",
         "token":         "<optional symbol; defaults to order.demand_resource.token>"
       }
 

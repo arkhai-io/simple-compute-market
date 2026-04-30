@@ -111,7 +111,7 @@ class TestCreateOrderEndpoint:
         body = {
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
-            "duration_hours": 2.0,
+            "max_duration_seconds": 7200,
         }
         resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
@@ -124,7 +124,7 @@ class TestCreateOrderEndpoint:
         body = {
             "offer": _TOKEN_DEMAND,
             "demand": _COMPUTE_OFFER,
-            "duration_hours": 1.0,
+            "max_duration_seconds": 3600,
         }
         resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200
@@ -172,7 +172,7 @@ class TestCreateOrderViaClient:
         body = {
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
-            "duration_hours": 1.0,
+            "max_duration_seconds": 3600,
         }
         resp = await agent_app_client.post("/listings/create", json=body)
         assert resp.status_code == 200

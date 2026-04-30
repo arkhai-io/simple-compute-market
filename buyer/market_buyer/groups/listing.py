@@ -221,7 +221,11 @@ def listing_show(
     table.add_row("Status", str(found.get("status", "-")))
     table.add_row("Seller", str(found.get("seller", "-")))
     table.add_row("Buyer", str(found.get("buyer", "-")))
-    table.add_row("Duration (h)", str(found.get("duration_hours", "-")))
+    max_secs = found.get("max_duration_seconds")
+    table.add_row(
+        "Max duration (s)",
+        str(max_secs) if max_secs else "unlimited",
+    )
     table.add_row("Created", _short_ts(found.get("created_at")))
     table.add_row("Updated", _short_ts(found.get("updated_at")))
     table.add_row("Offer", _format_resource(found.get("offer_resource", {})))

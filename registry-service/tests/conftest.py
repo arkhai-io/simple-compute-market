@@ -74,7 +74,7 @@ def sample_order(db_session, sample_agent):
         order_maker="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)
@@ -111,7 +111,7 @@ def sample_order_no_owner(db_session, sample_agent_no_owner):
         order_maker="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)

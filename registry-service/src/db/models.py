@@ -108,7 +108,9 @@ class Listing(Base):
     buyer = Column(Text, nullable=True)    # Agent card URL of the buyer (when accepted)
     offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
     demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
-    duration_hours = Column(Integer, nullable=False)
+    # Optional ceiling on lease duration (seconds). NULL = unlimited.
+    # Buyers supply the actual duration at negotiation init.
+    max_duration_seconds = Column(Integer, nullable=True)
     seller_attestation = Column(Text, nullable=True)  # fulfillment attestation UID posted by seller
     buyer_attestation = Column(Text, nullable=True)   # escrow attestation UID locked by buyer
     oracle_address = Column(Text, nullable=True)

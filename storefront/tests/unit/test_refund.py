@@ -46,11 +46,14 @@ def _order(
     duration_hours: int = 3,
     escrow_uid: str | None = "0xescrow-1",
 ) -> dict:
+    # Slice C will replace this with agreed_duration_seconds from the
+    # negotiation thread. For now the kludge: encode hours in the
+    # listing's max_duration_seconds (the refund logic divides by 3600).
     return {
         "listing_id": listing_id,
         "status": status,
         "demand_resource": json.dumps(demand or {"token": _MOCK_TOKEN, "amount": 1_000_000_000_000_000_000}),
-        "duration_hours": duration_hours,
+        "max_duration_seconds": duration_hours * 3600,
         "escrow_uid": escrow_uid,
     }
 

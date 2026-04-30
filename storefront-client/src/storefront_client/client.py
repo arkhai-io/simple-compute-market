@@ -379,11 +379,25 @@ class StorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         demand: dict[str, Any],
-        duration_hours: float = 1.0,
+        max_duration_seconds: int | None = None,
+        paused: bool = False,
     ) -> StorefrontListingCreateResponse:
-        """POST /listings/create"""
+        """POST /listings/create.
+
+        ``max_duration_seconds`` is the optional ceiling on lease duration
+        (None = unlimited). Buyers supply the actual duration at
+        negotiation init time; total payment is computed at agreement
+        as demand.amount × agreed_duration_seconds / 3600. Pass
+        ``paused=True`` to create the listing in local SQLite without
+        publishing to the registry; call ``resume_listing`` to publish.
+        """
         headers = self._auth_headers("create_listing", agent_wallet_address)
-        body = {"offer": offer, "demand": demand, "duration_hours": duration_hours}
+        body = {
+            "offer": offer,
+            "demand": demand,
+            "max_duration_seconds": max_duration_seconds,
+            "paused": paused,
+        }
         return StorefrontListingCreateResponse.from_dict(
             await self._post("/listings/create", body, extra_headers=headers)
         )
@@ -708,16 +722,24 @@ class SyncStorefrontClient(_StorefrontClientBase):
         agent_wallet_address: str,
         offer: dict[str, Any],
         demand: dict[str, Any],
-        duration_hours: float = 1.0,
+        max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
-        """POST /listings/create
+        """POST /listings/create.
 
-        Pass ``paused=True`` to create the order in local SQLite without
-        publishing to the registry.  Call ``resume_listing`` to publish.
+        ``max_duration_seconds`` is the optional ceiling on lease duration
+        (None = unlimited). Buyers supply the actual duration at
+        negotiation init time. Pass ``paused=True`` to create the listing
+        in local SQLite without publishing to the registry; call
+        ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
-        body = {"offer": offer, "demand": demand, "duration_hours": duration_hours, "paused": paused}
+        body = {
+            "offer": offer,
+            "demand": demand,
+            "max_duration_seconds": max_duration_seconds,
+            "paused": paused,
+        }
         return StorefrontListingCreateResponse.from_dict(
             self._post("/listings/create", body, extra_headers=headers)
         )

@@ -156,7 +156,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_publish(agent_url, offer, demand, duration_hours, wallet_address, private_key):
+    def fake_publish(agent_url, offer, demand, max_duration_seconds, wallet_address, private_key):
         calls.append({"offer": offer, "demand": demand})
         rid = offer["resource_id"]
         return {"status": "created", "listing_id": f"listing-for-{rid}"}
@@ -166,11 +166,11 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        duration_hours=1,
         wallet_address="",
         private_key=None,
         default_min_price="100",
         default_token="MOCK",
+        default_max_duration_seconds=None,
         skip_ids={"compute-001"},
     )
 
@@ -202,11 +202,11 @@ def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        duration_hours=1,
         wallet_address="",
         private_key=None,
         default_min_price="100",
         default_token="MOCK",
+        default_max_duration_seconds=None,
         skip_ids=None,
     )
     assert len(published) == 1
@@ -251,11 +251,11 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     published, failed, _ = _publish_round(
         db_path=db,
         base_url="http://agent",
-        duration_hours=1,
         wallet_address="",
         private_key=None,
         default_min_price="100",
         default_token="MOCK",
+        default_max_duration_seconds=None,
     )
 
     by_rid = {c["offer"]["resource_id"]: c["demand"] for c in calls}
@@ -292,11 +292,11 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     published, failed, _ = _publish_round(
         db_path=db,
         base_url="http://agent",
-        duration_hours=1,
         wallet_address="",
         private_key=None,
         default_min_price=None,  # no fallback
         default_token="MOCK",
+        default_max_duration_seconds=None,
     )
 
     assert [c["offer"]["resource_id"] for c in calls] == ["compute-priced"]
@@ -322,10 +322,10 @@ def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
     published, failed, skipped = _publish_round(
         db_path=db,
         base_url="http://agent",
-        duration_hours=1,
         wallet_address="",
         private_key=None,
         default_min_price="100",
         default_token="MOCK",
+        default_max_duration_seconds=None,
     )
     assert not published and not failed and not skipped

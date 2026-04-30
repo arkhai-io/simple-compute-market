@@ -45,10 +45,13 @@ def _thread(
 
 
 def _order(order_id: str = "ord-1", duration_hours: int = 2) -> dict:
+    # Slice C will replace this with agreed_duration_seconds from the
+    # negotiation thread. For now: encode test hours via the listing's
+    # max_duration_seconds (the agreement code reads it / 3600).
     return {
         "order_id": order_id,
         "status": "open",
-        "duration_hours": duration_hours,
+        "max_duration_seconds": duration_hours * 3600,
         "offer_resource": {},
         "demand_resource": {},
     }

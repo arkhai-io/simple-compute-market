@@ -22,6 +22,7 @@ CORE_COLUMNS = {
     "state",
     "min_price",
     "token",
+    "max_duration_seconds",
 }
 
 ATTRIBUTE_PREFIX = "attribute."
@@ -112,10 +113,20 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
     state_raw = _clean_cell(row.get("state"))
     min_price_raw = _clean_cell(row.get("min_price"))
     token_raw = _clean_cell(row.get("token"))
+    max_duration_seconds_raw = _clean_cell(row.get("max_duration_seconds"))
 
     value: int | float | None = None
     if value_raw:
         value = _parse_numeric(value_raw)
+
+    max_duration_seconds: int | None = None
+    if max_duration_seconds_raw:
+        try:
+            max_duration_seconds = int(max_duration_seconds_raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid max_duration_seconds '{max_duration_seconds_raw}' (must be an integer)"
+            ) from exc
 
     attributes: dict[str, Any] = {}
     for key, raw in row.items():
@@ -141,6 +152,7 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "attributes": attributes or None,
         "min_price": min_price_raw or None,
         "token": token_raw or None,
+        "max_duration_seconds": max_duration_seconds,
     }
 
 
@@ -202,6 +214,7 @@ async def upsert_resources_from_csv(
                         attributes=db_resource.get("attributes"),
                         min_price=db_resource.get("min_price"),
                         token=db_resource.get("token"),
+                        max_duration_seconds=db_resource.get("max_duration_seconds"),
                     )
                 else:
                     row_result.warnings.append("Dry-run mode: row validated but not persisted.")

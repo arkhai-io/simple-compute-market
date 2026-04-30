@@ -218,7 +218,7 @@ async def execute_action(
             order = create_order(
                 offer_resource=offer_resource,
                 demand_resource=demand_resource,
-                duration_hours=parameters.get("duration_hours", 1),
+                max_duration_seconds=parameters.get("max_duration_seconds"),
             )
             created_listing_id = order.get("listing_id") if isinstance(order, dict) else None
 
@@ -241,7 +241,7 @@ async def execute_action(
                         offer_resource=order.get("offer_resource"),
                         demand_resource=order.get("demand_resource"),
                         fulfillment_resource=None,
-                        duration_hours=int(order.get("duration_hours", 1)),
+                        max_duration_seconds=order.get("max_duration_seconds"),
                         seller=order.get("seller", BASE_URL_OVERRIDE),
                         buyer=order.get("buyer"),
                         matched_offer_id=parameters.get("matched_offer_id"),
@@ -545,7 +545,7 @@ def create_order(
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
     demand_resource: ComputeResource | TokenResource = None,
-    duration_hours: int = 1,
+    max_duration_seconds: int | None = None,
 ) -> dict | None:
     """Create an order in the market.
 
@@ -558,7 +558,9 @@ def create_order(
         publish_to_registry: Whether to publish order to registry (default: True)
         offer_resource: Offer resource (required)
         demand_resource: Demand resource (required)
-        duration_hours: Duration of the order in hours (default: 1); 1 if seller (rate), else total if buyer
+        max_duration_seconds: Optional ceiling on lease duration in seconds.
+            None = unlimited. Buyer specifies the actual duration at
+            negotiation init time.
 
     Returns:
         The created order as a dictionary if the order was successfully created, or None otherwise.
@@ -572,7 +574,7 @@ def create_order(
     if not demand_resource:
         logger.error("[TOOL] demand_resource is required")
         return None
-    
+
     # The token-offering side is always the oracle/buyer.
     offering_tokens = isinstance(offer_resource, TokenResource) or (
         isinstance(offer_resource, dict) and "token" in offer_resource
@@ -585,7 +587,7 @@ def create_order(
         buyer=None,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
-        duration_hours=duration_hours,
+        max_duration_seconds=max_duration_seconds,
         seller_attestation=None,
         buyer_attestation=None,
         oracle_address=oracle_address,
@@ -718,7 +720,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
                 demand=order_dict.get("demand_resource", {}),
-                duration_hours=float(order_dict.get("duration_hours", 1.0)),
+                max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             await registry_client.publish_listing(
                 agent_id_for_registry, order_request, private_key=CONFIG.agent_priv_key
@@ -730,7 +732,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             agent_url=BASE_URL_OVERRIDE,
             offer=order_dict.get("offer_resource"),
             demand=order_dict.get("demand_resource"),
-            duration_hours=order_dict.get("duration_hours"),
+            max_duration_seconds=order_dict.get("max_duration_seconds"),
         )
         return {"status": "published", "listing_id": order_id}
     except Exception as exc:
@@ -829,7 +831,11 @@ async def fulfill_compute_obligation(
 
     if order_dict:
         order_id = order_dict.get("order_id")
-        duration_hours = order_dict.get("duration_hours", 1)
+        # Slice C will replace this with the buyer-supplied agreed_duration_seconds
+        # from the negotiation thread. For now: derive from listing's
+        # max_duration_seconds with 1h default for backward compat.
+        max_seconds = order_dict.get("max_duration_seconds")
+        duration_hours = int(max_seconds // 3600) if max_seconds else 1
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("region", "gpu_model"):

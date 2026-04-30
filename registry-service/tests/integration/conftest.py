@@ -143,7 +143,7 @@ def open_order(db_session, agent_no_owner):
         seller=agent_no_owner.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
         demand_resource={"token": "USDC", "amount": 100.0},
-        duration_hours=1,
+        max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)
@@ -161,7 +161,7 @@ def authenticated_open_order(db_session, maker_agent):
         seller=maker_agent.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
         demand_resource={"token": "USDC", "amount": 100.0},
-        duration_hours=1,
+        max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)

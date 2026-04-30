@@ -269,7 +269,11 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # Listings table (local source of truth)
+            # Listings table (local source of truth).
+            # Duration is buyer-driven (Slice C): the seller advertises an
+            # OPTIONAL ceiling (max_duration_seconds; NULL = unlimited).
+            # demand.amount is per-hour; total payment at agreement time
+            # is amount × agreed_duration_seconds / 3600.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -280,7 +284,7 @@ class SQLiteClient:
                   offer_resource TEXT NOT NULL,
                   demand_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
-                  duration_hours INTEGER NOT NULL,
+                  max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
                   buyer TEXT,
                   matched_offer_id TEXT,
@@ -298,10 +302,10 @@ class SQLiteClient:
             except sqlite3.OperationalError:
                 pass  # Column already exists
             # Resources table (local source of truth across all resource types).
-            # min_price/token are per-offering: each row carries the price the
-            # operator wants per published listing for that resource. NULLs fall
-            # back to [seller.pricing] defaults at publish time. Duration is
-            # buyer-driven and lives on the published listing, not the resource.
+            # min_price/token/max_duration_seconds are per-offering: each row
+            # carries the price + max-duration ceiling the operator wants per
+            # published listing for that resource. NULLs fall back to
+            # [seller.pricing] defaults at publish time.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS resources (
@@ -315,17 +319,19 @@ class SQLiteClient:
                   attributes TEXT,
                   min_price TEXT,
                   token TEXT,
+                  max_duration_seconds INTEGER,
                   created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
                   updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 )
                 """
             )
-            # Idempotent migration for existing databases that pre-date the
-            # pricing columns. ALTER TABLE ADD COLUMN raises OperationalError
-            # if the column already exists.
+            # Idempotent migration for existing databases that pre-date these
+            # columns. ALTER TABLE ADD COLUMN raises OperationalError if the
+            # column already exists.
             for col_ddl in (
                 "ALTER TABLE resources ADD COLUMN min_price TEXT",
                 "ALTER TABLE resources ADD COLUMN token TEXT",
+                "ALTER TABLE resources ADD COLUMN max_duration_seconds INTEGER",
             ):
                 try:
                     cur.execute(col_ddl)
@@ -559,6 +565,7 @@ class SQLiteClient:
         attributes: dict[str, Any] | None = None,
         min_price: str | None = None,
         token: str | None = None,
+        max_duration_seconds: int | None = None,
     ) -> None:
         """Create or update a generic resource snapshot row."""
         def _save() -> None:
@@ -570,9 +577,9 @@ class SQLiteClient:
                     """
                     INSERT INTO resources(
                       resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                      min_price, token, created_at, updated_at
+                      min_price, token, max_duration_seconds, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(resource_id) DO UPDATE SET
                       resource_type=excluded.resource_type,
                       resource_subtype=excluded.resource_subtype,
@@ -582,6 +589,7 @@ class SQLiteClient:
                       attributes=excluded.attributes,
                       min_price=excluded.min_price,
                       token=excluded.token,
+                      max_duration_seconds=excluded.max_duration_seconds,
                       updated_at=excluded.updated_at
                     """,
                     (
@@ -594,6 +602,7 @@ class SQLiteClient:
                         json.dumps(attributes) if attributes is not None else None,
                         min_price,
                         token,
+                        max_duration_seconds,
                         now_iso,
                         now_iso,
                     ),
@@ -630,7 +639,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, created_at, updated_at
+                           min_price, token, max_duration_seconds, created_at, updated_at
                     FROM resources
                     {where_clause}
                     ORDER BY updated_at DESC
@@ -649,6 +658,7 @@ class SQLiteClient:
                     row_attributes,
                     row_min_price,
                     row_token,
+                    row_max_duration_seconds,
                     row_created_at,
                     row_updated_at,
                 ) in rows:
@@ -671,6 +681,7 @@ class SQLiteClient:
                             "attributes": attrs,
                             "min_price": row_min_price,
                             "token": row_token,
+                            "max_duration_seconds": row_max_duration_seconds,
                             "created_at": row_created_at,
                             "updated_at": row_updated_at,
                         }
@@ -690,7 +701,7 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT resource_id, resource_type, resource_subtype, unit, value, state, attributes,
-                           min_price, token, created_at, updated_at
+                           min_price, token, max_duration_seconds, created_at, updated_at
                     FROM resources
                     WHERE resource_id = ?
                     LIMIT 1
@@ -711,6 +722,7 @@ class SQLiteClient:
                     row_attributes,
                     row_min_price,
                     row_token,
+                    row_max_duration_seconds,
                     row_created_at,
                     row_updated_at,
                 ) = row
@@ -733,6 +745,7 @@ class SQLiteClient:
                     "attributes": attrs,
                     "min_price": row_min_price,
                     "token": row_token,
+                    "max_duration_seconds": row_max_duration_seconds,
                     "created_at": row_created_at,
                     "updated_at": row_updated_at,
                 }
@@ -1060,7 +1073,7 @@ class SQLiteClient:
         offer_resource: Any,
         demand_resource: Any,
         fulfillment_resource: Any | None,
-        duration_hours: int,
+        max_duration_seconds: int | None,
         seller: str,
         buyer: str | None = None,
         matched_offer_id: str | None = None,
@@ -1083,7 +1096,7 @@ class SQLiteClient:
                       offer_resource,
                       demand_resource,
                       fulfillment_resource,
-                      duration_hours,
+                      max_duration_seconds,
                       seller,
                       buyer,
                       matched_offer_id,
@@ -1099,7 +1112,7 @@ class SQLiteClient:
                       offer_resource=excluded.offer_resource,
                       demand_resource=excluded.demand_resource,
                       fulfillment_resource=excluded.fulfillment_resource,
-                      duration_hours=excluded.duration_hours,
+                      max_duration_seconds=excluded.max_duration_seconds,
                       seller=excluded.seller,
                       buyer=excluded.buyer,
                       matched_offer_id=excluded.matched_offer_id,
@@ -1116,7 +1129,7 @@ class SQLiteClient:
                         self._serialize_resource(offer_resource),
                         self._serialize_resource(demand_resource),
                         self._serialize_resource(fulfillment_resource),
-                        duration_hours,
+                        max_duration_seconds,
                         seller,
                         buyer,
                         matched_offer_id,
@@ -1141,7 +1154,7 @@ class SQLiteClient:
         offer_resource: Any | None = None,
         demand_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
-        duration_hours: int | None = None,
+        max_duration_seconds: int | None = None,
         seller: str | None = None,
         buyer: str | None = None,
         matched_offer_id: str | None = None,
@@ -1165,7 +1178,7 @@ class SQLiteClient:
             add("offer_resource", offer_resource, serialize=True)
             add("demand_resource", demand_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
-            add("duration_hours", duration_hours)
+            add("max_duration_seconds", max_duration_seconds)
             add("seller", seller)
             add("buyer", buyer)
             add("matched_offer_id", matched_offer_id)
@@ -1200,7 +1213,7 @@ class SQLiteClient:
                     """
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, seller, buyer,
+                           max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address
                     FROM listings WHERE listing_id = ?
@@ -1213,7 +1226,7 @@ class SQLiteClient:
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "seller", "buyer",
+                    "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address",
                 ]
@@ -2226,7 +2239,7 @@ class SQLiteClient:
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, seller, buyer,
+                           max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
                            COALESCE(paused, 0) AS paused
@@ -2239,7 +2252,7 @@ class SQLiteClient:
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "seller", "buyer",
+                    "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address", "paused",
                 ]

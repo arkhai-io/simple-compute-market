@@ -128,10 +128,10 @@ async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord
     try:
         conn.execute(
             """INSERT INTO listings (listing_id, status, created_at, updated_at,
-                                   offer_resource, demand_resource, duration_hours,
+                                   offer_resource, demand_resource, max_duration_seconds,
                                    seller, buyer, escrow_uid)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
-                       '{}', '{}', 1, 'http://seller:8001', NULL, NULL)""",
+                       '{}', '{}', 3600, 'http://seller:8001', NULL, NULL)""",
             (listing_id,),
         )
         conn.commit()
@@ -273,7 +273,7 @@ async def test_background_task_writes_ready_on_success(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
-            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -298,7 +298,7 @@ async def test_background_task_writes_failed_on_exception(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
-            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
@@ -325,7 +325,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
             listing_id="seller-ord-1",
-            order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
+            order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )

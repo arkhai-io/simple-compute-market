@@ -49,6 +49,8 @@ policy_mode = "rl"
 
 [seller.pricing]
 # Defaults applied to inventory rows that don't carry their own
-# min_price/token. Per-row CSV columns override these.
-default_min_price = "100"
-default_token     = "MOCK"
+# min_price/token/max_duration_seconds. Per-row CSV columns override.
+# default_max_duration_seconds = 0 (or omitted) means "unlimited".
+default_min_price            = "100"
+default_token                = "MOCK"
+default_max_duration_seconds = 0

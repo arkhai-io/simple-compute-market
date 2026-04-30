@@ -120,7 +120,11 @@ def derive_refund_params(
                 400,
                 {"error": "Order demand amount is not an integer; pass explicit 'amount'"},
             )
-        duration = int(order.get("duration_hours") or 1)
+        # Slice C will replace this with agreed_duration_seconds from the
+        # negotiation thread. For now: derive an hours-equivalent from the
+        # listing's max_duration_seconds, defaulting to 1h.
+        max_seconds = order.get("max_duration_seconds")
+        duration = int(max_seconds // 3600) if max_seconds else 1
         amount_raw = base_raw * max(duration, 1)
 
     if amount_raw <= 0:

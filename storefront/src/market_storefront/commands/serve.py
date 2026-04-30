@@ -46,7 +46,6 @@ def _spawn_publish_loop(
     host: str,
     port: int,
     poll_interval: float,
-    duration_hours: int,
 ) -> Optional[threading.Thread]:
     """Spawn the publish watch loop in a daemon thread.
 
@@ -59,6 +58,7 @@ def _spawn_publish_loop(
 
     db_path = CONFIG.agent_db_path
     default_min_price = CONFIG.default_min_price
+    default_max_duration_seconds = CONFIG.default_max_duration_seconds
     base_url = f"http://127.0.0.1:{port}"
     wallet_address = CONFIG.agent_wallet_address or ""
     private_key = CONFIG.agent_priv_key
@@ -72,10 +72,11 @@ def _spawn_publish_loop(
         try:
             run_watch_loop(
                 db_path=db_path, base_url=base_url,
-                duration_hours=duration_hours, wallet_address=wallet_address,
+                wallet_address=wallet_address,
                 private_key=private_key,
                 default_min_price=default_min_price,
                 default_token=CONFIG.default_token,
+                default_max_duration_seconds=default_max_duration_seconds,
                 poll_interval=poll_interval,
                 log_silent_cycles=False,
             )
@@ -93,7 +94,6 @@ def run_serve(
     *,
     no_publish: bool = False,
     poll_interval: float = 30.0,
-    duration_hours: int = 1,
 ) -> None:
     import uvicorn
 
@@ -107,7 +107,6 @@ def run_serve(
             host=host,
             port=resolved_port,
             poll_interval=poll_interval,
-            duration_hours=duration_hours,
         )
     else:
         logger.info("[serve] --no-publish: not starting the publish loop")

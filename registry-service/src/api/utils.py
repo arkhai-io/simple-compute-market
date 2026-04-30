@@ -302,7 +302,7 @@ def order_to_dict(listing: Listing) -> dict:
         "buyer": listing.buyer,
         "offer_resource": listing.offer_resource or {},
         "demand_resource": listing.demand_resource or {},
-        "duration_hours": listing.duration_hours,
+        "max_duration_seconds": listing.max_duration_seconds,
         "seller_attestation": listing.seller_attestation,
         "buyer_attestation": listing.buyer_attestation,
         "oracle_address": listing.oracle_address,

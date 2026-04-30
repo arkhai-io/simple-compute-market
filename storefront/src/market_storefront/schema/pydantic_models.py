@@ -202,7 +202,14 @@ class Listing(BaseModel):
     demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
-    duration_hours: int = Field(description="The duration of the listing in hours")
+    max_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Optional ceiling on lease duration in seconds. None = unlimited. "
+            "demand_resource.amount is per-hour; total payment is computed at "
+            "agreement time as amount * agreed_duration_seconds / 3600."
+        ),
+    )
     seller_attestation: str | None = Field(
         default=None,
         description="The seller's fulfillment attestation UID (None until fulfillment lands).",
@@ -269,7 +276,13 @@ class ListingCreatedEvent(DomainEvent):
     demand: Union[ComputeResource, TokenResource] = Field(
         description="Demanded resource (compute or token)"
     )
-    duration_hours: int = Field(default=1, description="Duration of the order in hours")
+    max_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Optional max lease duration in seconds (None = unlimited). "
+            "Buyer asks for an actual duration at negotiation init."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

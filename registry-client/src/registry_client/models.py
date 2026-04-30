@@ -225,7 +225,7 @@ class ListingRequest:
 
     offer: dict[str, Any]
     demand: dict[str, Any]
-    duration_hours: float
+    max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
 
     def to_dict(self) -> dict:
@@ -233,7 +233,7 @@ class ListingRequest:
             "listing_id": self.listing_id,
             "offer_resource": self.offer,
             "demand_resource": self.demand,
-            "duration_hours": self.duration_hours,
+            "max_duration_seconds": self.max_duration_seconds,
         }
 
 
@@ -250,7 +250,7 @@ class ListingSummary:
     maker_agent_id: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
     demand: dict[str, Any] = field(default_factory=dict)
-    duration_hours: float | None = None
+    max_duration_seconds: int | None = None
     created_at: str | int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -259,11 +259,11 @@ class ListingSummary:
         known = {
             # Listings vocabulary (current registry wire)
             "listing_id", "agent_id", "seller", "buyer",
-            "offer_resource", "demand_resource", "duration_hours",
+            "offer_resource", "demand_resource", "max_duration_seconds",
             "created_at", "updated_at", "status",
             "seller_attestation", "buyer_attestation",
             # camelCase alternatives
-            "id", "makerAgentId", "offer", "demand", "durationHours", "createdAt",
+            "id", "makerAgentId", "offer", "demand", "maxDurationSeconds", "createdAt",
             "maker_agent_id",
         }
         # Registry uses "listing_id" as the primary key; fall back to "id"
@@ -286,7 +286,7 @@ class ListingSummary:
             maker_agent_id=maker,
             offer=offer,
             demand=demand,
-            duration_hours=d.get("duration_hours") or d.get("durationHours"),
+            max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
             created_at=d.get("created_at") or d.get("createdAt"),
             extra={k: v for k, v in d.items() if k not in known},
         )

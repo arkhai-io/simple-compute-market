@@ -147,7 +147,7 @@ def refund_cmd(
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
         help="Refund amount in human token units. Defaults to the listing's "
-             "demanded payment (demand.amount * duration_hours).",
+             "demanded payment (demand.amount * agreed_duration_seconds/3600).",
     ),
     token: Optional[str] = typer.Option(
         None, "--token",

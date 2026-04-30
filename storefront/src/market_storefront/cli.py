@@ -123,16 +123,13 @@ def serve_cmd(
         30.0, "--publish-poll-interval",
         help="Seconds between publish cycles (when auto-publish is enabled).",
     ),
-    duration_hours: int = typer.Option(
-        1, "--publish-duration-hours",
-        help="Lease duration advertised on auto-published listings (hours).",
-    ),
 ) -> None:
     """Run the storefront HTTP server (uvicorn, foreground).
 
     Auto-publishes available compute inventory in a background thread by
-    default. Pass --no-publish to disable. Reads config from
-    `$XDG_CONFIG_HOME/arkhai/config.toml`.
+    default. Pass --no-publish to disable. Listings advertise an optional
+    max_duration_seconds ceiling (per-row CSV / [seller.pricing] default);
+    buyers supply the actual duration at negotiation init.
     """
     from .commands.serve import run_serve
 
@@ -140,7 +137,6 @@ def serve_cmd(
         host=host, port=port,
         no_publish=no_publish,
         poll_interval=poll_interval,
-        duration_hours=duration_hours,
     )
 
 

@@ -135,7 +135,7 @@ def _publish_offer(
     agent_url: str,
     offer: dict,
     demand: dict,
-    duration_hours: int,
+    max_duration_seconds: int | None,
     wallet_address: str,
     private_key: Optional[str],
 ) -> dict:
@@ -151,7 +151,7 @@ def _publish_offer(
                 agent_wallet_address=wallet_address,
                 offer=offer,
                 demand=demand,
-                duration_hours=duration_hours,
+                max_duration_seconds=max_duration_seconds,
             )
         except StorefrontClientError as exc:
             typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
@@ -219,11 +219,11 @@ def _publish_round(
     *,
     db_path: str,
     base_url: str,
-    duration_hours: int,
     wallet_address: str,
     private_key: Optional[str],
     default_min_price: Optional[str],
     default_token: str,
+    default_max_duration_seconds: int | None,
     skip_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
     """Publish one order for every priced & available resource not in `skip_ids`.
@@ -257,6 +257,7 @@ def _publish_round(
                 "no min_price (set per-row in CSV or [seller.pricing].default_min_price)",
             ))
             continue
+        max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in
         # `--watch` mode.
@@ -270,7 +271,7 @@ def _publish_round(
         demand = {"token": token, "amount": min_price}
         try:
             resp = _publish_offer(
-                base_url, offer, demand, duration_hours, wallet_address, private_key,
+                base_url, offer, demand, max_duration_seconds, wallet_address, private_key,
             )
             published.append({
                 "resource": res,
@@ -289,11 +290,11 @@ def run_watch_loop(
     *,
     db_path: str,
     base_url: str,
-    duration_hours: int,
     wallet_address: str,
     private_key: Optional[str],
     default_min_price: Optional[str],
     default_token: str,
+    default_max_duration_seconds: int | None,
     poll_interval: float,
     console: Optional[Console] = None,
     log_silent_cycles: bool = True,
@@ -319,9 +320,9 @@ def run_watch_loop(
                 covered = _open_order_resource_ids(db_path)
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
-                    duration_hours=duration_hours, wallet_address=wallet_address,
-                    private_key=private_key,
+                    wallet_address=wallet_address, private_key=private_key,
                     default_min_price=default_min_price, default_token=default_token,
+                    default_max_duration_seconds=default_max_duration_seconds,
                     skip_ids=covered,
                 )
             except Exception as exc:
@@ -406,10 +407,11 @@ def register(app: typer.Typer) -> None:
             False, "--abort-all",
             help="Close every open sell order on this agent instead of publishing. Useful on shutdown.",
         ),
-        duration_hours: int = typer.Option(
-            1, "--duration-hours", "-t",
-            help="Lease duration offered per published listing (hours). "
-                 "Buyers may negotiate this further; this is the seller's advertised default.",
+        max_duration_seconds: Optional[int] = typer.Option(
+            None, "--max-duration-seconds",
+            help="Override the per-listing max lease ceiling (seconds). "
+                 "Without this, each row uses its CSV column or "
+                 "[seller.pricing].default_max_duration_seconds (NULL = unlimited).",
         ),
         watch: bool = typer.Option(
             False, "--watch", "-w",
@@ -452,6 +454,12 @@ def register(app: typer.Typer) -> None:
 
         default_min_price = CONFIG.default_min_price
         default_token = CONFIG.default_token
+        # CLI override > config default. Per-row CSV columns still beat both.
+        default_max_duration_seconds = (
+            max_duration_seconds
+            if max_duration_seconds is not None
+            else CONFIG.default_max_duration_seconds
+        )
 
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:
@@ -516,9 +524,9 @@ def register(app: typer.Typer) -> None:
         if not watch:
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
-                duration_hours=duration_hours, wallet_address=wallet_address,
-                private_key=private_key,
+                wallet_address=wallet_address, private_key=private_key,
                 default_min_price=default_min_price, default_token=default_token,
+                default_max_duration_seconds=default_max_duration_seconds,
             )
             if not published and not failed:
                 console.print(
@@ -556,14 +564,17 @@ def register(app: typer.Typer) -> None:
             f"{default_min_price or '-'} {default_token}",
         )
         header.add_row("Poll interval", f"{poll_interval:.0f}s")
-        header.add_row("Duration per lease", f"{duration_hours}h")
+        header.add_row(
+            "Default max duration",
+            f"{default_max_duration_seconds}s" if default_max_duration_seconds else "unlimited",
+        )
         console.print(Panel(header, title="market-storefront publish --watch", border_style="blue"))
         console.print("[dim]Ctrl-C to stop.[/dim]\n")
 
         run_watch_loop(
             db_path=db_path, base_url=base_url,
-            duration_hours=duration_hours, wallet_address=wallet_address,
-            private_key=private_key,
+            wallet_address=wallet_address, private_key=private_key,
             default_min_price=default_min_price, default_token=default_token,
+            default_max_duration_seconds=default_max_duration_seconds,
             poll_interval=poll_interval, console=console,
         )

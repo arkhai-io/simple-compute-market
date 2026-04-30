@@ -287,7 +287,7 @@ async def continue_sync_negotiation(
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
             agreed_price=last_seller_price,
-            agreed_duration_hours=int(our_order_dict.get("duration_hours") or 1),
+            agreed_duration_hours=int((our_order_dict.get("max_duration_seconds") or 3600) // 3600),
         )
         stage_event(
             "negotiation", "accepted",
@@ -352,7 +352,7 @@ async def continue_sync_negotiation(
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
             agreed_price=int(decision.price),
-            agreed_duration_hours=int(our_order_dict.get("duration_hours") or 1),
+            agreed_duration_hours=int((our_order_dict.get("max_duration_seconds") or 3600) // 3600),
         )
     stage_event(
         "negotiation", "round_decided",

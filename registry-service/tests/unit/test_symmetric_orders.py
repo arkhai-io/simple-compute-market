@@ -15,7 +15,7 @@ def test_find_symmetric_order(db_session, sample_agent):
         buyer="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order_a)
@@ -27,7 +27,7 @@ def test_find_symmetric_order(db_session, sample_agent):
         seller="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"token": "USDC"},
         demand_resource={"gpu_model": "A100", "region": "us-west"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order_b)
@@ -50,7 +50,7 @@ def test_find_symmetric_order_not_found(db_session, sample_agent):
         buyer="http://localhost:8002/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)
@@ -72,7 +72,7 @@ def test_find_symmetric_order_no_taker(db_session, sample_agent):
         buyer=None,
         offer_resource={"gpu_model": "A100", "region": "us-west"},
         demand_resource={"token": "USDC"},
-        duration_hours=3600,
+        max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     db_session.add(order)

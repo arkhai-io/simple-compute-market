@@ -175,6 +175,9 @@ class Config:
     # or they're skipped at publish time."
     default_min_price: str | None
     default_token: str
+    # Default max-duration ceiling (seconds) advertised on listings whose
+    # CSV row leaves max_duration_seconds blank. None = unlimited.
+    default_max_duration_seconds: int | None
     # Admin API key — protects /admin/* routes and admin-only resource actions.
     # None means unprotected (local dev).  Set via [seller].admin_api_key in
     # config.toml, or injected via the Helm provisioning-secrets profile.
@@ -357,9 +360,12 @@ def load_config() -> Config:
         admin_api_key=_resolve("seller.admin_api_key", None) or None,
 
         # Pricing defaults — applied to resources whose CSV row leaves
-        # min_price / token blank.
+        # min_price / token / max_duration_seconds blank.
         default_min_price=_resolve("seller.pricing.default_min_price", None) or None,
         default_token=str(_resolve("seller.pricing.default_token", "MOCK")),
+        default_max_duration_seconds=_resolve_int(
+            "seller.pricing.default_max_duration_seconds", 0
+        ) or None,
     )
 
 

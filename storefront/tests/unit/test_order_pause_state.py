@@ -32,7 +32,7 @@ async def db(tmp_path) -> SQLiteClient:
         offer_resource={"gpu_model": "H200", "quantity": 1, "sla": 99.9, "region": "California, US"},
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 1000},
         fulfillment_resource=None,
-        duration_hours=1,
+        max_duration_seconds=3600,
         seller="http://seller:8001",
     )
     return client
@@ -69,7 +69,7 @@ class TestOrderPauseHelpers:
             offer_resource={},
             demand_resource={},
             fulfillment_resource=None,
-            duration_hours=1,
+            max_duration_seconds=3600,
             seller="http://seller:8001",
         )
         await db.set_listing_paused(listing_id="order-001", paused=True)

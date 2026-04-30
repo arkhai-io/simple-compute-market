@@ -65,8 +65,7 @@ class TestPublishOrder:
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
                 demand={"token": "USDC", "amount": 100.0},
-                duration_hours=1.0,
-            ),
+                ),
             private_key=MAKER_PRIVATE_KEY,
         )
         assert "listing_id" in result
@@ -77,8 +76,7 @@ class TestPublishOrder:
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
                 demand={"token": "USDC", "amount": 100.0},
-                duration_hours=1.0,
-            ),
+                ),
             private_key=MAKER_PRIVATE_KEY,
         )
         assert "listing_id" in result
@@ -88,7 +86,7 @@ class TestPublishOrder:
             await registry_client.publish_listing(
                 maker_agent.agent_id,
                 ListingRequest(offer={"gpu_model": "A100"}, demand={"token": "USDC"},
-                             duration_hours=1.0),
+                             ),
                 private_key=TAKER_PRIVATE_KEY,
             )
         assert exc_info.value.status_code == 401
@@ -97,7 +95,7 @@ class TestPublishOrder:
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.publish_listing(
                 "nonexistent-agent",
-                ListingRequest(offer={}, demand={}, duration_hours=1.0),
+                ListingRequest(offer={}, demand={}, ),
                 private_key=MAKER_PRIVATE_KEY,
             )
         assert exc_info.value.status_code == 404
@@ -120,7 +118,7 @@ class TestGetAgentOrders:
             seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
             demand_resource={"token": "USDC"},
-            duration_hours=1,
+            max_duration_seconds=3600,
             status=OrderStatusEnum.closed,
         ))
         db_session.commit()
@@ -196,8 +194,7 @@ class TestOrderLifecycle:
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
                 demand={"token": "USDC", "amount": 100.0},
-                duration_hours=1.0,
-            ),
+                ),
             private_key=MAKER_PRIVATE_KEY,
         )
         order_id = pub["listing_id"]

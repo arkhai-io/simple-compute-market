@@ -131,7 +131,7 @@ def test_happy_path_drives_to_ready():
     responses = [
         # 1. registry GET
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL,
-                      "duration_hours": 2}]},
+                      "max_duration_seconds": 7200}]},
         # 2. /negotiate/new — seller accepts immediately
         {"negotiation_id": "neg-1", "action": "accept", "price": 50},
         # 3. GET /.well-known/agent-wallet.json on seller
@@ -202,7 +202,7 @@ def test_first_match_exits_second_agrees():
         {"items": [
             {"listing_id": "seller-1", "seller": "http://seller1:8001"},
             {"listing_id": "seller-2", "seller": "http://seller2:8001",
-             "duration_hours": 1},
+             "max_duration_seconds": 3600},
         ]},
         # /negotiate/new on seller1 — exits
         {"negotiation_id": "neg-1", "action": "exit",

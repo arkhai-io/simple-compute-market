@@ -173,7 +173,11 @@ class NegotiationService:
         )
 
         our_order = await self._db.load_listing(listing_id=listing_id)
-        duration_hours = int((our_order or {}).get("duration_hours") or 1)
+        # Slice C will replace this with agreed_duration_seconds from the
+        # negotiation init. For now: derive hours from the listing's
+        # max_duration_seconds ceiling, defaulting to 1h.
+        max_seconds = (our_order or {}).get("max_duration_seconds")
+        duration_hours = int(max_seconds // 3600) if max_seconds else 1
 
         # Write the acceptance message and terminal state directly via sqlite_client,
         # bypassing NegotiationThreadTransaction which requires the thread-store

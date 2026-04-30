@@ -171,7 +171,7 @@ class TestAdminStatus:
             offer_resource={},
             demand_resource={},
             fulfillment_resource=None,
-            duration_hours=1,
+            max_duration_seconds=3600,
             seller="http://seller:8001",
         )
         result = await c.admin_status()
@@ -188,7 +188,7 @@ class TestAdminStatus:
             offer_resource={},
             demand_resource={},
             fulfillment_resource=None,
-            duration_hours=1,
+            max_duration_seconds=3600,
             seller="http://seller:8001",
         )
         await db.set_listing_paused(listing_id="pause-count", paused=True)

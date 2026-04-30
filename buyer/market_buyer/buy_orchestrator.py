@@ -417,13 +417,18 @@ def run_buy(
             _event("escrow_resolve_wallet_failed", {"seller_url": seller_url, "error": str(exc)})
             continue
 
+        # Slice C will replace this with the buyer-supplied duration from
+        # the negotiation init. For now: derive hours from the listing's
+        # advertised max_duration_seconds ceiling (NULL → 1h default).
+        max_seconds = match.get("max_duration_seconds")
+        derived_hours = int(max_seconds // 3600) if max_seconds else 1
         terms = AgreedTerms(
             seller_url=seller_url,
             seller_wallet_address=seller_wallet,
             negotiation_id=outcome.negotiation_id or "",
             listing_id=listing_id,
             agreed_price=outcome.agreed_price,
-            duration_hours=int(match.get("duration_hours") or 1),
+            duration_hours=derived_hours,
         )
         _event("escrow_create_start", {"terms": terms.__dict__})
         try:

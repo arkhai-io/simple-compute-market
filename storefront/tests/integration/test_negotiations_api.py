@@ -48,7 +48,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         offer_resource={"gpu_model": "H200", "quantity": 1, "sla": 99.9, "region": "California, US"},
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
         fulfillment_resource=None,
-        duration_hours=2,
+        max_duration_seconds=7200,
         seller="http://seller:8001",
     )
 
