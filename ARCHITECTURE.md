@@ -234,6 +234,10 @@ default policies at server startup via
 side imports the same engine at CLI invocation time but does not run a
 server.
 
+**Critical policy wiring detail:** `PolicyStore.__init__` creates an **empty** `self._registry = {}`. The `@policy_callable` decorators populate the module-level `CALLABLE_REGISTRY` dict in `market_policy.registry`. These two are only connected by an explicit call to `policy_store.register_callables(CALLABLE_REGISTRY)`. `PolicyManager.initialize()` does this wiring at startup. Any code that creates a fresh `PolicyStore` instance (controllers, tests, seed endpoints) **must** call `register_callables` before evaluating policies, or `evaluate_policy` will always return `None` despite callables being registered in `CALLABLE_REGISTRY`.
+
+**`domain/` package — not installed, on sys.path:** `domain/compute/agent/app/policy/store.py` contains the actual `@policy_callable` decorated functions the storefront uses. The `domain/` tree is not a pip-installable package — it is copied into the Docker image at `/app/domain/` and requires `/app` to be on `sys.path`. The Dockerfile sets `ENV PYTHONPATH="/app"` to ensure this. The `POST /admin/policy/seed` endpoint also does a defensive `sys.path` check as a fallback. `domain.compute.agent.app.policy.arkhai_common` always fails to import (requires `gymnasium`) — this is expected and non-fatal; the module we actually need is `store.py`, which has no ML dependencies.
+
 **Local state — SQLite:** the storefront maintains a SQLite database
 (`seller.db_path`) containing policy configuration, order history,
 negotiation threads, and the resource portfolio. This is a known area
@@ -302,20 +306,25 @@ The storefront exposes a structured REST API via a `controllers/` package,
 mirroring the provisioning service's controller pattern. All controllers are
 mounted in `server.py` alongside the legacy `a2a_app` routes.
 
-**System controller** (`controllers/system_controller.py`):
+**System controller** (`controllers/system_controller.py`) — HTTP layer only; all logic in `services/system_service.py`:
 ```
-GET /health                   Kubernetes liveness/readiness probe
-GET /api/v1/system/health     Versioned alias
-GET /api/v1/system/status     Diagnostic snapshot: DB health + global pause state
+GET  /health                            Kubernetes liveness/readiness probe
+GET  /api/v1/system/health              Versioned alias
+GET  /api/v1/system/status              Diagnostic snapshot: DB health + global pause state
+POST /admin/policy/seed                 Discover @policy_callable decorators + seed default DB rows (admin key)
+GET  /api/v1/system/policy              Callable registry + seeded policies with components_resolvable flag
+POST /api/v1/system/policy/evaluate     Dry-run a synthetic order_create event through the policy engine (no writes)
 ```
 
 **Listings controller** (`controllers/listings_controller.py`):
 ```
-GET  /api/v1/listings                    List local orders (filter: status, paused, limit, offset)
-GET  /api/v1/listings/{listing_id}         Single order detail (includes paused flag)
-POST /api/v1/listings/{listing_id}/pause   Take order off market — admin key required
-POST /api/v1/listings/{listing_id}/resume  Put order back on market — admin key required
+GET  /api/v1/listings                      List local listings (filter: status, paused, limit, offset)
+GET  /api/v1/listings/{listing_id}         Single listing detail (includes paused flag)
+POST /api/v1/listings/{listing_id}/pause   Take listing off market — admin key required
+POST /api/v1/listings/{listing_id}/resume  Unpause + publish to registry — admin key required
 ```
+
+`resume_listing` calls `publish_order_to_registry(row)` after clearing the paused flag. This is idempotent if the listing was already published, and is the **required step** to push a listing that was created with `paused=True`.
 
 **Negotiations controller** (`controllers/negotiations_controller.py`):
 ```
@@ -354,19 +363,26 @@ the provisioning test controller). See Deployment Topology → Helm section.
 `{"error": "paused", "reason": "global", "hint": "..."}`. In-flight
 negotiations are not interrupted. Toggled via `POST /admin/pause|resume`.
 
-**Per-order pause** (`paused` INTEGER column on the `orders` table, default 0):
-when set for a specific order, `POST /negotiate/new` against that order returns
+**Per-listing pause** (`paused` INTEGER column on the `listings` table, default 0):
+when set for a specific listing, `POST /negotiate/new` against that listing returns
 503 with `{"reason": "order:<listing_id>"}`. Toggled via
-`POST /api/v1/listings/{id}/pause|resume`. Orders can be created already-paused
-by passing `"paused": true` in the `POST /listings/create` body.
+`POST /api/v1/listings/{id}/pause|resume`.
+
+Listings can be **created already-paused** by passing `"paused": true` in the
+`POST /orders/create` body. This threads through the policy pipeline:
+`agent.py` reads the flag from the request body → adds it to `OrderCreateEvent.data["paused"]`
+→ `oc_action_make_offer_from_order_create` in `domain/compute/agent/app/policy/store.py`
+propagates it into `action.parameters["paused"]`
+→ `action_executor.py` MAKE_OFFER handler writes the listing to SQLite with `paused=1`
+and **skips** `publish_order_to_registry`.
+The listing is invisible to buyers until `POST /api/v1/listings/{id}/resume` is called,
+which clears `paused=0` and calls `publish_order_to_registry`. This is the mechanism
+used in the e2e test to assert registry non-visibility (stage 03) before controlled
+publication (stage 04).
 
 Both flags are checked at the top of `start_sync_negotiation()` in
 `sync_negotiation.py`, raising `StorefrontPausedError` which the negotiate
 endpoint converts to HTTP 503.
-
-**Use in e2e tests:** The test pod pauses the storefront via `POST /admin/pause`
-before submitting the buyer order, asserts registry visibility, then uses
-`POST .../force-accept` or `POST /admin/resume` to advance — no polling loops.
 
 #### Negotiation Detail Response Shape
 
@@ -1069,6 +1085,10 @@ make build
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
 
+- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops.
+
+- **`NegotiationThreadStore` singleton in integration tests:** `NegotiationThreadTransaction` (used by `continue_sync_negotiation` → the `/negotiations/{id}/advance` endpoint) calls `get_thread_store()` on enter, which requires a one-time initialization with `sqlite_client` and `identity`. In production this happens in `TraderAgent._startup_tasks`. In integration tests the singleton must be initialized in the fixture: `import market_policy.negotiation_thread as _nt; _nt._thread_store = None; _nt.get_thread_store(sqlite_client=db, identity=Identity(agent_url="http://test-seller:8001"))`. See `test_negotiations_api.py` for the pattern.
+
 ---
 
 ## Storefront — Planned Rework
@@ -1366,40 +1386,47 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 #### Full-Deal E2E Test (`tests/e2e/roles/scenarios/test_full_deal.py`)
 
-The primary e2e test suite. 16 sequential tests, each asserting one observable stage boundary of a complete buyer-seller deal lifecycle. Tests run in numbered order; later tests skip automatically via `require_state(deal_state, "field_name")` if a prerequisite field was not populated (indicating the earlier test failed), so the first failure is always the actionable one.
+The primary e2e test suite. 18 sequential tests covering the complete buyer-seller deal lifecycle. Tests run in numbered order; later tests skip automatically via `require_state(deal_state, "field_name")` if a prerequisite field was not populated, so the first failure is always the actionable one.
 
 **Stage map:**
 
 | Test | Stage | Observable |
 |---|---|---|
-| 01 | Seller creates order | `order_id` returned from `POST /orders/create` |
-| 02 | Registry indexes order | Order visible in `GET /orders?status=open` |
-| 03 | Admin pause blocks | `/negotiate/new` returns 503 |
-| 04 | Admin resume allows | `GET /api/v1/system/status` shows `paused=false` |
-| 05 | Negotiation starts | `negotiation_id` returned from `POST /negotiate/new` |
-| 06 | Negotiation visible | Thread present in `GET /orders/{id}/negotiations` |
-| 07 | Force-accept converges | Admin calls `POST .../force-accept` with agreed price |
-| 08 | Terminal success | `GET .../negotiations/{neg_id}` shows `terminal_state=success` |
-| 09 | Mock escrow created | Deterministic `escrow_uid` captured (no real chain call) |
-| 10 | Settlement submitted | `POST /settle/{uid}` returns `status=provisioning` |
-| 11 | Provisioning job queued | `provisioning_job_id` in settle status; job visible via provisioning API |
-| 12 | Provisioning paused | Job in `running` state (mock gate held at `wait_for_playbook`) |
-| 13 | Gate released | `GET /test/jobs/{id}/wait` resolves to `succeeded` |
-| 14 | Settlement ready | `GET /settle/{uid}/status` shows `status=ready` |
-| 15 | Credentials present | `tenant_credentials` field non-empty in settlement response |
-| 16 | Seller order accepted | `GET /api/v1/orders/{id}` shows `status=accepted` or `closed` |
+| 00a | Policy seed | `POST /admin/policy/seed` — callable_count > 0, order_create policy seeded |
+| 00b | Policy dry-run | `POST /api/v1/system/policy/evaluate` — action=make_offer |
+| 01 | Create paused listing | `POST /orders/create` `{paused:true}` → `listing_id`, local only |
+| 02 | Listing locally visible | `GET /api/v1/listings/{id}` → status=open, paused=True |
+| 03 | Registry absent | `GET registry/orders?status=open` — listing NOT present |
+| 04 | Resume publishes | `POST /api/v1/listings/{id}/resume` → registry_status=published |
+| 05 | Registry present | `GET registry/orders?status=open` — listing NOW present |
+| 06 | Admin pause blocks | `POST /negotiate/new` returns 503 |
+| 07 | Admin resume allows | `GET /api/v1/system/status` → paused=false |
+| 08 | Negotiation starts | `POST /negotiate/new` → negotiation_id (EIP-191 signed by buyer) |
+| 09 | Negotiation visible | `GET /api/v1/listings/{id}/negotiations` lists thread |
+| 10 | Force-accept converges | `POST .../force-accept` → action=accept, price=agreed |
+| 11 | Terminal success | `GET .../negotiations/{neg_id}` → terminal_state=success |
+| 12 | Mock escrow | deterministic `escrow_uid` captured (no real chain call) |
+| 13 | Settlement submitted | `POST /settle/{uid}` → status=provisioning |
+| 14 | Provisioning job | `provisioning_job_id` in settle status; job in provisioning API |
+| 15 | Provisioning completes | `GET /test/jobs/{id}/wait` → succeeded (long-poll) |
+| 16 | Settlement ready | `GET /settle/{uid}/status` → status=ready |
+| 17 | Tenant credentials | `tenant_credentials` non-empty in settlement response |
+| 18 | Seller listing accepted | `GET /api/v1/listings/{id}` → status=accepted or closed |
 
-**`DealState`** — a module-scoped dataclass that accumulates IDs and snapshots across all 16 tests. Each test reads prerequisite fields and writes its own outputs. `require_state(deal_state, "field")` calls `pytest.skip` if the field is None, cleanly propagating first-failure without cascading.
+**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `seller_listing_id`, `negotiation_id`, `agreed_price`, `escrow_uid`, `provisioning_job_id`, `settlement_status`, `tenant_credentials`. Also `_policies_seeded` and `_policy_evaluated` (bool) for the 00a/00b prerequisites.
 
-**Provisioning gate pattern:** Test 09 should add a `pause_before_result=True` mock rule via `ProvisioningTestClient.add_mock_rule` before submitting settlement in test 10. Test 12 then asserts the job is in `running` state (held at the gate). Test 13 calls `resume_rule` and uses `wait_for_job` (long-poll, no sleep) to confirm `succeeded`.
+**`/negotiate/new` signing:** `SyncStorefrontClient` has no `negotiate_new` method. The e2e test calls it via `storefront_client._client.post("/negotiate/new", ...)` with a manually constructed EIP-191 signature using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`.
+
+**Provisioning gate pattern:** Before submitting settlement (stage 13), add a `pause_before_result=True` mock rule via `ProvisioningTestClient.add_mock_rule`. Stage 15 calls `resume_rule` then `wait_for_job` (long-poll, no sleep). Note: the current test skips the gate setup — it's a known gap to wire in stage 12/15 properly.
 
 **Topology requirements:**
-- Storefront running with `admin_api_key` configured; value in `settings.SELLER.ADMIN_API_KEY`
-- Registry service reachable; URL in `settings.REGISTRY.API_URL`
-- Provisioning service running with `ACTIVE_PROFILES=mock`; URL in `settings.PROVISIONING.API_URL`
-- Buyer wallet keys in `settings.BUYER.PRIVATE_KEY` / `settings.BUYER.WALLET_ADDRESS`
+- Storefront with `admin_api_key` set; `settings.SELLER.ADMIN_API_KEY` and `settings.SELLER.PRIVATE_KEY`
+- Registry reachable; `settings.REGISTRY.API_URL`
+- Provisioning with `ACTIVE_PROFILES=mock`; `settings.PROVISIONING.API_URL`
+- Buyer wallet: `settings.BUYER.PRIVATE_KEY`, `settings.BUYER.WALLET_ADDRESS`
+- `settings.SELLER.WALLET_ADDRESS` (for EIP-191 signing of `POST /orders/create`)
 
-**`ProvisioningTestClient`** (`integration-tests/src/provisioning_test_client.py`) — sync HTTP client for the `/test/*` endpoints. Not part of the canonical `SyncProvisioningClient`; test infrastructure only. Wraps: `add_mock_rule`, `list_mock_rules`, `delete_mock_rule`, `resume_rule`, `job_summary`, `wait_for_job` (long-poll), `drain` (long-poll).
+**`ProvisioningTestClient`** (`integration-tests/src/provisioning_test_client.py`) — sync HTTP client for the `/test/*` endpoints. Not part of `SyncProvisioningClient`; test infra only. Methods: `add_mock_rule`, `list_mock_rules`, `delete_mock_rule`, `resume_rule`, `job_summary`, `wait_for_job` (long-poll), `drain` (long-poll).
 
 ### Coverage Contract Between Levels
 
