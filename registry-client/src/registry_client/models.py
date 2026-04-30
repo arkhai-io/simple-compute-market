@@ -382,3 +382,85 @@ class AttestationStats:
                 d.get("buyer_attestation_count", d.get("taker_attestation_count", 0))
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# System diagnostics  (GET /api/v1/system/config|sync|stats)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SystemConfigResponse:
+    """Response from GET /api/v1/system/config."""
+
+    chain_id: int = 0
+    rpc_url: str = ""
+    identity_registry_address: str = ""
+    reputation_registry_address: str = ""
+    validation_registry_address: str = ""
+    enable_health_checks: bool = False
+    heartbeat_ttl_secs: int = 0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SystemConfigResponse":
+        known = {
+            "chain_id", "rpc_url", "identity_registry_address",
+            "reputation_registry_address", "validation_registry_address",
+            "enable_health_checks", "heartbeat_ttl_secs",
+        }
+        return cls(
+            chain_id=int(d.get("chain_id", 0)),
+            rpc_url=d.get("rpc_url", ""),
+            identity_registry_address=d.get("identity_registry_address", ""),
+            reputation_registry_address=d.get("reputation_registry_address", ""),
+            validation_registry_address=d.get("validation_registry_address", ""),
+            enable_health_checks=bool(d.get("enable_health_checks", False)),
+            heartbeat_ttl_secs=int(d.get("heartbeat_ttl_secs", 0)),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class SystemSyncResponse:
+    """Response from GET /api/v1/system/sync."""
+
+    event_sync_running: bool = False
+    event_sync_last_block: int = 0
+    health_check_running: bool = False
+    health_check_enabled: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SystemSyncResponse":
+        es = d.get("event_sync", {})
+        hc = d.get("health_check", {})
+        return cls(
+            event_sync_running=bool(es.get("running", False)),
+            event_sync_last_block=int(es.get("last_synced_block", 0)),
+            health_check_running=bool(hc.get("running", False)),
+            health_check_enabled=bool(hc.get("enabled", False)),
+            extra={k: v for k, v in d.items() if k not in ("event_sync", "health_check")},
+        )
+
+
+@dataclass
+class SystemStatsResponse:
+    """Response from GET /api/v1/system/stats."""
+
+    agent_count: int = 0
+    order_count: int = 0
+    orders_by_status: dict[str, int] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SystemStatsResponse":
+        obs_raw = d.get("orders_by_status", {})
+        obs = {k: int(v) for k, v in obs_raw.items()} if isinstance(obs_raw, dict) else {}
+        known = {"agent_count", "order_count", "orders_by_status"}
+        return cls(
+            agent_count=int(d.get("agent_count", 0)),
+            order_count=int(d.get("order_count", 0)),
+            orders_by_status=obs,
+            extra={k: v for k, v in d.items() if k not in known},
+        )

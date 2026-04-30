@@ -39,6 +39,9 @@ from registry_client.models import (
     ListingListResponse,
     ListingRequest,
     ListingSummary,
+    SystemConfigResponse,
+    SystemSyncResponse,
+    SystemStatsResponse,
     UpdateListingRequest,
 )
 
@@ -180,6 +183,18 @@ class _RegistryClientBase:
     def _parse_attestation_stats(data: dict) -> AttestationStats:
         return AttestationStats.from_dict(data)
 
+    @staticmethod
+    def _parse_system_config(data: dict) -> SystemConfigResponse:
+        return SystemConfigResponse.from_dict(data)
+
+    @staticmethod
+    def _parse_system_sync(data: dict) -> SystemSyncResponse:
+        return SystemSyncResponse.from_dict(data)
+
+    @staticmethod
+    def _parse_system_stats(data: dict) -> SystemStatsResponse:
+        return SystemStatsResponse.from_dict(data)
+
 
 # ---------------------------------------------------------------------------
 # Async client
@@ -261,6 +276,24 @@ class RegistryClient(_RegistryClientBase):
         """GET /api/v1/system/stats/attestations → AttestationStats"""
         return self._parse_attestation_stats(
             await self._request("GET", "/api/v1/system/stats/attestations")
+        )
+
+    async def get_system_config(self) -> SystemConfigResponse:
+        """GET /api/v1/system/config → SystemConfigResponse"""
+        return self._parse_system_config(
+            await self._request("GET", "/api/v1/system/config")
+        )
+
+    async def get_system_sync(self) -> SystemSyncResponse:
+        """GET /api/v1/system/sync → SystemSyncResponse"""
+        return self._parse_system_sync(
+            await self._request("GET", "/api/v1/system/sync")
+        )
+
+    async def get_system_stats(self) -> SystemStatsResponse:
+        """GET /api/v1/system/stats → SystemStatsResponse"""
+        return self._parse_system_stats(
+            await self._request("GET", "/api/v1/system/stats")
         )
 
     # ------------------------------------------------------------------
@@ -456,6 +489,24 @@ class SyncRegistryClient(_RegistryClientBase):
         """GET /api/v1/system/stats/attestations → AttestationStats"""
         return self._parse_attestation_stats(
             self._request("GET", "/api/v1/system/stats/attestations")
+        )
+
+    def get_system_config(self) -> SystemConfigResponse:
+        """GET /api/v1/system/config → SystemConfigResponse"""
+        return self._parse_system_config(
+            self._request("GET", "/api/v1/system/config")
+        )
+
+    def get_system_sync(self) -> SystemSyncResponse:
+        """GET /api/v1/system/sync → SystemSyncResponse"""
+        return self._parse_system_sync(
+            self._request("GET", "/api/v1/system/sync")
+        )
+
+    def get_system_stats(self) -> SystemStatsResponse:
+        """GET /api/v1/system/stats → SystemStatsResponse"""
+        return self._parse_system_stats(
+            self._request("GET", "/api/v1/system/stats")
         )
 
     # ------------------------------------------------------------------

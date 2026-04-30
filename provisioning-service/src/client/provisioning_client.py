@@ -43,6 +43,7 @@ from typing import Any, Optional
 import httpx
 
 from models.host_model import (
+    HostConnectivityResponse,
     HostCreate,
     HostListResponse,
     HostResponse,
@@ -292,6 +293,15 @@ class ProvisioningClient(_ProvisioningClientBase):
         """POST /api/v1/hosts/{name}/disable"""
         return HostResponse(**(await self._post(f"/api/v1/hosts/{name}/disable", {})))
 
+    async def check_connectivity(self, host: str) -> HostConnectivityResponse:
+        """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping.
+
+        Always returns 200 with ``reachable=True/False`` — only raises on
+        404 (host not registered) or unexpected server errors.
+        """
+        data = await self._get(f"/api/v1/hosts/{host}/connectivity")
+        return HostConnectivityResponse.model_validate(data)
+
     async def import_hosts_from_path(self, path: Path, ssh_key_type: str = "path") -> HostListResponse:
         """POST /api/v1/hosts/import — upload an INI file from disk."""
         with open(path, "rb") as f:
@@ -505,6 +515,10 @@ class SyncProvisioningClient(_ProvisioningClientBase):
 
     def disable_host(self, name: str) -> HostResponse:
         return HostResponse(**(self._post(f"/api/v1/hosts/{name}/disable", {})))
+
+    def check_connectivity(self, host: str) -> HostConnectivityResponse:
+        """GET /api/v1/hosts/{host}/connectivity — run ansible -m ping."""
+        return HostConnectivityResponse.model_validate(self._get(f"/api/v1/hosts/{host}/connectivity"))
 
     def import_hosts_from_text(self, ini_text: str, ssh_key_type: str = "path",
                                 filename: str = "hosts") -> HostListResponse:

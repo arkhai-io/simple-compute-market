@@ -73,3 +73,18 @@ class HostListResponse(BaseModel):
     """Response body for ``GET /api/v1/hosts/``."""
 
     hosts: list[HostResponse]
+
+class HostConnectivityResponse(BaseModel):
+    """Response from ``GET /api/v1/hosts/{host}/connectivity``.
+
+    The endpoint always returns 200 — ``reachable`` carries the actual
+    result.  Returns 404 if ``host`` is not registered.
+    """
+
+    host: str = Field(description="Host alias that was tested.")
+    reachable: bool = Field(
+        description="True if Ansible could authenticate and execute on the host."
+    )
+    detail: str = Field(
+        description="Ansible stdout on success, or the error message on failure."
+    )

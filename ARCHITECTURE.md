@@ -1367,6 +1367,16 @@ This section defines the testing conventions for the Arkhai Market Stack. It exi
 
 **Client contract verification:** Integration tests call `ProvisioningClient` methods directly against the in-process app. Route strings, request body shapes, and response parsing are owned by the client — no raw HTTP calls appear in test code. If the API renames a field or changes a route, the client method raises `ProvisioningError` and the test fails immediately.
 
+**The "no raw calls" rule — two legitimate exceptions:**
+
+The rule is absolute for happy-path tests. Two narrow exceptions are permitted:
+
+1. **Rejection-path tests** — testing server-side validation of inputs the typed client deliberately refuses to construct (e.g., asserting a 422 on a malformed body that `CreateVmRequest` Pydantic validation would reject before it ever reaches the HTTP layer). These tests verify the *server's* validation boundary, not the client's. They use `client._client.post(...)` (async) or a raw `httpx` call with the same `ASGITransport`. They must: (a) only assert on status codes, never on response body field names; (b) be clearly commented as rejection-path tests.
+
+2. **Service-internal state setup** — inserting DB rows directly via `db_session.add(...)` to establish precondition state that cannot be expressed through any HTTP API endpoint. This is not an HTTP call at all; it is the standard test-setup pattern documented above.
+
+Any other use of `_request`, `_client.get/post`, or raw `httpx` in an integration test is a gap that requires either adding a method to the canonical client or restructuring the test. The comment `"not yet a client method"` is a deferred debt marker, not a permanent exemption — it must reference a tracking item and be resolved before the gap accumulates.
+
 **State setup convention:** Test precondition state (e.g., a job row that must already exist before the endpoint under test is called) should be created through the HTTP API where feasible. Use direct DB factory functions only for state that is not expressible through any API endpoint — this keeps integration tests honest about the API contract.
 
 **Async test discipline — no sleeps:** Tests that exercise the background job processing loop must never use `asyncio.sleep` or `await asyncio.wait_for(..., timeout=...)` to wait for side effects. These approaches always produce intermittent failures. The correct pattern uses the `on_job_started` seam on `AsyncJobQueue`:
@@ -1501,16 +1511,9 @@ registry-service/tests/
 
 **Client contract enforcement in registry-service integration tests:**
 
-All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and
-exercise the API exclusively through it.  The transport is `httpx.WSGITransport(app=app)` —
-real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or
-changes a response shape, the client's `from_dict` parser will either raise or silently drop
-the field, and the assertion will fail immediately.  The `get_db` dependency is overridden
-per-test to yield the fixture's isolated in-memory SQLite session.
+All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-Routes not yet surfaced on `RegistryClient` (PUT /listings/{id}, POST /agents/register details)
-are exercised via `registry_client._http` — the raw httpx client — which still traverses the
-full stack.  These are marked as candidates for client extension in follow-on work.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above.  All previously-raw calls to `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, and `PUT /listings/{id}` have been replaced with typed client methods in `arkhai-registry-client` 0.2.0.
 
 **integration-tests**:
 ```

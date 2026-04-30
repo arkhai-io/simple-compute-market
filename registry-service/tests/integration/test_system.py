@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import pytest
-import httpx
 
 from registry_client import RegistryClient, RegistryClientError
-from registry_client.models import HealthResponse
+from registry_client.models import HealthResponse, SystemConfigResponse, SystemSyncResponse, SystemStatsResponse
 from tests.integration.conftest import IDENTITY_REGISTRY
 
 
@@ -33,6 +32,7 @@ class TestHealth:
             finally:
                 pass
 
+        import httpx
         app.dependency_overrides[get_db] = _broken_db
         try:
             async with RegistryClient(
@@ -48,63 +48,65 @@ class TestHealth:
 
 class TestSystemConfig:
     async def test_returns_chain_id_and_contract_addresses(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/config")
-        assert isinstance(resp["chain_id"], int)
+        config = await registry_client.get_system_config()
+        assert isinstance(config, SystemConfigResponse)
+        assert isinstance(config.chain_id, int)
         for field in (
             "identity_registry_address",
             "reputation_registry_address",
             "validation_registry_address",
         ):
-            assert resp[field].startswith("0x"), f"{field} not an address: {resp[field]!r}"
+            addr = getattr(config, field)
+            assert addr.startswith("0x"), f"{field} not an address: {addr!r}"
 
     async def test_rpc_url_non_empty(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/config")
-        assert resp.get("rpc_url")
+        config = await registry_client.get_system_config()
+        assert config.rpc_url
 
     async def test_heartbeat_ttl_positive(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/config")
-        assert isinstance(resp["heartbeat_ttl_secs"], int)
-        assert resp["heartbeat_ttl_secs"] > 0
+        config = await registry_client.get_system_config()
+        assert isinstance(config.heartbeat_ttl_secs, int)
+        assert config.heartbeat_ttl_secs > 0
 
 
 class TestSystemSync:
     async def test_event_sync_shape(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/sync")
-        es = resp["event_sync"]
-        assert isinstance(es["running"], bool)
-        assert isinstance(es["last_synced_block"], int)
+        sync = await registry_client.get_system_sync()
+        assert isinstance(sync, SystemSyncResponse)
+        assert isinstance(sync.event_sync_running, bool)
+        assert isinstance(sync.event_sync_last_block, int)
 
     async def test_health_check_shape(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/sync")
-        hc = resp["health_check"]
-        assert isinstance(hc["running"], bool)
-        assert isinstance(hc["enabled"], bool)
+        sync = await registry_client.get_system_sync()
+        assert isinstance(sync.health_check_running, bool)
+        assert isinstance(sync.health_check_enabled, bool)
 
     async def test_event_sync_not_running_outside_lifespan(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/sync")
-        assert resp["event_sync"]["running"] is False
-        assert resp["event_sync"]["last_synced_block"] == 0
+        sync = await registry_client.get_system_sync()
+        assert sync.event_sync_running is False
+        assert sync.event_sync_last_block == 0
 
 
 class TestSystemStats:
     async def test_empty_db_returns_zero_counts(self, registry_client):
-        resp = await registry_client._request("GET", "/api/v1/system/stats")
-        assert resp["agent_count"] == 0
-        assert resp["order_count"] == 0
+        stats = await registry_client.get_system_stats()
+        assert isinstance(stats, SystemStatsResponse)
+        assert stats.agent_count == 0
+        assert stats.order_count == 0
 
     async def test_agent_count_reflects_fixtures(
         self, registry_client, agent_no_owner, maker_agent
     ):
-        resp = await registry_client._request("GET", "/api/v1/system/stats")
-        assert resp["agent_count"] == 2
+        stats = await registry_client.get_system_stats()
+        assert stats.agent_count == 2
 
     async def test_order_counts_by_status(
         self, registry_client, open_order, authenticated_open_order
     ):
-        resp = await registry_client._request("GET", "/api/v1/system/stats")
-        assert resp["order_count"] == 2
-        assert resp["orders_by_status"]["open"] == 2
-        assert resp["orders_by_status"]["closed"] == 0
+        stats = await registry_client.get_system_stats()
+        assert stats.order_count == 2
+        assert stats.orders_by_status.get("open") == 2
+        assert stats.orders_by_status.get("closed", 0) == 0
 
     async def test_closed_order_counted(self, registry_client, db_session, agent_no_owner):
         from src.db.models import Listing, OrderStatusEnum
@@ -118,8 +120,8 @@ class TestSystemStats:
             status=OrderStatusEnum.closed,
         ))
         db_session.commit()
-        resp = await registry_client._request("GET", "/api/v1/system/stats")
-        assert resp["orders_by_status"]["closed"] == 1
+        stats = await registry_client.get_system_stats()
+        assert stats.orders_by_status.get("closed") == 1
 
 
 class TestAttestationStats:
@@ -139,7 +141,6 @@ class TestAttestationStats:
     async def test_order_with_no_attestations_not_counted(
         self, registry_client, open_order
     ):
-        # open_order has neither attestation set
         stats = await registry_client.get_attestation_stats()
         assert stats.settled_listing_count == 0
         assert stats.seller_attestation_count == 0
@@ -161,11 +162,9 @@ class TestAttestationStats:
             buyer_attestation=None,
         ))
         db_session.commit()
-
         stats = await registry_client.get_attestation_stats()
         assert stats.seller_attestation_count == 1
         assert stats.buyer_attestation_count == 0
-        # Not settled — taker_attestation is missing
         assert stats.settled_listing_count == 0
 
     async def test_only_taker_attestation_counted_separately(
@@ -184,11 +183,9 @@ class TestAttestationStats:
             buyer_attestation="0xtaker_uid_xyz",
         ))
         db_session.commit()
-
         stats = await registry_client.get_attestation_stats()
         assert stats.seller_attestation_count == 0
         assert stats.buyer_attestation_count == 1
-        # Not settled — maker_attestation is missing
         assert stats.settled_listing_count == 0
 
     async def test_both_attestations_counted_as_settled(
@@ -207,7 +204,6 @@ class TestAttestationStats:
             buyer_attestation="0xtaker_uid_001",
         ))
         db_session.commit()
-
         stats = await registry_client.get_attestation_stats()
         assert stats.seller_attestation_count == 1
         assert stats.buyer_attestation_count == 1
@@ -216,70 +212,56 @@ class TestAttestationStats:
     async def test_mixed_orders_counted_independently(
         self, registry_client, db_session, agent_no_owner
     ):
-        """Three orders in different attestation states — each counter
-        reflects only its own condition, settled requires both."""
         from src.db.models import Listing, OrderStatusEnum
-
         agent_id = agent_no_owner.agent_id
         maker = agent_no_owner.token_uri
-
         db_session.add_all([
             Listing(
-                listing_id="mix-open",
-                agent_id=agent_id, seller=maker,
+                listing_id="mix-open", agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 max_duration_seconds=3600, status=OrderStatusEnum.open,
                 seller_attestation=None, buyer_attestation=None,
             ),
             Listing(
-                listing_id="mix-maker-only",
-                agent_id=agent_id, seller=maker,
+                listing_id="mix-maker-only", agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 max_duration_seconds=3600, status=OrderStatusEnum.accepted,
                 seller_attestation="0xmaker_mix_001", buyer_attestation=None,
             ),
             Listing(
-                listing_id="mix-settled",
-                agent_id=agent_id, seller=maker,
+                listing_id="mix-settled", agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 max_duration_seconds=3600, status=OrderStatusEnum.closed,
                 seller_attestation="0xmaker_mix_002", buyer_attestation="0xtaker_mix_002",
             ),
         ])
         db_session.commit()
-
         stats = await registry_client.get_attestation_stats()
-        assert stats.seller_attestation_count == 2  # maker-only + settled
-        assert stats.buyer_attestation_count == 1  # settled only
-        assert stats.settled_listing_count == 1       # only the fully settled one
+        assert stats.seller_attestation_count == 2
+        assert stats.buyer_attestation_count == 1
+        assert stats.settled_listing_count == 1
 
     async def test_settled_count_does_not_double_count(
         self, registry_client, db_session, agent_no_owner
     ):
-        """Two fully settled orders → settled_order_count == 2, not 4."""
         from src.db.models import Listing, OrderStatusEnum
-
         agent_id = agent_no_owner.agent_id
         maker = agent_no_owner.token_uri
-
         db_session.add_all([
             Listing(
-                listing_id="double-settled-1",
-                agent_id=agent_id, seller=maker,
+                listing_id="double-settled-1", agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 max_duration_seconds=3600, status=OrderStatusEnum.closed,
                 seller_attestation="0xm1", buyer_attestation="0xt1",
             ),
             Listing(
-                listing_id="double-settled-2",
-                agent_id=agent_id, seller=maker,
+                listing_id="double-settled-2", agent_id=agent_id, seller=maker,
                 offer_resource={"gpu_model": "A100"}, demand_resource={"token": "USDC"},
                 max_duration_seconds=3600, status=OrderStatusEnum.closed,
                 seller_attestation="0xm2", buyer_attestation="0xt2",
             ),
         ])
         db_session.commit()
-
         stats = await registry_client.get_attestation_stats()
         assert stats.seller_attestation_count == 2
         assert stats.buyer_attestation_count == 2

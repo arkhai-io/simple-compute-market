@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from registry_client import RegistryClientError
-from registry_client.models import ListingListResponse, ListingRequest, ListingSummary
+from registry_client.models import ListingListResponse, ListingRequest, ListingSummary, UpdateListingRequest
 from tests.integration.conftest import MAKER_PRIVATE_KEY, TAKER_PRIVATE_KEY
 
 
@@ -206,10 +206,9 @@ class TestOrderLifecycle:
         assert isinstance(order, ListingSummary)
         assert order.status == "open"
 
-        # PUT is not yet a client method; use _request directly
-        put = await registry_client._request(
-            "PUT", f"/listings/{order_id}",
-            json={"status": "accepted", "buyer": agent_b.token_uri},
+        put = await registry_client.update_listing(
+            order_id,
+            UpdateListingRequest(updates={"status": "accepted", "buyer": agent_b.token_uri}),
         )
         assert put["status"] == "accepted"
 

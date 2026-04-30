@@ -192,29 +192,14 @@ class TestConnectivity:
     async def test_connectivity_registered_host(self, client_and_queue):
         client, _ = client_and_queue
         await _register(client)
-        # connectivity is not yet a ProvisioningClient method — use _request via
-        # a raw httpx call through the same transport; this is an acceptable gap
-        # for endpoints not yet modelled on the client.
-        from httpx import ASGITransport, AsyncClient
-        from main import app
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as http:
-            resp = await http.get("/api/v1/hosts/ww1/connectivity")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["host"] == "ww1"
-        assert "reachable" in data
+        result = await client.check_connectivity("ww1")
+        assert result.host == "ww1"
+        assert "reachable" in result.__dict__
 
     async def test_connectivity_uses_db_inventory(self, client_and_queue, fake_ansible):
         client, _ = client_and_queue
         await _register(client)
-        from httpx import ASGITransport, AsyncClient
-        from main import app
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as http:
-            await http.get("/api/v1/hosts/ww1/connectivity")
+        await client.check_connectivity("ww1")
         fake_ansible.write_inventory.assert_called_once()
         called_hosts = fake_ansible.write_inventory.call_args[0][0]
         assert len(called_hosts) == 1
@@ -222,10 +207,7 @@ class TestConnectivity:
 
     async def test_connectivity_unknown_host_raises_404(self, client_and_queue):
         client, _ = client_and_queue
-        from httpx import ASGITransport, AsyncClient
-        from main import app
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as http:
-            resp = await http.get("/api/v1/hosts/ghost/connectivity")
-        assert resp.status_code == 404
+        from client.provisioning_client import ProvisioningError
+        with pytest.raises(ProvisioningError) as exc_info:
+            await client.check_connectivity("ghost")
+        assert exc_info.value.status_code == 404

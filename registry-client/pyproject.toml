@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-registry-client"
-version = "0.1.3"
+version = "0.2.0"
 description = "Async and sync HTTP clients for the Arkhai ERC-8004 registry REST API."
 requires-python = ">=3.12"
 dependencies = [
