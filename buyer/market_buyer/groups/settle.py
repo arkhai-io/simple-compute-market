@@ -36,8 +36,9 @@ def register(app: typer.Typer) -> None:
     @app.command("settle")
     def settle(
         run_id: str = typer.Option(
-            ..., "--run", "-r",
-            help="Buyer run-id from a prior `market negotiate` (see `market logs runs`).",
+            ..., "--from", "--run", "-r",
+            help="Buyer run-id from a prior `market negotiate` to resume "
+                 "from (see `market logs runs`).",
         ),
         escrow_uid: Optional[str] = typer.Option(
             None, "--escrow-uid", "-u",

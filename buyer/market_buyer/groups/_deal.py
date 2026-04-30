@@ -242,3 +242,109 @@ def resolve_chain_settings(
 def open_run_log(run_id: str) -> RunLog:
     """Append-only run log for the run we're recovering."""
     return RunLog.open(run_id)
+
+
+@dataclass
+class NegotiationResumePoint:
+    """What ``market negotiate --from`` needs to resume the round loop.
+
+    Pulled from a prior run-log via :func:`load_negotiation_resume_point`.
+    Fed into :func:`buyer_client.negotiate_with_seller` as the
+    ``resume=`` argument so we skip ``/negotiate/new`` and continue
+    against the seller's existing thread.
+    """
+    seller_url: str
+    listing_id: str
+    negotiation_id: str
+    transcript: list  # list[NegotiationRound] — typed downstream
+    last_seller_price: Optional[int]
+    rounds_completed: int
+    last_status: Optional[str]
+
+
+def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
+    """Reconstruct a partial negotiation from a prior run-log.
+
+    Reads ``negotiation_round`` events to rebuild the transcript and
+    pick the most recent seller counter price. Raises
+    ``typer.BadParameter`` if the log doesn't have enough state to
+    resume (no negotiation_id, no recorded rounds, etc.).
+    """
+    from market_policy.negotiation_strategy import NegotiationRound
+
+    events = read_run(run_id)
+    if not events:
+        raise typer.BadParameter(
+            f"No run-log found for run_id={run_id!r}. "
+            f"Check `market logs runs`."
+        )
+
+    seller_url: Optional[str] = None
+    listing_id: Optional[str] = None
+    negotiation_id: Optional[str] = None
+    transcript: list = []
+    last_seller_price: Optional[int] = None
+    last_status: Optional[str] = None
+    rounds_completed = 0
+
+    for ev in events:
+        et = ev.get("event")
+        if et == "run_started":
+            seller_url = ev.get("seller_url") or seller_url
+            listing_id = ev.get("listing_id") or listing_id
+        elif et == "run_ended":
+            last_status = ev.get("status") or last_status
+            if ev.get("negotiation_id"):
+                negotiation_id = str(ev["negotiation_id"])
+        elif et == "negotiation_round":
+            our = ev.get("our_message") or {}
+            their = ev.get("their_reply") or {}
+            if their.get("negotiation_id"):
+                negotiation_id = str(their["negotiation_id"])
+            round_idx = int(ev.get("round", rounds_completed))
+            rounds_completed = max(rounds_completed, round_idx + 1)
+            our_action = our.get("action") or "initial"
+            our_price_raw = our.get("price") or our.get("initial_price")
+            transcript.append(NegotiationRound(
+                round_number=round_idx,
+                sender="us",
+                action=our_action,
+                price=int(our_price_raw) if our_price_raw is not None else None,
+            ))
+            their_action = their.get("action") or "counter"
+            their_price_raw = their.get("price")
+            transcript.append(NegotiationRound(
+                round_number=round_idx,
+                sender="them",
+                action=their_action,
+                price=int(their_price_raw) if their_price_raw is not None else None,
+            ))
+            if their_action == "counter" and their_price_raw is not None:
+                last_seller_price = int(their_price_raw)
+        elif et == "negotiation_completed":
+            last_status = ev.get("status") or last_status
+            if ev.get("negotiation_id"):
+                negotiation_id = str(ev["negotiation_id"])
+            if ev.get("listing_id"):
+                listing_id = str(ev["listing_id"])
+
+    missing = [n for n, v in (
+        ("seller_url", seller_url),
+        ("listing_id", listing_id),
+        ("negotiation_id", negotiation_id),
+    ) if not v]
+    if missing:
+        raise typer.BadParameter(
+            f"Run-log {run_id!r} is missing fields needed to resume: "
+            f"{', '.join(missing)}. Last status was {last_status!r}."
+        )
+
+    return NegotiationResumePoint(
+        seller_url=seller_url,                # type: ignore[arg-type]
+        listing_id=listing_id,                # type: ignore[arg-type]
+        negotiation_id=negotiation_id,        # type: ignore[arg-type]
+        transcript=transcript,
+        last_seller_price=last_seller_price,
+        rounds_completed=rounds_completed,
+        last_status=last_status,
+    )

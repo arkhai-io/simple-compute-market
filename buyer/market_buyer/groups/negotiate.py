@@ -19,8 +19,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..common import resolve_config_value
-from ..buyer_client import negotiate_with_seller
+from ..buyer_client import ResumeState, negotiate_with_seller
 from ..run_log import RunLog
+from ._deal import load_negotiation_resume_point
 
 
 def register(app: typer.Typer) -> None:
@@ -28,25 +29,36 @@ def register(app: typer.Typer) -> None:
 
     @app.command("negotiate")
     def negotiate(
-        seller_url: str = typer.Option(
-            ..., "--seller", "-s",
-            help="Seller agent base URL (e.g. http://seller:8001).",
+        seller_url: Optional[str] = typer.Option(
+            None, "--seller", "-s",
+            help="Seller agent base URL. Required for fresh runs; "
+                 "resumed runs (--from) read it from the run-log.",
         ),
-        listing_id: str = typer.Option(
-            ..., "--listing-id",
-            help="The seller's listing_id we're negotiating against.",
+        listing_id: Optional[str] = typer.Option(
+            None, "--listing-id",
+            help="The seller's listing_id. Required for fresh runs; "
+                 "resumed runs (--from) read it from the run-log.",
         ),
-        initial_price: int = typer.Option(
-            ..., "--initial-price",
-            help="Opening bid in raw token units.",
+        initial_price: Optional[int] = typer.Option(
+            None, "--initial-price",
+            help="Opening bid in raw token units. Required for fresh runs.",
         ),
-        max_price: int = typer.Option(
-            ..., "--max-price",
-            help="Ceiling — accept any seller counter at or under this.",
+        max_price: Optional[int] = typer.Option(
+            None, "--max-price",
+            help="Ceiling — accept any seller counter at or under this. "
+                 "Required for fresh runs; resumed runs reuse the original.",
         ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
             help="Walk away after this many buyer-initiated counters.",
+        ),
+        from_run: Optional[str] = typer.Option(
+            None, "--from",
+            help="Resume the round loop of a prior `market negotiate` run "
+                 "(by run-id). Skips /negotiate/new; replays the seller's "
+                 "last counter into the strategy and continues. Useful "
+                 "when the buyer crashed mid-round but the seller's "
+                 "thread state is still live.",
         ),
         buyer_address: Optional[str] = typer.Option(
             None, "--buyer-address",
@@ -97,6 +109,40 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
+        resume_state = None
+        if from_run:
+            resume_point = load_negotiation_resume_point(from_run)
+            seller_url = seller_url or resume_point.seller_url
+            listing_id = listing_id or resume_point.listing_id
+            if max_price is None:
+                typer.secho(
+                    "--max-price is required when resuming (the strategy "
+                    "needs the buyer's ceiling).",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            resume_state = ResumeState(
+                negotiation_id=resume_point.negotiation_id,
+                transcript=resume_point.transcript,
+                last_seller_price=resume_point.last_seller_price,
+                rounds_completed=resume_point.rounds_completed,
+            )
+
+        if not seller_url or not listing_id:
+            typer.secho(
+                "Missing required negotiation inputs. For a fresh run pass "
+                "--seller and --listing-id; for a resume pass --from <run-id>.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
+        if resume_state is None and (initial_price is None or max_price is None):
+            typer.secho(
+                "Fresh runs require --initial-price and --max-price.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+
         # Best-effort: fetch the seller's on-chain wallet from the
         # /.well-known/agent-wallet.json endpoint and log it. Failure
         # is non-fatal — the negotiation itself doesn't need this; we
@@ -127,15 +173,19 @@ def register(app: typer.Typer) -> None:
             duration_hours=duration_hours,
             token_contract=token_contract,
             token_decimals=token_decimals,
+            resumed_from=from_run,
         )
 
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
+        if from_run:
+            header.add_row("Resumed from", from_run)
         header.add_row("Seller", seller_url)
         header.add_row("Listing", listing_id)
-        header.add_row("Opening bid", str(initial_price))
+        if initial_price is not None:
+            header.add_row("Opening bid", str(initial_price))
         header.add_row("Ceiling", str(max_price))
         header.add_row("Max rounds", str(max_rounds))
         console.print(Panel(header, title="market negotiate", border_style="cyan"))
@@ -168,10 +218,11 @@ def register(app: typer.Typer) -> None:
                 buyer_address=addr,
                 buyer_private_key=pk,
                 listing_id=listing_id,
-                initial_price=initial_price,
+                initial_price=initial_price or 0,
                 max_price=max_price,
                 max_rounds=max_rounds,
                 on_round=_observe,
+                resume=resume_state,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

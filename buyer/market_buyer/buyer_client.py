@@ -129,6 +129,22 @@ def _post(
         raise RuntimeError(f"POST {url} returned non-JSON: {text[:200]!r}") from exc
 
 
+@dataclass
+class ResumeState:
+    """Inputs for resuming an in-flight negotiation thread.
+
+    Built by ``market negotiate --from <run_id>``: the run-log gives
+    us the server-assigned ``negotiation_id``, the rounds we've
+    observed, and the seller's last-known price. We replay that into
+    the strategy and continue the round loop without going through
+    ``/negotiate/new`` again (the seller has the thread already).
+    """
+    negotiation_id: str
+    transcript: list[NegotiationRound]
+    last_seller_price: int | None
+    rounds_completed: int
+
+
 def negotiate_with_seller(
     *,
     seller_url: str,
@@ -140,6 +156,7 @@ def negotiate_with_seller(
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     strategy: Optional[NegotiationStrategy] = None,
+    resume: Optional[ResumeState] = None,
 ) -> NegotiationOutcome:
     """Run a synchronous negotiation with one seller, round-by-round.
 
@@ -166,54 +183,72 @@ def negotiate_with_seller(
         _maybe_register_rl_strategy()
         strategy = load_strategy()
 
-    # --- Round 0: /negotiate/new ---------------------------------------
-    new_body = {
-        "listing_id": listing_id,
-        "buyer_address": buyer_address,
-        "initial_price": int(initial_price),
-    }
-    sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
-    reply = _post(
-        f"{seller_url}/negotiate/new", new_body,
-        signature=sig, timestamp=ts,
-    )
-    if on_round:
-        on_round(0, new_body, reply)
-
-    neg_id = reply.get("negotiation_id")
-    seller_action = reply.get("action")
-
-    if seller_action == "accept":
-        return NegotiationOutcome(
-            status="agreed",
-            negotiation_id=neg_id,
-            agreed_price=int(reply.get("price", initial_price)),
-            rounds=0,
+    if resume is not None:
+        # Resume mode: skip /negotiate/new and the first counter exchange.
+        # We trust the run-log's recorded transcript and the seller's last
+        # counter price; the strategy decides our next move from there.
+        if resume.last_seller_price is None:
+            raise RuntimeError(
+                "Cannot resume — no seller counter price recorded in run-log."
+            )
+        neg_id = resume.negotiation_id
+        transcript = list(resume.transcript)
+        # Synthesize a `reply` dict shaped like the round-loop expects.
+        reply: dict[str, Any] = {
+            "negotiation_id": neg_id,
+            "action": "counter",
+            "price": int(resume.last_seller_price),
+        }
+        round_idx = max(1, resume.rounds_completed)
+    else:
+        # --- Round 0: /negotiate/new ---------------------------------------
+        new_body = {
+            "listing_id": listing_id,
+            "buyer_address": buyer_address,
+            "initial_price": int(initial_price),
+        }
+        sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
+        reply = _post(
+            f"{seller_url}/negotiate/new", new_body,
+            signature=sig, timestamp=ts,
         )
-    if seller_action in ("exit", "reject"):
-        return NegotiationOutcome(
-            status="exited",
-            negotiation_id=neg_id,
-            reason=reply.get("reason"),
-            rounds=0,
-        )
-    # From here on seller_action should be "counter".
-    if seller_action != "counter":
-        raise RuntimeError(f"Unexpected seller action on /negotiate/new: {seller_action!r}")
-    if not neg_id:
-        raise RuntimeError("/negotiate/new returned counter but no negotiation_id")
+        if on_round:
+            on_round(0, new_body, reply)
 
-    our_counters.append(int(initial_price))
-    transcript.append(NegotiationRound(
-        round_number=0, sender="us", action="initial", price=int(initial_price),
-    ))
-    transcript.append(NegotiationRound(
-        round_number=0, sender="them", action="counter",
-        price=int(reply.get("price")) if reply.get("price") is not None else None,
-    ))
+        neg_id = reply.get("negotiation_id")
+        seller_action = reply.get("action")
+
+        if seller_action == "accept":
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=neg_id,
+                agreed_price=int(reply.get("price", initial_price)),
+                rounds=0,
+            )
+        if seller_action in ("exit", "reject"):
+            return NegotiationOutcome(
+                status="exited",
+                negotiation_id=neg_id,
+                reason=reply.get("reason"),
+                rounds=0,
+            )
+        # From here on seller_action should be "counter".
+        if seller_action != "counter":
+            raise RuntimeError(f"Unexpected seller action on /negotiate/new: {seller_action!r}")
+        if not neg_id:
+            raise RuntimeError("/negotiate/new returned counter but no negotiation_id")
+
+        our_counters.append(int(initial_price))
+        transcript.append(NegotiationRound(
+            round_number=0, sender="us", action="initial", price=int(initial_price),
+        ))
+        transcript.append(NegotiationRound(
+            round_number=0, sender="them", action="counter",
+            price=int(reply.get("price")) if reply.get("price") is not None else None,
+        ))
+        round_idx = 1
 
     # --- Rounds 1..N: /negotiate/{id} ----------------------------------
-    round_idx = 1
     while round_idx <= max_rounds:
         seller_counter_price = reply.get("price")
         if seller_counter_price is None:
