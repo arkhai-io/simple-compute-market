@@ -61,12 +61,12 @@ class NegotiationService:
 
         Raises ``NegotiationServiceError(404)`` if the order is not found.
         """
-        order = await self._db.load_order(listing_id=listing_id)
+        order = await self._db.load_listing(listing_id=listing_id)
         if not order:
             raise NegotiationServiceError(
                 f"Order {listing_id!r} not found", status_code=404
             )
-        return await self._db.list_negotiations_for_order(
+        return await self._db.list_negotiations_for_listing(
             listing_id=listing_id,
             terminal_state=terminal_state,
             buyer_address=buyer_address,
@@ -172,7 +172,7 @@ class NegotiationService:
             listing_id=listing_id, neg_id=neg_id, require_non_terminal=True
         )
 
-        our_order = await self._db.load_order(listing_id=listing_id)
+        our_order = await self._db.load_listing(listing_id=listing_id)
         duration_hours = int((our_order or {}).get("duration_hours") or 1)
 
         # Write the acceptance message and terminal state directly via sqlite_client,

@@ -91,14 +91,14 @@ def _we_are_compute_buyer(order_dict: dict[str, Any]) -> bool:
     - Buyer-as-maker: maker offers tokens (us), we are the maker → we buy compute.
     """
     maker_offers_compute = _resource_is_compute(order_dict.get("offer_resource"))
-    we_are_maker = _agent_urls_match(order_dict.get("order_maker"), BASE_URL_OVERRIDE)
+    we_are_maker = _agent_urls_match(order_dict.get("seller"), BASE_URL_OVERRIDE)
     return (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
 
 
 def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | None:
     """Return the URL of the other party in the order (the one that is not us)."""
-    maker = order_dict.get("order_maker")
-    taker = order_dict.get("order_taker")
+    maker = order_dict.get("seller")
+    taker = order_dict.get("buyer")
     if _agent_urls_match(maker, BASE_URL_OVERRIDE):
         return taker
     return maker
@@ -220,16 +220,16 @@ async def execute_action(
                 demand_resource=demand_resource,
                 duration_hours=parameters.get("duration_hours", 1),
             )
-            created_order_id = order.get("order_id") if isinstance(order, dict) else None
+            created_listing_id = order.get("listing_id") if isinstance(order, dict) else None
 
             # Mirror the order in the local DB for the seller's own
             # bookkeeping (policies read from here, not from the registry).
-            if isinstance(order, dict) and order.get("order_id"):
+            if isinstance(order, dict) and order.get("listing_id"):
                 try:
                     now_iso = datetime.now().isoformat()
                     sqlite_client = get_sqlite_client()
-                    await sqlite_client.upsert_order(
-                        listing_id=order.get("order_id"),
+                    await sqlite_client.upsert_listing(
+                        listing_id=order.get("listing_id"),
                         status="open",
                         created_at=now_iso,
                         updated_at=now_iso,
@@ -237,25 +237,25 @@ async def execute_action(
                         demand_resource=order.get("demand_resource"),
                         fulfillment_resource=None,
                         duration_hours=int(order.get("duration_hours", 1)),
-                        seller=order.get("order_maker", BASE_URL_OVERRIDE),
-                        buyer=order.get("order_taker"),
+                        seller=order.get("seller", BASE_URL_OVERRIDE),
+                        buyer=order.get("buyer"),
                         matched_offer_id=parameters.get("matched_offer_id"),
-                        seller_attestation=order.get("maker_attestation"),
-                        buyer_attestation=order.get("taker_attestation"),
+                        seller_attestation=order.get("seller_attestation"),
+                        buyer_attestation=order.get("buyer_attestation"),
                         oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
                     )
                 except Exception as exc:
-                    logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_order_id, exc)
+                    logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_listing_id, exc)
 
             publish_result = await publish_order_to_registry(order)
             outcome["result"] = publish_result
             outcome["message"] = publish_result.get(
                 "message",
-                f"Order {created_order_id or '?'} ({publish_result.get('status')})",
+                f"Order {created_listing_id or '?'} ({publish_result.get('status')})",
             )
-            if created_order_id:
-                outcome["order_id"] = created_order_id
+            if created_listing_id:
+                outcome["listing_id"] = created_listing_id
 
         case ActionType.CLOSE_ORDER.value:
             result = await close_order(parameters)
@@ -309,13 +309,13 @@ def reject_offer() -> bool:
 async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any]:
     """Close an order locally and in the registry (if enabled)."""
     parameters = parameters or {}
-    order_id = parameters.get("order_id")
+    order_id = parameters.get("listing_id")
     if not isinstance(order_id, str) or not order_id.strip():
-        return {"status": "error", "message": "Missing order_id for close_order"}
+        return {"status": "error", "message": "Missing listing_id for close_listing"}
 
     try:
         sqlite_client = get_sqlite_client()
-        await sqlite_client.update_order(
+        await sqlite_client.update_listing(
             listing_id=order_id,
             status="closed",
         )
@@ -326,7 +326,7 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         return {
             "status": "skipped",
             "message": "Registry discovery is disabled; order not updated in registry",
-            "order_id": order_id,
+            "listing_id": order_id,
         }
 
     try:
@@ -343,20 +343,20 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             return {
                 "status": "closed",
                 "message": f"Order {order_id} marked closed in registry",
-                "order_id": order_id,
+                "listing_id": order_id,
                 "registry_result": result,
             }
         return {
             "status": "error",
             "message": f"Failed to update order {order_id} in registry",
-            "order_id": order_id,
+            "listing_id": order_id,
         }
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to close order %s in registry: %s", order_id, exc)
         return {
             "status": "error",
             "message": f"Registry update failed for order {order_id}: {exc}",
-            "order_id": order_id,
+            "listing_id": order_id,
         }
 
 
@@ -521,7 +521,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
     if isinstance(order.demand_resource, TokenResource):
         return order.demand_resource.amount
 
-    raise ValueError(f"Order has no token resource: {order.order_id}")
+    raise ValueError(f"Order has no token resource: {order.listing_id}")
 
 
 
@@ -564,14 +564,14 @@ def create_order(
     oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
 
     order = Listing(
-        order_id=str(uuid.uuid4()),
-        order_maker=BASE_URL_OVERRIDE,
-        order_taker=None,
+        listing_id=str(uuid.uuid4()),
+        seller=BASE_URL_OVERRIDE,
+        buyer=None,
         offer_resource=offer_resource,
         demand_resource=demand_resource,
         duration_hours=duration_hours,
-        maker_attestation=None,
-        taker_attestation=None,
+        seller_attestation=None,
+        buyer_attestation=None,
         oracle_address=oracle_address,
     )
 
@@ -660,7 +660,7 @@ async def discover(
 
     stage_event(
         "discovery", "matches_found",
-        our_order_id=order_id,
+        our_listing_id=order_id,
         match_count=len(matches),
         matched_order_ids=[m["their_listing_id"] for m in matches],
         counterparty_urls=[m["their_agent_url"] for m in matches],
@@ -681,7 +681,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """
     if isinstance(order, Listing):
         order_dict = order.model_dump(mode="json")
-        order_id = order.order_id
+        order_id = order.listing_id
     else:
         order_dict = order
         order_id = order_dict.get("order_id", "unknown")
@@ -693,7 +693,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         )
 
     if not CONFIG.enable_registry_discovery:
-        return {"status": "disabled", "order_id": order_id}
+        return {"status": "disabled", "listing_id": order_id}
 
     try:
         agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
@@ -716,10 +716,10 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             demand=order_dict.get("demand_resource"),
             duration_hours=order_dict.get("duration_hours"),
         )
-        return {"status": "published", "order_id": order_id}
+        return {"status": "published", "listing_id": order_id}
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
-        return {"status": "error", "order_id": order_id, "message": str(exc)}
+        return {"status": "error", "listing_id": order_id, "message": str(exc)}
 
 
 def encode_compute_lease(
@@ -827,7 +827,7 @@ async def fulfill_compute_obligation(
         if order_id:
             try:
                 sqlite_client = get_sqlite_client()
-                await sqlite_client.update_order(
+                await sqlite_client.update_listing(
                     listing_id=order_id,
                     status="accepted",
                     escrow_uid=escrow_uid,
@@ -988,7 +988,7 @@ async def fulfill_compute_obligation(
     if order_id:
         try:
             sqlite_client = get_sqlite_client()
-            await sqlite_client.update_order(
+            await sqlite_client.update_listing(
                 listing_id=order_id,
                 seller_attestation=maker_attestation,
                 fulfillment_resource=connection_details,

@@ -62,7 +62,7 @@ class ListingsController:
             paused_filter = paused_raw.lower() in ("true", "1", "yes")
         limit, offset = self._parse_pagination(request)
 
-        listings = await self._sqlite_client.list_orders(
+        listings = await self._sqlite_client.list_listings(
             status=status_filter,
             paused=paused_filter,
             limit=limit,
@@ -78,7 +78,7 @@ class ListingsController:
     async def get_listing(self, request: Request) -> JSONResponse:
         """``GET /api/v1/listings/{listing_id}``"""
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(listing_id=listing_id)
+        row = await self._sqlite_client.load_listing(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
@@ -95,13 +95,13 @@ class ListingsController:
         this listing will receive 503 while it is paused.
         """
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(listing_id=listing_id)
+        row = await self._sqlite_client.load_listing(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(listing_id=listing_id, paused=True)
+        await self._sqlite_client.set_listing_paused(listing_id=listing_id, paused=True)
         return JSONResponse({
             "listing_id": listing_id,
             "paused": True,
@@ -111,13 +111,13 @@ class ListingsController:
     async def resume_listing(self, request: Request) -> JSONResponse:
         """``POST /api/v1/listings/{listing_id}/resume``"""
         listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_order(listing_id=listing_id)
+        row = await self._sqlite_client.load_listing(listing_id=listing_id)
         if not row:
             return JSONResponse(
                 {"error": "Not found", "listing_id": listing_id},
                 status_code=404,
             )
-        await self._sqlite_client.set_order_paused(listing_id=listing_id, paused=False)
+        await self._sqlite_client.set_listing_paused(listing_id=listing_id, paused=False)
         return JSONResponse({
             "listing_id": listing_id,
             "paused": False,

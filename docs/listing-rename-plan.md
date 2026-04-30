@@ -122,6 +122,29 @@ negotiations_controller). `action_executor.discover()` now returns
 `their_listing_id` keys. Tests green: storefront 290 unit + integration,
 registry 84, buyer 17, policy 21.
 
+**Slice 6 — Internal identifier cleanup** ✅ committed
+Pydantic `Listing` model fields renamed: `order_id`/`order_maker`/
+`order_taker`/`maker_attestation`/`taker_attestation` →
+`listing_id`/`seller`/`buyer`/`seller_attestation`/`buyer_attestation`.
+`ListingClosedEvent.order_id` → `listing_id`.
+`FulfillmentFailedEvent.seller_order_id` → `listing_id`.
+`stage_events.order_id` → `listing_id` column.
+sqlite_client method names: `upsert_order`/`update_order`/`load_order`/
+`is_order_paused`/`set_order_paused`/`list_orders` → ...listing(s);
+`list_negotiations_for_order` → `list_negotiations_for_listing`;
+`get_active_negotiations_for_order` → `..._for_listing`;
+`cancel_negotiations_for_order` → `..._for_listing`;
+`get_order_id_by_escrow_uid` → `get_listing_id_by_escrow_uid`.
+agent.py wire shims (`_wire_in`/`_wire_out`) deleted; `_extract_order_id`
+→ `_extract_listing_id`. refund.py / recovery.py read `listing_id`
+from payload directly. Local Python identifiers (order_id, params,
+match dicts) renamed in agent.py / action_executor / settlement_jobs.
+Obsolete code deleted: `find_symmetric_open_order`,
+`update_order_by_escrow_uid`, `load_orders_by_escrow_uid`,
+`get_active_negotiations_for_agent`, `cancel_negotiations_for_agent`
+(0 callers). Tests green: storefront 290 + integration, registry 84,
+buyer 17, policy 21.
+
 **Slice 5 — Docs + helm** ✅ committed
 Doc-level vocabulary swap. ARCHITECTURE.md routes/columns/JSON keys
 flipped (`/api/v1/orders` → `/api/v1/listings`,

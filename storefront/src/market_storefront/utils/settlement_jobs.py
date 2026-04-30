@@ -60,11 +60,11 @@ async def start_settlement_job(
     if thread.get("agreed_price") is None:
         raise ValueError(f"Negotiation {negotiation_id} has no agreed_price committed")
 
-    our_order_id = thread.get("our_listing_id")
-    our_order_dict = await sqlite_client.load_order(listing_id=our_order_id) if our_order_id else None
+    our_listing_id = thread.get("our_listing_id")
+    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id) if our_listing_id else None
     if not our_order_dict:
         raise ValueError(
-            f"Seller's order {our_order_id!r} (from negotiation {negotiation_id}) "
+            f"Seller's order {our_listing_id!r} (from negotiation {negotiation_id}) "
             "is gone from the local DB"
         )
 
@@ -86,22 +86,22 @@ async def start_settlement_job(
     # (claim/reclaim/refund) and `market logs status` can tie fulfillment
     # back to this deal. Idempotent update_order call.
     try:
-        await sqlite_client.update_order(
-            order_id=our_order_id,
+        await sqlite_client.update_listing(
+            listing_id=our_listing_id,
             status="accepted",
             escrow_uid=escrow_uid,
         )
     except Exception as exc:
         logger.warning(
             "[SETTLE_JOB] Could not attach escrow_uid to order %s: %s",
-            our_order_id, exc,
+            our_listing_id, exc,
         )
 
     asyncio.create_task(
         _run_settlement_job_bg(
             escrow_uid=escrow_uid,
             ssh_public_key=ssh_public_key,
-            seller_order_id=our_order_id,
+            listing_id=our_listing_id,
             order_dict=our_order_dict,
             sqlite_client=sqlite_client,
             alkahest_client=alkahest_client,
@@ -119,7 +119,7 @@ async def _run_settlement_job_bg(
     *,
     escrow_uid: str,
     ssh_public_key: str,
-    seller_order_id: str,
+    listing_id: str,
     order_dict: dict[str, Any],
     sqlite_client: Any,
     alkahest_client: Any,
@@ -137,7 +137,7 @@ async def _run_settlement_job_bg(
             ssh_public_key=ssh_public_key,
             oracle_address=CONFIG.agent_wallet_address,
             order=order_dict,
-            seller_order_id=seller_order_id,
+            listing_id=listing_id,
         )
     except Exception as exc:
         logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)
@@ -153,7 +153,7 @@ async def _run_settlement_job_bg(
         await sqlite_client.update_settlement_job(
             escrow_uid=escrow_uid,
             status="ready",
-            attestation_uid=result.get("fulfillment_uid") or result.get("maker_attestation"),
+            attestation_uid=result.get("fulfillment_uid") or result.get("seller_attestation"),
             connection_details=result.get("connection_details"),
             tenant_credentials=json.dumps(result.get("tenant_credentials"))
                 if result.get("tenant_credentials") is not None else None,

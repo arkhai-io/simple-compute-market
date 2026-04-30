@@ -125,45 +125,15 @@ MAX_OUTCOME_JSON_CHARS = 100_000
 MAX_PAST_EXPERIENCES = 5
 
 
-def _extract_order_id(outcome: dict | None) -> str | None:
+def _extract_listing_id(outcome: dict | None) -> str | None:
     if not isinstance(outcome, dict):
         return None
-    if outcome.get("order_id"):
-        return outcome["order_id"]
+    if outcome.get("listing_id"):
+        return outcome["listing_id"]
     result = outcome.get("result")
     if isinstance(result, dict):
-        return result.get("order_id") or (result.get("order") or {}).get("order_id")
+        return result.get("listing_id") or (result.get("listing") or {}).get("listing_id")
     return None
-
-
-def _wire_in(payload: Any) -> Any:
-    """Translate inbound wire body: ``listing_id`` → ``order_id``.
-
-    The HTTP contract uses ``listing_id``; internal helpers (refund,
-    recovery, DB) still key on ``order_id`` until the DB-column rename
-    in a later slice. This single shim performs the rename at the
-    wire boundary.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    if "listing_id" in payload and "order_id" not in payload:
-        payload = dict(payload)
-        payload["order_id"] = payload["listing_id"]
-    return payload
-
-
-def _wire_out(body: dict) -> dict:
-    """Translate outbound wire body: ``order_id`` → ``listing_id``.
-
-    Mirror of ``_wire_in`` — the internal helpers return dicts keyed
-    by ``order_id``, but the HTTP contract surfaces ``listing_id``.
-    """
-    if not isinstance(body, dict):
-        return body
-    if "order_id" in body and "listing_id" not in body:
-        body = dict(body)
-        body["listing_id"] = body.pop("order_id")
-    return body
 
 
 def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
@@ -233,14 +203,14 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
             return ListingCreatedEvent.model_validate(order_create_payload)
 
         elif event_type == EventType.ORDER_CLOSE:
-            order_id = data.get("order_id", payload.get("order_id"))
-            if not isinstance(order_id, str) or not order_id.strip():
-                raise ValueError("ListingClosedEvent requires 'order_id'")
+            listing_id = data.get("listing_id", payload.get("listing_id"))
+            if not isinstance(listing_id, str) or not listing_id.strip():
+                raise ValueError("ListingClosedEvent requires 'listing_id'")
             order_close_payload = {
                 "event_id": payload.get("event_id") or f"order_close_{uuid.uuid4()}",
                 "event_type": EventType.ORDER_CLOSE.value,
                 "source": payload.get("source") or BASE_URL_OVERRIDE,
-                "order_id": order_id,
+                "listing_id": listing_id,
                 "data": data,
             }
             return ListingClosedEvent.model_validate(order_close_payload)
@@ -266,7 +236,7 @@ def _parse_domain_event(payload: Dict[str, Any]) -> DomainEvent:
                 source=payload.get("source", "unknown"),
                 escrow_uid=data.get("escrow_uid", ""),
                 reason=data.get("reason"),
-                seller_order_id=data.get("seller_order_id"),
+                listing_id=data.get("listing_id"),
                 negotiation_id=data.get("negotiation_id"),
                 data=data,
             )
@@ -925,16 +895,16 @@ async def _run_create_order_flow(request: Request) -> dict:
     )
 
     outcome = root_agent._last_action_outcomes.pop(event_id, None)
-    order_id = _extract_order_id(outcome)
+    listing_id = _extract_listing_id(outcome)
 
     response_payload = {
-        "status": "created" if order_id else "no_action",
+        "status": "created" if listing_id else "no_action",
         "event_id": event_id,
         "listing_request": order_create_event.model_dump(mode="json"),
         "root_agent_response": final_response or "",
     }
-    if order_id:
-        response_payload["listing_id"] = order_id
+    if listing_id:
+        response_payload["listing_id"] = listing_id
     return response_payload
 
 async def _run_close_order_flow(request: Request) -> dict:
@@ -951,16 +921,16 @@ async def _run_close_order_flow(request: Request) -> dict:
     except Exception as e:
         raise ValueError(f"Invalid JSON in request body: {e}") from e
 
-    order_id = close_data.get("listing_id")
-    if not isinstance(order_id, str) or not order_id.strip():
+    listing_id = close_data.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id.strip():
         raise ValueError("Request must include non-empty 'listing_id'")
 
     event_id = f"order_close_{uuid.uuid4()}"
     order_close_event = ListingClosedEvent(
         event_id=event_id,
         source=BASE_URL_OVERRIDE,
-        order_id=order_id,
-        data={"order_id": order_id},
+        listing_id=listing_id,
+        data={"listing_id": listing_id},
     )
 
     if is_event_queue_enabled():
@@ -1018,10 +988,10 @@ async def close_market_order_endpoint(request: Request) -> JSONResponse:
     """
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "close_listing", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "close_listing", listing_id)
     if auth_error:
         return auth_error
 
@@ -1053,7 +1023,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
 
     Body:
       {
-        "order_id":      "<required>",
+        "listing_id": "<required>",
         "buyer_address": "0x...  (required; the provider explicitly names the recipient)",
         "amount":        "<optional decimal; defaults to order.demand_resource.amount * duration_hours>",
         "token":         "<optional symbol; defaults to order.demand_resource.token>"
@@ -1067,7 +1037,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
     Returns (status_code, body_dict).
     """
     try:
-        payload = _wire_in(await request.json())
+        payload = await request.json()
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1076,10 +1046,10 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
     if not CHAIN_RPC_URL or not CHAIN_RPC_URL.strip():
         return 500, {"error": "CHAIN_RPC_URL not configured on agent"}
 
-    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    listing_id_peek = payload.get("listing_id") if isinstance(payload, dict) else None
     order = None
-    if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
+    if isinstance(listing_id_peek, str) and listing_id_peek.strip():
+        order = await root_agent._sqlite_client.load_listing(listing_id=listing_id_peek.strip())
 
     def _resolve_token(ident: str) -> dict:
         try:
@@ -1105,12 +1075,12 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
             amount_raw=params["amount_raw"],
         )
     except RuntimeError as exc:
-        logger.error("[REFUND] Transfer failed for order %s: %s", params["order_id"], exc)
+        logger.error("[REFUND] Transfer failed for order %s: %s", params["listing_id"], exc)
         return 502, {"error": "Token transfer failed", "detail": str(exc)}
 
     updated_at = datetime.now().isoformat()
-    await root_agent._sqlite_client.update_order(
-        order_id=params["order_id"],
+    await root_agent._sqlite_client.update_listing(
+        listing_id=params["listing_id"],
         status="refunded",
         updated_at=updated_at,
     )
@@ -1119,7 +1089,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
     stage_event(
         "post_settlement",
         "refund_transferred",
-        order_id=params["order_id"],
+        listing_id=params["listing_id"],
         escrow_uid=params.get("escrow_uid"),
         tx_hash=result["tx_hash"],
         token_symbol=params["token_meta"].get("symbol"),
@@ -1130,7 +1100,7 @@ async def _run_refund_flow(request: Request) -> tuple[int, dict]:
 
     return 200, {
         "status": "refunded",
-        "order_id": params["order_id"],
+        "listing_id": params["listing_id"],
         "tx_hash": result["tx_hash"],
         "from_address": result["from_address"],
         "to_address": result["to_address"],
@@ -1148,16 +1118,16 @@ async def refund_market_order_endpoint(request: Request) -> JSONResponse:
     """Expose an endpoint for providers to refund a deal via direct token transfer."""
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "refund_listing", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "refund_listing", listing_id)
     if auth_error:
         return auth_error
 
     try:
         status_code, body_out = await _run_refund_flow(request)
-        return JSONResponse(_wire_out(body_out), status_code=status_code)
+        return JSONResponse(body_out, status_code=status_code)
     except ValueError as exc:
         logger.error(f"[REFUND] Validation error: {exc}")
         return JSONResponse(
@@ -1190,7 +1160,7 @@ def _require_alkahest_client() -> tuple[int, dict] | None:
 async def _run_claim_flow(request: Request) -> tuple[int, dict]:
     """Seller collects an escrow on-chain after fulfillment."""
     try:
-        payload = _wire_in(await request.json())
+        payload = await request.json()
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1198,10 +1168,10 @@ async def _run_claim_flow(request: Request) -> tuple[int, dict]:
     if cfg_err:
         return cfg_err
 
-    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    listing_id_peek = payload.get("listing_id") if isinstance(payload, dict) else None
     order = None
-    if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
+    if isinstance(listing_id_peek, str) and listing_id_peek.strip():
+        order = await root_agent._sqlite_client.load_listing(listing_id=listing_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_claim_params
     outcome = derive_claim_params(order=order, payload=payload)
@@ -1216,16 +1186,16 @@ async def _run_claim_flow(request: Request) -> tuple[int, dict]:
             params["fulfillment_uid"],
         )
     except Exception as exc:
-        logger.error("[CLAIM] collect failed for order %s: %s", params["order_id"], exc)
+        logger.error("[CLAIM] collect failed for order %s: %s", params["listing_id"], exc)
         return 502, {
             "error": "Escrow collect failed on-chain",
             "detail": str(exc),
-            "order_id": params["order_id"],
+            "listing_id": params["listing_id"],
             "escrow_uid": params["escrow_uid"],
         }
 
-    await root_agent._sqlite_client.update_order(
-        order_id=params["order_id"],
+    await root_agent._sqlite_client.update_listing(
+        listing_id=params["listing_id"],
         status="closed",
         updated_at=datetime.now().isoformat(),
     )
@@ -1233,7 +1203,7 @@ async def _run_claim_flow(request: Request) -> tuple[int, dict]:
     stage_event(
         "post_settlement",
         "escrow_claimed",
-        order_id=params["order_id"],
+        listing_id=params["listing_id"],
         escrow_uid=params["escrow_uid"],
         fulfillment_uid=params["fulfillment_uid"],
         collect_result=str(collect_result),
@@ -1241,7 +1211,7 @@ async def _run_claim_flow(request: Request) -> tuple[int, dict]:
 
     return 200, {
         "status": "claimed",
-        "order_id": params["order_id"],
+        "listing_id": params["listing_id"],
         "escrow_uid": params["escrow_uid"],
         "fulfillment_uid": params["fulfillment_uid"],
         "collect_result": str(collect_result),
@@ -1252,16 +1222,16 @@ async def claim_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/claim — seller-side escrow collect."""
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "claim_listing", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "claim_listing", listing_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_claim_flow(request)
-        return JSONResponse(_wire_out(body_out), status_code=status)
+        return JSONResponse(body_out, status_code=status)
     except ValueError as exc:
         logger.error(f"[CLAIM] Validation error: {exc}")
         return JSONResponse(
@@ -1279,7 +1249,7 @@ async def claim_market_order_endpoint(request: Request) -> JSONResponse:
 async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
     """Buyer reclaims an expired escrow on-chain."""
     try:
-        payload = _wire_in(await request.json())
+        payload = await request.json()
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1287,10 +1257,10 @@ async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
     if cfg_err:
         return cfg_err
 
-    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    listing_id_peek = payload.get("listing_id") if isinstance(payload, dict) else None
     order = None
-    if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
+    if isinstance(listing_id_peek, str) and listing_id_peek.strip():
+        order = await root_agent._sqlite_client.load_listing(listing_id=listing_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_reclaim_params
     outcome = derive_reclaim_params(order=order, payload=payload)
@@ -1304,18 +1274,18 @@ async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
             params["escrow_uid"],
         )
     except Exception as exc:
-        logger.error("[RECLAIM] reclaim_expired failed for order %s: %s", params["order_id"], exc)
+        logger.error("[RECLAIM] reclaim_expired failed for order %s: %s", params["listing_id"], exc)
         # Most common cause: expiration hasn't passed yet. Surface the
         # on-chain error verbatim; the CLI displays it to the operator.
         return 502, {
             "error": "Escrow reclaim failed on-chain",
             "detail": str(exc),
-            "order_id": params["order_id"],
+            "listing_id": params["listing_id"],
             "escrow_uid": params["escrow_uid"],
         }
 
-    await root_agent._sqlite_client.update_order(
-        order_id=params["order_id"],
+    await root_agent._sqlite_client.update_listing(
+        listing_id=params["listing_id"],
         status="reclaimed",
         updated_at=datetime.now().isoformat(),
     )
@@ -1323,14 +1293,14 @@ async def _run_reclaim_flow(request: Request) -> tuple[int, dict]:
     stage_event(
         "post_settlement",
         "escrow_reclaimed",
-        order_id=params["order_id"],
+        listing_id=params["listing_id"],
         escrow_uid=params["escrow_uid"],
         reclaim_result=str(reclaim_result),
     )
 
     return 200, {
         "status": "reclaimed",
-        "order_id": params["order_id"],
+        "listing_id": params["listing_id"],
         "escrow_uid": params["escrow_uid"],
         "reclaim_result": str(reclaim_result),
     }
@@ -1340,16 +1310,16 @@ async def reclaim_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/reclaim — buyer-side reclaim of an expired escrow."""
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "reclaim_listing", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "reclaim_listing", listing_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_reclaim_flow(request)
-        return JSONResponse(_wire_out(body_out), status_code=status)
+        return JSONResponse(body_out, status_code=status)
     except ValueError as exc:
         logger.error(f"[RECLAIM] Validation error: {exc}")
         return JSONResponse(
@@ -1373,7 +1343,7 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
     for debugging and for the day we reintroduce oracle-gated arbiters.
     """
     try:
-        payload = _wire_in(await request.json())
+        payload = await request.json()
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
@@ -1381,10 +1351,10 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
     if cfg_err:
         return cfg_err
 
-    order_id_peek = payload.get("order_id") if isinstance(payload, dict) else None
+    listing_id_peek = payload.get("listing_id") if isinstance(payload, dict) else None
     order = None
-    if isinstance(order_id_peek, str) and order_id_peek.strip():
-        order = await root_agent._sqlite_client.load_order(listing_id=order_id_peek.strip())
+    if isinstance(listing_id_peek, str) and listing_id_peek.strip():
+        order = await root_agent._sqlite_client.load_listing(listing_id=listing_id_peek.strip())
 
     from market_storefront.utils.recovery import derive_arbitrate_params
     outcome = derive_arbitrate_params(order=order, payload=payload)
@@ -1414,19 +1384,19 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
     except Exception as exc:
         logger.error(
             "[ARBITRATE] arbitrate_many failed for order %s: %s",
-            params["order_id"], exc,
+            params["listing_id"], exc,
         )
         return 502, {
             "error": "Oracle arbitration failed on-chain",
             "detail": str(exc),
-            "order_id": params["order_id"],
+            "listing_id": params["listing_id"],
         }
 
     from market_storefront.utils.stage_log import stage_event
     stage_event(
         "post_settlement",
         "oracle_arbitrated",
-        order_id=params["order_id"],
+        listing_id=params["listing_id"],
         fulfillment_uid=params["fulfillment_uid"],
         escrow_uid=params["escrow_uid"],
         decision=params["decision"],
@@ -1435,7 +1405,7 @@ async def _run_arbitrate_flow(request: Request) -> tuple[int, dict]:
 
     return 200, {
         "status": "arbitrated",
-        "order_id": params["order_id"],
+        "listing_id": params["listing_id"],
         "fulfillment_uid": params["fulfillment_uid"],
         "decision": params["decision"],
         "decisions_count": len(decisions or []) if decisions is not None else 0,
@@ -1450,16 +1420,16 @@ async def arbitrate_market_order_endpoint(request: Request) -> JSONResponse:
     """POST /orders/arbitrate — buyer-as-oracle records a decision (no-op under RecipientArbiter)."""
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "arbitrate_listing", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "arbitrate_listing", listing_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_arbitrate_flow(request)
-        return JSONResponse(_wire_out(body_out), status_code=status)
+        return JSONResponse(body_out, status_code=status)
     except ValueError as exc:
         logger.error(f"[ARBITRATE] Validation error: {exc}")
         return JSONResponse(
@@ -1484,46 +1454,36 @@ async def _run_discover_flow(request: Request) -> tuple[int, dict]:
     decides which matches to start negotiations with.
     """
     try:
-        payload = _wire_in(await request.json())
+        payload = await request.json()
     except Exception as exc:
         raise ValueError(f"Invalid JSON in request body: {exc}") from exc
 
-    order_id = payload.get("order_id")
-    if not isinstance(order_id, str) or not order_id.strip():
-        raise ValueError("Request must include non-empty 'order_id'")
-    order_id = order_id.strip()
+    listing_id = payload.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id.strip():
+        raise ValueError("Request must include non-empty 'listing_id'")
+    listing_id = listing_id.strip()
 
     include_active = bool(payload.get("include_active", False))
 
     from market_storefront.utils.action_executor import discover
     try:
         matches = await discover(
-            order_id=order_id,
+            listing_id=listing_id,
             include_active_negotiations=include_active,
         )
     except ValueError as exc:
         return 400, {"error": "Discover request invalid",
                      "detail": str(exc),
-                     "listing_id": order_id}
+                     "listing_id": listing_id}
     except RuntimeError as exc:
         return 500, {"error": "Discovery unavailable",
                      "detail": str(exc),
-                     "listing_id": order_id}
-
-    wire_matches = []
-    for m in matches:
-        if isinstance(m, dict):
-            row = dict(m)
-            if "their_order_id" in row and "their_listing_id" not in row:
-                row["their_listing_id"] = row.pop("their_order_id")
-            wire_matches.append(row)
-        else:
-            wire_matches.append(m)
+                     "listing_id": listing_id}
 
     return 200, {
-        "listing_id": order_id,
+        "listing_id": listing_id,
         "match_count": len(matches),
-        "matches": wire_matches,
+        "matches": matches,
     }
 
 
@@ -1531,16 +1491,16 @@ async def discover_market_orders_endpoint(request: Request) -> JSONResponse:
     """POST /listings/discover — pure registry-query step."""
     try:
         body = await request.json()
-        order_id = body.get("listing_id", "")
+        listing_id = body.get("listing_id", "")
     except Exception:
-        order_id = ""
-    auth_error = _check_agent_request_auth(request, "discover_listings", order_id)
+        listing_id = ""
+    auth_error = _check_agent_request_auth(request, "discover_listings", listing_id)
     if auth_error:
         return auth_error
 
     try:
         status, body_out = await _run_discover_flow(request)
-        return JSONResponse(_wire_out(body_out), status_code=status)
+        return JSONResponse(body_out, status_code=status)
     except ValueError as exc:
         logger.error(f"[DISCOVER] Validation error: {exc}")
         return JSONResponse(
@@ -1593,11 +1553,11 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
-    seller_order_id = body.get("listing_id")
+    listing_id = body.get("listing_id")
     buyer_address = body.get("buyer_address")
     initial_price_raw = body.get("initial_price")
 
-    for name, val in (("listing_id", seller_order_id),
+    for name, val in (("listing_id", listing_id),
                       ("buyer_address", buyer_address)):
         if not isinstance(val, str) or not val.strip():
             return JSONResponse({"error": f"Missing or empty '{name}'"}, status_code=400)
@@ -1608,7 +1568,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
 
     auth_error = _check_buyer_signature(
         request, operation="negotiate_new",
-        resource_id=seller_order_id, claimed_address=buyer_address,
+        resource_id=listing_id, claimed_address=buyer_address,
     )
     if auth_error:
         return auth_error
@@ -1619,7 +1579,7 @@ async def negotiate_new_endpoint(request: Request) -> JSONResponse:
     try:
         result = await start_sync_negotiation(
             sqlite_client=root_agent._sqlite_client,
-            our_listing_id=seller_order_id,
+            our_listing_id=listing_id,
             buyer_address=buyer_address,
             their_proposed_price=initial_price,
             our_base_url=BASE_URL_OVERRIDE or "",

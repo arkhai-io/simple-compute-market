@@ -40,7 +40,7 @@ async def db(tmp_path) -> SQLiteClient:
 
 
 async def _seed_order(db: SQLiteClient, order_id: str) -> None:
-    await db.upsert_order(
+    await db.upsert_listing(
         listing_id=order_id,
         status="open",
         created_at=datetime.now().isoformat(),

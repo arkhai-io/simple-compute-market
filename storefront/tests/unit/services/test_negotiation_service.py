@@ -61,7 +61,7 @@ def _order(order_id: str = "ord-1", duration_hours: int = 2) -> dict:
 class TestListForOrder:
     async def test_raises_404_if_order_not_found(self):
         db = AsyncMock()
-        db.load_order.return_value = None
+        db.load_listing.return_value = None
         svc = _make_service(db)
         with pytest.raises(NegotiationServiceError) as exc_info:
             await svc.list_for_order(listing_id="ghost")
@@ -69,15 +69,15 @@ class TestListForOrder:
 
     async def test_returns_threads_from_db(self):
         db = AsyncMock()
-        db.load_order.return_value = _order()
-        db.list_negotiations_for_order.return_value = [
+        db.load_listing.return_value = _order()
+        db.list_negotiations_for_listing.return_value = [
             _thread("n1", "ord-1"),
             _thread("n2", "ord-1"),
         ]
         svc = _make_service(db)
         result = await svc.list_for_order(listing_id="ord-1")
         assert len(result) == 2
-        db.list_negotiations_for_order.assert_awaited_once_with(
+        db.list_negotiations_for_listing.assert_awaited_once_with(
             listing_id="ord-1",
             terminal_state=None,
             buyer_address=None,
@@ -87,8 +87,8 @@ class TestListForOrder:
 
     async def test_passes_filters_to_db(self):
         db = AsyncMock()
-        db.load_order.return_value = _order()
-        db.list_negotiations_for_order.return_value = []
+        db.load_listing.return_value = _order()
+        db.list_negotiations_for_listing.return_value = []
         svc = _make_service(db)
         await svc.list_for_order(
             listing_id="ord-1",
@@ -97,7 +97,7 @@ class TestListForOrder:
             limit=10,
             offset=5,
         )
-        db.list_negotiations_for_order.assert_awaited_once_with(
+        db.list_negotiations_for_listing.assert_awaited_once_with(
             listing_id="ord-1",
             terminal_state="success",
             buyer_address="0xBuyer",
@@ -225,7 +225,7 @@ class TestForceAccept:
     async def test_commits_agreed_terms_and_returns_result(self):
         db = AsyncMock()
         db.load_negotiation_thread_row.return_value = _thread()
-        db.load_order.return_value = _order(duration_hours=3)
+        db.load_listing.return_value = _order(duration_hours=3)
         db.commit_agreed_terms = AsyncMock()
         db.save_negotiation_message = AsyncMock()
         db.update_negotiation_thread_terminal = AsyncMock()

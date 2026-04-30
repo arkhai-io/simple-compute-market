@@ -157,10 +157,10 @@ async def start_sync_negotiation(
     if is_globally_paused():
         raise StorefrontPausedError("global")
 
-    if await sqlite_client.is_order_paused(listing_id=our_listing_id):
+    if await sqlite_client.is_listing_paused(listing_id=our_listing_id):
         raise StorefrontPausedError(f"order:{our_listing_id}")
 
-    our_order_dict = await sqlite_client.load_order(listing_id=our_listing_id)
+    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id)
     if not our_order_dict:
         raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
@@ -250,7 +250,7 @@ async def continue_sync_negotiation(
         )
 
     our_listing_id = thread.get("our_listing_id")
-    our_order_dict = await sqlite_client.load_order(listing_id=our_listing_id) if our_listing_id else None
+    our_order_dict = await sqlite_client.load_listing(listing_id=our_listing_id) if our_listing_id else None
     if not our_order_dict:
         raise ValueError(f"Seller's order {our_listing_id} is gone from local DB")
     our_order = Listing.model_validate(our_order_dict)

@@ -20,10 +20,10 @@ ValidationResult = tuple  # ("ok", dict) | ("error", int, dict)
 
 
 def _validate_body(payload: dict) -> tuple[str, str]:
-    """Raise ValueError on bad body; otherwise return (order_id, buyer_address)."""
-    order_id = payload.get("order_id")
-    if not isinstance(order_id, str) or not order_id.strip():
-        raise ValueError("Request must include non-empty 'order_id'")
+    """Raise ValueError on bad body; otherwise return (listing_id, buyer_address)."""
+    listing_id = payload.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id.strip():
+        raise ValueError("Request must include non-empty listing_id")
 
     buyer_address = payload.get("buyer_address")
     if not isinstance(buyer_address, str) or not buyer_address.strip():
@@ -32,7 +32,7 @@ def _validate_body(payload: dict) -> tuple[str, str]:
     if not (buyer_address.startswith("0x") and len(buyer_address) == 42):
         raise ValueError("'buyer_address' must be a 0x-prefixed 20-byte hex address")
 
-    return order_id.strip(), buyer_address
+    return listing_id.strip(), buyer_address
 
 
 def derive_refund_params(
@@ -50,21 +50,21 @@ def derive_refund_params(
     Returns either ("ok", {params dict}) or ("error", status_code, body).
 
     Params dict contains:
-      order_id, buyer_address, token_address, amount_raw, token_meta,
+      listing_id, buyer_address, token_address, amount_raw, token_meta,
       decimals, escrow_uid.
 
     Raises ValueError for inputs the caller should surface as HTTP 400.
     """
-    order_id, buyer_address = _validate_body(payload)
+    listing_id, buyer_address = _validate_body(payload)
 
     if not order:
-        return ("error", 404, {"error": f"Order {order_id} not found on this agent"})
+        return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})
 
     if order.get("status") == "refunded":
         return (
             "error",
             409,
-            {"error": "Order already refunded", "order_id": order_id, "status": "refunded"},
+            {"error": "Listing already refunded", "listing_id": listing_id, "status": "refunded"},
         )
 
     demand_raw = order.get("demand_resource") or "{}"
@@ -129,7 +129,7 @@ def derive_refund_params(
     return (
         "ok",
         {
-            "order_id": order_id,
+            "listing_id": listing_id,
             "buyer_address": buyer_address,
             "token_address": token_address,
             "token_meta": token_meta,

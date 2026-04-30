@@ -100,7 +100,7 @@ class NegotiationThreadTransaction:
         for oid in [order_id, their_listing_id]:
             if not oid:
                 continue
-            canceled = await self.thread_store._sqlite.cancel_negotiations_for_order(
+            canceled = await self.thread_store._sqlite.cancel_negotiations_for_listing(
                 order_id=oid,
                 except_negotiation_id=except_negotiation_id,
             )
@@ -129,7 +129,7 @@ class NegotiationThreadTransaction:
             logger.warning(f"[{self.component}] No thread store available")
             return set()
 
-        active_negotiations = await self.thread_store._sqlite.get_active_negotiations_for_order(
+        active_negotiations = await self.thread_store._sqlite.get_active_negotiations_for_listing(
             order_id=order_id
         )
 

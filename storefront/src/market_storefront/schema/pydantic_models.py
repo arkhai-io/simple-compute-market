@@ -188,13 +188,13 @@ class ComputeResourcePortfolio(BaseModel):
 
 
 class Listing(BaseModel):
-    """Market order for trading compute resources and tokens."""
+    """Marketplace listing for trading compute resources and tokens."""
 
-    order_id: str = Field(description="The id of the order")
-    order_maker: str = Field(description="The card URL of the agent who made the order")
-    order_taker: str | None = Field(
+    listing_id: str = Field(description="The id of the listing")
+    seller: str = Field(description="The card URL of the agent that posted the listing")
+    buyer: str | None = Field(
         default="",
-        description="The card URL of the agent who took the order",
+        description="The card URL of the agent that took the listing",
     )
     offer_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being offered, which may be a token or compute resource."
@@ -202,14 +202,14 @@ class Listing(BaseModel):
     demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
     )
-    duration_hours: int = Field(description="The duration of the order in hours")
-    maker_attestation: str | None = Field(
+    duration_hours: int = Field(description="The duration of the listing in hours")
+    seller_attestation: str | None = Field(
         default=None,
-        description="The attestation for the offer in escrow (None for open orders)",
+        description="The seller's fulfillment attestation UID (None until fulfillment lands).",
     )
-    taker_attestation: str | None = Field(
+    buyer_attestation: str | None = Field(
         default=None,
-        description="The attestation of the satisfied demand in escrow (None for open orders)",
+        description="The buyer's escrow attestation UID (None until escrow is locked).",
     )
     oracle_address: str | None = Field(
         default=None,
@@ -222,24 +222,22 @@ class Listing(BaseModel):
         """Parse resources from dicts to Resource types."""
         if not isinstance(data, dict):
             return data
-        
-        # Parse offer_resource using Resource helper
+
         if "offer_resource" in data:
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
-        
-        # Parse demand_resource using Resource helper
+
         if "demand_resource" in data:
             data["demand_resource"] = ComputeDomainResource.parse_from_dict(data["demand_resource"])
-        
+
         return data
 
     def is_open(self) -> bool:
-        """Check if this is an open order (no attestation)"""
-        return self.maker_attestation is None or self.taker_attestation is None
+        """Check if this is an open listing (escrow or fulfillment missing)."""
+        return self.seller_attestation is None or self.buyer_attestation is None
 
     def is_closed(self) -> bool:
-        """Check if this is a closed order (has attestation)"""
-        return self.maker_attestation is not None and self.taker_attestation is not None
+        """Check if this listing is fully attested (both escrow and fulfillment)."""
+        return self.seller_attestation is not None and self.buyer_attestation is not None
 
 
 # =============================
@@ -286,10 +284,10 @@ class ListingCreatedEvent(DomainEvent):
 
 
 class ListingClosedEvent(DomainEvent):
-    """Event triggered when a local client requests order closure."""
+    """Event triggered when a local client requests listing closure."""
 
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)
-    order_id: str = Field(description="Order ID to close")
+    listing_id: str = Field(description="Listing ID to close")
 
 
 class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
@@ -336,7 +334,7 @@ class FulfillmentFailedEvent(DomainEvent):
     event_type: EventType = Field(default=EventType.FULFILLMENT_FAILED)
     escrow_uid: str = Field(description="Escrow UID that was locked for this deal")
     reason: str | None = Field(default=None, description="Human-readable failure reason")
-    seller_order_id: str | None = Field(default=None, description="Seller's local order ID")
+    listing_id: str | None = Field(default=None, description="Seller's local listing ID")
     negotiation_id: str | None = Field(default=None, description="Buyer-supplied correlation token for this negotiation")
 
 

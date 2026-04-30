@@ -1016,53 +1016,7 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_reserve)
 
-    async def find_symmetric_open_order(
-        self,
-        *,
-        offer_resource: Any,
-        demand_resource: Any,
-        seller: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Find an open local order whose resources are symmetric to the given pair.
-
-        Symmetric means:
-        - local.offer_resource == demand_resource
-        - local.demand_resource == offer_resource
-        """
-        def _find() -> dict[str, Any] | None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT listing_id, offer_resource, demand_resource, seller, status, buyer, created_at
-                    FROM listings
-                    WHERE status = 'open'
-                      AND (buyer IS NULL OR buyer = '')
-                    """
-                )
-                rows = cur.fetchall()
-                matches: list[dict[str, Any]] = []
-                for row in rows:
-                    row_listing_id, row_offer, row_demand, row_maker, row_status, row_taker, row_created = row
-                    if seller and row_maker != seller:
-                        continue
-                    if self._resources_equal(row_offer, demand_resource) and self._resources_equal(row_demand, offer_resource):
-                        matches.append({
-                            "listing_id": row_listing_id,
-                            "seller": row_maker,
-                            "created_at": row_created,
-                        })
-                if not matches:
-                    return None
-                matches.sort(key=lambda m: m.get("created_at") or "", reverse=True)
-                return matches[0]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_find)
-
-    async def upsert_order(
+    async def upsert_listing(
         self,
         *,
         listing_id: str,
@@ -1144,7 +1098,7 @@ class SQLiteClient:
 
         await asyncio.to_thread(_save)
 
-    async def update_order(
+    async def update_listing(
         self,
         *,
         listing_id: str,
@@ -1202,54 +1156,7 @@ class SQLiteClient:
 
         await asyncio.to_thread(_save)
 
-    async def update_order_by_escrow_uid(
-        self,
-        *,
-        escrow_uid: str,
-        status: str | None = None,
-        updated_at: str | None = None,
-        fulfillment_resource: Any | None = None,
-        seller_attestation: str | None = None,
-        buyer_attestation: str | None = None,
-        oracle_address: str | None = None,
-    ) -> None:
-        """
-        Update order fields based on escrow_uid, when listing_id is not available.
-        """
-        def _save() -> None:
-            updates: list[str] = []
-            values: list[Any] = []
-
-            def add(field: str, value: Any, *, serialize: bool = False) -> None:
-                if value is None:
-                    return
-                updates.append(f"{field}=?")
-                values.append(self._serialize_resource(value) if serialize else value)
-
-            add("status", status)
-            add("updated_at", updated_at or datetime.now().isoformat())
-            add("fulfillment_resource", fulfillment_resource, serialize=True)
-            add("seller_attestation", seller_attestation)
-            add("buyer_attestation", buyer_attestation)
-            add("oracle_address", oracle_address)
-
-            if not updates:
-                return
-
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    f"UPDATE listings SET {', '.join(updates)} WHERE escrow_uid=?",
-                    (*values, escrow_uid),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-        await asyncio.to_thread(_save)
-
-    async def load_order(self, *, listing_id: str) -> dict[str, Any] | None:
+    async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None:
         """Return a single order by listing_id, or None if not found."""
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
@@ -1282,35 +1189,6 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_load)
 
-    async def load_orders_by_escrow_uid(self, *, escrow_uid: str) -> list[dict[str, Any]]:
-        """Return all orders that share the given escrow_uid."""
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, demand_resource, fulfillment_resource,
-                           duration_hours, seller, buyer,
-                           matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address
-                    FROM listings WHERE escrow_uid = ?
-                    """,
-                    (escrow_uid,),
-                )
-                keys = [
-                    "listing_id", "status", "created_at", "updated_at",
-                    "offer_resource", "demand_resource", "fulfillment_resource",
-                    "duration_hours", "seller", "buyer",
-                    "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address",
-                ]
-                return [dict(zip(keys, row)) for row in cur.fetchall()]
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_load)
 
     async def save_policy(
         self,
@@ -2052,7 +1930,7 @@ class SQLiteClient:
                 conn.close()
         return await asyncio.to_thread(_check)
 
-    async def get_active_negotiations_for_order(
+    async def get_active_negotiations_for_listing(
         self, *, listing_id: str
     ) -> list[dict[str, Any]]:
         """Get all active negotiations involving an order (as our_listing_id or their_listing_id)."""
@@ -2084,39 +1962,7 @@ class SQLiteClient:
                 conn.close()
         return await asyncio.to_thread(_load)
 
-    async def get_active_negotiations_for_agent(
-        self, *, agent_id: str
-    ) -> list[dict[str, Any]]:
-        """Get all active negotiations involving an agent (as our_agent_id or their_agent_id)."""
-        def _load() -> list[dict[str, Any]]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT negotiation_id, our_listing_id, their_listing_id, our_agent_id, their_agent_id, status
-                    FROM negotiation_threads
-                    WHERE (our_agent_id = ? OR their_agent_id = ?) AND status = 'active'
-                    """,
-                    (agent_id, agent_id),
-                )
-                rows = cur.fetchall()
-                result = []
-                for row in rows:
-                    result.append({
-                        "negotiation_id": row[0],
-                        "our_listing_id": row[1],
-                        "their_listing_id": row[2],
-                        "our_agent_id": row[3],
-                        "their_agent_id": row[4],
-                        "status": row[5],
-                    })
-                return result
-            finally:
-                conn.close()
-        return await asyncio.to_thread(_load)
-
-    async def cancel_negotiations_for_order(
+    async def cancel_negotiations_for_listing(
         self, *, listing_id: str, except_negotiation_id: str | None = None
     ) -> list[dict]:
         """Cancel all active negotiations for an order, except the specified one.
@@ -2172,30 +2018,6 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_cancel)
 
-    async def cancel_negotiations_for_agent(
-        self, *, agent_id: str, except_negotiation_id: str | None = None
-    ) -> None:
-        """Cancel all active negotiations for an agent, except the specified one."""
-        def _cancel() -> None:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    UPDATE negotiation_threads
-                    SET status = 'superseded',
-                        terminal_state = 'superseded',
-                        updated_at = ?
-                    WHERE (our_agent_id = ? OR their_agent_id = ?)
-                      AND (status = 'active')
-                      AND negotiation_id != COALESCE(?, '')
-                    """,
-                    (datetime.now().isoformat(), agent_id, agent_id, except_negotiation_id or '')
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        await asyncio.to_thread(_cancel)
 
     async def store_credential(
         self,
@@ -2302,7 +2124,7 @@ class SQLiteClient:
     # Orders API helpers
     # ------------------------------------------------------------------
 
-    async def list_orders(
+    async def list_listings(
         self,
         *,
         status: str | None = None,
@@ -2357,7 +2179,7 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_list)
 
-    async def set_order_paused(self, *, listing_id: str, paused: bool) -> None:
+    async def set_listing_paused(self, *, listing_id: str, paused: bool) -> None:
         """Set the paused flag on a local order."""
         def _update() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -2373,7 +2195,7 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
-    async def is_order_paused(self, *, listing_id: str) -> bool:
+    async def is_listing_paused(self, *, listing_id: str) -> bool:
         """Return True if the order exists and has paused=1."""
         def _check() -> bool:
             conn = sqlite3.connect(self.db_path)
@@ -2394,7 +2216,7 @@ class SQLiteClient:
     # Negotiations API helpers
     # ------------------------------------------------------------------
 
-    async def list_negotiations_for_order(
+    async def list_negotiations_for_listing(
         self,
         *,
         listing_id: str,

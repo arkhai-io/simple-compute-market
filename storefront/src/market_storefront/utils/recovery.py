@@ -17,36 +17,36 @@ from typing import Any
 ValidationResult = tuple
 
 
-def _validate_order_id(payload: dict) -> str:
-    """Extract + validate order_id from a request body. Raises ValueError on malformed."""
-    order_id = payload.get("order_id")
-    if not isinstance(order_id, str) or not order_id.strip():
-        raise ValueError("Request must include non-empty 'order_id'")
-    return order_id.strip()
+def _validate_listing_id(payload: dict) -> str:
+    """Extract + validate listing_id from a request body. Raises ValueError on malformed."""
+    listing_id = payload.get("listing_id")
+    if not isinstance(listing_id, str) or not listing_id.strip():
+        raise ValueError("Request must include non-empty listing_id")
+    return listing_id.strip()
 
 
 def derive_claim_params(*, order: dict[str, Any] | None, payload: dict) -> ValidationResult:
     """Seller collects an escrow after delivering.
 
     Requires the order to carry both escrow_uid (the buyer's escrow) and
-    maker_attestation (the seller's fulfillment attestation UID — set by
+    seller_attestation (the seller's fulfillment attestation UID — set by
     fulfill_compute_obligation). Without the attestation, the on-chain
     collect call has no fulfillment to reference.
 
     Allows `payload.fulfillment_uid` to override the order's
-    maker_attestation for cases where the DB got out of sync with the
+    seller_attestation for cases where the DB got out of sync with the
     chain (e.g. the attestation landed but the agent crashed before
     persisting it).
     """
-    order_id = _validate_order_id(payload)
+    listing_id = _validate_listing_id(payload)
     if not order:
-        return ("error", 404, {"error": f"Order {order_id} not found on this agent"})
+        return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})
 
     if order.get("status") == "closed":
         return (
             "error",
             409,
-            {"error": "Order already closed", "order_id": order_id, "status": "closed"},
+            {"error": "Listing already closed", "listing_id": listing_id, "status": "closed"},
         )
 
     escrow_uid = order.get("escrow_uid")
@@ -54,7 +54,7 @@ def derive_claim_params(*, order: dict[str, Any] | None, payload: dict) -> Valid
         return (
             "error",
             400,
-            {"error": f"Order {order_id} has no escrow_uid; nothing to claim"},
+            {"error": f"Listing {listing_id} has no escrow_uid; nothing to claim"},
         )
 
     fulfillment_uid = payload.get("fulfillment_uid") or order.get("seller_attestation")
@@ -64,7 +64,7 @@ def derive_claim_params(*, order: dict[str, Any] | None, payload: dict) -> Valid
             400,
             {
                 "error": (
-                    f"Order {order_id} has no maker_attestation yet — fulfillment has not "
+                    f"Listing {listing_id} has no seller_attestation yet — fulfillment has not "
                     "completed. Pass 'fulfillment_uid' explicitly if the attestation is on-chain "
                     "but missing locally."
                 ),
@@ -74,7 +74,7 @@ def derive_claim_params(*, order: dict[str, Any] | None, payload: dict) -> Valid
     return (
         "ok",
         {
-            "order_id": order_id,
+            "listing_id": listing_id,
             "escrow_uid": escrow_uid,
             "fulfillment_uid": fulfillment_uid,
         },
@@ -89,9 +89,9 @@ def derive_reclaim_params(*, order: dict[str, Any] | None, payload: dict) -> Val
     the tx), but we do refuse when there is no escrow to reclaim or the
     order is already closed/reclaimed.
     """
-    order_id = _validate_order_id(payload)
+    listing_id = _validate_listing_id(payload)
     if not order:
-        return ("error", 404, {"error": f"Order {order_id} not found on this agent"})
+        return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})
 
     if order.get("status") in ("closed", "reclaimed", "refunded"):
         return (
@@ -99,7 +99,7 @@ def derive_reclaim_params(*, order: dict[str, Any] | None, payload: dict) -> Val
             409,
             {
                 "error": f"Order already in terminal state '{order.get('status')}'",
-                "order_id": order_id,
+                "listing_id": listing_id,
                 "status": order.get("status"),
             },
         )
@@ -109,13 +109,13 @@ def derive_reclaim_params(*, order: dict[str, Any] | None, payload: dict) -> Val
         return (
             "error",
             400,
-            {"error": f"Order {order_id} has no escrow_uid; nothing to reclaim"},
+            {"error": f"Listing {listing_id} has no escrow_uid; nothing to reclaim"},
         )
 
     return (
         "ok",
         {
-            "order_id": order_id,
+            "listing_id": listing_id,
             "escrow_uid": escrow_uid,
         },
     )
@@ -130,13 +130,13 @@ def derive_arbitrate_params(*, order: dict[str, Any] | None, payload: dict) -> V
       (a) debugging / auditing the oracle side of the flow, and
       (b) future re-introduction of an oracle-gated arbiter.
 
-    Requires: the buyer's order, with a maker_attestation (the seller's
+    Requires: the buyer's order, with a seller_attestation (the seller's
     fulfillment UID) to arbitrate. Caller may override `fulfillment_uid`
     for out-of-band arbitration.
     """
-    order_id = _validate_order_id(payload)
+    listing_id = _validate_listing_id(payload)
     if not order:
-        return ("error", 404, {"error": f"Order {order_id} not found on this agent"})
+        return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})
 
     fulfillment_uid = payload.get("fulfillment_uid") or order.get("seller_attestation")
     if not fulfillment_uid:
@@ -145,7 +145,7 @@ def derive_arbitrate_params(*, order: dict[str, Any] | None, payload: dict) -> V
             400,
             {
                 "error": (
-                    f"Order {order_id} has no maker_attestation and no fulfillment_uid in body; "
+                    f"Listing {listing_id} has no seller_attestation and no fulfillment_uid in body; "
                     "nothing to arbitrate."
                 ),
             },
@@ -160,7 +160,7 @@ def derive_arbitrate_params(*, order: dict[str, Any] | None, payload: dict) -> V
     return (
         "ok",
         {
-            "order_id": order_id,
+            "listing_id": listing_id,
             "fulfillment_uid": fulfillment_uid,
             "escrow_uid": order.get("escrow_uid"),
             "oracle_address": order.get("oracle_address"),

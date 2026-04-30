@@ -123,7 +123,7 @@ async def _seed_negotiation(
         conn.close()
 
 
-async def _seed_seller_order(client: SQLiteClient, order_id: str = "seller-ord-1") -> None:
+async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord-1") -> None:
     conn = sqlite3.connect(client.db_path)
     try:
         conn.execute(
@@ -132,7 +132,7 @@ async def _seed_seller_order(client: SQLiteClient, order_id: str = "seller-ord-1
                                    seller, buyer, escrow_uid)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
                        '{}', '{}', 1, 'http://seller:8001', NULL, NULL)""",
-            (order_id,),
+            (listing_id,),
         )
         conn.commit()
     finally:
@@ -272,7 +272,7 @@ async def test_background_task_writes_ready_on_success(client):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
-            seller_order_id="seller-ord-1",
+            listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),
@@ -297,7 +297,7 @@ async def test_background_task_writes_failed_on_exception(client):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
-            seller_order_id="seller-ord-1",
+            listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),
@@ -324,7 +324,7 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
             ssh_public_key="ssh-rsa ...",
-            seller_order_id="seller-ord-1",
+            listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "duration_hours": 1},
             sqlite_client=client,
             alkahest_client=MagicMock(),

@@ -18,7 +18,7 @@ Events are emitted to both:
 
 Usage:
     from market_storefront.utils.stage_log import stage_event
-    stage_event("discovery", "order_published", order_id=oid, offer=spec)
+    stage_event("discovery", "listing_published", listing_id=lid, offer=spec)
 """
 
 from __future__ import annotations
@@ -56,14 +56,14 @@ def _persist(entry: dict[str, Any]) -> None:
         conn = sqlite3.connect(db_path, timeout=2)
         try:
             conn.execute(
-                """INSERT INTO stage_events (ts, stage, event, negotiation_id, order_id, escrow_uid, data)
+                """INSERT INTO stage_events (ts, stage, event, negotiation_id, listing_id, escrow_uid, data)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     entry["ts"],
                     entry["stage"],
                     entry["event"],
                     entry.get("negotiation_id"),
-                    entry.get("order_id") or entry.get("our_order_id") or entry.get("negotiation_id"),
+                    entry.get("listing_id") or entry.get("our_listing_id") or entry.get("negotiation_id"),
                     entry.get("escrow_uid"),
                     json.dumps(entry, default=str),
                 ),
