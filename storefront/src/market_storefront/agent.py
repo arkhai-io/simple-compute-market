@@ -784,7 +784,7 @@ async def _run_create_order_flow(request: Request) -> dict:
     Example offer (compute):
     {
       "gpu_model": "H200",
-      "quantity": 1,
+      "gpu_count": 1,
       "sla": 99.9,
       "region": "California, US"
     }

@@ -48,14 +48,14 @@ from storefront_client.models import (  # noqa: F401 — re-exported for backwar
 @dataclass
 class ComputeResourcePayload:
     gpu_model: str
-    quantity: int
+    gpu_count: int
     sla: float
     region: str
 
     def to_dict(self) -> dict:
         return {
             "gpu_model": self.gpu_model,
-            "quantity": self.quantity,
+            "gpu_count": self.gpu_count,
             "sla": self.sla,
             "region": self.region,
         }
@@ -94,7 +94,7 @@ class AgentOrderCreateRequest:
         cls,
         *,
         gpu_model: str,
-        quantity: int,
+        gpu_count: int,
         sla: float,
         region: str,
         token: str,
@@ -103,7 +103,7 @@ class AgentOrderCreateRequest:
     ) -> "AgentOrderCreateRequest":
         """Seller-side convenience: offering compute, demanding tokens."""
         return cls(
-            offer=ComputeResourcePayload(gpu_model, quantity, sla, region).to_dict(),
+            offer=ComputeResourcePayload(gpu_model, gpu_count, sla, region).to_dict(),
             demand=TokenResourcePayload(token, amount).to_dict(),
             duration_hours=duration_hours,
         )
@@ -115,7 +115,7 @@ class AgentOrderCreateRequest:
         token: str,
         amount: float,
         gpu_model: str,
-        quantity: int,
+        gpu_count: int,
         sla: float,
         region: str,
         duration_hours: int = 1,
@@ -123,7 +123,7 @@ class AgentOrderCreateRequest:
         """Buyer-side convenience: offering tokens, demanding compute."""
         return cls(
             offer=TokenResourcePayload(token, amount).to_dict(),
-            demand=ComputeResourcePayload(gpu_model, quantity, sla, region).to_dict(),
+            demand=ComputeResourcePayload(gpu_model, gpu_count, sla, region).to_dict(),
             duration_hours=duration_hours,
         )
 
@@ -155,7 +155,7 @@ class ResourceAlertRequest:
     value is a float 0.0-1.0; label / threshold describe the condition.
     """
     event_type: str
-    resource: dict[str, Any]   # keys: gpu_model, quantity, sla, region
+    resource: dict[str, Any]   # keys: gpu_model, gpu_count, sla, region
     value: float
     label: str
     threshold: str
@@ -174,7 +174,7 @@ class ResourceAlertRequest:
         cls,
         *,
         gpu_model: str,
-        quantity: int,
+        gpu_count: int,
         sla: float,
         region: str,
         value: float = 0.1,
@@ -182,7 +182,7 @@ class ResourceAlertRequest:
         """Convenience factory for a low-utilization (surplus) alert."""
         return cls(
             event_type="resource_imbalance",
-            resource={"gpu_model": gpu_model, "quantity": quantity, "sla": sla, "region": region},
+            resource={"gpu_model": gpu_model, "gpu_count": gpu_count, "sla": sla, "region": region},
             value=value,
             label="LOW UTILIZATION",
             threshold="<=0.30",

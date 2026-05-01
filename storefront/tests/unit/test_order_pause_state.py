@@ -29,7 +29,7 @@ async def db(tmp_path) -> SQLiteClient:
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
-        offer_resource={"gpu_model": "H200", "quantity": 1, "sla": 99.9, "region": "California, US"},
+        offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
         demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 1000},
         fulfillment_resource=None,
         max_duration_seconds=3600,

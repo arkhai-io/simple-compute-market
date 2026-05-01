@@ -280,9 +280,9 @@ def count_nodes_by_slot(
         slot = gpu_slot(resource, gpu_slot_map)
         if slot is None:
             continue
-        total[slot] += float(resource.quantity)
+        total[slot] += float(resource.gpu_count)
         # Local portfolio has no direct free-capacity metric; use conservative estimate.
-        free[slot] += float(resource.quantity) * 0.5
+        free[slot] += float(resource.gpu_count) * 0.5
     return total, free
 
 
@@ -352,7 +352,7 @@ def build_arkhai_observation(
         if isinstance(demand_resource, ComputeResource):
             slot = gpu_slot(demand_resource, gpu_slot_map)
             if slot is not None:
-                request_nodes[slot] = float(demand_resource.quantity)
+                request_nodes[slot] = float(demand_resource.gpu_count)
         for slot in range(node_types):
             denom = job_nodes[slot] + 1.0
             obs[0, idx] = min(1.0, request_nodes[slot] / denom)
@@ -469,7 +469,7 @@ def build_negotiation_observation(
                     gpu_name = res.get("gpu_model", "")
                     slot = gpu_slot_map.get(gpu_name)
                     if slot is not None:
-                        request_gpu_qty = float(res.get("quantity", 0))
+                        request_gpu_qty = float(res.get("gpu_count", 0))
                         request_gpu_slot = slot
                     break
         observation[0, base + request_gpu_slot] = min(1.0, request_gpu_qty / MAX_GPU)

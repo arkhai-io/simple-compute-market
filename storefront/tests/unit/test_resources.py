@@ -24,7 +24,7 @@ USDT = ERC20TokenMetadata(
 
 COMPUTE = ComputeResource(
     gpu_model=GPUModel.H200,
-    quantity=2,
+    gpu_count=2,
     sla=99.0,
     region=Region.CALIFORNIA_US,
 )
@@ -41,18 +41,18 @@ class TestParseResourceFromDict:
         data = {
             "resource_type": "compute.gpu",
             "gpu_model": "H200",
-            "quantity": 2,
+            "gpu_count": 2,
             "sla": 99.0,
             "region": "California, US",
         }
         result = parse_resource_from_dict(data)
         assert isinstance(result, ComputeResource)
         assert result.gpu_model == GPUModel.H200
-        assert result.quantity == 2
+        assert result.gpu_count == 2
 
     def test_compute_via_discriminator_key_fallback(self):
         """No resource_type in payload — falls back to gpu_model discriminator."""
-        data = {"gpu_model": "H200", "quantity": 1, "sla": 90.0, "region": "California, US"}
+        data = {"gpu_model": "H200", "gpu_count": 1, "sla": 90.0, "region": "California, US"}
         result = parse_resource_from_dict(data)
         assert isinstance(result, ComputeResource)
 
@@ -107,7 +107,7 @@ class TestDbRoundTrip:
         restored = adapt_db_resource_to_domain_resource(db_row)
         assert isinstance(restored, ComputeResource)
         assert restored.gpu_model == COMPUTE.gpu_model
-        assert restored.quantity == COMPUTE.quantity
+        assert restored.gpu_count == COMPUTE.gpu_count
         assert restored.sla == COMPUTE.sla
         assert restored.region == COMPUTE.region
 

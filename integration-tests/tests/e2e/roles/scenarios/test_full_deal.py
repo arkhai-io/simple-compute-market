@@ -45,7 +45,7 @@ pytestmark = pytest.mark.e2e_deal
 
 OFFER_RESOURCE = {
     "gpu_model": "H200",
-    "quantity": 1,
+    "gpu_count": 1,
     "sla": 99.0,
     "region": "California, US",
 }

@@ -129,7 +129,7 @@ class TestListingRequestConstructor:
         """
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
-            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "CA"},
+            offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
             demand={"token": {"symbol": "MOCK"}, "amount": 10_000},
             max_duration_seconds=3600,
         )
@@ -219,7 +219,7 @@ class TestPublishListingWireFormat:
         client, transport = capturing_client
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
-            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "CA"},
+            offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
             demand={"token": {"symbol": "MOCK"}, "amount": 10_000},
             max_duration_seconds=3600,
         )
@@ -243,7 +243,7 @@ class TestPublishListingWireFormat:
     async def test_body_contains_offer_resource(self, capturing_client):
         """Request body must include offer_resource with the offer dict."""
         client, transport = capturing_client
-        offer = {"gpu_model": "RTX4090", "quantity": 2, "sla": 95.0, "region": "NY"}
+        offer = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
         req = ListingRequest(listing_id=uuid.uuid4().hex, offer=offer, demand={"amount": 1})
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body

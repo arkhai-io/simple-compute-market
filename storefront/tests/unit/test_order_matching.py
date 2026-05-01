@@ -26,7 +26,7 @@ def _summary_order(offer: dict, demand: dict, order_id: str = "ord"):
     return ListingSummary(id=order_id, offer=offer, demand=demand, status="open")
 
 
-COMPUTE = {"gpu_model": "A100", "quantity": 1, "sla": 99.0, "region": "us-west"}
+COMPUTE = {"gpu_model": "A100", "gpu_count": 1, "sla": 99.0, "region": "us-west"}
 TOKEN = {"token": "USDC", "amount": 100.0}
 
 

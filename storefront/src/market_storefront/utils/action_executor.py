@@ -779,7 +779,7 @@ def encode_compute_lease(
     lease_terms = {
         "gpu_model": compute.gpu_model.value if hasattr(compute.gpu_model, "value") else str(compute.gpu_model),
         "region": compute.region.value if hasattr(compute.region, "value") else str(compute.region),
-        "quantity": compute.quantity,
+        "gpu_count": compute.gpu_count,
         "sla": compute.sla,
         "duration_seconds": duration_seconds,
         "token_symbol": token_meta.symbol,

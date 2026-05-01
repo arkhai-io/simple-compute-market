@@ -329,7 +329,7 @@ class TestPolicyEvaluate:
         c, _, _ = client
         await c.policy_seed()
         result = await c.policy_evaluate(
-            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "California, US"},
+            offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
             demand={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 10000},
         )
         assert "action" in result
@@ -342,7 +342,7 @@ class TestPolicyEvaluate:
         c, _, _ = client
         # Don't seed — fresh DB has no policies
         result = await c.policy_evaluate(
-            offer={"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "California, US"},
+            offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
             demand={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 10000},
         )
         # With no policies seeded, must return no_action and a reason

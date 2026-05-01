@@ -93,7 +93,7 @@ def _available_resources(db_path: str) -> list[dict]:
         out.append({
             "resource_id": row["resource_id"],
             "gpu_model": attrs.get("gpu_model"),
-            "quantity": int(row["value"]) if row["value"] is not None else 1,
+            "gpu_count": int(row["value"]) if row["value"] is not None else 1,
             "sla": attrs.get("sla", 0.0),
             "region": attrs.get("region"),
             "min_price": row["min_price"],
@@ -264,7 +264,7 @@ def _publish_round(
         offer = {
             "resource_id": res["resource_id"],
             "gpu_model": res["gpu_model"],
-            "quantity": res["quantity"],
+            "gpu_count": res["gpu_count"],
             "sla": res["sla"],
             "region": res["region"],
         }
@@ -375,7 +375,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
         demand = entry["demand"]
         summary.add_row(
             res["resource_id"],
-            f"{res['gpu_model']} x{res['quantity']}",
+            f"{res['gpu_model']} x{res['gpu_count']}",
             res["region"] or "-",
             f"{demand['amount']} {demand['token']}",
             str(resp.get("listing_id", "-")),
@@ -384,7 +384,7 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     for res, reason in failed:
         summary.add_row(
             res["resource_id"],
-            f"{res['gpu_model']} x{res['quantity']}",
+            f"{res['gpu_model']} x{res['gpu_count']}",
             res["region"] or "-",
             "-",
             "-",

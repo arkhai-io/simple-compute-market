@@ -36,7 +36,7 @@ def _build_buyer_order(compute_spec: dict, payment_spec: dict) -> dict:
         "offer_resource": {"token": payment_spec["token"], "amount": payment_spec["amount"]},
         "demand_resource": {
             "gpu_model": compute_spec["gpu_model"],
-            "quantity": compute_spec["quantity"],
+            "gpu_count": compute_spec["gpu_count"],
             "sla": compute_spec["sla"],
             "region": compute_spec["region"],
         },

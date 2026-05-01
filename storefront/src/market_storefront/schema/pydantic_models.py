@@ -36,6 +36,23 @@ class Region(str, Enum):
     TOKYO_JP = "Tokyo, JP"
 
 
+class GpuInterconnect(str, Enum):
+    """GPU-to-GPU interconnect topology."""
+
+    NVLINK = "nvlink"
+    NVSWITCH = "nvswitch"
+    PCIE_ONLY = "pcie_only"
+    INFINIBAND = "infiniband"
+
+
+class VirtualizationType(str, Enum):
+    """How the host exposes the resource to the buyer."""
+
+    BARE_METAL = "bare_metal"
+    VM = "vm"
+    CONTAINER = "container"
+
+
 Attestation = CoreAttestation
 
 
@@ -115,7 +132,17 @@ TokenResource = CoreTokenResource
 class ComputeResource(ComputeDomainResource):
     """Describes the compute resources that are available to each Agent,
     and may be put on the market. This is before any valuation.
-    Not all resources in the resource portfolio are on sale
+    Not all resources in the resource portfolio are on sale.
+
+    Spec fields below ``vm_host`` are configuration-only — values that derive
+    from another field (e.g., VRAM from gpu_model, PCIe lanes from motherboard,
+    AVX support from cpu_type) are intentionally omitted; consumers compute
+    them from vendor lookup tables. All spec fields default to ``None`` so old
+    payloads keep parsing; populate them as data becomes available.
+
+    Free-form provider tags belong in ``attributes`` under the ``tag.*``
+    namespace (e.g. ``attributes["tag.datacenter_tier"]``). Tags are opaque
+    to the negotiation policy and matched by exact equality only.
     """
 
     resource_id: str | None = Field(
@@ -125,7 +152,7 @@ class ComputeResource(ComputeDomainResource):
     gpu_model: GPUModel = Field(
         description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
     )
-    quantity: int = Field(description="The quantity of the GPU")
+    gpu_count: int = Field(description="Number of GPUs in this resource entry")
     sla: float = Field(description="The SLA of the GPU")
     region: Region = Field(
         description="The region of the GPU (California, US, Tokyo, JP, etc.)"
@@ -135,27 +162,119 @@ class ComputeResource(ComputeDomainResource):
         description="Provisioning host identifier for VM placement (e.g., vm1)",
     )
 
+    # CPU
+    cpu_type: str | None = Field(default=None, description="CPU model string, e.g. 'AMD EPYC 9654'")
+    cpu_count: int | None = Field(default=None, description="Number of physical CPU packages installed")
+
+    # Memory
+    ram_gb: int | None = Field(default=None, description="System RAM in GB")
+
+    # Storage
+    disk_gb: int | None = Field(default=None, description="Total host disk capacity in GB")
+    disk_type: str | None = Field(
+        default=None,
+        description="Disk model string, e.g. 'Samsung MZTL3T8HEFK' or 'Kingston SFYRD2000G'",
+    )
+    disk_count: int | None = Field(default=None, description="Number of physical disks")
+
+    # Bus / motherboard (PCIe lanes/generation derive from motherboard model)
+    motherboard: str | None = Field(default=None, description="Motherboard model string")
+
+    # GPU topology
+    gpu_interconnect: GpuInterconnect | None = Field(
+        default=None,
+        description="GPU-to-GPU interconnect topology",
+    )
+
+    # Network
+    nic_speed_gbps: int | None = Field(default=None, description="Primary NIC link speed in Gbps")
+    internet_download_mbps: int | None = Field(default=None, description="Internet downlink in Mbps")
+    internet_upload_mbps: int | None = Field(default=None, description="Internet uplink in Mbps")
+    static_ip: bool | None = Field(default=None, description="Whether the host has a static public IP")
+    open_ports_count: int | None = Field(
+        default=None,
+        description="Number of externally-routable TCP ports the host exposes",
+    )
+
+    # Hosting
+    virtualization_type: VirtualizationType | None = Field(
+        default=None,
+        description="How the host exposes the resource",
+    )
+    datacenter_grade: bool | None = Field(
+        default=None,
+        description="True for commercial datacenter hosting (vs home/colo)",
+    )
+
 
 class ComputeResourcePortfolio(BaseModel):
     """Describes the resource portfolio of an Agent."""
 
     resources: list[ComputeResource] = Field(description="The resources in the portfolio")
 
-    def total_quantity(self, gpu_model: GPUModel | None = None) -> int:
-        """Calculate total GPU quantity, optionally filtered by model"""
+    def total_gpu_count(self, gpu_model: GPUModel | None = None) -> int:
+        """Calculate total GPU gpu_count, optionally filtered by model"""
         if gpu_model:
-            return sum(r.quantity for r in self.resources if r.gpu_model == gpu_model)
-        return sum(r.quantity for r in self.resources)
+            return sum(r.gpu_count for r in self.resources if r.gpu_model == gpu_model)
+        return sum(r.gpu_count for r in self.resources)
 
     def has_capacity(self, required: ComputeResource) -> bool:
-        """Check if portfolio has sufficient capacity for a required resource"""
+        """Check if portfolio has sufficient capacity for a required resource.
+
+        Mandatory match: gpu_model, region, gpu_count (>=), sla (>=).
+
+        Optional spec fields are enforced only when the demand side specifies
+        them (i.e., is not None). Numeric fields use >=; enum/string/bool
+        fields use exact equality. If the demand specifies a constraint and
+        the offered resource has the field as None, the resource is rejected
+        — an unknown spec can't be assumed to satisfy a stated requirement.
+        """
+        numeric_min_fields = (
+            "cpu_count",
+            "ram_gb",
+            "disk_gb",
+            "disk_count",
+            "nic_speed_gbps",
+            "internet_download_mbps",
+            "internet_upload_mbps",
+            "open_ports_count",
+        )
+        equality_fields = (
+            "cpu_type",
+            "disk_type",
+            "motherboard",
+            "gpu_interconnect",
+            "virtualization_type",
+            "static_ip",
+            "datacenter_grade",
+        )
         for resource in self.resources:
-            if (
+            if not (
                 resource.gpu_model == required.gpu_model
                 and resource.region == required.region
-                and resource.quantity >= required.quantity
+                and resource.gpu_count >= required.gpu_count
                 and resource.sla >= required.sla
             ):
+                continue
+            ok = True
+            for field in numeric_min_fields:
+                req_v = getattr(required, field)
+                if req_v is None:
+                    continue
+                res_v = getattr(resource, field)
+                if res_v is None or res_v < req_v:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            for field in equality_fields:
+                req_v = getattr(required, field)
+                if req_v is None:
+                    continue
+                if getattr(resource, field) != req_v:
+                    ok = False
+                    break
+            if ok:
                 return True
         return False
 
@@ -167,7 +286,7 @@ class ComputeResourcePortfolio(BaseModel):
                 and existing.region == resource.region
                 and existing.sla == resource.sla
             ):
-                existing.quantity += resource.quantity
+                existing.gpu_count += resource.gpu_count
                 return
         self.resources.append(resource)
 
@@ -179,9 +298,9 @@ class ComputeResourcePortfolio(BaseModel):
                 and existing.region == resource.region
                 and existing.sla == resource.sla
             ):
-                if existing.quantity >= resource.quantity:
-                    existing.quantity -= resource.quantity
-                    if existing.quantity == 0:
+                if existing.gpu_count >= resource.gpu_count:
+                    existing.gpu_count -= resource.gpu_count
+                    if existing.gpu_count == 0:
                         self.resources.remove(existing)
                     return True
         return False
@@ -409,7 +528,7 @@ class ResourceAlertRequest(BaseModel):
         description="Type of event (must be resource_imbalance)"
     )
     resource: dict[str, Any] = Field(
-        description="Resource details with required fields: gpu_model, quantity, sla, region"
+        description="Resource details with required fields: gpu_model, gpu_count, sla, region"
     )
     value: float = Field(
         ge=0.0,
@@ -423,7 +542,7 @@ class ResourceAlertRequest(BaseModel):
     @classmethod
     def validate_resource(cls, v: dict[str, Any]) -> dict[str, Any]:
         """Validate resource dict has all required fields."""
-        required_fields = ["gpu_model", "quantity", "sla", "region"]
+        required_fields = ["gpu_model", "gpu_count", "sla", "region"]
         missing = [field for field in required_fields if field not in v]
         if missing:
             raise ValueError(f"Resource dict missing required fields: {missing}")
@@ -440,14 +559,14 @@ class ResourceAlertRequest(BaseModel):
         """
         # Extract and validate resource fields
         gpu_model = GPUModel(self.resource["gpu_model"])
-        quantity = int(self.resource["quantity"])
+        gpu_count = int(self.resource["gpu_count"])
         sla = float(self.resource["sla"])
         region = Region(self.resource["region"])
         
         # Create ComputeResource
         compute_resource = ComputeResource(
             gpu_model=gpu_model,
-            quantity=quantity,
+            gpu_count=gpu_count,
             sla=sla,
             region=region,
         )
@@ -468,7 +587,7 @@ class ResourceAlertRequest(BaseModel):
             severity=severity,
             data={
                 "gpu_model": gpu_model.value,
-                "quantity": quantity,
+                "gpu_count": gpu_count,
                 "region": region.value,
                 "sla": sla,
                 "imbalance_type": imbalance_type,
@@ -507,7 +626,7 @@ class ResourceImbalanceEvent(DomainEvent):
                 resource_dict = nested_data["resource"]
                 if isinstance(resource_dict, dict):
                     # Validate required fields
-                    required_fields = ["gpu_model", "quantity", "sla", "region"]
+                    required_fields = ["gpu_model", "gpu_count", "sla", "region"]
                     missing = [f for f in required_fields if f not in resource_dict]
                     if missing:
                         raise ValueError(f"Resource missing required fields: {missing}")
@@ -523,7 +642,7 @@ class ResourceImbalanceEvent(DomainEvent):
         # If resource is at top level as dict, convert it
         elif "resource" in data and isinstance(data["resource"], dict):
             resource_dict = data["resource"]
-            required_fields = ["gpu_model", "quantity", "sla", "region"]
+            required_fields = ["gpu_model", "gpu_count", "sla", "region"]
             missing = [f for f in required_fields if f not in resource_dict]
             if missing:
                 raise ValueError(f"Resource missing required fields: {missing}")
@@ -549,7 +668,7 @@ class ResourceImbalanceEvent(DomainEvent):
             severity=severity,
             data={
                 "gpu_model": resource.gpu_model.value,
-                "quantity": resource.quantity,
+                "gpu_count": resource.gpu_count,
                 "region": resource.region.value,
                 "imbalance_type": imbalance_type,
                 "severity": severity,

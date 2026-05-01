@@ -85,7 +85,7 @@ def _insert_resource(
 
 
 def _insert_order(path: str, order_id: str, status: str, resource_id: str | None) -> None:
-    offer = {"gpu_model": "RTX 4090", "quantity": 1, "sla": 95.0, "region": "New York, US"}
+    offer = {"gpu_model": "RTX 4090", "gpu_count": 1, "sla": 95.0, "region": "New York, US"}
     if resource_id:
         offer["resource_id"] = resource_id
     conn = sqlite3.connect(path)

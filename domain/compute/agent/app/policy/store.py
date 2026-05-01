@@ -104,7 +104,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
                     resource.gpu_model == offer.gpu_model
                     and resource.region == offer.region
                     and resource.sla >= offer.sla
-                    and resource.quantity >= offer.quantity
+                    and resource.gpu_count >= offer.gpu_count
                 ):
                     offer = resource
                     break

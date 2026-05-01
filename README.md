@@ -50,7 +50,7 @@ Create a market order via the agent endpoint:
 
 ```bash
 market listing create \
-  -o '{"gpu_model":"H200","quantity":1,"sla":99.9,"region":"California, US"}' \
+  -o '{"gpu_model":"H200","gpu_count":1,"sla":99.9,"region":"California, US"}' \
   -d '{"token":"MOCK","amount":9.0}'
 ```
 

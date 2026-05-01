@@ -1,14 +1,40 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Final, Protocol
 
 from market_storefront.schema.pydantic_models import (
     ComputeResource,
     ERC20TokenMetadata,
+    GpuInterconnect,
     TokenResource,
+    VirtualizationType,
 )
 from service.clients.token import TOKEN_REGISTRY
+
+
+# Optional spec fields on ComputeResource that round-trip through the DB
+# resource ``attributes`` dict. The attribute key matches the model field.
+# Items are (field_name, coercer-or-None). Coercer maps the raw attribute
+# value back into the typed field on read; None means pass-through.
+_COMPUTE_OPTIONAL_SPEC_FIELDS: tuple[tuple[str, Any], ...] = (
+    ("cpu_type", None),
+    ("cpu_count", int),
+    ("ram_gb", int),
+    ("disk_gb", int),
+    ("disk_type", None),
+    ("disk_count", int),
+    ("motherboard", None),
+    ("gpu_interconnect", GpuInterconnect),
+    ("nic_speed_gbps", int),
+    ("internet_download_mbps", int),
+    ("internet_upload_mbps", int),
+    ("static_ip", bool),
+    ("open_ports_count", int),
+    ("virtualization_type", VirtualizationType),
+    ("datacenter_grade", bool),
+)
 
 
 class ResourceAdapter(Protocol):
@@ -58,9 +84,9 @@ class ComputeGpuResourceAdapter:
         attrs = _ensure_dict(db_resource.get("attributes"))
 
         gpu_model = attrs.get("gpu_model") or db_resource.get("resource_subtype")
-        quantity = db_resource.get("value")
-        if quantity is None:
-            quantity = attrs.get("quantity", 0)
+        gpu_count = db_resource.get("value")
+        if gpu_count is None:
+            gpu_count = attrs.get("gpu_count", 0)
         sla = attrs.get("sla")
         region = attrs.get("region")
         vm_host = attrs.get("vm_host")
@@ -70,13 +96,21 @@ class ComputeGpuResourceAdapter:
                 "compute.gpu db_resource requires attributes.gpu_model/resource_subtype, attributes.sla, and attributes.region"
             )
 
+        optional_kwargs: dict[str, Any] = {}
+        for field_name, coerce in _COMPUTE_OPTIONAL_SPEC_FIELDS:
+            raw = attrs.get(field_name)
+            if raw is None:
+                continue
+            optional_kwargs[field_name] = coerce(raw) if coerce is not None else raw
+
         return ComputeResource(
             resource_id=str(db_resource.get("resource_id")) if db_resource.get("resource_id") is not None else None,
             gpu_model=gpu_model,
-            quantity=int(quantity),
+            gpu_count=int(gpu_count),
             sla=float(sla),
             region=region,
             vm_host=str(vm_host) if vm_host is not None else None,
+            **optional_kwargs,
         )
 
     def from_domain_resource(
@@ -88,19 +122,25 @@ class ComputeGpuResourceAdapter:
     ) -> dict[str, Any]:
         """
         Convert a ComputeResource domain instance to a DB resource dict."""
+        attributes: dict[str, Any] = {
+            "gpu_model": resource.gpu_model.value,
+            "sla": resource.sla,
+            "region": resource.region.value,
+            "vm_host": resource.vm_host,
+        }
+        for field_name, _ in _COMPUTE_OPTIONAL_SPEC_FIELDS:
+            v = getattr(resource, field_name)
+            if v is None:
+                continue
+            attributes[field_name] = v.value if isinstance(v, Enum) else v
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
             "resource_subtype": resource.gpu_model.value.lower(),
             "unit": "count",
-            "value": resource.quantity,
+            "value": resource.gpu_count,
             "state": state,
-            "attributes": {
-                "gpu_model": resource.gpu_model.value,
-                "sla": resource.sla,
-                "region": resource.region.value,
-                "vm_host": resource.vm_host,
-            },
+            "attributes": attributes,
         }
 
     def from_dict(self, data: dict[str, Any]) -> ComputeResource:

@@ -40,7 +40,7 @@ def _make_service(db: SQLiteClient, registry: dict | None = None) -> SystemServi
     )
 
 
-OFFER = {"gpu_model": "H200", "quantity": 1, "sla": 99.0, "region": "California, US"}
+OFFER = {"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"}
 DEMAND = {
     "token": {
         "symbol": "MOCK",

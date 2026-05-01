@@ -30,7 +30,7 @@ from storefront_client import StorefrontClient, StorefrontClientError
 
 _COMPUTE_OFFER = {
     "gpu_model": "RTX 4090",
-    "quantity": 1,
+    "gpu_count": 1,
     "sla": 99.0,
     "region": "California, US",
 }
@@ -77,7 +77,7 @@ class TestAlertEndpoint:
 
     async def test_alert_resource_missing_fields_returns_400(self, agent_app_client):
         bad = dict(_ALERT_BODY)
-        bad["resource"] = {"gpu_model": "RTX 4090"}  # missing quantity/sla/region
+        bad["resource"] = {"gpu_model": "RTX 4090"}  # missing gpu_count/sla/region
         resp = await agent_app_client.post("/alerts/resource", json=bad)
         assert resp.status_code == 400
 
