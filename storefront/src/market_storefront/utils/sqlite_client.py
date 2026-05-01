@@ -658,7 +658,29 @@ class SQLiteClient:
         token: str | None = None,
         max_duration_seconds: int | None = None,
     ) -> None:
-        """Create or update a generic resource snapshot row."""
+        """Create or update a generic resource snapshot row.
+
+        For ``compute.gpu`` rows that reference a known local host via
+        ``attributes.vm_host``, runs a capacity check against the host's
+        gpu_count / vcpu_count / ram_gb / disk_gb totals. Raises
+        ``CapacityExceededError`` if the new commitment would over-allocate
+        the host. Slices without ``vm_host`` or pointing at unknown hosts
+        pass through unchecked.
+        """
+        # Capacity gate — only for active compute.gpu slices.
+        if resource_type == "compute.gpu" and (state is None or state != "deleted"):
+            from .capacity import check_slice_fits_host
+            attrs = attributes or {}
+            await check_slice_fits_host(
+                sqlite_client=self,
+                resource_id=resource_id,
+                host_name=attrs.get("vm_host"),
+                gpu_count=int(value) if value is not None else None,
+                vcpu_count=attrs.get("vcpu_count"),
+                ram_gb=attrs.get("ram_gb"),
+                disk_gb=attrs.get("disk_gb"),
+            )
+
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:

@@ -366,3 +366,188 @@ class TestAdapterHostJoin:
         assert "cpu_type" not in attrs
         assert "host_cpu_cores" not in attrs
         assert "motherboard" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# Capacity enforcement on upsert_resource
+# ---------------------------------------------------------------------------
+
+
+from market_storefront.utils.capacity import CapacityExceededError
+
+
+class TestCapacityEnforcement:
+    def _attrs(self, host: str, vcpu: int = 16, ram: int = 256, disk: int = 4000) -> dict:
+        return {
+            "gpu_model": "H200", "sla": 99.0, "region": "California, US",
+            "vm_host": host, "vcpu_count": vcpu, "ram_gb": ram, "disk_gb": disk,
+        }
+
+    def test_first_slice_within_capacity_passes(self, client):
+        async def _run():
+            await client.upsert_host(
+                name="h", total_gpu_count=4, host_cpu_cores=64,
+                host_ram_gb=512, host_disk_gb=8000,
+            )
+            # 1 GPU / 16 vCPU / 256 RAM / 4 TB on a 4-GPU / 64-core / 512 GB / 8 TB host.
+            await client.upsert_resource(
+                resource_id="s1",
+                resource_type="compute.gpu",
+                resource_subtype="h200",
+                unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            cap = await client.host_capacity_remaining(name="h")
+            assert cap["used"]["gpu_count"] == 1
+
+        asyncio.run(_run())
+
+    def test_second_slice_within_remaining_capacity_passes(self, client):
+        async def _run():
+            await client.upsert_host(
+                name="h", total_gpu_count=4, host_cpu_cores=64,
+                host_ram_gb=512, host_disk_gb=8000,
+            )
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=2, state="available",
+                attributes=self._attrs("h", vcpu=32, ram=256, disk=4000),
+            )
+            await client.upsert_resource(
+                resource_id="s2", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=2, state="available",
+                attributes=self._attrs("h", vcpu=32, ram=256, disk=4000),
+            )
+            cap = await client.host_capacity_remaining(name="h")
+            assert cap["remaining"] == {"gpu_count": 0, "vcpu_count": 0, "ram_gb": 0, "disk_gb": 0}
+
+        asyncio.run(_run())
+
+    def test_oversubscribing_gpu_count_rejected(self, client):
+        async def _run():
+            await client.upsert_host(name="h", total_gpu_count=2, host_cpu_cores=64)
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=2, state="available",
+                attributes=self._attrs("h", vcpu=32),
+            )
+            with pytest.raises(CapacityExceededError, match="gpu_count"):
+                await client.upsert_resource(
+                    resource_id="s2", resource_type="compute.gpu",
+                    resource_subtype="h200", unit="count", value=1, state="available",
+                    attributes=self._attrs("h", vcpu=16),
+                )
+
+        asyncio.run(_run())
+
+    def test_oversubscribing_ram_rejected(self, client):
+        async def _run():
+            await client.upsert_host(
+                name="h", total_gpu_count=4, host_cpu_cores=64, host_ram_gb=128,
+            )
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h", ram=100),
+            )
+            with pytest.raises(CapacityExceededError, match="ram_gb"):
+                await client.upsert_resource(
+                    resource_id="s2", resource_type="compute.gpu",
+                    resource_subtype="h200", unit="count", value=1, state="available",
+                    attributes=self._attrs("h", ram=64),
+                )
+
+        asyncio.run(_run())
+
+    def test_reimport_same_resource_is_idempotent(self, client):
+        """Re-upserting the same resource_id excludes itself from the capacity sum."""
+        async def _run():
+            await client.upsert_host(name="h", total_gpu_count=2)
+            attrs = self._attrs("h")
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=2, state="available",
+                attributes=attrs,
+            )
+            # Re-upsert with same id and full host gpu_count — should pass.
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=2, state="available",
+                attributes=attrs,
+            )
+            cap = await client.host_capacity_remaining(name="h")
+            assert cap["used"]["gpu_count"] == 2
+
+        asyncio.run(_run())
+
+    def test_unknown_host_passes_through(self, client):
+        """Resources pointing at hosts the operator hasn't registered are not gated."""
+        async def _run():
+            # No upsert_host call. Resource references vm_host="never-registered".
+            await client.upsert_resource(
+                resource_id="remote", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=64, state="available",
+                attributes=self._attrs("never-registered", vcpu=512, ram=4096, disk=80000),
+            )
+            # Did not raise.
+
+        asyncio.run(_run())
+
+    def test_no_vm_host_passes_through(self, client):
+        """Resources without vm_host (legacy) are not gated."""
+        async def _run():
+            attrs = {"gpu_model": "H200", "sla": 99.0, "region": "California, US"}
+            await client.upsert_resource(
+                resource_id="legacy", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=4, state="available",
+                attributes=attrs,
+            )
+
+        asyncio.run(_run())
+
+    def test_deleted_state_skips_capacity_check(self, client):
+        """Soft-deleting a slice doesn't run the capacity gate."""
+        async def _run():
+            await client.upsert_host(name="h", total_gpu_count=1)
+            # Pre-fill the host.
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="available",
+                attributes=self._attrs("h"),
+            )
+            # Now mark it deleted with the same gpu_count — gate skipped.
+            await client.upsert_resource(
+                resource_id="s1", resource_type="compute.gpu",
+                resource_subtype="h200", unit="count", value=1, state="deleted",
+                attributes=self._attrs("h"),
+            )
+
+        asyncio.run(_run())
+
+    def test_csv_import_surfaces_capacity_error_per_row(self, client, tmp_path):
+        """An over-committed slice in CSV becomes a row-level error, not a fatal."""
+        hosts = tmp_path / "hosts.csv"
+        hosts.write_text(
+            "name,total_gpu_count,host_cpu_cores,host_ram_gb,host_disk_gb\nh,2,32,256,4000\n"
+        )
+        # Two slices each demanding 2 GPUs — the second over-commits by 2.
+        resources = tmp_path / "resources.csv"
+        resources.write_text(
+            "resource_id,resource_type,unit,value,state,attribute.gpu_model,attribute.sla,"
+            "attribute.region,attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
+            "attribute.disk_gb\n"
+            "ok,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
+            "bad,compute.gpu,count,2,available,H200,99.0,\"California, US\",h,16,128,2000\n"
+        )
+
+        async def _run():
+            await client.upsert_hosts_from_csv(csv_path=str(hosts), dry_run=False)
+            report = await client.upsert_resources_from_csv(csv_path=str(resources), dry_run=False)
+            # The "ok" row imports; the "bad" row fails capacity but doesn't crash.
+            assert report["imported_count"] == 1
+            assert report["failed_count"] == 1
+            bad_rows = [r for r in report["rows"] if not r["imported"]]
+            assert len(bad_rows) == 1
+            assert any("over-committed" in e for e in bad_rows[0]["errors"])
+
+        asyncio.run(_run())
