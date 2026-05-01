@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -44,10 +45,15 @@ class BuyConfig:
 
 @dataclass
 class BuyConstraints:
-    """What the buyer wants, enforced locally during negotiation."""
-    max_price: int          # ceiling per order (base units, per-hour rate)
-    initial_price: int      # opening bid per order
-    duration_seconds: int   # buyer's lease ask, sent on /negotiate/new
+    """What the buyer wants, enforced locally during negotiation.
+
+    ``max_price`` and ``initial_price`` may be ``None`` when ``run_buy`` is
+    invoked with a ``derive_prices`` callback that computes per-listing
+    prices from the seller's advertised min_price.
+    """
+    duration_seconds: int               # buyer's lease ask, sent on /negotiate/new
+    max_price: Optional[int] = None     # ceiling per order (base units, per-hour rate)
+    initial_price: Optional[int] = None # opening bid per order
 
 
 @dataclass
@@ -87,14 +93,23 @@ class BuyResult:
 def query_registry_for_matches(
     registry_url: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    filters: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Ask the registry for open seller listings.
+    """Ask the registry for open seller listings, optionally pre-filtered.
 
-    Returns the raw list of listing dicts the registry gave us. Buyers
-    don't have anything in the registry to filter against — they pick
-    one (or several) offers to negotiate with.
+    ``filters`` is a flat dict of registry filter params (gpu_model,
+    gpu_count_min, region, virtualization_type, etc.). ``None``/missing
+    values are dropped; booleans are serialized as the lowercase strings
+    FastAPI expects.
     """
-    url = registry_url.rstrip("/") + "/listings?status=open"
+    base_params: dict[str, Any] = {"status": "open"}
+    if filters:
+        for key, val in filters.items():
+            if val is None:
+                continue
+            base_params[key] = "true" if val is True else "false" if val is False else val
+    url = registry_url.rstrip("/") + "/listings?" + urllib.parse.urlencode(base_params)
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -119,6 +134,30 @@ def query_registry_for_matches(
         return []
 
     return items
+
+
+def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
+    """Pull the seller's per-hour floor (``demand_resource.amount``) out of
+    a registry listing dict. Returns ``None`` if absent or unparseable.
+
+    The marketplace's pricing convention treats demand_resource.amount as
+    the per-hour token rate (in raw token base units); see
+    storefront/utils/action_executor.py:772 for the matching settlement
+    formula ``total = hourly_rate × duration_seconds / 3600``.
+    """
+    demand = listing.get("demand_resource") or {}
+    if isinstance(demand, str):
+        try:
+            demand = json.loads(demand)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(demand, dict):
+        return None
+    amount = demand.get("amount")
+    try:
+        return int(amount) if amount is not None else None
+    except (ValueError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +337,7 @@ def run_buy(
     settlement_total_timeout: float = DEFAULT_SETTLEMENT_TIMEOUT,
     on_event: Optional[Callable[[str, dict], None]] = None,
     sleep: Callable[[float], None] = time.sleep,
+    derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]] = None,
 ) -> BuyResult:
     """Run one buy attempt end-to-end. Sequential; every dependency is explicit.
 
@@ -313,6 +353,11 @@ def run_buy(
     on_event
         Optional observer: called as `on_event(stage_name, payload)` at
         each stage transition. Good for CLI progress UI.
+    derive_prices
+        Optional ``(match) -> (initial_price, max_price)`` callback for
+        per-listing pricing. When set, overrides the constants on
+        ``constraints`` for each candidate. Useful for auto-pricing flows
+        that anchor on the seller's advertised min_price.
 
     Returns
     -------
@@ -371,14 +416,43 @@ def run_buy(
                 their_reply=their_reply,
             )
 
+        if derive_prices is not None:
+            try:
+                initial_price, max_price = derive_prices(match)
+            except Exception as exc:
+                _emit_neg("negotiation_failed", error=f"price_derivation: {exc}")
+                attempts.append({
+                    "seller_url": seller_url,
+                    "listing_id": listing_id,
+                    "error": f"price_derivation: {exc}",
+                })
+                continue
+        else:
+            if constraints.initial_price is None or constraints.max_price is None:
+                _emit_neg(
+                    "negotiation_failed",
+                    error="missing_prices_no_derive_prices_callback",
+                )
+                attempts.append({
+                    "seller_url": seller_url,
+                    "listing_id": listing_id,
+                    "error": (
+                        "BuyConstraints.initial_price and max_price are None "
+                        "but no derive_prices callback was provided"
+                    ),
+                })
+                continue
+            initial_price = constraints.initial_price
+            max_price = constraints.max_price
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
                 buyer_address=config.buyer_address,
                 buyer_private_key=config.buyer_private_key,
                 listing_id=listing_id,
-                initial_price=constraints.initial_price,
-                max_price=constraints.max_price,
+                initial_price=initial_price,
+                max_price=max_price,
                 duration_seconds=constraints.duration_seconds,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,

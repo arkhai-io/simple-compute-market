@@ -316,19 +316,34 @@ class TestBuyFrom:
             "Settlement must not run when negotiation didn't agree"
         )
 
-    def test_buy_fresh_still_requires_initial_price(self, runner):
-        """--from is the only way to skip --initial-price / --max-price.
-        Fresh `buy` without those flags must fail fast."""
+    def test_buy_fresh_still_requires_duration_hours(self, runner):
+        """Fresh `market buy` (no --from) without --duration-hours fails fast.
+
+        Prices are now optional — when omitted they're derived from each
+        listing's seller-advertised min_price (interactively confirmed by
+        default; non-interactively under --auto-price). Duration is still
+        mandatory because it shapes the buyer's lease ask sent at
+        /negotiate/new.
+        """
         result = runner.invoke(app, [
             "buy",
             "--buyer-address", _BUYER_ADDR,
             "--buyer-priv-key", _BUYER_PK,
         ])
         assert result.exit_code == 2
-        assert (
-            "initial-price" in result.output.lower()
-            or "max-price" in result.output.lower()
-        )
+        assert "duration-hours" in result.output.lower()
+
+    def test_buy_fresh_rejects_only_one_price(self, runner):
+        """Pass both prices, or neither — never one half."""
+        result = runner.invoke(app, [
+            "buy",
+            "--buyer-address", _BUYER_ADDR,
+            "--buyer-priv-key", _BUYER_PK,
+            "--duration-hours", "1",
+            "--initial-price", "100",
+        ])
+        assert result.exit_code == 2
+        assert "initial-price" in result.output.lower() or "max-price" in result.output.lower()
 
     def test_buy_from_mid_stream_without_max_price_errors(
         self, runner, monkeypatch,

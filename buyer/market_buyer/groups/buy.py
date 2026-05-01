@@ -28,6 +28,8 @@ from rich.table import Table
 from ..buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
+    extract_seller_min_price,
+    query_registry_for_matches,
     run_buy,
 )
 from ..buyer_client import ResumeState, negotiate_with_seller
@@ -39,6 +41,90 @@ from ._deal import (
     open_run_log,
 )
 from .settle import run_settle_from_log
+
+
+def _resolve_prices_from_matches(
+    *,
+    matches: list[dict],
+    console: Console,
+    auto_price: bool,
+    price_markup: float,
+) -> tuple[Optional[int], Optional[int]]:
+    """Derive (initial_price, max_price) from the seller-advertised
+    min_price on the candidate listings.
+
+    Strategy: pick the cheapest listing's min_price as the anchor. Set
+    ``initial = anchor`` (open at the seller's floor) and
+    ``max = round(anchor * price_markup)`` (a ceiling above the floor).
+
+    Modes:
+      - ``auto_price=True``: derive silently and return.
+      - ``auto_price=False`` and stdin is a TTY: print the candidate
+        listings + derived defaults, prompt the user to confirm or edit.
+      - ``auto_price=False`` and stdin is not a TTY: derive silently
+        (so non-interactive scripts that omit prices still work).
+
+    Returns ``(None, None)`` if no listing carries a usable min_price or
+    the user declines.
+    """
+    priced = [
+        (extract_seller_min_price(m), m)
+        for m in matches
+    ]
+    priced = [(p, m) for p, m in priced if p is not None and p > 0]
+    if not priced:
+        typer.secho(
+            "No matched listing carries a parseable min_price; pass "
+            "--initial-price / --max-price explicitly.",
+            err=True, fg=typer.colors.RED,
+        )
+        return None, None
+
+    priced.sort(key=lambda pm: pm[0])
+    cheapest = priced[0][0]
+    derived_initial = cheapest
+    derived_max = max(int(round(cheapest * price_markup)), cheapest + 1)
+
+    interactive = (not auto_price) and os.isatty(0)
+    if not interactive:
+        return derived_initial, derived_max
+
+    # Show the candidate listings with their min_prices so the user can
+    # cross-check the derived defaults.
+    table = Table(title="Matched listings (per-hour rates)", show_header=True)
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Listing ID", overflow="fold")
+    table.add_column("Seller", overflow="fold")
+    table.add_column("min_price", justify="right")
+    for i, (p, m) in enumerate(priced, start=1):
+        table.add_row(
+            str(i),
+            str(m.get("listing_id", "-")),
+            str(m.get("seller", "-"))[:48],
+            str(p),
+        )
+    console.print(table)
+
+    typer.echo(
+        f"Defaults: --initial-price={derived_initial} "
+        f"--max-price={derived_max} (anchor={cheapest}, markup={price_markup})"
+    )
+    if not typer.confirm("Use these prices?", default=True):
+        try:
+            initial_price = typer.prompt(
+                "initial-price (raw token base units, per-hour)",
+                default=derived_initial,
+                type=int,
+            )
+            max_price = typer.prompt(
+                "max-price (raw token base units, per-hour)",
+                default=derived_max,
+                type=int,
+            )
+        except typer.Abort:
+            return None, None
+        return initial_price, max_price
+    return derived_initial, derived_max
 
 
 def _run_resume_from(
@@ -203,16 +289,27 @@ def register(app: typer.Typer) -> None:
     def buy(
         initial_price: Optional[int] = typer.Option(
             None, "--initial-price",
-            help="Opening bid per negotiation (raw token units). "
-                 "Required for fresh runs; resumed runs (--from) "
-                 "carry it forward from the run-log.",
+            help="Opening bid per negotiation (raw token units, per-hour rate). "
+                 "Optional — when omitted, prices are derived from the "
+                 "seller's advertised min_price (interactively confirmed "
+                 "by default; with --auto-price uses min_price as-is).",
         ),
         max_price: Optional[int] = typer.Option(
             None, "--max-price",
-            help="Ceiling per negotiation (raw token units). Required "
-                 "for fresh runs; required for --from runs only when "
-                 "the negotiation is still mid-stream (the strategy "
-                 "needs the buyer's ceiling).",
+            help="Ceiling per negotiation (raw token units, per-hour rate). "
+                 "Optional — when omitted, derived as min_price × "
+                 "--price-markup (interactively confirmed by default).",
+        ),
+        auto_price: bool = typer.Option(
+            False, "--auto-price",
+            help="Skip the interactive price prompt; derive initial = "
+                 "seller's min_price and max = min_price × --price-markup. "
+                 "Set this for non-interactive runs.",
+        ),
+        price_markup: float = typer.Option(
+            1.5, "--price-markup",
+            help="Multiplier applied to seller min_price when auto-deriving "
+                 "max-price. Default 1.5 (50%% headroom).",
         ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
@@ -220,6 +317,29 @@ def register(app: typer.Typer) -> None:
                  "Required for fresh runs — sent to the seller's "
                  "/negotiate/new and validated against the listing's "
                  "max_duration_seconds. Resumed runs read it from the run-log.",
+        ),
+        # Spec filters — slice fields
+        gpu_model: Optional[str] = typer.Option(None, "--gpu-model", help="Filter listings by GPU model (e.g., H200)."),
+        gpu_count_min: Optional[int] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
+        vcpu_count_min: Optional[int] = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
+        ram_gb_min: Optional[int] = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
+        disk_gb_min: Optional[int] = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
+        region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
+        virtualization_type: Optional[str] = typer.Option(
+            None, "--virt", help="Virtualization mode (bare_metal|vm|container).",
+        ),
+        # Spec filters — host context
+        cpu_type: Optional[str] = typer.Option(None, "--cpu-type", help="Filter by host CPU model string."),
+        host_cpu_cores_min: Optional[int] = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
+        host_ram_gb_min: Optional[int] = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
+        gpu_interconnect: Optional[str] = typer.Option(
+            None, "--interconnect", help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
+        ),
+        datacenter_grade: Optional[bool] = typer.Option(
+            None, "--datacenter/--no-datacenter", help="Restrict to datacenter-grade hosts.",
+        ),
+        static_ip: Optional[bool] = typer.Option(
+            None, "--static-ip/--no-static-ip", help="Restrict to hosts with static public IP.",
         ),
         from_run: Optional[str] = typer.Option(
             None, "--from",
@@ -322,13 +442,6 @@ def register(app: typer.Typer) -> None:
             )
             return
 
-        if initial_price is None or max_price is None:
-            typer.secho(
-                "Fresh `market buy` runs require --initial-price and "
-                "--max-price. To resume a prior run pass --from <run-id>.",
-                err=True, fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
         if duration_hours is None or duration_hours <= 0:
             typer.secho(
                 "Fresh `market buy` runs require --duration-hours "
@@ -337,6 +450,18 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
         duration_seconds = int(round(duration_hours * 3600))
+
+        explicit_prices = initial_price is not None and max_price is not None
+        if not explicit_prices and (initial_price is not None) != (max_price is not None):
+            typer.secho(
+                "Pass both --initial-price and --max-price, or neither "
+                "(in which case prices are derived from seller min_price).",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        if price_markup <= 0:
+            typer.secho("--price-markup must be positive.", err=True, fg=typer.colors.RED)
+            raise typer.Exit(2)
 
         # Resolution: CLI flag > config.toml > default.
         addr = resolve_config_value(
@@ -405,6 +530,54 @@ def register(app: typer.Typer) -> None:
             expiration_seconds=expiration_seconds,
         )
 
+        # Filter-aware discovery: pre-fetch matches with spec filters applied
+        # so we can (a) show them to the user in interactive mode, (b) anchor
+        # auto-price derivation on each listing's seller-advertised min_price.
+        spec_filters = {
+            "gpu_model": gpu_model,
+            "gpu_count_min": gpu_count_min,
+            "vcpu_count_min": vcpu_count_min,
+            "ram_gb_min": ram_gb_min,
+            "disk_gb_min": disk_gb_min,
+            "region": region,
+            "virtualization_type": virtualization_type,
+            "cpu_type": cpu_type,
+            "host_cpu_cores_min": host_cpu_cores_min,
+            "host_ram_gb_min": host_ram_gb_min,
+            "gpu_interconnect": gpu_interconnect,
+            "datacenter_grade": datacenter_grade,
+            "static_ip": static_ip,
+        }
+        active_filters = {k: v for k, v in spec_filters.items() if v is not None}
+        try:
+            matches = query_registry_for_matches(reg, filters=active_filters or None)
+        except RuntimeError as exc:
+            typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(3)
+
+        if not matches:
+            typer.secho(
+                "No listings matched. " + (
+                    f"Filters applied: {active_filters}." if active_filters
+                    else "Registry returned nothing."
+                ),
+                err=True, fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(0)
+
+        # Interactive vs auto-price: when the buyer hasn't pinned both prices
+        # explicitly, anchor on the seller's advertised min_price per match.
+        if not explicit_prices:
+            initial_price, max_price = _resolve_prices_from_matches(
+                matches=matches,
+                console=console,
+                auto_price=auto_price,
+                price_markup=price_markup,
+            )
+            if initial_price is None or max_price is None:
+                # User aborted, or no listing carried a min_price.
+                raise typer.Exit(2)
+
         config = BuyConfig(
             registry_url=reg,
             buyer_address=addr,
@@ -426,6 +599,7 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             max_matches=max_matches,
             max_rounds=max_rounds,
+            filters=active_filters or None,
         )
 
         header = Table.grid(padding=(0, 2))
@@ -436,6 +610,8 @@ def register(app: typer.Typer) -> None:
         header.add_row("Buyer wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
+        if active_filters:
+            header.add_row("Filters", ", ".join(f"{k}={v}" for k, v in active_filters.items()))
         console.print(Panel(header, title="market buy-sync", border_style="cyan"))
 
         def _observe(stage: str, body: dict) -> None:
@@ -480,6 +656,7 @@ def register(app: typer.Typer) -> None:
                 config=config,
                 constraints=constraints,
                 create_escrow=create_escrow,
+                matches=matches,
                 max_matches_to_try=max_matches,
                 max_negotiation_rounds=max_rounds,
                 settlement_poll_interval=poll_interval,
