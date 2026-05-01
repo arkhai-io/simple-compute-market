@@ -143,3 +143,44 @@ class TestStorefrontRegistration:
             f"Full status response: {body}"
         )
         log.info("✓ Storefront registry connectivity ok")
+
+    def test_negotiation_strategy_viable(
+        self,
+        seller_api_url: str,
+        seller_settings: dict,
+    ) -> None:
+        """GET /api/v1/system/status must report a viable negotiation strategy.
+
+        Guards against the rl strategy being configured but torch being
+        unavailable in the container — in that case every /negotiate/new call
+        returns exit_negotiation at round 0, causing stage 10 of the e2e test
+        to fail with a 409 on force-accept.  Catching this here saves the entire
+        multi-stage e2e run.
+        """
+        import httpx
+        admin_key = seller_settings.get("admin_api_key", "")
+        headers = {"X-Admin-Key": admin_key} if admin_key else {}
+        try:
+            resp = httpx.get(
+                f"{seller_api_url}/api/v1/system/status",
+                headers=headers,
+                timeout=5.0,
+            )
+        except Exception as exc:
+            pytest.fail(f"Could not reach /api/v1/system/status: {exc}")
+
+        assert resp.status_code in (200, 503), (
+            f"Unexpected status {resp.status_code}: {resp.text[:200]}"
+        )
+        body = resp.json()
+        strat = body.get("checks", {}).get("negotiation_strategy", "absent")
+        assert strat != "absent", (
+            "checks.negotiation_strategy absent from status response. "
+            "Ensure the storefront image includes the updated system_controller.py."
+        )
+        assert "exit_on_probe" not in strat, (
+            f"Negotiation strategy would exit on every round: {strat!r}\n"
+            "Fix: set [seller.negotiation] policy_mode = 'bisection' in config.toml,\n"
+            "or install torch in the container if rl is required."
+        )
+        log.info("✓ Negotiation strategy viable: %s", strat)

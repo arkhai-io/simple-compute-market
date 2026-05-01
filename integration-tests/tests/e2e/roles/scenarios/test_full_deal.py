@@ -53,13 +53,13 @@ DEMAND_RESOURCE = {
     "token": {
         "symbol": "MOCK",
         "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 18,
+        "decimals": 0,   # test token — no decimal scaling so amount is already base units
     },
     "amount": 10_000,
 }
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 7_000
-BUYER_MAX_PRICE = 11_000
+BUYER_INITIAL_PRICE = 10_000   # at seller's floor (demand.amount) — policy will counter or accept
+BUYER_MAX_PRICE = 12_000
 MOCK_ESCROW_UID = f"escrow-e2e-{uuid.uuid4().hex[:8]}"
 PROV_RULE_ID = "e2e-create-pause"
 
@@ -132,6 +132,36 @@ class TestStage00b_PolicyDryRun:
         deal_state._policy_evaluated = True
         log.info("[00b] Policy dry-run: action=%s policy=%s",
                  action, result.get("policy_used"))
+
+
+# ---------------------------------------------------------------------------
+# Stage 00c — Negotiation strategy viability
+# ---------------------------------------------------------------------------
+
+class TestStage00c_NegotiationStrategy:
+    def test_00c_negotiation_strategy_is_viable(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """GET /api/v1/system/status → checks.negotiation_strategy is not exit-on-probe.
+
+        Catches the rl-strategy-but-no-torch failure mode before any negotiation
+        attempt.  If this fails, set [seller.negotiation] policy_mode = 'bisection'
+        in config.toml and restart the storefront.
+        """
+        require_state(deal_state, "_policy_evaluated")
+        status = storefront_admin_client.get_system_status()
+        strat = status.checks.get("negotiation_strategy", "absent")
+        assert strat != "absent", (
+            "checks.negotiation_strategy missing from /api/v1/system/status. "
+            "Rebuild the storefront image with the updated system_controller.py."
+        )
+        assert "exit_on_probe" not in strat, (
+            f"Negotiation strategy would exit every round: {strat!r}\n"
+            "Set [seller.negotiation] policy_mode = 'bisection' in config.toml "
+            "and restart the storefront."
+        )
+        deal_state._negotiation_strategy_viable = True
+        log.info("[00c] Negotiation strategy: %s", strat)
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +362,8 @@ class TestStage08_NegotiationStarts:
         self, storefront_client, buyer_config, deal_state: DealState
     ):
         """POST /negotiate/new — buyer opens with initial_price."""
-        require_state(deal_state, "seller_listing_id", "admin_resume_confirmed")
+        require_state(deal_state, "seller_listing_id", "admin_resume_confirmed",
+                      "_negotiation_strategy_viable")
 
         from storefront_client.client import _sign_eip191
         ts = str(int(time.time()))
@@ -357,10 +388,31 @@ class TestStage08_NegotiationStarts:
         neg_id = body.get("negotiation_id")
         assert neg_id, f"No negotiation_id in response: {body}"
 
+        # Verify the seller's round 0 decision via stage events — catches
+        # strategy misconfiguration (e.g. rl without torch) before it surfaces
+        # as a 409 at stage 10.
+        events_result = storefront_admin_client.get_events(
+            stage="negotiation",
+            negotiation_id=neg_id,
+        )
+        round0_events = [e for e in events_result.events if e.event == "round_decided"]
+        assert round0_events, (
+            f"No 'negotiation/round_decided' stage event found for {neg_id}. "
+            "Check that sync_negotiation.py emits stage_event after decide()."
+        )
+        round0 = round0_events[0]
+        assert round0.data.get("decision") != "exit", (
+            f"Seller exited at round 0. reason={round0.data.get('decision_reason')!r}. "
+            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
+            "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
+            "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to meet the seller floor."
+        )
+
         deal_state.negotiation_id = neg_id
         deal_state.negotiation_round_count = 1
-        log.info("[08] Negotiation %s started; seller action=%s",
-                 neg_id, body.get("action"))
+        log.info("[08] Negotiation %s started; seller action=%s reason=%s",
+                 neg_id, body.get("action"),
+                 round0.data.get("decision_reason"))
 
 
 class TestStage09_NegotiationVisible:
@@ -385,6 +437,23 @@ class TestStage10_NegotiationForceAccepted:
     ):
         """Admin force-accepts at agreed_price to converge without round-trips."""
         require_state(deal_state, "seller_listing_id", "negotiation_id")
+
+        # Guard: confirm the negotiation is still open before force-accepting.
+        # If round 0 exited (e.g. strategy misconfiguration), force-accept
+        # returns 409.  Checking stage events here gives a better failure message.
+        events_result = storefront_admin_client.get_events(
+            stage="negotiation",
+            negotiation_id=deal_state.negotiation_id,
+        )
+        terminal_exits = [
+            e for e in events_result.events
+            if e.event == "round_decided" and e.data.get("decision") == "exit"
+        ]
+        assert not terminal_exits, (
+            f"Negotiation {deal_state.negotiation_id} already exited before force-accept. "
+            f"Exit reason: {terminal_exits[0].data.get('decision_reason')!r}. "
+            "Check stage 08's round_decided event for root cause."
+        )
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
         result = storefront_admin_client.force_accept_negotiation(

@@ -56,6 +56,7 @@ class SystemController:
         if include_registry:
             checks["registry"] = await self._registry_check()
             checks["registry_auth"] = await self._registry_auth_check()
+            checks["negotiation_strategy"] = self._negotiation_strategy_check()
 
         all_ok = all(v in ("ok", "unconfigured") for v in checks.values())
         return JSONResponse(
@@ -129,6 +130,40 @@ class SystemController:
             body = getattr(exc, "body", "") or str(exc)
             if "404" in str(exc) or "not found" in body.lower():
                 return "agent_not_found"
+            return f"error: {exc}"
+
+    def _negotiation_strategy_check(self) -> str:
+        """Return the name of the active negotiation strategy and whether it is viable.
+
+        A strategy is viable if it can be instantiated and would not immediately
+        return exit on a synthetic round.  Returns one of:
+          'bisection'                    — BisectionStrategy loaded; always viable
+          'rl (viable)'                  — RL strategy loaded and torch is available
+          '<name> (exit_on_probe: <r>)'  — strategy exits every round; negotiations will fail
+          'unknown: <msg>'               — load_strategy raised; negotiation will 500
+        """
+        try:
+            from market_storefront.utils.sync_negotiation import _load_storefront_strategy
+            from market_policy.negotiation_strategy import NegotiationRoundInput
+
+            strategy = _load_storefront_strategy()
+            name = type(strategy).__name__
+
+            # Probe: synthetic maximize round where buyer meets floor exactly.
+            # A viable strategy accepts or counters; a broken one exits.
+            probe = strategy.decide(NegotiationRoundInput(
+                direction="maximize",
+                our_reference_price=10_000,
+                their_proposed_price=10_000,
+                history=[],
+            ))
+            if probe.action == "exit":
+                return f"{name} (exit_on_probe: {probe.reason})"
+            return name.lower().replace("strategy", "").strip() or name
+
+        except KeyError as exc:
+            return f"unknown: {exc}"
+        except Exception as exc:
             return f"error: {exc}"
 
     async def health_bare(self, request: Request) -> JSONResponse:

@@ -128,6 +128,29 @@ class TestHealthEndpoint:
         )
         assert isinstance(auth_check, str) and auth_check
 
+    async def test_system_status_includes_negotiation_strategy_check(self, client):
+        """GET /api/v1/system/status must include checks.negotiation_strategy.
+
+        The value identifies which strategy is loaded and whether it is viable.
+        An exit_on_probe value means every /negotiate/new call will produce a
+        terminal failure before any meaningful negotiation — must be caught at
+        smoke-test time, not discovered at stage 10 of the e2e test.
+        """
+        c, _, _ = client
+        result = await c.get_system_status()
+        strat_check = result.checks.get("negotiation_strategy")
+        assert strat_check is not None, (
+            "checks.negotiation_strategy absent from /api/v1/system/status. "
+            "SystemController._negotiation_strategy_check() must be wired into "
+            "_health_impl(include_registry=True)."
+        )
+        assert isinstance(strat_check, str) and strat_check
+        # In integration tests the strategy is always bisection (no torch required).
+        assert "exit_on_probe" not in strat_check, (
+            f"Negotiation strategy would exit on every round: {strat_check!r}. "
+            "Set policy_mode = 'bisection' in config.toml or install torch."
+        )
+
 
 # ---------------------------------------------------------------------------
 # POST /admin/pause

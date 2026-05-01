@@ -42,6 +42,7 @@ class DealState:
     # Stage 00 — policy seeding
     _policies_seeded: bool = False
     _policy_evaluated: bool = False
+    _negotiation_strategy_viable: bool = False
     # Stage 1 — seller order
     seller_listing_id: Optional[str] = None
     _seller_url: str = ""

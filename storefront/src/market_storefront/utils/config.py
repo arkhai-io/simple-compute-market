@@ -343,11 +343,11 @@ def load_config() -> Config:
         redis_url=str(_resolve("seller.redis.url", "redis://localhost:6379")),
         redis_channels=str(_resolve("seller.redis.channels", "events:*")),
 
-        # Negotiation policy. Empty string (the default) means "use the
-        # registered default", which today is the trained RL strategy
-        # ("rl"). Set explicitly to "bisection" to opt out.
+        # Negotiation strategy. "bisection" is the safe default — no ML
+        # dependencies required. Set to "rl" to use the trained Arkhai
+        # pufferlib checkpoint (requires torch; exits every round if unavailable).
         negotiation_policy_mode=str(_resolve(
-            "seller.negotiation.policy_mode", "",
+            "seller.negotiation.policy_mode", "bisection",
         )).lower(),
         arkhai_negotiator_seller_model_path=str(_resolve(
             "seller.negotiation.seller_model_path",

@@ -39,9 +39,7 @@ service_url = "http://provisioning:8081"
 mode        = "http"
 
 [seller.negotiation]
-# rl = trained Arkhai puffer checkpoints (default). Set to "bisection"
-# to drop the model dependency for stripped-down test runs.
-policy_mode = "rl"
+policy_mode = "bisection"    # was "rl" — rl requires torch which is not installed in test env
 
 [seller.pricing]
 # Defaults applied to inventory rows that don't carry their own

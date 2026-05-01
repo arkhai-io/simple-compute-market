@@ -234,6 +234,7 @@ async def start_sync_negotiation(
         their_price=their_proposed_price,
         decision=decision.action,
         decision_price=decision.price,
+        decision_reason=decision.reason,
     )
     return {"negotiation_id": neg_id, **decision.to_dict()}
 
@@ -399,6 +400,7 @@ async def continue_sync_negotiation(
         their_price=int(buyer_price),
         decision=decision.action,
         decision_price=decision.price,
+        decision_reason=decision.reason,
     )
     return decision.to_dict()
 
