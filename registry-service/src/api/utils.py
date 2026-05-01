@@ -324,15 +324,47 @@ def matches_resource_filters(
     order: Listing,
     offer_resource_type: Optional[str] = None,
     demand_resource_type: Optional[str] = None,
+    # Equality filters (legacy + new)
     region: Optional[str] = None,
     gpu_model: Optional[str] = None,
     sla: Optional[float] = None,
+    cpu_type: Optional[str] = None,
+    host_disk_type: Optional[str] = None,
+    motherboard: Optional[str] = None,
+    gpu_interconnect: Optional[str] = None,
+    virtualization_type: Optional[str] = None,
+    static_ip: Optional[bool] = None,
+    datacenter_grade: Optional[bool] = None,
+    # Numeric ">=" filters (slice + host context)
+    gpu_count_min: Optional[int] = None,
+    vcpu_count_min: Optional[int] = None,
+    ram_gb_min: Optional[int] = None,
+    disk_gb_min: Optional[int] = None,
+    host_cpu_cores_min: Optional[int] = None,
+    host_ram_gb_min: Optional[int] = None,
+    host_disk_gb_min: Optional[int] = None,
+    total_gpu_count_min: Optional[int] = None,
+    nic_speed_gbps_min: Optional[int] = None,
+    internet_download_mbps_min: Optional[int] = None,
+    internet_upload_mbps_min: Optional[int] = None,
+    open_ports_count_min: Optional[int] = None,
     bidirectional: bool = False,
 ) -> bool:
-    """Check if order matches resource filters"""
+    """Check if order matches resource filters.
+
+    Match semantics:
+      - Equality filters: the named field on offer or demand must equal the
+        provided value (matches in either direction).
+      - ``_min`` filters: the offer's value must be >= provided value.
+        Demand-side numerics (which describe what the buyer needs) are not
+        treated as a sat answer for offer ">=" — only the offer is checked.
+        If the offer doesn't carry the field, the slice is rejected.
+
+    Resource type, region, gpu_model, sla preserve their existing semantics.
+    """
     offer_res = order.offer_resource or {}
     demand_res = order.demand_resource or {}
-    
+
     # Resource type filtering (skip if bidirectional)
     if not bidirectional:
         if offer_resource_type:
@@ -341,22 +373,65 @@ def matches_resource_filters(
         if demand_resource_type:
             if get_resource_type(demand_res) != demand_resource_type.lower():
                 return False
-    
+
     # Region filtering - applies to both directions
     if region:
         if offer_res.get("region") != region and demand_res.get("region") != region:
             return False
-    
+
     # GPU model filtering - applies to both directions
     if gpu_model:
         if offer_res.get("gpu_model") != gpu_model and demand_res.get("gpu_model") != gpu_model:
             return False
-    
-    # SLA filtering - applies to both directions
+
+    # SLA filtering - applies to both directions (legacy exact-equality)
     if sla is not None:
         if offer_res.get("sla") != sla and demand_res.get("sla") != sla:
             return False
-    
+
+    # Bidirectional equality filters: offer OR demand must match
+    bidir_equality = {
+        "cpu_type": cpu_type,
+        "host_disk_type": host_disk_type,
+        "motherboard": motherboard,
+        "gpu_interconnect": gpu_interconnect,
+        "virtualization_type": virtualization_type,
+        "static_ip": static_ip,
+        "datacenter_grade": datacenter_grade,
+    }
+    for field, val in bidir_equality.items():
+        if val is None:
+            continue
+        if offer_res.get(field) != val and demand_res.get(field) != val:
+            return False
+
+    # Offer ">=" filters — what the slice provides must meet the buyer's floor.
+    numeric_min = {
+        "gpu_count": gpu_count_min,
+        "vcpu_count": vcpu_count_min,
+        "ram_gb": ram_gb_min,
+        "disk_gb": disk_gb_min,
+        "host_cpu_cores": host_cpu_cores_min,
+        "host_ram_gb": host_ram_gb_min,
+        "host_disk_gb": host_disk_gb_min,
+        "total_gpu_count": total_gpu_count_min,
+        "nic_speed_gbps": nic_speed_gbps_min,
+        "internet_download_mbps": internet_download_mbps_min,
+        "internet_upload_mbps": internet_upload_mbps_min,
+        "open_ports_count": open_ports_count_min,
+    }
+    for field, floor in numeric_min.items():
+        if floor is None:
+            continue
+        offered = offer_res.get(field)
+        if offered is None:
+            return False
+        try:
+            if float(offered) < float(floor):
+                return False
+        except (TypeError, ValueError):
+            return False
+
     return True
 
 

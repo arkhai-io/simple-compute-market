@@ -55,7 +55,11 @@ def _format_resource(resource: dict) -> str:
         return str(resource)
     is_compute = resource.get("type") == "compute" or "gpu_model" in resource
     if is_compute:
-        ordered_keys = ("type", "gpu_model", "quantity", "sla", "region")
+        ordered_keys = (
+            "type", "gpu_model", "gpu_count", "sla", "region",
+            "vcpu_count", "ram_gb", "disk_gb", "virtualization_type",
+            "cpu_type", "host_cpu_cores", "host_ram_gb", "gpu_interconnect",
+        )
         lines = [f"{key}={resource[key]}" for key in ordered_keys if key in resource]
         extra_keys = sorted(k for k in resource.keys() if k not in ordered_keys)
         lines.extend(f"{key}={resource[key]}" for key in extra_keys)
@@ -112,30 +116,43 @@ def _fetch_json(url: str) -> dict:
 @listing_app.command("list")
 def listing_list(
     registry_url: str = typer.Option(
-        None,
-        "--registry-url",
-        "-r",
+        None, "--registry-url", "-r",
         help="Registry indexer base URL (config.toml: registry.url).",
     ),
-    listing_id: str | None = typer.Option(
-        None,
-        "--listing-id",
-        help="Filter by listing ID.",
+    listing_id: str | None = typer.Option(None, "--listing-id", help="Filter by listing ID."),
+    # Spec filters — slice fields
+    gpu_model: str | None = typer.Option(None, "--gpu-model", help="Filter by GPU model (e.g., H200, RTX 5080)."),
+    gpu_count_min: int | None = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
+    vcpu_count_min: int | None = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
+    ram_gb_min: int | None = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
+    disk_gb_min: int | None = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
+    region: str | None = typer.Option(None, "--region", help="Filter by region."),
+    virtualization_type: str | None = typer.Option(
+        None, "--virt", help="Virtualization mode (bare_metal|vm|container).",
     ),
-    limit: int = typer.Option(
-        50,
-        "--limit",
-        "-l",
-        help="Maximum listings to fetch (1-200).",
+    # Spec filters — host context
+    cpu_type: str | None = typer.Option(None, "--cpu-type", help="Filter by host CPU model string."),
+    host_cpu_cores_min: int | None = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
+    host_ram_gb_min: int | None = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
+    gpu_interconnect: str | None = typer.Option(
+        None, "--interconnect", help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
     ),
-    offset: int = typer.Option(
-        0,
-        "--offset",
-        "-o",
-        help="Pagination offset.",
+    datacenter_grade: bool | None = typer.Option(
+        None, "--datacenter/--no-datacenter", help="Restrict to datacenter-grade hosts.",
     ),
+    static_ip: bool | None = typer.Option(
+        None, "--static-ip/--no-static-ip", help="Restrict to hosts with static public IP.",
+    ),
+    # Pagination
+    limit: int = typer.Option(50, "--limit", "-l", help="Maximum listings to fetch (1-200)."),
+    offset: int = typer.Option(0, "--offset", "-o", help="Pagination offset."),
 ) -> None:
-    """List open listings from the registry indexer."""
+    """List open listings from the registry indexer.
+
+    Spec filters mirror the registry API: equality for strings/enums/bools,
+    `_min` semantics for numerics. Without any filters, returns all open
+    listings up to ``--limit``.
+    """
     base_url = (
         registry_url
         or resolve_config_value(toml_path="registry.url")
@@ -150,6 +167,26 @@ def listing_list(
     query_params: dict[str, str | int] = {"status": "open", "limit": limit, "offset": offset}
     if listing_id:
         query_params["listing_id"] = listing_id
+
+    spec_filters: dict[str, object] = {
+        "gpu_model": gpu_model,
+        "gpu_count_min": gpu_count_min,
+        "vcpu_count_min": vcpu_count_min,
+        "ram_gb_min": ram_gb_min,
+        "disk_gb_min": disk_gb_min,
+        "region": region,
+        "virtualization_type": virtualization_type,
+        "cpu_type": cpu_type,
+        "host_cpu_cores_min": host_cpu_cores_min,
+        "host_ram_gb_min": host_ram_gb_min,
+        "gpu_interconnect": gpu_interconnect,
+        "datacenter_grade": datacenter_grade,
+        "static_ip": static_ip,
+    }
+    for key, val in spec_filters.items():
+        if val is None:
+            continue
+        query_params[key] = str(val).lower() if isinstance(val, bool) else val
     params = urllib.parse.urlencode(query_params)
     url = f"{base_url}/listings?{params}"
 
