@@ -43,6 +43,35 @@ from ._deal import (
 from .settle import run_settle_from_log
 
 
+def _confirm_settlement_interactive(*, terms, listing: dict, console: Console) -> bool:
+    """Prompt the buyer to approve settlement at the negotiated price.
+
+    Shown after negotiation agrees but BEFORE create_escrow runs — i.e.,
+    no on-chain transaction has been emitted and the seller's /settle
+    endpoint hasn't been touched yet. Declining here is a clean exit.
+
+    Displays the agreed per-hour rate, duration, total payment (= rate
+    × duration_seconds / 3600), seller URL, and listing ID so the buyer
+    can sanity-check the cost before committing.
+    """
+    duration_hours = terms.duration_seconds / 3600
+    total = terms.agreed_price * terms.duration_seconds // 3600
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("Seller", str(terms.seller_url))
+    table.add_row("Listing", str(terms.listing_id))
+    table.add_row("Negotiation", str(terms.negotiation_id))
+    table.add_row("Agreed price", f"{terms.agreed_price} (per hour, raw token units)")
+    table.add_row("Duration", f"{terms.duration_seconds}s ({duration_hours:.4g}h)")
+    table.add_row("Total payment", f"{total} (raw token units)")
+    console.print(Panel(table, title="Confirm settlement", border_style="yellow"))
+    try:
+        return typer.confirm("Proceed to settlement (escrow + /settle + poll)?", default=True)
+    except typer.Abort:
+        return False
+
+
 def _resolve_prices_from_matches(
     *,
     matches: list[dict],
@@ -310,6 +339,14 @@ def register(app: typer.Typer) -> None:
             1.5, "--price-markup",
             help="Multiplier applied to seller min_price when auto-deriving "
                  "max-price. Default 1.5 (50%% headroom).",
+        ),
+        assume_yes: bool = typer.Option(
+            False, "--yes", "-y",
+            help="Skip the pre-settlement confirmation prompt. Default "
+                 "behavior shows the agreed per-hour price + total payment "
+                 "after negotiation and waits for explicit approval before "
+                 "creating the on-chain escrow. Set this for non-interactive "
+                 "runs.",
         ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
@@ -651,6 +688,13 @@ def register(app: typer.Typer) -> None:
                 st = (body.get("body") or {}).get("status")
                 console.print(f"[dim]poll #{body.get('attempt')}[/dim]  status={st}")
 
+        confirm_settlement_cb = None
+        if not assume_yes and os.isatty(0):
+            def confirm_settlement_cb(terms, listing):  # noqa: E306
+                return _confirm_settlement_interactive(
+                    terms=terms, listing=listing, console=console,
+                )
+
         try:
             result = run_buy(
                 config=config,
@@ -662,6 +706,7 @@ def register(app: typer.Typer) -> None:
                 settlement_poll_interval=poll_interval,
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
+                confirm_settlement=confirm_settlement_cb,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

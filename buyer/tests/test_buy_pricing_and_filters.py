@@ -183,3 +183,142 @@ class TestRunBuyDerivePrices:
             "BuyConstraints.initial_price and max_price are None" in (a.get("error") or "")
             for a in result.attempts
         )
+
+
+# ---------------------------------------------------------------------------
+# run_buy with confirm_settlement gate
+# ---------------------------------------------------------------------------
+
+
+def _agree_negotiate_factory(price: int = 100):
+    """Build a fake negotiate_with_seller that always agrees at the given price."""
+    def fake(**kwargs):
+        from market_buyer.buyer_client import NegotiationOutcome
+        return NegotiationOutcome(
+            status="agreed", agreed_price=price, rounds=2, reason=None,
+            negotiation_id="neg-id", duration_seconds=kwargs.get("duration_seconds"),
+        )
+    return fake
+
+
+class TestConfirmSettlementGate:
+    def _setup_orchestrator(self, monkeypatch, agree_price: int = 100):
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator.negotiate_with_seller",
+            _agree_negotiate_factory(agree_price),
+        )
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator._resolve_seller_wallet",
+            lambda url, timeout=5.0: "0x" + "f" * 40,
+        )
+
+    def _config(self):
+        return BuyConfig(
+            registry_url="http://reg",
+            buyer_address="0x" + "1" * 40,
+            buyer_private_key="0x" + "2" * 64,
+            ssh_public_key="ssh-ed25519 AAAA",
+        )
+
+    def _constraints(self):
+        return BuyConstraints(duration_seconds=3600, initial_price=50, max_price=200)
+
+    def test_confirm_returning_false_aborts_before_escrow(self, monkeypatch):
+        """User decline keeps the on-chain side completely untouched."""
+        self._setup_orchestrator(monkeypatch)
+        events: list[tuple[str, dict]] = []
+        matches = [{"listing_id": "L1", "seller": "http://s1"}]
+
+        result = run_buy(
+            config=self._config(),
+            constraints=self._constraints(),
+            create_escrow=lambda terms: pytest.fail("escrow MUST NOT run when declined"),
+            matches=matches, max_matches_to_try=1,
+            on_event=lambda stage, body: events.append((stage, body)),
+            confirm_settlement=lambda terms, listing: False,
+        )
+
+        assert result.status == "exited"
+        assert result.reason == "user_declined"
+        assert result.agreed_price == 100
+        # Settlement-decline event was emitted; escrow_create_start was NOT.
+        stages = [s for s, _ in events]
+        assert "settlement_declined" in stages
+        assert "escrow_create_start" not in stages
+
+    def test_confirm_returning_true_proceeds_to_escrow(self, monkeypatch):
+        """User approval lets the rest of the pipeline run."""
+        self._setup_orchestrator(monkeypatch)
+        escrow_calls: list[Any] = []
+
+        def fake_create(terms):
+            escrow_calls.append(terms)
+            return "escrow-uid-1"
+
+        # Settlement submit + poll need stubbing too — short-circuit to "ready".
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator.submit_settlement",
+            lambda **kw: {"status": "queued"},
+        )
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator.wait_for_settlement",
+            lambda **kw: {"status": "ready", "result": {"connection_details": "ssh ..."}},
+        )
+
+        matches = [{"listing_id": "L1", "seller": "http://s1"}]
+        result = run_buy(
+            config=self._config(),
+            constraints=self._constraints(),
+            create_escrow=fake_create,
+            matches=matches, max_matches_to_try=1,
+            confirm_settlement=lambda terms, listing: True,
+        )
+
+        assert len(escrow_calls) == 1, "escrow ran exactly once after approval"
+        assert result.status == "ready"
+        assert result.escrow_uid == "escrow-uid-1"
+
+    def test_no_callback_skips_gate(self, monkeypatch):
+        """Default behavior (no callback) doesn't add a confirmation step."""
+        self._setup_orchestrator(monkeypatch)
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator.submit_settlement",
+            lambda **kw: {"status": "queued"},
+        )
+        monkeypatch.setattr(
+            "market_buyer.buy_orchestrator.wait_for_settlement",
+            lambda **kw: {"status": "ready", "result": {}},
+        )
+        escrow_count = {"n": 0}
+
+        def fake_create(terms):
+            escrow_count["n"] += 1
+            return "uid"
+
+        matches = [{"listing_id": "L1", "seller": "http://s1"}]
+        result = run_buy(
+            config=self._config(),
+            constraints=self._constraints(),
+            create_escrow=fake_create,
+            matches=matches, max_matches_to_try=1,
+        )
+        assert escrow_count["n"] == 1
+        assert result.status == "ready"
+
+    def test_confirm_callback_raising_aborts_safely(self, monkeypatch):
+        """Exceptions in the confirm callback don't reach the chain."""
+        self._setup_orchestrator(monkeypatch)
+        matches = [{"listing_id": "L1", "seller": "http://s1"}]
+
+        def boom(terms, listing):
+            raise RuntimeError("user pressed ctrl-c")
+
+        result = run_buy(
+            config=self._config(),
+            constraints=self._constraints(),
+            create_escrow=lambda terms: pytest.fail("never"),
+            matches=matches, max_matches_to_try=1,
+            confirm_settlement=boom,
+        )
+        assert result.status == "exited"
+        assert "confirm_settlement_callback_raised" in (result.reason or "")

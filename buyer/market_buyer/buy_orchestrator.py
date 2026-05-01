@@ -338,6 +338,7 @@ def run_buy(
     on_event: Optional[Callable[[str, dict], None]] = None,
     sleep: Callable[[float], None] = time.sleep,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]] = None,
+    confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]] = None,
 ) -> BuyResult:
     """Run one buy attempt end-to-end. Sequential; every dependency is explicit.
 
@@ -358,6 +359,12 @@ def run_buy(
         per-listing pricing. When set, overrides the constants on
         ``constraints`` for each candidate. Useful for auto-pricing flows
         that anchor on the seller's advertised min_price.
+    confirm_settlement
+        Optional ``(agreed_terms, listing) -> bool`` gate invoked between
+        successful negotiation and on-chain escrow creation. Returning
+        ``False`` aborts settlement for this match — the orchestrator
+        records ``status="exited"`` with reason ``user_declined`` and
+        never touches the chain or the seller's /settle endpoint.
 
     Returns
     -------
@@ -501,6 +508,33 @@ def run_buy(
             agreed_price=outcome.agreed_price,
             duration_seconds=constraints.duration_seconds,
         )
+
+        if confirm_settlement is not None:
+            try:
+                approved = confirm_settlement(terms, match)
+            except Exception as exc:
+                _event("settlement_confirm_failed", {"error": str(exc)})
+                return BuyResult(
+                    status="exited",
+                    negotiation_id=outcome.negotiation_id,
+                    seller_url=seller_url,
+                    agreed_price=outcome.agreed_price,
+                    reason=f"confirm_settlement_callback_raised: {exc}",
+                    rounds=outcome.rounds,
+                    attempts=attempts,
+                )
+            if not approved:
+                _event("settlement_declined", {"terms": terms.__dict__})
+                return BuyResult(
+                    status="exited",
+                    negotiation_id=outcome.negotiation_id,
+                    seller_url=seller_url,
+                    agreed_price=outcome.agreed_price,
+                    reason="user_declined",
+                    rounds=outcome.rounds,
+                    attempts=attempts,
+                )
+
         _event("escrow_create_start", {"terms": terms.__dict__})
         try:
             escrow_uid = create_escrow(terms)
