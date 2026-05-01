@@ -14,25 +14,34 @@ from market_storefront.schema.pydantic_models import (
 from service.clients.token import TOKEN_REGISTRY
 
 
-# Optional spec fields on ComputeResource that round-trip through the DB
-# resource ``attributes`` dict. The attribute key matches the model field.
-# Items are (field_name, coercer-or-None). Coercer maps the raw attribute
-# value back into the typed field on read; None means pass-through.
-_COMPUTE_OPTIONAL_SPEC_FIELDS: tuple[tuple[str, Any], ...] = (
-    ("cpu_type", None),
-    ("cpu_count", int),
+# Slice fields stored directly on the resource row's ``attributes`` JSON.
+# These are per-listing values the seller sets when publishing a slice.
+# Items are (field_name, coercer-or-None). Coercer maps raw attribute value
+# back into the typed field on read; None means pass-through string.
+_COMPUTE_SLICE_FIELDS: tuple[tuple[str, Any], ...] = (
+    ("vcpu_count", int),
     ("ram_gb", int),
     ("disk_gb", int),
-    ("disk_type", None),
-    ("disk_count", int),
+    ("virtualization_type", VirtualizationType),
+)
+
+# Host context fields denormalized onto the wire-format ComputeResource at
+# read time via a join against the hosts table. Stored on hosts rows, not on
+# resources rows. Coercer applied when populating the joined ComputeResource.
+_COMPUTE_HOST_CONTEXT_FIELDS: tuple[tuple[str, Any], ...] = (
+    ("cpu_type", None),
+    ("host_cpu_cores", int),
+    ("host_ram_gb", int),
+    ("host_disk_gb", int),
+    ("host_disk_type", None),
     ("motherboard", None),
+    ("total_gpu_count", int),
     ("gpu_interconnect", GpuInterconnect),
     ("nic_speed_gbps", int),
     ("internet_download_mbps", int),
     ("internet_upload_mbps", int),
     ("static_ip", bool),
     ("open_ports_count", int),
-    ("virtualization_type", VirtualizationType),
     ("datacenter_grade", bool),
 )
 
@@ -77,9 +86,19 @@ class ComputeGpuResourceAdapter:
     domain_type: type = ComputeResource
     discriminator_key: str = "gpu_model"
 
-    def to_domain_resource(self, db_resource: dict[str, Any]) -> ComputeResource:
-        """
-        Convert a DB resource dict to a ComputeResource domain instance.
+    def to_domain_resource(
+        self,
+        db_resource: dict[str, Any],
+        host_row: dict[str, Any] | None = None,
+    ) -> ComputeResource:
+        """Convert a DB resource dict to a ComputeResource domain instance.
+
+        Slice fields are read from ``db_resource.attributes``. Host context
+        fields are read from ``host_row`` (a row from the ``hosts`` table)
+        when provided — callers that have already loaded the seller's host
+        inventory pass it here to denormalize host fields onto the returned
+        ComputeResource. Without ``host_row``, host context fields fall back
+        to whatever happens to be in ``attributes`` (legacy/wire payloads).
         """
         attrs = _ensure_dict(db_resource.get("attributes"))
 
@@ -96,12 +115,20 @@ class ComputeGpuResourceAdapter:
                 "compute.gpu db_resource requires attributes.gpu_model/resource_subtype, attributes.sla, and attributes.region"
             )
 
-        optional_kwargs: dict[str, Any] = {}
-        for field_name, coerce in _COMPUTE_OPTIONAL_SPEC_FIELDS:
+        slice_kwargs: dict[str, Any] = {}
+        for field_name, coerce in _COMPUTE_SLICE_FIELDS:
             raw = attrs.get(field_name)
             if raw is None:
                 continue
-            optional_kwargs[field_name] = coerce(raw) if coerce is not None else raw
+            slice_kwargs[field_name] = coerce(raw) if coerce is not None else raw
+
+        host_kwargs: dict[str, Any] = {}
+        host_source = host_row if host_row is not None else attrs
+        for field_name, coerce in _COMPUTE_HOST_CONTEXT_FIELDS:
+            raw = host_source.get(field_name)
+            if raw is None:
+                continue
+            host_kwargs[field_name] = coerce(raw) if coerce is not None else raw
 
         return ComputeResource(
             resource_id=str(db_resource.get("resource_id")) if db_resource.get("resource_id") is not None else None,
@@ -110,7 +137,8 @@ class ComputeGpuResourceAdapter:
             sla=float(sla),
             region=region,
             vm_host=str(vm_host) if vm_host is not None else None,
-            **optional_kwargs,
+            **slice_kwargs,
+            **host_kwargs,
         )
 
     def from_domain_resource(
@@ -120,15 +148,19 @@ class ComputeGpuResourceAdapter:
         resource_id: str,
         state: str | None = None,
     ) -> dict[str, Any]:
+        """Convert a ComputeResource domain instance to a DB resource dict.
+
+        Only slice fields + the ``vm_host`` FK + the canonical
+        gpu_model/sla/region triple are written to ``attributes``. Host
+        context fields belong on the hosts table and are not written here.
         """
-        Convert a ComputeResource domain instance to a DB resource dict."""
         attributes: dict[str, Any] = {
             "gpu_model": resource.gpu_model.value,
             "sla": resource.sla,
             "region": resource.region.value,
             "vm_host": resource.vm_host,
         }
-        for field_name, _ in _COMPUTE_OPTIONAL_SPEC_FIELDS:
+        for field_name, _ in _COMPUTE_SLICE_FIELDS:
             v = getattr(resource, field_name)
             if v is None:
                 continue

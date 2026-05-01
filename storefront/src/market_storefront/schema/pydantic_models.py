@@ -46,11 +46,71 @@ class GpuInterconnect(str, Enum):
 
 
 class VirtualizationType(str, Enum):
-    """How the host exposes the resource to the buyer."""
+    """How the host exposes the resource to the buyer.
+
+    Per-slice (resource-level) — the seller picks the deployment mode for
+    each listing. Two listings on the same host can differ (e.g., one as a
+    GPU-passthrough VM, another as a Docker container) provided the host's
+    deployment configuration supports both.
+    """
 
     BARE_METAL = "bare_metal"
     VM = "vm"
     CONTAINER = "container"
+
+
+class Host(BaseModel):
+    """A physical host the seller owns. Source of truth for host hardware.
+
+    Mirrors provisioning-service's host inventory and adds marketing metadata
+    that the provisioning-service doesn't track (cpu_type, motherboard,
+    capacity totals, network specs, datacenter grade, etc.). Compute slice
+    resources reference a host by ``name`` via ``ComputeResource.vm_host``.
+
+    Capacity invariants enforced at publish time:
+      ``SUM(active_slices.gpu_count)  ≤ total_gpu_count``
+      ``SUM(active_slices.vcpu_count) ≤ host_cpu_cores``
+      ``SUM(active_slices.ram_gb)     ≤ host_ram_gb``
+      ``SUM(active_slices.disk_gb)    ≤ host_disk_gb``
+
+    Free-form provider-specific tags belong in ``attributes`` under the
+    ``tag.*`` namespace (e.g. ``attributes["tag.datacenter_tier"]``).
+    """
+
+    name: str = Field(description="Host alias (matches provisioning-service host alias, e.g. 'ww1').")
+    cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
+    host_cpu_cores: int | None = Field(default=None, description="Total physical CPU cores on host")
+    host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
+    host_disk_gb: int | None = Field(default=None, description="Host total disk capacity in GB")
+    host_disk_type: str | None = Field(
+        default=None,
+        description="Disk model string of the host's storage, e.g. 'Samsung MZTL3T8HEFK'",
+    )
+    motherboard: str | None = Field(default=None, description="Motherboard model string")
+    total_gpu_count: int | None = Field(default=None, description="Total GPUs on the host")
+    gpu_model: GPUModel | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
+    gpu_interconnect: GpuInterconnect | None = Field(
+        default=None,
+        description="Host GPU-to-GPU interconnect (set by BIOS/NVSwitch domain; uniform across slices)",
+    )
+    nic_speed_gbps: int | None = Field(default=None, description="Host NIC link speed in Gbps")
+    internet_download_mbps: int | None = Field(default=None, description="Host internet downlink in Mbps")
+    internet_upload_mbps: int | None = Field(default=None, description="Host internet uplink in Mbps")
+    static_ip: bool | None = Field(default=None, description="Whether the host has a static public IP")
+    open_ports_count: int | None = Field(
+        default=None,
+        description="Number of externally-routable TCP ports the host exposes",
+    )
+    region: Region | None = Field(default=None, description="Geographic region of the host")
+    datacenter_grade: bool | None = Field(
+        default=None,
+        description="True for commercial datacenter hosting (vs home/colo)",
+    )
+    attributes: dict[str, Any] | None = Field(
+        default=None,
+        description="Free-form provider tags under the 'tag.*' namespace.",
+    )
+    enabled: bool = Field(default=True, description="Whether the host is active")
 
 
 Attestation = CoreAttestation
@@ -130,15 +190,22 @@ class ComputeDomainResource(CoreResource):
 TokenResource = CoreTokenResource
 
 class ComputeResource(ComputeDomainResource):
-    """Describes the compute resources that are available to each Agent,
-    and may be put on the market. This is before any valuation.
-    Not all resources in the resource portfolio are on sale.
+    """Describes a compute slice — a sliceable allocation from a host that
+    may be put on the market. The seller decides the slice configuration
+    (gpu_count + vcpu_count + ram_gb + disk_gb) when publishing; one host
+    can be split into multiple concurrent slices.
 
-    Spec fields below ``vm_host`` are configuration-only — values that derive
-    from another field (e.g., VRAM from gpu_model, PCIe lanes from motherboard,
-    AVX support from cpu_type) are intentionally omitted; consumers compute
-    them from vendor lookup tables. All spec fields default to ``None`` so old
-    payloads keep parsing; populate them as data becomes available.
+    Wire format is denormalized: host context fields (cpu_type, motherboard,
+    host_cpu_cores, host_ram_gb, etc.) are populated from a join against the
+    seller's ``hosts`` table at publish time so buyers see one flat record
+    per listing. Stored-row form keeps only slice fields + the ``vm_host``
+    FK; the storefront's ``ComputeGpuResourceAdapter`` handles the join.
+
+    Configuration-only — values derivable from another field (VRAM from
+    gpu_model, PCIe lanes/generation from motherboard, AVX from cpu_type)
+    are intentionally omitted; consumers compute them from vendor lookup
+    tables. All optional spec fields default to ``None`` so sparse payloads
+    keep parsing.
 
     Free-form provider tags belong in ``attributes`` under the ``tag.*``
     namespace (e.g. ``attributes["tag.datacenter_tier"]``). Tags are opaque
@@ -147,59 +214,52 @@ class ComputeResource(ComputeDomainResource):
 
     resource_id: str | None = Field(
         default=None,
-        description="Canonical DB resource identifier for this compute resource",
+        description="Canonical DB resource identifier for this compute slice",
     )
+
+    # ---- Slice fields (per-listing; the seller's split of the host) ----
     gpu_model: GPUModel = Field(
         description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
     )
-    gpu_count: int = Field(description="Number of GPUs in this resource entry")
-    sla: float = Field(description="The SLA of the GPU")
+    gpu_count: int = Field(description="Number of GPUs in this slice")
+    sla: float = Field(description="The SLA of this slice")
     region: Region = Field(
-        description="The region of the GPU (California, US, Tokyo, JP, etc.)"
+        description="The region of the slice (matches host region)"
     )
     vm_host: str | None = Field(
         default=None,
-        description="Provisioning host identifier for VM placement (e.g., vm1)",
+        description="FK to hosts.name — which host this slice is allocated from",
     )
-
-    # CPU
-    cpu_type: str | None = Field(default=None, description="CPU model string, e.g. 'AMD EPYC 9654'")
-    cpu_count: int | None = Field(default=None, description="Number of physical CPU packages installed")
-
-    # Memory
-    ram_gb: int | None = Field(default=None, description="System RAM in GB")
-
-    # Storage
-    disk_gb: int | None = Field(default=None, description="Total host disk capacity in GB")
-    disk_type: str | None = Field(
+    vcpu_count: int | None = Field(default=None, description="vCPUs allocated to this slice")
+    ram_gb: int | None = Field(default=None, description="RAM allocated to this slice in GB")
+    disk_gb: int | None = Field(default=None, description="Disk allocated to this slice in GB")
+    virtualization_type: VirtualizationType | None = Field(
         default=None,
-        description="Disk model string, e.g. 'Samsung MZTL3T8HEFK' or 'Kingston SFYRD2000G'",
+        description="How this slice is exposed: bare_metal | vm | container",
     )
-    disk_count: int | None = Field(default=None, description="Number of physical disks")
 
-    # Bus / motherboard (PCIe lanes/generation derive from motherboard model)
-    motherboard: str | None = Field(default=None, description="Motherboard model string")
-
-    # GPU topology
+    # ---- Host context (denormalized at publish; sourced from hosts table) ----
+    cpu_type: str | None = Field(default=None, description="Host CPU model string, e.g. 'AMD EPYC 9654'")
+    host_cpu_cores: int | None = Field(default=None, description="Total physical cores on host")
+    host_ram_gb: int | None = Field(default=None, description="Host total RAM in GB")
+    host_disk_gb: int | None = Field(default=None, description="Host total disk capacity in GB")
+    host_disk_type: str | None = Field(
+        default=None,
+        description="Host disk model string, e.g. 'Samsung MZTL3T8HEFK'",
+    )
+    motherboard: str | None = Field(default=None, description="Host motherboard model string")
+    total_gpu_count: int | None = Field(default=None, description="Total GPUs on host (slice fraction = gpu_count / total_gpu_count)")
     gpu_interconnect: GpuInterconnect | None = Field(
         default=None,
-        description="GPU-to-GPU interconnect topology",
+        description="Host GPU-to-GPU interconnect topology",
     )
-
-    # Network
-    nic_speed_gbps: int | None = Field(default=None, description="Primary NIC link speed in Gbps")
-    internet_download_mbps: int | None = Field(default=None, description="Internet downlink in Mbps")
-    internet_upload_mbps: int | None = Field(default=None, description="Internet uplink in Mbps")
+    nic_speed_gbps: int | None = Field(default=None, description="Host primary NIC link speed in Gbps")
+    internet_download_mbps: int | None = Field(default=None, description="Host internet downlink in Mbps")
+    internet_upload_mbps: int | None = Field(default=None, description="Host internet uplink in Mbps")
     static_ip: bool | None = Field(default=None, description="Whether the host has a static public IP")
     open_ports_count: int | None = Field(
         default=None,
         description="Number of externally-routable TCP ports the host exposes",
-    )
-
-    # Hosting
-    virtualization_type: VirtualizationType | None = Field(
-        default=None,
-        description="How the host exposes the resource",
     )
     datacenter_grade: bool | None = Field(
         default=None,
@@ -230,10 +290,13 @@ class ComputeResourcePortfolio(BaseModel):
         — an unknown spec can't be assumed to satisfy a stated requirement.
         """
         numeric_min_fields = (
-            "cpu_count",
+            "vcpu_count",
             "ram_gb",
             "disk_gb",
-            "disk_count",
+            "host_cpu_cores",
+            "host_ram_gb",
+            "host_disk_gb",
+            "total_gpu_count",
             "nic_speed_gbps",
             "internet_download_mbps",
             "internet_upload_mbps",
@@ -241,7 +304,7 @@ class ComputeResourcePortfolio(BaseModel):
         )
         equality_fields = (
             "cpu_type",
-            "disk_type",
+            "host_disk_type",
             "motherboard",
             "gpu_interconnect",
             "virtualization_type",

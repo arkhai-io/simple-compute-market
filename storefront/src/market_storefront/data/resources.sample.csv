@@ -1,6 +1,6 @@
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.cpu_type,attribute.cpu_count,attribute.ram_gb,attribute.disk_gb,attribute.disk_type,attribute.disk_count,attribute.motherboard,attribute.gpu_interconnect,attribute.nic_speed_gbps,attribute.internet_download_mbps,attribute.internet_upload_mbps,attribute.static_ip,attribute.open_ports_count,attribute.virtualization_type,attribute.datacenter_grade,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw,attribute.tag.datacenter_tier,attribute.tag.billing_code
-compute-h200-001,compute.gpu,H200,count,8,available,200,MOCK,604800,H200,99.0,"California, US",vm1,AMD EPYC 9654,2,1024,8000,Samsung MZTL3T8HEFK,4,Supermicro H13DSG-O-CPU,nvswitch,200,10000,10000,true,128,bare_metal,true,,,,,,,,tier3,DC-CA-001
-compute-h200-002,compute.gpu,h200,count,2,available,180,MOCK,,H200,95.0,"California, US",vm2,AMD EPYC 9354,1,512,4000,Kingston SFYRD2000G,2,ASRock Rack ROMED8-2T,nvlink,100,2000,2000,true,64,vm,true,,,,,,,,tier2,
-token-usdc-main,token.erc20,usdc,base_units,100000000,available,,,,,,,,,,,,,,,,,,,,,,,USDC,0xdac17f958d2ee523a2206206994597c13d831ec7,6,,,,,,
-battery-edge-01,energy.battery,kwh,kwh,56,discharging,,,,,,,,,,,,,,,,,,,,,,,,,,,,64.3,80.0,-1.52,,
-info-note-001,information.note,,,,available,,,,,,,,,,,,,,,,,,,,,,,,,,market-overview,,,,,
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb,attribute.virtualization_type,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw
+compute-h200-001,compute.gpu,H200,count,8,available,200,MOCK,604800,H200,99.0,"California, US",host-ca-h200-01,192,2048,20000,bare_metal,,,,,,,
+compute-h200-002,compute.gpu,h200,count,1,available,180,MOCK,,H200,95.0,"California, US",host-ca-h200-02,16,256,4000,vm,,,,,,,
+token-usdc-main,token.erc20,usdc,base_units,100000000,available,,,,,,,,,,,,USDC,0xdac17f958d2ee523a2206206994597c13d831ec7,6,,,,
+battery-edge-01,energy.battery,kwh,kwh,56,discharging,,,,,,,,,,,,,,,,64.3,80.0,-1.52
+info-note-001,information.note,,,,available,,,,,,,,,,,,,,,market-overview,,,

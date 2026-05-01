@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from .config import CONFIG
+from .host_csv_importer import upsert_hosts_from_csv
 from .resource_csv_importer import upsert_resources_from_csv
 
 logger = logging.getLogger(__name__)
@@ -389,6 +390,55 @@ class SQLiteClient:
                   UPDATE resources
                   SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
                   WHERE pk = NEW.pk;
+                END
+                """
+            )
+            # Hosts table (one row per physical host the seller owns).
+            # Mirrors provisioning-service's hosts inventory + adds marketing
+            # metadata (cpu_type, motherboard, host capacity totals, network)
+            # that the provisioning-service doesn't track. Compute slice
+            # resources reference a host by name via attributes.vm_host.
+            #
+            # Capacity invariants are checked at publish time, not enforced
+            # by SQLite — sum of active resources' gpu_count/vcpu_count/
+            # ram_gb/disk_gb per host must not exceed the host totals.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hosts (
+                  name TEXT PRIMARY KEY,
+                  cpu_type TEXT,
+                  host_cpu_cores INTEGER,
+                  host_ram_gb INTEGER,
+                  host_disk_gb INTEGER,
+                  host_disk_type TEXT,
+                  motherboard TEXT,
+                  total_gpu_count INTEGER,
+                  gpu_model TEXT,
+                  gpu_interconnect TEXT,
+                  nic_speed_gbps INTEGER,
+                  internet_download_mbps INTEGER,
+                  internet_upload_mbps INTEGER,
+                  static_ip INTEGER,
+                  open_ports_count INTEGER,
+                  region TEXT,
+                  datacenter_grade INTEGER,
+                  attributes TEXT,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  updated_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_hosts_updated_at
+                AFTER UPDATE ON hosts
+                FOR EACH ROW
+                WHEN NEW.updated_at = OLD.updated_at
+                BEGIN
+                  UPDATE hosts
+                  SET updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                  WHERE name = NEW.name;
                 END
                 """
             )
@@ -828,6 +878,256 @@ class SQLiteClient:
             dry_run=dry_run,
         )
         return report.to_dict()
+
+    async def upsert_hosts_from_csv(
+        self,
+        *,
+        csv_path: str,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import hosts from CSV and upsert rows into the hosts table."""
+        report = await upsert_hosts_from_csv(
+            csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+
+    # ------------------------------------------------------------------
+    # Hosts CRUD — physical hosts owned by the seller
+    # ------------------------------------------------------------------
+
+    _HOST_COLUMNS = (
+        "name",
+        "cpu_type",
+        "host_cpu_cores",
+        "host_ram_gb",
+        "host_disk_gb",
+        "host_disk_type",
+        "motherboard",
+        "total_gpu_count",
+        "gpu_model",
+        "gpu_interconnect",
+        "nic_speed_gbps",
+        "internet_download_mbps",
+        "internet_upload_mbps",
+        "static_ip",
+        "open_ports_count",
+        "region",
+        "datacenter_grade",
+        "attributes",
+        "enabled",
+    )
+
+    @staticmethod
+    def _host_row_to_dict(row: tuple) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for col, val in zip(SQLiteClient._HOST_COLUMNS, row):
+            d[col] = val
+        # Normalize types: bools come back as 0/1 ints
+        for bcol in ("static_ip", "datacenter_grade", "enabled"):
+            if d.get(bcol) is not None:
+                d[bcol] = bool(d[bcol])
+        # JSON-decode attributes if present
+        raw_attrs = d.get("attributes")
+        if isinstance(raw_attrs, str) and raw_attrs.strip():
+            try:
+                d["attributes"] = json.loads(raw_attrs)
+            except json.JSONDecodeError:
+                d["attributes"] = {}
+        elif raw_attrs is None:
+            d["attributes"] = None
+        return d
+
+    async def upsert_host(
+        self,
+        *,
+        name: str,
+        cpu_type: str | None = None,
+        host_cpu_cores: int | None = None,
+        host_ram_gb: int | None = None,
+        host_disk_gb: int | None = None,
+        host_disk_type: str | None = None,
+        motherboard: str | None = None,
+        total_gpu_count: int | None = None,
+        gpu_model: str | None = None,
+        gpu_interconnect: str | None = None,
+        nic_speed_gbps: int | None = None,
+        internet_download_mbps: int | None = None,
+        internet_upload_mbps: int | None = None,
+        static_ip: bool | None = None,
+        open_ports_count: int | None = None,
+        region: str | None = None,
+        datacenter_grade: bool | None = None,
+        attributes: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        """Create or update a host row."""
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO hosts(
+                      name, cpu_type, host_cpu_cores, host_ram_gb, host_disk_gb,
+                      host_disk_type, motherboard, total_gpu_count, gpu_model,
+                      gpu_interconnect, nic_speed_gbps, internet_download_mbps,
+                      internet_upload_mbps, static_ip, open_ports_count, region,
+                      datacenter_grade, attributes, enabled
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(name) DO UPDATE SET
+                      cpu_type=excluded.cpu_type,
+                      host_cpu_cores=excluded.host_cpu_cores,
+                      host_ram_gb=excluded.host_ram_gb,
+                      host_disk_gb=excluded.host_disk_gb,
+                      host_disk_type=excluded.host_disk_type,
+                      motherboard=excluded.motherboard,
+                      total_gpu_count=excluded.total_gpu_count,
+                      gpu_model=excluded.gpu_model,
+                      gpu_interconnect=excluded.gpu_interconnect,
+                      nic_speed_gbps=excluded.nic_speed_gbps,
+                      internet_download_mbps=excluded.internet_download_mbps,
+                      internet_upload_mbps=excluded.internet_upload_mbps,
+                      static_ip=excluded.static_ip,
+                      open_ports_count=excluded.open_ports_count,
+                      region=excluded.region,
+                      datacenter_grade=excluded.datacenter_grade,
+                      attributes=excluded.attributes,
+                      enabled=excluded.enabled,
+                      updated_at=STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    """,
+                    (
+                        name,
+                        cpu_type,
+                        host_cpu_cores,
+                        host_ram_gb,
+                        host_disk_gb,
+                        host_disk_type,
+                        motherboard,
+                        total_gpu_count,
+                        gpu_model,
+                        gpu_interconnect,
+                        nic_speed_gbps,
+                        internet_download_mbps,
+                        internet_upload_mbps,
+                        int(static_ip) if static_ip is not None else None,
+                        open_ports_count,
+                        region,
+                        int(datacenter_grade) if datacenter_grade is not None else None,
+                        json.dumps(attributes) if attributes is not None else None,
+                        int(bool(enabled)),
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def get_host(self, *, name: str) -> dict[str, Any] | None:
+        """Read a single host row by name."""
+        cols = ", ".join(self._HOST_COLUMNS)
+
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(f"SELECT {cols} FROM hosts WHERE name = ?", (name,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                return self._host_row_to_dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_hosts(
+        self,
+        *,
+        enabled_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """List host rows. Defaults to enabled hosts only."""
+        cols = ", ".join(self._HOST_COLUMNS)
+
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                where = "WHERE enabled = 1" if enabled_only else ""
+                cur.execute(f"SELECT {cols} FROM hosts {where} ORDER BY name")
+                return [self._host_row_to_dict(r) for r in cur.fetchall()]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def host_capacity_remaining(self, *, name: str) -> dict[str, Any] | None:
+        """Compute remaining capacity for a host: host totals minus the sum
+        of active (non-deleted) compute slices currently allocated.
+
+        Returns ``None`` if the host doesn't exist. Returns a dict with the
+        four capacity dimensions (gpu_count, vcpu_count, ram_gb, disk_gb)
+        plus their host limits and the sum of currently-allocated values.
+        """
+        host = await self.get_host(name=name)
+        if host is None:
+            return None
+
+        def _sum_allocations() -> dict[str, int]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT value, attributes
+                    FROM resources
+                    WHERE resource_type = 'compute.gpu'
+                      AND (state IS NULL OR state != 'deleted')
+                    """
+                )
+                totals = {"gpu_count": 0, "vcpu_count": 0, "ram_gb": 0, "disk_gb": 0}
+                for row_value, row_attrs in cur.fetchall():
+                    attrs = {}
+                    if isinstance(row_attrs, str) and row_attrs.strip():
+                        try:
+                            attrs = json.loads(row_attrs)
+                        except json.JSONDecodeError:
+                            continue
+                    if attrs.get("vm_host") != name:
+                        continue
+                    if row_value is not None:
+                        totals["gpu_count"] += int(row_value)
+                    for k in ("vcpu_count", "ram_gb", "disk_gb"):
+                        v = attrs.get(k)
+                        if v is not None:
+                            totals[k] += int(v)
+                return totals
+            finally:
+                conn.close()
+
+        used = await asyncio.to_thread(_sum_allocations)
+        return {
+            "host_name": name,
+            "limits": {
+                "gpu_count": host.get("total_gpu_count"),
+                "vcpu_count": host.get("host_cpu_cores"),
+                "ram_gb": host.get("host_ram_gb"),
+                "disk_gb": host.get("host_disk_gb"),
+            },
+            "used": used,
+            "remaining": {
+                k: (host_limit - used[k]) if (host_limit := host.get({
+                    "gpu_count": "total_gpu_count",
+                    "vcpu_count": "host_cpu_cores",
+                    "ram_gb": "host_ram_gb",
+                    "disk_gb": "host_disk_gb",
+                }[k])) is not None else None
+                for k in ("gpu_count", "vcpu_count", "ram_gb", "disk_gb")
+            },
+        }
 
     def ensure_default_resources(self, resources: list[dict[str, Any]]) -> None:
         """Seed default resources only when the resources table is empty."""
