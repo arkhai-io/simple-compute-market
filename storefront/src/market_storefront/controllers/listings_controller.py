@@ -16,11 +16,24 @@ Endpoints
 
 Query parameters for ``GET /api/v1/listings``
 ---------------------------------------------
+Listing-level:
 ``status``  — filter by listing status (e.g. ``open``, ``accepted``, ``closed``).
               Omit to return all statuses.
 ``paused``  — ``true`` / ``false`` / omit for all.
 ``limit``   — max rows (default 50, max 200).
 ``offset``  — pagination offset (default 0).
+
+Spec filters (mirror the registry-service ``GET /listings`` filter shape):
+Equality —
+``region``, ``gpu_model``, ``sla``, ``cpu_type``, ``host_disk_type``,
+``motherboard``, ``gpu_interconnect``, ``virtualization_type``, ``static_ip``,
+``datacenter_grade``.
+Numeric ``_min`` (offer must satisfy >=) —
+``gpu_count_min``, ``vcpu_count_min``, ``ram_gb_min``, ``disk_gb_min``,
+``host_cpu_cores_min``, ``host_ram_gb_min``, ``host_disk_gb_min``,
+``total_gpu_count_min``, ``nic_speed_gbps_min``,
+``internet_download_mbps_min``, ``internet_upload_mbps_min``,
+``open_ports_count_min``.
 """
 
 from __future__ import annotations
@@ -28,6 +41,62 @@ from __future__ import annotations
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from market_storefront.utils.listing_filters import matches_listing_filters
+
+
+_BOOL_FILTER_FIELDS = ("static_ip", "datacenter_grade")
+_FLOAT_FILTER_FIELDS = ("sla",)
+_STR_FILTER_FIELDS = (
+    "region", "gpu_model", "cpu_type", "host_disk_type", "motherboard",
+    "gpu_interconnect", "virtualization_type",
+)
+_INT_MIN_FILTER_FIELDS = (
+    "gpu_count_min", "vcpu_count_min", "ram_gb_min", "disk_gb_min",
+    "host_cpu_cores_min", "host_ram_gb_min", "host_disk_gb_min",
+    "total_gpu_count_min", "nic_speed_gbps_min",
+    "internet_download_mbps_min", "internet_upload_mbps_min",
+    "open_ports_count_min",
+)
+
+
+def _parse_bool_param(raw: str | None) -> bool | None:
+    if raw is None:
+        return None
+    lowered = raw.lower()
+    if lowered in ("true", "1", "yes"):
+        return True
+    if lowered in ("false", "0", "no"):
+        return False
+    return None
+
+
+def _build_spec_filter_kwargs(query_params) -> dict:
+    """Pull spec filters out of query_params and coerce types."""
+    kwargs: dict = {}
+    for field in _STR_FILTER_FIELDS:
+        v = query_params.get(field)
+        if v:
+            kwargs[field] = v
+    for field in _BOOL_FILTER_FIELDS:
+        parsed = _parse_bool_param(query_params.get(field))
+        if parsed is not None:
+            kwargs[field] = parsed
+    for field in _FLOAT_FILTER_FIELDS:
+        v = query_params.get(field)
+        if v:
+            try:
+                kwargs[field] = float(v)
+            except ValueError:
+                pass
+    for field in _INT_MIN_FILTER_FIELDS:
+        v = query_params.get(field)
+        if v:
+            try:
+                kwargs[field] = int(v)
+            except ValueError:
+                pass
+    return kwargs
 
 
 class ListingsController:
@@ -54,26 +123,58 @@ class ListingsController:
     # ------------------------------------------------------------------
 
     async def list_listings(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/listings``"""
+        """``GET /api/v1/listings``
+
+        Listing-level filters (status, paused) are pushed down into the
+        SQL query. Spec filters (gpu_model, gpu_count_min, ram_gb_min,
+        cpu_type, etc.) are applied in-memory after the DB read since the
+        offer/demand resources live as JSON blobs. The local listing book
+        is small enough (operator-scoped) that this is fine.
+
+        Pagination semantics: limit/offset apply to the *post-filter*
+        result set so callers see consistent counts. The DB-level fetch
+        pulls a wider window when spec filters are present.
+        """
         status_filter = request.query_params.get("status") or None
         paused_raw = request.query_params.get("paused")
-        paused_filter: bool | None = None
-        if paused_raw is not None:
-            paused_filter = paused_raw.lower() in ("true", "1", "yes")
+        paused_filter: bool | None = _parse_bool_param(paused_raw)
         limit, offset = self._parse_pagination(request)
 
-        listings = await self._sqlite_client.list_listings(
-            status=status_filter,
-            paused=paused_filter,
-            limit=limit,
-            offset=offset,
-        )
-        return JSONResponse({
+        spec_kwargs = _build_spec_filter_kwargs(request.query_params)
+        has_spec_filters = bool(spec_kwargs)
+
+        if has_spec_filters:
+            # Pull a generous window so post-filter pagination still reflects
+            # the user's limit. 200 is the route-level cap; 1000 internal is
+            # the wider read so spec filters don't truncate against limit.
+            db_limit = 1000
+            listings_all = await self._sqlite_client.list_listings(
+                status=status_filter,
+                paused=paused_filter,
+                limit=db_limit,
+                offset=0,
+            )
+            filtered = [r for r in listings_all if matches_listing_filters(r, **spec_kwargs)]
+            total_after_filter = len(filtered)
+            listings = filtered[offset : offset + limit]
+        else:
+            listings = await self._sqlite_client.list_listings(
+                status=status_filter,
+                paused=paused_filter,
+                limit=limit,
+                offset=offset,
+            )
+            total_after_filter = None
+
+        body: dict = {
             "listings": listings,
             "count": len(listings),
             "limit": limit,
             "offset": offset,
-        })
+        }
+        if total_after_filter is not None:
+            body["total_after_filter"] = total_after_filter
+        return JSONResponse(body)
 
     async def get_listing(self, request: Request) -> JSONResponse:
         """``GET /api/v1/listings/{listing_id}``"""
