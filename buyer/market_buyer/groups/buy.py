@@ -76,7 +76,7 @@ def _resolve_prices_from_matches(
     *,
     matches: list[dict],
     console: Console,
-    auto_price: bool,
+    assume_yes: bool,
     price_markup: float,
 ) -> tuple[Optional[int], Optional[int]]:
     """Derive (initial_price, max_price) from the seller-advertised
@@ -86,12 +86,9 @@ def _resolve_prices_from_matches(
     ``initial = anchor`` (open at the seller's floor) and
     ``max = round(anchor * price_markup)`` (a ceiling above the floor).
 
-    Modes:
-      - ``auto_price=True``: derive silently and return.
-      - ``auto_price=False`` and stdin is a TTY: print the candidate
-        listings + derived defaults, prompt the user to confirm or edit.
-      - ``auto_price=False`` and stdin is not a TTY: derive silently
-        (so non-interactive scripts that omit prices still work).
+    Interactive only when stdin is a TTY AND ``assume_yes`` is False.
+    Otherwise derives silently — same disposition as ``--yes`` propagated
+    through every gate.
 
     Returns ``(None, None)`` if no listing carries a usable min_price or
     the user declines.
@@ -114,7 +111,7 @@ def _resolve_prices_from_matches(
     derived_initial = cheapest
     derived_max = max(int(round(cheapest * price_markup)), cheapest + 1)
 
-    interactive = (not auto_price) and os.isatty(0)
+    interactive = (not assume_yes) and os.isatty(0)
     if not interactive:
         return derived_initial, derived_max
 
@@ -321,19 +318,14 @@ def register(app: typer.Typer) -> None:
             help="Opening bid per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, prices are derived from the "
                  "seller's advertised min_price (interactively confirmed "
-                 "by default; with --auto-price uses min_price as-is).",
+                 "in TTY runs, derived silently with --yes).",
         ),
         max_price: Optional[int] = typer.Option(
             None, "--max-price",
             help="Ceiling per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, derived as min_price × "
-                 "--price-markup (interactively confirmed by default).",
-        ),
-        auto_price: bool = typer.Option(
-            False, "--auto-price",
-            help="Skip the interactive price prompt; derive initial = "
-                 "seller's min_price and max = min_price × --price-markup. "
-                 "Set this for non-interactive runs.",
+                 "--price-markup (interactively confirmed in TTY runs, "
+                 "derived silently with --yes).",
         ),
         price_markup: float = typer.Option(
             1.5, "--price-markup",
@@ -342,11 +334,10 @@ def register(app: typer.Typer) -> None:
         ),
         assume_yes: bool = typer.Option(
             False, "--yes", "-y",
-            help="Skip the pre-settlement confirmation prompt. Default "
-                 "behavior shows the agreed per-hour price + total payment "
-                 "after negotiation and waits for explicit approval before "
-                 "creating the on-chain escrow. Set this for non-interactive "
-                 "runs.",
+            help="Skip ALL interactive prompts (price defaults + "
+                 "pre-settlement confirmation). Same effect as running "
+                 "without a TTY — defaults are accepted automatically. "
+                 "Set this for scripts, CI, or non-interactive runs.",
         ),
         duration_hours: Optional[float] = typer.Option(
             None, "--duration-hours", "-t",
@@ -608,7 +599,7 @@ def register(app: typer.Typer) -> None:
             initial_price, max_price = _resolve_prices_from_matches(
                 matches=matches,
                 console=console,
-                auto_price=auto_price,
+                assume_yes=assume_yes,
                 price_markup=price_markup,
             )
             if initial_price is None or max_price is None:
