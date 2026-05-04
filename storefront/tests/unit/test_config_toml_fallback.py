@@ -37,8 +37,10 @@ def test_empty_toml_uses_all_defaults():
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
     assert cfg.enable_redis_ingest is False
-    # Empty default → strategy loader falls back to DEFAULT_STRATEGY ("rl").
-    assert cfg.negotiation_policy_mode == ""
+    # Default is "bisection" (not "") — prevents silent RL failures when torch
+    # is unavailable. See ARCHITECTURE.md Known Issues: "Negotiation strategy
+    # default was 'rl' (implicit)".
+    assert cfg.negotiation_policy_mode == "bisection"
 
 
 def test_empty_toml_with_no_seller_section_still_loads():

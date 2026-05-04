@@ -1,10 +1,14 @@
 """Integration tests for the Listings API.
 
 Uses the async ``StorefrontClient`` via ``httpx.ASGITransport`` —
-the same pattern as the provisioning-service integration tests.
+matching the provisioning-service integration test pattern.
 All assertions go through the canonical client; no raw HTTP calls.
-"""
 
+Fixture pattern: build a minimal FastAPI app containing only the
+ListingsController router + AdminAuthMiddleware, backed by an in-memory
+SQLiteClient. This mirrors how provisioning-service tests wire a real
+FastAPI app with dependency overrides.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,9 +17,10 @@ from typing import AsyncIterator
 import httpx
 import pytest
 import pytest_asyncio
-from starlette.applications import Starlette
+from fastapi import FastAPI
 
-from market_storefront.controllers.listings_controller import ListingsController
+import market_storefront.container as _container
+from market_storefront.controllers.listings_controller import router as listings_router
 from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -48,9 +53,14 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
 
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
-    ctrl = ListingsController(sqlite_client=db)
-    app = Starlette(routes=ctrl.routes())
+    _container.resolved_sqlite_client = db
+    _container.resolved_listing_service = None  # not used by read/pause/resume
+    _container.resolved_policy_pipeline_service = None  # not used by read/pause/resume
+
+    app = FastAPI()
+    app.include_router(listings_router)
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
         "http://test",
@@ -59,16 +69,26 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     ) as c:
         yield c, db
 
+    _container.resolved_sqlite_client = None
+    _container.resolved_listing_service = None
+    _container.resolved_policy_pipeline_service = None
+
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
-    """Client without admin key — for testing 403 responses."""
-    ctrl = ListingsController(sqlite_client=db)
-    app = Starlette(routes=ctrl.routes())
+    _container.resolved_sqlite_client = db
+    _container.resolved_listing_service = None  # not used by read/pause/resume
+    _container.resolved_policy_pipeline_service = None  # not used by read/pause/resume
+
+    app = FastAPI()
+    app.include_router(listings_router)
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient("http://test", transport=transport) as c:
         yield c
+
+    _container.resolved_sqlite_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +149,6 @@ class TestListListings:
 
     async def test_spec_filter_gpu_count_min(self, client):
         c, db = client
-        # Seed two listings with different gpu_count values
         for lid, gpu_count in (("small", 1), ("big", 8)):
             await db.upsert_listing(
                 listing_id=lid, status="open",
@@ -165,7 +184,6 @@ class TestListListings:
 
     async def test_spec_filter_combines_multiple_constraints(self, client):
         c, db = client
-        # Match: 8 GPUs, vcpu=192, datacenter, nvswitch
         await db.upsert_listing(
             listing_id="dream", status="open",
             created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
@@ -178,7 +196,6 @@ class TestListListings:
             fulfillment_resource=None,
             max_duration_seconds=86400, seller="http://seller:8001",
         )
-        # No match: small slice, pcie only, home-grade
         await db.upsert_listing(
             listing_id="basic", status="open",
             created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
@@ -202,7 +219,6 @@ class TestListListings:
         await _seed_listing(db, "exists")
         result = await c.list_listings(gpu_model="NONEXISTENT_GPU")
         assert result.count == 0
-        # When spec filters are present, the response includes total_after_filter.
         raw = await c._get("/api/v1/listings", params={"gpu_model": "NONEXISTENT_GPU"})
         assert raw.get("total_after_filter") == 0
 
@@ -269,39 +285,18 @@ class TestResumeListing:
         assert await db.is_listing_paused(listing_id="resumable") is False
 
     async def test_resume_returns_registry_status(self, client):
-        """resume_listing response must include registry_status field.
-
-        In this integration test the registry is not reachable, so
-        registry_status will be 'error' or 'disabled'. What matters is
-        that the field is present and is a non-empty string — the client
-        model must parse it from the response body without losing it in
-        the `extra` dict.
-        """
         c, db = client
         await _seed_listing(db, "resume-registry-check")
         result = await c.resume_listing("resume-registry-check")
-        assert hasattr(result, "registry_status"), (
-            "ListingPauseResponse missing registry_status attribute. "
-            "Client model needs to be updated."
-        )
-        assert isinstance(result.registry_status, str), (
-            f"registry_status should be a str, got {type(result.registry_status)}"
-        )
-        # Must not be silently dropped into extra
-        assert "registry_status" not in result.extra, (
-            "registry_status is being captured in 'extra' instead of the typed field. "
-            "Check ListingPauseResponse.from_dict known set."
-        )
+        assert hasattr(result, "registry_status")
+        assert isinstance(result.registry_status, str)
+        assert "registry_status" not in result.extra
 
     async def test_pause_response_has_no_registry_status(self, client):
-        """pause_listing response does not include registry_status (only resume does)."""
         c, db = client
         await _seed_listing(db, "pause-no-registry")
         result = await c.pause_listing("pause-no-registry")
-        # registry_status should be empty string (default) for pause responses
-        assert result.registry_status == "", (
-            f"pause response should have empty registry_status, got {result.registry_status!r}"
-        )
+        assert result.registry_status == ""
 
     async def test_resume_unknown_listing_raises(self, client):
         c, _ = client

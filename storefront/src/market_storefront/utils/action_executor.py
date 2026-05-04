@@ -20,7 +20,7 @@ from market_storefront.utils.stage_log import stage_event
 from alkahest_py import AlkahestClient
 import json
 
-from market_storefront.schema.pydantic_models import (
+from market_storefront.models.domain_models import (
     Action,
     ActionType,
     ComputeResource,

@@ -17,6 +17,45 @@ from service.schemas import (
 
 from service.clients.token import ERC20TokenMetadata
 
+# =============================================================================
+# Domain Model Class Hierarchy
+# =============================================================================
+#
+# service.schemas (external wheel — canonical base types)
+# ├── CoreResource                  Base resource model
+# │   └── ComputeDomainResource     Parse/coerce helper; extends CoreResource
+# │       ├── ComputeResource       A compute slice (GPU, CPU, RAM, region, ...)
+# │       └── TokenResource         ERC-20 token payment (= CoreTokenResource alias)
+# ├── CoreDomainEvent               Base event model
+# │   ├── DomainEvent               (alias for CoreDomainEvent)
+# │   ├── ListingCreatedEvent       order_create pipeline trigger
+# │   ├── ListingClosedEvent        order_close pipeline trigger
+# │   ├── ResourceImbalanceEvent    alert pipeline trigger
+# │   ├── ReceiveComputeObligationFulfillmentEvent
+# │   ├── FulfillmentFailedEvent
+# │   └── ArbitrationCompleteEvent
+# └── (other core types re-aliased below)
+#     ├── Action                    = CoreDomainAction
+#     ├── DecisionContext           = CoreDecisionContext
+#     └── Decision                  = CoreDecision
+#
+# Marketplace-layer types (defined here)
+# ├── Listing                       A published marketplace listing
+# │   ├── offer_resource: ComputeResource | TokenResource
+# │   └── demand_resource: ComputeResource | TokenResource
+# ├── Host                          Physical host metadata (capacity, hardware)
+# ├── ComputeResourcePortfolio      Collection of ComputeResource slices
+# └── ResourceAlertRequest          HTTP input for POST /alerts/resource
+#         └── .to_resource_imbalance_event() → ResourceImbalanceEvent
+#
+# Enumerations
+# ├── GPUModel          H200 | Tesla V100 | RTX 5080 | RTX A5000 | RTX 4090
+# ├── Region            California, US | New York, US | Tokyo, JP
+# ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
+# ├── VirtualizationType bare_metal | vm | container
+# └── EventType         order_create | order_close | resource_imbalance | ...
+# =============================================================================
+
 
 class GPUModel(str, Enum):
     """GPU hardware models available in the marketplace"""

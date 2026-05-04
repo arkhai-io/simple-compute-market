@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",
+    "fastapi-utils>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     "alkahest-py",

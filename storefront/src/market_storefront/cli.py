@@ -131,7 +131,7 @@ def serve_cmd(
     max_duration_seconds ceiling (per-row CSV / [seller.pricing] default);
     buyers supply the actual duration at negotiation init.
     """
-    from .commands.serve import run_serve
+    from market_storefront.server import run_serve
 
     run_serve(
         host=host, port=port,

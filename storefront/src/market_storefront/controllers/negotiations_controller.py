@@ -1,191 +1,94 @@
-"""Negotiations controller — HTTP routing for the negotiations API.
-
-This controller is intentionally thin: it extracts and validates HTTP
-parameters, delegates all business logic to ``NegotiationService``, and
-maps ``NegotiationServiceError`` to the appropriate HTTP status codes.
-
-Business rules (precondition checks, DB orchestration, state machine
-transitions) live in ``market_storefront.services.negotiation_service``.
-
-Endpoints
----------
-``GET  /api/v1/listings/{listing_id}/negotiations``
-``GET  /api/v1/listings/{listing_id}/negotiations/{neg_id}``
-``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance``       admin key
-``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept``  admin key
-"""
-
+"""Negotiations controller — admin read/control API for negotiation threads."""
 from __future__ import annotations
 
 import logging
+from typing import Annotated, Any
 
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi_utils.cbv import cbv
 
-from market_storefront.services.negotiation_service import (
-    NegotiationService,
-    NegotiationServiceError,
-)
+import market_storefront.container as _container
+from market_storefront.models.negotiation_models import AdvanceRequest, ForceAcceptRequest
+from market_storefront.services.negotiation_service import NegotiationServiceError
 
 logger = logging.getLogger(__name__)
 
+router = APIRouter(prefix="/api/v1/listings", tags=["negotiations"])
 
+
+@cbv(router)
 class NegotiationsController:
-    def __init__(self, *, sqlite_client) -> None:
-        self._service = NegotiationService(sqlite_client=sqlite_client)
+    def __init__(
+        self,
+        neg_svc=Depends(lambda: _container.resolved_negotiation_service),
+    ) -> None:
+        self._svc = neg_svc
 
-    # ------------------------------------------------------------------
-    # Pagination helper
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _pagination(request: Request) -> tuple[int, int]:
+    @router.get("/{listing_id}/negotiations", summary="List negotiations for a listing")
+    async def list_negotiations(
+        self,
+        listing_id: str,
+        terminal_state: Annotated[str | None, Query()] = None,
+        buyer_address: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
         try:
-            limit = min(int(request.query_params.get("limit", 50)), 200)
-        except (ValueError, TypeError):
-            limit = 50
-        try:
-            offset = max(int(request.query_params.get("offset", 0)), 0)
-        except (ValueError, TypeError):
-            offset = 0
-        return limit, offset
-
-    # ------------------------------------------------------------------
-    # Handlers
-    # ------------------------------------------------------------------
-
-    async def list_negotiations(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/listings/{listing_id}/negotiations``"""
-        listing_id = request.path_params["listing_id"]
-        limit, offset = self._pagination(request)
-        try:
-            threads = await self._service.list_for_order(
+            threads = await self._svc.list_for_order(
                 listing_id=listing_id,
-                terminal_state=request.query_params.get("terminal_state") or None,
-                buyer_address=request.query_params.get("buyer_address") or None,
+                terminal_state=terminal_state or None,
+                buyer_address=buyer_address or None,
                 limit=limit,
                 offset=offset,
             )
         except NegotiationServiceError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
-
-        return JSONResponse({
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
+        return {
             "listing_id": listing_id,
             "negotiations": threads,
             "count": len(threads),
             "limit": limit,
             "offset": offset,
-        })
+        }
 
-    async def get_negotiation(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/listings/{listing_id}/negotiations/{neg_id}``"""
-        listing_id = request.path_params["listing_id"]
-        neg_id = request.path_params["neg_id"]
+    @router.get("/{listing_id}/negotiations/{neg_id}", summary="Get negotiation detail")
+    async def get_negotiation(self, listing_id: str, neg_id: str) -> dict[str, Any]:
         try:
-            detail = await self._service.get_detail(
-                listing_id=listing_id, neg_id=neg_id
+            return await self._svc.get_detail(listing_id=listing_id, neg_id=neg_id)
+        except NegotiationServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    @router.post(
+        "/{listing_id}/negotiations/{neg_id}/advance",
+        summary="Admin: drive one negotiation round",
+    )
+    async def advance_negotiation(
+        self, listing_id: str, neg_id: str, body: AdvanceRequest
+    ) -> dict[str, Any]:
+        try:
+            return await self._svc.advance(
+                listing_id=listing_id, neg_id=neg_id,
+                action=body.action, price=body.price, reason=body.reason,
             )
         except NegotiationServiceError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
-        return JSONResponse(detail)
-
-    async def advance_negotiation(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance``"""
-        listing_id = request.path_params["listing_id"]
-        neg_id = request.path_params["neg_id"]
-
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-        action = body.get("action")
-        price_raw = body.get("price")
-        price: int | None = None
-        if price_raw is not None:
-            try:
-                price = int(price_raw)
-            except (TypeError, ValueError):
-                return JSONResponse(
-                    {"error": "'price' must be an integer"}, status_code=400
-                )
-
-        try:
-            result = await self._service.advance(
-                listing_id=listing_id,
-                neg_id=neg_id,
-                action=action,
-                price=price,
-                reason=body.get("reason"),
-            )
-        except NegotiationServiceError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
         except Exception as exc:
-            logger.error("[CONTROLLER] advance_negotiation unexpected: %s", exc, exc_info=True)
-            return JSONResponse(
-                {"error": "advance failed", "detail": str(exc)}, status_code=500
-            )
+            logger.error("[NEGOTIATIONS] advance: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
 
-        return JSONResponse(result)
-
-    async def force_accept_negotiation(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept``"""
-        listing_id = request.path_params["listing_id"]
-        neg_id = request.path_params["neg_id"]
-
+    @router.post(
+        "/{listing_id}/negotiations/{neg_id}/force-accept",
+        summary="Admin: force-accept a negotiation",
+    )
+    async def force_accept_negotiation(
+        self, listing_id: str, neg_id: str, body: ForceAcceptRequest
+    ) -> dict[str, Any]:
         try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-        try:
-            price = int(body["price"])
-        except (KeyError, TypeError, ValueError):
-            return JSONResponse(
-                {"error": "'price' (int) is required"}, status_code=400
-            )
-
-        try:
-            result = await self._service.force_accept(
-                listing_id=listing_id, neg_id=neg_id, price=price
+            return await self._svc.force_accept(
+                listing_id=listing_id, neg_id=neg_id, price=body.price
             )
         except NegotiationServiceError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=exc.status_code)
+            raise HTTPException(status_code=exc.status_code, detail=str(exc))
         except Exception as exc:
-            logger.error(
-                "[CONTROLLER] force_accept_negotiation unexpected: %s", exc, exc_info=True
-            )
-            return JSONResponse(
-                {"error": "force-accept failed", "detail": str(exc)}, status_code=500
-            )
-
-        return JSONResponse(result)
-
-    # ------------------------------------------------------------------
-    # Route factory
-    # ------------------------------------------------------------------
-
-    def routes(self) -> list[Route]:
-        return [
-            Route(
-                "/api/v1/listings/{listing_id}/negotiations",
-                self.list_negotiations,
-                methods=["GET"],
-            ),
-            Route(
-                "/api/v1/listings/{listing_id}/negotiations/{neg_id}",
-                self.get_negotiation,
-                methods=["GET"],
-            ),
-            Route(
-                "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
-                self.advance_negotiation,
-                methods=["POST"],
-            ),
-            Route(
-                "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
-                self.force_accept_negotiation,
-                methods=["POST"],
-            ),
-        ]
+            logger.error("[NEGOTIATIONS] force-accept: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))

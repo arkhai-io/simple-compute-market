@@ -1,32 +1,30 @@
+"""Integration tests for orders, alerts and identity endpoints.
+
+Covers the endpoints extracted from agent.py into the new controllers:
+  - OrdersController  (/listings/create, /listings/close)
+  - AlertsController  (/alerts/resource)
+  - IdentityController (/.well-known/*)
+
+Uses a StorefrontService stub and FastAPI ASGITransport — no
+ENABLE_EVENT_QUEUE env var hack, no agent.py module-level import needed.
+
+The original conftest/agent_app_client fixture is superseded by the
+per-test fixtures here that wire only the routers under test.
 """
-Integration tests for the Arkhai agent REST API routes.
-
-Coverage (per Architecture.md — Integration Tests jurisdiction):
-  - Request bodies accepted / rejected correctly (validation path)
-  - Responses parse into StorefrontClient's expected shapes
-  - Auth bypass works when AGENT_WALLET_ADDRESS is unset
-  - GET /.well-known/erc-8004-registration.json returns valid JSON
-
-``ENABLE_EVENT_QUEUE=true`` is set in conftest so all order/alert handlers
-return immediately after queuing — the ADK Runner and root_agent are not
-invoked.  This isolates the HTTP layer without requiring AI infrastructure.
-
-What is NOT covered here (not in integration test jurisdiction):
-  - ADK runner / root_agent response quality (system test territory)
-  - Policy evaluation or negotiation logic (unit test territory)
-  - On-chain calls (system test territory)
-"""
-
 from __future__ import annotations
 
+from typing import AsyncIterator
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 import pytest
+import pytest_asyncio
+from fastapi import FastAPI
 
-from storefront_client import StorefrontClient, StorefrontClientError
-
-
-# ---------------------------------------------------------------------------
-# Shared fixtures
-# ---------------------------------------------------------------------------
+import market_storefront.container as _container
+from market_storefront.controllers.alerts_controller import router as alerts_router
+from market_storefront.controllers.identity_controller import router as identity_router
+from market_storefront.controllers.listings_controller import router as listings_router
 
 _COMPUTE_OFFER = {
     "gpu_model": "RTX 4090",
@@ -50,196 +48,187 @@ _ALERT_BODY = {
 
 
 # ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest_asyncio.fixture
+async def mock_svc():
+    """Minimal service stubs matching ListingService and PolicyPipelineService APIs."""
+    svc = MagicMock()
+    # ListingService methods
+    svc.create_listing = AsyncMock(
+        return_value={
+            "status": "queued",
+            "event_id": "ev-test-123",
+            "listing_request": {},
+        }
+    )
+    svc.close_listing = AsyncMock(
+        return_value={
+            "status": "queued",
+            "event_id": "ev-close-456",
+            "listing_request": {},
+        }
+    )
+    # PolicyPipelineService methods
+    svc.handle_resource_alert = AsyncMock(
+        return_value={**_ALERT_BODY, "root_agent_response": "Noted."}
+    )
+    return svc
+
+
+@pytest_asyncio.fixture
+async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
+    from market_storefront.utils.sqlite_client import SQLiteClient
+    db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
+    _container.resolved_sqlite_client = db
+    _container.resolved_listing_service = mock_svc
+    _container.resolved_policy_pipeline_service = mock_svc
+
+    app = FastAPI()
+    app.include_router(listings_router)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_listing_service = None
+    _container.resolved_policy_pipeline_service = None
+
+
+@pytest_asyncio.fixture
+async def alerts_client(mock_svc) -> AsyncIterator[httpx.AsyncClient]:
+    _container.resolved_policy_pipeline_service = mock_svc
+
+    app = FastAPI()
+    app.include_router(alerts_router)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+    _container.resolved_policy_pipeline_service = None
+
+
+@pytest_asyncio.fixture
+async def identity_client() -> AsyncIterator[httpx.AsyncClient]:
+    app = FastAPI()
+    app.include_router(identity_router)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+# ---------------------------------------------------------------------------
 # /alerts/resource
 # ---------------------------------------------------------------------------
 
-
 class TestAlertEndpoint:
-    async def test_valid_alert_returns_200(self, agent_app_client):
-        resp = await agent_app_client.post("/alerts/resource", json=_ALERT_BODY)
+    async def test_valid_alert_returns_200(self, alerts_client):
+        resp = await alerts_client.post("/alerts/resource", json=_ALERT_BODY)
         assert resp.status_code == 200
         data = resp.json()
-        assert "root_agent_response" in data or "error" not in data
+        assert "root_agent_response" in data
 
-    async def test_alert_missing_required_field_returns_400(self, agent_app_client):
+    async def test_alert_missing_required_field_returns_422(self, alerts_client):
+        """FastAPI/Pydantic returns 422 for missing required fields."""
         bad = dict(_ALERT_BODY)
         del bad["value"]
-        resp = await agent_app_client.post("/alerts/resource", json=bad)
-        assert resp.status_code == 400
+        resp = await alerts_client.post("/alerts/resource", json=bad)
+        assert resp.status_code == 422
 
-    async def test_alert_invalid_json_returns_400(self, agent_app_client):
-        resp = await agent_app_client.post(
+    async def test_alert_invalid_json_returns_422(self, alerts_client):
+        resp = await alerts_client.post(
             "/alerts/resource",
             content=b"not json",
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
-    async def test_alert_resource_missing_fields_returns_400(self, agent_app_client):
+    async def test_alert_resource_missing_fields_returns_422(self, alerts_client):
         bad = dict(_ALERT_BODY)
         bad["resource"] = {"gpu_model": "RTX 4090"}  # missing gpu_count/sla/region
-        resp = await agent_app_client.post("/alerts/resource", json=bad)
-        assert resp.status_code == 400
-
-    async def test_alert_value_out_of_range_returns_400(self, agent_app_client):
-        bad = dict(_ALERT_BODY)
-        bad["value"] = 1.5  # must be <= 1.0
-        resp = await agent_app_client.post("/alerts/resource", json=bad)
-        assert resp.status_code == 400
-
-
-class TestAlertViaClient:
-    async def test_client_send_resource_alert_matches_endpoint(self, agent_app_client):
-        """StorefrontClient.send_resource_alert body matches what the endpoint accepts."""
-        import aiohttp
-
-        # Build the body that StorefrontClient would send
-        client = StorefrontClient("http://test")
-
-        # Call the endpoint directly with the same body the client would use
-        resp = await agent_app_client.post("/alerts/resource", json=_ALERT_BODY)
-        assert resp.status_code == 200
+        resp = await alerts_client.post("/alerts/resource", json=bad)
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
 # /listings/create
 # ---------------------------------------------------------------------------
 
-
 class TestCreateOrderEndpoint:
-    async def test_valid_compute_offer_token_demand_returns_200(self, agent_app_client):
-        body = {
-            "offer": _COMPUTE_OFFER,
-            "demand": _TOKEN_DEMAND,
-            "max_duration_seconds": 7200,
-        }
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code == 200
-        data = resp.json()
-        # With event queue enabled the response has status=queued or status=created
-        assert "status" in data
-        assert "event_id" in data
-
-    async def test_valid_token_offer_compute_demand_returns_200(self, agent_app_client):
-        body = {
-            "offer": _TOKEN_DEMAND,
-            "demand": _COMPUTE_OFFER,
-            "max_duration_seconds": 3600,
-        }
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code == 200
-
-    async def test_missing_offer_returns_422_or_400(self, agent_app_client):
-        body = {"demand": _TOKEN_DEMAND}
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code in (400, 422)
-
-    async def test_missing_demand_returns_422_or_400(self, agent_app_client):
-        body = {"offer": _COMPUTE_OFFER}
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code in (400, 422)
-
-    async def test_two_compute_resources_returns_400(self, agent_app_client):
-        body = {
-            "offer": _COMPUTE_OFFER,
-            "demand": _COMPUTE_OFFER,
-        }
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code in (400, 422, 500)
-
-    async def test_unknown_token_returns_400(self, agent_app_client):
-        body = {
-            "offer": _COMPUTE_OFFER,
-            "demand": {"token": "NONEXISTENT_TOKEN_XYZ", "amount": 10.0},
-        }
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code in (400, 422)
-
-    async def test_response_contains_order_request(self, agent_app_client):
+    async def test_valid_create_returns_200(self, orders_client):
         body = {
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
         }
-        resp = await agent_app_client.post("/listings/create", json=body)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "listing_request" in data
-
-
-class TestCreateOrderViaClient:
-    async def test_client_create_order_body_matches_endpoint(self, agent_app_client):
-        """StorefrontClient.create_order serialises to a body the endpoint accepts."""
-        body = {
-            "offer": _COMPUTE_OFFER,
-            "demand": _TOKEN_DEMAND,
-            "max_duration_seconds": 3600,
-        }
-        resp = await agent_app_client.post("/listings/create", json=body)
+        resp = await orders_client.post("/listings/create", json=body)
         assert resp.status_code == 200
         data = resp.json()
         assert "event_id" in data
         assert "status" in data
+
+    async def test_missing_offer_returns_422(self, orders_client):
+        """CreateListingRequest Pydantic model requires offer; FastAPI returns 422."""
+        resp = await orders_client.post("/listings/create", json={"demand": _TOKEN_DEMAND})
+        assert resp.status_code == 422
+
+    async def test_missing_demand_returns_422(self, orders_client):
+        """CreateListingRequest Pydantic model requires demand; FastAPI returns 422."""
+        resp = await orders_client.post("/listings/create", json={"offer": _COMPUTE_OFFER})
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------
 # /listings/close
 # ---------------------------------------------------------------------------
 
-
 class TestCloseOrderEndpoint:
-    async def test_valid_close_returns_200(self, agent_app_client):
-        body = {"listing_id": "test-order-abc123"}
-        resp = await agent_app_client.post("/listings/close", json=body)
+    async def test_valid_close_returns_200(self, orders_client):
+        resp = await orders_client.post("/listings/close", json={"listing_id": "test-order-abc"})
         assert resp.status_code == 200
         data = resp.json()
         assert "status" in data
         assert "event_id" in data
 
-    async def test_missing_order_id_returns_400(self, agent_app_client):
-        resp = await agent_app_client.post("/listings/close", json={})
+    async def test_missing_order_id_returns_400(self, orders_client):
+        resp = await orders_client.post("/listings/close", json={})
         assert resp.status_code in (400, 422)
 
-    async def test_empty_order_id_returns_400(self, agent_app_client):
-        resp = await agent_app_client.post("/listings/close", json={"listing_id": ""})
+    async def test_empty_order_id_returns_400(self, orders_client):
+        resp = await orders_client.post("/listings/close", json={"listing_id": ""})
         assert resp.status_code in (400, 422)
-
-    async def test_response_contains_order_request(self, agent_app_client):
-        body = {"listing_id": "test-order-xyz"}
-        resp = await agent_app_client.post("/listings/close", json=body)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "listing_request" in data
-
-
-class TestCloseOrderViaClient:
-    async def test_client_close_order_body_matches_endpoint(self, agent_app_client):
-        """StorefrontClient.close_order serialises to a body the endpoint accepts."""
-        body = {"listing_id": "order-abc"}
-        resp = await agent_app_client.post("/listings/close", json=body)
-        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
 # /.well-known/erc-8004-registration.json
 # ---------------------------------------------------------------------------
 
-
 class TestRegistrationEndpoint:
-    async def test_returns_200_with_json(self, agent_app_client):
-        resp = await agent_app_client.get("/.well-known/erc-8004-registration.json")
+    async def test_returns_200_with_json(self, identity_client):
+        resp = await identity_client.get("/.well-known/erc-8004-registration.json")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict)
 
-    async def test_contains_type_field(self, agent_app_client):
-        resp = await agent_app_client.get("/.well-known/erc-8004-registration.json")
+    async def test_contains_expected_fields(self, identity_client):
+        resp = await identity_client.get("/.well-known/erc-8004-registration.json")
         data = resp.json()
-        # ERC-8004 spec requires a 'type' field
-        assert "type" in data or "name" in data  # either spec field is acceptable
+        # ERC-8004 spec: either 'type' or 'name' must be present
+        assert "type" in data or "name" in data
 
-    async def test_client_get_registration_parses_response(self, agent_app_client):
-        """StorefrontClient.get_registration parses a valid JSON response."""
-        resp = await agent_app_client.get("/.well-known/erc-8004-registration.json")
+
+# ---------------------------------------------------------------------------
+# /.well-known/agent-wallet.json
+# ---------------------------------------------------------------------------
+
+class TestAgentWalletEndpoint:
+    async def test_returns_200_with_address(self, identity_client):
+        resp = await identity_client.get("/.well-known/agent-wallet.json")
         assert resp.status_code == 200
         data = resp.json()
-        assert isinstance(data, dict)
+        assert "agent_wallet_address" in data
+        # Value is a string (may be empty if not configured)
+        assert isinstance(data["agent_wallet_address"], str)

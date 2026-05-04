@@ -176,7 +176,7 @@ class TestEvaluateOrderCreatePreFlight:
 class TestEvaluateOrderCreateHappyPath:
     async def test_returns_make_offer_when_callable_fires(self, db):
         """End-to-end: seeded policy + registered callable → action=make_offer."""
-        from market_storefront.schema.pydantic_models import ActionType, ListingCreatedEvent
+        from market_storefront.models.domain_models import ActionType, ListingCreatedEvent
         from service.schemas import DomainAction
 
         # Register a fake callable that always returns MAKE_OFFER
@@ -211,7 +211,7 @@ class TestEvaluateOrderCreateHappyPath:
         A bare PolicyStore (no register_callables) always returns None even when
         the callable exists in the registry.  This test fails if the wiring is absent.
         """
-        from market_storefront.schema.pydantic_models import ActionType, ListingCreatedEvent
+        from market_storefront.models.domain_models import ActionType, ListingCreatedEvent
         from service.schemas import DomainAction
 
         fired = []

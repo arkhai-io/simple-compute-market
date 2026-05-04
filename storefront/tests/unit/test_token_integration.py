@@ -4,7 +4,7 @@ import pytest
 
 def test_erc20_token_metadata_resolves_from_service():
     """ERC20TokenMetadata in pydantic_models is the same class as in service.clients.token."""
-    from market_storefront.schema.pydantic_models import ERC20TokenMetadata as CoreMeta
+    from market_storefront.models.domain_models import ERC20TokenMetadata as CoreMeta
     from service.clients.token import ERC20TokenMetadata as ServiceMeta
     assert CoreMeta is ServiceMeta
 

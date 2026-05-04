@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from market_storefront.schema.pydantic_models import (
+from market_storefront.models.domain_models import (
     ResourceAlertRequest,
     Listing,
     ComputeResource,

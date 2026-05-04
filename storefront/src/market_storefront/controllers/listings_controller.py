@@ -1,251 +1,263 @@
-"""Listings controller — seller-local listing read API and pause controls.
+"""Listings controller — full listing lifecycle API.
 
-All read endpoints (``GET``) are unauthenticated — the storefront's listing
-book is operator-facing data that does not need to be hidden.
+Consolidates the former ``ListingsController`` (read/pause/resume) and
+``OrdersController`` (create/close/refund/claim/reclaim/arbitrate/discover)
+into a single controller, since all operations act on the ``listings``
+resource. ``orders_controller.py`` is tombstoned.
 
-Write endpoints (``POST .../pause``, ``POST .../resume``) require the
-``X-Admin-Key`` header enforced by ``AdminAuthMiddleware``.
+Route groups
+------------
+Read (unauthenticated):
+  GET  /api/v1/listings
+  GET  /api/v1/listings/{listing_id}
 
-Endpoints
----------
-``GET  /api/v1/listings``                       List local listings (filterable).
-``GET  /api/v1/listings/{listing_id}``          Single listing detail.
-``POST /api/v1/listings/{listing_id}/pause``    Take listing off market (block new
-                                                negotiations against it).
-``POST /api/v1/listings/{listing_id}/resume``   Put listing back on market.
+Admin pause/resume (admin key via AdminAuthMiddleware):
+  POST /api/v1/listings/{listing_id}/pause
+  POST /api/v1/listings/{listing_id}/resume
 
-Query parameters for ``GET /api/v1/listings``
----------------------------------------------
-Listing-level:
-``status``  — filter by listing status (e.g. ``open``, ``accepted``, ``closed``).
-              Omit to return all statuses.
-``paused``  — ``true`` / ``false`` / omit for all.
-``limit``   — max rows (default 50, max 200).
-``offset``  — pagination offset (default 0).
-
-Spec filters (mirror the registry-service ``GET /listings`` filter shape):
-Equality —
-``region``, ``gpu_model``, ``sla``, ``cpu_type``, ``host_disk_type``,
-``motherboard``, ``gpu_interconnect``, ``virtualization_type``, ``static_ip``,
-``datacenter_grade``.
-Numeric ``_min`` (offer must satisfy >=) —
-``gpu_count_min``, ``vcpu_count_min``, ``ram_gb_min``, ``disk_gb_min``,
-``host_cpu_cores_min``, ``host_ram_gb_min``, ``host_disk_gb_min``,
-``total_gpu_count_min``, ``nic_speed_gbps_min``,
-``internet_download_mbps_min``, ``internet_upload_mbps_min``,
-``open_ports_count_min``.
+Listing lifecycle (seller-signed via SellerAuthDepends):
+  POST /listings/create
+  POST /listings/close
+  POST /listings/refund
+  POST /listings/claim
+  POST /listings/reclaim
+  POST /listings/arbitrate
+  POST /listings/discover
 """
-
 from __future__ import annotations
 
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+import logging
+from typing import Any
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi_utils.cbv import cbv
+
+import market_storefront.container as _container
+from market_storefront.middleware.seller_auth import make_seller_auth_dep
+from market_storefront.models.listing_models import (
+    ArbitrateRequest,
+    ClaimRequest,
+    CloseListingRequest,
+    CreateListingRequest,
+    DiscoverRequest,
+    ListingFilterParams,
+    ReclaimRequest,
+    RefundRequest,
+    listing_filter_params,
+)
 from market_storefront.utils.listing_filters import matches_listing_filters
 
+logger = logging.getLogger(__name__)
 
-_BOOL_FILTER_FIELDS = ("static_ip", "datacenter_grade")
-_FLOAT_FILTER_FIELDS = ("sla",)
-_STR_FILTER_FIELDS = (
-    "region", "gpu_model", "cpu_type", "host_disk_type", "motherboard",
-    "gpu_interconnect", "virtualization_type",
-)
-_INT_MIN_FILTER_FIELDS = (
-    "gpu_count_min", "vcpu_count_min", "ram_gb_min", "disk_gb_min",
-    "host_cpu_cores_min", "host_ram_gb_min", "host_disk_gb_min",
-    "total_gpu_count_min", "nic_speed_gbps_min",
-    "internet_download_mbps_min", "internet_upload_mbps_min",
-    "open_ports_count_min",
-)
+router = APIRouter(tags=["listings"])
 
 
-def _parse_bool_param(raw: str | None) -> bool | None:
-    if raw is None:
-        return None
-    lowered = raw.lower()
-    if lowered in ("true", "1", "yes"):
-        return True
-    if lowered in ("false", "0", "no"):
-        return False
-    return None
-
-
-def _build_spec_filter_kwargs(query_params) -> dict:
-    """Pull spec filters out of query_params and coerce types."""
-    kwargs: dict = {}
-    for field in _STR_FILTER_FIELDS:
-        v = query_params.get(field)
-        if v:
-            kwargs[field] = v
-    for field in _BOOL_FILTER_FIELDS:
-        parsed = _parse_bool_param(query_params.get(field))
-        if parsed is not None:
-            kwargs[field] = parsed
-    for field in _FLOAT_FILTER_FIELDS:
-        v = query_params.get(field)
-        if v:
-            try:
-                kwargs[field] = float(v)
-            except ValueError:
-                pass
-    for field in _INT_MIN_FILTER_FIELDS:
-        v = query_params.get(field)
-        if v:
-            try:
-                kwargs[field] = int(v)
-            except ValueError:
-                pass
-    return kwargs
-
-
+@cbv(router)
 class ListingsController:
-    def __init__(self, *, sqlite_client) -> None:
-        self._sqlite_client = sqlite_client
+    def __init__(
+        self,
+        db=Depends(lambda: _container.resolved_sqlite_client),
+        listing_svc=Depends(lambda: _container.resolved_listing_service),
+        pipeline_svc=Depends(lambda: _container.resolved_policy_pipeline_service),
+    ) -> None:
+        self._db = db
+        self._listing_svc = listing_svc
+        self._pipeline_svc = pipeline_svc
 
     # ------------------------------------------------------------------
-    # Helpers
+    # GET /api/v1/listings
     # ------------------------------------------------------------------
 
-    def _parse_pagination(self, request: Request) -> tuple[int, int]:
-        try:
-            limit = min(int(request.query_params.get("limit", 50)), 200)
-        except (ValueError, TypeError):
-            limit = 50
-        try:
-            offset = max(int(request.query_params.get("offset", 0)), 0)
-        except (ValueError, TypeError):
-            offset = 0
-        return limit, offset
+    @router.get("/api/v1/listings", summary="List seller-local listings")
+    async def list_listings(
+        self,
+        params: ListingFilterParams = Depends(listing_filter_params),
+    ) -> dict[str, Any]:
+        spec_kwargs = params.to_spec_kwargs()
+        has_spec = bool(spec_kwargs)
 
-    # ------------------------------------------------------------------
-    # Handlers
-    # ------------------------------------------------------------------
-
-    async def list_listings(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/listings``
-
-        Listing-level filters (status, paused) are pushed down into the
-        SQL query. Spec filters (gpu_model, gpu_count_min, ram_gb_min,
-        cpu_type, etc.) are applied in-memory after the DB read since the
-        offer/demand resources live as JSON blobs. The local listing book
-        is small enough (operator-scoped) that this is fine.
-
-        Pagination semantics: limit/offset apply to the *post-filter*
-        result set so callers see consistent counts. The DB-level fetch
-        pulls a wider window when spec filters are present.
-        """
-        status_filter = request.query_params.get("status") or None
-        paused_raw = request.query_params.get("paused")
-        paused_filter: bool | None = _parse_bool_param(paused_raw)
-        limit, offset = self._parse_pagination(request)
-
-        spec_kwargs = _build_spec_filter_kwargs(request.query_params)
-        has_spec_filters = bool(spec_kwargs)
-
-        if has_spec_filters:
-            # Pull a generous window so post-filter pagination still reflects
-            # the user's limit. 200 is the route-level cap; 1000 internal is
-            # the wider read so spec filters don't truncate against limit.
-            db_limit = 1000
-            listings_all = await self._sqlite_client.list_listings(
-                status=status_filter,
-                paused=paused_filter,
-                limit=db_limit,
-                offset=0,
+        if has_spec:
+            all_rows = await self._db.list_listings(
+                status=params.status, paused=params.paused, limit=1000, offset=0
             )
-            filtered = [r for r in listings_all if matches_listing_filters(r, **spec_kwargs)]
+            filtered = [r for r in all_rows if matches_listing_filters(r, **spec_kwargs)]
             total_after_filter = len(filtered)
-            listings = filtered[offset : offset + limit]
-        else:
-            listings = await self._sqlite_client.list_listings(
-                status=status_filter,
-                paused=paused_filter,
-                limit=limit,
-                offset=offset,
-            )
-            total_after_filter = None
+            listings = filtered[params.offset: params.offset + params.limit]
+            return {
+                "listings": listings,
+                "count": len(listings),
+                "limit": params.limit,
+                "offset": params.offset,
+                "total_after_filter": total_after_filter,
+            }
 
-        body: dict = {
+        listings = await self._db.list_listings(
+            status=params.status, paused=params.paused,
+            limit=params.limit, offset=params.offset,
+        )
+        return {
             "listings": listings,
             "count": len(listings),
-            "limit": limit,
-            "offset": offset,
+            "limit": params.limit,
+            "offset": params.offset,
         }
-        if total_after_filter is not None:
-            body["total_after_filter"] = total_after_filter
-        return JSONResponse(body)
 
-    async def get_listing(self, request: Request) -> JSONResponse:
-        """``GET /api/v1/listings/{listing_id}``"""
-        listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_listing(listing_id=listing_id)
+    # ------------------------------------------------------------------
+    # GET /api/v1/listings/{listing_id}
+    # ------------------------------------------------------------------
+
+    @router.get("/api/v1/listings/{listing_id}", summary="Get a single listing")
+    async def get_listing(self, listing_id: str) -> dict[str, Any]:
+        row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            return JSONResponse(
-                {"error": "Not found", "listing_id": listing_id},
-                status_code=404,
-            )
+            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
         if "paused" not in row:
             row["paused"] = False
-        return JSONResponse(row)
+        return row
 
-    async def pause_listing(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/listings/{listing_id}/pause``
+    # ------------------------------------------------------------------
+    # POST /api/v1/listings/{listing_id}/pause  (admin key)
+    # ------------------------------------------------------------------
 
-        Marks the listing as paused. New ``/negotiate/new`` calls against
-        this listing will receive 503 while it is paused.
-        """
-        listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_listing(listing_id=listing_id)
+    @router.post("/api/v1/listings/{listing_id}/pause", summary="Pause a listing (admin)")
+    async def pause_listing(self, listing_id: str) -> dict[str, Any]:
+        row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            return JSONResponse(
-                {"error": "Not found", "listing_id": listing_id},
-                status_code=404,
-            )
-        await self._sqlite_client.set_listing_paused(listing_id=listing_id, paused=True)
-        return JSONResponse({
-            "listing_id": listing_id,
-            "paused": True,
-            "message": "Listing paused. New negotiations against this listing will receive 503.",
-        })
+            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+        await self._db.set_listing_paused(listing_id=listing_id, paused=True)
+        return {"listing_id": listing_id, "paused": True, "registry_status": "",
+                "message": "Listing paused. New negotiations will receive 503."}
 
-    async def resume_listing(self, request: Request) -> JSONResponse:
-        """``POST /api/v1/listings/{listing_id}/resume``
+    # ------------------------------------------------------------------
+    # POST /api/v1/listings/{listing_id}/resume  (admin key)
+    # ------------------------------------------------------------------
 
-        Clears the paused flag then publishes the listing to the registry.
-        Safe to call when the listing was created with ``paused=true`` and
-        has never been published, or when it was previously paused.
-        """
-        listing_id = request.path_params["listing_id"]
-        row = await self._sqlite_client.load_listing(listing_id=listing_id)
+    @router.post("/api/v1/listings/{listing_id}/resume",
+                 summary="Resume a listing and publish to registry (admin)")
+    async def resume_listing(self, listing_id: str) -> dict[str, Any]:
+        row = await self._db.load_listing(listing_id=listing_id)
         if not row:
-            return JSONResponse(
-                {"error": "Not found", "listing_id": listing_id},
-                status_code=404,
-            )
-        await self._sqlite_client.set_listing_paused(listing_id=listing_id, paused=False)
-
-        # Publish to registry — idempotent if already published; required if
-        # this is the first resume after a paused-at-creation listing.
+            raise HTTPException(status_code=404, detail=f"Listing {listing_id} not found")
+        await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         from market_storefront.utils.action_executor import publish_order_to_registry
         publish_result = await publish_order_to_registry(row)
         registry_status = publish_result.get("status", "unknown")
-
-        return JSONResponse({
-            "listing_id": listing_id,
-            "paused": False,
-            "registry_status": registry_status,
-            "message": f"Listing resumed and {registry_status} to registry.",
-        })
+        return {"listing_id": listing_id, "paused": False,
+                "registry_status": registry_status,
+                "message": f"Listing resumed and {registry_status} to registry."}
 
     # ------------------------------------------------------------------
-    # Route factory
+    # POST /listings/create  (seller auth)
     # ------------------------------------------------------------------
 
-    def routes(self) -> list[Route]:
-        return [
-            Route("/api/v1/listings", self.list_listings, methods=["GET"]),
-            Route("/api/v1/listings/{listing_id}", self.get_listing, methods=["GET"]),
-            Route("/api/v1/listings/{listing_id}/pause", self.pause_listing, methods=["POST"]),
-            Route("/api/v1/listings/{listing_id}/resume", self.resume_listing, methods=["POST"]),
-        ]
+    @router.post(
+        "/listings/create",
+        summary="Create a new listing via policy pipeline (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("create_listing"))],
+    )
+    async def create_listing(self, body: CreateListingRequest) -> dict[str, Any]:
+        try:
+            return await self._listing_svc.create_listing(body.model_dump(), self._pipeline_svc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            logger.error("[LISTINGS] create unexpected: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # POST /listings/close  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/close",
+        summary="Close a listing (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("close_listing"))],
+    )
+    async def close_listing(self, body: CloseListingRequest) -> dict[str, Any]:
+        if not body.listing_id.strip():
+            raise HTTPException(status_code=400, detail="listing_id must not be empty")
+        try:
+            return await self._listing_svc.close_listing(body.listing_id, self._pipeline_svc)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            logger.error("[LISTINGS] close unexpected: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    # ------------------------------------------------------------------
+    # POST /listings/refund  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/refund",
+        summary="Direct token refund to buyer (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("refund_listing"))],
+    )
+    async def refund(self, body: RefundRequest) -> Any:
+        status_code, result = await self._listing_svc.refund(body.model_dump())
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail=result.get("error", "Refund failed"))
+        return result
+
+    # ------------------------------------------------------------------
+    # POST /listings/claim  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/claim",
+        summary="Seller claims on-chain escrow (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("claim_listing"))],
+    )
+    async def claim(self, body: ClaimRequest) -> Any:
+        status_code, result = await self._listing_svc.claim(body.model_dump())
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail=result.get("error", "Claim failed"))
+        return result
+
+    # ------------------------------------------------------------------
+    # POST /listings/reclaim  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/reclaim",
+        summary="Buyer reclaims expired escrow (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("reclaim_listing"))],
+    )
+    async def reclaim(self, body: ReclaimRequest) -> Any:
+        status_code, result = await self._listing_svc.reclaim(body.model_dump())
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail=result.get("error", "Reclaim failed"))
+        return result
+
+    # ------------------------------------------------------------------
+    # POST /listings/arbitrate  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/arbitrate",
+        summary="Oracle arbitration (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("arbitrate_listing"))],
+    )
+    async def arbitrate(self, body: ArbitrateRequest) -> Any:
+        status_code, result = await self._listing_svc.arbitrate(body.model_dump())
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail=result.get("error", "Arbitrate failed"))
+        return result
+
+    # ------------------------------------------------------------------
+    # POST /listings/discover  (seller auth)
+    # ------------------------------------------------------------------
+
+    @router.post(
+        "/listings/discover",
+        summary="Discover matching counterparty listings (seller auth)",
+        dependencies=[Depends(make_seller_auth_dep("discover_listings"))],
+    )
+    async def discover(self, body: DiscoverRequest) -> Any:
+        try:
+            status_code, result = await self._listing_svc.discover(body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if status_code != 200:
+            raise HTTPException(status_code=status_code, detail=result.get("error", "Discover failed"))
+        return result

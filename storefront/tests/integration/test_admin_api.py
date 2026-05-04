@@ -3,8 +3,13 @@
 Uses the async ``StorefrontClient`` via ``httpx.ASGITransport``,
 matching the provisioning-service integration test pattern.
 All assertions go through the canonical client.
-"""
 
+Key fixture change from Starlette → FastAPI: the AdminController and
+SystemController now import the global pause functions from server.py via
+their defaults. For testing we need to control the pause state, so the
+fixture wires the container and uses the module-level flag in server.py
+directly (same as production).
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -13,10 +18,12 @@ from typing import AsyncIterator
 import httpx
 import pytest
 import pytest_asyncio
-from starlette.applications import Starlette
+from fastapi import FastAPI
 
-from market_storefront.controllers.admin_controller import AdminController
-from market_storefront.controllers.system_controller import SystemController
+import market_storefront.container as _container
+import market_storefront.server as _server
+from market_storefront.controllers.admin_controller import router as admin_router
+from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -34,121 +41,93 @@ async def db(tmp_path) -> SQLiteClient:
     return SQLiteClient(db_path=str(tmp_path / "admin_test.db"))
 
 
-def _make_app(db: SQLiteClient, *, admin_key: str | None = ADMIN_KEY):
-    """Build a minimal Starlette app with system + admin controllers.
-
-    Returns (app, paused_ref) where paused_ref is a mutable list[bool]
-    the test can inspect directly to verify the flag was toggled.
-    """
-    _paused = [False]
-
-    def _get() -> bool:
-        return _paused[0]
-
-    def _set(v: bool) -> None:
-        _paused[0] = v
-
-    system_ctrl = SystemController(sqlite_client=db, globally_paused_fn=_get)
-    admin_ctrl = AdminController(
-        sqlite_client=db, get_paused_fn=_get, set_paused_fn=_set
-    )
-    routes = system_ctrl.routes() + admin_ctrl.routes()
-    app = Starlette(routes=routes)
-    app.add_middleware(AdminAuthMiddleware, admin_api_key=admin_key)
-    return app, _paused
+@pytest_asyncio.fixture(autouse=True)
+def reset_pause_state():
+    """Ensure global pause flag is reset between tests."""
+    _server._GLOBALLY_PAUSED = False
+    yield
+    _server._GLOBALLY_PAUSED = False
 
 
 @pytest_asyncio.fixture
-async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient, list]]:
-    app, paused_ref = _make_app(db)
+async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+    from market_storefront.services.system_service import SystemService
+    _container.resolved_sqlite_client = db
+    _container.resolved_system_service = SystemService(sqlite_client=db)
+
+    app = FastAPI()
+    app.include_router(system_router)
+    app.include_router(admin_router)
+    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
         "http://test", transport=transport, admin_key=ADMIN_KEY
     ) as c:
-        yield c, db, paused_ref
+        yield c, db
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_system_service = None
 
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
-    app, _ = _make_app(db)
+    from market_storefront.services.system_service import SystemService
+    _container.resolved_sqlite_client = db
+    _container.resolved_system_service = SystemService(sqlite_client=db)
+
+    app = FastAPI()
+    app.include_router(system_router)
+    app.include_router(admin_router)
+    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient("http://test", transport=transport) as c:
         yield c
 
+    _container.resolved_sqlite_client = None
+    _container.resolved_system_service = None
+
 
 # ---------------------------------------------------------------------------
-# GET /health  (get_health)
+# GET /health
 # ---------------------------------------------------------------------------
 
 class TestHealthEndpoint:
     async def test_health_returns_ok(self, client):
-        c, _, _ = client
+        c, _ = client
         result = await c.get_health()
         assert result.status == "ok"
         assert result.checks.get("database") == "ok"
-        # /health must NOT include a registry check (keeps liveness probes fast)
         assert "registry" not in result.checks
 
     async def test_system_status_includes_paused(self, client):
-        """GET /api/v1/system/status includes paused flag regardless of registry state."""
-        c, _, _ = client
+        c, _ = client
         result = await c.get_system_status()
         assert result.paused is False
 
     async def test_system_status_includes_registry_check(self, client):
-        """GET /api/v1/system/status must include checks.registry.
-
-        In the integration test environment the registry URL is unconfigured,
-        so the value will be 'unconfigured'. What matters is the key is present
-        and is a non-empty string.
-        """
-        c, _, _ = client
+        c, _ = client
         result = await c.get_system_status()
         registry_check = result.checks.get("registry")
-        assert registry_check is not None, (
-            "checks.registry absent from /api/v1/system/status. "
-            "SystemController._health_impl must be called with include_registry=True "
-            "from system_status."
-        )
+        assert registry_check is not None
         assert isinstance(registry_check, str) and registry_check
 
     async def test_system_status_includes_registry_auth_check(self, client):
-        """GET /api/v1/system/status must include checks.registry_auth.
-
-        Guards against the silent-401 failure mode where the agent's wallet
-        doesn't own the pinned onchain_agent_id. In integration tests the
-        registry URL is unconfigured so the value will be 'unconfigured'.
-        """
-        c, _, _ = client
+        c, _ = client
         result = await c.get_system_status()
         auth_check = result.checks.get("registry_auth")
-        assert auth_check is not None, (
-            "checks.registry_auth absent from /api/v1/system/status. "
-            "SystemController._health_impl must call _registry_auth_check()."
-        )
+        assert auth_check is not None
         assert isinstance(auth_check, str) and auth_check
 
     async def test_system_status_includes_negotiation_strategy_check(self, client):
-        """GET /api/v1/system/status must include checks.negotiation_strategy.
-
-        The value identifies which strategy is loaded and whether it is viable.
-        An exit_on_probe value means every /negotiate/new call will produce a
-        terminal failure before any meaningful negotiation — must be caught at
-        smoke-test time, not discovered at stage 10 of the e2e test.
-        """
-        c, _, _ = client
+        c, _ = client
         result = await c.get_system_status()
         strat_check = result.checks.get("negotiation_strategy")
-        assert strat_check is not None, (
-            "checks.negotiation_strategy absent from /api/v1/system/status. "
-            "SystemController._negotiation_strategy_check() must be wired into "
-            "_health_impl(include_registry=True)."
-        )
+        assert strat_check is not None
         assert isinstance(strat_check, str) and strat_check
-        # In integration tests the strategy is always bisection (no torch required).
         assert "exit_on_probe" not in strat_check, (
-            f"Negotiation strategy would exit on every round: {strat_check!r}. "
-            "Set policy_mode = 'bisection' in config.toml or install torch."
+            f"Negotiation strategy would exit on every round: {strat_check!r}"
         )
 
 
@@ -163,13 +142,13 @@ class TestAdminPause:
         assert "403" in str(exc_info.value)
 
     async def test_pause_sets_flag(self, client):
-        c, _, paused_ref = client
+        c, _ = client
         result = await c.admin_pause()
         assert result.paused is True
-        assert paused_ref[0] is True
+        assert _server._GLOBALLY_PAUSED is True
 
     async def test_pause_reflected_in_system_status(self, client):
-        c, _, _ = client
+        c, _ = client
         await c.admin_pause()
         status = await c.get_system_status()
         assert status.paused is True
@@ -186,15 +165,15 @@ class TestAdminResume:
         assert "403" in str(exc_info.value)
 
     async def test_resume_clears_flag(self, client):
-        c, _, paused_ref = client
+        c, _ = client
         await c.admin_pause()
-        assert paused_ref[0] is True
+        assert _server._GLOBALLY_PAUSED is True
         result = await c.admin_resume()
         assert result.paused is False
-        assert paused_ref[0] is False
+        assert _server._GLOBALLY_PAUSED is False
 
     async def test_resume_reflected_in_system_status(self, client):
-        c, _, _ = client
+        c, _ = client
         await c.admin_pause()
         await c.admin_resume()
         status = await c.get_system_status()
@@ -212,7 +191,7 @@ class TestAdminStatus:
         assert "403" in str(exc_info.value)
 
     async def test_status_counts_when_empty(self, client):
-        c, _, _ = client
+        c, _ = client
         result = await c.admin_status()
         assert result.paused is False
         assert result.active_negotiations == 0
@@ -220,7 +199,7 @@ class TestAdminStatus:
         assert result.paused_listings == 0
 
     async def test_status_counts_open_orders(self, client):
-        c, db, _ = client
+        c, db = client
         now = datetime.now().isoformat()
         await db.upsert_listing(
             listing_id="count-1",
@@ -237,7 +216,7 @@ class TestAdminStatus:
         assert result.open_listings == 1
 
     async def test_status_counts_paused_orders(self, client):
-        c, db, _ = client
+        c, db = client
         now = datetime.now().isoformat()
         await db.upsert_listing(
             listing_id="pause-count",
@@ -252,7 +231,6 @@ class TestAdminStatus:
         )
         await db.set_listing_paused(listing_id="pause-count", paused=True)
         result = await c.admin_status()
-        # Paused order is excluded from open_orders count
         assert result.open_listings == 0
         assert result.paused_listings == 1
 
@@ -263,9 +241,8 @@ class TestAdminStatus:
 
 class TestPolicySeed:
     async def test_seed_returns_structured_response(self, client):
-        c, _, _ = client
+        c, _ = client
         result = await c.policy_seed()
-        # Response must have these keys regardless of whether callables loaded
         assert "callable_registry_count" in result
         assert "callables" in result
         assert "seeded_policies" in result
@@ -279,16 +256,13 @@ class TestPolicySeed:
         assert "403" in str(exc_info.value)
 
     async def test_seed_seeds_order_create_policy(self, client):
-        c, _, _ = client
+        c, _ = client
         result = await c.policy_seed()
         seeded = result.get("seeded_policies", [])
-        assert any("order_create" in p for p in seeded), (
-            f"order_create policy not seeded. Got: {seeded}"
-        )
+        assert any("order_create" in p for p in seeded)
 
     async def test_seed_idempotent(self, client):
-        """Calling seed twice should not fail or duplicate policies."""
-        c, _, _ = client
+        c, _ = client
         r1 = await c.policy_seed()
         r2 = await c.policy_seed()
         assert r1["seeded_policies"] == r2["seeded_policies"]
@@ -296,8 +270,7 @@ class TestPolicySeed:
 
 class TestPolicyStatus:
     async def test_policy_status_returns_structured_response(self, client):
-        c, _, _ = client
-        # Seed first so there is something to read
+        c, _ = client
         await c.policy_seed()
         result = await c.policy_status()
         assert "callable_count" in result
@@ -306,27 +279,23 @@ class TestPolicyStatus:
         assert isinstance(result["seeded_policies"], list)
 
     async def test_policy_status_lists_seeded_policies(self, client):
-        c, _, _ = client
+        c, _ = client
         await c.policy_seed()
         result = await c.policy_status()
         names = [p["policy_name"] for p in result["seeded_policies"]]
-        assert any("order_create" in n for n in names), (
-            f"order_create policy not in status. Got: {names}"
-        )
+        assert any("order_create" in n for n in names)
 
     async def test_policy_status_includes_resolvable_flag(self, client):
-        c, _, _ = client
+        c, _ = client
         await c.policy_seed()
         result = await c.policy_status()
         for policy in result["seeded_policies"]:
-            assert "components_resolvable" in policy, (
-                f"Missing components_resolvable in {policy}"
-            )
+            assert "components_resolvable" in policy
 
 
 class TestPolicyEvaluate:
     async def test_evaluate_returns_structured_response(self, client):
-        c, _, _ = client
+        c, _ = client
         await c.policy_seed()
         result = await c.policy_evaluate(
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
@@ -338,32 +307,29 @@ class TestPolicyEvaluate:
         assert "reason" in result
 
     async def test_evaluate_no_policies_returns_no_action(self, client):
-        """Fresh DB with no seeded policies → no_action with clear reason."""
-        c, _, _ = client
-        # Don't seed — fresh DB has no policies
+        c, _ = client
         result = await c.policy_evaluate(
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
             demand={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 10000},
         )
-        # With no policies seeded, must return no_action and a reason
         assert result["action"] == "no_action"
         assert result["reason"] is not None
 
     async def test_evaluate_rejects_bad_event_type(self, client):
-        c, _, _ = client
+        c, _ = client
         resp = await c._client.post(
             "/api/v1/system/policy/evaluate",
             json={"event_type": "totally_unknown", "offer": {}, "demand": {}},
         )
-        assert resp.status_code == 400
+        assert resp.status_code in (400, 422)
 
     async def test_evaluate_rejects_missing_offer(self, client):
-        c, _, _ = client
+        c, _ = client
         resp = await c._client.post(
             "/api/v1/system/policy/evaluate",
             json={"event_type": "order_create", "demand": {}},
         )
-        assert resp.status_code == 400
+        assert resp.status_code in (400, 422)
 
 
 # ---------------------------------------------------------------------------
@@ -376,14 +342,13 @@ class TestStreamEvents:
         assert resp.status_code == 403
 
     async def test_returns_empty_list_on_fresh_db(self, client):
-        c, _, _ = client
+        c, _ = client
         result = await c.get_events()
         assert result.count == 0
         assert result.events == []
 
     async def test_returns_seeded_events(self, client):
-        """Events written via stage_log.stage_event() appear in get_events()."""
-        c, db, _ = client
+        c, db = client
         import json as _json
         import sqlite3
 
@@ -406,8 +371,7 @@ class TestStreamEvents:
         assert result.events[0].listing_id == "listing-1"
 
     async def test_since_id_cursor(self, client):
-        """since_id filters to only rows with id > since_id."""
-        c, db, _ = client
+        c, db = client
         import json as _json
         import sqlite3
 
@@ -432,8 +396,7 @@ class TestStreamEvents:
         assert all(ev.id > first_id for ev in tail.events)
 
     async def test_stage_filter(self, client):
-        """stage= query param restricts results to that stage."""
-        c, db, _ = client
+        c, db = client
         import json as _json
         import sqlite3
 

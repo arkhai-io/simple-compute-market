@@ -1,231 +1,62 @@
 """System controller — health, liveness, and policy diagnostic endpoints.
 
-HTTP layer only.  Business logic lives in SystemService.
-
-Endpoints
----------
-  GET  /health                            Kubernetes liveness/readiness probe.
-  GET  /api/v1/system/health              Versioned alias.
-  GET  /api/v1/system/status              Pause state + DB health.
-  POST /admin/policy/seed                 Discover callables + seed default policies.
-  GET  /api/v1/system/policy              Callable registry + seeded policy diagnostic.
-  POST /api/v1/system/policy/evaluate     Dry-run an order_create event.
+Thin routing layer; all business logic delegated to SystemService singleton.
 """
-
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import sqlite3
-from typing import Any, AsyncIterator
+from typing import Annotated, Any
 
-import httpx
-from starlette.requests import Request
-from starlette.responses import JSONResponse, StreamingResponse
-from starlette.routing import Route
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from fastapi_utils.cbv import cbv
 
-from market_storefront.services.system_service import SystemService
+import market_storefront.container as _container
+from market_storefront.models.system_models import PolicyEvaluateRequest
+from market_storefront.server import is_globally_paused
 
 logger = logging.getLogger(__name__)
 
+router = APIRouter(tags=["system"])
 
+
+@cbv(router)
 class SystemController:
-    def __init__(self, *, sqlite_client, globally_paused_fn, system_service: SystemService | None = None) -> None:
-        self._sqlite_client = sqlite_client
-        self._globally_paused_fn = globally_paused_fn
-        # Injected for testing; defaults to a standard instance using the same sqlite_client.
-        self._service = system_service or SystemService(sqlite_client=sqlite_client)
+    def __init__(
+        self,
+        db=Depends(lambda: _container.resolved_sqlite_client),
+        system_svc=Depends(lambda: _container.resolved_system_service),
+    ) -> None:
+        self._db = db
+        self._svc = system_svc
 
-    # ------------------------------------------------------------------
-    # Health
-    # ------------------------------------------------------------------
+    @router.get("/health", summary="Kubernetes liveness probe")
+    async def health_bare(self) -> dict[str, Any]:
+        return await self._svc.get_health()
 
-    async def _health_impl(self, *, include_registry: bool = False) -> JSONResponse:
-        checks: dict[str, str] = {"api": "ok"}
-        try:
-            conn = sqlite3.connect(self._sqlite_client.db_path, timeout=2)
-            try:
-                conn.execute("SELECT 1")
-            finally:
-                conn.close()
-            checks["database"] = "ok"
-        except Exception as exc:
-            checks["database"] = f"error: {exc}"
+    @router.get("/api/v1/system/health", summary="Versioned health alias")
+    async def health_versioned(self) -> dict[str, Any]:
+        return await self._svc.get_health()
 
-        if include_registry:
-            checks["registry"] = await self._registry_check()
-            checks["registry_auth"] = await self._registry_auth_check()
-            checks["negotiation_strategy"] = self._negotiation_strategy_check()
+    @router.get("/api/v1/system/status", summary="Full diagnostic status")
+    async def system_status(self) -> dict[str, Any]:
+        body = await self._svc.get_health(include_registry=True)
+        body["paused"] = is_globally_paused()
+        return body
 
-        all_ok = all(v in ("ok", "unconfigured") for v in checks.values())
-        return JSONResponse(
-            {"status": "ok" if all_ok else "degraded", "checks": checks},
-            status_code=200 if all_ok else 503,
-        )
-
-    async def _registry_check(self) -> str:
-        """Probe the configured registry URL.  Returns 'ok' or an error string.
-
-        Uses a 2-second timeout so the status endpoint stays fast.
-        Only called from /api/v1/system/status — never from /health.
-        """
-        from market_storefront.utils.config import CONFIG
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        if not url:
-            return "unconfigured"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{url}/health")
-            if resp.status_code < 500:
-                return "ok"
-            return f"http_{resp.status_code}"
-        except httpx.ConnectError:
-            return "unreachable"
-        except httpx.TimeoutException:
-            return "timeout"
-        except Exception as exc:
-            return f"error: {exc}"
-
-    async def _registry_auth_check(self) -> str:
-        """Verify this agent's wallet owns its configured on-chain agent ID.
-
-        Calls GET /agents/<canonical_id> on the registry and compares the
-        returned ``owner`` field against CONFIG.agent_wallet_address.
-
-        Returns one of:
-          'ok'                — owner matches wallet address
-          'unconfigured'      — indexer_url or agent config missing
-          'agent_not_found'   — canonical ID not indexed in registry yet
-          'owner_mismatch'    — registry owner != configured wallet (401 at publish)
-          'error: <msg>'      — unexpected failure
-
-        This check catches the case where onchain_agent_id is pinned to an ID
-        owned by a different wallet, which produces silent 401s on publish_listing
-        but passes the connectivity check.
-        """
-        from market_storefront.utils.config import CONFIG
-        from market_storefront.utils.action_executor import _canonical_agent_id, _make_registry_client
-
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        wallet = (CONFIG.agent_wallet_address or "").lower()
-        if not url or not wallet:
-            return "unconfigured"
-
-        canonical_id = _canonical_agent_id()
-        if not canonical_id:
-            return "unconfigured"
-
-        try:
-            async with _make_registry_client() as rc:
-                agent = await rc.get_agent(canonical_id)
-            owner = (agent.owner or "").lower()
-            if not owner:
-                # Agent exists but has no owner — unauthenticated; publish will work
-                return "ok"
-            if owner == wallet:
-                return "ok"
-            return f"owner_mismatch: registry={agent.owner} config={CONFIG.agent_wallet_address}"
-        except Exception as exc:
-            body = getattr(exc, "body", "") or str(exc)
-            if "404" in str(exc) or "not found" in body.lower():
-                return "agent_not_found"
-            return f"error: {exc}"
-
-    def _negotiation_strategy_check(self) -> str:
-        """Return the name of the active negotiation strategy and whether it is viable.
-
-        A strategy is viable if it can be instantiated and would not immediately
-        return exit on a synthetic round.  Returns one of:
-          'bisection'                    — BisectionStrategy loaded; always viable
-          'rl (viable)'                  — RL strategy loaded and torch is available
-          '<name> (exit_on_probe: <r>)'  — strategy exits every round; negotiations will fail
-          'unknown: <msg>'               — load_strategy raised; negotiation will 500
-        """
-        try:
-            from market_storefront.utils.sync_negotiation import _load_storefront_strategy
-            from market_policy.negotiation_strategy import NegotiationRoundInput
-
-            strategy = _load_storefront_strategy()
-            name = type(strategy).__name__
-
-            # Probe: synthetic maximize round where buyer meets floor exactly.
-            # A viable strategy accepts or counters; a broken one exits.
-            probe = strategy.decide(NegotiationRoundInput(
-                direction="maximize",
-                our_reference_price=10_000,
-                their_proposed_price=10_000,
-                history=[],
-            ))
-            if probe.action == "exit":
-                return f"{name} (exit_on_probe: {probe.reason})"
-            return name.lower().replace("strategy", "").strip() or name
-
-        except KeyError as exc:
-            return f"unknown: {exc}"
-        except Exception as exc:
-            return f"error: {exc}"
-
-    async def health_bare(self, request: Request) -> JSONResponse:
-        """GET /health — Kubernetes liveness probe."""
-        return await self._health_impl()
-
-    async def health_versioned(self, request: Request) -> JSONResponse:
-        """GET /api/v1/system/health — versioned alias."""
-        return await self._health_impl()
-
-    async def system_status(self, request: Request) -> JSONResponse:
-        """GET /api/v1/system/status — pause state + DB health + registry connectivity."""
-        health_response = await self._health_impl(include_registry=True)
-        body = json.loads(health_response.body)
-        body["paused"] = self._globally_paused_fn()
-        return JSONResponse(body, status_code=health_response.status_code)
-
-    # ------------------------------------------------------------------
-    # Stage events stream  (admin key enforced by AdminAuthMiddleware)
-    # ------------------------------------------------------------------
-
-    async def stream_events(self, request: Request) -> StreamingResponse:
-        """GET /api/v1/system/events — tail stage_events as SSE or query historically.
-
-        Query parameters
-        ----------------
-        since_id : int, default 0
-            Only return events with id > since_id.  Pass the last seen ``id``
-            on each call to implement a cursor-based tail.
-        limit : int, default 100 (max 500)
-            Maximum rows for historical (non-streaming) queries.
-        stream : bool, default false
-            If ``true``, hold the connection open and push new events as they
-            arrive (Server-Sent Events).  If ``false`` (default), return the
-            matching events as a JSON array and close.
-        stage : str, optional
-            Filter by stage (e.g. ``discovery``, ``negotiation``).
-        listing_id : str, optional
-            Filter by listing_id.
-        negotiation_id : str, optional
-            Filter by negotiation_id.
-
-        SSE event format
-        ----------------
-        Each event is emitted as::
-
-            id: <row_id>
-            data: <json_object>\\n\\n
-
-        Callers should reconnect with ``Last-Event-ID`` header set to the last
-        received id to resume without gaps.
-        """
-        try:
-            since_id = int(request.query_params.get("since_id", 0))
-        except (ValueError, TypeError):
-            since_id = 0
-        try:
-            limit = min(int(request.query_params.get("limit", 100)), 500)
-        except (ValueError, TypeError):
-            limit = 100
-
-        # SSE reconnect: Last-Event-ID header takes precedence over since_id param
+    @router.get("/api/v1/system/events", summary="Stage event log (admin)")
+    async def stream_events(
+        self,
+        request: Request,
+        since_id: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        stream: Annotated[bool, Query()] = False,
+        stage: Annotated[str | None, Query()] = None,
+        listing_id: Annotated[str | None, Query()] = None,
+        negotiation_id: Annotated[str | None, Query()] = None,
+    ):
         last_event_id_hdr = request.headers.get("last-event-id")
         if last_event_id_hdr:
             try:
@@ -233,138 +64,75 @@ class SystemController:
             except (ValueError, TypeError):
                 pass
 
-        do_stream = request.query_params.get("stream", "false").lower() in ("1", "true", "yes")
-        stage_filter = request.query_params.get("stage") or None
-        listing_id_filter = request.query_params.get("listing_id") or None
-        neg_id_filter = request.query_params.get("negotiation_id") or None
-
-        if not do_stream:
-            # Historical query — return JSON array and close.
-            rows = await self._sqlite_client.list_stage_events(
-                after_id=since_id,
-                limit=limit,
-                stage=stage_filter,
-                listing_id=listing_id_filter,
-                negotiation_id=neg_id_filter,
+        if not stream:
+            rows = await self._db.list_stage_events(
+                after_id=since_id, limit=limit,
+                stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
             )
-            return JSONResponse({"events": rows, "count": len(rows)})
+            return {"events": rows, "count": len(rows)}
 
-        # Live SSE stream.
         async def _generate():
             cursor = since_id
             while True:
-                rows = await self._sqlite_client.list_stage_events(
-                    after_id=cursor,
-                    limit=50,
-                    stage=stage_filter,
-                    listing_id=listing_id_filter,
-                    negotiation_id=neg_id_filter,
+                rows = await self._db.list_stage_events(
+                    after_id=cursor, limit=50,
+                    stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
                 )
                 for row in rows:
                     cursor = row["id"]
-                    data = json.dumps(row, default=str)
-                    yield f"id: {cursor}\ndata: {data}\n\n"
+                    yield f"id: {cursor}\ndata: {json.dumps(row, default=str)}\n\n"
                 if not rows:
                     await asyncio.sleep(0.2)
 
         return StreamingResponse(_generate(), media_type="text/event-stream")
 
-
-    async def policy_seed(self, request: Request) -> JSONResponse:
-        """POST /admin/policy/seed — discover callables + seed default policies."""
+    @router.post("/admin/policy/seed", summary="Seed default policies (admin)")
+    async def policy_seed(self) -> dict[str, Any]:
         try:
-            result = await self._service.seed_policies()
-        except RuntimeError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            result = await self._svc.seed_policies()
         except Exception as exc:
-            logger.error("[POLICY SEED] Unexpected error: %s", exc)
-            return JSONResponse({"error": "policy seeding failed", "detail": str(exc)}, status_code=500)
-
-        return JSONResponse({
+            logger.error("[POLICY SEED] %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+        return {
             "callable_registry_count": result.callable_registry_count,
             "callables": result.callables,
             "seeded_policies": result.seeded_policies,
             "import_errors": [{"module": e.module, "error": e.error} for e in result.import_errors],
-        })
+        }
 
-    # ------------------------------------------------------------------
-    # Policy status  (read-only, no auth)
-    # ------------------------------------------------------------------
-
-    async def policy_status(self, request: Request) -> JSONResponse:
-        """GET /api/v1/system/policy — callable registry + seeded policies."""
-        result = await self._service.get_policy_status()
-        return JSONResponse({
+    @router.get("/api/v1/system/policy", summary="Policy status")
+    async def policy_status(self) -> dict[str, Any]:
+        result = await self._svc.get_policy_status()
+        return {
             "callable_count": result.callable_count,
             "callable_registry": result.callable_registry,
             "seeded_policies": [
-                {
-                    "policy_name": p.policy_name,
-                    "trigger_type": p.trigger_type,
-                    "components": p.components,
-                    "components_resolvable": p.components_resolvable,
-                }
+                {"policy_name": p.policy_name, "trigger_type": p.trigger_type,
+                 "components": p.components, "components_resolvable": p.components_resolvable}
                 for p in result.seeded_policies
             ],
-        })
+        }
 
-    # ------------------------------------------------------------------
-    # Policy evaluate  (read-only, no auth)
-    # ------------------------------------------------------------------
-
-    async def policy_evaluate(self, request: Request) -> JSONResponse:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
-        try:
-            body: dict[str, Any] = await request.json()
-        except Exception:
-            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
-
-        event_type = body.get("event_type", "order_create")
-        if event_type != "order_create":
-            return JSONResponse(
-                {"error": f"Unsupported event_type: {event_type!r}. Only 'order_create' is supported."},
+    @router.post("/api/v1/system/policy/evaluate", summary="Dry-run policy evaluate")
+    async def policy_evaluate(self, body: PolicyEvaluateRequest) -> dict[str, Any]:
+        if body.event_type != "order_create":
+            raise HTTPException(
                 status_code=400,
+                detail=f"Unsupported event_type: {body.event_type!r}. Only 'order_create' is supported.",
             )
-
-        offer_raw = body.get("offer")
-        demand_raw = body.get("demand")
-        if not offer_raw or not demand_raw:
-            return JSONResponse(
-                {"error": "Request body must include 'offer' and 'demand' fields."},
-                status_code=400,
-            )
-
+        if not body.offer or not body.demand:
+            raise HTTPException(status_code=400, detail="Request body must include 'offer' and 'demand'.")
         try:
-            result = await self._service.evaluate_order_create(
-                offer_raw=offer_raw,
-                demand_raw=demand_raw,
-                max_duration_seconds=body.get("max_duration_seconds"),
+            result = await self._svc.evaluate_order_create(
+                offer_raw=body.offer, demand_raw=body.demand, max_duration_seconds=None,
             )
         except ValueError as exc:
-            return JSONResponse({"error": "Invalid offer/demand resource", "detail": str(exc)}, status_code=400)
+            raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
-            logger.warning("[POLICY EVAL] Unexpected error: %s", exc)
-            return JSONResponse({"error": "Policy evaluation error", "detail": str(exc)}, status_code=500)
-
-        return JSONResponse({
-            "action": result.action,
-            "policy_used": result.policy_used,
-            "components": result.components,
-            "resolvable": result.resolvable,
+            logger.warning("[POLICY EVAL] %s", exc)
+            raise HTTPException(status_code=500, detail=str(exc))
+        return {
+            "action": result.action, "policy_used": result.policy_used,
+            "components": result.components, "resolvable": result.resolvable,
             "reason": result.reason,
-        })
-
-    # ------------------------------------------------------------------
-    # Route factory
-    # ------------------------------------------------------------------
-
-    def routes(self) -> list[Route]:
-        return [
-            Route("/health",                         self.health_bare,      methods=["GET"]),
-            Route("/api/v1/system/health",           self.health_versioned,  methods=["GET"]),
-            Route("/api/v1/system/status",           self.system_status,     methods=["GET"]),
-            Route("/api/v1/system/events",           self.stream_events,     methods=["GET"]),
-            Route("/admin/policy/seed",              self.policy_seed,       methods=["POST"]),
-            Route("/api/v1/system/policy",           self.policy_status,     methods=["GET"]),
-            Route("/api/v1/system/policy/evaluate",  self.policy_evaluate,   methods=["POST"]),
-        ]
+        }

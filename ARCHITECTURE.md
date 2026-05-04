@@ -194,28 +194,125 @@ helper extracted from the same module.
 storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
 ├── commands/
-│   ├── register.py         # in-process port of the legacy register_onchain.py
-│   └── serve.py            # uvicorn launch
+│   └── register.py         # in-process port of the legacy register_onchain.py
+├── server.py               # FastAPI app, lifespan, run_serve(), auto-publish loop
+├── container.py            # Resolved service singletons (populated in lifespan)
+├── agent.py                # Startup/background-task helpers only:
+│                           #   _startup_tasks, _ensure_agent_identity, _start_heartbeat,
+│                           #   _preflight_provisioning, process_queued_events
+│                           #   TraderAgent class (kept for _RootAgentShim; see planned rework)
+├── controllers/
+│   ├── listings_controller.py    # GET/POST /api/v1/listings/* + /listings/create|close|refund|…
+│   ├── negotiations_controller.py # GET/POST /api/v1/listings/*/negotiations/*
+│   ├── negotiate_controller.py   # POST /negotiate/new, /negotiate/{neg_id}
+│   ├── settle_controller.py      # POST /settle/{uid}, GET /settle/{uid}/status
+│   ├── system_controller.py      # GET /health, /api/v1/system/*, /admin/policy/*
+│   ├── admin_controller.py       # POST /admin/pause|resume, GET /admin/status
+│   ├── alerts_controller.py      # POST /alerts/resource
+│   └── identity_controller.py    # GET /.well-known/*
+├── middleware/
+│   ├── admin_auth.py       # AdminAuthMiddleware (X-Admin-Key enforcement)
+│   ├── buyer_auth.py       # Depends() factories for EIP-191 buyer signature verification
+│   └── seller_auth.py      # Depends() factory for EIP-191 seller signature verification
+├── models/
+│   ├── domain_models.py    # Domain types: ComputeResource, Listing, DomainEvent, etc.
+│   ├── listing_models.py   # HTTP shapes: ListingFilterParams, CreateListingRequest, …
+│   ├── negotiation_models.py # HTTP shapes: NegotiateNewRequest, ForceAcceptRequest, …
+│   ├── settle_models.py    # HTTP shapes: SettleRequest, SettleStatusResponse
+│   ├── alert_models.py     # HTTP shapes: ResourceAlertResponse
+│   └── system_models.py    # HTTP shapes: PolicyEvaluateRequest, HealthResponse, …
+├── services/
+│   ├── listing_service.py        # ListingService: create/close/refund/claim/reclaim/…
+│   ├── policy_pipeline_service.py # PolicyPipelineService: reactive event pipeline + policy infra
+│   ├── alkahest_service.py        # build_client(): AlkahestClient factory
+│   ├── negotiation_service.py     # NegotiationService: advance/force-accept/list/get
+│   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
-├── cli_provide.py          # `provide` (publish sell orders from DB)
-├── cli_portfolio.py        # `portfolio import-csv`
-├── cli_logs.py             # `logs show / status` (SQLite-backed seller stage events)
-├── cli_common.py
-├── server.py               # uvicorn entrypoint
-├── agent.py                # Starlette routes, policy wiring, startup hooks
-├── resource_poller.py      # Background resource state polling
-├── negotiation_watchdog.py # Background task; monitors stuck negotiations
-├── agent_heartbeat.py      # Heartbeat sender to registry
-├── policy/seeding.py       # Default policy seeding for the seller role
+├── cli_provide.py, cli_portfolio.py, cli_logs.py, cli_common.py
+├── resource_poller.py, negotiation_watchdog.py, agent_heartbeat.py
+├── policy/seeding.py
 ├── utils/
-│   ├── config.py           # Typed Config dataclass (CONFIG singleton, TOML-only)
-│   ├── sqlite_client.py    # SQLite DB wrapper
-│   ├── action_executor.py  # Executes policy actions (send offers, call provisioning, …)
-│   ├── sync_negotiation.py # Synchronous /negotiate handler that drives one round
+│   ├── config.py, sqlite_client.py, action_executor.py
+│   ├── sync_negotiation.py, settlement_jobs.py, serializer.py
 │   └── …
-├── schema/pydantic_models.py
 └── data/                   # Bundled token/alkahest address registries
 ```
+
+**Storefront component diagram:**
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Storefront Process                           │
+│                                                                     │
+│  HTTP (FastAPI / controllers/)                                      │
+│  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌────────────┐ │
+│  │  listings   │ │ negotiations │ │    system    │ │   admin    │ │
+│  │ controller  │ │  controller  │ │  controller  │ │  (agent.py)│ │
+│  └──────┬──────┘ └──────┬───────┘ └──────┬───────┘ └─────┬──────┘ │
+│         │               │                │               │        │
+│  ┌──────▼───────────────▼────────────────▼───────────────▼──────┐ │
+│  │                   SQLiteClient                                │ │
+│  │  listings · negotiation_threads · negotiation_messages        │ │
+│  │  stage_events · policy_config · resource_portfolio            │ │
+│  └──────────────────────────────────────────────────────────────┘ │
+│                                                                     │
+│  ┌───────────────────────────────────────────────────────────────┐ │
+│  │              sync_negotiation.py  (request-scoped)            │ │
+│  │                                                               │ │
+│  │  start_sync_negotiation()   continue_sync_negotiation()       │ │
+│  │         │                            │                        │ │
+│  │         └──────────┬─────────────────┘                        │ │
+│  │                    ▼                                           │ │
+│  │         _load_storefront_strategy()                           │ │
+│  │              │                                                │ │
+│  │    ┌─────────┴──────────┐                                     │ │
+│  │    │  NegotiationStrategy (market_policy)                     │ │
+│  │    │  • BisectionStrategy  ← default; no ML deps              │ │
+│  │    │  • TorchArkhaiStrategy ← opt-in; requires torch          │ │
+│  │    └─────────┬──────────┘                                     │ │
+│  │              ▼                                                 │ │
+│  │    NegotiationDecision {action, price, reason}                │ │
+│  │              │                                                │ │
+│  │    stage_event("negotiation","round_decided",                  │ │
+│  │               decision, decision_reason)  ──► stage_events DB │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+│                                                                     │
+│  Background tasks                                                   │
+│  ┌─────────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
+│  │ negotiation_watchdog│  │ resource_poller  │  │agent_heartbeat│ │
+│  └─────────────────────┘  └──────────────────┘  └───────────────┘ │
+│                                                                     │
+│  Outbound                                                           │
+│  ┌─────────────────────┐  ┌──────────────────┐                     │
+│  │   RegistryClient    │  │ProvisioningClient│                     │
+│  │ (arkhai-registry-   │  │(provisioning-    │                     │
+│  │  client wheel)      │  │ service wheel)   │                     │
+│  └─────────────────────┘  └──────────────────┘                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Negotiation strategy selection — critical runtime behaviour:**
+
+`sync_negotiation.py` does **not** use the `@policy_callable` domain policy chain for deciding what to do in a negotiation round. It uses the `market_policy.negotiation_strategy` module directly via `_load_storefront_strategy()`. The two systems are parallel and independent:
+
+- The `@policy_callable` chain (in `domain/compute/agent/app/policy/store.py`) handles listing-level decisions: whether to accept an order, what price floor to set, whether to pause. Many of these callables are currently no-ops (`if True: return None`) because the events they depended on (`NegotiationEvent`, `AcceptOfferEvent`) were removed when the rename happened.
+- The `NegotiationStrategy` (`market_policy.negotiation_strategy`) handles round-by-round decisions during an active negotiation: accept, counter at midpoint, or exit. This is what actually fires at each `/negotiate/new` and `/negotiations/{id}/advance` call.
+
+`_load_storefront_strategy()` resolves the strategy as follows:
+1. Read `CONFIG.negotiation_policy_mode` (from `seller.negotiation.policy_mode` in TOML; default `"bisection"`)
+2. If `"rl"`: register `TorchArkhaiStrategy` (requires torch + pufferlib + model file); if torch is absent, `TorchArkhaiStrategy.decide()` returns `exit(reason="torch_unavailable")` every round — silent failure
+3. Call `load_strategy(name)` from the in-process strategy registry
+4. Return the strategy instance
+
+**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. The seller offers `ComputeResource` and demands `TokenResource` (payment), so `is_offering_compute = True` → direction `"maximize"` (seller wants the highest price it can get). The buyer offers `TokenResource` → direction `"minimize"`.
+
+**BisectionStrategy convergence (maximize direction):**
+- Accept if `their_price >= our_price * (1 - CONVERGENCE_RATIO)` (default ratio ≈ 0.01, so accept within 1%)
+- Counter at `(our_price + their_price) // 2` if `their_price >= our_price / 1.5`
+- Exit with `reason="price_unreasonable"` otherwise
+
+`our_price` is extracted from `demand.amount` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
+
+**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00c both assert on this field.
 
 The legacy `core/agent/app/` tree is gone. Files that lived there
 either moved into `storefront/src/market_storefront/` (server,
@@ -293,12 +390,10 @@ Under normal operation (`.dist/` correctly in context, no ignore file issues),
 `make build` is sufficient — BuildKit will invalidate the `COPY .dist/ /dist/`
 layer whenever wheel file contents change.
 
-> **TODO:** Document Alkahest escrow mechanics — what on-chain calls
-> are made at which points in the negotiation.
-> **TODO:** Document the SQLite schema and known
-> statefulness/concurrency issues.
-> **TODO:** Document the `negotiation_watchdog` — what conditions
-> trigger it and what it does to orphaned negotiations.
+> **TODO (tracked):** Document Alkahest escrow mechanics — what on-chain calls are made at which points in the negotiation lifecycle (escrow lock, attestation submission, release).
+> **TODO (tracked):** Document the SQLite schema — table definitions, index strategy, and known statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering).
+> **TODO (tracked):** Document `negotiation_watchdog` — what staleness threshold triggers it, what it writes to the DB, and how it interacts with in-flight `/advance` calls.
+> **TODO (next session):** Negotiation refactor — restore the `NegotiationEvent` model and rewire the `@policy_callable` domain callables so round-by-round decisions flow through the callable chain rather than bypassing it via `_load_storefront_strategy()`. Goal: testability via the existing policy dry-run infrastructure, visibility via the existing stage events stream.
 
 #### Storefront API Surface (`controllers/`)
 
@@ -348,6 +443,80 @@ GET  /api/v1/listings/{listing_id}/negotiations                        List thre
 GET  /api/v1/listings/{listing_id}/negotiations/{neg_id}               Full detail: thread + messages + stage_events
 POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance       Admin: drive one round — admin key required
 POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  Admin: commit terminal-success — admin key required
+
+**Negotiation process flow:**
+```
+Buyer                    Storefront (/negotiate/new)         SQLite
+  │                              │                              │
+  │── POST /negotiate/new ───────►│                              │
+  │   {listing_id, buyer_address, │                              │
+  │    initial_price, duration,   │                              │
+  │    signature, timestamp}      │                              │
+  │                              │── verify EIP-191 sig ────────►│
+  │                              │◄─ ok ────────────────────────│
+  │                              │── check global pause ─────────►│
+  │                              │◄─ not paused ─────────────────│
+  │                              │── load listing ───────────────►│
+  │                              │◄─ listing row ────────────────│
+  │                              │                              │
+  │                              │  _load_storefront_strategy() │
+  │                              │  determine_direction()        │
+  │                              │  strategy.decide(round_input) │
+  │                              │  → NegotiationDecision        │
+  │                              │                              │
+  │                              │── INSERT negotiation_thread ──►│
+  │                              │── INSERT negotiation_message──►│
+  │                              │   (round=0, sender=buyer,     │
+  │                              │    action=make_offer)         │
+  │                              │── INSERT negotiation_message──►│
+  │                              │   (round=1, sender=seller,    │
+  │                              │    action=decision.action)    │
+  │                              │── stage_event(round_decided,  │
+  │                              │   decision, decision_reason)──►│
+  │                              │                              │
+  │◄─ 200 {neg_id, action,───────│                              │
+  │        proposed_price}       │                              │
+  │                              │                              │
+  │  [if action == "counter"]    │                              │
+  │── POST /negotiations/{id}    │                              │
+  │       /advance ──────────────►│                              │
+  │   {buyer_price, signature}   │  continue_sync_negotiation() │
+  │                              │  strategy.decide(round_input) │
+  │                              │── INSERT negotiation_message──►│
+  │                              │── stage_event(round_decided)──►│
+  │◄─ 200 {action, price} ───────│                              │
+  │                              │                              │
+  │  [or admin force-accepts]    │                              │
+  │── POST /force-accept ─────────►│                              │
+  │                              │── UPDATE thread terminal ─────►│
+  │◄─ 200 {action=accept, price}─│                              │
+```
+
+**Negotiation lifecycle phases (stage events emitted):**
+
+All negotiation events are written to `stage_events` with `stage="negotiation"` and are queryable via `GET /api/v1/system/events?stage=negotiation&negotiation_id=<id>`.
+
+| Event | Trigger | Key data fields |
+|---|---|---|
+| `negotiation_started` | `/negotiate/new` accepted (sig valid, not paused) | `listing_id`, `buyer_address`, `initial_price` |
+| `round_decided` | Seller strategy returns a decision (every round) | `round`, `our_price`, `their_price`, `decision` (`accept`/`counter`/`exit`), `decision_price`, `decision_reason` |
+| `negotiation_accepted` | Decision is `accept` or admin `force-accept` | `agreed_price`, `neg_id` |
+| `negotiation_exited` | Decision is `exit` | `decision_reason` (e.g. `price_unreasonable`, `torch_unavailable`) |
+
+**`decision_reason` values:**
+
+| Reason | Strategy | Meaning |
+|---|---|---|
+| `convergence` | Bisection | Buyer price within 1% of seller floor — accepted |
+| `price_unreasonable` | Bisection | Buyer price below `our_price / 1.5` — too far to counter |
+| `torch_unavailable` | RL | torch import failed; strategy exits every round |
+| `model_missing` | RL | Model file not found at configured path |
+| `price_unreasonable` | RL | RL policy evaluated and rejected the offer |
+
+**Key invariants:**
+- `our_price` in every `round_decided` event equals `demand.amount` from the listing (the seller's floor, already multiplied by `10**decimals`)
+- A `round_decided` with `decision=exit` means the negotiation is already in terminal `failure` state — `force-accept` will return 409
+- The `round` field in messages is 0-indexed for the buyer's initial offer; the seller's response is round 1, subsequent buyer counters are round 2, etc.
 ```
 
 **Admin controller** (`controllers/admin_controller.py`):
@@ -1103,6 +1272,18 @@ make build
 
 - **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops. **Note:** `load_listing` in `sqlite_client.py` previously omitted the `paused` column from its SELECT — this is fixed and covered by `test_load_listing_returns_paused_flag` in `test_order_pause_state.py`. Convention: any time a new column is added to the `listings` table, both `upsert_listing` (write path) and `load_listing` (read path) must be updated together, and a round-trip unit test added.
 
+- **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The policy pipeline multiplies `demand.amount` by `10**decimals` before storing it as `our_price`. Any token with 18 decimals and a human-readable amount above ~9.2 billion will overflow. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so `amount` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time, or enforce a maximum sane price check in `_extract_initial_price_from_order()`.
+
+- **`@policy_callable` domain callables are dead code:** `domain/compute/agent/app/policy/store.py` callables for negotiation (`negotiation_guard_always_negotiate_on_price_diff`, `negotiation_action_price_interval_concession`, `negotiation_respond_to_make_offer`, etc.) all have `if True: return None` at the top because the `NegotiationEvent`, `AcceptOfferEvent`, and `MakeOfferEvent` classes they depended on were removed. The storefront's negotiation rounds are driven entirely by `NegotiationStrategy` in `market_policy.negotiation_strategy` (not the callable chain). These callables will need to be either rewired to the new event model or deleted as part of the negotiation refactor.
+
+- **`perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple:** On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal. **Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
+
+- **Negotiation strategy default was `"rl"` (implicit):** When `seller.negotiation.policy_mode` was unset in TOML, the config resolved to `""` which fell through to `DEFAULT_STRATEGY = "rl"` in `market_policy`. In environments without torch, `TorchArkhaiStrategy.decide()` returns `exit(reason="torch_unavailable")` on every round — silent failure, diagnosed only by reading logs. **Fixed:** default changed to `"bisection"` in `config.py`. The RL strategy is now opt-in via explicit `policy_mode = "rl"` in TOML. The `checks.negotiation_strategy` field in `/api/v1/system/status` exposes this before any negotiation is attempted.
+
+- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `demand.amount` (in base units after decimal scaling) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= demand.amount` in the e2e test constants.
+
+- **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the negotiation refactor planned for the next session.
+
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag is in-process memory, not reset between `pytest` sessions. If a test run ends with the storefront paused (e.g., stage 06 ran but stage 07 did not), the next run immediately fails at stage 08. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running tests against a live environment that may have been left paused by a previous run, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
  `NegotiationThreadTransaction` (used by `continue_sync_negotiation` → the `/negotiations/{id}/advance` endpoint) calls `get_thread_store()` on enter, which requires a one-time initialization with `sqlite_client` and `identity`. In production this happens in `TraderAgent._startup_tasks`. In integration tests the singleton must be initialized in the fixture: `import market_policy.negotiation_thread as _nt; _nt._thread_store = None; _nt.get_thread_store(sqlite_client=db, identity=Identity(agent_url="http://test-seller:8001"))`. See `test_negotiations_api.py` for the pattern.
@@ -1110,74 +1291,28 @@ make build
 ---
 
 ## Storefront — Planned Rework
-
-### 1. Migrate storefront HTTP layer to FastAPI
-
-**Status:** Planned.
-
-**Problem:** The storefront currently uses plain Starlette with manual `Request`/`JSONResponse`
-throughout — in `agent.py` (20+ legacy route handlers) and in the new `controllers/`
-package. The rest of the stack (provisioning-service, registry-service) uses FastAPI,
-which provides:
-- Automatic `/docs` Swagger UI with live request/response schemas (critical for operator
-  visibility into the new orders and negotiations APIs)
-- Pydantic-powered request validation with structured 422 errors instead of manual
-  `if not isinstance(val, str)` checks
-- Typed function parameters via `Depends()` replacing `request.path_params["x"]` extraction
-- Consistency across all services — one HTTP framework to reason about
-
-**Scope:** Both layers need to move together. Converting only the new controllers while
-leaving `agent.py` on raw Starlette creates a Starlette/FastAPI hybrid that is harder
-to maintain than either alone.
-
-**Planned fix:** In a single batch:
-1. Rewrite all `controllers/` to use `@router.get/post()` decorators and typed params
-2. Extract all route handlers from `agent.py` into controllers (see item 2 below)
-3. Replace the `Starlette(routes=[...])` app construction in `server.py` with a
-   `FastAPI()` instance using `app.include_router()`
-4. Replace `JSONResponse({...})` returns with plain `dict` returns (FastAPI serialises)
-5. Add Pydantic request body models for the negotiate, settle, and admin endpoints
-
-**Dependency:** Blocked on item 2 (agent.py refactor) — both should land in the same
-PR to avoid an intermediate broken state.
-
----
-
-### 2. Refactor agent.py routes into controllers
+### 1. Remove TraderAgent class and root_agent shim from agent.py
 
 **Status:** Planned.
 
-**Problem:** `agent.py` contains 20+ route handler functions defined at module level,
-mixed with `TraderAgent` class definition, module-level singletons (`root_agent`,
-`CONFIG`, `BASE_URL_OVERRIDE`), EIP-191 auth helpers, and background task management.
-This conflation makes the handlers untestable in isolation — importing any handler
-pulls in the full agent initialisation, Alkahest client setup, and SQLite connection.
+**Problem:** `agent.py` still contains the `TraderAgent` class and a `_RootAgentShim`
+instance named `root_agent`. The shim was introduced as a transitional adapter: it
+forwards `._sqlite_client`, `._alkahest_client`, and `._process_event_with_pipeline`
+attribute accesses to the `PolicyPipelineService` singleton in the container. This
+exists because several functions in `agent.py` were not yet migrated to the service
+layer when the FastAPI conversion landed, but all callers have since been removed.
 
-The existing `tests/integration/conftest.py` documents this explicitly:
-> "TODO(agent-testability): Refactor the three handler functions out of agent.py into a
-> dedicated routes/ package so they can be imported and tested without triggering the
-> full module-level agent initialisation."
-
-**Planned fix:** Extract handlers into controllers following the existing `controllers/`
-pattern:
-```
-controllers/
-  negotiate_controller.py   — POST /negotiate/new, POST /negotiate/{neg_id}
-  settle_controller.py      — POST /settle/{escrow_uid}, GET /settle/{escrow_uid}/status
-  orders_legacy_controller.py — POST /listings/create, /close, /claim, /reclaim,
-                                  /refund, /arbitrate, /discover
-  alerts_controller.py      — POST /alerts/resource
-  identity_controller.py    — GET /.well-known/*, GET /.well-known/agent-wallet.json
-```
-
-Each controller receives its dependencies (`sqlite_client`, `alkahest_client`,
-`config`) via constructor injection rather than reading module-level globals.
-This makes each handler independently importable and unit-testable.
-
-**Dependency:** Should land in the same batch as the FastAPI migration (item 1) since
-the injection pattern aligns with FastAPI's `Depends()` mechanism.
+**Planned fix:**
+1. Verify no remaining code references `root_agent` or `TraderAgent` outside of `agent.py`.
+2. Delete `TraderAgent`, `_RootAgentShim`, and `root_agent = _RootAgentShim()` from `agent.py`.
+3. Move any remaining utilities still in `agent.py` (`_serialize_context_for_storage`,
+   `_serialize_outcome_for_storage`, `_parse_domain_event`) to appropriate utils modules.
+4. Rename `agent.py` to `startup.py` to reflect its actual remaining responsibility:
+   background task management (`_startup_tasks`, `_ensure_agent_identity`,
+   `_start_heartbeat`, `_preflight_provisioning`, `process_queued_events`).
 
 ---
+
 
 ### 3. Storefront config unification (TOML singleton → dynaconf profiles)
 

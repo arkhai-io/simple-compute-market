@@ -9,7 +9,6 @@ are created by the negotiation engine, not through a public API.
 Direct DB writes are the accepted exception when state is not
 expressible through any API endpoint.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -20,9 +19,10 @@ from typing import AsyncIterator
 import httpx
 import pytest
 import pytest_asyncio
-from starlette.applications import Starlette
+from fastapi import FastAPI
 
-from market_storefront.controllers.negotiations_controller import NegotiationsController
+import market_storefront.container as _container
+from market_storefront.controllers.negotiations_controller import router as negotiations_router
 from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -61,12 +61,7 @@ async def _seed_thread(
     terminal_state: str | None = None,
     agreed_price: int | None = None,
 ) -> None:
-    """Insert a minimal negotiation thread and two messages directly into SQLite.
-
-    Uses an explicit named-column INSERT so the VALUES tuple count exactly
-    matches the named columns, regardless of how many total columns the
-    table has (extras get their DEFAULT values).
-    """
+    """Insert a minimal negotiation thread and two messages directly into SQLite."""
     now = datetime.now().isoformat()
 
     def _insert() -> None:
@@ -118,19 +113,22 @@ async def _seed_thread(
 
 @pytest_asyncio.fixture
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
-    # Initialize the NegotiationThreadStore singleton so that advance()
-    # can call NegotiationThreadTransaction without raising on first call.
     import market_policy.negotiation_thread as _nt_module
     from market_policy.identity import Identity
-    _nt_module._thread_store = None  # clear any stale singleton from a previous test
+    _nt_module._thread_store = None
     _nt_module.get_thread_store(
         sqlite_client=db,
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-    ctrl = NegotiationsController(sqlite_client=db)
-    app = Starlette(routes=ctrl.routes())
+    from market_storefront.services.negotiation_service import NegotiationService
+    _container.resolved_sqlite_client = db
+    _container.resolved_negotiation_service = NegotiationService(sqlite_client=db)
+
+    app = FastAPI()
+    app.include_router(negotiations_router)
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
         "http://test",
@@ -138,6 +136,9 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
         admin_key=ADMIN_KEY,
     ) as c:
         yield c, db
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_negotiation_service = None
 
 
 @pytest_asyncio.fixture
@@ -150,12 +151,20 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
         identity=Identity(agent_url="http://test-seller:8001"),
     )
 
-    ctrl = NegotiationsController(sqlite_client=db)
-    app = Starlette(routes=ctrl.routes())
+    from market_storefront.services.negotiation_service import NegotiationService
+    _container.resolved_sqlite_client = db
+    _container.resolved_negotiation_service = NegotiationService(sqlite_client=db)
+
+    app = FastAPI()
+    app.include_router(negotiations_router)
     app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient("http://test", transport=transport) as c:
         yield c
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_negotiation_service = None
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +272,6 @@ class TestForceAccept:
         assert result.action == "accept"
         assert result.price == 8500
         assert result.source == "admin_force_accept"
-        # Verify through the read API — client contract test
         detail = await c.get_negotiation("ord-fa2", "neg-fa2")
         assert detail.terminal_state == "success"
         assert detail.agreed_price == 8500
@@ -272,13 +280,13 @@ class TestForceAccept:
         c, db = client
         await _seed_order(db, "ord-fa3")
         await _seed_thread(db, "neg-fa3", "ord-fa3")
-        # Bypass the typed client to test the API's own 400 handling
+        # FastAPI returns 422 (Pydantic validation) for missing required field
         resp = await c._client.post(
             "/api/v1/listings/ord-fa3/negotiations/neg-fa3/force-accept",
             json={},
             headers={"X-Admin-Key": ADMIN_KEY},
         )
-        assert resp.status_code == 400
+        assert resp.status_code in (400, 422)
 
     async def test_force_accept_already_terminal_raises(self, client):
         c, db = client
@@ -312,16 +320,16 @@ class TestAdvanceNegotiation:
         await _seed_thread(db, "neg-adv2", "ord-adv2")
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.advance_negotiation("ord-adv2", "neg-adv2", action="invalid")
-        assert "400" in str(exc_info.value)
+        # FastAPI Pydantic validation returns 422 for invalid Literal values
+        assert any(c in str(exc_info.value) for c in ("400", "422"))
 
     async def test_counter_missing_price_raises(self, client):
         c, db = client
         await _seed_order(db, "ord-adv3")
         await _seed_thread(db, "neg-adv3", "ord-adv3")
         with pytest.raises(StorefrontClientError) as exc_info:
-            # price=None (default) with action=counter should be rejected by service
             await c.advance_negotiation("ord-adv3", "neg-adv3", action="counter")
-        assert "400" in str(exc_info.value)
+        assert any(c in str(exc_info.value) for c in ("400", "422"))
 
     async def test_exit_marks_thread_terminal(self, client):
         c, db = client
@@ -331,7 +339,6 @@ class TestAdvanceNegotiation:
             "ord-adv4", "neg-adv4", action="exit", reason="operator_decision"
         )
         assert result.action == "exit"
-        # Verify through the read API
         detail = await c.get_negotiation("ord-adv4", "neg-adv4")
         assert detail.terminal_state == "failure"
 

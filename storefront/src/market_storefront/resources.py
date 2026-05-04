@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final, Protocol
 
-from market_storefront.schema.pydantic_models import (
+from market_storefront.models.domain_models import (
     ComputeResource,
     ERC20TokenMetadata,
     GpuInterconnect,

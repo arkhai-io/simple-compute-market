@@ -26,7 +26,7 @@ from typing import Any
 from market_policy.registry import CALLABLE_REGISTRY
 from market_policy.store import PolicyStore
 from market_storefront.policy.seeding import ComputePolicySeeder
-from market_storefront.schema.pydantic_models import (
+from market_storefront.models.domain_models import (
     EventType,
     ListingCreatedEvent,
 )
@@ -370,3 +370,129 @@ class SystemService:
             resolvable=True,
             reason=None,
         )
+
+    # ------------------------------------------------------------------
+    # Health / connectivity checks
+    # Moved from SystemController._health_impl / _registry_check etc.
+    # ------------------------------------------------------------------
+
+    async def get_health(self, *, include_registry: bool = False) -> dict:
+        """Return a health dict: {status, checks}.
+
+        Parameters
+        ----------
+        include_registry:
+            When True, also probe the registry URL, verify agent ownership,
+            and check negotiation strategy viability. Used by
+            GET /api/v1/system/status. Omitted for the fast /health liveness probe.
+        """
+        import sqlite3
+
+        checks: dict[str, str] = {"api": "ok"}
+        try:
+            conn = sqlite3.connect(self._db.db_path, timeout=2)
+            try:
+                conn.execute("SELECT 1")
+            finally:
+                conn.close()
+            checks["database"] = "ok"
+        except Exception as exc:
+            checks["database"] = f"error: {exc}"
+
+        if include_registry:
+            checks["registry"] = await self.registry_check()
+            checks["registry_auth"] = await self.registry_auth_check()
+            checks["negotiation_strategy"] = self.negotiation_strategy_check()
+
+        all_ok = all(v in ("ok", "unconfigured") for v in checks.values())
+        return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
+    async def registry_check(self) -> str:
+        """Probe the configured registry URL. Returns 'ok' or an error string.
+
+        Uses a 2-second timeout so the status endpoint stays fast.
+        Only called from /api/v1/system/status — never from /health.
+        """
+        import httpx
+
+        url = (CONFIG.indexer_url or "").rstrip("/")
+        if not url:
+            return "unconfigured"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{url}/health")
+            return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
+        except httpx.ConnectError:
+            return "unreachable"
+        except httpx.TimeoutException:
+            return "timeout"
+        except Exception as exc:
+            return f"error: {exc}"
+
+    async def registry_auth_check(self) -> str:
+        """Verify this agent's wallet owns its configured on-chain agent ID.
+
+        Returns 'ok', 'unconfigured', 'agent_not_found', 'owner_mismatch',
+        or an error string.
+        """
+        import httpx
+
+        url = (CONFIG.indexer_url or "").rstrip("/")
+        if not url:
+            return "unconfigured"
+        onchain_id = CONFIG.onchain_agent_id
+        if not onchain_id:
+            return "unconfigured"
+        chain_id = CONFIG.chain_id
+        identity_addr = (CONFIG.identity_registry_address or "").lower()
+        canonical = f"eip155:{chain_id}:{identity_addr}:{onchain_id}"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{url}/agents/{canonical}")
+            if resp.status_code == 404:
+                return "agent_not_found"
+            if resp.status_code >= 400:
+                return f"http_{resp.status_code}"
+            data = resp.json()
+            owner = (data.get("owner") or "").lower()
+            wallet = (CONFIG.agent_wallet_address or "").lower()
+            if not owner:
+                return "owner_unknown"
+            if not wallet:
+                return "wallet_unconfigured"
+            return "ok" if owner == wallet else "owner_mismatch"
+        except httpx.ConnectError:
+            return "unreachable"
+        except httpx.TimeoutException:
+            return "timeout"
+        except Exception as exc:
+            return f"error: {exc}"
+
+    def negotiation_strategy_check(self) -> str:
+        """Probe the configured negotiation strategy. Returns a viability string.
+
+        Possible values:
+          'bisection'                    — BisectionStrategy loaded; always viable
+          'rl (viable)'                  — RL strategy loaded; torch is available
+          '<name> (exit_on_probe: <r>)'  — strategy exits every round; will fail
+          'unknown: <msg>'               — load_strategy raised
+        """
+        try:
+            from market_policy.negotiation_strategy import NegotiationRoundInput
+            from market_storefront.utils.sync_negotiation import _load_storefront_strategy
+
+            strategy = _load_storefront_strategy()
+            name = type(strategy).__name__
+            probe = strategy.decide(NegotiationRoundInput(
+                direction="maximize",
+                our_reference_price=10_000,
+                their_proposed_price=10_000,
+                history=[],
+            ))
+            if probe.action == "exit":
+                return f"{name} (exit_on_probe: {probe.reason})"
+            return name.lower().replace("strategy", "").strip() or name
+        except KeyError as exc:
+            return f"unknown: {exc}"
+        except Exception as exc:
+            return f"error: {exc}"

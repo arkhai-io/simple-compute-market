@@ -152,7 +152,7 @@ async def start_sync_negotiation(
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.schema.pydantic_models import Listing
+    from market_storefront.models.domain_models import Listing
     from market_storefront.utils.action_executor import (
         _extract_initial_price_from_order,
         determine_strategy_from_order,
@@ -257,7 +257,7 @@ async def continue_sync_negotiation(
       - "exit": the buyer is walking away; we mark the thread terminal.
     """
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.schema.pydantic_models import Listing
+    from market_storefront.models.domain_models import Listing
     from market_storefront.utils.action_executor import (
         _extract_initial_price_from_order,
         determine_strategy_from_order,

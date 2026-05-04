@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from market_policy.store import PolicyStore
-from market_storefront.schema.pydantic_models import EventType
+from market_storefront.models.domain_models import EventType
 from market_storefront.utils.sqlite_client import SQLiteClient
 
 logger = logging.getLogger(__name__)
