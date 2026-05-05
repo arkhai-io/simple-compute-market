@@ -37,16 +37,26 @@ async def start_settlement_job(
     """Kick off provisioning for an already-on-chain escrow.
 
     Verifies the negotiation is terminal-success with agreed terms,
-    locates the seller's order, inserts a settlement_jobs row, and
-    schedules the provisioning coroutine. Returns the job state
-    immediately (status='provisioning' on first call, or the existing
-    row verbatim if already kicked off — idempotent by escrow_uid).
+    locates the seller's order, **reads the on-chain escrow and asserts it
+    matches the negotiated terms** (fail-closed; see
+    ``escrow_verification.verify_escrow_for_settlement``), then inserts a
+    settlement_jobs row and schedules the provisioning coroutine. Returns
+    the job state immediately (status='provisioning' on first call, or the
+    existing row verbatim if already kicked off — idempotent by escrow_uid).
 
     Raises:
         ValueError if the negotiation doesn't exist, isn't terminal-
             success, has no agreed_price, or the seller's order is gone
             from the local DB.
+        EscrowVerificationError if the on-chain escrow does not match the
+            negotiated terms (wrong token, insufficient amount, wrong
+            recipient, expired, revoked, etc).
     """
+    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.escrow_verification import (
+        verify_escrow_for_settlement,
+    )
+
     thread = await sqlite_client.load_negotiation_thread_row(
         negotiation_id=negotiation_id,
     )
@@ -67,6 +77,27 @@ async def start_settlement_job(
             f"Seller's order {our_listing_id!r} (from negotiation {negotiation_id}) "
             "is gone from the local DB"
         )
+
+    # Fail-closed on-chain verification: the escrow must exist, be live,
+    # and match the negotiated terms before we touch any local state or
+    # provision a VM.  Raises EscrowVerificationError on mismatch; the
+    # controller maps that to HTTP 400.
+    duration_for_amount = (
+        thread.get("agreed_duration_seconds")
+        or thread.get("requested_duration_seconds")
+        or our_order_dict.get("max_duration_seconds")
+        or 3600
+    )
+    await verify_escrow_for_settlement(
+        escrow_uid=escrow_uid,
+        seller_wallet=CONFIG.agent_wallet_address or "",
+        agreed_price=int(thread["agreed_price"]),
+        agreed_duration_seconds=int(duration_for_amount),
+        listing=our_order_dict,
+        chain_rpc_url=CONFIG.chain_rpc_url,
+        chain_name=CONFIG.chain_name,
+        alkahest_address_config_path=CONFIG.alkahest_address_config_path,
+    )
 
     inserted = await sqlite_client.insert_settlement_job(
         escrow_uid=escrow_uid,

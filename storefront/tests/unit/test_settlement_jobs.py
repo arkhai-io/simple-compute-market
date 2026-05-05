@@ -200,8 +200,12 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
     await _seed_negotiation(client)
 
     # Prevent the background task from doing real work during the test.
+    # Bypass on-chain escrow verification — covered in test_escrow_verification.py.
     with patch(
         "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        new=AsyncMock(),
+    ), patch(
+        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
         new=AsyncMock(),
     ):
         result = await start_settlement_job(
@@ -220,12 +224,47 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
 
 
 @pytest.mark.asyncio
+async def test_start_aborts_when_escrow_verification_rejects(client):
+    """If on-chain verification fails, no settlement_jobs row is inserted
+    and no background task is scheduled — fail-closed."""
+    from market_storefront.utils.escrow_verification import EscrowVerificationError
+
+    await _seed_seller_order(client)
+    await _seed_negotiation(client)
+
+    bg_mock = AsyncMock()
+    verify_mock = AsyncMock(side_effect=EscrowVerificationError("amount insufficient"))
+    with patch(
+        "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        new=bg_mock,
+    ), patch(
+        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+        new=verify_mock,
+    ):
+        with pytest.raises(EscrowVerificationError, match="amount insufficient"):
+            await start_settlement_job(
+                escrow_uid="0xescrow",
+                negotiation_id="neg-1",
+                ssh_public_key="ssh-rsa ...",
+                sqlite_client=client,
+                alkahest_client=MagicMock(),
+            )
+
+    # No DB row, no background task.
+    assert await client.load_settlement_job(escrow_uid="0xescrow") is None
+    bg_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_start_is_idempotent_by_escrow_uid(client):
     await _seed_seller_order(client)
     await _seed_negotiation(client)
 
     with patch(
         "market_storefront.utils.settlement_jobs._run_settlement_job_bg",
+        new=AsyncMock(),
+    ), patch(
+        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
         new=AsyncMock(),
     ):
         first = await start_settlement_job(

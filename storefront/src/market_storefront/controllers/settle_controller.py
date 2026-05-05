@@ -39,6 +39,9 @@ class SettleController:
         body: SettleRequest,
         request: Request,
     ) -> Any:
+        from market_storefront.utils.escrow_verification import (
+            EscrowVerificationError,
+        )
         from market_storefront.utils.settlement_jobs import (
             serialize_settlement_job,
             start_settlement_job,
@@ -59,6 +62,8 @@ class SettleController:
                 sqlite_client=self._db,
                 alkahest_client=self._alkahest,
             )
+        except EscrowVerificationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
