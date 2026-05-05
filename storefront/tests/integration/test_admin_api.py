@@ -316,12 +316,13 @@ class TestPolicyEvaluate:
     """
 
     async def test_evaluate_rejects_bad_event_type(self, client):
-        """Invalid event_type rejected by controller before reaching policy_svc."""
+        """Empty offer/demand rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
                 offer={}, demand={},
                 max_duration_seconds=None,
+                policy_components=["oc.action.make_offer_from_order_create"],
             )
         # policy_evaluate hardcodes event_type="order_create" in the client,
         # so we test the missing offer/demand validation instead.
@@ -331,7 +332,10 @@ class TestPolicyEvaluate:
         """Empty offer dict is rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.policy_evaluate(offer={}, demand={"token": "MOCK", "amount": 1000})
+            await c.policy_evaluate(
+                offer={}, demand={"token": "MOCK", "amount": 1000},
+                policy_components=["oc.action.make_offer_from_order_create"],
+            )
         assert any(code in str(exc_info.value) for code in ("400", "422"))
 
     async def test_evaluate_rejects_missing_demand(self, client):
@@ -341,6 +345,7 @@ class TestPolicyEvaluate:
             await c.policy_evaluate(
                 offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
                 demand={},
+                policy_components=["oc.action.make_offer_from_order_create"],
             )
         assert any(code in str(exc_info.value) for code in ("400", "422"))
 

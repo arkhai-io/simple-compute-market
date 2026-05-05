@@ -282,7 +282,7 @@ class AdminListingsController:
         except Exception as exc:
             logger.error("[ADMIN] evaluate-create: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        return AdminEvaluateCreateResponse(**result)
+        return result
 
     @admin_router.post(
         "/{listing_id}/evaluate-close",
@@ -298,7 +298,7 @@ class AdminListingsController:
         except Exception as exc:
             logger.error("[ADMIN] evaluate-close: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        return AdminEvaluateCloseResponse(**result)
+        return result
 
     @admin_router.post(
         "/{listing_id}/evaluate-negotiate",

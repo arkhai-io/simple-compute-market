@@ -40,7 +40,7 @@ from market_policy.manager import PolicyManager
 from market_policy.negotiation_thread import get_thread_store
 from market_policy.store import PolicyStore
 from market_storefront.models.domain_models import (
-    EventType,
+    EventType,  # retained for future callers; not used in evaluate path
     ListingClosedEvent,
     ListingCreatedEvent,
     ResourceAlertRequest,
@@ -182,13 +182,26 @@ class PolicyService:
         offer_raw: dict,
         demand_raw: dict,
         max_duration_seconds: int | None = None,
+        policy_components: list[str] | None = None,
     ) -> PolicyEvaluateResponse:
         """Dry-run a listing creation policy evaluation from raw offer/demand dicts.
 
-        Parses resources, builds the event, consults the policy. No side effects.
-        Moved from SystemService.evaluate_order_create.
+        Parses resources, builds the event, checks that every component in
+        ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
+        the callable pipeline.  No DB lookup is performed — this is a pure
+        data operation.  The caller is responsible for supplying the component
+        names (e.g. read from ``GET /api/v1/system/policy`` after seeding).
         """
         from market_policy.registry import CALLABLE_REGISTRY
+
+        if not policy_components:
+            return PolicyEvaluateResponse(
+                action="no_action",
+                policy_used=None,
+                components=[],
+                resolvable=False,
+                reason="policy_components must be provided; supply the callable names to evaluate.",
+            )
 
         try:
             offer_resource = parse_resource_from_dict(offer_raw)
@@ -200,46 +213,29 @@ class PolicyService:
             offer_resource, demand_resource, max_duration_seconds, paused=False
         )
 
-        # Pre-flight: are any policies seeded for this trigger?
-        seeded_rows = []
-        try:
-            seeded_rows = await self._db.list_seeded_policies()
-        except Exception:
-            pass
-        oc_policies = [r for r in seeded_rows if r.get("trigger_type") == EventType.ORDER_CREATE.value]
-
-        if not oc_policies:
-            return PolicyEvaluateResponse(
-                action="no_action",
-                policy_used=None,
-                components=[],
-                resolvable=False,
-                reason="No policies seeded for 'listing_create' trigger. Call POST /api/v1/admin/policy/seed first.",
-            )
-
-        first = oc_policies[0]
-        components = first.get("components") or []
-        unresolvable = [c for c in components if c not in CALLABLE_REGISTRY]
+        unresolvable = [c for c in policy_components if c not in CALLABLE_REGISTRY]
         if unresolvable:
             return PolicyEvaluateResponse(
                 action="no_action",
-                policy_used=first.get("policy_name"),
-                components=components,
+                policy_used=None,
+                components=policy_components,
                 resolvable=False,
-                reason=f"Components not in callable registry: {unresolvable}. Call POST /api/v1/admin/policy/seed.",
+                reason=(
+                    f"Components not in CALLABLE_REGISTRY: {unresolvable}. "
+                    "Call POST /api/v1/admin/policy/seed to discover callables first."
+                ),
             )
 
         action = await self._consult_policy(event)
         if action is None:
             return PolicyEvaluateResponse(
                 action="no_action",
-                policy_used=first.get("policy_name"),
-                components=components,
+                policy_used=None,
+                components=policy_components,
                 resolvable=len(CALLABLE_REGISTRY) > 0,
                 reason=(
                     "Policy evaluated but returned no action. "
-                    f"CALLABLE_REGISTRY has {len(CALLABLE_REGISTRY)} entries. "
-                    "If 0, call POST /api/v1/admin/policy/seed first."
+                    f"CALLABLE_REGISTRY has {len(CALLABLE_REGISTRY)} entries."
                 ),
             )
 
@@ -250,8 +246,8 @@ class PolicyService:
         )
         return PolicyEvaluateResponse(
             action=action_type.lower(),
-            policy_used=first.get("policy_name"),
-            components=components,
+            policy_used=None,
+            components=policy_components,
             resolvable=True,
             reason=None,
         )

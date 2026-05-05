@@ -140,6 +140,7 @@ class SystemController:
             result = await self._policy_svc.evaluate_listing_create_policy_from_raw(
                 offer_raw=body.offer, demand_raw=body.demand,
                 max_duration_seconds=body.max_duration_seconds,
+                policy_components=body.policy_components,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

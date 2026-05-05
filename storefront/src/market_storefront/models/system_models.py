@@ -17,6 +17,13 @@ class PolicyEvaluateRequest(BaseModel):
     offer: dict[str, Any] | None = None
     demand: dict[str, Any] | None = None
     max_duration_seconds: int | None = None
+    policy_components: list[str] = Field(
+        description=(
+            "Callable names to evaluate against (e.g. ['oc.action.make_offer_from_order_create']). "
+            "The endpoint checks each name against the CALLABLE_REGISTRY and runs the pipeline. "
+            "No DB lookup is performed — this is a pure data operation."
+        ),
+    )
 
 
 class PolicyComponentResponse(BaseModel):

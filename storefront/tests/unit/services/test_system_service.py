@@ -160,44 +160,47 @@ def _make_policy_service(db, registry=None):
 
 
 class TestEvaluateListingCreatePolicyFromRaw:
-    async def test_no_policies_seeded_returns_no_action(self, db):
+    async def test_no_policy_components_returns_no_action(self, db):
+        """Empty policy_components list → no_action with explanation."""
         from market_storefront.models.system_models import PolicyEvaluateResponse
         svc = _make_policy_service(db)
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND
+            offer_raw=OFFER, demand_raw=DEMAND, policy_components=[],
         )
         assert isinstance(result, PolicyEvaluateResponse)
         assert result.action == "no_action"
         assert result.resolvable is False
-        assert "seed" in (result.reason or "").lower()
+        assert result.reason is not None
 
     async def test_unresolvable_components_returns_no_action(self, db):
-        from market_policy.store import PolicyStore
+        """Component not in CALLABLE_REGISTRY → no_action with resolvable=False."""
         from market_storefront.models.system_models import PolicyEvaluateResponse
-        from market_storefront.policy.seeding import ComputePolicySeeder
-        svc = _make_policy_service(db, {})
-        ps = PolicyStore(db)
-        seeder = ComputePolicySeeder(policy_store=ps, sqlite_client=db, agent_id="test-agent")
-        await seeder.ensure_default_policies()
+        svc = _make_policy_service(db, {})  # empty registry
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND
+            offer_raw=OFFER, demand_raw=DEMAND,
+            policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)
         assert result.action == "no_action"
         assert result.resolvable is False
+        assert "CALLABLE_REGISTRY" in (result.reason or "")
 
     async def test_invalid_offer_raises_value_error(self, db):
+        """Invalid offer dict raises ValueError before callable is consulted."""
         svc = _make_policy_service(db)
         with pytest.raises((ValueError, Exception)):
             await svc.evaluate_listing_create_policy_from_raw(
                 offer_raw={"not_a_valid_resource": True}, demand_raw=DEMAND,
+                policy_components=["oc.action.make_offer_from_order_create"],
             )
 
     async def test_returns_make_offer_when_callable_fires(self, db):
-        from market_policy.store import PolicyStore
+        """When the callable is registered and fires, action=make_offer is returned.
+
+        No DB seeding required — the function no longer reads seeded_policies.
+        """
         from market_storefront.models.domain_models import ActionType, ListingCreatedEvent
         from market_storefront.models.system_models import PolicyEvaluateResponse
-        from market_storefront.policy.seeding import ComputePolicySeeder
         from service.schemas import DomainAction
         def _fake_make_offer(context):
             if isinstance(context.event, ListingCreatedEvent):
@@ -209,11 +212,9 @@ class TestEvaluateListingCreatePolicyFromRaw:
             return None
         registry = {"oc.action.make_offer_from_order_create": _fake_make_offer}
         svc = _make_policy_service(db, registry)
-        ps = PolicyStore(db)
-        seeder = ComputePolicySeeder(policy_store=ps, sqlite_client=db, agent_id="test-agent")
-        await seeder.ensure_default_policies()
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND
+            offer_raw=OFFER, demand_raw=DEMAND,
+            policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)
         assert result.action == "make_offer"

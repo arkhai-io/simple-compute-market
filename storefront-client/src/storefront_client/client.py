@@ -484,11 +484,28 @@ class StorefrontClient(_StorefrontClientBase):
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
         return await self._get("/api/v1/system/policy")
 
-    async def policy_evaluate(self, *, offer: dict, demand: dict, max_duration_seconds: int | None = None) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
+    async def policy_evaluate(
+        self,
+        *,
+        offer: dict,
+        demand: dict,
+        max_duration_seconds: int | None = None,
+        policy_components: list[str],
+    ) -> dict:
+        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
+
+        Pure data operation — no DB lookup.  Supply the callable names to
+        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
+        """
         return await self._post(
             "/api/v1/system/policy/evaluate",
-            {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
+            {
+                "event_type": "order_create",
+                "offer": offer,
+                "demand": demand,
+                "max_duration_seconds": max_duration_seconds,
+                "policy_components": policy_components,
+            },
         )
 
     async def evaluate_create_listing(
@@ -508,6 +525,13 @@ class StorefrontClient(_StorefrontClientBase):
         }
         return await self._post(
             "/api/v1/admin/listings/evaluate-create", body,
+            extra_headers=self._admin_headers(),
+        )
+
+    async def evaluate_close_listing(self, listing_id: str) -> dict:
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
+        return await self._post(
+            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
             extra_headers=self._admin_headers(),
         )
 
@@ -567,7 +591,7 @@ class StorefrontClient(_StorefrontClientBase):
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
-            await self._post("/listings/create", body, extra_headers=headers)
+            await self._post("/api/v1/listings/create", body, extra_headers=headers)
         )
 
     async def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:
@@ -1075,11 +1099,28 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
         return self._get("/api/v1/system/policy")
 
-    def policy_evaluate(self, *, offer: dict, demand: dict, max_duration_seconds: int | None = None) -> dict:
-        """POST /api/v1/system/policy/evaluate — dry-run an order_create event."""
+    def policy_evaluate(
+        self,
+        *,
+        offer: dict,
+        demand: dict,
+        max_duration_seconds: int | None = None,
+        policy_components: list[str],
+    ) -> dict:
+        """POST /api/v1/system/policy/evaluate — dry-run an order_create event.
+
+        Pure data operation — no DB lookup.  Supply the callable names to
+        evaluate against (e.g. read from GET /api/v1/system/policy after seeding).
+        """
         return self._post(
             "/api/v1/system/policy/evaluate",
-            {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
+            {
+                "event_type": "order_create",
+                "offer": offer,
+                "demand": demand,
+                "max_duration_seconds": max_duration_seconds,
+                "policy_components": policy_components,
+            },
         )
 
     def evaluate_create_listing(
@@ -1099,6 +1140,13 @@ class SyncStorefrontClient(_StorefrontClientBase):
         }
         return self._post(
             "/api/v1/admin/listings/evaluate-create", body,
+            extra_headers=self._admin_headers(),
+        )
+
+    def evaluate_close_listing(self, listing_id: str) -> dict:
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run, no DB writes (admin key)."""
+        return self._post(
+            f"/api/v1/admin/listings/{listing_id}/evaluate-close", {},
             extra_headers=self._admin_headers(),
         )
 
@@ -1157,7 +1205,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "paused": paused,
         }
         return StorefrontListingCreateResponse.from_dict(
-            self._post("/listings/create", body, extra_headers=headers)
+            self._post("/api/v1/listings/create", body, extra_headers=headers)
         )
 
     def close_listing(self, listing_id: str) -> StorefrontListingCloseResponse:

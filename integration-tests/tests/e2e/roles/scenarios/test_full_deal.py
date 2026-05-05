@@ -97,6 +97,10 @@ BUYER_MAX_PRICE = 12_000
 MOCK_ESCROW_UID = f"escrow-e2e-{uuid.uuid4().hex[:8]}"
 PROV_RULE_ID = "e2e-create-pause"
 
+# Canonical callable name registered in domain/compute/agent/app/policy/store.py.
+# Used by test_01a (pure dry-run) and verified by test_01b (seed read-back).
+ORDER_CREATE_CALLABLE = "oc.action.make_offer_from_order_create"
+
 
 # ===========================================================================
 # Phase 0 — E2E readiness
@@ -149,19 +153,25 @@ class TestStage00c_ProvisioningHealth:
     def test_00c_provisioning_is_healthy(
         self, provisioning_client, deal_state: DealState
     ):
-        """GET provisioning /health → status=ok.
+        """GET /api/v1/system/ansible/readiness → playbook.exists=True.
 
-        Validates provisioning service is up and its mock profile is active
-        before settlement stages attempt to submit jobs.
+        Uses the ansible readiness endpoint rather than /health because it
+        confirms the mock profile is correctly configured — not just that
+        the HTTP server is running. In mock mode the playbook points to
+        /dev/null which always exists; a missing playbook means the mock
+        profile isn't active.
         """
         require_state(deal_state, "_storefront_healthy")
-        health = provisioning_client.get_health()
-        assert health.get("status") == "ok", (
-            f"Provisioning service unhealthy: {health}\n"
-            "Ensure ACTIVE_PROFILES=mock is set on the provisioning container."
+        resp = provisioning_client.get_ansible_readiness()
+        playbook_exists = resp.get("playbook", {}).get("exists", False)
+        assert playbook_exists, (
+            f"Provisioning playbook path does not exist: {resp.get('playbook')}\n"
+            "Ensure ACTIVE_PROFILES=mock is set on the provisioning container.\n"
+            f"Full response: {resp}"
         )
         deal_state._provisioning_healthy = True
-        log.info("[00c] Provisioning healthy: %s", health.get("status"))
+        log.info("[00c] Provisioning ansible readiness: playbook.exists=%s ansible=%s",
+                 playbook_exists, resp.get("ansible_version"))
 
 
 class TestStage00d_NegotiationStrategy:
@@ -198,36 +208,48 @@ class TestStage01a_PolicyDryRun:
     def test_01a_policy_evaluate_returns_make_offer(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /api/v1/system/policy/evaluate → action=make_offer (dry-run).
+        """POST /api/v1/system/policy/evaluate → action=make_offer (pure dry-run).
 
-        Verifies the policy pipeline can produce a decision for the offer/demand
-        spec before the seed advance writes any DB rows.
+        Evaluates the known order_create callable directly against the offer/demand
+        spec — no DB lookup, no seeding required. Confirms the callable pipeline
+        produces make_offer for this resource spec independently of DB state.
+
+        If this fails with resolvable=False, the callable is not in CALLABLE_REGISTRY
+        — call POST /api/v1/admin/policy/seed first (or check the domain import path).
         """
         require_state(deal_state, "_negotiation_strategy_viable")
         result = storefront_admin_client.policy_evaluate(
             offer=OFFER_RESOURCE,
             demand=DEMAND_RESOURCE,
             max_duration_seconds=DURATION_HOURS * 3600,
+            policy_components=[ORDER_CREATE_CALLABLE],
         )
         assert isinstance(result, dict), f"Unexpected response type: {result}"
+        assert result.get("resolvable") is True, (
+            f"Callable {ORDER_CREATE_CALLABLE!r} not in CALLABLE_REGISTRY. "
+            f"reason={result.get('reason')!r}\n"
+            "Call POST /api/v1/admin/policy/seed to discover callables first."
+        )
         action = result.get("action", "")
         assert "make_offer" in action.lower(), (
             f"Expected action=make_offer, got {action!r}. Full response: {result}"
         )
         deal_state._policy_dry_run_passed = True
-        log.info("[01a] Policy dry-run: action=%s policy=%s",
-                 action, result.get("policy_used"))
+        log.info("[01a] Policy dry-run: action=%s resolvable=%s",
+                 action, result.get("resolvable"))
 
 
 class TestStage01b_PolicySeed:
     def test_01b_admin_seeds_policies(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /admin/policy/seed → callable_count > 0, order_create seeded.
+        """POST /admin/policy/seed → callable_count > 0; read-back confirms integrity.
 
         Idempotent advance — discovers @policy_callable decorators and writes
-        default DB rows. Safe to call on a fresh deployment or one where
-        startup seeding silently failed (e.g. missing gymnasium).
+        default DB rows. After seeding, reads GET /api/v1/system/policy to
+        confirm the seeded order_create policy references the expected callable.
+        This verifies the seed wrote correctly and that our dry-run callable
+        name constant matches what the system actually seeded.
         """
         require_state(deal_state, "_policy_dry_run_passed")
         result = storefront_admin_client.policy_seed()
@@ -250,9 +272,29 @@ class TestStage01b_PolicySeed:
         assert any("order_create" in p for p in seeded), (
             f"order_create policy not seeded. Got: {seeded}"
         )
+
+        # Read back from /api/v1/system/policy to verify seeded policy integrity
+        policy_status = storefront_admin_client.policy_status()
+        assert isinstance(policy_status, dict), f"Unexpected policy_status response: {policy_status}"
+        seeded_policies = policy_status.get("seeded_policies", [])
+        oc_policies = [p for p in seeded_policies if "order_create" in p.get("policy_name", "")]
+        assert oc_policies, (
+            f"order_create policy absent from GET /api/v1/system/policy after seed. "
+            f"seeded_policies={seeded_policies}"
+        )
+        oc_policy = oc_policies[0]
+        oc_components = oc_policy.get("components", [])
+        assert ORDER_CREATE_CALLABLE in oc_components, (
+            f"Expected callable {ORDER_CREATE_CALLABLE!r} in seeded order_create policy. "
+            f"Got components: {oc_components}\n"
+            "This means the ORDER_CREATE_CALLABLE constant in test_full_deal.py "
+            "doesn't match the name registered in domain/compute/agent/app/policy/store.py."
+        )
+
         deal_state._policies_seeded = True
-        log.info("[01b] Policy seed: callable_count=%d seeded=%s import_errors=%d",
-                 callable_count, seeded, len(import_errors))
+        log.info("[01b] Policy seed: callable_count=%d seeded=%s import_errors=%d "
+                 "order_create_components=%s",
+                 callable_count, seeded, len(import_errors), oc_components)
 
 
 # ===========================================================================

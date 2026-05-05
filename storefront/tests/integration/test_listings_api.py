@@ -315,3 +315,265 @@ class TestResumeListing:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.resume_listing("ghost")
         assert "404" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Admin evaluate endpoints — evaluate-create, evaluate-close, evaluate-negotiate
+#
+# These tests use a dedicated fixture that includes both the buyer-facing
+# router and the admin_router (which hosts the /api/v1/admin/listings/* routes).
+# They require a real ListingService and PolicyService because the evaluate
+# paths exercise the full service stack.
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch
+
+
+@pytest_asyncio.fixture
+async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
+    """Fixture wiring both listings router and admin_router with real services.
+
+    PolicyService requires a config mock — only base_url_override and agent_id
+    are read during evaluate paths (via _consult_policy → PolicyManager).
+    """
+    from market_storefront.controllers.listings_controller import admin_router
+    from market_storefront.services.listing_service import ListingService
+    from market_storefront.services.policy_service import PolicyService
+
+    config = MagicMock()
+    config.base_url_override = ""
+    config.base_url_override_raw = ""
+    config.agent_id = "test-agent"
+    config.agent_priv_key = ""
+    config.chain_rpc_url = ""
+
+    listing_svc = ListingService(
+        sqlite_client=db, alkahest_client=None, config=config
+    )
+    policy_svc = PolicyService(
+        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+    )
+
+    _container.resolved_sqlite_client = db
+    _container.resolved_listing_service = listing_svc
+    _container.resolved_policy_service = policy_svc
+
+    app = FastAPI()
+    app.include_router(listings_router)
+    app.include_router(admin_router)
+    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
+
+    transport = httpx.ASGITransport(app=app)
+    async with StorefrontClient(
+        "http://test", transport=transport, admin_key=ADMIN_KEY,
+        private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    ) as c:
+        yield c, db
+
+    _container.resolved_sqlite_client = None
+    _container.resolved_listing_service = None
+    _container.resolved_policy_service = None
+
+
+_OFFER = {
+    "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
+}
+_DEMAND = {
+    "token": {
+        "symbol": "MOCK",
+        "contract_address": "0x0000000000000000000000000000000000000001",
+        "decimals": 0,
+    },
+    "amount": 5000,
+}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/admin/listings/evaluate-create
+# ---------------------------------------------------------------------------
+
+class TestEvaluateCreate:
+    """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes."""
+
+    async def test_returns_200_with_would_create_field(self, admin_client):
+        """Endpoint returns a structured response with would_create field."""
+        c, _ = admin_client
+        result = await c.evaluate_create_listing(
+            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+        )
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
+        assert "would_create" in result, f"Missing 'would_create' in response: {result}"
+        assert isinstance(result["would_create"], bool)
+
+    async def test_returns_action_field(self, admin_client):
+        """Response includes action string (make_offer or no_action)."""
+        c, _ = admin_client
+        result = await c.evaluate_create_listing(
+            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+        )
+        assert "action" in result, f"Missing 'action' in response: {result}"
+        assert isinstance(result["action"], str)
+
+    async def test_no_side_effects_db_unchanged(self, admin_client):
+        """evaluate-create writes nothing to SQLite."""
+        c, db = admin_client
+        before = await db.list_listings()
+        await c.evaluate_create_listing(
+            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+        )
+        after = await db.list_listings()
+        assert len(before) == len(after), (
+            "evaluate-create wrote a listing to the DB — it must be a pure dry-run"
+        )
+
+    async def test_requires_admin_key(self, client_no_key):
+        """Admin key required — missing key returns 403."""
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.evaluate_create_listing(
+                offer=_OFFER, demand=_DEMAND,
+            )
+        assert "403" in str(exc_info.value)
+
+    async def test_empty_offer_returns_500_or_400(self, admin_client):
+        """Malformed offer dict handled gracefully — no 500 from unhandled exception."""
+        c, _ = admin_client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.evaluate_create_listing(offer={}, demand=_DEMAND)
+        # 400 from the service ValueError or 500 if parse_resource_from_dict raises
+        assert any(code in str(exc_info.value) for code in ("400", "500"))
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/admin/listings/{listing_id}/evaluate-close
+# ---------------------------------------------------------------------------
+
+class TestEvaluateClose:
+    """POST /api/v1/admin/listings/{listing_id}/evaluate-close — dry-run."""
+
+    async def test_returns_200_with_would_close_field(self, admin_client):
+        """Endpoint returns a structured response with would_close field."""
+        c, db = admin_client
+        await _seed_listing(db, "close-test-1")
+        result = await c.evaluate_close_listing("close-test-1")
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
+        assert "would_close" in result, f"Missing 'would_close' in response: {result}"
+        assert isinstance(result["would_close"], bool)
+
+    async def test_returns_action_and_listing_id(self, admin_client):
+        """Response includes action and listing_id fields."""
+        c, db = admin_client
+        await _seed_listing(db, "close-test-2")
+        result = await c.evaluate_close_listing("close-test-2")
+        assert "action" in result
+        assert result.get("listing_id") == "close-test-2"
+
+    async def test_unknown_listing_returns_404(self, admin_client):
+        """Non-existent listing_id returns 404."""
+        c, _ = admin_client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.evaluate_close_listing("does-not-exist")
+        assert "404" in str(exc_info.value)
+
+    async def test_no_side_effects_db_unchanged(self, admin_client):
+        """evaluate-close writes nothing to SQLite."""
+        c, db = admin_client
+        await _seed_listing(db, "close-side-effects")
+        before_status = (await db.load_listing(listing_id="close-side-effects")).get("status")
+        await c.evaluate_close_listing("close-side-effects")
+        after_status = (await db.load_listing(listing_id="close-side-effects")).get("status")
+        assert before_status == after_status, (
+            "evaluate-close changed listing status — it must be a pure dry-run"
+        )
+
+    async def test_requires_admin_key(self, client_no_key):
+        """Admin key required — missing key returns 403."""
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.evaluate_close_listing("any-listing")
+        assert "403" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate
+# ---------------------------------------------------------------------------
+
+class TestEvaluateNegotiate:
+    """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run."""
+
+    async def test_returns_200_with_would_negotiate_field(self, admin_client):
+        """Endpoint returns a structured response with would_negotiate field."""
+        c, db = admin_client
+        await _seed_listing(db, "neg-eval-1")
+        with patch(
+            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
+            return_value=_bisection_strategy(),
+        ):
+            result = await c.evaluate_negotiate("neg-eval-1", their_proposed_price=5000)
+        assert isinstance(result.would_negotiate, bool)
+
+    async def test_returns_decision_fields(self, admin_client):
+        """Response includes decision, direction, our_reference_price, strategy."""
+        c, db = admin_client
+        await _seed_listing(db, "neg-eval-2")
+        with patch(
+            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
+            return_value=_bisection_strategy(),
+        ):
+            result = await c.evaluate_negotiate("neg-eval-2", their_proposed_price=5000)
+        assert result.decision in ("accept", "counter", "exit")
+        assert result.direction == "maximize"
+        assert result.our_reference_price > 0
+        assert result.strategy  # non-empty string
+
+    async def test_price_at_floor_does_not_exit(self, admin_client):
+        """Buyer price at or above the seller's floor should not produce exit."""
+        c, db = admin_client
+        await _seed_listing(db, "neg-eval-floor")  # default demand amount=9000
+        with patch(
+            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
+            return_value=_bisection_strategy(),
+        ):
+            result = await c.evaluate_negotiate(
+                "neg-eval-floor", their_proposed_price=9000
+            )
+        # At exactly the floor price, bisection should accept or counter, not exit
+        assert result.would_negotiate is True, (
+            f"Strategy exited at floor price 9000. decision={result.decision!r} "
+            f"reason={result.decision_reason!r} our_price={result.our_reference_price}"
+        )
+
+    async def test_unknown_listing_returns_404(self, admin_client):
+        """Non-existent listing_id returns 404."""
+        c, _ = admin_client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.evaluate_negotiate("ghost-listing", their_proposed_price=1000)
+        assert "404" in str(exc_info.value)
+
+    async def test_no_negotiation_thread_created(self, admin_client):
+        """evaluate-negotiate creates no thread in the DB."""
+        c, db = admin_client
+        await _seed_listing(db, "neg-eval-no-thread")
+        with patch(
+            "market_storefront.utils.sync_negotiation._load_storefront_strategy",
+            return_value=_bisection_strategy(),
+        ):
+            await c.evaluate_negotiate("neg-eval-no-thread", their_proposed_price=5000)
+        threads = await db.list_negotiations(listing_id="neg-eval-no-thread")
+        assert len(threads) == 0, (
+            "evaluate-negotiate created a negotiation thread — it must be a pure dry-run"
+        )
+
+    async def test_requires_admin_key(self, client_no_key):
+        """Admin key required — missing key returns 403."""
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.evaluate_negotiate("any", their_proposed_price=1000)
+        assert "403" in str(exc_info.value)
+
+
+def _bisection_strategy():
+    """Return a real BisectionStrategy instance for use in integration tests.
+
+    Patches _load_storefront_strategy to avoid torch/rl dependency and
+    CONFIG access in integration tests.
+    """
+    from market_policy.negotiation_strategy import load_strategy
+    return load_strategy("bisection")

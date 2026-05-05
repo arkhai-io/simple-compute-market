@@ -322,6 +322,25 @@ class ProvisioningClient(_ProvisioningClientBase):
         )))
 
     # ------------------------------------------------------------------
+    # System / readiness
+    # ------------------------------------------------------------------
+
+    async def get_ansible_readiness(self) -> dict:
+        """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
+
+        Returns a dict with fields:
+          - ansible_version: str | None
+          - inventory: {source, path, exists, host_count}
+          - playbook: {path, exists}
+          - ssh_keys: list of SSH key diagnostic dicts
+
+        Always returns 200 regardless of readiness state — check
+        ``response["playbook"]["exists"]`` to confirm the provisioning
+        service is correctly configured for the deal flow.
+        """
+        return await self._get("/api/v1/system/ansible/readiness")
+
+    # ------------------------------------------------------------------
     # Job operations
     # ------------------------------------------------------------------
 
@@ -536,6 +555,22 @@ class SyncProvisioningClient(_ProvisioningClientBase):
             files={"file": (path.name, content, "text/plain")},
             data={"ssh_key_type": ssh_key_type},
         )))
+
+    # System / readiness (sync mirrors)
+    def get_ansible_readiness(self) -> dict:
+        """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
+
+        Returns a dict with fields:
+          - ansible_version: str | None
+          - inventory: {source, path, exists, host_count}
+          - playbook: {path, exists}
+          - ssh_keys: list of SSH key diagnostic dicts
+
+        Always returns 200 regardless of readiness state — check
+        ``response["playbook"]["exists"]`` to confirm the provisioning
+        service is correctly configured for the deal flow.
+        """
+        return self._get("/api/v1/system/ansible/readiness")
 
     # Job operations (sync mirrors)
     def get_job(self, job_id: str) -> JobStatusResponse:
