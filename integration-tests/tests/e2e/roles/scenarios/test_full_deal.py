@@ -92,7 +92,7 @@ DEMAND_RESOURCE = {
     "amount": 10_000,
 }
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 10_000   # at seller's floor — policy will counter or accept
+BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
 MOCK_ESCROW_UID = f"escrow-e2e-{uuid.uuid4().hex[:8]}"
 PROV_RULE_ID = "e2e-create-pause"
@@ -488,6 +488,12 @@ class TestStage05a_EvaluateNegotiate:
             "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
             f"{result.our_reference_price} (seller floor)."
         )
+        assert result.decision == "counter", (
+            f"Strategy accepted at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}. "
+            "This means BUYER_INITIAL_PRICE >= seller floor. Lower it so the strategy "
+            "counters at round 0 — otherwise force_accept in 06b will 409 on an "
+            "already-terminal negotiation."
+        )
         deal_state._evaluate_negotiate_passed = True
         log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
                  result.decision, result.decision_reason, result.strategy)
@@ -537,12 +543,14 @@ class TestStage05b_NegotiationStartsAndVisible:
             "Check that sync_negotiation.py emits stage_event after decide()."
         )
         round0 = round0_events[0]
-        assert round0.data.get("decision") != "exit", (
-            f"Seller exited at round 0. reason={round0.data.get('decision_reason')!r}. "
-            f"our_price={round0.data.get('our_price')} "
-            f"their_price={round0.data.get('their_price')}.\n"
-            "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
-            "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE."
+        assert round0.data.get("decision") == "counter", (
+            f"Expected seller to counter at round 0, got decision={round0.data.get('decision')!r}. "
+            f"reason={round0.data.get('decision_reason')!r}. "
+            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
+            "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller's floor — "
+            "lower it so round 0 counters rather than accepts immediately "
+            "(force_accept in 06b will 409 on an already-terminal negotiation).\n"
+            "If decision='exit': increase BUYER_INITIAL_PRICE or check strategy config."
         )
 
         deal_state.negotiation_id = neg_id
@@ -568,19 +576,22 @@ class TestStage06b_ForceAcceptAndTerminal:
         """
         require_state(deal_state, "seller_listing_id", "negotiation_id")
 
-        # Guard: confirm negotiation is still open
+        # Guard: confirm negotiation is still open (not already terminal)
         events_result = storefront_admin_client.get_events(
             stage="negotiation",
             negotiation_id=deal_state.negotiation_id,
         )
-        terminal_exits = [
+        terminal_events = [
             e for e in events_result.events
-            if e.event == "round_decided" and e.data.get("decision") == "exit"
+            if e.event == "round_decided" and e.data.get("decision") in ("exit", "accept")
         ]
-        assert not terminal_exits, (
-            f"Negotiation {deal_state.negotiation_id} already exited before force-accept. "
-            f"Exit reason: {terminal_exits[0].data.get('decision_reason')!r}. "
-            "Check stage 05b's round_decided event for root cause."
+        assert not terminal_events, (
+            f"Negotiation {deal_state.negotiation_id} is already terminal before force-accept. "
+            f"decision={terminal_events[0].data.get('decision')!r} "
+            f"reason={terminal_events[0].data.get('decision_reason')!r}.\n"
+            "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller floor — "
+            "lower it so the strategy counters at round 0 rather than accepting immediately.\n"
+            "If decision='exit': check stage 05b's round_decided event for root cause."
         )
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
@@ -628,11 +639,11 @@ class TestStage07_MockEscrowAndProvGate:
 
         deal_state.escrow_uid = MOCK_ESCROW_UID
 
-        provisioning_test_client.add_mock_rule({
-            "rule_id": PROV_RULE_ID,
-            "match": {"vm_action": "create"},
-            "pause_before_result": True,
-            "result_stdout": (
+        provisioning_test_client.add_mock_rule(
+            rule_id=PROV_RULE_ID,
+            match={"vm_action": "create"},
+            pause_before_result=True,
+            result_stdout=(
                 '{"vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
                 '"tenant_ssh_key_path": "/tmp/e2e.key", '
                 '"frp": {"enabled": false}, '
@@ -640,8 +651,8 @@ class TestStage07_MockEscrowAndProvGate:
                 '{"external": "ssh vmuser@localhost", '
                 '"internal": "ssh vmuser@10.0.0.1"}}}}'
             ),
-            "fail_with": None,
-        })
+            fail_with=None,
+        )
         deal_state.provisioning_gate_armed = True
         log.info("[07] Mock escrow: %s; provisioning gate armed with rule=%s",
                  MOCK_ESCROW_UID, PROV_RULE_ID)
