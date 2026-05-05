@@ -39,41 +39,36 @@ log = logging.getLogger(__name__)
 @dataclass
 class DealState:
     """Accumulates IDs and snapshots as the deal progresses."""
-    # Stage 00 — policy seeding
-    _policies_seeded: bool = False
-    _policy_evaluated: bool = False
+    # Phase 0 — service readiness
+    _storefront_healthy: bool = False
+    _registry_reachable: bool = False
+    _provisioning_healthy: bool = False
     _negotiation_strategy_viable: bool = False
-    # Stage 1 — seller order
+    # Phase 1 — policy pipeline
+    _policy_dry_run_passed: bool = False
+    _policies_seeded: bool = False
+    # Phase 2 — listing creation (paused)
+    _evaluate_create_passed: bool = False
     seller_listing_id: Optional[str] = None
-    _seller_url: str = ""
-    # Stage 2 — local paused state verified
-    paused_create_confirmed: bool = False
-    # Stage 3 — registry absence confirmed
-    registry_absent_confirmed: bool = False
-    # Stage 3-4 — pause/resume
-    pause_confirmed: bool = False
+    # Phase 3 — registry publication
+    _registry_validate_passed: bool = False
     resume_confirmed: bool = False
-    # Stage 6-7 — global admin pause/resume
-    admin_resume_confirmed: bool = False
-    # Stage 5 — registry visibility confirmed
-    registry_order_confirmed: bool = False
-    # Stage 5-8 — negotiation
+    # Phase 5 — negotiation
+    _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
-    negotiation_round_count: int = 0
     negotiation_terminal_state: Optional[str] = None
     agreed_price: Optional[int] = None
-    # Stage 9 — escrow (mock)
+    # Phase 7 — mock escrow + provisioning gate
     escrow_uid: Optional[str] = None
-    # Stage 10-11 — settlement + provisioning
+    provisioning_gate_armed: bool = False
+    # Phase 8 — settlement
     settlement_submitted: bool = False
     provisioning_job_id: Optional[str] = None
-    # Stage 12-13 — provisioning lifecycle gates
-    provisioning_paused_confirmed: bool = False
+    # Phase 9 — provisioning completion
     provisioning_result_injected: bool = False
-    # Stage 14-16 — settlement ready and credentials
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
-    seller_order_final_status: Optional[str] = None
+    seller_listing_final_status: Optional[str] = None
 
 
 def require_state(deal_state: DealState, *fields: str) -> None:
@@ -206,11 +201,11 @@ def seller_wallet() -> str:
 
 @pytest.fixture(scope="module", autouse=True)
 def ensure_storefront_resumed(storefront_admin_client):
-    """Yield to let the module run; then unconditionally clear global pause.
+    """Yield to let the module run; then unconditionally clear global pause if set.
 
-    This prevents a failed stage 06 (which calls admin_pause but whose
-    stage 07 companion may not have run) from leaving the storefront paused
-    and poisoning subsequent test runs.
+    Safety net in case an unexpected error leaves the storefront paused between
+    runs. Admin pause/resume is no longer tested in this module (moved to the
+    smoke suite), so this fixture should rarely need to act.
     """
     yield
     try:

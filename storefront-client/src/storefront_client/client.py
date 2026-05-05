@@ -43,6 +43,7 @@ import httpx
 
 from storefront_client.models import (
     DiscoverMatch,
+    EvaluateNegotiateResponse,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
@@ -58,6 +59,8 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     AdminStatusResponse,
+    SettleResponse,
+    SettleStatusResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -488,9 +491,49 @@ class StorefrontClient(_StorefrontClientBase):
             {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
         )
 
-    # ------------------------------------------------------------------
-    # Existing methods (unchanged)
-    # ------------------------------------------------------------------
+    async def evaluate_create_listing(
+        self,
+        *,
+        offer: dict[str, Any],
+        demand: dict[str, Any],
+        max_duration_seconds: int | None = None,
+        paused: bool = False,
+    ) -> dict:
+        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
+        body = {
+            "offer": offer,
+            "demand": demand,
+            "max_duration_seconds": max_duration_seconds,
+            "paused": paused,
+        }
+        return await self._post(
+            "/api/v1/admin/listings/evaluate-create", body,
+            extra_headers=self._admin_headers(),
+        )
+
+    async def evaluate_negotiate(
+        self,
+        listing_id: str,
+        *,
+        their_proposed_price: int,
+        buyer_address: str = "",
+    ) -> EvaluateNegotiateResponse:
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
+
+        Runs the configured negotiation strategy against a synthetic buyer offer
+        without creating a negotiation thread or writing to the database.
+        Returns EvaluateNegotiateResponse.would_negotiate=False when the strategy
+        would exit immediately (e.g. price_unreasonable or torch_unavailable).
+        """
+        body = {"their_proposed_price": their_proposed_price, "buyer_address": buyer_address}
+        return EvaluateNegotiateResponse.from_dict(
+            await self._post(
+                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+
 
     async def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
@@ -611,9 +654,8 @@ class StorefrontClient(_StorefrontClientBase):
 
 
     # ------------------------------------------------------------------
-    # Buyer protocol — negotiate
-    # These endpoints require EIP-191 signed X-Signature + X-Timestamp headers.
-    # In tests, auth is bypassed via monkeypatching buyer_auth._verify.
+    # Buyer protocol — negotiate / settle
+    # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
     # ------------------------------------------------------------------
 
     async def negotiate_new(
@@ -625,7 +667,9 @@ class StorefrontClient(_StorefrontClientBase):
         duration_seconds: int,
         buyer_agent_url: str = "",
     ) -> dict:
-        """POST /api/v1/negotiate/new"""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
@@ -633,7 +677,10 @@ class StorefrontClient(_StorefrontClientBase):
             "duration_seconds": duration_seconds,
             "buyer_agent_url": buyer_agent_url,
         }
-        return await self._post("/api/v1/negotiate/new", body)
+        return await self._post(
+            "/api/v1/negotiate/new", body,
+            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+        )
 
     async def negotiate_continue(
         self,
@@ -651,6 +698,51 @@ class StorefrontClient(_StorefrontClientBase):
         if reason is not None:
             body["reason"] = reason
         return await self._post(f"/api/v1/negotiate/{neg_id}", body)
+
+    async def settle(
+        self,
+        escrow_uid: str,
+        *,
+        negotiation_id: str,
+        buyer_address: str,
+        ssh_public_key: str = "",
+    ) -> SettleResponse:
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        body: dict = {
+            "negotiation_id": negotiation_id,
+            "buyer_address": buyer_address,
+        }
+        if ssh_public_key:
+            body["ssh_public_key"] = ssh_public_key
+        return SettleResponse.from_dict(
+            await self._post(
+                f"/api/v1/settle/{escrow_uid}", body,
+                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            )
+        )
+
+    async def get_settle_status(
+        self,
+        escrow_uid: str,
+        *,
+        buyer_address: str,
+    ) -> SettleStatusResponse:
+        """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        url = self._url(f"/api/v1/settle/{escrow_uid}/status")
+        resp = await self._client.get(
+            f"/api/v1/settle/{escrow_uid}/status",
+            params={"buyer_address": buyer_address},
+            headers={"X-Signature": sig, "X-Timestamp": ts},
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleStatusResponse.from_dict(resp.json())
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -990,9 +1082,49 @@ class SyncStorefrontClient(_StorefrontClientBase):
             {"event_type": "order_create", "offer": offer, "demand": demand, "max_duration_seconds": max_duration_seconds},
         )
 
-    # ------------------------------------------------------------------
-    # Existing methods (unchanged)
-    # ------------------------------------------------------------------
+    def evaluate_create_listing(
+        self,
+        *,
+        offer: dict[str, Any],
+        demand: dict[str, Any],
+        max_duration_seconds: int | None = None,
+        paused: bool = False,
+    ) -> dict:
+        """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
+        body = {
+            "offer": offer,
+            "demand": demand,
+            "max_duration_seconds": max_duration_seconds,
+            "paused": paused,
+        }
+        return self._post(
+            "/api/v1/admin/listings/evaluate-create", body,
+            extra_headers=self._admin_headers(),
+        )
+
+    def evaluate_negotiate(
+        self,
+        listing_id: str,
+        *,
+        their_proposed_price: int,
+        buyer_address: str = "",
+    ) -> EvaluateNegotiateResponse:
+        """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
+
+        Runs the configured negotiation strategy against a synthetic buyer offer
+        without creating a negotiation thread or writing to the database.
+        Returns EvaluateNegotiateResponse.would_negotiate=False when the strategy
+        would exit immediately (e.g. price_unreasonable or torch_unavailable).
+        """
+        body = {"their_proposed_price": their_proposed_price, "buyer_address": buyer_address}
+        return EvaluateNegotiateResponse.from_dict(
+            self._post(
+                f"/api/v1/admin/listings/{listing_id}/evaluate-negotiate", body,
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+
 
     def get_registration(self) -> ERC8004RegistrationFile:
         """GET /.well-known/erc-8004-registration.json"""
@@ -1111,7 +1243,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
         return self._post("/api/v1/alerts/resource", body)
 
     # ------------------------------------------------------------------
-    # Buyer protocol — negotiate
+    # Buyer protocol — negotiate / settle
+    # EIP-191 signed X-Signature + X-Timestamp headers are added automatically.
     # ------------------------------------------------------------------
 
     def negotiate_new(
@@ -1123,7 +1256,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
         duration_seconds: int,
         buyer_agent_url: str = "",
     ) -> dict:
-        """POST /api/v1/negotiate/new"""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
@@ -1131,7 +1266,10 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "duration_seconds": duration_seconds,
             "buyer_agent_url": buyer_agent_url,
         }
-        return self._post("/api/v1/negotiate/new", body)
+        return self._post(
+            "/api/v1/negotiate/new", body,
+            extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+        )
 
     def negotiate_continue(
         self,
@@ -1149,3 +1287,47 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if reason is not None:
             body["reason"] = reason
         return self._post(f"/api/v1/negotiate/{neg_id}", body)
+
+    def settle(
+        self,
+        escrow_uid: str,
+        *,
+        negotiation_id: str,
+        buyer_address: str,
+        ssh_public_key: str = "",
+    ) -> SettleResponse:
+        """POST /api/v1/settle/{escrow_uid} — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"settle_escrow:{escrow_uid}:{ts}")
+        body: dict = {
+            "negotiation_id": negotiation_id,
+            "buyer_address": buyer_address,
+        }
+        if ssh_public_key:
+            body["ssh_public_key"] = ssh_public_key
+        return SettleResponse.from_dict(
+            self._post(
+                f"/api/v1/settle/{escrow_uid}", body,
+                extra_headers={"X-Signature": sig, "X-Timestamp": ts},
+            )
+        )
+
+    def get_settle_status(
+        self,
+        escrow_uid: str,
+        *,
+        buyer_address: str,
+    ) -> SettleStatusResponse:
+        """GET /api/v1/settle/{escrow_uid}/status — adds EIP-191 auth headers automatically."""
+        ts = str(int(time.time()))
+        sig = _sign_eip191(self._private_key, f"settle_status:{escrow_uid}:{ts}")
+        url = self._url(f"/api/v1/settle/{escrow_uid}/status")
+        resp = self._client.get(
+            f"/api/v1/settle/{escrow_uid}/status",
+            params={"buyer_address": buyer_address},
+            headers={"X-Signature": sig, "X-Timestamp": ts},
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleStatusResponse.from_dict(resp.json())
+

@@ -312,7 +312,7 @@ storefront/src/market_storefront/
 
 `our_price` is extracted from `demand.amount` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
 
-**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00c both assert on this field.
+**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
 The legacy `core/agent/app/` tree is gone. Files that lived there
 either moved into `storefront/src/market_storefront/` (server,
@@ -1488,6 +1488,135 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 
 ---
 
+## Service Design Decisions
+
+This section records design decisions reached through implementation experience. It exists so that the reasoning is available to future sessions without having to re-derive it from code.
+
+---
+
+### Orchestration over Event-Driven for Request-Path Operations
+
+**Decision:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline. This decision was made after examining the existing code and the e2e test requirements.
+
+**What "event-driven" meant in the original code:** The policy dispatch layer required domain events as its input format — `PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event` field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). This was preserved. What was removed was the awkward choreography that surrounded it: `process_event()` returning a human-readable string while storing structured results as side effects in `_last_action_outcomes`, and callers doing `pop_outcome()` to retrieve them.
+
+**What "orchestration" means here:** Each public service method is a named sequence of private steps:
+
+```python
+async def create_listing(self, request: CreateListingRequest, policy_svc) -> CreateListingResponse:
+    offer, demand = self._parse_offer_demand(request)          # step 1: validate inputs
+    action = await policy_svc.evaluate_create_listing_policy(  # step 2: consult policy
+        offer, demand, request.max_duration_seconds, request.paused
+    )
+    if action != "make_offer":
+        return CreateListingResponse(status="no_action")
+    listing_id = await policy_svc.execute_create_listing(      # step 3: execute
+        offer, demand, request.max_duration_seconds, request.paused
+    )
+    return CreateListingResponse(status="created", listing_id=listing_id)
+```
+
+Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
+
+**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process. `is_event_queue_enabled()` always returns `False` in normal operation (the redis path is a dead branch). The event-flavoured naming added indirection without adding capability.
+
+**The thin untested wrapper:** A future pure event-driven architecture would look like:
+
+```python
+def create_listing(request: CreateListingRequest) -> CreateListingResponse:
+    event_id = self._write_to_queue(request)           # write first event
+    result = await self._listen_for_result(event_id)   # await completion
+    return result
+```
+
+The synchronous orchestrator tests everything except this two-line wrapper, which is correct by inspection.
+
+**The in-memory event queue** (`enable_event_queue`, `enable_redis_ingest`, `is_event_queue_enabled()`) is dead code. See `## Storefront — Planned Rework` item 2 for the removal plan.
+
+---
+
+### PolicyService API Design
+
+**Decision:** The `PolicyService` class (formerly `PolicyPipelineService`) exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves.
+
+**Public API:**
+- `evaluate_create_listing_policy(offer, demand, max_duration, paused) → str` — policy dispatch only, no side effects
+- `execute_create_listing(offer, demand, max_duration, paused) → str | None` — SQLite write + registry publish
+- `evaluate_close_listing_policy(listing_id) → str` — policy dispatch only
+- `execute_close_listing(listing_id) → dict` — SQLite + registry update
+- `evaluate_listing_create_policy_from_raw(offer_raw, demand_raw, max_duration) → PolicyEvaluateResponse` — used by `POST /api/v1/system/policy/evaluate`
+- `handle_resource_alert(alert_request) → dict` — the one remaining consumer of internal event dispatch
+
+The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
+
+---
+
+### E2E Test Architecture for Event-Driven Services
+
+**Context:** The e2e test validates a system that is conceptually event-driven (policy dispatch, settlement pipeline, provisioning) but is implemented as a synchronous orchestrator with an audit-log event stream (the `stage_events` SQLite table).
+
+**Testing pattern for each pipeline stage:**
+
+Each stage has two parts — a dry-run and an advance:
+
+```
+stage Na:  dry-run   — call the admin "what would you do?" endpoint
+           validate  — assert the expected action before any state is changed
+
+stage Nb:  advance   — call the real endpoint (often with paused=True to control pacing)
+           validate  — read from the stage_event stream to confirm what happened
+```
+
+**Concrete example:**
+
+```python
+def stage_1a_evaluate_create():
+    # dry-run: what would policy do?
+    result = admin_client.policy_evaluate(offer=..., demand=...)
+    assert result["action"] == "make_offer"
+
+def stage_1b_create_listing():
+    # advance: create in paused state (not published to registry yet)
+    resp = admin_client.create_listing(offer=..., demand=..., paused=True)
+    assert resp.listing_id is not None
+    # audit: confirm listing appears in stage_event stream
+    event = wait_for_stage_event(stage="discovery", event="listing_created")
+    assert event["listing_id"] == resp.listing_id
+```
+
+**Admin "what would you do?" endpoints** (dry-run, no side effects):
+- `POST /api/v1/admin/listings/evaluate-create` → `AdminEvaluateCreateResponse`
+- `POST /api/v1/admin/listings/{listing_id}/evaluate-close` → `AdminEvaluateCloseResponse`
+- `POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate` → `EvaluateNegotiateResponse` (runs the configured negotiation strategy against a synthetic buyer offer; returns `would_negotiate=False` if the strategy would exit immediately)
+- `POST /api/v1/system/policy/evaluate` → `PolicyEvaluateResponse`
+
+These call the policy consultation step only — `PolicyService.evaluate_*_listing_policy()` — without executing any action. They exist specifically to enable the stage-Na validation pattern.
+
+**The event stream as the observable:** `GET /api/v1/system/events` (`SyncStorefrontClient.wait_for_stage_event()`) provides a cursor-based poll over the `stage_events` SQLite audit log. This is the mechanism for validating "what did you do?" without polling the resource directly or using `asyncio.sleep`. See `wait_for_stage_event` in `integration-tests/tests/e2e/roles/scenarios/conftest.py`.
+
+**The pause/advance pattern for multi-step pipelines:** Create resources with `paused=True` to prevent them from propagating to the next pipeline stage before the test has validated the current stage. Use admin endpoints (`resume`, `advance`, `force-accept`) to advance one step at a time. This is how the e2e test controls pacing through the negotiation → settlement → provisioning pipeline without race conditions.
+
+**What the e2e test deliberately does NOT test:** The two-line event-queue adapter (see orchestration section above). Everything else in the service layer is exercised by the stage-by-stage dry-run + advance + stream-inspect pattern.
+
+---
+
+### Admin Endpoint Conventions
+
+**Admin vs operator vs buyer endpoints:**
+
+| Audience | Auth | URL prefix | Example |
+|---|---|---|---|
+| Operator tooling / scripts | `X-Admin-Key` | `/api/v1/admin/` | `POST /api/v1/admin/pause` |
+| Buyer agents (external) | EIP-191 buyer sig | `/api/v1/negotiate/`, `/api/v1/settle/` | `POST /api/v1/negotiate/new` |
+| Seller tools | EIP-191 seller sig | `/api/v1/listings/create` etc. | `POST /api/v1/listings/create` |
+| Public read | none | `/api/v1/listings`, `/health` | `GET /api/v1/listings` |
+
+**Admin auth implementation:** `require_admin_key` is a FastAPI `Security()` dependency using `APIKeyHeader(name="X-Admin-Key")`. It is applied via `_key=Depends(require_admin_key)` in the `__init__` of admin CBV classes — NOT at the router constructor level (which causes `fastapi_utils @cbv` route registration failures).
+
+**Swagger Authorize button:** The `X-Admin-Key` security scheme is registered in the custom `openapi()` function in `server.py`. The Authorize button appears at the top of the Swagger UI, pre-filled keys persist across page reloads (`persistAuthorization: True`).
+
+**Buyer-facing EIP-191 auth:** Buyer endpoints (`/api/v1/negotiate/*`, `/api/v1/settle/*`) use EIP-191 signatures in `X-Signature` + `X-Timestamp` headers. This is not a standard OpenAPI security scheme; it is documented in each endpoint's OpenAPI `description`. Auth is verified by calling `buyer_auth._verify(request, operation, resource_id, claimed_address)` directly inside the handler — not via `Depends()` — to avoid `fastapi_utils @cbv` + method-level `Depends` interaction issues. Tests bypass auth via `unittest.mock.patch.object(buyer_auth, "_verify", return_value=None)`.
+
 ## Testing Strategy
 
 > **Test execution context:** The e2e / system integration test suite runs from a **Helm test pod** inside the cluster. It cannot import or instantiate service code in-process. All assertions are made over HTTP against live services using typed client libraries. This affects every layer of the test design: there is no `ASGITransport`, no monkeypatching of service internals, and no direct DB reads from the test pod. Visibility into service state is provided exclusively through HTTP endpoints — which is why the storefront and provisioning service expose rich read APIs rather than relying on direct DB inspection.
@@ -1571,36 +1700,42 @@ await asyncio.wait_for(job_dispatched.wait(), timeout=5.0)
 
 #### Full-Deal E2E Test (`tests/e2e/roles/scenarios/test_full_deal.py`)
 
-The primary e2e test suite. 18 sequential tests covering the complete buyer-seller deal lifecycle. Tests run in numbered order; later tests skip automatically via `require_state(deal_state, "field_name")` if a prerequisite field was not populated, so the first failure is always the actionable one.
+The primary e2e test suite. Sequential tests covering the complete buyer-seller deal lifecycle. Tests run in numbered order; later tests skip automatically via `require_state(deal_state, "field_name")` if a prerequisite field was not populated, so the first failure is always the actionable one.
 
 **Stage map:**
 
 | Test | Stage | Observable |
 |---|---|---|
-| 00a | Policy seed | `POST /admin/policy/seed` — callable_count > 0, order_create policy seeded |
-| 00b | Policy dry-run | `POST /api/v1/system/policy/evaluate` — action=make_offer |
-| 01 | Create paused listing | `POST /orders/create` `{paused:true}` → `listing_id`, local only |
-| 02 | Listing locally visible | `GET /api/v1/listings/{id}` → status=open, paused=True |
-| 03 | Registry absent | `GET registry/orders?status=open` — listing NOT present |
-| 04 | Resume publishes | `POST /api/v1/listings/{id}/resume` → `registry_status=published`; stage asserts this explicitly — `"error"` fails fast with diagnosis hint |
-| 05 | Registry present | `GET registry/listings?status=open` — listing NOW present (single query, no poll; synchronous because publish_order_to_registry is awaited inline in resume_listing) |
-| 06 | Admin pause blocks | `POST /negotiate/new` returns 503 |
-| 07 | Admin resume allows | `GET /api/v1/system/status` → paused=false |
-| 08 | Negotiation starts | `POST /negotiate/new` → negotiation_id (EIP-191 signed by buyer) |
-| 09 | Negotiation visible | `GET /api/v1/listings/{id}/negotiations` lists thread |
-| 10 | Force-accept converges | `POST .../force-accept` → action=accept, price=agreed |
-| 11 | Terminal success | `GET .../negotiations/{neg_id}` → terminal_state=success |
-| 12 | Mock escrow | deterministic `escrow_uid` captured (no real chain call) |
-| 13 | Settlement submitted | `POST /settle/{uid}` → status=provisioning |
-| 14 | Provisioning job | `wait_for_stage_event("provision","resource_reserved")` then single `GET /settle/{uid}/status` for `provisioning_job_id` |
-| 15 | Provisioning completes | `GET /test/jobs/{id}/wait` → succeeded (long-poll) |
-| 16 | Settlement ready | `wait_for_stage_event("provision","fulfilled")` then single `GET /settle/{uid}/status` → status=ready |
-| 17 | Tenant credentials | `tenant_credentials` non-empty in settlement response |
-| 18 | Seller listing accepted | `GET /api/v1/listings/{id}` → status=accepted or closed |
+| 00a | Storefront health | `GET /health` → status=ok, database=ok |
+| 00b | Registry reachable | `GET /api/v1/system/status` → checks.registry=ok |
+| 00c | Provisioning health | `GET provisioning/health` → status=ok |
+| 00d | Negotiation strategy | checks.negotiation_strategy not exit-on-probe |
+| 01a | Policy dry-run | `POST /api/v1/system/policy/evaluate` → action=make_offer |
+| 01b | Policy seed | `POST /admin/policy/seed` → callable_count > 0 |
+| 02a | Evaluate-create dry-run | `POST /api/v1/admin/listings/evaluate-create` → would_create=True |
+| 02b | Create listing paused | `POST /listings/create paused=True` → listing_id; local visible paused=True; registry absent |
+| 03a | Validate publish | `POST registry /api/v1/listings/validate-publish` → valid=True |
+| 03b | Resume + registry confirm | `POST /listings/{id}/resume` → registry_status=published; registry present |
+| 05a | Evaluate-negotiate dry-run | `POST /api/v1/admin/listings/{id}/evaluate-negotiate` → would_negotiate=True |
+| 05b | Negotiation starts + visible | `POST /negotiate/new` → neg_id; thread in list; round_decided event != exit |
+| 06b | Force-accept + terminal | Guard no exit events; `POST .../force-accept` → accept; terminal_state=success |
+| 07 | Mock escrow + gate | Capture escrow_uid; `add_mock_rule(pause_before_result=True)` |
+| 08b | Settlement + job queued | `POST /settle/{uid}` → provisioning; wait_for_stage_event(resource_reserved); provisioning_job_id present |
+| 09a | Gate release + complete | resume_rule; wait_for_job → succeeded |
+| 09b | Settlement ready + listing | wait_for_stage_event(fulfilled); status=ready + credentials; listing accepted/closed |
 
-**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `seller_listing_id`, `paused_create_confirmed`, `registry_absent_confirmed`, `resume_confirmed`, `registry_order_confirmed`, `admin_resume_confirmed`, `negotiation_id`, `agreed_price`, `escrow_uid`, `provisioning_job_id`, `settlement_status`, `tenant_credentials`. Also `_policies_seeded` and `_policy_evaluated` (bool) for the 00a/00b prerequisites. The `paused_create_confirmed → registry_absent_confirmed → resume_confirmed → registry_order_confirmed → admin_resume_confirmed` chain forms an ordered dependency spine: each field gates the next stage, so the first failure is always the actionable one and no subsequent stage runs with an unresolved precondition.
+**Note on Phase 4:** Admin pause/resume was removed from the e2e deal flow — it is an operational control surface unrelated to the deal lifecycle. A TODO comment in `test_storefront_smoke.py` tracks adding a dedicated `TestStorefrontAdminPauseResume` smoke test.
 
-**`/negotiate/new` signing:** `SyncStorefrontClient` has no `negotiate_new` method. The e2e test calls it via `storefront_client._client.post("/negotiate/new", ...)` with a manually constructed EIP-191 signature using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`. The body must include `listing_id` (not `seller_listing_id`) and `duration_seconds`.
+**Testing gaps — dry-run endpoints not yet implemented:**
+
+| Gap | Stage slot | Planned endpoint |
+|---|---|---|
+| No evaluate-resume dry-run | Phase 3 `03a` currently reads registry connectivity | `POST /api/v1/admin/listings/{id}/evaluate-resume` |
+| No evaluate-settle dry-run | Phase 8 `08a` skipped | `POST /api/v1/admin/settle/{uid}/evaluate` |
+
+**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5); `escrow_uid`, `provisioning_gate_armed` (Phase 7); `settlement_submitted`, `provisioning_job_id` (Phase 8); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9). Each field gates the next phase, so the first failure is always actionable.
+
+**`/api/v1/negotiate/new` signing:** `SyncStorefrontClient.negotiate_new()` accepts `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, and `buyer_agent_url`. It does not add auth headers — EIP-191 signing must be done by the caller using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`, then passing `X-Signature` and `X-Timestamp` as extra headers via `client._client.post(...)`. The body must include `listing_id` (not `seller_listing_id`) and `duration_seconds`. TODO: add signing support directly to `negotiate_new()` so the e2e test can use it without raw `_client.post`.
 
 **`ensure_storefront_resumed` teardown:** An `autouse=True` module-scoped fixture in `conftest.py` that unconditionally calls `admin_resume()` if `get_system_status().paused` is True after the module finishes. This prevents stage 06 (`admin_pause`) from leaving the storefront in a paused state across test runs when stage 07 fails or is skipped. Any test that calls `admin_pause` must rely on this teardown — never assume stage 07 will run.
 
@@ -1670,7 +1805,7 @@ registry-service/tests/
 
 All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above.  All previously-raw calls to `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, and `PUT /listings/{id}` have been replaced with typed client methods in `arkhai-registry-client` 0.2.0.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above.  All previously-raw calls to `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, and `PUT /listings/{id}` have been replaced with typed client methods in `arkhai-registry-client` 0.2.0. Version 0.3.0 added `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) on both `RegistryClient` and `SyncRegistryClient`, plus `ValidatePublishRequest` and `ValidatePublishResponse` models.
 
 **integration-tests**:
 ```
@@ -1869,7 +2004,7 @@ cd registry-service && make reinit && make test-integration
 | `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
-`arkhai-storefront-client` is currently at **version 0.3.0**. The bump from 0.2.0 added: `ListingPauseResponse.registry_status` field; `StageEvent` and `StageEventListResponse` models; `get_events()` and `wait_for_stage_event()` methods on both `StorefrontClient` and `SyncStorefrontClient`.
+`arkhai-storefront-client` is currently at **version 0.5.0**. The bump from 0.4.0 added: EIP-191 signing built into `negotiate_new()` on both `StorefrontClient` and `SyncStorefrontClient` (callers no longer build auth headers manually); `settle()` method (`POST /api/v1/settle/{uid}`) with EIP-191 auth; `get_settle_status()` method (`GET /api/v1/settle/{uid}/status`) with EIP-191 auth; `evaluate_create_listing()` method (`POST /api/v1/admin/listings/evaluate-create`); `evaluate_negotiate()` method (`POST /api/v1/admin/listings/{id}/evaluate-negotiate`); `EvaluateNegotiateResponse`, `SettleResponse`, `SettleStatusResponse` models.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 

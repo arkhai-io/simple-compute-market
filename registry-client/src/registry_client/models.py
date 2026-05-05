@@ -464,3 +464,47 @@ class SystemStatsResponse:
             orders_by_status=obs,
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+
+@dataclass
+class ValidatePublishRequest:
+    """Request body for POST /api/v1/listings/validate-publish."""
+
+    listing_id: str
+    offer_resource: dict
+    demand_resource: dict
+    max_duration_seconds: int | None = None
+
+    def to_dict(self) -> dict:
+        d: dict = {
+            "listing_id": self.listing_id,
+            "offer_resource": self.offer_resource,
+            "demand_resource": self.demand_resource,
+        }
+        if self.max_duration_seconds is not None:
+            d["max_duration_seconds"] = self.max_duration_seconds
+        return d
+
+
+@dataclass
+class ValidatePublishResponse:
+    """Response from POST /api/v1/listings/validate-publish."""
+
+    valid: bool
+    listing_id: str
+    offer_resource_type: str | None = None
+    demand_resource_type: str | None = None
+    errors: list = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ValidatePublishResponse":
+        known = {"valid", "listing_id", "offer_resource_type", "demand_resource_type", "errors"}
+        return cls(
+            valid=bool(d.get("valid", False)),
+            listing_id=d.get("listing_id", ""),
+            offer_resource_type=d.get("offer_resource_type"),
+            demand_resource_type=d.get("demand_resource_type"),
+            errors=list(d.get("errors", [])),
+            extra={k: v for k, v in d.items() if k not in known},
+        )

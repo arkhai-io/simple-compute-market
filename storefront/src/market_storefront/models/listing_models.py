@@ -271,3 +271,32 @@ class AdminEvaluateCloseResponse(BaseModel):
     listing_id: str
     policy_used: str | None = None
     reason: str | None = None
+
+
+class EvaluateNegotiateRequest(BaseModel):
+    """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+    their_proposed_price: int = Field(
+        description="The buyer's proposed price (in base token units) to evaluate"
+    )
+    buyer_address: str = Field(
+        default="",
+        description="Buyer wallet address (used for logging/context only; not auth-checked)",
+    )
+
+
+class EvaluateNegotiateResponse(BaseModel):
+    """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate.
+
+    Returns what the configured negotiation strategy *would* decide for a
+    buyer's opening offer at this listing — without creating any negotiation
+    thread or writing to the database.
+    """
+    listing_id: str
+    our_reference_price: int    # Seller's floor extracted from the listing's demand resource
+    their_proposed_price: int   # Echoed back from the request
+    direction: str              # "maximize" (seller always maximises price)
+    strategy: str               # e.g. "bisection" or "rl"
+    decision: str               # "accept" | "counter" | "exit"
+    decision_price: int | None = None
+    decision_reason: str | None = None
+    would_negotiate: bool       # True when decision != "exit"

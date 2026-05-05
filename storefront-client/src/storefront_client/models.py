@@ -628,3 +628,82 @@ class AdminStatusResponse:
             paused_listings=int(d.get("paused_listings", 0)),
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+
+@dataclass
+class EvaluateNegotiateResponse:
+    """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
+
+    listing_id: str = ""
+    our_reference_price: int = 0
+    their_proposed_price: int = 0
+    direction: str = ""
+    strategy: str = ""
+    decision: str = ""
+    decision_price: int | None = None
+    decision_reason: str | None = None
+    would_negotiate: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "EvaluateNegotiateResponse":
+        known = {
+            "listing_id", "our_reference_price", "their_proposed_price",
+            "direction", "strategy", "decision", "decision_price",
+            "decision_reason", "would_negotiate",
+        }
+        return cls(
+            listing_id=d.get("listing_id", ""),
+            our_reference_price=int(d.get("our_reference_price", 0)),
+            their_proposed_price=int(d.get("their_proposed_price", 0)),
+            direction=d.get("direction", ""),
+            strategy=d.get("strategy", ""),
+            decision=d.get("decision", ""),
+            decision_price=d.get("decision_price"),
+            decision_reason=d.get("decision_reason"),
+            would_negotiate=bool(d.get("would_negotiate", False)),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class SettleResponse:
+    """Response from POST /api/v1/settle/{escrow_uid}."""
+
+    status: str = ""
+    escrow_uid: str = ""
+    negotiation_id: str = ""
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SettleResponse":
+        known = {"status", "escrow_uid", "negotiation_id"}
+        return cls(
+            status=d.get("status", ""),
+            escrow_uid=d.get("escrow_uid", ""),
+            negotiation_id=d.get("negotiation_id", ""),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class SettleStatusResponse:
+    """Response from GET /api/v1/settle/{escrow_uid}/status."""
+
+    status: str = ""
+    escrow_uid: str = ""
+    provisioning_job_id: str | None = None
+    tenant_credentials: dict[str, Any] | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SettleStatusResponse":
+        known = {"status", "escrow_uid", "provisioning_job_id", "tenant_credentials"}
+        creds = d.get("tenant_credentials")
+        return cls(
+            status=d.get("status", ""),
+            escrow_uid=d.get("escrow_uid", ""),
+            provisioning_job_id=d.get("provisioning_job_id"),
+            tenant_credentials=dict(creds) if isinstance(creds, dict) else None,
+            extra={k: v for k, v in d.items() if k not in known},
+        )

@@ -20,6 +20,8 @@ from registry_client.models import (
     ListingRequest,
     ListingSummary,
     UpdateListingRequest,
+    ValidatePublishRequest,
+    ValidatePublishResponse,
 )
 
 __all__ = [
@@ -37,4 +39,6 @@ __all__ = [
     "ListingRequest",
     "ListingSummary",
     "UpdateListingRequest",
+    "ValidatePublishRequest",
+    "ValidatePublishResponse",
 ]

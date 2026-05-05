@@ -43,6 +43,8 @@ from registry_client.models import (
     SystemSyncResponse,
     SystemStatsResponse,
     UpdateListingRequest,
+    ValidatePublishRequest,
+    ValidatePublishResponse,
 )
 
 log = logging.getLogger(__name__)
@@ -396,6 +398,22 @@ class RegistryClient(_RegistryClientBase):
             json=body, headers=hdrs, expected=(201,),
         )
 
+    async def validate_publish_listing(
+        self, request: ValidatePublishRequest
+    ) -> ValidatePublishResponse:
+        """POST /api/v1/listings/validate-publish — dry-run, no auth, no DB writes.
+
+        Returns ValidatePublishResponse.valid=True when the payload would be
+        accepted by publish_listing (ignoring agent registration and auth).
+        Use this as the stage-03a pre-flight check before calling resume on
+        the storefront.
+        """
+        data = await self._request(
+            "POST", "/api/v1/listings/validate-publish",
+            json=request.to_dict(), expected=(200,),
+        )
+        return ValidatePublishResponse.from_dict(data)
+
     async def get_agent_listings(
         self,
         agent_id: str,
@@ -638,6 +656,22 @@ class SyncRegistryClient(_RegistryClientBase):
             "POST", f"/agents/{agent_id}/listings",
             json=body, headers=hdrs, expected=(201,),
         )
+
+    def validate_publish_listing(
+        self, request: ValidatePublishRequest
+    ) -> ValidatePublishResponse:
+        """POST /api/v1/listings/validate-publish — dry-run, no auth, no DB writes.
+
+        Returns ValidatePublishResponse.valid=True when the payload would be
+        accepted by publish_listing (ignoring agent registration and auth).
+        Use this as the stage-03a pre-flight check before calling resume on
+        the storefront.
+        """
+        data = self._request(
+            "POST", "/api/v1/listings/validate-publish",
+            json=request.to_dict(), expected=(200,),
+        )
+        return ValidatePublishResponse.from_dict(data)
 
     def get_agent_listings(
         self,

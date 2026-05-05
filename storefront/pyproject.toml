@@ -9,7 +9,7 @@ authors = [
 #pufferlib requires numpy<2. So we're stuck with python 3.12
 requires-python = ">=3.12,<3.13"
 dependencies = [
-	"arkhai-registry-client>=0.2.0",
+	"arkhai-registry-client>=0.3.0",
     "arkhai-storefront-client>=0.5.0",
     "market-service",
     "market-policy",

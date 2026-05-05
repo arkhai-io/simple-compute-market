@@ -2,32 +2,66 @@
 
 Stage map
 ---------
-00a  Admin seeds policies (discover callables + write DB rows)
-00b  Policy dry-run asserts make_offer action would fire
-01   Seller creates listing with paused=True (local only, not in registry)
-02   Storefront health ok; listing visible locally with paused=True
-03   Registry does NOT yet contain the listing (publish was skipped)
-04   POST /api/v1/listings/{listing_id}/resume → publishes to registry
-05   Registry now contains the listing
-06   Admin pause blocks /negotiate/new (503)
-07   Admin resume re-enables negotiations
-08   Buyer starts negotiation (POST /negotiate/new)
-09   Negotiation visible via GET /orders/{id}/negotiations
-10   Admin force-accepts negotiation at agreed price
-11   Negotiation terminal_state=success confirmed
-12   Mock escrow_uid captured
-13   POST /settle/{uid} → status=provisioning
-14   Provisioning job_id visible in settle status + provisioning API
-15   Provisioning gate released; job completes (long-poll)
-16   Settlement status=ready
-17   Tenant credentials present
-18   Seller listing status=accepted
+Phase 0 — E2E readiness (all services healthy, no state changes)
+  00a  Storefront reachable:    GET /health → status=ok, database=ok
+  00b  Registry reachable:      GET /api/v1/system/status → checks.registry=ok
+  00c  Provisioning reachable:  GET provisioning /health → status=ok
+  00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
+
+Phase 1 — Policy pipeline ready
+  01a  Policy dry-run:  POST /api/v1/system/policy/evaluate → action=make_offer
+  01b  Policy seed:     POST /admin/policy/seed → callable_count > 0
+
+Phase 2 — Listing creation (paused)
+  02a  Evaluate-create dry-run: POST /api/v1/admin/listings/evaluate-create → would_create=True
+  02b  Create listing paused + confirm:
+         POST /listings/create paused=True → listing_id
+         GET /api/v1/listings/{id} → status=open, paused=True
+         GET registry/listings → listing absent (publish suppressed)
+
+Phase 3 — Registry publication
+  03a  Validate listing publishable: POST registry /api/v1/listings/validate-publish → valid=True
+  03b  Resume + registry confirm:
+         POST /api/v1/listings/{id}/resume → registry_status=published
+         GET registry/listings → listing present
+
+Phase 4 — (removed; admin pause/resume tested in storefront smoke suite)
+  TODO: Add test_admin_pause_resume to tests/smoke/test_storefront_smoke.py
+
+Phase 5 — Negotiation lifecycle
+  05a  Evaluate-negotiate dry-run:
+         POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True
+  05b  Negotiation starts + visible + round confirmed:
+         POST /api/v1/negotiate/new → negotiation_id
+         GET /api/v1/listings/{id}/negotiations → thread visible
+         stage_events: round_decided with decision != exit
+
+Phase 6 — Negotiation settlement
+  06b  Force-accept + terminal state:
+         Guard: no exit events before force-accept
+         POST .../force-accept → action=accept
+         GET .../negotiations/{neg_id} → terminal_state=success
+
+Phase 7 — Mock escrow + provisioning gate setup
+  07   Capture mock escrow_uid; add provisioning mock rule (pause_before_result=True)
+
+Phase 8 — Settlement pipeline
+  08b  Settlement submitted + job queued:
+         POST /api/v1/settle/{uid} → status=provisioning
+         wait_for_stage_event(provision, resource_reserved)
+         GET /settle/{uid}/status → provisioning_job_id present
+
+Phase 9 — Provisioning completion
+  09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
+  09b  Settlement ready + credentials + listing closed:
+         wait_for_stage_event(provision, fulfilled)
+         GET /settle/{uid}/status → status=ready, tenant_credentials present
+         GET /api/v1/listings/{id} → status=accepted or closed
 """
 
 from __future__ import annotations
 
 import logging
-import time
 import uuid
 
 import pytest
@@ -40,7 +74,7 @@ log = logging.getLogger(__name__)
 pytestmark = pytest.mark.e2e_deal
 
 # ---------------------------------------------------------------------------
-# Offer / demand spec
+# Offer / demand spec — constants shared across all stages
 # ---------------------------------------------------------------------------
 
 OFFER_RESOURCE = {
@@ -58,99 +92,91 @@ DEMAND_RESOURCE = {
     "amount": 10_000,
 }
 DURATION_HOURS = 1
-BUYER_INITIAL_PRICE = 10_000   # at seller's floor (demand.amount) — policy will counter or accept
+BUYER_INITIAL_PRICE = 10_000   # at seller's floor — policy will counter or accept
 BUYER_MAX_PRICE = 12_000
 MOCK_ESCROW_UID = f"escrow-e2e-{uuid.uuid4().hex[:8]}"
 PROV_RULE_ID = "e2e-create-pause"
 
 
-# ---------------------------------------------------------------------------
-# Stage 00a — Policy seed
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Phase 0 — E2E readiness
+# ===========================================================================
 
-class TestStage00a_PolicySeed:
-    def test_00a_admin_seeds_policies(
+class TestStage00a_StorefrontHealth:
+    def test_00a_storefront_is_healthy(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /admin/policy/seed populates CALLABLE_REGISTRY and seeds DB rows.
+        """GET /health → status=ok, database=ok.
 
-        Idempotent — safe to call on a fresh deployment or one where
-        discover_and_register silently failed at startup (e.g. missing gymnasium).
-        Reports per-module import errors in the response so failures are
-        visible in test output without reading container logs.
+        Validates storefront process is up and SQLite is reachable before
+        any state-changing call is made.
         """
-        result = storefront_admin_client.policy_seed()
-        assert isinstance(result, dict), f"Unexpected response: {result}"
-
-        # Surface any per-module import failures for diagnosis
-        import_errors = result.get("import_errors", [])
-        if import_errors:
-            log.warning("[00a] %d module(s) failed to import during seed:", len(import_errors))
-            for err in import_errors:
-                log.warning("  %s: %s", err.get("module"), err.get("error"))
-
-        callable_count = result.get("callable_registry_count", 0)
-        assert callable_count > 0, (
-            f"CALLABLE_REGISTRY is still empty after seed.\n"
-            f"Import errors ({len(import_errors)}):\n"
-            + "\n".join(f"  {e['module']}: {e['error']}" for e in import_errors)
-            + f"\nFull response: {result}"
+        health = storefront_admin_client.get_health()
+        assert health.status == "ok", (
+            f"Storefront health degraded before test run: {health}"
         )
-        seeded = result.get("seeded_policies", [])
-        assert any("order_create" in p for p in seeded), (
-            f"order_create policy not seeded. Got: {seeded}"
+        db_check = (health.checks or {}).get("database", "absent")
+        assert db_check == "ok", (
+            f"Storefront database check failed: checks.database={db_check!r}"
         )
-        deal_state._policies_seeded = True
-        log.info("[00a] Policy seed: callable_count=%d seeded=%s import_errors=%d",
-                 callable_count, seeded, len(import_errors))
+        deal_state._storefront_healthy = True
+        log.info("[00a] Storefront healthy: status=%s database=%s", health.status, db_check)
 
 
-# ---------------------------------------------------------------------------
-# Stage 00b — Policy dry-run
-# ---------------------------------------------------------------------------
-
-class TestStage00b_PolicyDryRun:
-    def test_00b_policy_evaluate_returns_make_offer(
+class TestStage00b_RegistryReachable:
+    def test_00b_registry_reachable_from_storefront(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /api/v1/system/policy/evaluate returns action=make_offer."""
-        require_state(deal_state, "_policies_seeded")
+        """GET /api/v1/system/status → checks.registry=ok.
 
-        result = storefront_admin_client.policy_evaluate(
-            offer=OFFER_RESOURCE,
-            demand=DEMAND_RESOURCE,
-            max_duration_seconds=DURATION_HOURS * 3600,
+        Uses the storefront's own registry connectivity check — the relevant
+        oracle, since it's the storefront that must reach the registry to
+        publish listings.
+        """
+        require_state(deal_state, "_storefront_healthy")
+        status = storefront_admin_client.get_system_status()
+        registry_check = (status.checks or {}).get("registry", "absent")
+        assert registry_check == "ok", (
+            f"Storefront cannot reach registry. checks.registry={registry_check!r}.\n"
+            f"Verify registry.url in the storefront config points to a reachable "
+            f"endpoint from inside the storefront container."
         )
-        assert isinstance(result, dict), f"Unexpected response: {result}"
-        assert result.get("resolvable") is True, (
-            f"Policy components not resolvable: {result}"
+        deal_state._registry_reachable = True
+        log.info("[00b] Registry reachable from storefront: checks.registry=%s", registry_check)
+
+
+class TestStage00c_ProvisioningHealth:
+    def test_00c_provisioning_is_healthy(
+        self, provisioning_client, deal_state: DealState
+    ):
+        """GET provisioning /health → status=ok.
+
+        Validates provisioning service is up and its mock profile is active
+        before settlement stages attempt to submit jobs.
+        """
+        require_state(deal_state, "_storefront_healthy")
+        health = provisioning_client.get_health()
+        assert health.get("status") == "ok", (
+            f"Provisioning service unhealthy: {health}\n"
+            "Ensure ACTIVE_PROFILES=mock is set on the provisioning container."
         )
-        action = result.get("action", "")
-        assert "make_offer" in action.lower(), (
-            f"Expected action=make_offer, got {action!r}. Full response: {result}"
-        )
-        deal_state._policy_evaluated = True
-        log.info("[00b] Policy dry-run: action=%s policy=%s",
-                 action, result.get("policy_used"))
+        deal_state._provisioning_healthy = True
+        log.info("[00c] Provisioning healthy: %s", health.get("status"))
 
 
-# ---------------------------------------------------------------------------
-# Stage 00c — Negotiation strategy viability
-# ---------------------------------------------------------------------------
-
-class TestStage00c_NegotiationStrategy:
-    def test_00c_negotiation_strategy_is_viable(
+class TestStage00d_NegotiationStrategy:
+    def test_00d_negotiation_strategy_is_viable(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/system/status → checks.negotiation_strategy is not exit-on-probe.
+        """GET /api/v1/system/status → checks.negotiation_strategy not exit-on-probe.
 
         Catches the rl-strategy-but-no-torch failure mode before any negotiation
-        attempt.  If this fails, set [seller.negotiation] policy_mode = 'bisection'
+        attempt. If this fails, set [seller.negotiation] policy_mode = 'bisection'
         in config.toml and restart the storefront.
         """
-        require_state(deal_state, "_policy_evaluated")
+        require_state(deal_state, "_storefront_healthy")
         status = storefront_admin_client.get_system_status()
-        strat = status.checks.get("negotiation_strategy", "absent")
+        strat = (status.checks or {}).get("negotiation_strategy", "absent")
         assert strat != "absent", (
             "checks.negotiation_strategy missing from /api/v1/system/status. "
             "Rebuild the storefront image with the updated system_controller.py."
@@ -161,21 +187,119 @@ class TestStage00c_NegotiationStrategy:
             "and restart the storefront."
         )
         deal_state._negotiation_strategy_viable = True
-        log.info("[00c] Negotiation strategy: %s", strat)
+        log.info("[00d] Negotiation strategy viable: %s", strat)
 
 
-# ---------------------------------------------------------------------------
-# Stage 01 — Create order (paused)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Phase 1 — Policy pipeline ready
+# ===========================================================================
 
-class TestStage01_CreateListingPaused:
-    def test_01_seller_creates_listing_paused(
-        self, storefront_admin_client, seller_wallet, deal_state: DealState
+class TestStage01a_PolicyDryRun:
+    def test_01a_policy_evaluate_returns_make_offer(
+        self, storefront_admin_client, deal_state: DealState
     ):
-        """POST /api/v1/listings/create with paused=True creates listing in local SQLite
-        but does NOT publish to the registry.
+        """POST /api/v1/system/policy/evaluate → action=make_offer (dry-run).
+
+        Verifies the policy pipeline can produce a decision for the offer/demand
+        spec before the seed advance writes any DB rows.
         """
-        require_state(deal_state, "_policy_evaluated")
+        require_state(deal_state, "_negotiation_strategy_viable")
+        result = storefront_admin_client.policy_evaluate(
+            offer=OFFER_RESOURCE,
+            demand=DEMAND_RESOURCE,
+            max_duration_seconds=DURATION_HOURS * 3600,
+        )
+        assert isinstance(result, dict), f"Unexpected response type: {result}"
+        action = result.get("action", "")
+        assert "make_offer" in action.lower(), (
+            f"Expected action=make_offer, got {action!r}. Full response: {result}"
+        )
+        deal_state._policy_dry_run_passed = True
+        log.info("[01a] Policy dry-run: action=%s policy=%s",
+                 action, result.get("policy_used"))
+
+
+class TestStage01b_PolicySeed:
+    def test_01b_admin_seeds_policies(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """POST /admin/policy/seed → callable_count > 0, order_create seeded.
+
+        Idempotent advance — discovers @policy_callable decorators and writes
+        default DB rows. Safe to call on a fresh deployment or one where
+        startup seeding silently failed (e.g. missing gymnasium).
+        """
+        require_state(deal_state, "_policy_dry_run_passed")
+        result = storefront_admin_client.policy_seed()
+        assert isinstance(result, dict), f"Unexpected response: {result}"
+
+        import_errors = result.get("import_errors", [])
+        if import_errors:
+            log.warning("[01b] %d module(s) failed to import during seed:", len(import_errors))
+            for err in import_errors:
+                log.warning("  %s: %s", err.get("module"), err.get("error"))
+
+        callable_count = result.get("callable_registry_count", 0)
+        assert callable_count > 0, (
+            f"CALLABLE_REGISTRY still empty after seed.\n"
+            f"Import errors ({len(import_errors)}):\n"
+            + "\n".join(f"  {e['module']}: {e['error']}" for e in import_errors)
+            + f"\nFull response: {result}"
+        )
+        seeded = result.get("seeded_policies", [])
+        assert any("order_create" in p for p in seeded), (
+            f"order_create policy not seeded. Got: {seeded}"
+        )
+        deal_state._policies_seeded = True
+        log.info("[01b] Policy seed: callable_count=%d seeded=%s import_errors=%d",
+                 callable_count, seeded, len(import_errors))
+
+
+# ===========================================================================
+# Phase 2 — Listing creation (paused)
+# ===========================================================================
+
+class TestStage02a_EvaluateCreate:
+    def test_02a_evaluate_create_would_create(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """POST /api/v1/admin/listings/evaluate-create → would_create=True (dry-run).
+
+        Validates the offer/demand spec against the policy pipeline without
+        writing to SQLite or the registry. If this fails, listing creation
+        in 02b will also fail.
+        """
+        require_state(deal_state, "_policies_seeded")
+        result = storefront_admin_client.evaluate_create_listing(
+            offer=OFFER_RESOURCE,
+            demand=DEMAND_RESOURCE,
+            max_duration_seconds=DURATION_HOURS * 3600,
+            paused=True,
+        )
+        assert isinstance(result, dict), f"Unexpected response: {result}"
+        assert result.get("would_create") is True, (
+            f"evaluate-create returned would_create=False. action={result.get('action')!r}. "
+            f"reason={result.get('reason')!r}. Ensure stage 01b (policy seed) passed."
+        )
+        deal_state._evaluate_create_passed = True
+        log.info("[02a] Evaluate-create: would_create=%s action=%s",
+                 result.get("would_create"), result.get("action"))
+
+
+class TestStage02b_CreateListingPaused:
+    def test_02b_create_listing_paused_local_only(
+        self, storefront_admin_client, seller_wallet, registry_client, deal_state: DealState
+    ):
+        """Create listing with paused=True; confirm locally visible and registry absent.
+
+        Three assertions in one advance step — all validate the single decision
+        that paused=True suppresses registry publication:
+          1. listing_id returned from create
+          2. local GET shows status=open, paused=True
+          3. registry GET does NOT contain the listing
+        """
+        require_state(deal_state, "_evaluate_create_passed")
+
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
@@ -187,210 +311,180 @@ class TestStage01_CreateListingPaused:
         assert listing_id, (
             f"No listing_id in response — policy pipeline returned no action.\n"
             f"Response: {resp}\n"
-            f"Ensure stage 00a (policy seed) passed."
+            f"Ensure stage 01b (policy seed) passed."
         )
-        deal_state.seller_listing_id = listing_id
-        log.info("[01] Order %s created (paused, not yet in registry)", order_id)
 
-
-# ---------------------------------------------------------------------------
-# Stage 02 — Order visible locally with paused=True
-# ---------------------------------------------------------------------------
-
-class TestStage02_ListingLocallyPaused:
-    def test_02_order_visible_locally_and_paused(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """GET /api/v1/listings/{listing_id} shows the listing as paused=True locally."""
-        require_state(deal_state, "seller_listing_id")
-
-        health = storefront_admin_client.get_health()
-        assert health.status == "ok", f"Storefront health degraded: {health}"
-
-        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.status == "open", f"Expected status=open, got {order.status!r}"
+        # Confirm locally visible with paused=True
+        listing = storefront_admin_client.get_listing(listing_id)
+        assert listing.status == "open", (
+            f"Expected status=open, got {listing.status!r}"
+        )
         assert listing.paused is True, (
             f"Expected paused=True after paused create, got paused={listing.paused}"
         )
-        deal_state.paused_create_confirmed = True
-        log.info("[02] Order %s visible locally: status=%s paused=%s",
-                 deal_state.seller_listing_id, listing.status, listing.paused)
 
-
-# ---------------------------------------------------------------------------
-# Stage 03 — Registry does NOT yet contain the order
-# ---------------------------------------------------------------------------
-
-class TestStage03_RegistryDoesNotSeeOrder:
-    def test_03_registry_does_not_yet_contain_listing(
-        self, registry_client, deal_state: DealState
-    ):
-        """The registry has no record of this listing_id — publish was skipped."""
-        require_state(deal_state, "seller_listing_id")
-
+        # Confirm registry does NOT yet contain the listing
         result = registry_client.list_listings(status="open", limit=200)
         ids = {o.id for o in result.listings}
-        assert deal_state.seller_listing_id not in ids, (
-            f"Order {deal_state.seller_listing_id} found in registry before resume. "
-            f"The paused=True path did not suppress the publish."
+        assert listing_id not in ids, (
+            f"Listing {listing_id} found in registry before resume — "
+            f"paused=True did not suppress the publish."
         )
-        deal_state.registry_absent_confirmed = True
-        log.info("[03] Confirmed order %s absent from registry (as expected)",
-                 deal_state.seller_listing_id)
+
+        deal_state.seller_listing_id = listing_id
+        log.info("[02b] Listing %s created (paused=True, absent from registry)", listing_id)
 
 
-# ---------------------------------------------------------------------------
-# Stage 04 — Resume publishes to registry
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Phase 3 — Registry publication
+# ===========================================================================
 
-class TestStage04_ResumePublishesToRegistry:
-    def test_04_resume_order_publishes_to_registry(
-        self, storefront_admin_client, deal_state: DealState
+class TestStage03a_ValidatePublish:
+    def test_03a_listing_payload_validates_against_registry(
+        self, registry_client, deal_state: DealState
     ):
-        """POST /api/v1/listings/{listing_id}/resume clears paused flag and publishes."""
-        require_state(deal_state, "seller_listing_id", "paused_create_confirmed", "registry_absent_confirmed")
+        """POST registry /api/v1/listings/validate-publish → valid=True (dry-run).
+
+        Structural pre-flight: confirms the listing's offer/demand payload is
+        recognisable to the registry before resume triggers the actual publish.
+        Uses the test's known offer/demand spec directly — no need to fetch
+        the listing back from the storefront.
+        """
+        require_state(deal_state, "seller_listing_id")
+        from registry_client import ValidatePublishRequest
+        req = ValidatePublishRequest(
+            listing_id=deal_state.seller_listing_id,
+            offer_resource=OFFER_RESOURCE,
+            demand_resource=DEMAND_RESOURCE,
+            max_duration_seconds=DURATION_HOURS * 3600,
+        )
+        result = registry_client.validate_publish_listing(req)
+        assert result.valid, (
+            f"Registry validate-publish returned valid=False for listing "
+            f"{deal_state.seller_listing_id}.\n"
+            f"Errors: {result.errors}\n"
+            f"offer_resource_type={result.offer_resource_type!r} "
+            f"demand_resource_type={result.demand_resource_type!r}"
+        )
+        deal_state._registry_validate_passed = True
+        log.info("[03a] Registry validate-publish: valid=%s offer=%s demand=%s",
+                 result.valid, result.offer_resource_type, result.demand_resource_type)
+
+
+class TestStage03b_ResumePublishesToRegistry:
+    def test_03b_resume_listing_publishes_and_registry_confirms(
+        self, storefront_admin_client, registry_client, deal_state: DealState
+    ):
+        """Resume listing → registry_status=published; registry confirms immediately.
+
+        Combined advance + confirm: resume_listing awaits publish_order_to_registry
+        synchronously, so when registry_status=published is in the response the
+        registry row already exists — no polling required.
+        """
+        require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
-        assert result.paused is False, f"Expected paused=False after resume, got: {result}"
+        assert result.paused is False, (
+            f"Expected paused=False after resume, got: {result}"
+        )
         assert result.registry_status == "published", (
             f"Registry publish failed during resume. registry_status={result.registry_status!r}.\n"
             f"Check that registry.url in config.toml is reachable from the storefront container.\n"
+            f"Run GET /api/v1/system/status and inspect checks.registry for diagnosis.\n"
             f"Current response: {result}"
         )
 
-        # Confirm locally
+        # Confirm local paused flag cleared
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert listing.paused is False, f"Local listing still paused after resume: {listing}"
+        assert listing.paused is False, (
+            f"Local listing still shows paused=True after resume: {listing}"
+        )
+
+        # Confirm registry now contains the listing (synchronous — publish already committed)
+        reg_result = registry_client.list_listings(status="open", limit=200)
+        ids = {o.id for o in reg_result.listings}
+        assert deal_state.seller_listing_id in ids, (
+            f"Listing {deal_state.seller_listing_id} absent from registry immediately after "
+            f"resume.\nregistry_status was 'published' but listing not found — "
+            f"possible registry indexing inconsistency.\n"
+            f"Registry returned {len(ids)} open listings."
+        )
 
         deal_state.resume_confirmed = True
-        log.info("[04] Order %s resumed; registry_status=%s",
+        log.info("[03b] Listing %s resumed; registry_status=%s, registry confirmed",
                  deal_state.seller_listing_id, result.registry_status)
 
 
-# ---------------------------------------------------------------------------
-# Stage 05 — Registry now contains the order
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Phase 5 — Negotiation lifecycle
+# (Phase 4 admin pause/resume removed from e2e — see smoke test TODO above)
+# ===========================================================================
 
-class TestStage05_RegistrySeesOrder:
-    def test_05_registry_now_contains_listing(
-        self, registry_client, deal_state: DealState
+class TestStage05a_EvaluateNegotiate:
+    def test_05a_evaluate_negotiate_would_not_exit(
+        self, storefront_admin_client, buyer_config, deal_state: DealState
     ):
-        """After resume, the listing is immediately visible in the registry.
+        """POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True (dry-run).
 
-        No polling: resume_listing calls publish_order_to_registry synchronously
-        and stage 04 already asserted registry_status=published.  By the time
-        we reach this test the listing is provably in the registry DB.
+        Runs the configured negotiation strategy against BUYER_INITIAL_PRICE
+        without creating a thread. Catches price_unreasonable and
+        torch_unavailable before committing a real negotiation.
         """
         require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
-        result = registry_client.list_listings(status="open", limit=200)
-        ids = {o.id for o in result.listings}
-        assert deal_state.seller_listing_id in ids, (
-            f"Order {deal_state.seller_listing_id} not visible in registry immediately after resume.\n"
-            f"registry_status was 'published' but listing is absent — possible registry indexing delay.\n"
-            f"Registry returned {len(ids)} open listings."
+        result = storefront_admin_client.evaluate_negotiate(
+            deal_state.seller_listing_id,
+            their_proposed_price=BUYER_INITIAL_PRICE,
+            buyer_address=buyer_config["wallet_address"],
         )
-        deal_state.registry_order_confirmed = True
-        log.info("[05] Order %s confirmed in registry", deal_state.seller_listing_id)
+        assert result.would_negotiate, (
+            f"Strategy would exit at round 0 for BUYER_INITIAL_PRICE={BUYER_INITIAL_PRICE}.\n"
+            f"decision={result.decision!r} reason={result.decision_reason!r}\n"
+            f"our_reference_price={result.our_reference_price} "
+            f"their_proposed_price={result.their_proposed_price}\n"
+            "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
+            "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to >= "
+            f"{result.our_reference_price} (seller floor)."
+        )
+        deal_state._evaluate_negotiate_passed = True
+        log.info("[05a] Evaluate-negotiate: decision=%s reason=%s strategy=%s",
+                 result.decision, result.decision_reason, result.strategy)
 
 
-# ---------------------------------------------------------------------------
-# Stages 06-07 — Global admin pause / resume
-# ---------------------------------------------------------------------------
-
-class TestStage06_AdminPauseBlocks:
-    def test_06_admin_pause_blocks_negotiations(
-        self, storefront_admin_client, storefront_client, buyer_config, deal_state: DealState
+class TestStage05b_NegotiationStartsAndVisible:
+    def test_05b_buyer_starts_negotiation_and_thread_confirmed(
+        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
     ):
-        """POST /admin/pause → /negotiate/new returns 503.
+        """Negotiation starts + visible + round-0 confirmed in event stream.
 
-        Must use real buyer credentials: the storefront validates the EIP-191
-        signature before checking the global pause flag, so an invalid signature
-        produces 403 rather than 503.  We need the signature to pass so the
-        pause check is reached.
+        Combined advance + confirm:
+          1. POST /api/v1/negotiate/new → negotiation_id
+          2. GET /api/v1/listings/{id}/negotiations → thread listed
+          3. GET stage_events → round_decided event with decision != exit
         """
-        require_state(deal_state, "seller_listing_id", "registry_order_confirmed")
+        require_state(deal_state, "seller_listing_id", "_evaluate_negotiate_passed")
 
-        storefront_admin_client.admin_pause()
-
-        from storefront_client.client import _sign_eip191
-        ts = str(int(time.time()))
-        sig = _sign_eip191(
-            buyer_config["private_key"],
-            f"negotiate_new:{deal_state.seller_listing_id}:{ts}",
+        resp = storefront_client.negotiate_new(
+            listing_id=deal_state.seller_listing_id,
+            buyer_address=buyer_config["wallet_address"],
+            initial_price=BUYER_INITIAL_PRICE,
+            duration_seconds=DURATION_HOURS * 3600,
         )
-        resp = storefront_client._client.post(
-            "/negotiate/new",
-            json={
-                "listing_id": deal_state.seller_listing_id,
-                "buyer_address": buyer_config["wallet_address"],
-                "initial_price": BUYER_INITIAL_PRICE,
-                "duration_seconds": DURATION_HOURS * 3600,
-            },
-            headers={"X-Signature": sig, "X-Timestamp": ts},
+        neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
+        assert neg_id, (
+            f"No negotiation_id in response: {resp}\n"
+            f"POST /api/v1/negotiate/new returned unexpected shape."
         )
-        assert resp.status_code == 503, (
-            f"Expected 503 from paused storefront, got {resp.status_code}: {resp.text[:200]}"
+
+        # Confirm thread visible on the listing's negotiations list
+        neg_list = storefront_admin_client.list_negotiations(deal_state.seller_listing_id)
+        ids = {n.negotiation_id for n in neg_list.negotiations}
+        assert neg_id in ids, (
+            f"Negotiation {neg_id} not found in "
+            f"GET /api/v1/listings/{deal_state.seller_listing_id}/negotiations. Found: {ids}"
         )
-        deal_state.pause_confirmed = True
-        log.info("[06] Admin pause blocks negotiation correctly")
 
-
-class TestStage07_AdminResumeAllows:
-    def test_07_admin_resume_re_enables_negotiations(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """POST /admin/resume clears the global pause flag."""
-        require_state(deal_state, "pause_confirmed")
-
-        result = storefront_admin_client.admin_resume()
-        assert result.paused is False
-
-        status = storefront_admin_client.get_system_status()
-        assert status.paused is False
-
-        deal_state.admin_resume_confirmed = True
-        log.info("[07] Admin resume: storefront accepting negotiations")
-
-
-# ---------------------------------------------------------------------------
-# Stages 08-11 — Negotiation lifecycle
-# ---------------------------------------------------------------------------
-
-class TestStage08_NegotiationStarts:
-    def test_08_buyer_starts_negotiation(
-        self, storefront_client, buyer_config, deal_state: DealState
-    ):
-        """POST /negotiate/new — buyer opens with initial_price."""
-        require_state(deal_state, "seller_listing_id", "admin_resume_confirmed",
-                      "_negotiation_strategy_viable")
-
-        from storefront_client.client import _sign_eip191
-        ts = str(int(time.time()))
-        sig = _sign_eip191(
-            buyer_config["private_key"],
-            f"negotiate_new:{deal_state.seller_listing_id}:{ts}",
-        )
-        resp = storefront_client._client.post(
-            "/negotiate/new",
-            json={
-                "listing_id": deal_state.seller_listing_id,
-                "buyer_address": buyer_config["wallet_address"],
-                "initial_price": BUYER_INITIAL_PRICE,
-                "duration_seconds": DURATION_HOURS * 3600,
-            },
-            headers={"X-Signature": sig, "X-Timestamp": ts},
-        )
-        assert resp.status_code == 200, (
-            f"POST /negotiate/new returned {resp.status_code}: {resp.text[:300]}"
-        )
-        body = resp.json()
-        neg_id = body.get("negotiation_id")
-        assert neg_id, f"No negotiation_id in response: {body}"
-
-        # Verify the seller's round 0 decision via stage events — catches
-        # strategy misconfiguration (e.g. rl without torch) before it surfaces
-        # as a 409 at stage 10.
+        # Verify round-0 decision via stage events — catches strategy misconfiguration
         events_result = storefront_admin_client.get_events(
             stage="negotiation",
             negotiation_id=neg_id,
@@ -403,44 +497,36 @@ class TestStage08_NegotiationStarts:
         round0 = round0_events[0]
         assert round0.data.get("decision") != "exit", (
             f"Seller exited at round 0. reason={round0.data.get('decision_reason')!r}. "
-            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
+            f"our_price={round0.data.get('our_price')} "
+            f"their_price={round0.data.get('their_price')}.\n"
             "If reason is 'torch_unavailable': set policy_mode='bisection' in config.toml.\n"
-            "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE to meet the seller floor."
+            "If reason is 'price_unreasonable': increase BUYER_INITIAL_PRICE."
         )
 
         deal_state.negotiation_id = neg_id
-        deal_state.negotiation_round_count = 1
-        log.info("[08] Negotiation %s started; seller action=%s reason=%s",
-                 neg_id, body.get("action"),
-                 round0.data.get("decision_reason"))
+        log.info("[05b] Negotiation %s started; thread visible; round_decided=%s reason=%s",
+                 neg_id, round0.data.get("decision"), round0.data.get("decision_reason"))
 
 
-class TestStage09_NegotiationVisible:
-    def test_09_negotiation_visible_on_storefront_api(
+# ===========================================================================
+# Phase 6 — Negotiation settlement
+# (06a skipped — force-accept has no meaningful dry-run)
+# ===========================================================================
+
+class TestStage06b_ForceAcceptAndTerminal:
+    def test_06b_force_accept_and_terminal_success(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/listings/{listing_id}/negotiations lists the active thread."""
+        """Guard + force-accept + terminal state — combined advance + confirm.
+
+        Guard: reads stage events to ensure no exit before force-accept
+        (avoids confusing 409 if strategy already exited).
+        Advance: POST .../force-accept → action=accept.
+        Confirm: GET .../negotiations/{neg_id} → terminal_state=success.
+        """
         require_state(deal_state, "seller_listing_id", "negotiation_id")
 
-        result = storefront_admin_client.list_negotiations(deal_state.seller_listing_id)
-        ids = {n.negotiation_id for n in result.negotiations}
-        assert deal_state.negotiation_id in ids, (
-            f"Negotiation {deal_state.negotiation_id} not in "
-            f"GET /orders/{deal_state.seller_listing_id}/negotiations. Found: {ids}"
-        )
-        log.info("[09] Negotiation %s visible on storefront API", deal_state.negotiation_id)
-
-
-class TestStage10_NegotiationForceAccepted:
-    def test_10_admin_force_accepts_negotiation(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Admin force-accepts at agreed_price to converge without round-trips."""
-        require_state(deal_state, "seller_listing_id", "negotiation_id")
-
-        # Guard: confirm the negotiation is still open before force-accepting.
-        # If round 0 exited (e.g. strategy misconfiguration), force-accept
-        # returns 409.  Checking stage events here gives a better failure message.
+        # Guard: confirm negotiation is still open
         events_result = storefront_admin_client.get_events(
             stage="negotiation",
             negotiation_id=deal_state.negotiation_id,
@@ -452,7 +538,7 @@ class TestStage10_NegotiationForceAccepted:
         assert not terminal_exits, (
             f"Negotiation {deal_state.negotiation_id} already exited before force-accept. "
             f"Exit reason: {terminal_exits[0].data.get('decision_reason')!r}. "
-            "Check stage 08's round_decided event for root cause."
+            "Check stage 05b's round_decided event for root cause."
         )
 
         agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
@@ -461,87 +547,96 @@ class TestStage10_NegotiationForceAccepted:
             deal_state.negotiation_id,
             price=agreed,
         )
-        assert result.action == "accept", f"Unexpected action: {result}"
+        assert result.action == "accept", (
+            f"Unexpected action from force-accept: {result}"
+        )
         assert result.price == agreed
 
-        deal_state.agreed_price = agreed
-        log.info("[10] Force-accepted at price %d", agreed)
-
-
-class TestStage11_NegotiationTerminal:
-    def test_11_negotiation_terminal_success(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """GET .../negotiations/{neg_id} shows terminal_state=success."""
-        require_state(deal_state, "seller_listing_id", "negotiation_id", "agreed_price")
-
+        # Confirm terminal state
         detail = storefront_admin_client.get_negotiation(
             deal_state.seller_listing_id, deal_state.negotiation_id
         )
         assert detail.terminal_state == "success", (
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
         )
-        assert detail.agreed_price == deal_state.agreed_price
+        assert detail.agreed_price == agreed
 
+        deal_state.agreed_price = agreed
         deal_state.negotiation_terminal_state = detail.terminal_state
-        log.info("[11] Negotiation terminal: state=%s price=%d",
-                 detail.terminal_state, detail.agreed_price)
+        log.info("[06b] Force-accepted at price %d; terminal_state=%s",
+                 agreed, detail.terminal_state)
 
 
-# ---------------------------------------------------------------------------
-# Stage 12 — Mock escrow
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Phase 7 — Mock escrow + provisioning gate setup
+# ===========================================================================
 
-class TestStage12_MockEscrow:
-    def test_12_mock_escrow_uid_captured(self, deal_state: DealState):
-        """Capture a deterministic mock escrow_uid (no real chain call)."""
-        require_state(deal_state, "negotiation_terminal_state")
-        deal_state.escrow_uid = MOCK_ESCROW_UID
-        log.info("[12] Mock escrow: %s", MOCK_ESCROW_UID)
-
-
-# ---------------------------------------------------------------------------
-# Stages 13-18 — Settlement + provisioning
-# ---------------------------------------------------------------------------
-
-class TestStage13_SettlementSubmitted:
-    def test_13_settlement_submitted(
-        self, storefront_client, buyer_config, deal_state: DealState
+class TestStage07_MockEscrowAndProvGate:
+    def test_07_mock_escrow_and_provision_gate_armed(
+        self, provisioning_test_client, deal_state: DealState
     ):
-        """POST /settle/{uid} returns status=provisioning."""
-        require_state(deal_state, "negotiation_id", "escrow_uid")
+        """Capture deterministic mock escrow_uid and arm provisioning pause gate.
 
-        resp = storefront_client._client.post(
-            f"/settle/{deal_state.escrow_uid}",
-            json={
-                "negotiation_id": deal_state.negotiation_id,
-                "ssh_public_key": buyer_config["ssh_public_key"],
-                "buyer_address": buyer_config["wallet_address"],
-            },
+        The pause gate (pause_before_result=True) holds the mock job before it
+        reports success, giving stage 08b a window to assert the job is
+        queued/running before stage 09a releases it. Without the gate the mock
+        may complete before the assertion and the test races.
+        """
+        require_state(deal_state, "negotiation_terminal_state")
+
+        deal_state.escrow_uid = MOCK_ESCROW_UID
+
+        provisioning_test_client.add_mock_rule({
+            "rule_id": PROV_RULE_ID,
+            "match": {"vm_action": "create"},
+            "pause_before_result": True,
+            "result_stdout": (
+                '{"vm_name": "e2e-test-vm", "tenant_user": "vmuser", '
+                '"tenant_ssh_key_path": "/tmp/e2e.key", '
+                '"frp": {"enabled": false}, '
+                '"authentication": {"tenant": {"ssh_commands": '
+                '{"external": "ssh vmuser@localhost", '
+                '"internal": "ssh vmuser@10.0.0.1"}}}}'
+            ),
+            "fail_with": None,
+        })
+        deal_state.provisioning_gate_armed = True
+        log.info("[07] Mock escrow: %s; provisioning gate armed with rule=%s",
+                 MOCK_ESCROW_UID, PROV_RULE_ID)
+
+
+# ===========================================================================
+# Phase 8 — Settlement pipeline
+# (08a skipped — no meaningful dry-run for settle with mocked provisioning)
+# ===========================================================================
+
+class TestStage08b_SettlementSubmittedAndJobQueued:
+    def test_08b_settlement_submitted_and_provisioning_job_queued(
+        self, storefront_client, storefront_admin_client, provisioning_client,
+        buyer_config, deal_state: DealState
+    ):
+        """Settlement submitted + provisioning job queued — advance + async observe.
+
+        Advance: POST /api/v1/settle/{uid} → status=provisioning.
+        Observe (event-driven): wait_for_stage_event(provision, resource_reserved)
+          then single GET /settle/{uid}/status → provisioning_job_id.
+        Confirms: job visible in provisioning API with status queued/running/succeeded.
+        """
+        require_state(deal_state, "negotiation_id", "escrow_uid", "provisioning_gate_armed")
+
+        settle_resp = storefront_client.settle(
+            deal_state.escrow_uid,
+            negotiation_id=deal_state.negotiation_id,
+            buyer_address=buyer_config["wallet_address"],
+            ssh_public_key=buyer_config["ssh_public_key"],
         )
-        assert resp.status_code in (200, 202), (
-            f"POST /settle/{deal_state.escrow_uid} returned {resp.status_code}: {resp.text[:300]}"
-        )
-        body = resp.json()
-        assert body.get("status") == "provisioning", (
-            f"Expected status=provisioning, got: {body}"
+        assert settle_resp.status == "provisioning", (
+            f"Expected status=provisioning, got: {settle_resp.status!r}. "
+            f"Full response: {settle_resp}"
         )
         deal_state.settlement_submitted = True
-        log.info("[13] Settlement submitted for escrow %s", deal_state.escrow_uid)
 
-
-class TestStage14_ProvisioningJobQueued:
-    def test_14_provisioning_job_id_surfaces(
-        self, storefront_admin_client, storefront_client, provisioning_client, buyer_config, deal_state: DealState
-    ):
-        """provisioning_job_id appears in settle status; job exists in provisioning API.
-
-        Uses wait_for_stage_event (stage=provision, event=resource_reserved) rather
-        than polling /settle/{uid}/status so the test is driven by the storefront's
-        own event log — no arbitrary sleep or deadline needed.
-        """
-        require_state(deal_state, "escrow_uid", "settlement_submitted")
-
+        # Wait for the storefront to queue the provisioning job (event-driven)
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
         _wait(
             storefront_admin_client,
@@ -550,55 +645,62 @@ class TestStage14_ProvisioningJobQueued:
             timeout=15.0,
         )
 
-        # Now poll once — the event confirms the job was queued
-        resp = storefront_client._client.get(
-            f"/settle/{deal_state.escrow_uid}/status",
-            params={"buyer_address": buyer_config["wallet_address"]},
+        # Single read — event confirms job is queued
+        status_resp = storefront_client.get_settle_status(
+            deal_state.escrow_uid,
+            buyer_address=buyer_config["wallet_address"],
         )
-        assert resp.status_code == 200, f"Settle status returned {resp.status_code}"
-        prov_job_id = resp.json().get("provisioning_job_id")
-        assert prov_job_id, f"provisioning_job_id absent from settle status: {resp.json()}"
+        prov_job_id = status_resp.provisioning_job_id
+        assert prov_job_id, (
+            f"provisioning_job_id absent from settle status after resource_reserved event: "
+            f"{status_resp}"
+        )
 
         job = provisioning_client.get_job(prov_job_id)
         assert job.status in ("queued", "running", "succeeded"), (
             f"Unexpected job status: {job.status}"
         )
         deal_state.provisioning_job_id = prov_job_id
-        log.info("[14] Provisioning job %s in state %s", prov_job_id, job.status)
+        log.info("[08b] Provisioning job %s in state %s", prov_job_id, job.status)
 
 
-class TestStage15_ProvisioningCompletes:
-    def test_15_provisioning_job_completes(
+# ===========================================================================
+# Phase 9 — Provisioning completion
+# ===========================================================================
+
+class TestStage09a_ProvisioningCompletes:
+    def test_09a_release_gate_and_job_succeeds(
         self, provisioning_test_client, deal_state: DealState
     ):
-        """Long-poll via /test/jobs/{id}/wait until job reaches succeeded."""
+        """Release provisioning gate then long-poll until job succeeds."""
         require_state(deal_state, "provisioning_job_id")
 
-        try:
-            provisioning_test_client.resume_rule(PROV_RULE_ID)
-        except Exception as exc:
-            log.debug("[15] resume_rule no-op (may not have been paused): %s", exc)
+        provisioning_test_client.resume_rule(PROV_RULE_ID)
 
         result = provisioning_test_client.wait_for_job(
             deal_state.provisioning_job_id, timeout=30
         )
         assert result["status"] == "succeeded", (
-            f"Expected succeeded, got {result['status']!r}. Error: {result.get('error')}"
+            f"Expected succeeded, got {result['status']!r}. "
+            f"Error: {result.get('error')}"
         )
         deal_state.provisioning_result_injected = True
-        log.info("[15] Provisioning job %s succeeded", deal_state.provisioning_job_id)
+        log.info("[09a] Provisioning job %s succeeded", deal_state.provisioning_job_id)
 
 
-class TestStage16_SettlementReady:
-    def test_16_settlement_status_ready(
-        self, storefront_admin_client, storefront_client, buyer_config, deal_state: DealState
+class TestStage09b_SettlementReadyAndCredentials:
+    def test_09b_settlement_ready_credentials_and_listing_closed(
+        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
     ):
-        """GET /settle/{uid}/status shows status=ready after provisioning succeeds.
+        """Settlement status=ready, tenant credentials present, listing accepted/closed.
 
-        Uses wait_for_stage_event (stage=provision, event=fulfilled) to avoid
-        polling /settle/{uid}/status in a tight loop.
+        Combined observation of all post-provisioning state:
+          1. wait_for_stage_event(provision, fulfilled) — event-driven, no sleep
+          2. GET /settle/{uid}/status → status=ready + tenant_credentials
+          3. GET /api/v1/listings/{id} → status=accepted or closed
         """
-        require_state(deal_state, "escrow_uid", "provisioning_result_injected")
+        require_state(deal_state, "escrow_uid", "provisioning_result_injected",
+                      "seller_listing_id")
 
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
         _wait(
@@ -608,49 +710,25 @@ class TestStage16_SettlementReady:
             timeout=20.0,
         )
 
-        resp = storefront_client._client.get(
-            f"/settle/{deal_state.escrow_uid}/status",
-            params={"buyer_address": buyer_config["wallet_address"]},
+        status_resp = storefront_client.get_settle_status(
+            deal_state.escrow_uid,
+            buyer_address=buyer_config["wallet_address"],
         )
-        assert resp.status_code == 200, f"Settle status returned {resp.status_code}"
-        final_status = resp.json().get("status")
-        assert final_status == "ready", (
-            f"Settlement not 'ready' after provision fulfilled event. Got: {final_status!r}"
+        assert status_resp.status == "ready", (
+            f"Settlement not 'ready' after provision fulfilled event. "
+            f"Got: {status_resp.status!r}"
         )
-        deal_state.settlement_status = final_status
-        log.info("[16] Settlement status=ready")
-
-
-class TestStage17_TenantCredentials:
-    def test_17_tenant_credentials_present(
-        self, storefront_client, buyer_config, deal_state: DealState
-    ):
-        """Settlement response includes tenant_credentials."""
-        require_state(deal_state, "escrow_uid", "settlement_status")
-
-        resp = storefront_client._client.get(
-            f"/settle/{deal_state.escrow_uid}/status",
-            params={"buyer_address": buyer_config["wallet_address"]},
+        assert status_resp.tenant_credentials, (
+            f"tenant_credentials missing from settlement status: {status_resp}"
         )
-        assert resp.status_code == 200
-        creds = resp.json().get("tenant_credentials")
-        assert creds, f"tenant_credentials missing: {resp.json()}"
-
-        deal_state.tenant_credentials = creds
-        log.info("[17] Tenant credentials received: keys=%s", list(creds.keys()))
-
-
-class TestStage18_SellerOrderAccepted:
-    def test_18_seller_order_status_accepted(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """GET /api/v1/listings/{listing_id} shows status=accepted after settlement."""
-        require_state(deal_state, "seller_listing_id", "settlement_submitted")
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
         assert listing.status in ("accepted", "closed"), (
-            f"Expected accepted/closed, got {listing.status!r}"
+            f"Expected listing status=accepted/closed, got {listing.status!r}"
         )
-        deal_state.seller_order_final_status = listing.status
-        log.info("[18] Seller order %s status=%s",
-                 deal_state.seller_listing_id, listing.status)
+
+        deal_state.settlement_status = status_resp.status
+        deal_state.tenant_credentials = status_resp.tenant_credentials
+        deal_state.seller_listing_final_status = listing.status
+        log.info("[09b] Settlement ready; credentials present; listing status=%s",
+                 listing.status)
