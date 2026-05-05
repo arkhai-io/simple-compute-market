@@ -70,7 +70,11 @@ async def client(db):
 
     transport = httpx.ASGITransport(app=app)
     with patch.object(buyer_auth, "_verify", return_value=None):
-        async with StorefrontClient("http://test", transport=transport) as c:
+        async with StorefrontClient(
+            "http://test",
+            transport=transport,
+            private_key="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+            ) as c:
             yield c, db
 
     _container.resolved_sqlite_client = None

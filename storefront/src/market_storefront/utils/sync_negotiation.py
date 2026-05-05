@@ -118,6 +118,56 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
 
 
 # ---------------------------------------------------------------------------
+# Pure compute — no DB writes, no events.
+# Called by both the real flow and the evaluate-negotiate dry-run endpoint.
+# ---------------------------------------------------------------------------
+
+
+def _compute_round_zero_decision(
+    *,
+    listing: Any,
+    their_proposed_price: int,
+) -> tuple[int, str, str, NegotiationDecision]:
+    """Determine the seller's round-0 decision for a given buyer price.
+
+    Loads the configured strategy, builds a ``NegotiationRoundInput`` for
+    round 0, and calls ``strategy.decide()``.  No SQLite writes and no
+    stage events are emitted — those remain the responsibility of the
+    real flow in ``start_sync_negotiation``.
+
+    Returns ``(our_price, strategy_label, direction, strategy_name, decision)``
+    so callers have all the context needed to emit events or build response
+    payloads without duplicating the extraction logic.
+
+    Raises ``ValueError`` if the listing has no usable negotiation strategy
+    (e.g. the offer/demand resources don't declare one).
+    """
+    from market_storefront.utils.action_executor import (
+        _extract_initial_price_from_order,
+        determine_strategy_from_order,
+    )
+
+    strategy_label = determine_strategy_from_order(listing)
+    if not strategy_label:
+        raise ValueError(
+            f"Listing {getattr(listing, 'listing_id', repr(listing))} "
+            "has no usable strategy for negotiation"
+        )
+    our_price = _extract_initial_price_from_order(listing)
+    direction = _direction_from_strategy_label(strategy_label)
+
+    strategy_obj = _load_storefront_strategy()
+    strategy_name = type(strategy_obj).__name__
+    decision = strategy_obj.decide(NegotiationRoundInput(
+        direction=direction,
+        our_reference_price=our_price,
+        their_proposed_price=their_proposed_price,
+        history=[],
+    ))
+    return our_price, strategy_label, direction, strategy_name, decision
+
+
+# ---------------------------------------------------------------------------
 # Stateful wrappers — load/save thread, call the configured strategy.
 # ---------------------------------------------------------------------------
 
@@ -153,10 +203,6 @@ async def start_sync_negotiation(
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
     from market_storefront.models.domain_models import Listing
-    from market_storefront.utils.action_executor import (
-        _extract_initial_price_from_order,
-        determine_strategy_from_order,
-    )
     from market_storefront.utils.stage_log import stage_event
 
     # Check global pause flag and per-order pause flag before doing any work.
@@ -187,10 +233,12 @@ async def start_sync_negotiation(
         )
 
     our_order = Listing.model_validate(our_order_dict)
-    strategy = determine_strategy_from_order(our_order)
-    if not strategy:
-        raise ValueError(f"Order {our_listing_id} has no usable strategy for negotiation")
-    our_price = _extract_initial_price_from_order(our_order)
+
+    # Pure compute: resolve strategy and get round-0 decision without writing anything.
+    our_price, strategy, direction, _strategy_name, decision = _compute_round_zero_decision(
+        listing=our_order,
+        their_proposed_price=their_proposed_price,
+    )
 
     neg_id = "neg_" + uuid.uuid4().hex
 
@@ -216,13 +264,6 @@ async def start_sync_negotiation(
             message_type="offer",
         )
 
-    strategy_obj = _load_storefront_strategy()
-    decision = strategy_obj.decide(NegotiationRoundInput(
-        direction=_direction_from_strategy_label(strategy),
-        our_reference_price=our_price,
-        their_proposed_price=their_proposed_price,
-        history=[],
-    ))
     await _record_seller_decision(neg_id=neg_id, our_price=our_price,
                                   their_price=their_proposed_price,
                                   decision=decision)

@@ -22,6 +22,7 @@ from market_storefront.models.listing_models import (
     CloseListingResponse,
     CreateListingRequest,
     CreateListingResponse,
+    EvaluateNegotiateResponse,
     ReclaimRequest,
     RefundRequest,
 )
@@ -171,6 +172,44 @@ class ListingService:
         return AdminEvaluateCloseResponse(
             would_close=action in ("close_order", "close_listing"),
             action=action, listing_id=listing_id,
+        )
+
+    async def evaluate_negotiate(
+        self, listing_id: str, their_proposed_price: int
+    ) -> EvaluateNegotiateResponse:
+        """Dry-run the round-0 negotiation decision without creating a thread.
+
+        Loads the listing from SQLite, then delegates to
+        ``_compute_round_zero_decision`` — the same pure-compute function
+        used by ``start_sync_negotiation`` — so the result is identical to
+        what round 0 of a real negotiation would produce.
+
+        Raises ``ValueError`` if the listing doesn't exist or has no usable
+        negotiation strategy. The controller converts these to HTTP 404.
+        """
+        from market_storefront.models.domain_models import Listing
+        from market_storefront.utils.sync_negotiation import _compute_round_zero_decision
+
+        row = await self._db.load_listing(listing_id=listing_id)
+        if not row:
+            raise ValueError(f"Listing {listing_id} not found")
+        listing = Listing.model_validate(row)
+        our_price, _strategy_label, direction, strategy_name, decision = (
+            _compute_round_zero_decision(
+                listing=listing,
+                their_proposed_price=their_proposed_price,
+            )
+        )
+        return EvaluateNegotiateResponse(
+            listing_id=listing_id,
+            our_reference_price=our_price,
+            their_proposed_price=their_proposed_price,
+            direction=direction,
+            strategy=strategy_name,
+            decision=decision.action,
+            decision_price=decision.price,
+            decision_reason=decision.reason,
+            would_negotiate=(decision.action != "exit"),
         )
 
     async def refund(self, listing_id: str, payload: RefundRequest) -> tuple[int, dict]:

@@ -308,65 +308,21 @@ class AdminListingsController:
     async def evaluate_negotiate(
         self, listing_id: str, body: EvaluateNegotiateRequest
     ) -> EvaluateNegotiateResponse:
-        """Runs the configured negotiation strategy against a synthetic buyer offer.
+        """Dry-run the seller's round-0 negotiation decision without creating a thread.
 
-        Loads the listing from SQLite, extracts the seller's floor price and
-        direction, then calls ``strategy.decide()`` — identical to the logic
-        in ``start_sync_negotiation`` — without creating a negotiation thread
-        or writing anything to the database.
+        Delegates to ``ListingService.evaluate_negotiate``, which calls
+        ``_compute_round_zero_decision`` — the same pure-compute function used
+        by the real ``/negotiate/new`` flow. The result is identical to what
+        round 0 of a real negotiation would produce for the given price.
 
-        Use this as the stage-05a dry-run before calling POST /api/v1/negotiate/new.
-        A decision of 'exit' means the buyer's price is below the seller's
-        acceptable range and the real call would immediately exit.
+        Returns HTTP 404 if the listing doesn't exist or has no usable strategy.
         """
-        from market_storefront.models.domain_models import Listing
-        from market_storefront.utils.action_executor import (
-            _extract_initial_price_from_order,
-            determine_strategy_from_order,
-        )
-        from market_storefront.utils.sync_negotiation import (
-            _load_storefront_strategy,
-            _direction_from_strategy_label,
-        )
-        from market_policy.negotiation_strategy import NegotiationRoundInput
-
-        db = self._listing_svc._db
         try:
-            row = await db.load_listing(listing_id=listing_id)
-            if not row:
-                raise ValueError(f"Listing {listing_id} not found")
-
-            listing = Listing.model_validate(row)
-            strategy_label = determine_strategy_from_order(listing)
-            if not strategy_label:
-                raise ValueError(
-                    f"Listing {listing_id} has no usable strategy for negotiation"
-                )
-            our_price = _extract_initial_price_from_order(listing)
-            direction = _direction_from_strategy_label(strategy_label)
-
-            strategy_obj = _load_storefront_strategy()
-            strategy_name = type(strategy_obj).__name__
-            decision = strategy_obj.decide(NegotiationRoundInput(
-                direction=direction,
-                our_reference_price=our_price,
-                their_proposed_price=body.their_proposed_price,
-                history=[],
-            ))
+            return await self._listing_svc.evaluate_negotiate(
+                listing_id, body.their_proposed_price
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except Exception as exc:
             logger.error("[ADMIN] evaluate-negotiate: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-
-        return EvaluateNegotiateResponse(
-            listing_id=listing_id,
-            our_reference_price=our_price,
-            their_proposed_price=body.their_proposed_price,
-            direction=direction,
-            strategy=strategy_name,
-            decision=decision.action,
-            decision_price=decision.price,
-            decision_reason=decision.reason,
-            would_negotiate=(decision.action != "exit"),
-        )
