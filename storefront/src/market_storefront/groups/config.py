@@ -161,7 +161,7 @@ _INIT_USER_TEMPLATE = """\
 # frp_dashboard_password = ""
 
 [seller.negotiation]
-# policy_mode = ""                              # "" (default → rl) | "bisection" | "rl"
+# policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 """

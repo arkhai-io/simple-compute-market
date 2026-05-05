@@ -77,20 +77,27 @@ pip install -e .
 cp .env.example .env
 ```
 
-Edit `.env` with your configuration:
+Edit `.env` with your configuration. Defaults shown match `src/config.py`
+(local anvil chain). The ERC-8004 addresses are CREATE2 vanity addresses
+and are identical on every chain — `make build-anvil-state` produces the
+same addresses the deployer uses on testnet.
 
 ```env
 # Database (SQLite for dev, PostgreSQL for prod)
 DATABASE_URL=sqlite:///./registry.db
 
-# Blockchain Configuration - Base Sepolia
-CHAIN_ID=84532
-RPC_URL=https://sepolia.base.org
+# Blockchain Configuration - default = local anvil
+CHAIN_ID=1337
+RPC_URL=http://localhost:8545
 
-# ERC-8004 Contract Addresses (Base Sepolia)
+# ERC-8004 Contract Addresses (CREATE2 vanity — same on all chains)
 IDENTITY_REGISTRY_ADDRESS=0x8004AA63c570c570eBF15376c0dB199918BFe9Fb
 REPUTATION_REGISTRY_ADDRESS=0x8004bd8daB57f14Ed299135749a5CB5c42d341BF
 VALIDATION_REGISTRY_ADDRESS=0x8004C269D0A5647E51E121FeB226200ECE932d55
+
+# To target Base Sepolia instead, override CHAIN_ID + RPC_URL:
+#   CHAIN_ID=84532
+#   RPC_URL=https://sepolia.base.org
 
 # Server Configuration
 PORT=8080

@@ -65,6 +65,16 @@ def _wait_for_port(host: str, port: int, *, timeout: float = 30.0) -> bool:
 def _spawn_publish_loop(*, host: str, port: int, poll_interval: float) -> threading.Thread | None:
     from market_storefront.cli_publish import run_watch_loop
 
+    if not CONFIG.default_min_price:
+        # Without a global floor, only resources with per-row min_price in the
+        # CSV will publish. Cycles silently drop everything else — surface the
+        # misconfig once at startup so it's not buried in cycle logs.
+        logger.warning(
+            "[publish-loop] [seller.pricing].default_min_price is not set. "
+            "Resources without per-row min_price in the CSV will be skipped "
+            "at publish time. Set it in config.toml or per row in resources.csv."
+        )
+
     def _runner() -> None:
         if not _wait_for_port(host, port, timeout=30.0):
             logger.warning("[publish-loop] server not reachable within 30s; aborting")

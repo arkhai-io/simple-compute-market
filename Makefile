@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := $(CURDIR)/.dist
 
-.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean
+.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -107,7 +107,10 @@ build-test-image:
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-init: init-submodules init-buyer init-images
+# `make init` resolves dependencies for all three roles. Each role's
+# Makefile owns its own venv; we just delegate so a fresh clone has one
+# entry point. Run `make build` separately to produce wheel/Docker artifacts.
+init: init-prerequisites init-submodules init-buyer init-storefront init-registry-service
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -121,13 +124,14 @@ init-dependencies: init-zero-tier init-buyer
 init-zero-tier:
 	cd infra && make install
 
-# Initializing the buyer CLI should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
 init-buyer:
-	echo "NYI"
+	cd buyer && make init
 
-# This will eventually download the docker images
-init-images:
-	echo "NYI"
+init-storefront: dist-service dist-policy dist-provisioning dist-storefront-client dist-registry
+	cd storefront && make init
+
+init-registry-service: dist-registry
+	cd registry-service && make init
 
 deploy-compose:
 	docker compose up
