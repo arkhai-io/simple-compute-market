@@ -30,10 +30,7 @@ from service.clients.token import ERC20TokenMetadata
 # │   ├── DomainEvent               (alias for CoreDomainEvent)
 # │   ├── ListingCreatedEvent       order_create pipeline trigger
 # │   ├── ListingClosedEvent        order_close pipeline trigger
-# │   ├── ResourceImbalanceEvent    alert pipeline trigger
-# │   ├── ReceiveComputeObligationFulfillmentEvent
-# │   ├── FulfillmentFailedEvent
-# │   └── ArbitrationCompleteEvent
+# │   └── ResourceImbalanceEvent    alert pipeline trigger
 # └── (other core types re-aliased below)
 #     ├── Action                    = CoreDomainAction
 #     ├── DecisionContext           = CoreDecisionContext
@@ -478,12 +475,7 @@ class EventType(str, Enum):
 
     ORDER_CREATE = "order_create"
     ORDER_CLOSE = "order_close"
-    RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT = "receive_compute_obligation_fulfillment"
-    FULFILLMENT_FAILED = "fulfillment_failed"
-    ARBITRATION_COMPLETE = "arbitration_complete"
     RESOURCE_IMBALANCE = "resource_imbalance"
-    CRON_JOB = "cron_job"
-    ARBITRAGE_OPPORTUNITY = "arbitrage_opportunity"
 DomainEvent = CoreDomainEvent
 
 
@@ -523,101 +515,6 @@ class ListingClosedEvent(DomainEvent):
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)
     listing_id: str = Field(description="Listing ID to close")
 
-
-class ReceiveComputeObligationFulfillmentEvent(DomainEvent):
-    """Event triggered when the buyer receives compute fulfillment details."""
-
-    event_type: EventType = Field(default=EventType.RECEIVE_COMPUTE_OBLIGATION_FULFILLMENT)
-    escrow_uid: str = Field(description="Escrow UID tied to the fulfillment")
-    fulfillment_uid: str | None = Field(
-        default=None,
-        description="UID of the fulfillment (may be provided by seller/chain)",
-    )
-    connection_details: str | None = Field(
-        default=None,
-        description="Connection string/details for the provisioned compute",
-    )
-    fulfilling_party_url: str | None = Field(
-        default=None,
-        description="URL of the compute seller who fulfilled the obligation",
-    )
-    tenant_credentials: dict | None = Field(
-        default=None,
-        description="Tenant credentials (password, key_type) for the provisioned VM",
-    )
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "ReceiveComputeObligationFulfillmentEvent":
-        escrow_uid = payload.get("escrow_uid")
-        if not escrow_uid:
-            raise ValueError("ReceiveComputeObligationFulfillmentEvent requires escrow_uid")
-        return cls(
-            event_id=payload.get("event_id", f"rcf_{uuid.uuid4()}"),
-            source=payload.get("source", "unknown"),
-            escrow_uid=escrow_uid,
-            fulfillment_uid=payload.get("fulfillment_uid"),
-            connection_details=payload.get("connection_details"),
-            fulfilling_party_url=payload.get("fulfilling_party_url"),
-            tenant_credentials=payload.get("tenant_credentials"),
-            data=payload,
-        )
-
-class FulfillmentFailedEvent(DomainEvent):
-    """Event triggered when the seller's provisioning fails after accepting an offer."""
-
-    event_type: EventType = Field(default=EventType.FULFILLMENT_FAILED)
-    escrow_uid: str = Field(description="Escrow UID that was locked for this deal")
-    reason: str | None = Field(default=None, description="Human-readable failure reason")
-    listing_id: str | None = Field(default=None, description="Seller's local listing ID")
-    negotiation_id: str | None = Field(default=None, description="Buyer-supplied correlation token for this negotiation")
-
-
-class ArbitrationCompleteEvent(DomainEvent):
-    """Event triggered when arbitration over fulfillment has completed."""
-
-    event_type: EventType = Field(default=EventType.ARBITRATION_COMPLETE)
-    decisions: list[Any] | None = Field(
-        default=None,
-        description="Arbiter decisions returned for the fulfillment",
-    )
-    fulfillment_uid: str | None = Field(
-        default=None,
-        description="UID of the fulfillment that was arbitrated",
-    )
-    escrow_uid: str | None = Field(
-        default=None,
-        description="Escrow UID tied to the fulfillment (may be required to collect)",
-    )
-    oracle_address: str | None = Field(
-        default=None,
-        description="Oracle contract/address used for arbitration",
-    )
-    status: str | None = Field(
-        default=None,
-        description="Status string reported by the arbiter or workflow",
-    )
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "ArbitrationCompleteEvent":
-        """Create an arbitration-complete event from a payload dict."""
-        data = payload.get("data", payload) if isinstance(payload, dict) else {}
-        if not isinstance(data, dict):
-            raise ValueError("ArbitrationCompleteEvent payload must be a dictionary")
-
-        fulfillment_uid = data.get("fulfillment_uid")
-        if not fulfillment_uid:
-            raise ValueError("ArbitrationCompleteEvent requires fulfillment_uid")
-
-        return cls(
-            event_id=data.get("event_id") or payload.get("event_id", f"arb_{uuid.uuid4()}"),
-            source=data.get("source") or payload.get("source", "unknown"),
-            decisions=data.get("decisions"),
-            fulfillment_uid=fulfillment_uid,
-            escrow_uid=data.get("escrow_uid"),
-            oracle_address=data.get("oracle_address"),
-            status=data.get("status"),
-            data=data,
-        )
 
 class ResourceAlertRequest(BaseModel):
     """Request model for resource imbalance alerts from monitoring systems.

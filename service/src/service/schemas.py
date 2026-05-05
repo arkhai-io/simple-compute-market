@@ -41,11 +41,6 @@ class ActionType(str, Enum):
     # Resource management
     RESOLVE_INTERNALLY = "resolve_internally"
     OUTSOURCE = "outsource"
-    FULFILL_COMPUTE_OBLIGATION = "fulfill_compute_obligation"
-    TRUST_COMPUTE_OBLIGATION_FULFILLMENT = "trust_compute_obligation_fulfillment"
-    COLLECT_ESCROW = "collect_escrow"
-    HANDLE_FULFILLMENT_FAILURE = "handle_fulfillment_failure"
-    VERIFY_COMPUTE_OBLIGATION_FULFILLMENT = "verify_compute_obligation_fulfillment"
 
     # No-op
     NOOP = "noop"

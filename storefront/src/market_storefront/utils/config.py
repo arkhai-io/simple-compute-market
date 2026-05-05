@@ -128,11 +128,6 @@ class Config:
     agent_wallet_address: str
     alkahest_address_config_path: str | None
     agent_db_path: str
-    event_validation_mode: str
-    enable_redis_ingest: bool
-    redis_url: str
-    redis_channels: str
-    enable_event_queue: bool
     log_file_path: str | None
     log_level: str
     token_registry_path: str
@@ -263,12 +258,6 @@ def load_config() -> Config:
 
         # Seller-only bookkeeping.
         agent_db_path=str(_resolve("seller.db_path", "/tmp/agent.db")),
-        event_validation_mode=str(_resolve(
-            "seller.event_validation_mode", "warn",
-        )),
-        enable_event_queue=_resolve_bool(
-            "seller.enable_event_queue", False,
-        ),
         log_file_path=_resolve("seller.log_file_path", None),
         log_level=str(_resolve("seller.log_level", "INFO")),
         token_registry_path=str(_resolve(
@@ -337,11 +326,6 @@ def load_config() -> Config:
             "seller.negotiation_watchdog_interval", 60,
         ),
         default_vm_host=str(_resolve("seller.default_vm_host", "ww1")),
-
-        # Redis — sub-table [seller.redis].
-        enable_redis_ingest=_resolve_bool("seller.redis.enable", False),
-        redis_url=str(_resolve("seller.redis.url", "redis://localhost:6379")),
-        redis_channels=str(_resolve("seller.redis.channels", "events:*")),
 
         # Negotiation strategy. "bisection" is the safe default — no ML
         # dependencies required. Set to "rl" to use the trained Arkhai

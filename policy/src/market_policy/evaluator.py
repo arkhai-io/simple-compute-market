@@ -12,7 +12,7 @@ class CallableEvaluator:
 
     async def evaluate(self, context: DecisionContext) -> Action | None:
         result = self.func(context)
-        # Handle async policy callables (e.g., negotiation_respond_to_make_offer)
+        # Handle async policy callables.
         if asyncio.iscoroutine(result):
             return await result
         return result

@@ -36,7 +36,6 @@ def test_empty_toml_uses_all_defaults():
     assert cfg.indexer_url == "http://localhost:8080"
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
-    assert cfg.enable_redis_ingest is False
     # Default is "bisection" (not "") — prevents silent RL failures when torch
     # is unavailable. See ARCHITECTURE.md Known Issues: "Negotiation strategy
     # default was 'rl' (implicit)".
@@ -110,16 +109,16 @@ def test_int_bad_toml_value_falls_back_to_default():
 
 def test_bool_from_toml_native():
     cfg = _load_with_toml({
-        "seller": {"agent_id": "test_agent", "redis": {"enable": True}},
+        "seller": {"agent_id": "test_agent", "auto_register": True},
     })
-    assert cfg.enable_redis_ingest is True
+    assert cfg.auto_register is True
 
 
 def test_bool_from_toml_string_truthy():
     cfg = _load_with_toml({
-        "seller": {"agent_id": "test_agent", "redis": {"enable": "true"}},
+        "seller": {"agent_id": "test_agent", "auto_register": "true"},
     })
-    assert cfg.enable_redis_ingest is True
+    assert cfg.auto_register is True
 
 
 # ---------------------------------------------------------------------------
@@ -143,20 +142,6 @@ def test_seller_provisioning_subtable():
     assert cfg.provisioning_poll_interval == 5
 
 
-def test_seller_redis_subtable():
-    cfg = _load_with_toml({
-        "seller": {
-            "agent_id": "test_agent",
-            "redis": {
-                "enable": True,
-                "url": "redis://cache.example:6379/1",
-                "channels": "events:orders,events:trades",
-            },
-        },
-    })
-    assert cfg.enable_redis_ingest is True
-    assert cfg.redis_url == "redis://cache.example:6379/1"
-    assert cfg.redis_channels == "events:orders,events:trades"
 
 
 def test_seller_negotiation_subtable():

@@ -151,8 +151,6 @@ _INIT_USER_TEMPLATE = """\
 # resource_lease_grace_seconds = 1800
 # negotiation_timeout_seconds = 1800
 # negotiation_watchdog_interval = 60
-# event_validation_mode = "warn"
-# enable_event_queue = false
 
 [seller.provisioning]
 # service_url = "http://localhost:8085"
@@ -161,11 +159,6 @@ _INIT_USER_TEMPLATE = """\
 # frp_server_addr = ""
 # frp_domain = ""
 # frp_dashboard_password = ""
-
-[seller.redis]
-# enable = false
-# url = "redis://localhost:6379"
-# channels = "events:*"
 
 [seller.negotiation]
 # policy_mode = ""                              # "" (default → rl) | "bisection" | "rl"
