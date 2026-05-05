@@ -538,19 +538,28 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        buyer_address: str,
+        buyer_address: str | None = None,
         amount: str | None = None,
         token: str | None = None,
     ) -> StorefrontListingRefundResponse:
-        """POST /listings/refund"""
+        """POST /api/v1/listings/{listing_id}/refund
+
+        ``buyer_address`` is optional; the storefront resolves it from the
+        listing's recorded buyer when omitted.
+        """
         headers = self._auth_headers("refund_listing", listing_id)
-        body: dict[str, Any] = {"listing_id": listing_id, "buyer_address": buyer_address}
+        body: dict[str, Any] = {}
+        if buyer_address is not None:
+            body["buyer_address"] = buyer_address
         if amount is not None:
             body["amount"] = amount
         if token is not None:
             body["token"] = token
         return StorefrontListingRefundResponse.from_dict(
-            await self._post("/listings/refund", body, extra_headers=headers)
+            await self._post(
+                f"/api/v1/listings/{listing_id}/refund",
+                body, extra_headers=headers,
+            )
         )
 
     async def claim_listing(
@@ -1030,19 +1039,28 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         listing_id: str,
-        buyer_address: str,
+        buyer_address: str | None = None,
         amount: str | None = None,
         token: str | None = None,
     ) -> StorefrontListingRefundResponse:
-        """POST /listings/refund"""
+        """POST /api/v1/listings/{listing_id}/refund
+
+        ``buyer_address`` is optional; the storefront resolves it from the
+        listing's recorded buyer when omitted.
+        """
         headers = self._auth_headers("refund_listing", listing_id)
-        body: dict[str, Any] = {"listing_id": listing_id, "buyer_address": buyer_address}
+        body: dict[str, Any] = {}
+        if buyer_address is not None:
+            body["buyer_address"] = buyer_address
         if amount is not None:
             body["amount"] = amount
         if token is not None:
             body["token"] = token
         return StorefrontListingRefundResponse.from_dict(
-            self._post("/listings/refund", body, extra_headers=headers)
+            self._post(
+                f"/api/v1/listings/{listing_id}/refund",
+                body, extra_headers=headers,
+            )
         )
 
     def claim_listing(

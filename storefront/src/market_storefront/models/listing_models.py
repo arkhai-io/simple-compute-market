@@ -134,8 +134,12 @@ class CreateListingRequest(BaseModel):
 class RefundRequest(BaseModel):
     """Body for POST /api/v1/listings/{listing_id}/refund.
     listing_id is in the path; this body contains the payment details only.
+
+    ``buyer_address`` defaults to the listing's recorded buyer (the
+    storefront DB knows it once a deal closes); pass explicitly to
+    override.
     """
-    buyer_address: str
+    buyer_address: str | None = None
     amount: float | None = None
     token: str | None = None
 

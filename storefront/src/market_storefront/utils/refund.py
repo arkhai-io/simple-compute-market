@@ -19,15 +19,22 @@ from typing import Any
 ValidationResult = tuple  # ("ok", dict) | ("error", int, dict)
 
 
-def _validate_body(payload: dict) -> tuple[str, str]:
-    """Raise ValueError on bad body; otherwise return (listing_id, buyer_address)."""
+def _validate_body(payload: dict, *, fallback_buyer: str | None = None) -> tuple[str, str]:
+    """Raise ValueError on bad body; otherwise return (listing_id, buyer_address).
+
+    ``fallback_buyer`` is the buyer address recorded on the listing — used
+    when the request body omits ``buyer_address``.
+    """
     listing_id = payload.get("listing_id")
     if not isinstance(listing_id, str) or not listing_id.strip():
         raise ValueError("Request must include non-empty listing_id")
 
-    buyer_address = payload.get("buyer_address")
+    buyer_address = payload.get("buyer_address") or fallback_buyer
     if not isinstance(buyer_address, str) or not buyer_address.strip():
-        raise ValueError("Request must include 'buyer_address' (0x-prefixed hex)")
+        raise ValueError(
+            "Request must include 'buyer_address' (0x-prefixed hex), or the "
+            "listing must have a recorded buyer."
+        )
     buyer_address = buyer_address.strip()
     if not (buyer_address.startswith("0x") and len(buyer_address) == 42):
         raise ValueError("'buyer_address' must be a 0x-prefixed 20-byte hex address")
@@ -55,7 +62,8 @@ def derive_refund_params(
 
     Raises ValueError for inputs the caller should surface as HTTP 400.
     """
-    listing_id, buyer_address = _validate_body(payload)
+    fallback_buyer = (order or {}).get("buyer")
+    listing_id, buyer_address = _validate_body(payload, fallback_buyer=fallback_buyer)
 
     if not order:
         return ("error", 404, {"error": f"Listing {listing_id} not found on this agent"})

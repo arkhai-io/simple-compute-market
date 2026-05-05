@@ -140,9 +140,11 @@ def claim_cmd(
 @escrow_app.command("refund")
 def refund_cmd(
     listing_id: str = typer.Argument(..., help="Local listing ID on the provider storefront."),
-    buyer_address: str = typer.Option(
-        ..., "--buyer", "-b",
-        help="0x-prefixed wallet address to receive the refund.",
+    buyer_address: Optional[str] = typer.Option(
+        None, "--buyer", "-b",
+        help="0x-prefixed wallet address to receive the refund. "
+             "Optional — the storefront resolves this from the listing's "
+             "recorded buyer when omitted. Pass explicitly to override.",
     ),
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
@@ -174,7 +176,7 @@ def refund_cmd(
     header.add_column()
     header.add_row("Storefront", base_url)
     header.add_row("Listing", listing_id)
-    header.add_row("Buyer", buyer_address)
+    header.add_row("Buyer", buyer_address or "[dim]from listing record[/dim]")
     if amount:
         header.add_row("Amount", f"{amount} {token or '(listing default)'}")
     else:
