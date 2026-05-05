@@ -1807,6 +1807,44 @@ All integration tests import `RegistryClient` from the `arkhai-registry-client` 
 
 The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above.  All previously-raw calls to `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, and `PUT /listings/{id}` have been replaced with typed client methods in `arkhai-registry-client` 0.2.0. Version 0.3.0 added `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) on both `RegistryClient` and `SyncRegistryClient`, plus `ValidatePublishRequest` and `ValidatePublishResponse` models.
 
+**service package (`market-service`)**:
+```
+service/tests/
+├── unit/
+│   ├── test_signing.py
+│   ├── test_heartbeat.py
+│   ├── test_role.py
+│   ├── test_alkahest.py
+│   ├── test_config_loader.py
+│   ├── test_token.py
+│   └── test_erc8004_blockchain.py   # pure-function tests (rpc_url conversion, canonical ID)
+└── integration/
+    └── test_abi_alignment.py        # ABI codec alignment — see pattern below
+```
+
+**ABI alignment test pattern (`service/tests/integration/test_abi_alignment.py`):**
+
+The `service.clients.erc8004.registration` module constructs Python dicts that are passed to web3's ABI codec as `MetadataEntry` struct arguments. If the dict field names don't match the ABI component names, web3 raises `KeyError` during `encode_abi()` before any transaction is broadcast. This is the failure mode that caused the `'metadataKey'` registration crash when the vendored ABI was updated from a hand-pasted version.
+
+The integration tests guard this invariant by calling `contract.encode_abi()` against the real vendored ABI using a provider-less `Web3()` instance — no Anvil, no deployment, no network:
+
+```python
+def test_register_with_metadata_encodes_without_error(contract):
+    metadata = _build_metadata_entries("agent", {"name": "agent"})
+    encoded = contract.encode_abi("register", args=["http://example/reg", metadata])
+    assert encoded
+```
+
+The `_build_metadata_entries()` helper in `registration.py` is the single authoritative source for struct field names — all metadata construction goes through it. When the ABI is updated, `test_metadata_entry_field_names_match_abi_struct` fails with an explicit message pointing at `_build_metadata_entries`.
+
+**Status / planned rework:**
+
+| Status | Problem | Planned fix |
+|---|---|---|
+| TODO | No EVM-level test for registration *logic* (detecting existing agents, idempotent updates, event parsing) | Option A: add `eth-tester[py-evm]` to service dev deps; add fixture that deploys IdentityRegistry bytecode into `EthereumTesterProvider`; write tests for `register_onchain_from_config` against local EVM. Requires bytecode available in repo (currently only ABI is vendored). Evaluate after erc-8004-contracts compilation artifacts are stable. |
+
+
+
 **integration-tests**:
 ```
 integration-tests/

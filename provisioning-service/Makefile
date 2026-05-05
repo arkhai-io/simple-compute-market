@@ -64,7 +64,7 @@ deploy-provisioning: ## Run the provisioning container (mock provisioning)
 	$(IMAGE_NAME):$(IMAGE_TAG)
 
 docker-run-dev: ## Run the service with host IaC + SSH key mounted (local dev)
-	docker run --rm \
+	docker run -it --rm --name provisioning \
 	-e ACTIVE_PROFILES=docker,mock \
 	--network market -p 8081:8081 \
 	-v "$(IAC_DIR):/opt/compute-provisioning-iac" \

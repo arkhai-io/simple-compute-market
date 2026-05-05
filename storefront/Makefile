@@ -17,6 +17,7 @@ init: ## Resolve deps and create .venv. Run once after checkout or after changin
 
 reinit: ## Force-reinstall internal wheels without bumping versions. Use after make dist-*.
 	uv sync --find-links $(DIST_DIR) \
+	--reinstall-package market-service \
 	--reinstall-package provisioning-service \
 	--reinstall-package arkhai-storefront-client \
 	--reinstall-package arkhai-registry-client
@@ -48,7 +49,8 @@ deploy: deploy-seller-agent
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://market-agent-sell:8001`.
 deploy-seller-agent:
-	docker run --rm -d --network market --name market-agent-sell -p 8001:8001 \
+	docker run --rm -d --name market-agent-sell \
+	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \

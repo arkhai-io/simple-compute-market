@@ -1,6 +1,6 @@
 [project]
 name = "market-service"
-version = "0.1.0"
+version = "0.1.1"
 description = "External service clients for the agent marketplace"
 requires-python = ">=3.10,<3.14"
 dependencies = [
@@ -20,6 +20,7 @@ packages = ["src/service"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [

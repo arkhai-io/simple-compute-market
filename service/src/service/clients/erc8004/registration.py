@@ -70,6 +70,56 @@ def build_registration_file_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/.well-known/erc-8004-registration.json"
 
 
+def _build_metadata_entries(
+    agent_name: str,
+    agent_card_data: dict,
+    labels: dict | None = None,
+) -> list[dict]:
+    """Build MetadataEntry structs for on-chain registration.
+
+    Field names MUST match the MetadataEntry struct in the IdentityRegistry ABI:
+      - 'metadataKey'   (string)
+      - 'metadataValue' (bytes, supplied as a hex string for web3.py encoding)
+
+    If the ABI struct is ever renamed, update this function and the test in
+    service/tests/integration/test_abi_alignment.py will catch any drift.
+
+    Args:
+        agent_name:      Human-readable name stored on-chain.
+        agent_card_data: Agent card dict serialised to JSON and stored on-chain.
+        labels:          Optional category/type labels.  Defaults to
+                         ``{"category": "compute", "type": "trader"}``.
+
+    Returns:
+        List of MetadataEntry dicts ready to pass to ``contract.functions.register()``.
+    """
+    from web3 import Web3  # deferred — Web3 import is heavy and tests may patch it
+
+    if labels is None:
+        labels = {"category": "compute", "type": "trader"}
+
+    return [
+        {
+            "metadataKey": "name",
+            "metadataValue": Web3.to_hex(text=agent_name),
+        },
+        {
+            "metadataKey": "category",
+            "metadataValue": Web3.to_hex(text=labels.get("category", "compute")),
+        },
+        {
+            "metadataKey": "type",
+            "metadataValue": Web3.to_hex(text=labels.get("type", "trader")),
+        },
+        {
+            "metadataKey": "agentCard",
+            "metadataValue": Web3.to_hex(
+                text=json.dumps(agent_card_data, separators=(",", ":"))
+            ),
+        },
+    ]
+
+
 @dataclass(frozen=True)
 class RegisterOnchainConfig:
     """Caller-supplied inputs to ``register_onchain_from_config``.
@@ -195,8 +245,8 @@ async def update_existing_agent(
 
         # Fetch current metadata and compare
         for desired_meta in desired_metadata:
-            key = desired_meta['key']
-            desired_value_hex = desired_meta['value']
+            key = desired_meta['metadataKey']
+            desired_value_hex = desired_meta['metadataValue']
 
             try:
                 # Fetch current metadata value (returns bytes)
@@ -491,22 +541,13 @@ async def register_onchain(
 
         # Build metadata for on-chain storage
         final_agent_name = agent_name or agent_card_data.get("name") or "root_agent"
-        labels = {"category": "compute", "type": "trader"}  # Default labels
 
-        # Official contract: register(string tokenUri, MetadataEntry[] metadata)
-        # MetadataEntry is {string key, bytes value} - format matches viem's toHex output
-        # Store essential metadata on-chain for composability
-        metadata = [
-            # Store agent name on-chain (as per ERC-8004 spec example)
-            # Uses AGENT_NAME env var if provided, otherwise from agent card, otherwise AGENT_ID
-            {"key": "name", "value": Web3.to_hex(text=final_agent_name)},
-            # Store category and type for filtering/discovery
-            {"key": "category", "value": Web3.to_hex(text=labels.get("category", "compute"))},
-            {"key": "type", "value": Web3.to_hex(text=labels.get("type", "trader"))},
-            # Store full agent card JSON as bytes for on-chain access
-            # Convert agent card dict to JSON string, then to bytes, then to hex
-            {"key": "agentCard", "value": Web3.to_hex(text=json.dumps(agent_card_data, separators=(',', ':')))},
-        ]
+        # Official contract: register(string agentURI, MetadataEntry[] metadata)
+        # MetadataEntry field names are defined by the ABI struct — see _build_metadata_entries.
+        metadata = _build_metadata_entries(
+            agent_name=final_agent_name,
+            agent_card_data=agent_card_data,
+        )
 
         # If we found an existing agent ID, check for changes and update if needed (idempotent)
         # CRITICAL: Use 'is not None' instead of truthy check because agent_id 0 is valid!
