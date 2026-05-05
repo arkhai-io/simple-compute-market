@@ -83,9 +83,10 @@ def main(
 @app.command("register")
 def register_cmd(
     chain_id: int = typer.Option(
-        1337, "--chain-id",
-        help="Numeric chain ID for canonical-id construction "
-             "(default 1337 for the local Anvil stack).",
+        None, "--chain-id",
+        help="Numeric chain ID for canonical-id construction. "
+             "When omitted, queried from chain.rpc_url via eth_chainId; "
+             "falls back to 1337 (local Anvil) if no RPC is configured.",
     ),
 ) -> None:
     """Register the storefront on-chain via ERC-8004.
@@ -95,8 +96,45 @@ def register_cmd(
     deployment; idempotent on subsequent runs.
     """
     from .commands.register import run_register
+    from .utils.config import CONFIG
 
-    raise typer.Exit(asyncio.run(run_register(chain_id=chain_id)))
+    resolved_chain_id = chain_id
+    if resolved_chain_id is None:
+        resolved_chain_id = _query_chain_id(CONFIG.chain_rpc_url) or 1337
+        typer.echo(f"Using chain_id={resolved_chain_id} (auto-detected).")
+
+    raise typer.Exit(asyncio.run(run_register(chain_id=resolved_chain_id)))
+
+
+def _query_chain_id(rpc_url: str | None) -> int | None:
+    """Query eth_chainId against the configured RPC.
+
+    Returns None on any failure (network, malformed reply, no rpc_url).
+    The caller falls back to a default — `register` accepts a wrong
+    chain_id more gracefully than a stuck startup, so we prefer "fall
+    through with default" over "crash".
+    """
+    if not rpc_url or not rpc_url.strip():
+        return None
+    try:
+        import json as _json
+        from urllib.request import Request, urlopen
+        req = Request(
+            rpc_url,
+            data=_json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=5) as resp:
+            body = _json.loads(resp.read())
+        return int(body.get("result", "0x0"), 16) or None
+    except Exception as exc:
+        typer.secho(
+            f"[register] eth_chainId lookup against {rpc_url!r} failed: {exc}",
+            err=True, fg=typer.colors.YELLOW,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
