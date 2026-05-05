@@ -17,6 +17,7 @@ RUN chown appuser:appuser /app
 USER appuser
 
 COPY --chown=appuser:appuser provisioning-service/pyproject.toml provisioning-service/uv.lock ./
+COPY --chown=appuser:appuser provisioning-service/src ./src
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
     uv sync --frozen --no-dev --no-install-project
 
