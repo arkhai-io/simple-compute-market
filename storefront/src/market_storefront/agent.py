@@ -160,36 +160,62 @@ async def _start_heartbeat():
 
 
 async def _preflight_provisioning() -> None:
-    """Ping the provisioning service and log a loud warning if it's down.
+    """Block startup until the provisioning service responds, or give up.
 
-    Runs once, ~10s after startup (to let compose dependencies settle).
-    Does not hard-fail — provisioning may come up later, and we want the
-    agent to keep serving unrelated endpoints.
+    Polls ``provisioning_service_url/health`` until it returns 200 or the
+    configured ``preflight_timeout`` elapses. On timeout:
+      * ``fail_on_unreachable=True`` (default): raise ``RuntimeError``,
+        which propagates out of ``_startup_tasks`` and crashes the
+        process. An orchestrator restart loop surfaces the misconfig
+        immediately rather than letting it hide in logs until the first
+        settle attempt fails.
+      * ``fail_on_unreachable=False``: log loud and return — useful for
+        dev where the service comes up later in the same pod.
+
+    The hint about ``ACTIVE_PROFILES=mock`` is preserved in the error
+    message because that's the most common e2e setup.
     """
     import httpx
 
-    await asyncio.sleep(10)
     url = CONFIG.provisioning_service_url.rstrip("/") + "/health"
-    try:
-        async with httpx.AsyncClient(timeout=5) as http:
-            resp = await http.get(url)
+    timeout_s = max(int(CONFIG.provisioning_preflight_timeout), 1)
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    last_error: str | None = None
+    attempt = 0
+
+    while True:
+        attempt += 1
+        try:
+            async with httpx.AsyncClient(timeout=5) as http:
+                resp = await http.get(url)
             if resp.status_code == 200:
-                logger.info("[STARTUP] Provisioning service reachable at %s",
-                            CONFIG.provisioning_service_url)
+                logger.info(
+                    "[STARTUP] Provisioning service reachable at %s (attempt %d)",
+                    CONFIG.provisioning_service_url, attempt,
+                )
                 return
-            logger.warning(
-                "[STARTUP] Provisioning service at %s returned HTTP %d — "
-                "fulfillment will fail until this is resolved",
-                CONFIG.provisioning_service_url, resp.status_code,
-            )
-    except Exception as exc:
-        logger.warning(
-            "A working PROVISIONING_SERVICE_URL is required; "
-            "fulfillment will fail until this is resolved. "
-            "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
-            "provisioning-service container. (url=%s err=%s: %s)",
-            CONFIG.provisioning_service_url, type(exc).__name__, exc,
+            last_error = f"HTTP {resp.status_code}"
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+
+        remaining = deadline - asyncio.get_event_loop().time()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(2.0, remaining))
+
+    msg = (
+        f"[STARTUP] Provisioning service at {CONFIG.provisioning_service_url} "
+        f"unreachable after {timeout_s}s ({last_error}). "
+        "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
+        "provisioning-service container."
+    )
+    if CONFIG.provisioning_fail_on_unreachable:
+        raise RuntimeError(
+            msg + " Set [seller.provisioning].fail_on_unreachable = false "
+            "to start the storefront anyway (fulfillment will fail until the "
+            "service is reachable)."
         )
+    logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
 def _maybe_join_zerotier_network() -> None:
@@ -248,5 +274,8 @@ async def _startup_tasks():
         CONFIG.negotiation_timeout_seconds,
     )
 
-    # Preflight: warn loudly if the provisioning service is unreachable.
-    asyncio.create_task(_preflight_provisioning())
+    # Preflight: block startup until the provisioning service is reachable.
+    # Crashes the process on timeout if [seller.provisioning].fail_on_unreachable
+    # is true (default), so the misconfig surfaces immediately rather than
+    # going silent until the first settle attempt fails.
+    await _preflight_provisioning()

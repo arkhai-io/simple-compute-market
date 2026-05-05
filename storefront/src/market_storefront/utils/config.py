@@ -152,6 +152,12 @@ class Config:
     provisioning_service_url: str
     provisioning_timeout: int
     provisioning_poll_interval: int
+    # Preflight: how long to wait for /health to come up at startup, and
+    # whether to crash the process on failure. fail_on_unreachable=true is
+    # the prod-correct default (orchestrator restarts surface the misconfig);
+    # set false in dev/CI when the service comes up later in the same pod.
+    provisioning_preflight_timeout: int
+    provisioning_fail_on_unreachable: bool
     frp_server_addr: str | None
     frp_domain: str | None
     frp_dashboard_password: str | None
@@ -303,6 +309,12 @@ def load_config() -> Config:
         ),
         provisioning_poll_interval=_resolve_int(
             "seller.provisioning.poll_interval", 15,
+        ),
+        provisioning_preflight_timeout=_resolve_int(
+            "seller.provisioning.preflight_timeout", 30,
+        ),
+        provisioning_fail_on_unreachable=_resolve_bool(
+            "seller.provisioning.fail_on_unreachable", True,
         ),
         frp_server_addr=_resolve("seller.provisioning.frp_server_addr", None),
         frp_domain=_resolve("seller.provisioning.frp_domain", None),
