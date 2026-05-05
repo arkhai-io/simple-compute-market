@@ -498,9 +498,8 @@ def register(app: typer.Typer) -> None:
         pk = resolve_config_value(
             override=buyer_private_key, toml_path="wallet.private_key",
         )
-        ssh = resolve_config_value(
-            override=ssh_public_key, toml_path="wallet.ssh_public_key",
-        )
+        from ..common import resolve_ssh_public_key
+        ssh = resolve_ssh_public_key(override=ssh_public_key)
         reg = resolve_config_value(
             override=registry_url, toml_path="registry.url",
         )
@@ -516,16 +515,28 @@ def register(app: typer.Typer) -> None:
             toml_path="chain.alkahest_address_config_path",
         )
 
+        _key_for = {
+            "buyer_address": "wallet.address",
+            "buyer_priv_key": "wallet.private_key",
+            "ssh_public_key": "wallet.ssh_public_key",
+            "registry_url": "registry.url",
+            "rpc_url": "chain.rpc_url",
+        }
         missing = [n for n, v in (
             ("buyer_address", addr), ("buyer_priv_key", pk),
             ("ssh_public_key", ssh), ("registry_url", reg),
             ("rpc_url", rpc),
         ) if not v]
         if missing:
+            typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
+            for name in missing:
+                typer.secho(
+                    f"  • {name} — set with: market config set {_key_for[name]} <value>",
+                    err=True, fg=typer.colors.RED,
+                )
             typer.secho(
-                f"Missing required config: {', '.join(missing)}. "
-                "Pass --flags or set corresponding env vars.",
-                err=True, fg=typer.colors.RED,
+                "Run `market config init-user` to scaffold a config file with the full set of keys.",
+                err=True, fg=typer.colors.YELLOW,
             )
             raise typer.Exit(2)
 

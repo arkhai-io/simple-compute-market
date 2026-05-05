@@ -21,9 +21,24 @@ network_app = typer.Typer(no_args_is_help=True)
 
 @network_app.command("join")
 def network_join(
-    network_id: str = typer.Argument(..., help="ZeroTier network ID to join."),
+    network_id: str = typer.Argument(
+        None,
+        help="ZeroTier network ID. Defaults to seller.zerotier_network from config.toml.",
+    ),
 ) -> None:
     """Join a ZeroTier network."""
+    from ..common import resolve_config_value
+    network_id = network_id or resolve_config_value(
+        toml_path="seller.zerotier_network",
+    )
+    if not network_id:
+        typer.secho(
+            "No network_id provided and seller.zerotier_network is not set in config.toml. "
+            "Pass the network ID explicitly or run "
+            "`market config set seller.zerotier_network <id>` first.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
     run_step(
         f"Join ZeroTier network {network_id}",
         ["make", "join", f"NETWORK_ID={network_id}"],

@@ -30,6 +30,34 @@ def resolve_config_value(
     return default
 
 
+def resolve_ssh_public_key(*, override: str | None = None) -> str:
+    """Resolve the buyer's SSH public key for provisioning.
+
+    Precedence: explicit override > ``wallet.ssh_public_key`` from config.toml
+    > the first standard public-key file found in ``~/.ssh/``. Returns an
+    empty string if no source has one — the caller decides whether that's
+    fatal (settle requires it; reclaim/refund don't).
+
+    The ~/.ssh fallback covers the most common case where the user has an
+    ed25519/rsa keypair but never added it to config.toml. Order matches
+    OpenSSH's identity-file default search order.
+    """
+    explicit = resolve_config_value(override=override, toml_path="wallet.ssh_public_key")
+    if explicit:
+        return explicit
+    home_ssh = Path.home() / ".ssh"
+    for fname in ("id_ed25519.pub", "id_ecdsa.pub", "id_rsa.pub"):
+        p = home_ssh / fname
+        if p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8").strip()
+            except OSError:
+                continue
+            if content:
+                return content
+    return ""
+
+
 def resolve_default_token() -> str:
     """Pick the buyer's default token symbol for `--token-contract` resolution.
 

@@ -186,9 +186,11 @@ def resolve_chain_settings(
     don't submit settlement (the SSH key only matters for the seller's
     provisioning step).
     """
+    from ..common import resolve_ssh_public_key
+
     addr = resolve_config_value(override=buyer_address, toml_path="wallet.address")
     pk = resolve_config_value(override=buyer_private_key, toml_path="wallet.private_key")
-    ssh = resolve_config_value(override=ssh_public_key, toml_path="wallet.ssh_public_key")
+    ssh = resolve_ssh_public_key(override=ssh_public_key)
     rpc = resolve_config_value(override=rpc_url, toml_path="chain.rpc_url")
     chain = resolve_config_value(
         override=chain_name, toml_path="chain.name", default="ethereum_sepolia",
@@ -197,6 +199,12 @@ def resolve_chain_settings(
         override=alkahest_addr_config, toml_path="chain.alkahest_address_config_path",
     )
 
+    _key_for = {
+        "buyer_address": "wallet.address",
+        "buyer_priv_key": "wallet.private_key",
+        "rpc_url": "chain.rpc_url",
+        "ssh_public_key": "wallet.ssh_public_key",
+    }
     missing = [n for n, v in (
         ("buyer_address", addr), ("buyer_priv_key", pk),
         ("rpc_url", rpc),
@@ -204,10 +212,15 @@ def resolve_chain_settings(
     if require_ssh and not ssh:
         missing.append("ssh_public_key")
     if missing:
+        typer.secho("Missing required config:", err=True, fg=typer.colors.RED)
+        for name in missing:
+            typer.secho(
+                f"  • {name} — set with: market config set {_key_for[name]} <value>",
+                err=True, fg=typer.colors.RED,
+            )
         typer.secho(
-            f"Missing required config: {', '.join(missing)}. "
-            "Pass --flags or set corresponding [wallet]/[chain] keys in config.toml.",
-            err=True, fg=typer.colors.RED,
+            "Run `market config init-user` to scaffold a config file with the full set of keys.",
+            err=True, fg=typer.colors.YELLOW,
         )
         raise typer.Exit(2)
 
