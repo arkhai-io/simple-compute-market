@@ -140,7 +140,7 @@ class ResumeState:
     us the server-assigned ``negotiation_id``, the rounds we've
     observed, and the seller's last-known price. We replay that into
     the strategy and continue the round loop without going through
-    ``/negotiate/new`` again (the seller has the thread already).
+    ``/api/v1/negotiate/new`` again (the seller has the thread already).
     """
     negotiation_id: str
     transcript: list[NegotiationRound]
@@ -168,14 +168,14 @@ def negotiate_with_seller(
     to haggle). `max_price` is the buyer's absolute ceiling — any seller
     counter at or below convergence to this gets accepted.
 
-    `duration_seconds` is the buyer's lease ask, sent on /negotiate/new
+    `duration_seconds` is the buyer's lease ask, sent on /api/v1/negotiate/new
     and validated server-side against the listing's max_duration_seconds
     (if set). Required for fresh starts; ignored in resume mode (the
     duration was already recorded on the seller's negotiation thread
-    when the original /negotiate/new fired).
+    when the original /api/v1/negotiate/new fired).
 
     The negotiation_id is server-assigned (returned in the
-    /negotiate/new response) and threaded through every subsequent
+    /api/v1/negotiate/new response) and threaded through every subsequent
     /negotiate/{neg_id} round; the buyer doesn't supply it.
 
     `on_round(round_idx, our_msg, their_reply)` is an optional observer
@@ -194,7 +194,7 @@ def negotiate_with_seller(
         strategy = load_strategy()
 
     if resume is not None:
-        # Resume mode: skip /negotiate/new and the first counter exchange.
+        # Resume mode: skip /api/v1/negotiate/new and the first counter exchange.
         # We trust the run-log's recorded transcript and the seller's last
         # counter price; the strategy decides our next move from there.
         if resume.last_seller_price is None:
@@ -211,7 +211,7 @@ def negotiate_with_seller(
         }
         round_idx = max(1, resume.rounds_completed)
     else:
-        # --- Round 0: /negotiate/new ---------------------------------------
+        # --- Round 0: /api/v1/negotiate/new ---------------------------------------
         if duration_seconds is None or duration_seconds <= 0:
             raise RuntimeError(
                 "duration_seconds is required for fresh negotiations "
@@ -225,7 +225,7 @@ def negotiate_with_seller(
         }
         sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
         reply = _post(
-            f"{seller_url}/negotiate/new", new_body,
+            f"{seller_url}/api/v1/negotiate/new", new_body,
             signature=sig, timestamp=ts,
         )
         if on_round:
@@ -252,9 +252,9 @@ def negotiate_with_seller(
             )
         # From here on seller_action should be "counter".
         if seller_action != "counter":
-            raise RuntimeError(f"Unexpected seller action on /negotiate/new: {seller_action!r}")
+            raise RuntimeError(f"Unexpected seller action on /api/v1/negotiate/new: {seller_action!r}")
         if not neg_id:
-            raise RuntimeError("/negotiate/new returned counter but no negotiation_id")
+            raise RuntimeError("/api/v1/negotiate/new returned counter but no negotiation_id")
 
         our_counters.append(int(initial_price))
         transcript.append(NegotiationRound(
@@ -291,7 +291,7 @@ def negotiate_with_seller(
 
         sig, ts = _sign(f"negotiate_continue:{neg_id}", buyer_private_key)
         reply = _post(
-            f"{seller_url}/negotiate/{neg_id}", body,
+            f"{seller_url}/api/v1/negotiate/{neg_id}", body,
             signature=sig, timestamp=ts,
         )
         if on_round:

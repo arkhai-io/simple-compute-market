@@ -6,10 +6,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-# ---------------------------------------------------------------------------
-# /negotiate/new — buyer → seller to start a negotiation
-# ---------------------------------------------------------------------------
-
 class NegotiateNewRequest(BaseModel):
     listing_id: str
     buyer_address: str
@@ -25,10 +21,6 @@ class NegotiateNewResponse(BaseModel):
     reason: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# /negotiate/{neg_id} — buyer continues an existing negotiation
-# ---------------------------------------------------------------------------
-
 class NegotiateContinueRequest(BaseModel):
     action: Literal["counter", "accept", "exit"]
     buyer_address: str
@@ -42,10 +34,6 @@ class NegotiateContinueResponse(BaseModel):
     reason: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# /api/v1/listings/{id}/negotiations — admin read and control API
-# ---------------------------------------------------------------------------
-
 class NegotiationSummary(BaseModel):
     negotiation_id: str
     our_listing_id: str
@@ -54,7 +42,6 @@ class NegotiationSummary(BaseModel):
     agreed_price: int | None = None
     round_count: int = 0
     created_at: str | None = None
-
     model_config = {"extra": "allow"}
 
 
@@ -71,7 +58,6 @@ class NegotiationMessage(BaseModel):
     sender: str
     action_taken: str
     proposed_price: int | None = None
-
     model_config = {"extra": "allow"}
 
 
@@ -84,13 +70,8 @@ class NegotiationDetailResponse(BaseModel):
     round_count: int = 0
     messages: list[dict[str, Any]] = Field(default_factory=list)
     stage_events: list[dict[str, Any]] = Field(default_factory=list)
-
     model_config = {"extra": "allow"}
 
-
-# ---------------------------------------------------------------------------
-# Admin negotiation control
-# ---------------------------------------------------------------------------
 
 class AdvanceRequest(BaseModel):
     action: Literal["counter", "accept", "exit"]
@@ -106,3 +87,9 @@ class ForceAcceptResponse(BaseModel):
     action: str
     price: int
     source: str = "admin_force_accept"
+
+
+class AdvanceResponse(BaseModel):
+    action: str
+    price: int | None = None
+    reason: str | None = None

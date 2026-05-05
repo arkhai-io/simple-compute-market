@@ -12,10 +12,18 @@ class SettleRequest(BaseModel):
     buyer_address: str
 
 
+class SettleResponse(BaseModel):
+    """Response for POST /api/v1/settle/{escrow_uid} (202 while provisioning)."""
+    escrow_uid: str
+    status: str
+    provisioning_job_id: str | None = None
+    model_config = {"extra": "allow"}
+
+
 class SettleStatusResponse(BaseModel):
+    """Response for GET /api/v1/settle/{escrow_uid}/status."""
     escrow_uid: str
     status: str
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
-
     model_config = {"extra": "allow"}

@@ -102,27 +102,22 @@ class StorefrontListingCreateResponse:
     """Response from POST /listings/create.
 
     status values:
-        ``"created"``   — storefront processed synchronously; listing_id set.
-        ``"no_action"`` — storefront ran but did not create a listing.
-        ``"queued"``    — enable_event_queue is True; processed async.
+        ``"created"``   — policy accepted; listing_id is set.
+        ``"no_action"`` — policy ran but did not create a listing (no matching policy).
     """
 
     status: str | None = None
-    event_id: str | None = None
     listing_id: str | None = None
     root_agent_response: str | None = None
-    listing_request: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "StorefrontListingCreateResponse":
-        known = {"status", "event_id", "listing_id", "root_agent_response", "listing_request"}
+        known = {"status", "listing_id", "root_agent_response"}
         return cls(
             status=d.get("status"),
-            event_id=d.get("event_id"),
             listing_id=d.get("listing_id"),
             root_agent_response=d.get("root_agent_response"),
-            listing_request=d.get("listing_request", {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -136,23 +131,20 @@ class StorefrontListingCreateResponse:
 class StorefrontListingCloseResponse:
     """Response from POST /listings/close.
 
-    status values: ``"closed"`` | ``"queued"``
+    status values: ``"closed"``
     """
 
-    status: str | None = None
-    event_id: str | None = None
+    listing_id: str | None = None
     root_agent_response: str | None = None
-    listing_request: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "StorefrontListingCloseResponse":
-        known = {"status", "event_id", "root_agent_response", "listing_request"}
+        known = {"status", "listing_id", "root_agent_response"}
         return cls(
             status=d.get("status"),
-            event_id=d.get("event_id"),
+            listing_id=d.get("listing_id"),
             root_agent_response=d.get("root_agent_response"),
-            listing_request=d.get("listing_request", {}),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

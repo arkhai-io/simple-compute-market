@@ -6,10 +6,8 @@ without an HTTP request/response cycle.
 Three responsibilities:
   seed_policies()          — discover @policy_callable decorators + seed DB rows
   get_policy_status()      — read callable registry + seeded policies with resolvability
-  evaluate_order_create()  — dry-run a synthetic order_create event through the policy engine
-
 None of these methods write to the registry or produce side-effects beyond SQLite
-(seed_policies writes policy rows; evaluate_order_create is fully read-only).
+(seed_policies writes policy rows; all other methods are read-only).
 """
 
 from __future__ import annotations
@@ -19,65 +17,32 @@ import logging
 import os
 import pkgutil
 import sys
-import uuid
-from dataclasses import dataclass, field
 from typing import Any
 
+import market_storefront.container as _container
 from market_policy.registry import CALLABLE_REGISTRY
 from market_policy.store import PolicyStore
 from market_storefront.policy.seeding import ComputePolicySeeder
-from market_storefront.models.domain_models import (
-    EventType,
-    ListingCreatedEvent,
+from market_storefront.models.system_models import (
+    ImportErrorResponse,
+    PolicyStatusResponse,
+    SeededPolicyInfo,
+    SeedPoliciesResponse,
 )
-from market_storefront.utils.action_executor import parse_resource_from_dict
 from market_storefront.utils.config import CONFIG
-from service.schemas import DecisionContext
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Result dataclasses — typed return values instead of raw dicts
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ModuleImportError:
-    module: str
-    error: str
-
-
-@dataclass
-class SeedResult:
-    callable_registry_count: int
-    callables: list[str]
-    seeded_policies: list[str]
-    import_errors: list[ModuleImportError]
-
-
-@dataclass
-class PolicyInfo:
-    policy_name: str
-    trigger_type: str | None
-    callable_ref: str | None
-    components: list[str]
-    components_resolvable: bool
-
-
-@dataclass
-class PolicyStatusResult:
-    callable_count: int
-    callable_registry: list[str]
-    seeded_policies: list[PolicyInfo]
-
-
-@dataclass
-class EvalResult:
-    action: str                   # "make_offer", "no_action", etc.
-    policy_used: str | None
-    components: list[str] = field(default_factory=list)
-    resolvable: bool = True
-    reason: str | None = None
+# Internal transfer object used only within _get_seeded_policies_detail
+class _PolicyInfoInternal:
+    __slots__ = ("policy_name", "trigger_type", "callable_ref", "components", "components_resolvable")
+    def __init__(self, policy_name, trigger_type, callable_ref, components, components_resolvable):
+        self.policy_name = policy_name
+        self.trigger_type = trigger_type
+        self.callable_ref = callable_ref
+        self.components = components
+        self.components_resolvable = components_resolvable
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +93,7 @@ class SystemService:
         store.register_callables(self._registry)
         return store
 
-    async def _get_seeded_policies_detail(self) -> list[PolicyInfo]:
+    async def _get_seeded_policies_detail(self) -> list[_PolicyInfoInternal]:
         """Load seeded policy rows from SQLite with per-policy resolvability."""
         try:
             rows = await self._db.list_seeded_policies()
@@ -138,7 +103,7 @@ class SystemService:
         for row in rows:
             components: list[str] = row.get("components") or []
             resolvable = all(c in self._registry for c in components)
-            result.append(PolicyInfo(
+            result.append(_PolicyInfoInternal(
                 policy_name=row.get("policy_name", ""),
                 trigger_type=row.get("trigger_type"),
                 callable_ref=row.get("callable_ref"),
@@ -171,7 +136,7 @@ class SystemService:
     # seed_policies
     # ------------------------------------------------------------------
 
-    async def seed_policies(self) -> SeedResult:
+    async def seed_policies(self) -> SeedPoliciesResponse:
         """Discover @policy_callable decorators and seed default policies to SQLite.
 
         Step 1: Ensure domain/ is on sys.path, then walk
@@ -191,7 +156,7 @@ class SystemService:
         """
         self._ensure_domain_on_sys_path()
 
-        import_errors: list[ModuleImportError] = []
+        import_errors: list[ImportErrorResponse] = []
         try:
             pkg = importlib.import_module(self.POLICY_PACKAGE)
             if hasattr(pkg, "__path__"):
@@ -199,7 +164,7 @@ class SystemService:
                     try:
                         importlib.import_module(mod_info.name)
                     except Exception as mod_exc:
-                        import_errors.append(ModuleImportError(
+                        import_errors.append(ImportErrorResponse(
                             module=mod_info.name, error=str(mod_exc)
                         ))
                         logger.warning(
@@ -220,7 +185,7 @@ class SystemService:
             p.policy_name for p in await self._get_seeded_policies_detail()
         ]
 
-        result = SeedResult(
+        result = SeedPoliciesResponse(
             callable_registry_count=len(self._registry),
             callables=sorted(self._registry.keys()),
             seeded_policies=seeded_names,
@@ -236,139 +201,22 @@ class SystemService:
     # get_policy_status
     # ------------------------------------------------------------------
 
-    async def get_policy_status(self) -> PolicyStatusResult:
+    async def get_policy_status(self) -> PolicyStatusResponse:
         """Return the callable registry contents and seeded policies with resolvability."""
         callables = sorted(self._registry.keys())
         seeded = await self._get_seeded_policies_detail()
-        return PolicyStatusResult(
+        return PolicyStatusResponse(
             callable_count=len(callables),
-            callable_registry=callables,
-            seeded_policies=seeded,
-        )
-
-    # ------------------------------------------------------------------
-    # evaluate_order_create
-    # ------------------------------------------------------------------
-
-    async def evaluate_order_create(
-        self,
-        *,
-        offer_raw: dict[str, Any],
-        demand_raw: dict[str, Any],
-        max_duration_seconds: int | None = None,
-    ) -> EvalResult:
-        """Dry-run a synthetic order_create event through the policy engine.
-
-        Parses ``offer_raw`` and ``demand_raw`` through the same resource
-        coercion path as ``POST /listings/create``, constructs a
-        ListingCreatedEvent, and calls PolicyStore.evaluate_policy with a
-        wired PolicyStore instance.
-
-        No SQLite writes.  No registry API calls.
-
-        Raises
-        ------
-        ValueError
-            If offer_raw or demand_raw cannot be parsed into valid resource models.
-
-        Returns
-        -------
-        EvalResult
-            ``action`` is the lower-cased ActionType value (e.g. ``"make_offer"``)
-            on success, or ``"no_action"`` with a populated ``reason`` when the
-            pipeline can't produce an action.
-        """
-        offer_resource = parse_resource_from_dict(offer_raw)
-        demand_resource = parse_resource_from_dict(demand_raw)
-
-        synthetic_event = ListingCreatedEvent(
-            event_id=f"dry_run_{uuid.uuid4().hex[:8]}",
-            source="dry_run",
-            offer=offer_resource,
-            demand=demand_resource,
-            max_duration_seconds=max_duration_seconds,
-            data={
-                "offer": offer_raw,
-                "demand": demand_raw,
-                "max_duration_seconds": max_duration_seconds,
-                "paused": False,
-            },
-        )
-
-        # Pre-flight: are there any policies seeded for this trigger?
-        seeded_all = await self._get_seeded_policies_detail()
-        oc_policies = [
-            p for p in seeded_all
-            if p.trigger_type == EventType.ORDER_CREATE.value
-        ]
-        if not oc_policies:
-            return EvalResult(
-                action="no_action",
-                policy_used=None,
-                components=[],
-                resolvable=False,
-                reason=(
-                    "No policies seeded for 'order_create' trigger. "
-                    "Call POST /admin/policy/seed first."
-                ),
-            )
-
-        # Surface unresolvable components before running evaluation so the error
-        # message names the missing callable(s) rather than silently returning None.
-        first_unresolvable = next(
-            (p for p in oc_policies if p.components and not p.components_resolvable),
-            None,
-        )
-        if first_unresolvable:
-            missing = [c for c in first_unresolvable.components if c not in self._registry]
-            return EvalResult(
-                action="no_action",
-                policy_used=first_unresolvable.policy_name,
-                components=first_unresolvable.components,
-                resolvable=False,
-                reason=(
-                    f"Components not in callable registry: {missing}. "
-                    "Call POST /admin/policy/seed."
-                ),
-            )
-
-        policy_store = self._make_policy_store()
-        ctx = DecisionContext(
-            agent_id=self._agent_id,
-            event=synthetic_event,
-            market_state={},
-            available_resources={},
-            past_experiences=[],
-            negotiation_history=[],
-        )
-
-        action = await policy_store.evaluate_policy(agent_id=self._agent_id, context=ctx)
-
-        first_policy = oc_policies[0]
-        if action is None:
-            return EvalResult(
-                action="no_action",
-                policy_used=first_policy.policy_name,
-                components=first_policy.components,
-                resolvable=len(self._registry) > 0,
-                reason=(
-                    "Policy evaluated but returned no action. "
-                    f"CALLABLE_REGISTRY has {len(self._registry)} entries. "
-                    "If 0, call POST /admin/policy/seed first."
-                ),
-            )
-
-        action_type = (
-            action.action_type.value
-            if hasattr(action.action_type, "value")
-            else str(action.action_type)
-        )
-        return EvalResult(
-            action=action_type.lower(),
-            policy_used=first_policy.policy_name,
-            components=first_policy.components,
-            resolvable=True,
-            reason=None,
+            callable_registry={k: k for k in callables},
+            seeded_policies=[
+                SeededPolicyInfo(
+                    policy_name=p.policy_name,
+                    trigger_type=p.trigger_type or "",
+                    components=p.components,
+                    components_resolvable=p.components_resolvable,
+                )
+                for p in seeded
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -404,7 +252,13 @@ class SystemService:
             checks["registry_auth"] = await self.registry_auth_check()
             checks["negotiation_strategy"] = self.negotiation_strategy_check()
 
-        all_ok = all(v in ("ok", "unconfigured") for v in checks.values())
+        # agent_not_found is a transient post-registration state (registry indexing lag)
+        # and is not a service degradation. Only hard errors cause degraded status.
+        # alkahest configured?
+        checks["alkahest"] = "ok" if _container.resolved_alkahest_configured else "unconfigured"
+
+        _non_degrading = {"ok", "unconfigured", "agent_not_found", "indexing"}
+        all_ok = all(v in _non_degrading for v in checks.values())
         return {"status": "ok" if all_ok else "degraded", "checks": checks}
 
     async def registry_check(self) -> str:
@@ -440,7 +294,10 @@ class SystemService:
         url = (CONFIG.indexer_url or "").rstrip("/")
         if not url:
             return "unconfigured"
-        onchain_id = CONFIG.onchain_agent_id
+        # Read the live runtime ID (set by _ensure_agent_identity at startup),
+        # not the config-file value (which may be stale or absent when auto_register=True).
+        from market_storefront.agent import _AGENT_ID as _live_agent_id
+        onchain_id = _live_agent_id or CONFIG.onchain_agent_id
         if not onchain_id:
             return "unconfigured"
         chain_id = CONFIG.chain_id

@@ -17,7 +17,7 @@ import logging
 
 import pytest
 
-from src.agent_client import AgentClient
+from storefront_client import SyncStorefrontClient
 from registry_client import RegistryClientError
 
 log = logging.getLogger(__name__)
@@ -35,11 +35,10 @@ def seller_api_url(seller_settings) -> str:
 
 
 @pytest.fixture(scope="module")
-def seller_client(seller_api_url: str, seller_settings: dict) -> AgentClient:
-    client = AgentClient(
+def seller_client(seller_api_url: str, seller_settings: dict) -> SyncStorefrontClient:
+    client = SyncStorefrontClient(
         base_url=seller_api_url,
         private_key=seller_settings["private_key"],
-        agent_wallet_address=seller_settings["wallet_address"],
     )
     yield client
     client.close()
@@ -49,13 +48,13 @@ def seller_client(seller_api_url: str, seller_settings: dict) -> AgentClient:
 class TestStorefrontRegistration:
     """Verify the deployed seller storefront is reachable and on-chain registered."""
 
-    def test_storefront_is_on_chain_registered(self, seller_client: AgentClient) -> None:
+    def test_storefront_is_on_chain_registered(self, seller_client: SyncStorefrontClient) -> None:
         """The registration file must contain at least one record with a
         non-zero agentId. Confirms the agent has been indexed by the
         registry and its on-chain identity is live.
         """
         try:
-            reg = seller_client.get_registration_file()
+            reg = seller_client.get_registration()
         except RegistryClientError as exc:
             pytest.fail(f"Could not fetch seller registration file.\n{exc}")
 
@@ -75,7 +74,7 @@ class TestStorefrontRegistration:
 
     def test_storefront_registry_address_matches_config(
         self,
-        seller_client: AgentClient,
+        seller_client: SyncStorefrontClient,
         registry_settings: dict,
     ) -> None:
         """The agentRegistry field in the registration file must contain
@@ -87,7 +86,7 @@ class TestStorefrontRegistration:
         """
         expected_address = registry_settings["identity_address"].lower()
         try:
-            reg = seller_client.get_registration_file()
+            reg = seller_client.get_registration()
         except RegistryClientError as exc:
             pytest.fail(f"Could not fetch seller registration file.\n{exc}")
 

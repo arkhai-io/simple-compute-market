@@ -4,11 +4,11 @@ Stage map
 ---------
 00a  Admin seeds policies (discover callables + write DB rows)
 00b  Policy dry-run asserts make_offer action would fire
-01   Seller creates order with paused=True (local only, not in registry)
-02   Storefront health ok; order visible locally with paused=True
-03   Registry does NOT yet contain the order (publish was skipped)
+01   Seller creates listing with paused=True (local only, not in registry)
+02   Storefront health ok; listing visible locally with paused=True
+03   Registry does NOT yet contain the listing (publish was skipped)
 04   POST /api/v1/listings/{listing_id}/resume → publishes to registry
-05   Registry now contains the order
+05   Registry now contains the listing
 06   Admin pause blocks /negotiate/new (503)
 07   Admin resume re-enables negotiations
 08   Buyer starts negotiation (POST /negotiate/new)
@@ -21,7 +21,7 @@ Stage map
 15   Provisioning gate released; job completes (long-poll)
 16   Settlement status=ready
 17   Tenant credentials present
-18   Seller order status=accepted
+18   Seller listing status=accepted
 """
 
 from __future__ import annotations
@@ -168,11 +168,11 @@ class TestStage00c_NegotiationStrategy:
 # Stage 01 — Create order (paused)
 # ---------------------------------------------------------------------------
 
-class TestStage01_CreateOrderPaused:
-    def test_01_seller_creates_order_paused(
+class TestStage01_CreateListingPaused:
+    def test_01_seller_creates_listing_paused(
         self, storefront_admin_client, seller_wallet, deal_state: DealState
     ):
-        """POST /orders/create with paused=True creates order in local SQLite
+        """POST /api/v1/listings/create with paused=True creates listing in local SQLite
         but does NOT publish to the registry.
         """
         require_state(deal_state, "_policy_evaluated")
@@ -183,13 +183,13 @@ class TestStage01_CreateOrderPaused:
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
-        order_id = resp.listing_id
-        assert order_id, (
-            f"No order_id in response — policy pipeline returned no action.\n"
+        listing_id = resp.listing_id
+        assert listing_id, (
+            f"No listing_id in response — policy pipeline returned no action.\n"
             f"Response: {resp}\n"
             f"Ensure stage 00a (policy seed) passed."
         )
-        deal_state.seller_listing_id = order_id
+        deal_state.seller_listing_id = listing_id
         log.info("[01] Order %s created (paused, not yet in registry)", order_id)
 
 
@@ -197,24 +197,24 @@ class TestStage01_CreateOrderPaused:
 # Stage 02 — Order visible locally with paused=True
 # ---------------------------------------------------------------------------
 
-class TestStage02_OrderLocallyPaused:
+class TestStage02_ListingLocallyPaused:
     def test_02_order_visible_locally_and_paused(
         self, storefront_admin_client, deal_state: DealState
     ):
-        """GET /api/v1/listings/{listing_id} shows the order as paused=True locally."""
+        """GET /api/v1/listings/{listing_id} shows the listing as paused=True locally."""
         require_state(deal_state, "seller_listing_id")
 
         health = storefront_admin_client.get_health()
         assert health.status == "ok", f"Storefront health degraded: {health}"
 
-        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert order.status == "open", f"Expected status=open, got {order.status!r}"
-        assert order.paused is True, (
-            f"Expected paused=True after paused create, got paused={order.paused}"
+        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert listing.status == "open", f"Expected status=open, got {order.status!r}"
+        assert listing.paused is True, (
+            f"Expected paused=True after paused create, got paused={listing.paused}"
         )
         deal_state.paused_create_confirmed = True
         log.info("[02] Order %s visible locally: status=%s paused=%s",
-                 deal_state.seller_listing_id, order.status, order.paused)
+                 deal_state.seller_listing_id, listing.status, listing.paused)
 
 
 # ---------------------------------------------------------------------------
@@ -222,10 +222,10 @@ class TestStage02_OrderLocallyPaused:
 # ---------------------------------------------------------------------------
 
 class TestStage03_RegistryDoesNotSeeOrder:
-    def test_03_registry_does_not_yet_contain_order(
+    def test_03_registry_does_not_yet_contain_listing(
         self, registry_client, deal_state: DealState
     ):
-        """The registry has no record of this order_id — publish was skipped."""
+        """The registry has no record of this listing_id — publish was skipped."""
         require_state(deal_state, "seller_listing_id")
 
         result = registry_client.list_listings(status="open", limit=200)
@@ -259,8 +259,8 @@ class TestStage04_ResumePublishesToRegistry:
         )
 
         # Confirm locally
-        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert order.paused is False, f"Local order still paused after resume: {order}"
+        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert listing.paused is False, f"Local listing still paused after resume: {listing}"
 
         deal_state.resume_confirmed = True
         log.info("[04] Order %s resumed; registry_status=%s",
@@ -272,10 +272,10 @@ class TestStage04_ResumePublishesToRegistry:
 # ---------------------------------------------------------------------------
 
 class TestStage05_RegistrySeesOrder:
-    def test_05_registry_now_contains_order(
+    def test_05_registry_now_contains_listing(
         self, registry_client, deal_state: DealState
     ):
-        """After resume, the order is immediately visible in the registry.
+        """After resume, the listing is immediately visible in the registry.
 
         No polling: resume_listing calls publish_order_to_registry synchronously
         and stage 04 already asserted registry_status=published.  By the time
@@ -647,10 +647,10 @@ class TestStage18_SellerOrderAccepted:
         """GET /api/v1/listings/{listing_id} shows status=accepted after settlement."""
         require_state(deal_state, "seller_listing_id", "settlement_submitted")
 
-        order = storefront_admin_client.get_listing(deal_state.seller_listing_id)
-        assert order.status in ("accepted", "closed"), (
-            f"Expected accepted/closed, got {order.status!r}"
+        listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
+        assert listing.status in ("accepted", "closed"), (
+            f"Expected accepted/closed, got {listing.status!r}"
         )
-        deal_state.seller_order_final_status = order.status
+        deal_state.seller_order_final_status = listing.status
         log.info("[18] Seller order %s status=%s",
-                 deal_state.seller_listing_id, order.status)
+                 deal_state.seller_listing_id, listing.status)

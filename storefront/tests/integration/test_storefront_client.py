@@ -57,18 +57,10 @@ async def mock_svc():
     svc = MagicMock()
     # ListingService methods
     svc.create_listing = AsyncMock(
-        return_value={
-            "status": "queued",
-            "event_id": "ev-test-123",
-            "listing_request": {},
-        }
+        return_value={"status": "created", "listing_id": "test-listing-123", "root_agent_response": ""}
     )
     svc.close_listing = AsyncMock(
-        return_value={
-            "status": "queued",
-            "event_id": "ev-close-456",
-            "listing_request": {},
-        }
+        return_value={"status": "closed", "listing_id": "test-listing-close", "root_agent_response": ""}
     )
     # PolicyPipelineService methods
     svc.handle_resource_alert = AsyncMock(
@@ -83,7 +75,7 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
     db = SQLiteClient(db_path=str(tmp_path / "orders_test.db"))
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = mock_svc
-    _container.resolved_policy_pipeline_service = mock_svc
+    _container.resolved_policy_service = mock_svc
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -94,12 +86,12 @@ async def orders_client(mock_svc, tmp_path) -> AsyncIterator[httpx.AsyncClient]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_pipeline_service = None
+    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def alerts_client(mock_svc) -> AsyncIterator[httpx.AsyncClient]:
-    _container.resolved_policy_pipeline_service = mock_svc
+    _container.resolved_policy_service = mock_svc
 
     app = FastAPI()
     app.include_router(alerts_router)
@@ -108,7 +100,7 @@ async def alerts_client(mock_svc) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
-    _container.resolved_policy_pipeline_service = None
+    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
@@ -127,7 +119,7 @@ async def identity_client() -> AsyncIterator[httpx.AsyncClient]:
 
 class TestAlertEndpoint:
     async def test_valid_alert_returns_200(self, alerts_client):
-        resp = await alerts_client.post("/alerts/resource", json=_ALERT_BODY)
+        resp = await alerts_client.post("/api/v1/alerts/resource", json=_ALERT_BODY)
         assert resp.status_code == 200
         data = resp.json()
         assert "root_agent_response" in data
@@ -136,12 +128,12 @@ class TestAlertEndpoint:
         """FastAPI/Pydantic returns 422 for missing required fields."""
         bad = dict(_ALERT_BODY)
         del bad["value"]
-        resp = await alerts_client.post("/alerts/resource", json=bad)
+        resp = await alerts_client.post("/api/v1/alerts/resource", json=bad)
         assert resp.status_code == 422
 
     async def test_alert_invalid_json_returns_422(self, alerts_client):
         resp = await alerts_client.post(
-            "/alerts/resource",
+            "/api/v1/alerts/resource",
             content=b"not json",
             headers={"Content-Type": "application/json"},
         )
@@ -150,7 +142,7 @@ class TestAlertEndpoint:
     async def test_alert_resource_missing_fields_returns_422(self, alerts_client):
         bad = dict(_ALERT_BODY)
         bad["resource"] = {"gpu_model": "RTX 4090"}  # missing gpu_count/sla/region
-        resp = await alerts_client.post("/alerts/resource", json=bad)
+        resp = await alerts_client.post("/api/v1/alerts/resource", json=bad)
         assert resp.status_code == 422
 
 
@@ -164,20 +156,20 @@ class TestCreateOrderEndpoint:
             "offer": _COMPUTE_OFFER,
             "demand": _TOKEN_DEMAND,
         }
-        resp = await orders_client.post("/listings/create", json=body)
+        resp = await orders_client.post("/api/v1/listings/create", json=body)
         assert resp.status_code == 200
         data = resp.json()
-        assert "event_id" in data
         assert "status" in data
+        assert data["status"] in ("created", "no_action")
 
     async def test_missing_offer_returns_422(self, orders_client):
         """CreateListingRequest Pydantic model requires offer; FastAPI returns 422."""
-        resp = await orders_client.post("/listings/create", json={"demand": _TOKEN_DEMAND})
+        resp = await orders_client.post("/api/v1/listings/create", json={"demand": _TOKEN_DEMAND})
         assert resp.status_code == 422
 
     async def test_missing_demand_returns_422(self, orders_client):
         """CreateListingRequest Pydantic model requires demand; FastAPI returns 422."""
-        resp = await orders_client.post("/listings/create", json={"offer": _COMPUTE_OFFER})
+        resp = await orders_client.post("/api/v1/listings/create", json={"offer": _COMPUTE_OFFER})
         assert resp.status_code == 422
 
 
@@ -187,19 +179,18 @@ class TestCreateOrderEndpoint:
 
 class TestCloseOrderEndpoint:
     async def test_valid_close_returns_200(self, orders_client):
-        resp = await orders_client.post("/listings/close", json={"listing_id": "test-order-abc"})
+        """listing_id is in the path, not the body."""
+        resp = await orders_client.post("/api/v1/listings/test-listing-abc/close", json={})
         assert resp.status_code == 200
         data = resp.json()
         assert "status" in data
-        assert "event_id" in data
 
-    async def test_missing_order_id_returns_400(self, orders_client):
-        resp = await orders_client.post("/listings/close", json={})
-        assert resp.status_code in (400, 422)
-
-    async def test_empty_order_id_returns_400(self, orders_client):
-        resp = await orders_client.post("/listings/close", json={"listing_id": ""})
-        assert resp.status_code in (400, 422)
+    async def test_unknown_listing_returns_404(self, orders_client):
+        """Close with a listing that doesn't exist in DB."""
+        # The mock listing_svc.close_listing always returns, so 404 only comes
+        # from missing path param or route mismatch.
+        resp = await orders_client.post("/api/v1/listings//close", json={})
+        assert resp.status_code in (404, 405, 422)
 
 
 # ---------------------------------------------------------------------------

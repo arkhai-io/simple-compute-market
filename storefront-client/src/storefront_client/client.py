@@ -453,20 +453,20 @@ class StorefrontClient(_StorefrontClientBase):
     async def admin_pause(self) -> AdminPauseResponse:
         """POST /admin/pause  (admin key required)"""
         return AdminPauseResponse.from_dict(
-            await self._post("/admin/pause", {}, extra_headers=self._admin_headers())
+            await self._post("/api/v1/admin/pause", {}, extra_headers=self._admin_headers())
         )
 
     async def admin_resume(self) -> AdminPauseResponse:
         """POST /admin/resume  (admin key required)"""
         return AdminPauseResponse.from_dict(
-            await self._post("/admin/resume", {}, extra_headers=self._admin_headers())
+            await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
     async def admin_status(self) -> AdminStatusResponse:
         """GET /admin/status  (admin key required)"""
-        url = self._url("/admin/status")
+        url = self._url("/api/v1/admin/status")
         resp = await self._client.get(
-            "/admin/status",
+            "/api/v1/admin/status",
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
@@ -475,7 +475,7 @@ class StorefrontClient(_StorefrontClientBase):
 
     async def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return await self._post("/admin/policy/seed", {}, extra_headers=self._admin_headers())
+        return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
 
     async def policy_status(self) -> dict:
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
@@ -598,7 +598,50 @@ class StorefrontClient(_StorefrontClientBase):
             "label": label,
             "threshold": threshold,
         }
-        return await self._post("/alerts/resource", body)
+        return await self._post("/api/v1/alerts/resource", body)
+
+
+    # ------------------------------------------------------------------
+    # Buyer protocol — negotiate
+    # These endpoints require EIP-191 signed X-Signature + X-Timestamp headers.
+    # In tests, auth is bypassed via monkeypatching buyer_auth._verify.
+    # ------------------------------------------------------------------
+
+    async def negotiate_new(
+        self,
+        *,
+        listing_id: str,
+        buyer_address: str,
+        initial_price: int,
+        duration_seconds: int,
+        buyer_agent_url: str = "",
+    ) -> dict:
+        """POST /api/v1/negotiate/new"""
+        body = {
+            "listing_id": listing_id,
+            "buyer_address": buyer_address,
+            "initial_price": initial_price,
+            "duration_seconds": duration_seconds,
+            "buyer_agent_url": buyer_agent_url,
+        }
+        return await self._post("/api/v1/negotiate/new", body)
+
+    async def negotiate_continue(
+        self,
+        neg_id: str,
+        *,
+        action: str,
+        buyer_address: str,
+        price: int | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        """POST /api/v1/negotiate/{neg_id}"""
+        body: dict = {"action": action, "buyer_address": buyer_address}
+        if price is not None:
+            body["price"] = price
+        if reason is not None:
+            body["reason"] = reason
+        return await self._post(f"/api/v1/negotiate/{neg_id}", body)
 
 
 # ---------------------------------------------------------------------------
@@ -903,20 +946,20 @@ class SyncStorefrontClient(_StorefrontClientBase):
     def admin_pause(self) -> AdminPauseResponse:
         """POST /admin/pause  (admin key required)"""
         return AdminPauseResponse.from_dict(
-            self._post("/admin/pause", {}, extra_headers=self._admin_headers())
+            self._post("/api/v1/admin/pause", {}, extra_headers=self._admin_headers())
         )
 
     def admin_resume(self) -> AdminPauseResponse:
         """POST /admin/resume  (admin key required)"""
         return AdminPauseResponse.from_dict(
-            self._post("/admin/resume", {}, extra_headers=self._admin_headers())
+            self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
     def admin_status(self) -> AdminStatusResponse:
         """GET /admin/status  (admin key required)"""
-        url = self._url("/admin/status")
+        url = self._url("/api/v1/admin/status")
         resp = self._client.get(
-            "/admin/status",
+            "/api/v1/admin/status",
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
@@ -925,7 +968,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
     def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
-        return self._post("/admin/policy/seed", {}, extra_headers=self._admin_headers())
+        return self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
 
     def policy_status(self) -> dict:
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
@@ -1047,4 +1090,44 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "label": label,
             "threshold": threshold,
         }
-        return self._post("/alerts/resource", body)
+        return self._post("/api/v1/alerts/resource", body)
+
+    # ------------------------------------------------------------------
+    # Buyer protocol — negotiate
+    # ------------------------------------------------------------------
+
+    def negotiate_new(
+        self,
+        *,
+        listing_id: str,
+        buyer_address: str,
+        initial_price: int,
+        duration_seconds: int,
+        buyer_agent_url: str = "",
+    ) -> dict:
+        """POST /api/v1/negotiate/new"""
+        body = {
+            "listing_id": listing_id,
+            "buyer_address": buyer_address,
+            "initial_price": initial_price,
+            "duration_seconds": duration_seconds,
+            "buyer_agent_url": buyer_agent_url,
+        }
+        return self._post("/api/v1/negotiate/new", body)
+
+    def negotiate_continue(
+        self,
+        neg_id: str,
+        *,
+        action: str,
+        buyer_address: str,
+        price: int | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        """POST /api/v1/negotiate/{neg_id}"""
+        body: dict = {"action": action, "buyer_address": buyer_address}
+        if price is not None:
+            body["price"] = price
+        if reason is not None:
+            body["reason"] = reason
+        return self._post(f"/api/v1/negotiate/{neg_id}", body)

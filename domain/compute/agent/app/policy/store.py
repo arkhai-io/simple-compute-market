@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from market_storefront.schema.pydantic_models import (
+from market_storefront.models.domain_models import (
     Action as DomainAction,
     ActionType as DomainActionType,
     ReceiveComputeObligationFulfillmentEvent,

@@ -1,7 +1,4 @@
-"""System controller — health, liveness, and policy diagnostic endpoints.
-
-Thin routing layer; all business logic delegated to SystemService singleton.
-"""
+"""System controller — health, liveness, policy diagnostics, and stage events."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +11,15 @@ from fastapi.responses import StreamingResponse
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
-from market_storefront.models.system_models import PolicyEvaluateRequest
+from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.models.system_models import (
+    HealthResponse,
+    PolicyEvaluateRequest,
+    PolicyEvaluateResponse,
+    PolicyStatusResponse,
+    SeedPoliciesResponse,
+    StageEventResponse,
+)
 from market_storefront.server import is_globally_paused
 
 logger = logging.getLogger(__name__)
@@ -28,25 +33,33 @@ class SystemController:
         self,
         db=Depends(lambda: _container.resolved_sqlite_client),
         system_svc=Depends(lambda: _container.resolved_system_service),
+        policy_svc=Depends(lambda: _container.resolved_policy_service),
     ) -> None:
         self._db = db
         self._svc = system_svc
+        self._policy_svc = policy_svc
 
-    @router.get("/health", summary="Kubernetes liveness probe")
-    async def health_bare(self) -> dict[str, Any]:
-        return await self._svc.get_health()
+    @router.get("/health", response_model=HealthResponse, summary="Kubernetes liveness probe")
+    async def health_bare(self) -> HealthResponse:
+        return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/health", summary="Versioned health alias")
-    async def health_versioned(self) -> dict[str, Any]:
-        return await self._svc.get_health()
+    @router.get("/api/v1/system/health", response_model=HealthResponse,
+                summary="Versioned health alias")
+    async def health_versioned(self) -> HealthResponse:
+        return HealthResponse(**(await self._svc.get_health()))
 
-    @router.get("/api/v1/system/status", summary="Full diagnostic status")
-    async def system_status(self) -> dict[str, Any]:
+    @router.get("/api/v1/system/status", response_model=HealthResponse,
+                summary="Full diagnostic status (includes registry + pause state)")
+    async def system_status(self) -> HealthResponse:
         body = await self._svc.get_health(include_registry=True)
         body["paused"] = is_globally_paused()
-        return body
+        return HealthResponse(**body)
 
-    @router.get("/api/v1/system/events", summary="Stage event log (admin)")
+    @router.get(
+        "/api/v1/system/events",
+        summary="Stage event log",
+        dependencies=[Depends(require_admin_key)],
+    )
     async def stream_events(
         self,
         request: Request,
@@ -69,7 +82,7 @@ class SystemController:
                 after_id=since_id, limit=limit,
                 stage=stage, listing_id=listing_id, negotiation_id=negotiation_id,
             )
-            return {"events": rows, "count": len(rows)}
+            return StageEventResponse(events=rows, count=len(rows))
 
         async def _generate():
             cursor = since_id
@@ -86,53 +99,55 @@ class SystemController:
 
         return StreamingResponse(_generate(), media_type="text/event-stream")
 
-    @router.post("/admin/policy/seed", summary="Seed default policies (admin)")
-    async def policy_seed(self) -> dict[str, Any]:
+    @router.post(
+        "/api/v1/admin/policy/seed",
+        response_model=SeedPoliciesResponse,
+        summary="Discover callables and seed default policies",
+        dependencies=[Depends(require_admin_key)],
+    )
+    async def policy_seed(self) -> SeedPoliciesResponse:
         try:
             result = await self._svc.seed_policies()
         except Exception as exc:
             logger.error("[POLICY SEED] %s", exc)
             raise HTTPException(status_code=500, detail=str(exc))
-        return {
-            "callable_registry_count": result.callable_registry_count,
-            "callables": result.callables,
-            "seeded_policies": result.seeded_policies,
-            "import_errors": [{"module": e.module, "error": e.error} for e in result.import_errors],
-        }
+        return result  # SystemService.seed_policies returns SeedPoliciesResponse directly
 
-    @router.get("/api/v1/system/policy", summary="Policy status")
-    async def policy_status(self) -> dict[str, Any]:
+    @router.get(
+        "/api/v1/system/policy",
+        response_model=PolicyStatusResponse,
+        summary="Policy callable registry and seeded policies",
+    )
+    async def policy_status(self) -> PolicyStatusResponse:
         result = await self._svc.get_policy_status()
-        return {
-            "callable_count": result.callable_count,
-            "callable_registry": result.callable_registry,
-            "seeded_policies": [
-                {"policy_name": p.policy_name, "trigger_type": p.trigger_type,
-                 "components": p.components, "components_resolvable": p.components_resolvable}
-                for p in result.seeded_policies
-            ],
-        }
+        return result  # SystemService.get_policy_status returns PolicyStatusResponse directly
 
-    @router.post("/api/v1/system/policy/evaluate", summary="Dry-run policy evaluate")
-    async def policy_evaluate(self, body: PolicyEvaluateRequest) -> dict[str, Any]:
+    @router.post(
+        "/api/v1/system/policy/evaluate",
+        response_model=PolicyEvaluateResponse,
+        summary="Dry-run an order_create event against the policy",
+    )
+    async def policy_evaluate(self, body: PolicyEvaluateRequest) -> PolicyEvaluateResponse:
         if body.event_type != "order_create":
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported event_type: {body.event_type!r}. Only 'order_create' is supported.",
             )
         if not body.offer or not body.demand:
-            raise HTTPException(status_code=400, detail="Request body must include 'offer' and 'demand'.")
+            raise HTTPException(status_code=400,
+                                detail="Request body must include 'offer' and 'demand'.")
         try:
-            result = await self._svc.evaluate_order_create(
-                offer_raw=body.offer, demand_raw=body.demand, max_duration_seconds=None,
+            result = await self._policy_svc.evaluate_listing_create_policy_from_raw(
+                offer_raw=body.offer, demand_raw=body.demand,
+                max_duration_seconds=body.max_duration_seconds,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
             logger.warning("[POLICY EVAL] %s", exc)
             raise HTTPException(status_code=500, detail=str(exc))
-        return {
-            "action": result.action, "policy_used": result.policy_used,
-            "components": result.components, "resolvable": result.resolvable,
-            "reason": result.reason,
-        }
+        return PolicyEvaluateResponse(
+            action=result.action, policy_used=result.policy_used,
+            components=result.components, resolvable=result.resolvable,
+            reason=result.reason,
+        )

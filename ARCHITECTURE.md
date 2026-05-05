@@ -1291,6 +1291,28 @@ make build
 ---
 
 ## Storefront — Planned Rework
+### 2. Remove event queue infrastructure
+
+**Status:** Planned.
+
+**Problem:** The event queue path (`is_event_queue_enabled()`, `queue_event()`,
+`configure_default_ingestion()`, `enable_event_queue` and `enable_redis_ingest`
+config fields) is dead code in the request path. `ListingService` was refactored
+to a synchronous orchestrator model in this session, eliminating all
+`is_event_queue_enabled()` branches from the service layer. The redis ingest path
+(`start_redis_subscriber`, `stop_redis_subscriber`) in `agent.py` is the only
+remaining consumer and has no tests.
+
+**Planned fix:**
+1. Remove `enable_event_queue` and `enable_redis_ingest` from `Config` and `config.toml`.
+2. Remove `configure_default_ingestion()` call from `agent.py`.
+3. Remove `start_redis_subscriber` / `stop_redis_subscriber` calls from `_startup_tasks`.
+4. Delete `utils/event_ingestion.py` (or retain only the `stage_event()` audit-log
+   helper if it is used elsewhere — confirm before deleting).
+5. Remove redis dependency from `pyproject.toml` if no other code requires it.
+
+---
+
 ### 1. Remove TraderAgent class and root_agent shim from agent.py
 
 **Status:** Planned.

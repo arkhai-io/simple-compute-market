@@ -5,7 +5,7 @@ matching the provisioning-service integration test pattern.
 All assertions go through the canonical client; no raw HTTP calls.
 
 Fixture pattern: build a minimal FastAPI app containing only the
-ListingsController router + AdminAuthMiddleware, backed by an in-memory
+ListingsController router, backed by an in-memory
 SQLiteClient. This mirrors how provisioning-service tests wire a real
 FastAPI app with dependency overrides.
 """
@@ -20,12 +20,24 @@ import pytest_asyncio
 from fastapi import FastAPI
 
 import market_storefront.container as _container
+from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.controllers.listings_controller import router as listings_router
-from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 ADMIN_KEY = "test-admin-key"
+
+def _key_enforcer(expected_key: str):
+    """Depends-compatible function that enforces a specific X-Admin-Key header.
+    Used in test fixtures to simulate production admin-key enforcement without
+    requiring a mutable CONFIG (which is a frozen dataclass).
+    """
+    from fastapi import Header, HTTPException
+    def _dep(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
+        if x_admin_key != expected_key:
+            raise HTTPException(status_code=403, detail="Valid X-Admin-Key header required")
+    return _dep
+
 
 
 # ---------------------------------------------------------------------------
@@ -55,11 +67,11 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
 async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
-    _container.resolved_policy_pipeline_service = None  # not used by read/pause/resume
+    _container.resolved_policy_service = None  # not used by read/pause/resume
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
@@ -71,18 +83,18 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
-    _container.resolved_policy_pipeline_service = None
+    _container.resolved_policy_service = None
 
 
 @pytest_asyncio.fixture
 async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
-    _container.resolved_policy_pipeline_service = None  # not used by read/pause/resume
+    _container.resolved_policy_service = None  # not used by read/pause/resume
 
     app = FastAPI()
     app.include_router(listings_router)
-    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient("http://test", transport=transport) as c:

@@ -1,39 +1,32 @@
 """HTTP request/response models for the Listings controller.
 
 Domain types (ComputeResource, TokenResource, Listing) live in domain_models.py.
-These models describe the wire shapes for the listings REST API only.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
-# Filter params — used via Depends() on list_listings to avoid the
-# @cbv + many Annotated[Query] params signature problem.
+# Filter params — Depends() factory for GET /api/v1/listings
 # ---------------------------------------------------------------------------
 
 class ListingFilterParams(BaseModel):
     """Query parameters for GET /api/v1/listings.
 
-    Instantiated via ``Depends(listing_filter_params)`` so FastAPI
-    validates all 20+ filters through Pydantic rather than as individual
-    method parameters, which mangled the @cbv route signature.
+    Instantiated via ``Depends(listing_filter_params)`` so FastAPI validates
+    all filters through Pydantic rather than as individual method parameters,
+    which mangled the @cbv route signature.
     """
     model_config = ConfigDict(extra="ignore")
 
-    # Pagination
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
-
-    # Listing-level filters
     status: str | None = None
     paused: bool | None = None
-
-    # Spec equality filters
     region: str | None = None
     gpu_model: str | None = None
     cpu_type: str | None = None
@@ -44,8 +37,6 @@ class ListingFilterParams(BaseModel):
     static_ip: bool | None = None
     datacenter_grade: bool | None = None
     sla: float | None = None
-
-    # Spec numeric-min filters
     gpu_count_min: int | None = None
     vcpu_count_min: int | None = None
     ram_gb_min: int | None = None
@@ -60,9 +51,8 @@ class ListingFilterParams(BaseModel):
     open_ports_count_min: int | None = None
 
     def to_spec_kwargs(self) -> dict[str, Any]:
-        """Extract non-None spec filter fields for matches_listing_filters()."""
         result: dict[str, Any] = {}
-        for field in (
+        for field_name in (
             "region", "gpu_model", "cpu_type", "host_disk_type", "motherboard",
             "gpu_interconnect", "virtualization_type", "static_ip", "datacenter_grade",
             "sla", "gpu_count_min", "vcpu_count_min", "ram_gb_min", "disk_gb_min",
@@ -71,9 +61,9 @@ class ListingFilterParams(BaseModel):
             "internet_download_mbps_min", "internet_upload_mbps_min",
             "open_ports_count_min",
         ):
-            v = getattr(self, field)
+            v = getattr(self, field_name)
             if v is not None:
-                result[field] = v
+                result[field_name] = v
         return result
 
 
@@ -105,7 +95,6 @@ async def listing_filter_params(
     internet_upload_mbps_min: int | None = Query(default=None),
     open_ports_count_min: int | None = Query(default=None),
 ) -> ListingFilterParams:
-    """Depends() factory that produces a validated ListingFilterParams."""
     return ListingFilterParams(
         limit=limit, offset=offset, status=status, paused=paused,
         region=region, gpu_model=gpu_model, cpu_type=cpu_type,
@@ -124,11 +113,12 @@ async def listing_filter_params(
 
 
 # ---------------------------------------------------------------------------
-# Create / close / escrow operation request models
+# Request models
+# listing_id is in the URL path for all lifecycle operations.
 # ---------------------------------------------------------------------------
 
 class CreateListingRequest(BaseModel):
-    """Body for POST /listings/create."""
+    """Body for POST /api/v1/listings/create."""
     offer: dict[str, Any] = Field(description="Offered resource (compute or token dict)")
     demand: dict[str, Any] = Field(description="Demanded resource (compute or token dict)")
     max_duration_seconds: int | None = None
@@ -141,52 +131,139 @@ class CreateListingRequest(BaseModel):
     )
 
 
-class CloseListingRequest(BaseModel):
-    """Body for POST /listings/close."""
-    listing_id: str
-
-
 class RefundRequest(BaseModel):
-    """Body for POST /listings/refund."""
-    listing_id: str
+    """Body for POST /api/v1/listings/{listing_id}/refund.
+    listing_id is in the path; this body contains the payment details only.
+    """
     buyer_address: str
     amount: float | None = None
     token: str | None = None
 
 
 class ClaimRequest(BaseModel):
-    """Body for POST /listings/claim."""
-    listing_id: str
+    """Body for POST /api/v1/listings/{listing_id}/claim."""
     escrow_uid: str
     fulfillment_uid: str
 
 
 class ReclaimRequest(BaseModel):
-    """Body for POST /listings/reclaim."""
-    listing_id: str
+    """Body for POST /api/v1/listings/{listing_id}/reclaim."""
     escrow_uid: str
 
 
 class ArbitrateRequest(BaseModel):
-    """Body for POST /listings/arbitrate."""
-    listing_id: str
+    """Body for POST /api/v1/listings/{listing_id}/arbitrate."""
     escrow_uid: str | None = None
     fulfillment_uid: str | None = None
     decision: bool = True
-
-
-class DiscoverRequest(BaseModel):
-    """Body for POST /listings/discover."""
-    listing_id: str
-    include_active: bool = False
 
 
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
 
+class ListingResponse(BaseModel):
+    """Single listing — returned by GET /api/v1/listings/{id}."""
+    listing_id: str
+    status: str
+    paused: bool = False
+    offer_resource: Any = None    # dict or JSON string from SQLite
+    demand_resource: Any = None   # dict or JSON string from SQLite
+    max_duration_seconds: int | None = None
+    seller: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+
+class ListingListResponse(BaseModel):
+    """Response for GET /api/v1/listings."""
+    listings: list[dict[str, Any]]
+    count: int
+    limit: int
+    offset: int
+    total_after_filter: int | None = None
+
+
 class PauseListingResponse(BaseModel):
+    """Response for POST /api/v1/listings/{id}/pause and /resume."""
     listing_id: str
     paused: bool
     registry_status: str = ""
     message: str = ""
+
+
+class CreateListingResponse(BaseModel):
+    """Response for POST /api/v1/listings/create."""
+    status: str
+    listing_id: str | None = None
+    root_agent_response: str = ""
+
+
+class CloseListingResponse(BaseModel):
+    """Response for POST /api/v1/listings/{listing_id}/close."""
+    status: str
+    listing_id: str
+    root_agent_response: str = ""
+
+
+class RefundResponse(BaseModel):
+    """Response for POST /api/v1/listings/{listing_id}/refund."""
+    status: str
+    listing_id: str
+    tx_hash: str | None = None
+    from_address: str | None = None
+    to_address: str | None = None
+    token: dict[str, Any] | None = None
+    amount_raw: int | None = None
+    block_number: int | None = None
+
+
+class ClaimResponse(BaseModel):
+    """Response for POST /api/v1/listings/{listing_id}/claim."""
+    status: str
+    listing_id: str
+    escrow_uid: str | None = None
+    fulfillment_uid: str | None = None
+    collect_result: str | None = None
+
+
+class ReclaimResponse(BaseModel):
+    """Response for POST /api/v1/listings/{listing_id}/reclaim."""
+    status: str
+    listing_id: str
+    escrow_uid: str | None = None
+    reclaim_result: str | None = None
+
+
+class ArbitrateResponse(BaseModel):
+    """Response for POST /api/v1/listings/{listing_id}/arbitrate."""
+    status: str
+    listing_id: str
+    fulfillment_uid: str | None = None
+    decision: bool = True
+    decisions_count: int = 0
+    note: str = ""
+
+
+class AdminEvaluateCreateResponse(BaseModel):
+    """Response for POST /api/v1/admin/listings/evaluate-create.
+
+    Returns what the policy pipeline *would* do for a given CreateListingRequest
+    without writing anything to SQLite or the registry.
+    """
+    would_create: bool
+    action: str
+    listing_id_preview: str | None = None
+    policy_used: str | None = None
+    reason: str | None = None
+
+
+class AdminEvaluateCloseResponse(BaseModel):
+    """Response for POST /api/v1/admin/listings/{listing_id}/evaluate-close.
+
+    Returns what the policy pipeline *would* do for a close event.
+    """
+    would_close: bool
+    action: str
+    listing_id: str
+    policy_used: str | None = None
+    reason: str | None = None

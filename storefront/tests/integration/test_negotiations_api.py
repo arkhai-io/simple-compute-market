@@ -22,12 +22,24 @@ import pytest_asyncio
 from fastapi import FastAPI
 
 import market_storefront.container as _container
+from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.controllers.negotiations_controller import router as negotiations_router
-from market_storefront.middleware.admin_auth import AdminAuthMiddleware
 from market_storefront.utils.sqlite_client import SQLiteClient
 from storefront_client.client import StorefrontClient, StorefrontClientError
 
 ADMIN_KEY = "test-admin-key"
+
+def _key_enforcer(expected_key: str):
+    """Depends-compatible function that enforces a specific X-Admin-Key header.
+    Used in test fixtures to simulate production admin-key enforcement without
+    requiring a mutable CONFIG (which is a frozen dataclass).
+    """
+    from fastapi import Header, HTTPException
+    def _dep(x_admin_key: str | None = Header(default=None, alias="X-Admin-Key")) -> None:
+        if x_admin_key != expected_key:
+            raise HTTPException(status_code=403, detail="Valid X-Admin-Key header required")
+    return _dep
+
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +139,7 @@ async def client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient]]:
 
     app = FastAPI()
     app.include_router(negotiations_router)
-    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient(
@@ -157,7 +169,7 @@ async def client_no_key(db) -> AsyncIterator[StorefrontClient]:
 
     app = FastAPI()
     app.include_router(negotiations_router)
-    app.add_middleware(AdminAuthMiddleware, admin_api_key=ADMIN_KEY)
+    app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
     async with StorefrontClient("http://test", transport=transport) as c:

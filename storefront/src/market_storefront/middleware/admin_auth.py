@@ -1,76 +1,52 @@
-"""Admin API key authentication middleware.
+"""Admin API key authentication.
 
-Protects all routes under ``/admin/*`` and any per-resource admin actions
-(listing pause/resume, negotiation advance/force-accept) with a shared secret.
+Replaced ``AdminAuthMiddleware`` (Starlette path-matching middleware) with a
+FastAPI ``Security()`` dependency. This makes admin auth explicit per-router,
+visible to OpenAPI/Swagger, and eliminates the fragile path-pattern list.
 
-The key is read from ``CONFIG.admin_api_key`` at startup.  Callers supply it
-via the ``X-Admin-Key`` request header.
+Usage on a router::
 
-Routes that do NOT require the admin key (normal buyer/operator routes) pass
-through unchanged.  The middleware only fires when a request path matches one
-of the protected prefixes/patterns defined in ``_ADMIN_PATHS``.
+    from market_storefront.middleware.admin_auth import require_admin_key
+    from fastapi import APIRouter
 
-If ``CONFIG.admin_api_key`` is None or empty the middleware is a no-op —
-admin endpoints are effectively unprotected.  This is intentional for local
-dev where the key is not configured; Helm deployments always inject the key.
+    router = APIRouter(
+        prefix="/api/v1/admin",
+        dependencies=[Depends(require_admin_key)],
+    )
+
+Or per-endpoint::
+
+    @router.post("/{listing_id}/pause", dependencies=[Depends(require_admin_key)])
+    async def pause(...): ...
+
+TOMBSTONE: AdminAuthMiddleware has been removed.
+The server.py ``app.add_middleware(AdminAuthMiddleware, ...)`` call is deleted.
 """
-
 from __future__ import annotations
 
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
+from fastapi import HTTPException, Security
+from fastapi.security import APIKeyHeader
 
+from market_storefront.utils.config import CONFIG
 
-# Path prefixes / suffixes that require an admin key.
-# Checked in order; first match wins.
-_ADMIN_PREFIXES = ("/admin/",)
-_ADMIN_SUFFIXES = (
-    "/pause",
-    "/resume",
-    "/advance",
-    "/force-accept",
-    "/system/events",
+_admin_key_header = APIKeyHeader(
+    name="X-Admin-Key",
+    auto_error=False,
+    description="Admin API key. Required for all /admin/* endpoints and admin actions.",
 )
 
 
-def _requires_admin(path: str) -> bool:
-    for prefix in _ADMIN_PREFIXES:
-        if path.startswith(prefix):
-            return True
-    for suffix in _ADMIN_SUFFIXES:
-        if path.endswith(suffix):
-            return True
-    return False
+def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
+    """FastAPI dependency that enforces the X-Admin-Key header.
 
-
-class AdminAuthMiddleware(BaseHTTPMiddleware):
-    """Starlette middleware that enforces ``X-Admin-Key`` on admin routes.
-
-    Instantiate and add to the Starlette app::
-
-        from market_storefront.middleware.admin_auth import AdminAuthMiddleware
-        app.add_middleware(AdminAuthMiddleware, admin_api_key="secret")
+    When ``CONFIG.admin_api_key`` is not set (local dev), all admin endpoints
+    are unprotected — matching the previous middleware behaviour.
     """
-
-    def __init__(self, app, *, admin_api_key: str | None = None) -> None:
-        super().__init__(app)
-        # Normalise: treat blank string the same as None (unprotected).
-        self._key: str | None = admin_api_key.strip() if admin_api_key else None
-
-    async def dispatch(self, request: Request, call_next):
-        if not _requires_admin(request.url.path):
-            return await call_next(request)
-
-        if not self._key:
-            # No key configured → allow all admin requests (dev mode).
-            return await call_next(request)
-
-        supplied = request.headers.get("X-Admin-Key", "")
-        if not supplied or supplied != self._key:
-            return JSONResponse(
-                {"error": "Forbidden", "detail": "Valid X-Admin-Key header required"},
-                status_code=403,
-            )
-
-        return await call_next(request)
+    configured = CONFIG.admin_api_key
+    if not configured:
+        return  # dev mode — unprotected
+    if not key or key != configured:
+        raise HTTPException(
+            status_code=403,
+            detail="Valid X-Admin-Key header required",
+        )

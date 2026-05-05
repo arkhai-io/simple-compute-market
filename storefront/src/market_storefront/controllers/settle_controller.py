@@ -9,12 +9,12 @@ from fastapi.responses import JSONResponse
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
-from market_storefront.middleware.buyer_auth import settle_escrow_auth, settle_status_auth
-from market_storefront.models.settle_models import SettleRequest
+from market_storefront.middleware import buyer_auth
+from market_storefront.models.settle_models import SettleRequest, SettleResponse, SettleStatusResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/settle", tags=["settle"])
+router = APIRouter(prefix="/api/v1/settle", tags=["settle"])
 
 
 @cbv(router)
@@ -27,18 +27,24 @@ class SettleController:
         self._db = db
         self._alkahest = alkahest
 
-    @router.post("/{escrow_uid}", summary="Submit settlement / kick off provisioning")
+    @router.post(
+        "/{escrow_uid}",
+        response_model=SettleResponse,
+        summary="Submit settlement / kick off provisioning",
+        description="Buyer-facing. Requires EIP-191 signed `X-Signature` + `X-Timestamp` headers.",
+    )
     async def settle_escrow(
         self,
         escrow_uid: str,
         body: SettleRequest,
         request: Request,
-        _auth: None = Depends(settle_escrow_auth),
     ) -> Any:
         from market_storefront.utils.settlement_jobs import (
             serialize_settlement_job,
             start_settlement_job,
         )
+
+        buyer_auth._verify(request, "settle_escrow", escrow_uid, body.buyer_address)
 
         if self._alkahest is None:
             raise HTTPException(
@@ -63,17 +69,23 @@ class SettleController:
         status_code = 200 if result.get("status") in ("ready", "failed") else 202
         return JSONResponse(content=serialized, status_code=status_code)
 
-    @router.get("/{escrow_uid}/status", summary="Poll settlement status")
+    @router.get(
+        "/{escrow_uid}/status",
+        response_model=SettleStatusResponse,
+        summary="Poll settlement status",
+        description="Buyer-facing. Requires EIP-191 signed `X-Signature` + `X-Timestamp` headers.",
+    )
     async def settle_status(
         self,
         escrow_uid: str,
         request: Request,
         buyer_address: str = Query(description="Buyer wallet address for EIP-191 verification"),
-        _auth: None = Depends(settle_status_auth),
-    ) -> Any:
+    ) -> SettleStatusResponse:
         from market_storefront.utils.settlement_jobs import serialize_settlement_job
+
+        buyer_auth._verify(request, "settle_status", escrow_uid, buyer_address)
 
         job = await self._db.load_settlement_job(escrow_uid=escrow_uid)
         if not job:
             raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
-        return serialize_settlement_job(job)
+        return SettleStatusResponse(**serialize_settlement_job(job))
