@@ -25,10 +25,13 @@ bash market-installer.sh
 ### Manual Development Install
 
 ```bash
-cd cli
-uv venv
-uv pip install -e .
+cd buyer
+make init   # creates .venv with uv venv --python 3.12 + uv sync
 ```
+
+After `make init`, run the CLI through `uv run market <command>` from
+inside `buyer/`, or activate the venv directly with
+`source buyer/.venv/bin/activate`.
 
 ## Requirements
 
