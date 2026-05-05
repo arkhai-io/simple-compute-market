@@ -450,9 +450,25 @@ def _canonical_agent_id() -> str | None:
     The provisioning service's X-Agent-ID header requires the canonical form, not the raw
     numeric ONCHAIN_AGENT_ID.  If the ID is already canonical (starts with 'eip155:') it is
     returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
-    Returns None if the required config values are missing.
+
+    Resolution order:
+      1. CONFIG.onchain_agent_id — explicit pin in config.toml (highest priority)
+      2. agent._AGENT_ID — set at startup by perform_registration when no pin is present
+      3. None — falls back to CONFIG.agent_id in callers (last resort)
+
+    Returns None if no agent ID is available.
     """
     raw = CONFIG.onchain_agent_id
+    if not raw:
+        # Fall back to the in-memory ID set by perform_registration at startup.
+        # This covers the case where onchain_agent_id is not pinned in config.toml
+        # but the agent successfully registered and stored the result in agent._AGENT_ID.
+        try:
+            from market_storefront.agent import _AGENT_ID as _runtime_id
+            if _runtime_id is not None:
+                raw = str(_runtime_id)
+        except Exception:
+            pass
     if not raw:
         return None
     if isinstance(raw, str) and raw.startswith("eip155:"):

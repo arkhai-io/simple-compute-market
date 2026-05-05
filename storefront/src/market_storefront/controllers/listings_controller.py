@@ -174,7 +174,7 @@ class ListingsController:
         except Exception as exc:
             logger.error("[LISTINGS] create unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        return CreateListingResponse(**result)
+        return result
 
     @router.post(
         "/listings/{listing_id}/close",
@@ -190,7 +190,7 @@ class ListingsController:
         except Exception as exc:
             logger.error("[LISTINGS] close unexpected: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
-        return CloseListingResponse(**result)
+        return result
 
     @router.post(
         "/listings/{listing_id}/refund",
