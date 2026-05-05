@@ -1,163 +1,35 @@
-# ERC-8004 Contract ABIs
-# Based on https://github.com/ww-jermaine/erc-8004-contracts
-# Official contract interface - matches IdentityRegistry.sol
+"""ERC-8004 ABI loader.
 
-IDENTITY_REGISTRY_ABI = [
-    {
-        "inputs": [],
-        "name": "register",
-        "outputs": [{"name": "agentId", "type": "uint256"}],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [{"name": "tokenUri", "type": "string"}],
-        "name": "register",
-        "outputs": [{"name": "agentId", "type": "uint256"}],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "tokenUri", "type": "string"},
-            {
-                "name": "metadata",
-                "type": "tuple[]",
-                "components": [
-                    {"name": "key", "type": "string"},
-                    {"name": "value", "type": "bytes"}
-                ]
-            }
-        ],
-        "name": "register",
-        "outputs": [{"name": "agentId", "type": "uint256"}],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "key", "type": "string"},
-            {"name": "value", "type": "bytes"}
-        ],
-        "name": "setMetadata",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [{"name": "agentId", "type": "uint256"}],
-        "name": "tokenURI",
-        "outputs": [{"name": "", "type": "string"}],
-        "stateMutability": "view",
-        "type": "function",
-    },
-    {
-        "inputs": [{"name": "agentId", "type": "uint256"}],
-        "name": "ownerOf",
-        "outputs": [{"name": "", "type": "address"}],
-        "stateMutability": "view",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "key", "type": "string"}
-        ],
-        "name": "getMetadata",
-        "outputs": [{"name": "", "type": "bytes"}],
-        "stateMutability": "view",
-        "type": "function",
-    },
-    {
-        "inputs": [],
-        "name": "totalSupply",
-        "outputs": [{"name": "", "type": "uint256"}],
-        "stateMutability": "view",
-        "type": "function",
-    },
-    {
-        "anonymous": False,
-        "inputs": [
-            {"indexed": True, "name": "agentId", "type": "uint256"},
-            {"indexed": False, "name": "tokenURI", "type": "string"},
-            {"indexed": True, "name": "owner", "type": "address"}
-        ],
-        "name": "Registered",
-        "type": "event",
-    },
-    {
-        "anonymous": False,
-        "inputs": [
-            {"indexed": True, "name": "agentId", "type": "uint256"},
-            {"indexed": True, "name": "indexedKey", "type": "string"},
-            {"indexed": False, "name": "key", "type": "string"},
-            {"indexed": False, "name": "value", "type": "bytes"}
-        ],
-        "name": "MetadataSet",
-        "type": "event",
-    },
-    {
-        "anonymous": False,
-        "inputs": [
-            {"indexed": True, "name": "agentId", "type": "uint256"},
-            {"indexed": False, "name": "newUri", "type": "string"},
-            {"indexed": True, "name": "updatedBy", "type": "address"}
-        ],
-        "name": "URIUpdated",
-        "type": "event",
-    },
-]
+ABI JSONs live in ``registry-service/src/contracts/abi/``, vendored from
+the upstream alkahest/contracts/lib/erc-8004-contracts compiled
+artifacts. Refresh by re-extracting the ``abi`` field from
+``artifacts/contracts/<name>Upgradeable.sol/<name>Upgradeable.json``.
 
-REPUTATION_REGISTRY_ABI = [
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "score", "type": "uint8"},
-            {"name": "tags", "type": "string[]"},
-            {"name": "fileRef", "type": "string"}
-        ],
-        "name": "giveFeedback",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "client", "type": "address"}
-        ],
-        "name": "getFeedbackSummary",
-        "outputs": [
-            {"name": "count", "type": "uint256"},
-            {"name": "averageScore", "type": "uint256"}
-        ],
-        "stateMutability": "view",
-        "type": "function",
-    },
-]
+Mirrors the loader pattern in ``service.clients.erc8004.abi`` but kept
+local because registry-service is a standalone deployable that doesn't
+depend on the market-service package.
+"""
+from __future__ import annotations
 
-VALIDATION_REGISTRY_ABI = [
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "validator", "type": "address"}
-        ],
-        "name": "requestValidation",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-    {
-        "inputs": [
-            {"name": "agentId", "type": "uint256"},
-            {"name": "score", "type": "uint8"},
-            {"name": "tags", "type": "string[]"}
-        ],
-        "name": "respondValidation",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    },
-]
+import json
+from pathlib import Path
+from typing import Any
 
+_ABI_DIR = Path(__file__).resolve().parent / "abi"
+
+
+def load_erc8004_abi(name: str) -> list[dict[str, Any]]:
+    """Load a vendored ERC-8004 ABI by short name.
+
+    Accepts: "IdentityRegistry", "ReputationRegistry", "ValidationRegistry".
+    """
+    path = _ABI_DIR / f"{name}.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"ERC-8004 ABI {name!r} not found at {path}. Vendored ABIs live in "
+            f"registry-service/src/contracts/abi/."
+        )
+    return json.loads(path.read_text())["abi"]
+
+
+IDENTITY_REGISTRY_ABI = load_erc8004_abi("IdentityRegistry")
