@@ -20,7 +20,7 @@ dependencies = [
     "fastapi-utils>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-    "alkahest-py",
+    "alkahest-py>=0.3.0",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "httpx>=0.27",
@@ -81,12 +81,8 @@ market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
-alkahest-py = [
-    { path = "packages/alkahest_py-0.1.0-cp312-cp312-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'arm64'" },
-    { path = "packages/alkahest_py-0.1.0-cp312-cp312-macosx_10_12_x86_64.whl", marker = "sys_platform == 'darwin' and platform_machine == 'x86_64'" },
-    { path = "packages/alkahest_py-0.1.0-cp312-cp312-manylinux_2_36_aarch64.whl", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" },
-    { path = "packages/alkahest_py-0.1.0-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
-]
+# alkahest-py >= 0.3.0 ships wheels for all four target platforms via PyPI
+# (PR #62 in arkhai-io/alkahest exposed the named chain configs to Python).
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

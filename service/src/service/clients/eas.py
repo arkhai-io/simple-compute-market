@@ -155,13 +155,13 @@ def resolve_eas_address(
 ) -> str:
     """Resolve the EAS contract address from the alkahest address config.
 
-    Mirrors `service.clients.alkahest.get_recipient_arbiter`'s lookup
-    pattern: explicit override JSON wins, otherwise the built-in
-    NETWORK_ADDRESS_CONFIGS table.
+    Override JSON wins; otherwise pull from the SDK's
+    ``DefaultExtensionConfig.for_chain`` (alkahest-py >= 0.3.0).
     """
     from service.clients.alkahest import (
-        NETWORK_ADDRESS_CONFIGS,
+        NETWORK_ANVIL,
         _load_override_config,
+        _sdk_addresses_for_chain,
         get_alkahest_network,
     )
 
@@ -171,12 +171,15 @@ def resolve_eas_address(
         addr = override.get("attestation_addresses", {}).get("eas")
         if addr:
             return str(addr)
-    if selected in NETWORK_ADDRESS_CONFIGS:
-        addr = NETWORK_ADDRESS_CONFIGS[selected].get(
-            "attestation_addresses", {},
-        ).get("eas")
-        if addr:
-            return str(addr)
+    if selected == NETWORK_ANVIL:
+        raise ValueError(
+            f"chain_name='anvil' requires an explicit alkahest_address_config_path "
+            "with attestation_addresses.eas."
+        )
+    cfg = _sdk_addresses_for_chain(selected)
+    addr = cfg.attestation_addresses.eas
+    if addr:
+        return str(addr)
     raise ValueError(
         f"Could not resolve EAS address for chain={chain_name!r}. "
         f"Pass an alkahest_address_config_path with attestation_addresses.eas."

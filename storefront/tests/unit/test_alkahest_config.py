@@ -28,18 +28,19 @@ def test_resolve_config_base_sepolia_uses_sdk_defaults() -> None:
     assert resolve_alkahest_address_config(NETWORK_BASE_SEPOLIA) is None
 
 
-def test_resolve_config_ethereum_mainnet_returns_explicit_config() -> None:
+def test_resolve_config_ethereum_mainnet_returns_sdk_config() -> None:
+    """Non-base-sepolia named chains return alkahest-py's
+    ``DefaultExtensionConfig.for_chain``. The SDK normalises addresses to
+    lowercase hex (alloy ``Address`` Display)."""
     config = resolve_alkahest_address_config(NETWORK_ETHEREUM_MAINNET)
     assert config is not None
-    assert isinstance(config, SimpleNamespace)
-    assert config.erc20_addresses.eas == "0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587"
+    assert config.erc20_addresses.eas.lower() == "0xa1207f3bba224e2c9c3c6d5af63d0eb1582ce587"
 
 
-def test_resolve_config_ethereum_sepolia_returns_explicit_config() -> None:
+def test_resolve_config_ethereum_sepolia_returns_sdk_config() -> None:
     config = resolve_alkahest_address_config(NETWORK_ETHEREUM_SEPOLIA)
     assert config is not None
-    assert isinstance(config, SimpleNamespace)
-    assert config.erc20_addresses.eas == "0xC2679fBD37d54388Ce493F1DB75320D236e1815e"
+    assert config.erc20_addresses.eas.lower() == "0xc2679fbd37d54388ce493f1db75320d236e1815e"
 
 
 def test_resolve_config_anvil_requires_override() -> None:

@@ -13,7 +13,7 @@ dependencies = [
   # on-chain escrow creation. Imported lazily from
   # market_buyer.escrow_client so loading the CLI does not pay the
   # native-binary cost unless the orchestrator actually runs.
-  "alkahest-py",
+  "alkahest-py>=0.3.0",
   "market-service",
   "market-policy",
 ]
