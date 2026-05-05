@@ -1,6 +1,6 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
-DIST_DIR := $(CURDIR)/.dist
+DIST_DIR := ${CURDIR}/.dist
 
 .PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service
 
@@ -20,43 +20,43 @@ DIST_DIR := $(CURDIR)/.dist
 dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra
 
 dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd storefront-client && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-storefront: ## Build market-storefront wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-policy: ## Build market-policy wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd policy && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_policy-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-provisioning: ## Build provisioning-service wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd provisioning-service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: provisioning-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-registry: ## Build arkhai-registry-client wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd registry-client && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_registry_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-service: ## Build market-service wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-service produced a platform-specific wheel — must build inside Docker" && exit 1)
 
 dist-infra: ## Build market-infra wheel into .dist/
-	@mkdir -p $(DIST_DIR)
+	-mkdir -p $(DIST_DIR)
 	cd infra && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/market_infra-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-infra produced a platform-specific wheel — must build inside Docker" && exit 1)
