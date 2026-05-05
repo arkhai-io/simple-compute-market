@@ -19,8 +19,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..common import resolve_config_value
+from ..buy_orchestrator import fetch_listing_dict
 from ..buyer_client import ResumeState, negotiate_with_seller
 from ..run_log import RunLog
+from ._cli_helpers import resolve_prices_from_matches
 from ._deal import load_negotiation_resume_point
 
 
@@ -31,22 +33,39 @@ def register(app: typer.Typer) -> None:
     def negotiate(
         seller_url: Optional[str] = typer.Option(
             None, "--seller", "-s",
-            help="Seller agent base URL. Required for fresh runs; "
-                 "resumed runs (--from) read it from the run-log.",
+            help="Seller agent base URL. Optional — resolved from the "
+                 "registry given --listing-id; resumed runs (--from) "
+                 "read it from the run-log. Pass explicitly to override.",
         ),
         listing_id: Optional[str] = typer.Option(
             None, "--listing-id",
             help="The seller's listing_id. Required for fresh runs; "
                  "resumed runs (--from) read it from the run-log.",
         ),
+        registry_url: Optional[str] = typer.Option(
+            None, "--registry-url",
+            help="Registry base URL (default: registry.url from config.toml). "
+                 "Used to resolve the seller URL and price floor from a listing_id.",
+        ),
         initial_price: Optional[int] = typer.Option(
             None, "--initial-price",
-            help="Opening bid in raw token units. Required for fresh runs.",
+            help="Opening bid in raw token units. Optional — when omitted, "
+                 "anchored on the listing's advertised min_price.",
         ),
         max_price: Optional[int] = typer.Option(
             None, "--max-price",
             help="Ceiling — accept any seller counter at or under this. "
-                 "Required for fresh runs; resumed runs reuse the original.",
+                 "Optional — when omitted, derived as min_price * --price-markup. "
+                 "Resumed runs reuse the original ceiling.",
+        ),
+        price_markup: float = typer.Option(
+            1.5, "--price-markup",
+            help="Multiplier on the listing's min_price for the auto-derived "
+                 "--max-price. Ignored when --max-price is explicit.",
+        ),
+        assume_yes: bool = typer.Option(
+            False, "--yes", "-y",
+            help="Skip interactive confirmations on auto-derived prices.",
         ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
@@ -129,17 +148,61 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
+        # Resolve registry URL once; used to look up the listing if --seller
+        # or prices weren't passed.
+        reg = resolve_config_value(
+            override=registry_url, toml_path="registry.url",
+        ) or "http://localhost:8080"
+
+        # Auto-resolve --seller from the registry given --listing-id.
+        if listing_id and not seller_url:
+            try:
+                listing_dict = fetch_listing_dict(reg, listing_id)
+            except RuntimeError as exc:
+                typer.secho(
+                    f"Could not fetch listing {listing_id} from {reg}: {exc}",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            if not listing_dict:
+                typer.secho(
+                    f"No listing {listing_id!r} on registry {reg}.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            seller_url = listing_dict.get("seller")
+            if not seller_url:
+                typer.secho(
+                    f"Listing {listing_id} has no `seller` field; pass --seller explicitly.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            # Auto-derive prices from the listing's min_price when caller
+            # didn't supply them. Same precedent as `market buy`.
+            if resume_state is None and (initial_price is None or max_price is None):
+                derived_initial, derived_max = resolve_prices_from_matches(
+                    matches=[listing_dict],
+                    console=console,
+                    assume_yes=assume_yes,
+                    price_markup=price_markup,
+                )
+                if derived_initial is None or derived_max is None:
+                    raise typer.Exit(2)
+                initial_price = initial_price if initial_price is not None else derived_initial
+                max_price = max_price if max_price is not None else derived_max
+
         if not seller_url or not listing_id:
             typer.secho(
                 "Missing required negotiation inputs. For a fresh run pass "
-                "--seller and --listing-id; for a resume pass --from <run-id>.",
+                "--listing-id (and optionally --seller); for a resume pass --from <run-id>.",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
 
         if resume_state is None and (initial_price is None or max_price is None):
             typer.secho(
-                "Fresh runs require --initial-price and --max-price.",
+                "Fresh runs require --initial-price and --max-price (or a "
+                "registry-discoverable listing_id with an advertised min_price).",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)

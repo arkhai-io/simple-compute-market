@@ -136,6 +136,41 @@ def query_registry_for_matches(
     return items
 
 
+def fetch_listing_dict(
+    registry_url: str,
+    listing_id: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+) -> Optional[dict[str, Any]]:
+    """Fetch a single registry listing by id as a raw dict.
+
+    Same wire shape as ``query_registry_for_matches`` items, so
+    ``extract_seller_min_price`` consumes it directly. Returns None on
+    404 or unparseable responses; raises on other transport errors.
+    """
+    url = registry_url.rstrip("/") + "/listings/" + urllib.parse.quote(listing_id, safe="")
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
+        raise RuntimeError(f"Registry GET {url} -> HTTP {exc.code}: {detail[:200]}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Registry GET {url} failed: {exc}") from exc
+
+    try:
+        payload = json.loads(text) if text else None
+    except ValueError:
+        return None
+    if isinstance(payload, dict):
+        # Registry wraps single listing as {"listing": {...}}; some routes
+        # return the dict directly. Tolerate both.
+        return payload.get("listing") if "listing" in payload else payload
+    return None
+
+
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
     """Pull the seller's per-hour floor (``demand_resource.amount``) out of
     a registry listing dict. Returns ``None`` if absent or unparseable.
