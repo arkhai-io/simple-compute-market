@@ -1,0 +1,261 @@
+name: Publish Python packages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'service/**'
+      - 'policy/**'
+      - 'provisioning-service/**'
+      - 'storefront-client/**'
+      - 'registry-client/**'
+      - '.github/workflows/publish-pypi.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+# Trusted publishing (OIDC, no secrets needed). Configure each package's
+# publisher at https://pypi.org/manage/project/<pkg>/settings/publishing/
+# with:
+#   Owner       = arkhai-io
+#   Repo        = simple-market-service
+#   Workflow    = publish-pypi.yml
+#   Environment = pypi-<pkg>            (matches `environment.name` below)
+#
+# Internal dep graph:
+#   market-service        -> no internal deps
+#   market-policy         -> depends on market-service (PyPI)
+#   provisioning-service, arkhai-storefront-client, arkhai-registry-client
+#                         -> no internal deps
+#
+# When market-service's version bumps, market-policy can pick it up on a
+# subsequent push that touches policy/. There is no sequencing inside one
+# run -- both publish in parallel against the *previous* market-service
+# version on PyPI. That is fine because pyproject.toml uses `>=` constraints,
+# not exact pins.
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      service:              ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.service }}
+      policy:               ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.policy }}
+      provisioning-service: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.provisioning-service }}
+      storefront-client:    ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.storefront-client }}
+      registry-client:      ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.registry-client }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          filters: |
+            service:
+              - 'service/**'
+            policy:
+              - 'policy/**'
+            provisioning-service:
+              - 'provisioning-service/**'
+            storefront-client:
+              - 'storefront-client/**'
+            registry-client:
+              - 'registry-client/**'
+
+  publish-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.service == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-market-service
+      url: https://pypi.org/p/market-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.13"
+      - name: Check version not yet on PyPI
+        id: check
+        env:
+          PKG_DIR: service
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name} ${version} already on PyPI; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build wheel + sdist
+        if: steps.check.outputs.skip == 'false'
+        working-directory: service
+        run: uv build --no-sources
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: service/dist
+
+  publish-policy:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.policy == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-market-policy
+      url: https://pypi.org/p/market-policy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.13"
+      - name: Check version not yet on PyPI
+        id: check
+        env:
+          PKG_DIR: policy
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name} ${version} already on PyPI; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build wheel + sdist
+        if: steps.check.outputs.skip == 'false'
+        working-directory: policy
+        # --no-sources strips tool.uv.sources overrides so the wheel records
+        # the plain `market-service` dep instead of a workspace path.
+        run: uv build --no-sources
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: policy/dist
+
+  publish-provisioning-service:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.provisioning-service == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-provisioning-service
+      url: https://pypi.org/p/provisioning-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.13"
+      - name: Check version not yet on PyPI
+        id: check
+        env:
+          PKG_DIR: provisioning-service
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name} ${version} already on PyPI; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build wheel + sdist
+        if: steps.check.outputs.skip == 'false'
+        working-directory: provisioning-service
+        run: uv build --no-sources
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: provisioning-service/dist
+
+  publish-storefront-client:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.storefront-client == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-arkhai-storefront-client
+      url: https://pypi.org/p/arkhai-storefront-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.13"
+      - name: Check version not yet on PyPI
+        id: check
+        env:
+          PKG_DIR: storefront-client
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name} ${version} already on PyPI; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build wheel + sdist
+        if: steps.check.outputs.skip == 'false'
+        working-directory: storefront-client
+        run: uv build --no-sources
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: storefront-client/dist
+
+  publish-registry-client:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.registry-client == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-arkhai-registry-client
+      url: https://pypi.org/p/arkhai-registry-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.8.13"
+      - name: Check version not yet on PyPI
+        id: check
+        env:
+          PKG_DIR: registry-client
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^version *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          name=$(awk -F'"' '/^name *= */{print $2; exit}' "${PKG_DIR}/pyproject.toml")
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if curl -sSL "https://pypi.org/pypi/${name}/json" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if '${version}' in d.get('releases', {}) else 1)"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name} ${version} already on PyPI; skipping"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build wheel + sdist
+        if: steps.check.outputs.skip == 'false'
+        working-directory: registry-client
+        run: uv build --no-sources
+      - name: Publish to PyPI
+        if: steps.check.outputs.skip == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: registry-client/dist
