@@ -214,9 +214,11 @@ def resolve_chain_settings(
     tc = token_contract
     decimals = token_decimals
     if not tc:
+        from ..common import resolve_default_token
+        symbol = resolve_default_token()
         try:
             from service.clients.token import TOKEN_REGISTRY
-            meta = TOKEN_REGISTRY.require("MOCK")
+            meta = TOKEN_REGISTRY.require(symbol)
             tc = meta.contract_address
             # Only override decimals when the token registry is the
             # source — caller-supplied flag wins over the default.
@@ -224,8 +226,9 @@ def resolve_chain_settings(
                 decimals = meta.decimals
         except Exception as exc:
             typer.secho(
-                f"Could not resolve default token 'MOCK' — pass "
-                f"--token-contract and --token-decimals. ({exc})",
+                f"Could not resolve default token {symbol!r} — pass "
+                f"--token-contract and --token-decimals, or set "
+                f"[buyer].default_token in config.toml. ({exc})",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)

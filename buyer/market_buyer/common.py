@@ -30,6 +30,20 @@ def resolve_config_value(
     return default
 
 
+def resolve_default_token() -> str:
+    """Pick the buyer's default token symbol for `--token-contract` resolution.
+
+    Looks up `buyer.default_token` in the user config; falls back to ``"MOCK"``
+    so behavior is unchanged for unconfigured installs. The symbol is resolved
+    against ``service.clients.token.TOKEN_REGISTRY`` at the call site.
+    """
+    from service.config_loader import get_dotted, load_user_config
+    v = get_dotted(load_user_config(), "buyer.default_token")
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    return "MOCK"
+
+
 def resolve_storefront_url(
     agent_url: str | None,
     default_port: int = 8000,

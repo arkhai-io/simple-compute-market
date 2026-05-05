@@ -123,6 +123,14 @@ _INIT_USER_TEMPLATE = """\
 # identity_registry_address = "0x..."          # ERC-8004 registry contract
 
 # ---------------------------------------------------------------------------
+# Buyer-only (read by `market buy` / `market negotiate` / `market settle`)
+# ---------------------------------------------------------------------------
+
+# [buyer]
+# default_token = "MOCK"                       # token symbol resolved via TOKEN_REGISTRY
+                                                # when --token-contract is not supplied
+
+# ---------------------------------------------------------------------------
 # Seller-only — uncomment the [seller] sections only on a host that runs
 # `market-storefront serve`. The `market` CLI ignores them.
 # ---------------------------------------------------------------------------
@@ -139,7 +147,7 @@ _INIT_USER_TEMPLATE = """\
 # service_url = "http://localhost:8085"
 
 # [seller.negotiation]
-# policy_mode = ""                              # "" (default → rl) | "bisection" | "rl"
+# policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 """
 
 
