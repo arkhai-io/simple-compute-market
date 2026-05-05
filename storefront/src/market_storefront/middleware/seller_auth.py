@@ -89,8 +89,14 @@ def make_seller_auth_dep(operation: str):
         ) -> dict: ...
     """
     async def _dep(request: Request) -> None:
-        # Try to get listing_id from already-parsed path params
+        # Path params take priority (e.g. /listings/{listing_id}/close)
         resource_id = request.path_params.get("listing_id", "")
+        if not resource_id:
+            # No listing_id path param — this is create_listing, which the client
+            # signs as "create_listing:{agent_wallet_address}:{ts}".
+            # Use CONFIG.agent_wallet_address as the resource_id to match.
+            from market_storefront.utils.config import CONFIG
+            resource_id = CONFIG.agent_wallet_address or ""
         verify_seller_signature(request, operation, resource_id)
 
     return _dep
