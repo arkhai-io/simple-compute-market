@@ -50,6 +50,7 @@ class NegotiateController:
     ) -> NegotiateNewResponse:
         from market_storefront.utils.config import CONFIG
         from market_storefront.utils.sync_negotiation import (
+            OfferUnfulfillableError,
             StorefrontPausedError,
             start_sync_negotiation,
         )
@@ -71,6 +72,17 @@ class NegotiateController:
             raise HTTPException(status_code=503, detail={
                 "error": "paused", "reason": exc.reason,
                 "hint": "Storefront or listing is paused; use admin API to advance or resume",
+            })
+        except OfferUnfulfillableError as exc:
+            raise HTTPException(status_code=409, detail={
+                "error": "offer_unfulfillable",
+                "reason": exc.reason,
+                "listing_id": exc.listing_id,
+                "hint": (
+                    "Seller refused: listing is not in a state that can accept "
+                    "new negotiations, or no matching compute is currently "
+                    "available. Try a different listing."
+                ),
             })
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))

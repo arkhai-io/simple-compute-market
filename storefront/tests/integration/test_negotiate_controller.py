@@ -51,6 +51,24 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         max_duration_seconds=7200,
         seller="http://seller:8001",
     )
+    # Seed at least one matching available compute resource so the
+    # seller's "refuse offers I can't fulfill" guard
+    # (sync_negotiation._has_matching_available_inventory) lets the
+    # negotiation start. Tests that want to exercise the refusal path
+    # should call _seed_listing without this fixture, or override.
+    await db.upsert_resource(
+        resource_id=f"res-{listing_id}",
+        resource_type="compute.gpu",
+        resource_subtype=None,
+        unit="vm",
+        value=1,
+        state="available",
+        attributes={
+            "gpu_model": "H200",
+            "region": "California, US",
+            "vm_host": "ww1",
+        },
+    )
 
 
 @pytest_asyncio.fixture
@@ -142,6 +160,105 @@ class TestNegotiateNew:
                 duration_seconds=3600,
             )
         assert any(code in str(exc_info.value) for code in ("422", "400"))
+
+    async def test_listing_not_open_returns_409(self, client, db):
+        """Listing in a terminal state is refused with 409."""
+        c, db = client
+        await _seed_listing(db, "neg-listing-closed")
+        # Flip the listing's status to a non-open state.
+        await db.update_listing(
+            listing_id="neg-listing-closed",
+            status="accepted",
+        )
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-closed",
+                buyer_address=_BUYER,
+                initial_price=5000,
+                duration_seconds=3600,
+            )
+        msg = str(exc_info.value)
+        assert "409" in msg
+        assert "listing_not_open" in msg
+
+    async def test_no_matching_inventory_returns_409(self, client, db):
+        """Listing without a matching available compute resource is refused."""
+        c, db = client
+        # Seed listing only — no resource. Use a fresh listing_id since
+        # _seed_listing always seeds an available resource.
+        await db.upsert_listing(
+            listing_id="neg-listing-empty",
+            status="open",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            offer_resource={
+                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "region": "California, US",
+            },
+            demand_resource={
+                "token": {
+                    "symbol": "MOCK",
+                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "decimals": 0,
+                },
+                "amount": 5000,
+            },
+            fulfillment_resource=None,
+            max_duration_seconds=7200,
+            seller="http://seller:8001",
+        )
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-empty",
+                buyer_address=_BUYER,
+                initial_price=5000,
+                duration_seconds=3600,
+            )
+        msg = str(exc_info.value)
+        assert "409" in msg
+        assert "no_matching_inventory" in msg
+
+    async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
+        """An available resource with the wrong gpu_model doesn't satisfy
+        a listing offering a different gpu_model."""
+        c, db = client
+        # Seed a listing with the standard helper (which seeds H200).
+        await _seed_listing(db, "neg-listing-mismatched")
+        # Add a *different* available resource and remove the H200 one
+        # by deleting it via state transition isn't easy here, so just
+        # seed a wrong-model listing and skip the helper-seeded one.
+        await db.upsert_listing(
+            listing_id="neg-listing-rtx",
+            status="open",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            offer_resource={
+                "gpu_model": "RTX 4090", "gpu_count": 1, "sla": 99.9,
+                "region": "California, US",
+            },
+            demand_resource={
+                "token": {
+                    "symbol": "MOCK",
+                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "decimals": 0,
+                },
+                "amount": 5000,
+            },
+            fulfillment_resource=None,
+            max_duration_seconds=7200,
+            seller="http://seller:8001",
+        )
+        # The H200 resource seeded by _seed_listing doesn't match the
+        # RTX 4090 offer; the seller should refuse.
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-rtx",
+                buyer_address=_BUYER,
+                initial_price=5000,
+                duration_seconds=3600,
+            )
+        assert "409" in str(exc_info.value)
+        assert "no_matching_inventory" in str(exc_info.value)
 
 
 class TestNegotiateContinue:
