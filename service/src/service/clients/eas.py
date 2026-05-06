@@ -34,7 +34,10 @@ from service.abi import load_abi
 
 
 # Tuple-encoded layout of ERC20EscrowObligation.ObligationData.
-_ERC20_ESCROW_OBLIGATION_TYPES = ("address", "bytes", "address", "uint256")
+# Wrapped in a struct ABI type because alkahest emits the data via
+# `abi.encode(obligationData)` (a single struct argument) — that form
+# carries a leading 32-byte tuple-offset that flat-tuple decoding rejects.
+_ERC20_ESCROW_OBLIGATION_TYPES = ("(address,bytes,address,uint256)",)
 
 
 @dataclass(frozen=True)
@@ -68,20 +71,8 @@ class EscrowAttestation:
         return self.expiration_time if self.expiration_time != 0 else None
 
 
-def _make_async_web3(rpc_url: str) -> AsyncWeb3:
-    """Build an async Web3 client from an http(s):// or ws(s):// URL.
-
-    Both transports support eth_call; we pick by scheme. AsyncHTTPProvider
-    handles HTTP, WebSocketProvider (the persistent-connection one) is
-    the async websocket provider — note the sync ``Web3`` ctor rejects
-    it with "Provider must be an instance of BaseProvider", so the
-    legacy sync read path translated ws://→http://. The async ctor has
-    no such restriction.
-    """
-    s = rpc_url.strip()
-    if s.startswith(("ws://", "wss://")):
-        return AsyncWeb3(WebSocketProvider(s))
-    return AsyncWeb3(AsyncHTTPProvider(s))
+def _is_websocket_url(rpc_url: str) -> bool:
+    return rpc_url.strip().startswith(("ws://", "wss://"))
 
 
 def _hex(b: bytes | str) -> str:
@@ -108,12 +99,20 @@ async def read_attestation(
             f"Attestation uid must be 32 bytes (0x + 64 hex chars); got {uid!r}"
         )
 
-    w3 = _make_async_web3(rpc_url)
-    contract = w3.eth.contract(
-        address=AsyncWeb3.to_checksum_address(eas_address),
-        abi=load_abi("IEAS"),
-    )
-    raw = await contract.functions.getAttestation(uid_bytes).call()
+    s = rpc_url.strip()
+    eas_addr = AsyncWeb3.to_checksum_address(eas_address)
+    abi = load_abi("IEAS")
+    if _is_websocket_url(s):
+        # WebSocketProvider is a persistent provider — needs the async
+        # context manager to open the socket. For a one-shot read this
+        # opens, calls, and closes within the same `await`.
+        async with AsyncWeb3(WebSocketProvider(s)) as w3:
+            contract = w3.eth.contract(address=eas_addr, abi=abi)
+            raw = await contract.functions.getAttestation(uid_bytes).call()
+    else:
+        w3 = AsyncWeb3(AsyncHTTPProvider(s))
+        contract = w3.eth.contract(address=eas_addr, abi=abi)
+        raw = await contract.functions.getAttestation(uid_bytes).call()
     # IEAS.Attestation tuple layout (per eas-contracts/IEAS.sol):
     #   uid, schema, time, expirationTime, revocationTime,
     #   refUID, recipient, attester, revocable, data
@@ -133,10 +132,11 @@ async def read_attestation(
     arbiter = demand = token = amount = None
     decode_error: Optional[str] = None
     try:
-        arbiter, demand, token, amount = abi_decode(
+        (decoded,) = abi_decode(
             list(_ERC20_ESCROW_OBLIGATION_TYPES),
             bytes(data),
         )
+        arbiter, demand, token, amount = decoded
     except Exception as exc:
         decode_error = (
             f"Could not decode data as ERC20EscrowObligation: {exc}. "

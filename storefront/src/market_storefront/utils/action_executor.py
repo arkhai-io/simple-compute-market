@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from market_storefront.utils.stage_log import stage_event
@@ -376,8 +376,20 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
         }
 
 
-async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) -> dict:
-    """Submit a create VM job to the provisioning service and return the result."""
+async def _do_provision(
+    ssh_public_key: str,
+    *,
+    vm_host: str,
+    vm_target: str,
+    on_job_submitted: Callable[[str], Awaitable[None]] | None = None,
+) -> dict:
+    """Submit a create VM job to the provisioning service and return the result.
+
+    ``on_job_submitted`` runs after the create_vm call returns the job_id but
+    before we start polling — gives the caller a hook to record the job_id
+    in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
+    surface it while the job is still queued/running.
+    """
     from models.vm_request_model import CreateVmRequest
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
@@ -394,6 +406,14 @@ async def _do_provision(ssh_public_key: str, *, vm_host: str, vm_target: str) ->
         if CONFIG.frp_dashboard_password:
             params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
         submit = await client.create_vm(vm_host, CreateVmRequest(**params))
+        if on_job_submitted is not None:
+            try:
+                await on_job_submitted(submit.job_id)
+            except Exception as exc:
+                logger.warning(
+                    "[PROVISIONING] on_job_submitted callback failed for job %s: %s",
+                    submit.job_id, exc,
+                )
         job = await client.poll_until_complete(
             submit.job_id,
             timeout=float(CONFIG.provisioning_timeout),
@@ -518,9 +538,18 @@ def _sender_id() -> str:
 
 
 def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
-    """Given an order, take the demand and offer and extract which is compute and which is tokens."""
+    """Given an order, take the demand and offer and extract which is compute and which is tokens.
+
+    SQLite stores offer/demand_resource as JSON strings; downstream encoders
+    (encode_compute_lease, ComputeResource.model_validate) expect dicts, so
+    json-decode here rather than push that responsibility to every caller.
+    """
     offer_resource = order.get("offer_resource", {})
     demand_resource = order.get("demand_resource", {})
+    if isinstance(offer_resource, str):
+        offer_resource = json.loads(offer_resource)
+    if isinstance(demand_resource, str):
+        demand_resource = json.loads(demand_resource)
 
     offer_is_compute = _resource_is_compute(offer_resource)
     demand_is_compute = _resource_is_compute(demand_resource)
@@ -884,7 +913,10 @@ async def fulfill_compute_obligation(
             order_dict = order
 
     if order_dict:
-        order_id = order_dict.get("order_id")
+        # Storefront listings are keyed by listing_id; legacy callers may
+        # still pass order_id. Prefer listing_id since that's what the rest
+        # of the system (sqlite, stage events, registry) keys off of.
+        order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("region", "gpu_model"):
@@ -918,16 +950,24 @@ async def fulfill_compute_obligation(
         if not reserved_vm_host:
             raise RuntimeError("Reserved resource missing vm_host")
         stage_event("provision", "resource_reserved",
+            listing_id=order_id,
             escrow_uid=escrow_uid,
             resource_id=reserved_resource_id,
             vm_host=reserved_vm_host,
             required_attributes=required_attributes,
         )
 
+        async def _record_job_id(job_id: str) -> None:
+            await get_sqlite_client().update_settlement_job(
+                escrow_uid=escrow_uid,
+                provisioning_job_id=job_id,
+            )
+
         provision_result = await _do_provision(
             ssh_public_key,
             vm_host=reserved_vm_host,
             vm_target=vm_target,
+            on_job_submitted=_record_job_id,
         )
         # Split credentials out before serialising — passwords must never touch on-chain data.
         authentication: dict | None = None
@@ -1070,6 +1110,7 @@ async def fulfill_compute_obligation(
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
     stage_event("provision", "fulfilled",
+        listing_id=order_id,
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
         maker_attestation=maker_attestation,

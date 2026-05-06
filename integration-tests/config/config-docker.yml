@@ -24,7 +24,10 @@ seller:
   base_url_override: "http://sell_agent:8001/"
   private_key:       "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
   wallet_address:    "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-  agent_id:          ""              # set after first registration
+  # Deterministic on a fresh Anvil: account #2 registers second against
+  # the IdentityRegistry deployed at 0x8004A8...4BD9e, becoming agent 2.
+  # Sent as X-Agent-ID for /admin/* and the provisioning service.
+  agent_id:          "eip155:31337:0x8004a818bfb912233c491871b3d84c89a494bd9e:2"
   admin_api_key:     "test-api-key"  # set to match [seller].admin_api_key in config.toml  
 
 provisioning:

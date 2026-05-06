@@ -230,7 +230,7 @@ def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
-    for field in ("attestation_uid", "connection_details", "reason"):
+    for field in ("attestation_uid", "provisioning_job_id", "connection_details", "reason"):
         v = row.get(field)
         if v is not None:
             out[field] = v

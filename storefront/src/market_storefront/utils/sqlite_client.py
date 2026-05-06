@@ -596,6 +596,7 @@ class SQLiteClient:
                   negotiation_id TEXT NOT NULL,
                   status TEXT NOT NULL,
                   attestation_uid TEXT,
+                  provisioning_job_id TEXT,
                   connection_details TEXT,
                   tenant_credentials TEXT,
                   reason TEXT,
@@ -604,6 +605,11 @@ class SQLiteClient:
                 )
                 """
             )
+            # Idempotent migration for DBs created before provisioning_job_id existed.
+            try:
+                cur.execute("ALTER TABLE settlement_jobs ADD COLUMN provisioning_job_id TEXT")
+            except sqlite3.OperationalError:
+                pass
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_status ON settlement_jobs(status)"
             )
@@ -2139,6 +2145,7 @@ class SQLiteClient:
         escrow_uid: str,
         status: str | None = None,
         attestation_uid: str | None = None,
+        provisioning_job_id: str | None = None,
         connection_details: str | None = None,
         tenant_credentials: str | None = None,
         reason: str | None = None,
@@ -2156,6 +2163,7 @@ class SQLiteClient:
 
             add("status", status)
             add("attestation_uid", attestation_uid)
+            add("provisioning_job_id", provisioning_job_id)
             add("connection_details", connection_details)
             add("tenant_credentials", tenant_credentials)
             add("reason", reason)
@@ -2188,7 +2196,8 @@ class SQLiteClient:
                 row = conn.execute(
                     """
                     SELECT escrow_uid, negotiation_id, status,
-                           attestation_uid, connection_details, tenant_credentials,
+                           attestation_uid, provisioning_job_id,
+                           connection_details, tenant_credentials,
                            reason, created_at, updated_at
                     FROM settlement_jobs WHERE escrow_uid = ?
                     """,
@@ -2198,7 +2207,8 @@ class SQLiteClient:
                     return None
                 keys = [
                     "escrow_uid", "negotiation_id", "status",
-                    "attestation_uid", "connection_details", "tenant_credentials",
+                    "attestation_uid", "provisioning_job_id",
+                    "connection_details", "tenant_credentials",
                     "reason", "created_at", "updated_at",
                 ]
                 return dict(zip(keys, row))

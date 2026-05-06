@@ -62,7 +62,6 @@ Phase 9 — Provisioning completion
 from __future__ import annotations
 
 import logging
-import uuid
 
 import pytest
 
@@ -91,15 +90,20 @@ OFFER_RESOURCE = {
 DEMAND_RESOURCE = {
     "token": {
         "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 0,   # test token — no decimal scaling so amount is already base units
+        # MockERC20 deployed by alkahest at fixed deterministic address —
+        # see market-contract-deployer/alkahest-transactions.json `_mock_erc20`.
+        # Stage 07 escrows real tokens against this contract so that
+        # storefront's pre-settlement on-chain verifier (commit 03e47bf)
+        # actually finds the EAS attestation. Account #1 (test buyer)
+        # is pre-funded by the alkahest deploy script.
+        "contract_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "decimals": 0,   # listing-display only; raw amounts are what land on-chain
     },
     "amount": 10_000,
 }
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
-MOCK_ESCROW_UID = f"escrow-e2e-{uuid.uuid4().hex[:8]}"
 PROV_RULE_ID = "e2e-create-pause"
 
 # Canonical callable name registered in domain/compute/agent/app/policy/store.py.
@@ -626,23 +630,45 @@ class TestStage06b_ForceAcceptAndTerminal:
 
 
 # ===========================================================================
-# Phase 7 — Mock escrow + provisioning gate setup
+# Phase 7 — On-chain escrow + provisioning gate setup
 # ===========================================================================
 
-class TestStage07_MockEscrowAndProvGate:
-    def test_07_mock_escrow_and_provision_gate_armed(
-        self, provisioning_test_client, deal_state: DealState
+class TestStage07_OnChainEscrowAndProvGate:
+    def test_07_create_real_escrow_and_arm_gate(
+        self, provisioning_test_client, buyer_config, seller_wallet,
+        deal_state: DealState,
     ):
-        """Capture deterministic mock escrow_uid and arm provisioning pause gate.
+        """Create a real on-chain escrow attestation + arm provisioning pause gate.
 
-        The pause gate (pause_before_result=True) holds the mock job before it
-        reports success, giving stage 08b a window to assert the job is
-        queued/running before stage 09a releases it. Without the gate the mock
-        may complete before the assertion and the test races.
+        Why on-chain (not a placeholder uid): commit 03e47bf added pre-settlement
+        verification — the storefront reads the EAS attestation by uid before
+        kicking off provisioning. A placeholder uid fails verification.
+
+        What's "buyer interaction" vs "anvil setup": token *distribution*
+        belongs in deploy-time (the alkahest deployer pre-funds account #1
+        with MockERC20). Token *escrow* is part of the deal flow — in
+        production the buyer signs and sends this transaction themselves —
+        so we do it here from the buyer's wallet, against the just-finalized
+        negotiation terms.
+
+        The pause gate (pause_before_result=True) holds the mock provisioning
+        job before it reports success, giving stage 08b a window to assert
+        queued/running before stage 09a releases it.
         """
-        require_state(deal_state, "negotiation_terminal_state")
+        require_state(deal_state, "negotiation_terminal_state", "agreed_price")
 
-        deal_state.escrow_uid = MOCK_ESCROW_UID
+        from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
+
+        escrow_uid = create_buyer_escrow(
+            buyer_private_key=buyer_config["private_key"],
+            seller_wallet_address=seller_wallet,
+            agreed_price=int(deal_state.agreed_price),
+            duration_seconds=DURATION_HOURS * 3600,
+            token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
+        )
+        deal_state.escrow_uid = escrow_uid
+        log.info("[07] Created on-chain escrow %s for negotiation %s",
+                 escrow_uid, deal_state.negotiation_id)
 
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
@@ -659,8 +685,7 @@ class TestStage07_MockEscrowAndProvGate:
             fail_with=None,
         )
         deal_state.provisioning_gate_armed = True
-        log.info("[07] Mock escrow: %s; provisioning gate armed with rule=%s",
-                 MOCK_ESCROW_UID, PROV_RULE_ID)
+        log.info("[07] Provisioning gate armed with rule=%s", PROV_RULE_ID)
 
 
 # ===========================================================================
@@ -681,14 +706,6 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         Confirms: job visible in provisioning API with status queued/running/succeeded.
         """
         require_state(deal_state, "negotiation_id", "escrow_uid", "provisioning_gate_armed")
-
-        pytest.skip(
-            "Stages 08+ require a real on-chain EAS escrow attestation since "
-            "commit 03e47bf added pre-settlement verification. The MOCK_ESCROW_UID "
-            "placeholder used by stage 07 fails verification. Need a buyer-side "
-            "fixture that creates a real ERC20EscrowObligation attestation via "
-            "alkahest before this stage can run end-to-end."
-        )
 
         settle_resp = storefront_client.settle(
             deal_state.escrow_uid,

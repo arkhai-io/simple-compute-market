@@ -158,7 +158,9 @@ class AnsibleJobService:
             if not job:
                 raise LookupError(f"Job {job_id} not found")
 
-            if job.agent_id:
+            # agent_id=None means "skip auth" — test endpoints under /test/*
+            # call this from a server-side admin context (mock profile only).
+            if job.agent_id and agent_id is not None:
                 is_seller = job.agent_id == agent_id
                 is_buyer = job.buyer_agent_id and job.buyer_agent_id == agent_id
                 if not is_seller and not is_buyer:
