@@ -153,6 +153,35 @@ class ProvisioningTestClient:
         """POST /test/mock-rules/{rule_id}/resume — release a paused job gate."""
         return self._post(f"/test/mock-rules/{rule_id}/resume")
 
+    def evaluate_job(
+        self,
+        host: str,
+        *,
+        vm_target: str = "eval-target",
+        ssh_pubkey: str | None = None,
+        vm_action: str = "create",
+    ) -> dict:
+        """POST /test/evaluate-job — dry-run job evaluation.
+
+        Returns a dict with:
+          params_valid: bool
+          host_exists: bool
+          rule_matched: str | None  — rule_id of the first matching mock rule
+          would_pause: bool         — True when the matched rule has pause_before_result
+          errors: list[str]
+
+        Use this in e2e stage 9a to confirm the provisioning gate is correctly
+        armed before calling POST /api/v1/settle/{uid}.
+        """
+        body: dict[str, Any] = {
+            "host": host,
+            "vm_target": vm_target,
+            "vm_action": vm_action,
+        }
+        if ssh_pubkey is not None:
+            body["ssh_pubkey"] = ssh_pubkey
+        return self._post("/test/evaluate-job", body)
+
     # ------------------------------------------------------------------
     # Job observation
     # ------------------------------------------------------------------

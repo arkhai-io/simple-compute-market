@@ -32,6 +32,7 @@ api_url           = ""
 base_url_override = ""
 private_key       = ""
 wallet_address    = ""
+chain_rpc_url     = ""   # RPC URL for on-chain escrow creation; falls back to rpc.url
 
 # ---------------------------------------------------------------------------
 # Seller wallet

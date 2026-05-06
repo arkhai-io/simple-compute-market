@@ -665,8 +665,9 @@ class TestStage07_OnChainEscrowAndProvGate:
             agreed_price=int(deal_state.agreed_price),
             duration_seconds=DURATION_HOURS * 3600,
             token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
+            rpc_url=buyer_config["rpc_url"],
         )
-        deal_state.escrow_uid = escrow_uid
+        deal_state.real_escrow_uid = escrow_uid
         log.info("[07] Created on-chain escrow %s for negotiation %s",
                  escrow_uid, deal_state.negotiation_id)
 
@@ -689,8 +690,117 @@ class TestStage07_OnChainEscrowAndProvGate:
 
 
 # ===========================================================================
-# Phase 8 — Settlement pipeline
-# (08a skipped — no meaningful dry-run for settle with mocked provisioning)
+# Phase 7b — Verify on-chain escrow via storefront (getRecordFromChain dry-run)
+# ===========================================================================
+
+class TestStage07b_VerifyEscrow:
+    def test_07b_storefront_verifies_on_chain_escrow(
+        self, storefront_admin_client, seller_wallet, deal_state: DealState
+    ):
+        """POST /api/v1/admin/settle/{uid}/verify → valid=True (dry-run).
+
+        Exercises getRecordFromChain in isolation: reads the escrow from chain
+        and confirms token, amount, and seller recipient match. No DB writes.
+        """
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price")
+
+        result = storefront_admin_client.verify_settle(
+            deal_state.real_escrow_uid,
+            seller_wallet=seller_wallet,
+            agreed_price=deal_state.agreed_price,
+            agreed_duration_seconds=DURATION_HOURS * 3600,
+            listing_id=deal_state.seller_listing_id,
+        )
+        assert result.get("valid") is True, (
+            f"Storefront could not verify on-chain escrow {deal_state.real_escrow_uid}.\n"
+            f"reason={result.get('reason')!r}\n"
+            "Check that the token address, amount, arbiter, and seller wallet "
+            "all match what was set at escrow creation time."
+        )
+        log.info("[07b] Storefront verified escrow %s: valid=True", deal_state.real_escrow_uid)
+
+
+# ===========================================================================
+# Phase 8a — Evaluate settlement job spec (doWork dry-run)
+# ===========================================================================
+
+class TestStage08a_EvaluateSettle:
+    def test_08a_evaluate_settle_would_submit(
+        self, storefront_admin_client, buyer_config, deal_state: DealState
+    ):
+        """POST /api/v1/admin/settle/{uid}/evaluate → would_submit=True (dry-run).
+
+        Exercises doWork in isolation: resolves a host from inventory and
+        builds the provisioning job spec without chain reads, DB writes, or
+        provisioning calls (read-only select_available_compute_vm). Confirms
+        a matching host exists before committing to settle.
+        """
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id")
+
+        result = storefront_admin_client.evaluate_settle(
+            deal_state.real_escrow_uid,
+            listing_id=deal_state.seller_listing_id,
+            ssh_public_key=buyer_config["ssh_public_key"],
+            duration_seconds=DURATION_HOURS * 3600,
+        )
+        assert result.get("would_submit") is True, (
+            f"evaluate_settle returned would_submit=False.\n"
+            f"reason={result.get('reason')!r}\n"
+            "Check that at least one compute resource is registered in the "
+            "storefront's resource inventory with state='available' and a "
+            "vm_host matching the listing's region/gpu_model requirements."
+        )
+        deal_state._evaluate_settle_vm_host = result.get("vm_host")
+        deal_state._evaluate_settle_vm_target = result.get("vm_target")
+        deal_state._evaluate_settle_passed = True
+        log.info("[08a] Evaluate settle: vm_host=%s vm_target=%s",
+                 result.get("vm_host"), result.get("vm_target"))
+
+
+# ===========================================================================
+# Phase 8c — Evaluate provisioning job (provisioning service dry-run)
+# ===========================================================================
+
+class TestStage08c_EvaluateProvisioningJob:
+    def test_08c_evaluate_provisioning_job(
+        self, provisioning_test_client, deal_state: DealState
+    ):
+        """POST /test/evaluate-job → params_valid=True, rule_matched=PROV_RULE_ID (dry-run).
+
+        Exercises the provisioning service's job routing in isolation:
+        confirms the host exists in inventory, the job params are valid,
+        and the armed mock rule would match and pause. No job is created.
+        """
+        require_state(deal_state, "_evaluate_settle_passed", "provisioning_gate_armed")
+
+        vm_host = deal_state._evaluate_settle_vm_host
+        assert vm_host, (
+            "vm_host not captured from stage 08a — cannot evaluate provisioning job."
+        )
+
+        result = provisioning_test_client.evaluate_job(
+            vm_host,
+            vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
+            vm_action="create",
+        )
+        assert result.get("params_valid") is True, (
+            f"Provisioning job params invalid. errors={result.get('errors')!r}"
+        )
+        assert result.get("host_exists") is True, (
+            f"Host {vm_host!r} not found in provisioning inventory."
+        )
+        assert result.get("rule_matched") == PROV_RULE_ID, (
+            f"Expected mock rule {PROV_RULE_ID!r} to match, "
+            f"got rule_matched={result.get('rule_matched')!r}."
+        )
+        assert result.get("would_pause") is True
+        deal_state._provision_job_evaluated = True
+        log.info("[08c] Provisioning job evaluate: host=%s rule=%s",
+                 vm_host, result.get("rule_matched"))
+
+
+# ===========================================================================
+# Phase 8b — Settlement pipeline (advance)
 # ===========================================================================
 
 class TestStage08b_SettlementSubmittedAndJobQueued:
@@ -705,10 +815,10 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
           then single GET /settle/{uid}/status → provisioning_job_id.
         Confirms: job visible in provisioning API with status queued/running/succeeded.
         """
-        require_state(deal_state, "negotiation_id", "escrow_uid", "provisioning_gate_armed")
+        require_state(deal_state, "negotiation_id", "real_escrow_uid", "_provision_job_evaluated")
 
         settle_resp = storefront_client.settle(
-            deal_state.escrow_uid,
+            deal_state.real_escrow_uid,
             negotiation_id=deal_state.negotiation_id,
             buyer_address=buyer_config["wallet_address"],
             ssh_public_key=buyer_config["ssh_public_key"],
@@ -730,7 +840,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
 
         # Single read — event confirms job is queued
         status_resp = storefront_client.get_settle_status(
-            deal_state.escrow_uid,
+            deal_state.real_escrow_uid,
             buyer_address=buyer_config["wallet_address"],
         )
         prov_job_id = status_resp.provisioning_job_id
@@ -794,7 +904,7 @@ class TestStage09b_SettlementReadyAndCredentials:
         )
 
         status_resp = storefront_client.get_settle_status(
-            deal_state.escrow_uid,
+            deal_state.real_escrow_uid,
             buyer_address=buyer_config["wallet_address"],
         )
         assert status_resp.status == "ready", (

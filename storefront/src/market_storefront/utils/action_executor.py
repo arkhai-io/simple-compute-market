@@ -249,11 +249,8 @@ async def execute_action(
                         buyer_attestation=order.get("buyer_attestation"),
                         oracle_address=order.get("oracle_address"),
                         escrow_uid=None,
+                        paused=create_paused,
                     )
-                    if create_paused:
-                        await sqlite_client.set_listing_paused(
-                            listing_id=order.get("listing_id"), paused=True
-                        )
                 except Exception as exc:
                     logger.warning("[LOCAL DB] Failed to upsert order %s: %s", created_listing_id, exc)
 
@@ -868,6 +865,58 @@ def encode_compute_lease(
     logger.info("[ALKAHEST] Encoding compute lease terms: %s", lease_terms)
 
     return json.dumps(lease_terms).encode("utf-8")
+
+
+async def _build_provisioning_job_spec(
+    *,
+    order_dict: dict | None,
+    ssh_public_key: str,
+    duration_seconds: int,
+    sqlite_client: Any | None = None,
+) -> dict | None:
+    """Pure compute: select a host from inventory and build the provisioning job spec.
+
+    Performs a **read-only** inventory lookup (``select_available_compute_vm``
+    — no state change, no reservation). Use this for dry-run / evaluate paths.
+    The real flow (``fulfill_compute_obligation``) continues to call
+    ``reserve_available_compute_vm`` directly so it can atomically reserve.
+
+    Returns a dict with keys:
+        resource_id, vm_host, vm_target, required_attributes, ssh_public_key,
+        duration_seconds
+
+    Returns None if no resource matches required_attributes.
+
+    This function is the ``doWork`` seam for the settlement pipeline:
+        POST /api/v1/settle/{uid}
+          ├── getRecordFromChain  (verify_escrow_for_settlement)
+          ├── doWork              (_build_provisioning_job_spec)  ← this function
+          └── submitJob           (_do_provision → asyncio.create_task)
+    """
+    required_attributes: dict[str, Any] = {}
+    if order_dict:
+        compute_resource, _token = extract_compute_and_token_from_order_dict(order_dict)
+        if isinstance(compute_resource, dict):
+            for key in ("region", "gpu_model"):
+                if compute_resource.get(key) is not None:
+                    required_attributes[key] = compute_resource[key]
+
+    db = sqlite_client or get_sqlite_client()
+    selected = await db.select_available_compute_vm(
+        required_attributes=required_attributes or None,
+    )
+    if not selected:
+        return None
+
+    vm_target = f"tenant-{uuid.uuid4().hex[:4]}"
+    return {
+        "resource_id": str(selected["resource_id"]),
+        "vm_host": selected["vm_host"],
+        "vm_target": vm_target,
+        "required_attributes": required_attributes,
+        "ssh_public_key": ssh_public_key,
+        "duration_seconds": duration_seconds,
+    }
 
 
 async def fulfill_compute_obligation(

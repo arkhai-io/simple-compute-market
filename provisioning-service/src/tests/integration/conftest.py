@@ -43,11 +43,129 @@ from db.database import create_session_factory
 
 AGENT_ID = "eip155:1337:0xdeadbeef:1"
 from db.models import Base
+
+
+# ---------------------------------------------------------------------------
+# Async test client for /test/* endpoints (shared across integration tests)
+# ---------------------------------------------------------------------------
+
+class AsyncProvisioningTestClientError(Exception):
+    """Non-2xx response from the provisioning test controller."""
+    def __init__(self, method: str, path: str, status: int, body: str) -> None:
+        self.status_code = status
+        super().__init__(f"{method} {path} -> {status}: {body[:200]}")
+
+
+class AsyncProvisioningTestClient:
+    """Async typed client for the provisioning service /test/* endpoints.
+
+    Used by integration tests that need to call test-mode control endpoints
+    (mock rules, job evaluation). Follows the architecture rule that test
+    bodies must not contain raw HTTP calls — all calls go through named methods.
+    """
+
+    def __init__(self, transport: ASGITransport) -> None:
+        self._client = AsyncClient(transport=transport, base_url="http://test")
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def __aenter__(self) -> "AsyncProvisioningTestClient":
+        return self
+
+    async def __aexit__(self, *_) -> None:
+        await self.close()
+
+    async def _get(self, path: str, *, params: dict | None = None, timeout: float = 15.0) -> dict:
+        resp = await self._client.get(path, params=params or {}, timeout=timeout)
+        if resp.status_code >= 400:
+            raise AsyncProvisioningTestClientError("GET", path, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _post(self, path: str, body: dict | None = None) -> dict:
+        resp = await self._client.post(path, json=body or {})
+        if resp.status_code >= 400:
+            raise AsyncProvisioningTestClientError("POST", path, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _delete(self, path: str) -> dict:
+        resp = await self._client.delete(path)
+        if resp.status_code >= 400:
+            raise AsyncProvisioningTestClientError("DELETE", path, resp.status_code, resp.text)
+        return resp.json()
+
+    async def add_mock_rule(
+        self,
+        *,
+        rule_id: str = "",
+        match: dict | None = None,
+        pause_before_result: bool = False,
+        result_stdout: str | None = None,
+        fail_with: str | None = None,
+    ) -> dict:
+        """POST /test/mock-rules"""
+        body: dict = {
+            "rule_id": rule_id,
+            "match": match or {},
+            "pause_before_result": pause_before_result,
+        }
+        if result_stdout is not None:
+            body["result_stdout"] = result_stdout
+        if fail_with is not None:
+            body["fail_with"] = fail_with
+        return await self._post("/test/mock-rules", body)
+
+    async def list_mock_rules(self) -> list[dict]:
+        """GET /test/mock-rules"""
+        return await self._get("/test/mock-rules")  # type: ignore[return-value]
+
+    async def delete_mock_rule(self, rule_id: str) -> dict:
+        """DELETE /test/mock-rules/{rule_id}"""
+        return await self._delete(f"/test/mock-rules/{rule_id}")
+
+    async def resume_rule(self, rule_id: str) -> dict:
+        """POST /test/mock-rules/{rule_id}/resume"""
+        return await self._post(f"/test/mock-rules/{rule_id}/resume")
+
+    async def job_summary(self) -> dict:
+        """GET /test/jobs/summary"""
+        return await self._get("/test/jobs/summary")
+
+    async def wait_for_job(self, job_id: str, *, timeout: float = 30.0) -> dict:
+        """GET /test/jobs/{job_id}/wait -- long-poll until terminal."""
+        return await self._get(
+            f"/test/jobs/{job_id}/wait",
+            params={"timeout": timeout},
+            timeout=timeout + 5.0,
+        )
+
+    async def drain(self, *, timeout: float = 60.0) -> dict:
+        """GET /test/jobs/drain"""
+        return await self._get(
+            "/test/jobs/drain",
+            params={"timeout": timeout},
+            timeout=timeout + 5.0,
+        )
+
+    async def evaluate_job(
+        self,
+        host: str,
+        *,
+        vm_target: str = "eval-target",
+        ssh_pubkey: str | None = None,
+        vm_action: str = "create",
+    ) -> dict:
+        """POST /test/evaluate-job — dry-run job evaluation."""
+        body: dict = {"host": host, "vm_target": vm_target, "vm_action": vm_action}
+        if ssh_pubkey is not None:
+            body["ssh_pubkey"] = ssh_pubkey
+        return await self._post("/test/evaluate-job", body)
 from main import app
 from services.ansible_service import AnsibleResult, AnsibleRun, AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
+from services.mock_ansible_service import ProgrammableMockAnsibleService
 from services.system_service import SystemService
 
 
@@ -257,6 +375,16 @@ async def client_and_queue(
     )
 
     transport = ASGITransport(app=app)
+
+    # Mount the test controller if not already present
+    from controllers.test_controller import make_router as _make_test_router
+    _test_prefix = "/test"
+    _already_mounted = any(
+        getattr(r, "path", "").startswith(_test_prefix) for r in app.routes
+    )
+    if not _already_mounted:
+        app.include_router(_make_test_router())
+
     async with AsyncClient(transport=transport, base_url="http://test") as http:
         client = ProvisioningClient(
             "http://test",
@@ -277,3 +405,24 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
+
+
+@pytest_asyncio.fixture
+async def test_client(client_and_queue) -> AsyncIterator[AsyncProvisioningTestClient]:
+    """Yield an AsyncProvisioningTestClient connected to the in-process app.
+
+    Depends on client_and_queue to ensure the full service stack (including
+    the test controller router) is mounted and the container is wired.
+    """
+    job_service = _container_module.resolved_job_service
+    mock_settings = getattr(job_service, "_settings", MagicMock())
+    programmable_mock = ProgrammableMockAnsibleService(mock_settings)
+
+    original_ansible = _container_module.resolved_ansible_service
+    _container_module.resolved_ansible_service = programmable_mock
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncProvisioningTestClient(transport) as tc:
+            yield tc
+    finally:
+        _container_module.resolved_ansible_service = original_ansible

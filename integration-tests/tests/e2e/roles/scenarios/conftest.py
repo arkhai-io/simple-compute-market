@@ -59,8 +59,14 @@ class DealState:
     negotiation_terminal_state: Optional[str] = None
     agreed_price: Optional[int] = None
     # Phase 7 — mock escrow + provisioning gate
-    escrow_uid: Optional[str] = None
+    real_escrow_uid: Optional[str] = None
     provisioning_gate_armed: bool = False
+    # Phase 8a — evaluate settle (doWork dry-run)
+    _evaluate_settle_vm_host: Optional[str] = None
+    _evaluate_settle_vm_target: Optional[str] = None
+    _evaluate_settle_passed: bool = False
+    # Phase 9a — provisioning job evaluate
+    _provision_job_evaluated: bool = False
     # Phase 8 — settlement
     settlement_submitted: bool = False
     provisioning_job_id: Optional[str] = None
@@ -182,10 +188,16 @@ def buyer_config() -> dict[str, str]:
         getattr(settings.BUYER, "SSH_PUBLIC_KEY", None) or
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForE2E test@e2e"
     )
+    # rpc_url for on-chain escrow creation — falls back to the global rpc.url setting
+    rpc_url = str(
+        getattr(settings.BUYER, "CHAIN_RPC_URL", None) or
+        getattr(settings, "RPC", {}).get("URL", "ws://localhost:8545")
+    )
     return {
         "private_key": private_key,
         "wallet_address": wallet_address,
         "ssh_public_key": ssh_public_key,
+        "rpc_url": rpc_url,
     }
 
 

@@ -1444,6 +1444,80 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_reserve)
 
+    async def select_available_compute_vm(
+        self,
+        *,
+        required_attributes: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Read-only lookup of one available compute resource — no state change.
+
+        Identical selection logic to ``reserve_available_compute_vm`` but
+        performs no UPDATE and emits no transition event. Use this for
+        dry-run / evaluate paths (e.g. POST /api/v1/admin/settle/{uid}/evaluate)
+        that must not consume a resource slot.
+
+        Args:
+            required_attributes: Optional exact-match filters (for example:
+                {"region": "California, US", "gpu_model": "H200"}).
+        """
+        def _select() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT resource_id, resource_subtype, unit, state, value, attributes
+                    FROM resources
+                    WHERE resource_type = 'compute.gpu'
+                      AND state = 'available'
+                    ORDER BY updated_at ASC
+                    """
+                )
+                rows = cur.fetchall()
+                for resource_id, resource_subtype, unit, state, value, attributes_raw in rows:
+                    attrs: dict[str, Any]
+                    try:
+                        attrs = json.loads(attributes_raw) if isinstance(attributes_raw, str) else {}
+                    except Exception:
+                        attrs = {}
+
+                    if required_attributes:
+                        top_level = {
+                            "resource_type": "compute.gpu",
+                            "resource_subtype": resource_subtype,
+                            "unit": unit,
+                            "state": state,
+                            "value": value,
+                        }
+                        is_match = True
+                        for key, expected in required_attributes.items():
+                            actual = attrs.get(key, top_level.get(key))
+                            if actual != expected:
+                                is_match = False
+                                break
+                        if not is_match:
+                            continue
+
+                    vm_host = attrs.get("vm_host")
+                    if not isinstance(vm_host, str) or not vm_host.strip():
+                        continue
+
+                    return {
+                        "resource_id": resource_id,
+                        "vm_host": vm_host,
+                        "resource_subtype": resource_subtype,
+                        "unit": unit,
+                        "state": "available",
+                        "value": value,
+                        "attributes": attrs,
+                    }
+
+                return None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_select)
+
     async def upsert_listing(
         self,
         *,
@@ -1462,6 +1536,7 @@ class SQLiteClient:
         buyer_attestation: str | None = None,
         escrow_uid: str | None = None,
         oracle_address: str | None = None,
+        paused: bool = False,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -1484,9 +1559,10 @@ class SQLiteClient:
                       seller_attestation,
                       buyer_attestation,
                       escrow_uid,
-                      oracle_address
+                      oracle_address,
+                      paused
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -1500,7 +1576,8 @@ class SQLiteClient:
                       seller_attestation=excluded.seller_attestation,
                       buyer_attestation=excluded.buyer_attestation,
                       escrow_uid=excluded.escrow_uid,
-                      oracle_address=excluded.oracle_address
+                      oracle_address=excluded.oracle_address,
+                      paused=excluded.paused
                     """,
                     (
                         listing_id,
@@ -1518,6 +1595,7 @@ class SQLiteClient:
                         buyer_attestation,
                         escrow_uid,
                         oracle_address,
+                        1 if paused else 0,
                     ),
                 )
                 conn.commit()

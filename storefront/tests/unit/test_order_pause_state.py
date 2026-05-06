@@ -86,6 +86,32 @@ class TestOrderPauseHelpers:
         row = await db.load_listing(listing_id="order-001")
         assert row["paused"] is False
 
+    async def test_upsert_listing_round_trips_paused_flag(self, db):
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+        await db.upsert_listing(
+            listing_id="order-paused-at-create",
+            status="open",
+            created_at=now,
+            updated_at=now,
+            offer_resource={},
+            demand_resource={},
+            fulfillment_resource=None,
+            max_duration_seconds=3600,
+            seller="http://seller:8001",
+            paused=True,
+        )
+
+        row = await db.load_listing(listing_id="order-paused-at-create")
+        assert row is not None
+        assert row["paused"] is True
+
+        paused_orders = await db.list_listings(paused=True)
+        assert "order-paused-at-create" in {
+            order["listing_id"] for order in paused_orders
+        }
+
     async def test_list_orders_paused_filter(self, db):
         # Add a second order (not paused)
         from datetime import datetime

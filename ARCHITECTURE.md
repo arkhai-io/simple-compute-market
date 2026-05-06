@@ -1270,7 +1270,7 @@ make build
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
 
-- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops. **Note:** `load_listing` in `sqlite_client.py` previously omitted the `paused` column from its SELECT — this is fixed and covered by `test_load_listing_returns_paused_flag` in `test_order_pause_state.py`. Convention: any time a new column is added to the `listings` table, both `upsert_listing` (write path) and `load_listing` (read path) must be updated together, and a round-trip unit test added.
+- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops. **Note:** `load_listing` in `sqlite_client.py` previously omitted the `paused` column from its SELECT — this is fixed and covered by `test_load_listing_returns_paused_flag` in `test_order_pause_state.py`. `upsert_listing(paused=...)` now owns the initial paused value atomically at listing creation/update time; `set_listing_paused()` remains the transition helper for pause/resume endpoints. Convention: any time a new column is added to the `listings` table, both `upsert_listing` (write path) and `load_listing` (read path) must be updated together, and a round-trip unit test added.
 
 - **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The policy pipeline multiplies `demand.amount` by `10**decimals` before storing it as `our_price`. Any token with 18 decimals and a human-readable amount above ~9.2 billion will overflow. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so `amount` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time, or enforce a maximum sane price check in `_extract_initial_price_from_order()`.
 
@@ -1419,6 +1419,16 @@ The `provisioning_job_id` is surfaced in `GET /settle/{escrow_uid}/status` on th
 Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or staging.
 
 Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
+
+In provisioning-service integration tests, `/test/*` callers use a fresh
+`ProgrammableMockAnsibleService` wired through `container.resolved_ansible_service`
+for the lifetime of the test client. The regular provisioning API integration
+fixtures may still use a `MagicMock` at the Ansible subprocess boundary when a
+test needs call assertions such as `start_playbook.assert_called_once()`.
+`POST /test/evaluate-job` is a typed JSON-body route backed by
+`EvaluateJobRequest`; request/response model imports must stay concrete at
+module scope so FastAPI binds the payload as a body rather than a query
+parameter.
 
 **Endpoints:**
 
@@ -1708,32 +1718,54 @@ The primary e2e test suite. Sequential tests covering the complete buyer-seller 
 |---|---|---|
 | 00a | Storefront health | `GET /health` → status=ok, database=ok |
 | 00b | Registry reachable | `GET /api/v1/system/status` → checks.registry=ok |
-| 00c | Provisioning health | `GET provisioning/health` → status=ok |
+| 00c | Provisioning health | `GET /api/v1/system/ansible/readiness` → playbook.exists=True |
 | 00d | Negotiation strategy | checks.negotiation_strategy not exit-on-probe |
-| 01a | Policy dry-run | `POST /api/v1/system/policy/evaluate` → action=make_offer |
-| 01b | Policy seed | `POST /admin/policy/seed` → callable_count > 0 |
+| 01a | Policy dry-run | `POST /api/v1/system/policy/evaluate` with `policy_components=["oc.action.make_offer_from_order_create"]` → action=make_offer |
+| 01b | Policy seed | `POST /admin/policy/seed` → callable_count > 0; read-back from `GET /api/v1/system/policy` confirms order_create callable |
 | 02a | Evaluate-create dry-run | `POST /api/v1/admin/listings/evaluate-create` → would_create=True |
-| 02b | Create listing paused | `POST /listings/create paused=True` → listing_id; local visible paused=True; registry absent |
+| 02b | Create listing paused | `POST /api/v1/listings/create paused=True` → listing_id; local visible paused=True; registry absent |
 | 03a | Validate publish | `POST registry /api/v1/listings/validate-publish` → valid=True |
 | 03b | Resume + registry confirm | `POST /listings/{id}/resume` → registry_status=published; registry present |
-| 05a | Evaluate-negotiate dry-run | `POST /api/v1/admin/listings/{id}/evaluate-negotiate` → would_negotiate=True |
-| 05b | Negotiation starts + visible | `POST /negotiate/new` → neg_id; thread in list; round_decided event != exit |
-| 06b | Force-accept + terminal | Guard no exit events; `POST .../force-accept` → accept; terminal_state=success |
-| 07 | Mock escrow + gate | Capture escrow_uid; `add_mock_rule(pause_before_result=True)` |
-| 08b | Settlement + job queued | `POST /settle/{uid}` → provisioning; wait_for_stage_event(resource_reserved); provisioning_job_id present |
-| 09a | Gate release + complete | resume_rule; wait_for_job → succeeded |
-| 09b | Settlement ready + listing | wait_for_stage_event(fulfilled); status=ready + credentials; listing accepted/closed |
+| 05a | Evaluate-negotiate dry-run | `POST /api/v1/admin/listings/{id}/evaluate-negotiate` → would_negotiate=True, decision=counter |
+| 05b | Negotiation starts + visible | `POST /negotiate/new` → neg_id; thread in list; round_decided event decision=counter |
+| 06b | Force-accept + terminal | Guard no exit/accept events; `POST .../force-accept` → accept; terminal_state=success |
+| 07 | Provision gate setup | `add_mock_rule(pause_before_result=True)` — arms the gate for stage 09a |
+| 07b | Buyer creates escrow + verify | Buyer calls Alkahest contract → real `escrow_uid`; `POST /api/v1/admin/settle/{uid}/verify` → valid=True |
+| 08a | Evaluate settle dry-run | `POST /api/v1/admin/settle/{uid}/evaluate` → would_submit=True, vm_host captured |
+| 09a | Evaluate provisioning job | `POST /test/evaluate-job` → params_valid=True, rule_matched=PROV_RULE_ID, would_pause=True |
+| 09b | Settlement + job queued | `POST /settle/{uid}` → provisioning; wait_for_stage_event(resource_reserved); provisioning_job_id present |
+| 09c | Gate release + complete | resume_rule; wait_for_job → succeeded |
+| 09d | Settlement ready + listing | wait_for_stage_event(fulfilled); status=ready + credentials; listing accepted/closed |
 
-**Note on Phase 4:** Admin pause/resume was removed from the e2e deal flow — it is an operational control surface unrelated to the deal lifecycle. A TODO comment in `test_storefront_smoke.py` tracks adding a dedicated `TestStorefrontAdminPauseResume` smoke test.
+**Note on Phase 4:** Admin pause/resume removed from e2e — see smoke test TODO in `test_storefront_smoke.py`.
 
 **Testing gaps — dry-run endpoints not yet implemented:**
 
 | Gap | Stage slot | Planned endpoint |
 |---|---|---|
-| No evaluate-resume dry-run | Phase 3 `03a` currently reads registry connectivity | `POST /api/v1/admin/listings/{id}/evaluate-resume` |
-| No evaluate-settle dry-run | Phase 8 `08a` skipped | `POST /api/v1/admin/settle/{uid}/evaluate` |
+| No evaluate-resume dry-run | Phase 3 `03a` uses registry reachability check instead | `POST /api/v1/admin/listings/{id}/evaluate-resume` |
 
-**`DealState`** — module-scoped dataclass accumulating IDs and snapshots. Key fields: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5); `escrow_uid`, `provisioning_gate_armed` (Phase 7); `settlement_submitted`, `provisioning_job_id` (Phase 8); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9). Each field gates the next phase, so the first failure is always actionable.
+**`DealState`** — module-scoped dataclass. Key fields by phase: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5-6); `provisioning_gate_armed` (Phase 7); `real_escrow_uid`/`escrow_uid` (Phase 7b); `_evaluate_settle_passed`, `_evaluate_settle_vm_host` (Phase 8a); `_provision_job_evaluated` (Phase 9a); `settlement_submitted`, `provisioning_job_id` (Phase 9b); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9c-d).
+
+**Admin dry-run settle endpoints (new this session):**
+
+- `POST /api/v1/admin/settle/{uid}/verify` — reads escrow from chain, confirms token/amount/arbiter match caller-supplied terms. No DB writes. Tests `getRecordFromChain` in isolation.
+- `POST /api/v1/admin/settle/{uid}/evaluate` — resolves a host from inventory (read-only, `reserve=False`) and builds the provisioning job spec. No chain reads, no DB writes. Tests `doWork` in isolation.
+
+**`_build_provisioning_job_spec` seam:**
+
+```
+POST /api/v1/settle/{uid}
+  ├── getRecordFromChain  verify_escrow_for_settlement()
+  ├── doWork              _build_provisioning_job_spec(reserve=True)  ← extracted seam
+  └── submitJob           asyncio.create_task(_run_settlement_job_bg())
+```
+
+`evaluate_settle` calls `_build_provisioning_job_spec(reserve=False)`. The real flow calls it with `reserve=True` (atomically marks resource reserved). `select_available_compute_vm(reserve=False)` is the read-only inventory lookup used by the evaluate path; `select_available_compute_vm(reserve=True)` is the write path used by the real flow. `reserve_available_compute_vm` is a deprecated alias for `select_available_compute_vm(reserve=True)`. The dry-run service passes its request-scoped/injected SQLite client into `_build_provisioning_job_spec`; the helper only falls back to the process-global client when no client is supplied. This keeps in-process integration tests on the same database for listing lookup and inventory selection.
+
+**Provisioning evaluate-job endpoint (test controller):**
+
+`POST /test/evaluate-job` on the provisioning service's test controller. Accepts `{host, vm_target, ssh_pubkey, vm_action}`, returns `{params_valid, host_exists, rule_matched, would_pause, errors}`. Checks host existence in inventory and which mock rule (if any) would match the job params. No job is created. Used by e2e stage 9a.
 
 **`/api/v1/negotiate/new` signing:** `SyncStorefrontClient.negotiate_new()` accepts `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, and `buyer_agent_url`. It does not add auth headers — EIP-191 signing must be done by the caller using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`, then passing `X-Signature` and `X-Timestamp` as extra headers via `client._client.post(...)`. The body must include `listing_id` (not `seller_listing_id`) and `duration_seconds`. TODO: add signing support directly to `negotiate_new()` so the e2e test can use it without raw `_client.post`.
 

@@ -10,7 +10,16 @@ from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware import buyer_auth
-from market_storefront.models.settle_models import SettleRequest, SettleResponse, SettleStatusResponse
+from market_storefront.middleware.admin_auth import require_admin_key
+from market_storefront.models.settle_models import (
+    EvaluateSettleRequest,
+    EvaluateSettleResponse,
+    SettleRequest,
+    SettleResponse,
+    SettleStatusResponse,
+    VerifyEscrowRequest,
+    VerifyEscrowResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +103,75 @@ class SettleController:
         if not job:
             raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
         return SettleStatusResponse(**serialize_settlement_job(job))
+
+
+# ---------------------------------------------------------------------------
+# Admin dry-run settle controller
+# ---------------------------------------------------------------------------
+
+admin_settle_router = APIRouter(prefix="/api/v1/admin/settle", tags=["admin-settle"])
+
+
+@cbv(admin_settle_router)
+class AdminSettleController:
+    def __init__(
+        self,
+        db=Depends(lambda: _container.resolved_sqlite_client),
+        _key=Depends(require_admin_key),
+    ) -> None:
+        from market_storefront.utils.config import CONFIG
+        from market_storefront.services.admin_settle_service import AdminSettleService
+        self._svc = AdminSettleService(sqlite_client=db, config=CONFIG)
+
+    @admin_settle_router.post(
+        "/{escrow_uid}/verify",
+        response_model=VerifyEscrowResponse,
+        summary="Verify an on-chain escrow matches expected terms (dry-run, no DB writes)",
+    )
+    async def verify_escrow(
+        self, escrow_uid: str, body: VerifyEscrowRequest
+    ) -> VerifyEscrowResponse:
+        """Read the escrow from chain and confirm it matches caller-supplied terms.
+
+        No DB writes. Returns valid=True/False. Used by e2e stage 07b.
+        """
+        try:
+            result = await self._svc.verify_escrow_dry_run(
+                escrow_uid=escrow_uid,
+                listing_id=body.listing_id,
+                seller_wallet=body.seller_wallet,
+                agreed_price=body.agreed_price,
+                agreed_duration_seconds=body.agreed_duration_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            logger.error("[ADMIN SETTLE] verify_escrow failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+        return VerifyEscrowResponse(**result)
+
+    @admin_settle_router.post(
+        "/{escrow_uid}/evaluate",
+        response_model=EvaluateSettleResponse,
+        summary="Evaluate provisioning job spec for a settlement (dry-run, no writes)",
+    )
+    async def evaluate_settle(
+        self, escrow_uid: str, body: EvaluateSettleRequest
+    ) -> EvaluateSettleResponse:
+        """Resolve a host from inventory and build the provisioning job spec.
+
+        No chain reads, no DB writes. Used by e2e stage 08a.
+        """
+        try:
+            result = await self._svc.evaluate_settle_dry_run(
+                escrow_uid=escrow_uid,
+                listing_id=body.listing_id,
+                ssh_public_key=body.ssh_public_key,
+                duration_seconds=body.duration_seconds,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            logger.error("[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+        return EvaluateSettleResponse(**result)

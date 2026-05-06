@@ -336,6 +336,53 @@ class ProgrammableMockAnsibleService(MockAnsibleService):
                 return rule
         return None
 
+    def evaluate_job(
+        self,
+        params: "AnsibleJobParams",
+        host_service: "Any",
+    ) -> "EvaluateJobResponse":
+        """Dry-run: check whether a job would be accepted and which rule would match.
+
+        Args:
+            params:       AnsibleJobParams describing the hypothetical job.
+            host_service: HostService instance used to verify host existence.
+
+        Returns EvaluateJobResponse with params_valid, host_exists,
+        rule_matched (rule_id or None), would_pause, and any errors.
+        No job is created or queued.
+        """
+        from models.system_model import EvaluateJobResponse
+
+        errors: list[str] = []
+        host_exists = False
+
+        # Check host exists in inventory
+        try:
+            host = host_service.get_host(params.vm_host)
+            host_exists = host is not None
+            if not host_exists:
+                errors.append(
+                    f"Host {params.vm_host!r} not found in inventory. "
+                    "Register it with POST /api/v1/hosts before settling."
+                )
+        except Exception as exc:
+            errors.append(f"Could not check host inventory: {exc}")
+
+        # Check mock rule matching
+        rule = self._find_rule(params)
+        rule_matched = rule.rule_id if rule is not None else None
+        would_pause = rule.pause_before_result if rule is not None else False
+
+        params_valid = len(errors) == 0 and bool(params.vm_host) and bool(params.vm_action)
+
+        return EvaluateJobResponse(
+            params_valid=params_valid,
+            host_exists=host_exists,
+            rule_matched=rule_matched,
+            would_pause=would_pause,
+            errors=errors,
+        )
+
     # ------------------------------------------------------------------
     # AnsibleService interface override
     # ------------------------------------------------------------------

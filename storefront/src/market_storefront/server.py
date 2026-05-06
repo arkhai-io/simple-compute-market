@@ -218,7 +218,7 @@ from market_storefront.controllers.admin_controller import router as admin_route
 from market_storefront.controllers.listings_controller import router as listings_router, admin_router as admin_listings_router       # noqa: E402
 from market_storefront.controllers.negotiations_controller import router as negotiations_router  # noqa: E402
 from market_storefront.controllers.negotiate_controller import router as negotiate_router     # noqa: E402
-from market_storefront.controllers.settle_controller import router as settle_router           # noqa: E402
+from market_storefront.controllers.settle_controller import router as settle_router, admin_settle_router           # noqa: E402
 from market_storefront.controllers.alerts_controller import router as alerts_router           # noqa: E402
 from market_storefront.controllers.identity_controller import router as identity_router       # noqa: E402
 
@@ -229,6 +229,7 @@ app.include_router(admin_listings_router)
 app.include_router(negotiations_router)
 app.include_router(negotiate_router)
 app.include_router(settle_router)
+app.include_router(admin_settle_router)
 app.include_router(alerts_router)
 app.include_router(identity_router)
 

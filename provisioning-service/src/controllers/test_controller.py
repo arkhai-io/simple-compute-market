@@ -50,6 +50,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 import container as _container_module
+from models.system_model import EvaluateJobRequest, EvaluateJobResponse
 from services.job_service import AnsibleJobService
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,41 @@ async def wait_for_job(
                        f"(current status: {job.status!r})",
             )
         await asyncio.sleep(min(0.25, remaining))
+
+
+@router.post(
+    "/evaluate-job",
+    response_model=EvaluateJobResponse,
+    summary="Dry-run: would this job be accepted and which mock rule would match?",
+)
+async def evaluate_job(body: EvaluateJobRequest) -> EvaluateJobResponse:
+    """Evaluate a provisioning job spec without creating a job.
+
+    Delegates to ProgrammableMockAnsibleService.evaluate_job which checks
+    host existence and mock rule matching. Only available when the service
+    is running in mock mode. Used by e2e stage 08c.
+    """
+    from models.jobs_model import AnsibleJobParams
+    from services.mock_ansible_service import ProgrammableMockAnsibleService
+
+    ansible_svc = _container_module.resolved_ansible_service
+    host_svc = _container_module.resolved_host_service
+
+    if not isinstance(ansible_svc, ProgrammableMockAnsibleService):
+        raise HTTPException(
+            status_code=503,
+            detail="evaluate-job is only available when ACTIVE_PROFILES=mock",
+        )
+    if host_svc is None:
+        raise HTTPException(status_code=503, detail="HostService not available")
+
+    params = AnsibleJobParams(
+        vm_host=body.host,
+        vm_action=body.vm_action,
+        vm_target=body.vm_target,
+        ssh_pubkey=body.ssh_pubkey,
+    )
+    return ansible_svc.evaluate_job(params, host_svc)
 
 
 def make_router() -> APIRouter:

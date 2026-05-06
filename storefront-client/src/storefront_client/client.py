@@ -766,8 +766,55 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
 
+    async def verify_settle(
+        self,
+        escrow_uid: str,
+        *,
+        seller_wallet: str,
+        agreed_price: int,
+        agreed_duration_seconds: int,
+        listing_id: str,
+    ) -> dict:
+        """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
 
+        Reads the escrow from chain and confirms it matches the supplied terms.
+        Returns dict with valid=True/False and reason on failure.
+        No DB writes. Used by e2e stage 7b.
+        """
+        body = {
+            "seller_wallet": seller_wallet,
+            "agreed_price": agreed_price,
+            "agreed_duration_seconds": agreed_duration_seconds,
+            "listing_id": listing_id,
+        }
+        return await self._post(
+            f"/api/v1/admin/settle/{escrow_uid}/verify", body,
+            extra_headers=self._admin_headers(),
+        )
 
+    async def evaluate_settle(
+        self,
+        escrow_uid: str,
+        *,
+        listing_id: str,
+        ssh_public_key: str = "",
+        duration_seconds: int = 3600,
+    ) -> dict:
+        """POST /api/v1/admin/settle/{escrow_uid}/evaluate — dry-run provisioning job spec (admin key).
+
+        Resolves a host from inventory and builds the job spec without chain reads,
+        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
+        vm_target, required_attributes. Used by e2e stage 8a.
+        """
+        body = {
+            "listing_id": listing_id,
+            "ssh_public_key": ssh_public_key,
+            "duration_seconds": duration_seconds,
+        }
+        return await self._post(
+            f"/api/v1/admin/settle/{escrow_uid}/evaluate", body,
+            extra_headers=self._admin_headers(),
+        )
 
 # ---------------------------------------------------------------------------
 # Sync client
@@ -1378,4 +1425,54 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
+
+    def verify_settle(
+        self,
+        escrow_uid: str,
+        *,
+        seller_wallet: str,
+        agreed_price: int,
+        agreed_duration_seconds: int,
+        listing_id: str,
+    ) -> dict:
+        """POST /api/v1/admin/settle/{escrow_uid}/verify — dry-run escrow chain read (admin key).
+
+        Reads the escrow from chain and confirms it matches the supplied terms.
+        Returns dict with valid=True/False and reason on failure.
+        No DB writes. Used by e2e stage 7b.
+        """
+        body = {
+            "seller_wallet": seller_wallet,
+            "agreed_price": agreed_price,
+            "agreed_duration_seconds": agreed_duration_seconds,
+            "listing_id": listing_id,
+        }
+        return self._post(
+            f"/api/v1/admin/settle/{escrow_uid}/verify", body,
+            extra_headers=self._admin_headers(),
+        )
+
+    def evaluate_settle(
+        self,
+        escrow_uid: str,
+        *,
+        listing_id: str,
+        ssh_public_key: str = "",
+        duration_seconds: int = 3600,
+    ) -> dict:
+        """POST /api/v1/admin/settle/{escrow_uid}/evaluate — dry-run provisioning job spec (admin key).
+
+        Resolves a host from inventory and builds the job spec without chain reads,
+        DB writes, or provisioning calls. Returns dict with would_submit, vm_host,
+        vm_target, required_attributes. Used by e2e stage 8a.
+        """
+        body = {
+            "listing_id": listing_id,
+            "ssh_public_key": ssh_public_key,
+            "duration_seconds": duration_seconds,
+        }
+        return self._post(
+            f"/api/v1/admin/settle/{escrow_uid}/evaluate", body,
+            extra_headers=self._admin_headers(),
+        )
 

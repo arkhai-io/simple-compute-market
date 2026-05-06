@@ -194,3 +194,72 @@ class TestRuleLifecycle:
         rules = svc.list_rules()
         gated = next(r for r in rules if r["rule_id"] == "gated")
         assert gated["paused"] is False
+
+
+class TestEvaluateJob:
+    """ProgrammableMockAnsibleService.evaluate_job — dry-run host+rule check."""
+
+    def _make_svc(self):
+        from services.mock_ansible_service import ProgrammableMockAnsibleService
+        return ProgrammableMockAnsibleService(
+            settings=MagicMock(resolved_playbook_path=Path("/fake/pb.yml"),
+                               resolved_inventory_path=Path("/fake/hosts"),
+                               ssh_decryption_key=""),
+        )
+
+    def _params(self, host: str = "ww1", vm_action: str = "create"):
+        from models.jobs_model import AnsibleJobParams
+        return AnsibleJobParams(vm_host=host, vm_action=vm_action, vm_target="t1")
+
+    def _mock_host_service(self, host_exists: bool = True):
+        svc = MagicMock()
+        svc.get_host.return_value = MagicMock() if host_exists else None
+        return svc
+
+    def test_unknown_host_returns_host_exists_false(self):
+        mock_svc = self._make_svc()
+        result = mock_svc.evaluate_job(self._params(host="ghost"), self._mock_host_service(False))
+        assert result.host_exists is False
+        assert result.params_valid is False
+        assert any("ghost" in e or "inventory" in e for e in result.errors)
+
+    def test_known_host_no_rules_returns_host_exists_true_rule_matched_none(self):
+        mock_svc = self._make_svc()
+        result = mock_svc.evaluate_job(self._params(host="ww1"), self._mock_host_service(True))
+        assert result.host_exists is True
+        assert result.params_valid is True
+        assert result.rule_matched is None
+        assert result.would_pause is False
+
+    def test_armed_rule_matching_params_reflected_in_result(self):
+        from services.mock_ansible_service import MockRule
+        mock_svc = self._make_svc()
+        mock_svc.add_rule(MockRule(
+            rule_id="r1",
+            match={"vm_action": "create"},
+            pause_before_result=True,
+        ))
+        result = mock_svc.evaluate_job(self._params(vm_action="create"), self._mock_host_service(True))
+        assert result.rule_matched == "r1"
+        assert result.would_pause is True
+
+    def test_non_matching_rule_returns_rule_matched_none(self):
+        from services.mock_ansible_service import MockRule
+        mock_svc = self._make_svc()
+        mock_svc.add_rule(MockRule(
+            rule_id="r-delete",
+            match={"vm_action": "delete"},
+            pause_before_result=True,
+        ))
+        result = mock_svc.evaluate_job(self._params(vm_action="create"), self._mock_host_service(True))
+        assert result.rule_matched is None
+        assert result.would_pause is False
+
+    def test_does_not_create_or_modify_any_job(self):
+        """evaluate_job is read-only — no side effects on the mock service state."""
+        from services.mock_ansible_service import MockRule
+        mock_svc = self._make_svc()
+        mock_svc.add_rule(MockRule(rule_id="r1", match={"vm_action": "create"}, pause_before_result=False))
+        _ = mock_svc.evaluate_job(self._params(), self._mock_host_service(True))
+        # Rule still present, not consumed
+        assert len(mock_svc.list_rules()) == 1
