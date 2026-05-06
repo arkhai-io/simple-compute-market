@@ -1,10 +1,11 @@
 """EVM-side helpers for reading EAS attestations.
 
 Used by `market escrow show` and `market-storefront escrow show` to
-inspect on-chain escrow state by uid. Wraps web3.py around the
-vendored `IEAS` ABI; the alkahest_py SDK does not expose a direct
-"get attestation by uid" method (its `get_escrow_attestation`
-indexes by fulfillment uid, the wrong direction).
+inspect on-chain escrow state by uid, and by the storefront's pre-
+settlement verifier. Wraps web3.py around the vendored `IEAS` ABI;
+the alkahest_py SDK does not expose a direct "get attestation by uid"
+method (its `get_escrow_attestation` indexes by fulfillment uid, the
+wrong direction).
 
 The ERC-20 escrow obligation payload is decoded inline against its
 known schema:
@@ -13,16 +14,21 @@ known schema:
 
 (matches `ERC20EscrowObligation.ObligationData` in the alkahest
 contracts).
+
+The reader is async-first (`AsyncWeb3`); a thin `read_attestation_sync`
+wrapper exists for the typer CLI sites that can't easily go async.
 """
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from eth_abi import decode as abi_decode
-from web3 import Web3
-from web3.providers.rpc import HTTPProvider
+from web3 import AsyncWeb3
+from web3.providers import AsyncHTTPProvider
+from web3.providers.persistent.websocket import WebSocketProvider
 
 from service.abi import load_abi
 
@@ -62,20 +68,20 @@ class EscrowAttestation:
         return self.expiration_time if self.expiration_time != 0 else None
 
 
-def _make_web3(rpc_url: str) -> Web3:
-    """Build a sync web3 client.
+def _make_async_web3(rpc_url: str) -> AsyncWeb3:
+    """Build an async Web3 client from an http(s):// or ws(s):// URL.
 
-    The seller's runtime keeps using ws:// for event subscriptions, but
-    `read_attestation` is a one-shot eth_call. web3.py's ``WebSocketProvider``
-    is async-only and panics when used by a sync Web3 instance, so we
-    translate ws://→http:// (and wss://→https://) for this read path.
+    Both transports support eth_call; we pick by scheme. AsyncHTTPProvider
+    handles HTTP, WebSocketProvider (the persistent-connection one) is
+    the async websocket provider — note the sync ``Web3`` ctor rejects
+    it with "Provider must be an instance of BaseProvider", so the
+    legacy sync read path translated ws://→http://. The async ctor has
+    no such restriction.
     """
     s = rpc_url.strip()
-    if s.startswith("ws://"):
-        s = "http://" + s[len("ws://"):]
-    elif s.startswith("wss://"):
-        s = "https://" + s[len("wss://"):]
-    return Web3(HTTPProvider(s))
+    if s.startswith(("ws://", "wss://")):
+        return AsyncWeb3(WebSocketProvider(s))
+    return AsyncWeb3(AsyncHTTPProvider(s))
 
 
 def _hex(b: bytes | str) -> str:
@@ -84,7 +90,7 @@ def _hex(b: bytes | str) -> str:
     return "0x" + b.hex()
 
 
-def read_attestation(
+async def read_attestation(
     rpc_url: str,
     eas_address: str,
     uid: str,
@@ -96,18 +102,18 @@ def read_attestation(
     decoded fields as None — the caller can still display the raw
     attestation envelope.
     """
-    w3 = _make_web3(rpc_url)
-    contract = w3.eth.contract(
-        address=Web3.to_checksum_address(eas_address),
-        abi=load_abi("IEAS"),
-    )
     uid_bytes = bytes.fromhex(uid[2:] if uid.startswith("0x") else uid)
     if len(uid_bytes) != 32:
         raise ValueError(
             f"Attestation uid must be 32 bytes (0x + 64 hex chars); got {uid!r}"
         )
 
-    raw = contract.functions.getAttestation(uid_bytes).call()
+    w3 = _make_async_web3(rpc_url)
+    contract = w3.eth.contract(
+        address=AsyncWeb3.to_checksum_address(eas_address),
+        abi=load_abi("IEAS"),
+    )
+    raw = await contract.functions.getAttestation(uid_bytes).call()
     # IEAS.Attestation tuple layout (per eas-contracts/IEAS.sol):
     #   uid, schema, time, expirationTime, revocationTime,
     #   refUID, recipient, attester, revocable, data
@@ -140,20 +146,31 @@ def read_attestation(
     return EscrowAttestation(
         uid=_hex(ret_uid),
         schema=_hex(schema),
-        attester=Web3.to_checksum_address(attester),
-        recipient=Web3.to_checksum_address(recipient),
+        attester=AsyncWeb3.to_checksum_address(attester),
+        recipient=AsyncWeb3.to_checksum_address(recipient),
         time=int(time),
         expiration_time=int(expiration_time),
         revocation_time=int(revocation_time),
         ref_uid=_hex(ref_uid),
         revocable=bool(revocable),
         raw_data=bytes(data),
-        arbiter=Web3.to_checksum_address(arbiter) if arbiter else None,
+        arbiter=AsyncWeb3.to_checksum_address(arbiter) if arbiter else None,
         demand=bytes(demand) if demand else None,
-        token=Web3.to_checksum_address(token) if token else None,
+        token=AsyncWeb3.to_checksum_address(token) if token else None,
         amount=int(amount) if amount is not None else None,
         decode_error=decode_error,
     )
+
+
+def read_attestation_sync(
+    rpc_url: str,
+    eas_address: str,
+    uid: str,
+) -> EscrowAttestation:
+    """Sync wrapper around ``read_attestation`` for CLI call sites that
+    aren't running inside an event loop. Don't call from async code —
+    use ``read_attestation`` directly there."""
+    return asyncio.run(read_attestation(rpc_url, eas_address, uid))
 
 
 def resolve_eas_address(

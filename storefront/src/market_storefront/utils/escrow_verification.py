@@ -21,7 +21,6 @@ testable without web3 or the alkahest address config.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -179,10 +178,9 @@ async def verify_escrow_for_settlement(
             f"Cannot resolve RecipientArbiter address for chain={chain_name!r}: {exc}"
         ) from exc
 
-    # The reader is sync (web3.py); offload to a thread to avoid blocking.
     try:
-        attestation = await asyncio.to_thread(
-            read_attestation_fn, chain_rpc_url, eas_address, escrow_uid
+        attestation = await read_attestation_fn(
+            chain_rpc_url, eas_address, escrow_uid
         )
     except Exception as exc:
         raise EscrowVerificationError(

@@ -414,7 +414,7 @@ def show_cmd(
         )
         raise typer.Exit(2)
 
-    from service.clients.eas import read_attestation, resolve_eas_address
+    from service.clients.eas import read_attestation_sync, resolve_eas_address
 
     eas = eas_address
     if not eas:
@@ -425,7 +425,7 @@ def show_cmd(
             raise typer.Exit(2)
 
     try:
-        att = read_attestation(rpc, eas, escrow_uid)
+        att = read_attestation_sync(rpc, eas, escrow_uid)
     except Exception as exc:
         typer.secho(
             f"IEAS.getAttestation failed: {exc}",

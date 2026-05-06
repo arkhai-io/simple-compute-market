@@ -234,7 +234,7 @@ def show_cmd(
     at runtime. Symmetric with `market escrow show` on the buyer side.
     """
     from ..utils.config import CONFIG
-    from service.clients.eas import read_attestation, resolve_eas_address
+    from service.clients.eas import read_attestation_sync, resolve_eas_address
 
     rpc = CONFIG.chain_rpc_url
     if not rpc:
@@ -256,7 +256,7 @@ def show_cmd(
             raise typer.Exit(2)
 
     try:
-        att = read_attestation(rpc, eas, escrow_uid)
+        att = read_attestation_sync(rpc, eas, escrow_uid)
     except Exception as exc:
         typer.secho(
             f"IEAS.getAttestation failed: {exc}",

@@ -67,8 +67,11 @@ def _good_attestation(**overrides: Any) -> FakeAttestation:
 
 
 def _make_seams(attestation: FakeAttestation) -> dict[str, Any]:
+    async def _read(rpc, eas, uid):
+        return attestation
+
     return {
-        "read_attestation_fn": lambda rpc, eas, uid: attestation,
+        "read_attestation_fn": _read,
         "resolve_eas_address_fn": lambda chain, *, config_path=None: EAS,
         "get_recipient_arbiter_fn": lambda chain, *, config_path=None: ARBITER,
     }
@@ -272,7 +275,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_chain_read_fails(self):
-        def _broken_read(*a, **k):
+        async def _broken_read(*a, **k):
             raise RuntimeError("rpc unreachable")
 
         seams = _make_seams(_good_attestation())
