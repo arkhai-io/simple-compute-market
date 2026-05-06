@@ -66,13 +66,28 @@ class Resource(BaseModel):
 
 
 class TokenResource(Resource):
-    """Describes a given value and amount of a token used for trade/payment."""
+    """Describes a given value and amount of a token used for trade/payment.
+
+    ``amount`` is tristate:
+      * positive integer — the public price (the seller advertises this
+        floor and uses it as the negotiation anchor).
+      * ``0`` — free / public-test offering (the seller advertises zero
+        cost; strategy accepts any non-negative offer).
+      * ``None`` — hidden reserve (the seller publishes the listing without
+        advertising a price; the negotiation strategy falls back to
+        ``[seller.pricing].default_min_price`` for the floor; buyer must
+        propose ``--initial-price`` and ``--max-price`` explicitly).
+    """
 
     token: SerializeAsAny[ERC20TokenMetadata] = Field(
         description="Token metadata resolved from registry"
     )
-    amount: int = Field(
-        description="Integer amount in base units (token amount * 10**decimals)"
+    amount: int | None = Field(
+        default=None,
+        description=(
+            "Integer amount in base units (token amount * 10**decimals). "
+            "0 = free; null = hidden reserve (negotiate); >0 = public price."
+        ),
     )
 
 

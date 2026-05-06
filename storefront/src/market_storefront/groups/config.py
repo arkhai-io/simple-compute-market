@@ -168,10 +168,15 @@ _INIT_USER_TEMPLATE = """\
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
 
 [seller.pricing]
-# default_min_price = "1000000"                # raw token base units (per-hour rate); fallback when CSV row leaves min_price blank
+# default_min_price = "1000000"                # raw token base units (per-hour rate); fallback for blank min_price.
+                                                # Also the negotiation floor for hidden-reserve listings.
 # default_token = "MOCK"                       # symbol resolved via TOKEN_REGISTRY
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
-# publish_priceless = false                    # advertise rows without a min_price as demand.amount=0 (buyer must propose)
+# publish_priceless = false                    # publish rows without a min_price as demand.amount=null
+                                                # (hidden reserve; buyer proposes; seller negotiates against
+                                                # default_min_price as the floor). Per-row min_price="0"
+                                                # publishes as demand.amount=0 (free / public-test offering),
+                                                # distinct from hidden reserve.
 """
 
 

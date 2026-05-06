@@ -120,8 +120,18 @@ def derive_refund_params(
                 400,
                 {"error": "Order demand has no amount; pass explicit 'amount'"},
             )
+        amount_raw_in = demand.get("amount")
+        if amount_raw_in is None:
+            # Hidden-reserve listing: refund total can't be derived from
+            # the listing alone. Caller must pass an explicit --amount.
+            return (
+                "error",
+                400,
+                {"error": "Listing was published with hidden reserve "
+                          "(amount=None); pass explicit 'amount' to refund"},
+            )
         try:
-            base_raw = int(demand.get("amount"))
+            base_raw = int(amount_raw_in)
         except (TypeError, ValueError):
             return (
                 "error",

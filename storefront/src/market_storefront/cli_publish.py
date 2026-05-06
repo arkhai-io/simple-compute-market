@@ -207,10 +207,20 @@ def _resolve_pricing(
 ) -> tuple[Optional[str], str]:
     """Pick the min_price/token for a resource: row > defaults > None.
 
-    Returns (min_price, token). min_price=None means "skip this row at
-    publish time" — there's no fallback for rows that have neither.
+    Returns (min_price, token). ``min_price`` may be:
+      * a positive numeric string — public price.
+      * ``"0"`` — explicit free offering (per-row "0" wins; default does
+        not override an explicit "0").
+      * ``None`` — neither row nor default set; caller decides whether
+        to skip or publish as hidden-reserve depending on
+        ``publish_priceless``.
     """
-    min_price = res.get("min_price") or default_min_price
+    row_min_price = res.get("min_price")
+    if row_min_price is None or row_min_price == "":
+        min_price = default_min_price
+    else:
+        # Honor "0" as a real value, not a falsy fallback trigger.
+        min_price = row_min_price
     token = res.get("token") or default_token
     return min_price, token
 
@@ -229,11 +239,20 @@ def _publish_round(
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
     """Publish one order for every priced & available resource not in `skip_ids`.
 
-    Pricing is per-row: `resources.min_price` / `resources.token` win over
-    the [seller.pricing] defaults. Rows with no price (row NULL + no default)
-    are reported as failed with a clear reason — unless ``publish_priceless``
-    is true, in which case they're published with ``demand.amount=0``
-    (a "price-less listing" buyers must propose a price for).
+    Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
+    over the [seller.pricing] defaults. Tristate publish behaviour:
+
+      * Row ``min_price > 0``  → publish with ``demand.amount = min_price``
+        (public price).
+      * Row ``min_price = "0"`` → publish with ``demand.amount = 0``
+        (free / public-test offering; explicit per-row, defaults don't
+        override).
+      * Row ``min_price`` unset and no default → controlled by
+        ``publish_priceless``:
+          - True  → publish with ``demand.amount = None`` (hidden reserve;
+            buyer proposes; seller's strategy uses
+            ``[seller.pricing].default_min_price`` as the negotiation floor).
+          - False → skip the row, surfaced in ``failed``.
 
     Returns (published, failed, skipped) — each a list of dicts keyed on
     the resource.
@@ -254,20 +273,29 @@ def _publish_round(
             default_min_price=default_min_price,
             default_token=default_token,
         )
-        if not min_price:
+        if min_price is None:
             if not publish_priceless:
                 failed.append((
                     res,
                     "no min_price (set per-row in CSV or [seller.pricing].default_min_price, "
-                    "or set [seller.pricing].publish_priceless=true to advertise as price-less)",
+                    "or set [seller.pricing].publish_priceless=true to advertise as hidden-reserve)",
                 ))
                 continue
-            # Price-less mode: advertise amount=0. The seller's negotiation
-            # strategy still falls back to default_min_price (if set) for
-            # the floor; otherwise it exits any negotiation cleanly.
-            advertised_amount: Any = 0
+            # Hidden-reserve mode: publish with amount=None. Seller's
+            # negotiation strategy falls back to default_min_price (if
+            # set) for the floor; otherwise refuses the negotiation
+            # cleanly with reason=no_floor_price.
+            advertised_amount: Any = None
         else:
-            advertised_amount = min_price
+            # min_price is "0" (free) or "N" (public price); pass through.
+            try:
+                advertised_amount = int(min_price)
+            except (ValueError, TypeError):
+                failed.append((
+                    res,
+                    f"unparseable min_price={min_price!r}; expected integer string",
+                ))
+                continue
         max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in

@@ -197,12 +197,16 @@ class TokenErc20ResourceAdapter:
     def to_domain_resource(self, db_resource: dict[str, Any]) -> TokenResource:
         """
         Convert a DB resource dict to a TokenResource domain instance.
+
+        ``value`` of None means "hidden reserve" — the listing was published
+        with no advertised price. Round-trips as ``amount=None``.
         """
         attrs = _ensure_dict(db_resource.get("attributes"))
         subtype = db_resource.get("resource_subtype")
         value = db_resource.get("value")
         if value is None:
-            value = attrs.get("amount", 0)
+            # Distinguish "DB column NULL → preserve" from "attrs has amount".
+            value = attrs.get("amount") if "amount" in attrs else None
 
         token_meta: ERC20TokenMetadata
         if all(k in attrs for k in ("symbol", "contract_address", "decimals")):
@@ -218,7 +222,8 @@ class TokenErc20ResourceAdapter:
                 "token.erc20 db_resource requires token metadata in attributes or resource_subtype resolvable by token registry"
             )
 
-        return TokenResource(token=token_meta, amount=int(value))
+        amount = None if value is None else int(value)
+        return TokenResource(token=token_meta, amount=amount)
 
     def from_domain_resource(
         self,
@@ -264,7 +269,9 @@ class TokenErc20ResourceAdapter:
             token_meta = TOKEN_REGISTRY.require(token_value)
         else:
             raise ValueError(f"Unsupported token value type: {type(token_value).__name__}")
-        return TokenResource(token=token_meta, amount=int(data["amount"]))
+        amount_raw = data.get("amount")
+        amount = None if amount_raw is None else int(amount_raw)
+        return TokenResource(token=token_meta, amount=amount)
 
     def to_dict(self, resource: TokenResource) -> dict[str, Any]:
         """

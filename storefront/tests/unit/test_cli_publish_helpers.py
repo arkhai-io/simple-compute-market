@@ -183,7 +183,7 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     # cycles can tell which resource a given order covers.
     assert calls[0]["offer"]["resource_id"] == "compute-002"
     # And demand was assembled from the (default) pricing, not a flag.
-    assert calls[0]["demand"] == {"token": "MOCK", "amount": "100"}
+    assert calls[0]["demand"] == {"token": "MOCK", "amount": 100}
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
@@ -259,8 +259,8 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     )
 
     by_rid = {c["offer"]["resource_id"]: c["demand"] for c in calls}
-    assert by_rid["compute-cheap"] == {"token": "USDC", "amount": "40"}
-    assert by_rid["compute-default"] == {"token": "MOCK", "amount": "100"}
+    assert by_rid["compute-cheap"] == {"token": "USDC", "amount": 40}
+    assert by_rid["compute-default"] == {"token": "MOCK", "amount": 100}
     assert len(published) == 2
     assert not failed
 
@@ -306,9 +306,9 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     assert "min_price" in failed[0][1]
 
 
-def test_publish_round_priceless_publishes_at_zero(tmp_path, monkeypatch):
+def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatch):
     """publish_priceless=True publishes rows without a min_price as
-    demand.amount=0 instead of skipping them."""
+    demand.amount=None (hidden reserve) — distinct from amount=0 (free)."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -338,8 +338,45 @@ def test_publish_round_priceless_publishes_at_zero(tmp_path, monkeypatch):
 
     assert len(published) == 1
     assert len(failed) == 0
-    assert calls[0]["demand"]["amount"] == 0
+    assert calls[0]["demand"]["amount"] is None
     assert calls[0]["demand"]["token"] == "MOCK"
+
+
+def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
+    """A row with min_price="0" publishes with demand.amount=0 (explicit
+    free offering) — distinct semantically from amount=None (hidden
+    reserve). The default_min_price does NOT override an explicit 0."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-free", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+        min_price="0", token="MOCK",
+    )
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, demand, *a, **k: (
+            calls.append({"offer": offer, "demand": demand})
+            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
+        ),
+    )
+
+    published, failed, _ = _publish_round(
+        db_path=db,
+        base_url="http://agent",
+        wallet_address="",
+        private_key=None,
+        default_min_price="500",  # explicit "0" beats default
+        default_token="MOCK",
+        default_max_duration_seconds=None,
+    )
+
+    assert len(published) == 1
+    assert len(failed) == 0
+    assert calls[0]["demand"]["amount"] == 0
+    # confirms the default didn't override the explicit "0"
 
 
 def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):

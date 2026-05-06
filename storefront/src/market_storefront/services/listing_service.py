@@ -82,19 +82,24 @@ class ListingService:
         except Exception as exc:
             raise ValueError(f"Unknown token: {token_value}") from exc
         amount_value = resource_payload.get("amount")
-        if amount_value is None:
-            raise ValueError("Token resource must include amount")
         if isinstance(token_meta, dict):
             decimals = int(token_meta["decimals"])
             token_dump = token_meta
         else:
             decimals = token_meta.decimals
             token_dump = token_meta.model_dump()
+        normalized = dict(resource_payload)
+        normalized["token"] = token_dump
+        if amount_value is None:
+            # Hidden-reserve listing: amount stays None and round-trips
+            # through the schema. Buyer must propose an initial price;
+            # seller's strategy uses [seller.pricing].default_min_price
+            # for the floor.
+            normalized["amount"] = None
+            return normalized
         raw = Decimal(str(amount_value)) * (Decimal(10) ** decimals)
         if raw != raw.to_integral_value():
             raise ValueError("Amount has too many decimal places for this token")
-        normalized = dict(resource_payload)
-        normalized["token"] = token_dump
         normalized["amount"] = int(raw)
         return normalized
 

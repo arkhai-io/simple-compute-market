@@ -40,11 +40,13 @@ def resolve_prices_from_matches(
         (extract_seller_min_price(m), m)
         for m in matches
     ]
-    priced = [(p, m) for p, m in priced if p is not None and p > 0]
+    # Keep listings with amount=0 (free) as legitimate anchors; only filter
+    # out None (hidden reserve) where we genuinely have no price signal.
+    priced = [(p, m) for p, m in priced if p is not None]
     if not priced:
         typer.secho(
-            "No matched listing carries a parseable min_price; pass "
-            "--initial-price / --max-price explicitly.",
+            "No matched listing carries an advertised price (all hidden-reserve); "
+            "pass --initial-price / --max-price explicitly.",
             err=True, fg=typer.colors.RED,
         )
         return None, None
@@ -52,6 +54,11 @@ def resolve_prices_from_matches(
     priced.sort(key=lambda pm: pm[0])
     cheapest = priced[0][0]
     derived_initial = cheapest
+    # max(0 * 1.5, 0+1) = 1 ensures even a free anchor produces a non-zero
+    # ceiling (so the strategy's accept-on-convergence math still works);
+    # in practice a free listing with non-zero ceiling means the buyer is
+    # willing to pay if the seller counters, but won't be surprised by
+    # a non-zero accept.
     derived_max = max(int(round(cheapest * price_markup)), cheapest + 1)
 
     interactive = (not assume_yes) and os.isatty(0)

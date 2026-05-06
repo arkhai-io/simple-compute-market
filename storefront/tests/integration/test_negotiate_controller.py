@@ -219,7 +219,7 @@ class TestNegotiateNew:
         assert "no_matching_inventory" in msg
 
     async def test_priceless_listing_without_fallback_returns_409(self, client, db):
-        """Listing with demand.amount=0 (price-less) and no
+        """Listing with demand.amount=None (hidden reserve) and no
         [seller.pricing].default_min_price configured → 409 with
         reason=no_floor_price (the seller has no negotiation floor)."""
         c, db = client
@@ -238,7 +238,7 @@ class TestNegotiateNew:
                     "contract_address": "0x0000000000000000000000000000000000000001",
                     "decimals": 0,
                 },
-                "amount": 0,  # price-less listing
+                "amount": None,  # hidden-reserve listing (distinct from amount=0 = free)
             },
             fulfillment_resource=None,
             max_duration_seconds=7200,
