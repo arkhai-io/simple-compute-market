@@ -6,6 +6,11 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 
+# psutil 5.9.8 (transitive via fastapi-utils) has no cp313 aarch64
+# wheel and falls back to a source build; needs a C toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy the pre-built wheels from the monorepo .dist/ directory.

@@ -127,6 +127,7 @@ services:
   # overrides go in `environment:` below.
   provisioning:
     image: arkhai:provisioning
+    platform: linux/amd64
     container_name: market-provisioning
     depends_on:
       redis:
@@ -138,6 +139,9 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/data/provisioning.db
       - REDIS_URL=redis://redis:6379
+      # Mounts /test/* router used by integration tests' provisioning_test_client
+      # (TestStage07 mock-rules). Should never be set in staging/prod.
+      - ACTIVE_PROFILES=mock
     volumes:
       - ./compute-provisioning-iac:/app/compute-provisioning-iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
