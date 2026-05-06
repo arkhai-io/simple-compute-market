@@ -23,7 +23,6 @@ from typing import Any, Optional
 from eth_abi import decode as abi_decode
 from web3 import Web3
 from web3.providers.rpc import HTTPProvider
-from web3.providers.persistent.websocket import WebSocketProvider
 
 from service.abi import load_abi
 
@@ -64,10 +63,19 @@ class EscrowAttestation:
 
 
 def _make_web3(rpc_url: str) -> Web3:
-    """Build a sync web3 client. Supports http(s) + ws(s) RPC URLs."""
-    if rpc_url.startswith(("ws://", "wss://")):
-        return Web3(WebSocketProvider(rpc_url))
-    return Web3(HTTPProvider(rpc_url))
+    """Build a sync web3 client.
+
+    The seller's runtime keeps using ws:// for event subscriptions, but
+    `read_attestation` is a one-shot eth_call. web3.py's ``WebSocketProvider``
+    is async-only and panics when used by a sync Web3 instance, so we
+    translate ws://→http:// (and wss://→https://) for this read path.
+    """
+    s = rpc_url.strip()
+    if s.startswith("ws://"):
+        s = "http://" + s[len("ws://"):]
+    elif s.startswith("wss://"):
+        s = "https://" + s[len("wss://"):]
+    return Web3(HTTPProvider(s))
 
 
 def _hex(b: bytes | str) -> str:

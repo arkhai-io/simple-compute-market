@@ -146,6 +146,18 @@ async def heartbeat_loop(
     else:
         logger.warning("[HEARTBEAT] No private key provided - heartbeats will be unsigned (may fail if Indexer requires auth)")
 
+    # Send the first heartbeat immediately so the registry has the agent
+    # in its DB before the seller's first publish/listing call. The
+    # registry's chain event-sync runs every 60s; without an upfront
+    # heartbeat, anything the seller does in the first minute after a
+    # fresh restart hits a 404 from the registry's HTTP API.
+    try:
+        success = await send_heartbeat(agent_id, indexer_url, private_key)
+        if success:
+            logger.info(f"[HEARTBEAT] Initial heartbeat sent for agent {agent_id}")
+    except Exception as e:
+        logger.warning(f"[HEARTBEAT] Initial heartbeat failed: {e}")
+
     while True:
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL)

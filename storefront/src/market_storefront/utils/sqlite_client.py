@@ -106,6 +106,18 @@ class SQLiteClient:
                     cur.execute("ALTER TABLE credentials RENAME COLUMN order_id TO listing_id")
                 except sqlite3.OperationalError:
                     pass
+
+            # stage_events: column rename order_id → listing_id (e2e tests
+            # query GET /api/v1/system/events?listing_id=... and the WHERE
+            # clause crashes if the legacy column name is still on disk).
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='stage_events'"
+            )
+            if cur.fetchone() is not None:
+                try:
+                    cur.execute("ALTER TABLE stage_events RENAME COLUMN order_id TO listing_id")
+                except sqlite3.OperationalError:
+                    pass
                 for old_idx in (
                     "idx_credentials_order_id",
                     "idx_credentials_order_granted",

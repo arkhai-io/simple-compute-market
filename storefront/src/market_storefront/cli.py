@@ -113,14 +113,24 @@ def _query_chain_id(rpc_url: str | None) -> int | None:
     The caller falls back to a default — `register` accepts a wrong
     chain_id more gracefully than a stuck startup, so we prefer "fall
     through with default" over "crash".
+
+    Translates ``ws://`` / ``wss://`` URLs to ``http://`` / ``https://``
+    for this one-shot RPC call: urllib doesn't speak websocket, but the
+    eth_chainId method is identical over either transport. The seller's
+    runtime keeps using the configured ws:// URL for event subscriptions.
     """
     if not rpc_url or not rpc_url.strip():
         return None
+    http_url = rpc_url.strip()
+    if http_url.startswith("ws://"):
+        http_url = "http://" + http_url[len("ws://"):]
+    elif http_url.startswith("wss://"):
+        http_url = "https://" + http_url[len("wss://"):]
     try:
         import json as _json
         from urllib.request import Request, urlopen
         req = Request(
-            rpc_url,
+            http_url,
             data=_json.dumps({
                 "jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": [],
             }).encode("utf-8"),

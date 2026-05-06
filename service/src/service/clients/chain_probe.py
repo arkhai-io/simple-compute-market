@@ -30,6 +30,19 @@ class ChainProbeError(RuntimeError):
     more addresses don't resolve to bytecode."""
 
 
+def _http_rpc_url(rpc_url: str) -> str:
+    """Translate ``ws://``/``wss://`` to ``http://``/``https://`` for the
+    one-shot urllib RPC; sellers configure ``rpc_url`` as a websocket
+    for runtime event subscriptions but eth_getCode is a one-shot HTTP
+    call. Same trick as ``cli._query_chain_id``."""
+    s = rpc_url.strip()
+    if s.startswith("ws://"):
+        return "http://" + s[len("ws://"):]
+    if s.startswith("wss://"):
+        return "https://" + s[len("wss://"):]
+    return s
+
+
 def _eth_get_code(rpc_url: str, address: str, *, timeout: float) -> str:
     """Issue a single ``eth_getCode(address, "latest")`` JSON-RPC call.
 
@@ -44,7 +57,7 @@ def _eth_get_code(rpc_url: str, address: str, *, timeout: float) -> str:
         "params": [address, "latest"],
     }).encode("utf-8")
     req = urllib.request.Request(
-        rpc_url,
+        _http_rpc_url(rpc_url),
         data=body,
         headers={"Content-Type": "application/json"},
     )
