@@ -306,6 +306,86 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     assert "min_price" in failed[0][1]
 
 
+def test_publish_round_priceless_publishes_at_zero(tmp_path, monkeypatch):
+    """publish_priceless=True publishes rows without a min_price as
+    demand.amount=0 instead of skipping them."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-noprice", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+    )
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda agent_url, offer, demand, *a, **k: (
+            calls.append({"offer": offer, "demand": demand})
+            or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
+        ),
+    )
+
+    published, failed, _ = _publish_round(
+        db_path=db,
+        base_url="http://agent",
+        wallet_address="",
+        private_key=None,
+        default_min_price=None,
+        default_token="MOCK",
+        default_max_duration_seconds=None,
+        publish_priceless=True,
+    )
+
+    assert len(published) == 1
+    assert len(failed) == 0
+    assert calls[0]["demand"]["amount"] == 0
+    assert calls[0]["demand"]["token"] == "MOCK"
+
+
+def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):
+    """publish_priceless defaults to False — the original skip behavior
+    is preserved."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-noprice", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda *a, **k: {"status": "created"},
+    )
+    published, failed, _ = _publish_round(
+        db_path=db, base_url="http://agent", wallet_address="",
+        private_key=None, default_min_price=None, default_token="MOCK",
+        default_max_duration_seconds=None,
+        # publish_priceless defaults to False
+    )
+    assert len(published) == 0
+    assert len(failed) == 1
+    assert "publish_priceless" in failed[0][1]
+
+
+def test_publish_round_priceless_message_mentions_opt_in(tmp_path, monkeypatch):
+    """Failure message should point operators at the publish_priceless flag."""
+    db = str(tmp_path / "agent.db")
+    _init_db(db)
+    _insert_resource(
+        db, "compute-noprice", "available",
+        {"gpu_model": "RTX 4090", "sla": 95.0, "region": "NY"},
+    )
+    monkeypatch.setattr(
+        "market_storefront.cli_publish._publish_offer",
+        lambda *a, **k: {"status": "created"},
+    )
+    _, failed, _ = _publish_round(
+        db_path=db, base_url="http://agent", wallet_address="",
+        private_key=None, default_min_price=None, default_token="MOCK",
+        default_max_duration_seconds=None,
+    )
+    assert "publish_priceless" in failed[0][1]
+
+
 def test_publish_round_ignores_leased_resources(tmp_path, monkeypatch):
     """Only `state='available'` resources get offered."""
     db = str(tmp_path / "agent.db")

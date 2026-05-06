@@ -166,6 +166,12 @@ _INIT_USER_TEMPLATE = """\
 # policy_mode = "bisection"                    # "bisection" (default; no ML deps) | "rl" (requires torch)
 # seller_model_path = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
 # buyer_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
+
+[seller.pricing]
+# default_min_price = "1000000"                # raw token base units (per-hour rate); fallback when CSV row leaves min_price blank
+# default_token = "MOCK"                       # symbol resolved via TOKEN_REGISTRY
+# default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
+# publish_priceless = false                    # advertise rows without a min_price as demand.amount=0 (buyer must propose)
 """
 
 

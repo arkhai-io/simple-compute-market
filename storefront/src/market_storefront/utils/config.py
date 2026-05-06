@@ -179,6 +179,14 @@ class Config:
     # Default max-duration ceiling (seconds) advertised on listings whose
     # CSV row leaves max_duration_seconds blank. None = unlimited.
     default_max_duration_seconds: int | None
+    # When True, resources without a configured per-row min_price (and no
+    # default_min_price either) are published anyway with demand.amount=0
+    # — a "price-less listing" buyers can negotiate against by proposing
+    # their own price. The seller's negotiation strategy falls back to
+    # default_min_price for the floor on these listings; if that's also
+    # unset, the strategy exits. Default False preserves the skip-on-missing
+    # behavior.
+    publish_priceless: bool
     # Admin API key — protects /admin/* routes and admin-only resource actions.
     # None means unprotected (local dev).  Set via [seller].admin_api_key in
     # config.toml, or injected via the Helm provisioning-secrets profile.
@@ -362,6 +370,9 @@ def load_config() -> Config:
         default_max_duration_seconds=_resolve_int(
             "seller.pricing.default_max_duration_seconds", 0
         ) or None,
+        publish_priceless=_resolve_bool(
+            "seller.pricing.publish_priceless", False,
+        ),
     )
 
 

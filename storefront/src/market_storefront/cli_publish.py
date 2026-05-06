@@ -25,7 +25,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.console import Console
@@ -224,13 +224,16 @@ def _publish_round(
     default_min_price: Optional[str],
     default_token: str,
     default_max_duration_seconds: int | None,
+    publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
     """Publish one order for every priced & available resource not in `skip_ids`.
 
     Pricing is per-row: `resources.min_price` / `resources.token` win over
     the [seller.pricing] defaults. Rows with no price (row NULL + no default)
-    are reported as failed with a clear reason.
+    are reported as failed with a clear reason — unless ``publish_priceless``
+    is true, in which case they're published with ``demand.amount=0``
+    (a "price-less listing" buyers must propose a price for).
 
     Returns (published, failed, skipped) — each a list of dicts keyed on
     the resource.
@@ -252,11 +255,19 @@ def _publish_round(
             default_token=default_token,
         )
         if not min_price:
-            failed.append((
-                res,
-                "no min_price (set per-row in CSV or [seller.pricing].default_min_price)",
-            ))
-            continue
+            if not publish_priceless:
+                failed.append((
+                    res,
+                    "no min_price (set per-row in CSV or [seller.pricing].default_min_price, "
+                    "or set [seller.pricing].publish_priceless=true to advertise as price-less)",
+                ))
+                continue
+            # Price-less mode: advertise amount=0. The seller's negotiation
+            # strategy still falls back to default_min_price (if set) for
+            # the floor; otherwise it exits any negotiation cleanly.
+            advertised_amount: Any = 0
+        else:
+            advertised_amount = min_price
         max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in
@@ -268,7 +279,7 @@ def _publish_round(
             "sla": res["sla"],
             "region": res["region"],
         }
-        demand = {"token": token, "amount": min_price}
+        demand = {"token": token, "amount": advertised_amount}
         try:
             resp = _publish_offer(
                 base_url, offer, demand, max_duration_seconds, wallet_address, private_key,
@@ -295,6 +306,7 @@ def run_watch_loop(
     default_min_price: Optional[str],
     default_token: str,
     default_max_duration_seconds: int | None,
+    publish_priceless: bool = False,
     poll_interval: float,
     console: Optional[Console] = None,
     log_silent_cycles: bool = True,
@@ -323,6 +335,7 @@ def run_watch_loop(
                     wallet_address=wallet_address, private_key=private_key,
                     default_min_price=default_min_price, default_token=default_token,
                     default_max_duration_seconds=default_max_duration_seconds,
+                    publish_priceless=publish_priceless,
                     skip_ids=covered,
                 )
             except Exception as exc:
@@ -527,6 +540,7 @@ def register(app: typer.Typer) -> None:
                 wallet_address=wallet_address, private_key=private_key,
                 default_min_price=default_min_price, default_token=default_token,
                 default_max_duration_seconds=default_max_duration_seconds,
+                publish_priceless=CONFIG.publish_priceless,
             )
             if not published and not failed:
                 console.print(
@@ -576,5 +590,6 @@ def register(app: typer.Typer) -> None:
             wallet_address=wallet_address, private_key=private_key,
             default_min_price=default_min_price, default_token=default_token,
             default_max_duration_seconds=default_max_duration_seconds,
+            publish_priceless=CONFIG.publish_priceless,
             poll_interval=poll_interval, console=console,
         )

@@ -65,14 +65,17 @@ def _wait_for_port(host: str, port: int, *, timeout: float = 30.0) -> bool:
 def _spawn_publish_loop(*, host: str, port: int, poll_interval: float) -> threading.Thread | None:
     from market_storefront.cli_publish import run_watch_loop
 
-    if not CONFIG.default_min_price:
-        # Without a global floor, only resources with per-row min_price in the
-        # CSV will publish. Cycles silently drop everything else — surface the
-        # misconfig once at startup so it's not buried in cycle logs.
+    if not CONFIG.default_min_price and not CONFIG.publish_priceless:
+        # Without a global floor and price-less mode disabled, only resources
+        # with per-row min_price in the CSV will publish. Cycles silently
+        # drop everything else — surface the misconfig once at startup so
+        # it's not buried in cycle logs.
         logger.warning(
-            "[publish-loop] [seller.pricing].default_min_price is not set. "
-            "Resources without per-row min_price in the CSV will be skipped "
-            "at publish time. Set it in config.toml or per row in resources.csv."
+            "[publish-loop] [seller.pricing].default_min_price is not set "
+            "and [seller.pricing].publish_priceless is False. Resources "
+            "without per-row min_price will be skipped. Set default_min_price "
+            "in config.toml, set per-row min_price in resources.csv, or set "
+            "publish_priceless=true to advertise unpriced listings."
         )
 
     def _runner() -> None:
@@ -88,6 +91,7 @@ def _spawn_publish_loop(*, host: str, port: int, poll_interval: float) -> thread
                 default_min_price=CONFIG.default_min_price,
                 default_token=CONFIG.default_token,
                 default_max_duration_seconds=CONFIG.default_max_duration_seconds,
+                publish_priceless=CONFIG.publish_priceless,
                 poll_interval=poll_interval,
                 log_silent_cycles=False,
             )

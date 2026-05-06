@@ -329,10 +329,22 @@ async def start_sync_negotiation(
     our_order = Listing.model_validate(our_order_dict)
 
     # Pure compute: resolve strategy and get round-0 decision without writing anything.
-    our_price, strategy, direction, _strategy_name, decision = _compute_round_zero_decision(
-        listing=our_order,
-        their_proposed_price=their_proposed_price,
-    )
+    try:
+        our_price, strategy, direction, _strategy_name, decision = _compute_round_zero_decision(
+            listing=our_order,
+            their_proposed_price=their_proposed_price,
+        )
+    except ValueError as exc:
+        # Price-less listing without a configured fallback floor — the
+        # operator opted into publishing without a price but never set
+        # default_min_price. Surface as an unfulfillable offer (409) so
+        # the buyer gets a clean retry hint, not a 404.
+        if "price-less" in str(exc) or "default_min_price" in str(exc):
+            raise OfferUnfulfillableError(
+                "no_floor_price",
+                listing_id=our_listing_id,
+            ) from exc
+        raise
 
     neg_id = "neg_" + uuid.uuid4().hex
 

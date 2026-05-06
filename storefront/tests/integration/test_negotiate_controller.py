@@ -218,6 +218,55 @@ class TestNegotiateNew:
         assert "409" in msg
         assert "no_matching_inventory" in msg
 
+    async def test_priceless_listing_without_fallback_returns_409(self, client, db):
+        """Listing with demand.amount=0 (price-less) and no
+        [seller.pricing].default_min_price configured → 409 with
+        reason=no_floor_price (the seller has no negotiation floor)."""
+        c, db = client
+        await db.upsert_listing(
+            listing_id="neg-listing-priceless",
+            status="open",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            offer_resource={
+                "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
+                "region": "California, US",
+            },
+            demand_resource={
+                "token": {
+                    "symbol": "MOCK",
+                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "decimals": 0,
+                },
+                "amount": 0,  # price-less listing
+            },
+            fulfillment_resource=None,
+            max_duration_seconds=7200,
+            seller="http://seller:8001",
+        )
+        # Seed a matching available resource so the inventory check passes
+        # and we test the price-less guard specifically.
+        await db.upsert_resource(
+            resource_id="res-priceless",
+            resource_type="compute.gpu",
+            resource_subtype=None,
+            unit="vm",
+            value=1,
+            state="available",
+            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "ww1"},
+        )
+        # default_min_price is None in the test config — falls through.
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.negotiate_new(
+                listing_id="neg-listing-priceless",
+                buyer_address=_BUYER,
+                initial_price=5000,
+                duration_seconds=3600,
+            )
+        msg = str(exc_info.value)
+        assert "409" in msg
+        assert "no_floor_price" in msg
+
     async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
         """An available resource with the wrong gpu_model doesn't satisfy
         a listing offering a different gpu_model."""

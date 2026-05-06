@@ -543,16 +543,47 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
     The token amount represents:
     - For surplus (offering compute): The floor price (minimum willing to accept)
     - For deficit (demanding compute): The ceiling price (maximum willing to pay)
+
+    For "price-less" listings (advertised amount = 0), falls back to the
+    seller's ``[seller.pricing].default_min_price`` config so the
+    negotiation strategy doesn't accept any positive offer. If neither
+    the listing nor the config has a price, raises ``ValueError`` —
+    the caller (negotiation strategy) translates that to an exit.
     """
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
+    advertised: int | None = None
     if isinstance(order.offer_resource, TokenResource):
-        return order.offer_resource.amount
-    if isinstance(order.demand_resource, TokenResource):
-        return order.demand_resource.amount
+        advertised = order.offer_resource.amount
+    elif isinstance(order.demand_resource, TokenResource):
+        advertised = order.demand_resource.amount
+    else:
+        raise ValueError(f"Order has no token resource: {order.listing_id}")
 
-    raise ValueError(f"Order has no token resource: {order.listing_id}")
+    if advertised and advertised > 0:
+        return advertised
+
+    # Price-less listing: fall back to the seller's config default.
+    from market_storefront.utils.config import CONFIG
+    fallback = CONFIG.default_min_price
+    if fallback is not None and str(fallback).strip():
+        try:
+            parsed = int(fallback)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"[seller.pricing].default_min_price={fallback!r} is not a "
+                f"valid integer; price-less listing {order.listing_id} has "
+                "no usable floor."
+            ) from exc
+        if parsed > 0:
+            return parsed
+
+    raise ValueError(
+        f"Listing {order.listing_id} is price-less (demand.amount=0) and "
+        "[seller.pricing].default_min_price is not configured. The seller "
+        "has no floor to negotiate against; refusing the negotiation."
+    )
 
 
 
