@@ -43,7 +43,9 @@ def test_get_trusted_oracle_arbiter_ethereum_sepolia():
     import service.clients.alkahest as alc
     alc._load_override_config_cached.cache_clear()
     addr = get_trusted_oracle_arbiter("ethereum_sepolia")
-    assert addr == "0x3B2a812E3eb3B729D40d866Da16c2BB2b6cDd2f2"
+    # alkahest-py SDK normalises addresses to lowercase hex (alloy
+    # ``Address`` Display); compare case-insensitively.
+    assert addr.lower() == "0x3b2a812e3eb3b729d40d866da16c2bb2b6cdd2f2"
 
 
 def test_resolve_alkahest_address_config_base_sepolia_returns_none():
@@ -58,4 +60,4 @@ def test_resolve_alkahest_address_config_ethereum_sepolia_returns_config():
     from service.clients.alkahest import resolve_alkahest_address_config
     result = resolve_alkahest_address_config("ethereum_sepolia")
     assert result is not None
-    assert result.erc20_addresses.eas == "0xC2679fBD37d54388Ce493F1DB75320D236e1815e"
+    assert result.erc20_addresses.eas.lower() == "0xc2679fbd37d54388ce493f1db75320d236e1815e"

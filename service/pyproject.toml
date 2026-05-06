@@ -26,4 +26,9 @@ testpaths = ["tests/unit", "tests/integration"]
 dev = [
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
+    # alkahest-py is a test-time dep: src/service/clients/alkahest.py
+    # lazily imports it inside _sdk_addresses_for_chain. The service
+    # package itself doesn't ship alkahest-py — consumers (storefront,
+    # buyer) carry it as a runtime dep.
+    "alkahest-py>=0.3.0",
 ]
