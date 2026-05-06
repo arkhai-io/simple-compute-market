@@ -125,6 +125,7 @@ FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered
 - `POST /agents/{agentId}/listings` — publish/update an order
 - `GET /listings` — global order book query (filter by resource type, region, GPU model, SLA, status)
 - `PUT /listings/{listing_id}` — update order status (e.g., mark accepted/closed)
+- `GET /api/v1/system/sync/wait-for-agent?agent_id=<canonical_id>&timeout=<s>` — long-poll until the specified agent appears in the registry DB (server-side wait, max 120 s). Returns `{"indexed": bool, "agent_id": str, "elapsed_ms": int}`. Used by the e2e test suite at stage 03c to gate negotiation stages on indexing completion without a client-side polling loop. The `SyncRegistryClient.wait_for_agent_indexed(agent_id, timeout=60.0)` method in the registry-client wheel wraps this endpoint.
 
 **Agent identity format (ERC-8004 canonical):**
 ```
@@ -1286,11 +1287,13 @@ make build
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag is in-process memory, not reset between `pytest` sessions. If a test run ends with the storefront paused (e.g., stage 06 ran but stage 07 did not), the next run immediately fails at stage 08. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running tests against a live environment that may have been left paused by a previous run, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
- `NegotiationThreadTransaction` (used by `continue_sync_negotiation` → the `/negotiations/{id}/advance` endpoint) calls `get_thread_store()` on enter, which requires a one-time initialization with `sqlite_client` and `identity`. In production this happens in `TraderAgent._startup_tasks`. In integration tests the singleton must be initialized in the fixture: `import market_policy.negotiation_thread as _nt; _nt._thread_store = None; _nt.get_thread_store(sqlite_client=db, identity=Identity(agent_url="http://test-seller:8001"))`. See `test_negotiations_api.py` for the pattern.
+- **Registry indexer race at e2e stage 03b / 05b:** The `EventSyncService` in the registry polls on-chain events every 60 s. On a fresh stack the initial sync (`sync_from_start`) may not complete before the e2e test reaches stage 03b (resume + publish). `publish_order_to_registry` issues `POST /agents/{canonical_id}/listings` against the registry; if the agent is not yet indexed, the registry returns 404 and the publish silently fails (`registry_status="error"` in the response). Stage 03b then fails its `registry_status == "published"` assertion, causing all negotiation stages to cascade-skip. Stage 03c (`TestStage03c_SellerAgentIndexed`) was added to gate on indexing completion via the new `GET /api/v1/system/sync/wait-for-agent` long-poll endpoint before any negotiation stage runs. **The `wait-for-agent` endpoint is the canonical pattern for this class of problem**: when a test needs to gate on an async background service completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This avoids client-side polling loops (fragile, sleep-based) and makes the wait observable (the endpoint logs the elapsed time).
 
----
+- **`settings.SELLER.AGENT_ID` discrepancy in config files:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) have `seller.agent_id: "eip155:31337:...:2"`. On a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, making `:2` stale. Stage 03c no longer uses this value — it calls `storefront.wait_for_registry_agent_ready()` which uses the storefront's live runtime agent ID. The `SELLER.AGENT_ID` value is still used by `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
-## Storefront — Planned Rework
+- **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. `_registry_reachable` was a live example of this: set by 00b, consumed by nothing, so a registry outage was invisible to all stages except 03b (which checked the registry directly). **This gap class cannot be caught by unit or integration tests** — it is a property of the test's own dependency graph. When adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it.
+
+
 ### 2. Remove event queue infrastructure
 
 **Status:** Planned.
@@ -1726,6 +1729,7 @@ The primary e2e test suite. Sequential tests covering the complete buyer-seller 
 | 02b | Create listing paused | `POST /api/v1/listings/create paused=True` → listing_id; local visible paused=True; registry absent |
 | 03a | Validate publish | `POST registry /api/v1/listings/validate-publish` → valid=True |
 | 03b | Resume + registry confirm | `POST /listings/{id}/resume` → registry_status=published; registry present |
+| 03c | Seller agent indexed | `GET registry /api/v1/system/sync/wait-for-agent?agent_id=…` → indexed=True (long-poll; gates all negotiation stages) |
 | 05a | Evaluate-negotiate dry-run | `POST /api/v1/admin/listings/{id}/evaluate-negotiate` → would_negotiate=True, decision=counter |
 | 05b | Negotiation starts + visible | `POST /negotiate/new` → neg_id; thread in list; round_decided event decision=counter |
 | 06b | Force-accept + terminal | Guard no exit/accept events; `POST .../force-accept` → accept; terminal_state=success |
@@ -1745,7 +1749,7 @@ The primary e2e test suite. Sequential tests covering the complete buyer-seller 
 |---|---|---|
 | No evaluate-resume dry-run | Phase 3 `03a` uses registry reachability check instead | `POST /api/v1/admin/listings/{id}/evaluate-resume` |
 
-**`DealState`** — module-scoped dataclass. Key fields by phase: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5-6); `provisioning_gate_armed` (Phase 7); `real_escrow_uid`/`escrow_uid` (Phase 7b); `_evaluate_settle_passed`, `_evaluate_settle_vm_host` (Phase 8a); `_provision_job_evaluated` (Phase 9a); `settlement_submitted`, `provisioning_job_id` (Phase 9b); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9c-d).
+**`DealState`** — module-scoped dataclass. Key fields by phase: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed`, `_seller_agent_indexed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5-6); `provisioning_gate_armed` (Phase 7); `real_escrow_uid` (Phase 7b); `_evaluate_settle_passed`, `_evaluate_settle_vm_host` (Phase 8a); `_provision_job_evaluated` (Phase 9a); `settlement_submitted`, `provisioning_job_id` (Phase 9b); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9c-d).
 
 **Admin dry-run settle endpoints (new this session):**
 
@@ -1771,7 +1775,9 @@ POST /api/v1/settle/{uid}
 
 **`ensure_storefront_resumed` teardown:** An `autouse=True` module-scoped fixture in `conftest.py` that unconditionally calls `admin_resume()` if `get_system_status().paused` is True after the module finishes. This prevents stage 06 (`admin_pause`) from leaving the storefront in a paused state across test runs when stage 07 fails or is skipped. Any test that calls `admin_pause` must rely on this teardown — never assume stage 07 will run.
 
-**`wait_for_stage_event` helper:** In `conftest.py`. Wraps `SyncStorefrontClient.wait_for_stage_event()` with pytest-friendly timeout error. Used at stages 14 and 16 to await async work (provisioning job queued, provisioning fulfilled) without polling loops. The underlying client method polls `GET /api/v1/system/events` with a cursor and 500ms interval.
+**`wait_for_stage_event` helper:** In `conftest.py`. Wraps `SyncStorefrontClient.wait_for_stage_event()` with pytest-friendly timeout error. Used at stages 08b and 09b to await async work (provisioning job queued, provisioning fulfilled) without polling loops. The underlying client method polls `GET /api/v1/system/events` with a cursor and 500ms interval.
+
+**`wait_for_registry_agent_ready` (storefront client):** `SyncStorefrontClient.wait_for_registry_agent_ready(timeout=90.0)` calls `GET /api/v1/system/wait-for-registry-agent` — a single server-side long-poll on the storefront. The storefront calls `registry_auth_check()` (which fetches `GET /agents/{canonical}` from the registry using the storefront's live runtime agent ID) every 1 s until the result is definitive (anything other than `"agent_not_found"`), or the timeout elapses. Returns `RegistryAgentReadyResponse(ready, registry_auth, elapsed_ms)`. Used at stage 03c. **Advantage over querying the registry directly:** no agent ID config is needed — the storefront uses its own live runtime ID (set by `_ensure_agent_identity` at startup), so the wait is correct regardless of what numeric ID was assigned on-chain. **Pattern:** any time a test needs to gate on a background indexer/sync service completing a unit of work, prefer a server-side long-poll endpoint over a client-side loop.
 
 **Provisioning gate pattern:** Before submitting settlement (stage 13), add a `pause_before_result=True` mock rule via `ProvisioningTestClient.add_mock_rule`. Stage 15 calls `resume_rule` then `wait_for_job` (long-poll, no sleep). Note: the current test skips the gate setup — it's a known gap to wire in stage 12/15 properly.
 

@@ -74,6 +74,19 @@ class StatsResponse(BaseModel):
     orders_by_status: OrderStatusCounts
 
 
+class AgentIndexedResponse(BaseModel):
+    """Response from GET /api/v1/system/sync/wait-for-agent.
+
+    ``indexed=True`` means the agent row is present in the registry DB and
+    the caller can safely proceed with heartbeat and listing publish calls.
+    ``indexed=False`` means the request timed out before the agent appeared.
+    """
+
+    indexed: bool = Field(description="True if the agent was found before the timeout elapsed")
+    agent_id: str = Field(description="The canonical agent ID that was polled for")
+    elapsed_ms: int = Field(description="Approximate wait time in milliseconds")
+
+
 class AttestationStatsResponse(BaseModel):
     """Settlement activity counts derived from listing attestation fields.
 

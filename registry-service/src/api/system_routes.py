@@ -30,6 +30,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from src.api.system_model import (
+    AgentIndexedResponse,
     AttestationStatsResponse,
     ConfigResponse,
     EventSyncStatus,
@@ -145,6 +146,60 @@ def system_sync() -> SyncResponse:
             enabled=settings.enable_health_checks,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# /api/v1/system/sync/wait-for-agent  — long-poll until agent is indexed
+# ---------------------------------------------------------------------------
+
+
+@_system_router.get(
+    "/sync/wait-for-agent",
+    response_model=AgentIndexedResponse,
+    summary="Long-poll until an agent is indexed (test/admin helper)",
+    description=(
+        "Blocks (server-side) until the specified canonical agent ID appears "
+        "in the registry DB, or until *timeout* seconds elapse.  Returns "
+        "``indexed=True`` as soon as the row exists; ``indexed=False`` on "
+        "timeout.  Intended for e2e test suites that need to wait for the "
+        "EventSync background service to index a freshly registered agent "
+        "before proceeding with heartbeat and listing-publish calls.  "
+        "Poll interval is 500 ms — callers should set timeout >= 60 s to "
+        "cover a normal sync cycle."
+    ),
+)
+async def wait_for_agent_indexed(
+    agent_id: str,
+    timeout: float = 60.0,
+    db: Session = Depends(get_db),
+) -> AgentIndexedResponse:
+    import asyncio
+    import time as _time
+
+    if timeout > 120.0:
+        timeout = 120.0  # hard cap — protect the server from indefinite holds
+
+    poll_interval = 0.5
+    start = _time.monotonic()
+    deadline = start + timeout
+
+    while True:
+        db.expire_all()
+        agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
+        if agent is not None:
+            elapsed_ms = int((_time.monotonic() - start) * 1000)
+            return AgentIndexedResponse(
+                indexed=True,
+                agent_id=agent_id,
+                elapsed_ms=elapsed_ms,
+            )
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(poll_interval, remaining))
+
+    elapsed_ms = int((_time.monotonic() - start) * 1000)
+    return AgentIndexedResponse(indexed=False, agent_id=agent_id, elapsed_ms=elapsed_ms)
 
 
 # ---------------------------------------------------------------------------

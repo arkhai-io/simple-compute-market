@@ -258,15 +258,23 @@ class HealthResponse:
     status: str = "ok"          # "ok" | "degraded"
     checks: dict[str, str] = field(default_factory=dict)
     paused: bool | None = None  # present on /api/v1/system/status only
+    agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
+    chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
+    resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
-        known = {"status", "checks", "paused"}
+        known = {"status", "checks", "paused", "agent_id", "chain_id", "resource_count"}
+        raw_chain_id = d.get("chain_id")
+        raw_resource_count = d.get("resource_count")
         return cls(
             status=d.get("status", "ok"),
             checks=d.get("checks", {}),
             paused=d.get("paused"),
+            agent_id=d.get("agent_id"),
+            chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
+            resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -682,6 +690,26 @@ class SettleResponse:
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
             negotiation_id=d.get("negotiation_id", ""),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class RegistryAgentReadyResponse:
+    """Response from GET /api/v1/system/wait-for-registry-agent."""
+
+    ready: bool = False
+    registry_auth: str = ""
+    elapsed_ms: int = 0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RegistryAgentReadyResponse":
+        known = {"ready", "registry_auth", "elapsed_ms"}
+        return cls(
+            ready=bool(d.get("ready", False)),
+            registry_auth=str(d.get("registry_auth", "")),
+            elapsed_ms=int(d.get("elapsed_ms", 0)),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

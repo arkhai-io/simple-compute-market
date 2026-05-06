@@ -390,6 +390,26 @@ class AttestationStats:
 
 
 @dataclass
+class AgentIndexedResponse:
+    """Response from GET /api/v1/system/sync/wait-for-agent."""
+
+    indexed: bool
+    agent_id: str
+    elapsed_ms: int = 0
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AgentIndexedResponse":
+        known = {"indexed", "agent_id", "elapsed_ms"}
+        return cls(
+            indexed=bool(d.get("indexed", False)),
+            agent_id=str(d.get("agent_id", "")),
+            elapsed_ms=int(d.get("elapsed_ms", 0)),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
 class SystemConfigResponse:
     """Response from GET /api/v1/system/config."""
 

@@ -183,3 +183,53 @@ class TestStorefrontRegistration:
             "or install torch in the container if rl is required."
         )
         log.info("✓ Negotiation strategy viable: %s", strat)
+
+    def test_resource_portfolio_seeded(
+        self,
+        seller_api_url: str,
+        seller_settings: dict,
+    ) -> None:
+        """GET /api/v1/system/status must report resource_count > 0.
+
+        Guards against the CSV importer writing to a different SQLite path
+        than the running server reads — a silent misconfiguration where the
+        storefront has no inventory and refuses all /negotiate/new calls with
+        409 no_matching_inventory.
+
+        resource_count is a top-level field (not in checks) on the full
+        diagnostic status endpoint, populated by querying the resources table
+        directly on the server.
+        """
+        admin_key = seller_settings.get("admin_api_key", "")
+        if not admin_key:
+            pytest.skip(
+                "seller.admin_api_key not configured — cannot call admin-gated "
+                "/api/v1/system/status endpoint. Set admin_api_key in config."
+            )
+        client = SyncStorefrontClient(
+            base_url=seller_api_url,
+            private_key=seller_settings["private_key"],
+            admin_key=admin_key,
+        )
+        try:
+            status = client.get_system_status()
+        except Exception as exc:
+            pytest.fail(f"Could not reach /api/v1/system/status: {exc}")
+        finally:
+            client.close()
+
+        resource_count = status.resource_count
+        assert resource_count is not None, (
+            "resource_count absent from /api/v1/system/status response.\n"
+            "Rebuild the storefront image with the updated system_service.py."
+        )
+        assert resource_count > 0, (
+            f"resource_count={resource_count} — storefront has no registered compute resources.\n"
+            "The resource CSV importer likely wrote to a different SQLite path than the server reads.\n"
+            "Check that the compose command passes --db-path matching [seller].db_path in config.toml.\n"
+            "Run the importer manually:\n"
+            "  docker exec market-agent-sell python scripts/import_resources_csv.py \\\n"
+            "    --csv src/market_storefront/data/ww1-machine.csv \\\n"
+            "    --db-path src/market_storefront/data/sell-agent/agent.db"
+        )
+        log.info("✓ Resource portfolio seeded: resource_count=%d", resource_count)

@@ -12,11 +12,13 @@ None of these methods write to the registry or produce side-effects beyond SQLit
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import os
 import pkgutil
 import sys
+import time
 from typing import Any
 
 import market_storefront.container as _container
@@ -29,7 +31,7 @@ from market_storefront.models.system_models import (
     SeededPolicyInfo,
     SeedPoliciesResponse,
 )
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import CONFIG, _resolve_chain_id
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +261,32 @@ class SystemService:
 
         _non_degrading = {"ok", "unconfigured", "agent_not_found", "indexing"}
         all_ok = all(v in _non_degrading for v in checks.values())
-        return {"status": "ok" if all_ok else "degraded", "checks": checks}
+
+        result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
+
+        if include_registry:
+            # Populate top-level diagnostic fields — not checks, just facts.
+            try:
+                from market_storefront.agent import _AGENT_ID as _live_agent_id
+                onchain_id = _live_agent_id or CONFIG.onchain_agent_id
+                if onchain_id:
+                    from market_storefront.utils.action_executor import _canonical_agent_id
+                    result["agent_id"] = _canonical_agent_id()
+                else:
+                    result["agent_id"] = None
+            except Exception:
+                result["agent_id"] = None
+            try:
+                result["chain_id"] = _resolve_chain_id()
+            except Exception:
+                result["chain_id"] = None
+            try:
+                resources = await self._db.list_resources()
+                result["resource_count"] = len(resources)
+            except Exception:
+                result["resource_count"] = None
+
+        return result
 
     async def registry_check(self) -> str:
         """Probe the configured registry URL. Returns 'ok' or an error string.
@@ -300,7 +327,7 @@ class SystemService:
         onchain_id = _live_agent_id or CONFIG.onchain_agent_id
         if not onchain_id:
             return "unconfigured"
-        chain_id = CONFIG.chain_id
+        chain_id = _resolve_chain_id()
         identity_addr = (CONFIG.identity_registry_address or "").lower()
         canonical = f"eip155:{chain_id}:{identity_addr}:{onchain_id}"
         try:
@@ -324,6 +351,97 @@ class SystemService:
             return "timeout"
         except Exception as exc:
             return f"error: {exc}"
+
+    async def wait_for_registry_agent(self, timeout: float) -> dict:
+        """Block until registry_auth_check() returns a definitive result.
+
+        Polls registry_auth_check() every second until the result is anything
+        other than 'agent_not_found' (the transient state while the registry's
+        EventSync is catching up after a fresh on-chain registration), or until
+        *timeout* seconds elapse.
+
+        Returns a dict with keys:
+          ready       — True if a definitive result was reached before timeout
+          registry_auth — the raw registry_auth_check() value
+          elapsed_ms  — approximate wall-clock wait time in milliseconds
+
+        'ready=True' does not imply 'registry_auth="ok"' — callers must check
+        registry_auth independently.  Definitive non-ok values include
+        'owner_mismatch', 'unconfigured', 'unreachable', and error strings.
+
+        Intended consumers:
+          - GET /api/v1/system/wait-for-registry-agent (thin controller wrapper)
+          - Storefront startup sequence (agent.py) — wait before starting the
+            heartbeat loop so the first heartbeat is not guaranteed to 404.
+        """
+        _pending = {"agent_not_found"}
+        poll_interval = 1.0
+        start = time.monotonic()
+        deadline = start + timeout
+        registry_auth = "unknown"
+
+        while True:
+            registry_auth = await self.registry_auth_check()
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            if registry_auth not in _pending:
+                return {
+                    "ready": True,
+                    "registry_auth": registry_auth,
+                    "elapsed_ms": elapsed_ms,
+                }
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(poll_interval, remaining))
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        return {
+            "ready": False,
+            "registry_auth": registry_auth,
+            "elapsed_ms": elapsed_ms,
+        }
+
+    async def seed_resources_if_empty(self, csv_path: str) -> dict:
+        """Upsert resources from *csv_path* only when the resources table is empty.
+
+        This is the idempotent startup seeding path: if a previous run already
+        populated the table (e.g. via the portfolio import CLI or a prior
+        startup), this method returns immediately without touching the DB.
+
+        Returns a dict with keys:
+          seeded       — True if the CSV was imported, False if the table was
+                         already non-empty (skipped) or if csv_path is empty.
+          imported_count — number of rows written (0 when seeded=False).
+          csv_path     — the path that was (or would have been) imported.
+
+        Raises ``FileNotFoundError`` if *csv_path* is set but does not exist on
+        disk — better to crash loudly at startup than to silently have zero
+        inventory.
+        """
+        if not csv_path:
+            return {"seeded": False, "imported_count": 0, "csv_path": csv_path}
+
+        existing = await self._db.list_resources()
+        if existing:
+            logger.info(
+                "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
+                len(existing),
+            )
+            return {"seeded": False, "imported_count": len(existing), "csv_path": csv_path}
+
+        report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+        imported = report.get("imported_count", 0)
+        failed = report.get("failed_count", 0)
+        if failed:
+            logger.warning(
+                "[RESOURCE SEED] %d row(s) failed to import from %s",
+                failed, csv_path,
+            )
+        logger.info(
+            "[RESOURCE SEED] Imported %d resource(s) from %s",
+            imported, csv_path,
+        )
+        return {"seeded": True, "imported_count": imported, "csv_path": csv_path}
 
     def negotiation_strategy_check(self) -> str:
         """Probe the configured negotiation strategy. Returns a viability string.

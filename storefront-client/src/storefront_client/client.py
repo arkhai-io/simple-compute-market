@@ -59,6 +59,7 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     AdminStatusResponse,
+    RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
     StageEvent,
@@ -234,6 +235,35 @@ class StorefrontClient(_StorefrontClientBase):
         if resp.status_code not in (200, 503):
             self._raise_for_status("GET", url, resp.status_code, resp.text)
         return HealthResponse.from_dict(resp.json())
+
+    async def wait_for_registry_agent_ready(
+        self,
+        *,
+        timeout: float = 90.0,
+    ) -> RegistryAgentReadyResponse:
+        """GET /api/v1/system/wait-for-registry-agent — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until
+        ``registry_auth_check()`` returns a definitive result (anything other
+        than ``"agent_not_found"``), or until *timeout* seconds elapse.
+
+        Returns ``RegistryAgentReadyResponse``.  Callers must check
+        ``result.ready`` and ``result.registry_auth``:
+        - ``ready=True, registry_auth="ok"`` — agent indexed and owner verified
+        - ``ready=True, registry_auth=<other>`` — definitive but non-ok
+        - ``ready=False`` — timed out while still ``"agent_not_found"``
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url("/api/v1/system/wait-for-registry-agent")
+        resp = await self._client.get(
+            "/api/v1/system/wait-for-registry-agent",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return RegistryAgentReadyResponse.from_dict(resp.json())
 
     async def get_events(
         self,
@@ -901,6 +931,36 @@ class SyncStorefrontClient(_StorefrontClientBase):
         if resp.status_code not in (200, 503):
             self._raise_for_status("GET", url, resp.status_code, resp.text)
         return HealthResponse.from_dict(resp.json())
+
+    def wait_for_registry_agent_ready(
+        self,
+        *,
+        timeout: float = 90.0,
+    ) -> RegistryAgentReadyResponse:
+        """GET /api/v1/system/wait-for-registry-agent — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until
+        ``registry_auth_check()`` returns a definitive result (anything other
+        than ``"agent_not_found"``), or until *timeout* seconds elapse.
+
+        Returns ``RegistryAgentReadyResponse``.  Callers must check
+        ``result.ready`` and ``result.registry_auth``:
+        - ``ready=True, registry_auth="ok"`` — agent indexed and owner verified
+        - ``ready=True, registry_auth=<other>`` — definitive but non-ok (e.g.
+          ``"owner_mismatch"``, ``"unconfigured"``)
+        - ``ready=False`` — timed out while still ``"agent_not_found"``
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url("/api/v1/system/wait-for-registry-agent")
+        resp = self._client.get(
+            "/api/v1/system/wait-for-registry-agent",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,  # client timeout slightly longer than server cap
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return RegistryAgentReadyResponse.from_dict(resp.json())
 
     def get_events(
         self,

@@ -13,6 +13,7 @@ ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAc
 [chain]
 name    = "anvil"
 rpc_url = "ws://anvil:8545"
+chain_id = 31337
 alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
 
 [registry]
@@ -31,6 +32,9 @@ log_file_path       = "./logs/bob.log"
 token_registry_path = "/app/src/market_storefront/data/token_registry_docker_compose.json"
 enable_event_queue  = false
 admin_api_key       = "test-api-key"
+# Seed the resources table from this CSV on startup when the table is empty.
+# The bundled ww1-machine.csv is the local dev inventory.
+resources_csv_path  = "/app/src/market_storefront/data/ww1-machine.csv"
 
 [seller.provisioning]
 service_url = "http://provisioning:8081"

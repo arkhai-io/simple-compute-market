@@ -31,6 +31,7 @@ import httpx
 
 from registry_client.auth import build_auth_headers, sign_eip191, RegistryClientError
 from registry_client.models import (
+    AgentIndexedResponse,
     AgentListResponse,
     AgentSummary,
     AttestationStats,
@@ -244,6 +245,10 @@ class _RegistryClientBase:
     def _parse_system_stats(data: dict) -> SystemStatsResponse:
         return SystemStatsResponse.from_dict(data)
 
+    @staticmethod
+    def _parse_agent_indexed(data: dict) -> AgentIndexedResponse:
+        return AgentIndexedResponse.from_dict(data)
+
 
 # ---------------------------------------------------------------------------
 # Async client
@@ -343,6 +348,30 @@ class RegistryClient(_RegistryClientBase):
         """GET /api/v1/system/stats → SystemStatsResponse"""
         return self._parse_system_stats(
             await self._request("GET", "/api/v1/system/stats")
+        )
+
+    async def wait_for_agent_indexed(
+        self,
+        agent_id: str,
+        *,
+        timeout: float = 60.0,
+    ) -> AgentIndexedResponse:
+        """GET /api/v1/system/sync/wait-for-agent → AgentIndexedResponse.
+
+        Single server-side long-poll — the registry blocks internally until
+        the agent row appears or *timeout* seconds elapse.  The caller makes
+        one HTTP call; no client-side polling loop is needed.
+
+        Raises ``RegistryClientError`` on non-2xx responses (e.g. registry
+        unreachable).  Returns normally regardless of ``indexed`` value —
+        callers must check ``result.indexed`` and raise / skip as appropriate.
+        """
+        params = {"agent_id": agent_id, "timeout": timeout}
+        return self._parse_agent_indexed(
+            await self._request(
+                "GET", "/api/v1/system/sync/wait-for-agent",
+                params=params,
+            )
         )
 
     # ------------------------------------------------------------------
@@ -604,6 +633,35 @@ class SyncRegistryClient(_RegistryClientBase):
         """GET /api/v1/system/stats → SystemStatsResponse"""
         return self._parse_system_stats(
             self._request("GET", "/api/v1/system/stats")
+        )
+
+    def wait_for_agent_indexed(
+        self,
+        agent_id: str,
+        *,
+        timeout: float = 60.0,
+    ) -> AgentIndexedResponse:
+        """GET /api/v1/system/sync/wait-for-agent → AgentIndexedResponse.
+
+        Single server-side long-poll — the registry blocks internally until
+        the agent row appears or *timeout* seconds elapse.  The caller makes
+        one HTTP call; no client-side polling loop is needed.
+
+        **Important:** the underlying ``httpx.Client`` must be configured with
+        a read timeout greater than *timeout* (the server-side wait).  The
+        ``SyncRegistryClient`` fixture in the e2e conftest sets ``timeout=90.0``
+        to cover the default 60 s server poll with headroom.
+
+        Raises ``RegistryClientError`` on non-2xx responses (e.g. registry
+        unreachable).  Returns normally regardless of ``indexed`` value —
+        callers must check ``result.indexed`` and raise / skip as appropriate.
+        """
+        params = {"agent_id": agent_id, "timeout": timeout}
+        return self._parse_agent_indexed(
+            self._request(
+                "GET", "/api/v1/system/sync/wait-for-agent",
+                params=params,
+            )
         )
 
     # ------------------------------------------------------------------

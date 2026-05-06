@@ -45,13 +45,7 @@ services:
         limits:
           memory: 512m
     command:
-      - sh
-      - -c
-      - |
-        echo "Importing seller resources..."
-        PYTHONPATH="/:/app:/app/src" uv run python scripts/import_resources_csv.py \
-          --csv src/market_storefront/data/ww1-machine.csv
-        exec ./entrypoint.sh
+      - ./entrypoint.sh
 
   seller-redis:
     image: redis:7-alpine

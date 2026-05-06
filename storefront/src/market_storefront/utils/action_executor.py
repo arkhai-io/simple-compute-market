@@ -29,8 +29,9 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import CONFIG, _resolve_chain_id
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
+from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
@@ -491,17 +492,7 @@ def _canonical_agent_id() -> str | None:
     if isinstance(raw, str) and raw.startswith("eip155:"):
         return raw
     try:
-        from service.clients.erc8004.blockchain import build_erc8004_canonical_id
-        chain_id = 31337  # default for Anvil/local
-        if CONFIG.chain_rpc_url:
-            try:
-                from web3 import Web3
-                from web3.providers import HTTPProvider
-                from service.clients.erc8004.blockchain import rpc_url_for_http_provider
-                w3 = Web3(HTTPProvider(rpc_url_for_http_provider(CONFIG.chain_rpc_url), request_kwargs={"timeout": 5}))
-                chain_id = w3.eth.chain_id
-            except Exception:
-                pass
+        chain_id = _resolve_chain_id()
         return build_erc8004_canonical_id(
             chain_id=chain_id,
             identity_registry=CONFIG.identity_registry_address,

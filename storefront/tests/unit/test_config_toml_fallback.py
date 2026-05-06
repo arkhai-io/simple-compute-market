@@ -185,12 +185,23 @@ def test_shared_chain_section():
         "chain": {
             "name": "anvil",
             "rpc_url": "http://localhost:8545",
+            "chain_id": 31337,
             "alkahest_address_config_path": "/etc/arkhai/alkahest.json",
         },
     })
     assert cfg.chain_name == "anvil"
     assert cfg.chain_rpc_url == "http://localhost:8545"
+    assert cfg.chain_id == 31337
     assert cfg.alkahest_address_config_path == "/etc/arkhai/alkahest.json"
+
+
+def test_chain_id_defaults_to_zero_when_absent():
+    """chain.chain_id absent in TOML → CONFIG.chain_id == 0 (unset sentinel)."""
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "chain": {"name": "anvil", "rpc_url": "http://localhost:8545"},
+    })
+    assert cfg.chain_id == 0
 
 
 def test_shared_registry_section():
@@ -225,3 +236,78 @@ def test_missing_agent_id_warns_and_falls_back_to_default():
     with pytest.warns(UserWarning, match="agent_id not set"):
         cfg = _load_with_toml({})
     assert cfg.agent_id == agent_config.DEFAULT_AGENT_ID
+
+
+# ---------------------------------------------------------------------------
+# _resolve_chain_id
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_chain_id_returns_config_value_when_set():
+    """When chain_id is non-zero in config, _resolve_chain_id returns it directly."""
+    with patch.object(agent_config, "_USER_CFG", {
+        "seller": {"agent_id": "test_agent"},
+        "chain": {"chain_id": 31337},
+    }):
+        agent_config.CONFIG = agent_config.load_config()
+        result = agent_config._resolve_chain_id()
+    assert result == 31337
+
+
+def test_resolve_chain_id_calls_rpc_when_config_is_zero(monkeypatch):
+    """When chain_id is 0 (unset), _resolve_chain_id falls back to RPC."""
+    from unittest.mock import MagicMock, patch as _patch
+
+    mock_w3 = MagicMock()
+    mock_w3.eth.chain_id = 42161  # simulated RPC response
+
+    with patch.object(agent_config, "_USER_CFG", {
+        "seller": {"agent_id": "test_agent"},
+        "chain": {"rpc_url": "http://localhost:8545"},
+    }):
+        agent_config.CONFIG = agent_config.load_config()
+        with _patch.object(agent_config, "Web3", return_value=mock_w3):
+            result = agent_config._resolve_chain_id()
+
+    assert result == 42161
+
+
+def test_resolve_chain_id_raises_when_zero_and_no_rpc():
+    """When chain_id is 0 and rpc_url is absent, _resolve_chain_id raises RuntimeError."""
+    with patch.object(agent_config, "_USER_CFG", {"seller": {"agent_id": "test_agent"}}):
+        agent_config.CONFIG = agent_config.load_config()
+        with pytest.raises(RuntimeError, match="chain.chain_id is not set"):
+            agent_config._resolve_chain_id()
+
+
+# ---------------------------------------------------------------------------
+# default_resources_csv_path
+# ---------------------------------------------------------------------------
+
+
+def test_default_resources_csv_path_is_none_when_absent():
+    """resources_csv_path absent from TOML → default_resources_csv_path is None."""
+    cfg = _load_with_toml({"seller": {"agent_id": "test_agent"}})
+    assert cfg.default_resources_csv_path is None
+
+
+def test_default_resources_csv_path_reads_from_toml():
+    """resources_csv_path set in TOML → value is propagated."""
+    cfg = _load_with_toml({
+        "seller": {
+            "agent_id": "test_agent",
+            "resources_csv_path": "/data/resources.csv",
+        },
+    })
+    assert cfg.default_resources_csv_path == "/data/resources.csv"
+
+
+def test_default_resources_csv_path_empty_string_becomes_none():
+    """Empty string in TOML → treated as unset (None), not as a path."""
+    cfg = _load_with_toml({
+        "seller": {
+            "agent_id": "test_agent",
+            "resources_csv_path": "",
+        },
+    })
+    assert cfg.default_resources_csv_path is None

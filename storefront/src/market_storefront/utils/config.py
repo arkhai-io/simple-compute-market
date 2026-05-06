@@ -19,6 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from web3 import Web3
+from web3.providers import HTTPProvider
+from service.clients.erc8004.blockchain import (  # type: ignore[import-not-found]
+    build_erc8004_canonical_id,
+    rpc_url_for_http_provider,
+)
+
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
 logger = logging.getLogger(__name__)
@@ -187,6 +194,11 @@ class Config:
     # unset, the strategy exits. Default False preserves the skip-on-missing
     # behavior.
     publish_priceless: bool
+    # Path to a CSV file to seed the resources table from on startup, only
+    # when the table is empty. None (the default) means no auto-seeding —
+    # the operator must seed manually via the portfolio import CLI or API.
+    # Set [seller].resources_csv_path in config.toml to enable.
+    default_resources_csv_path: str | None
     # Admin API key — protects /admin/* routes and admin-only resource actions.
     # None means unprotected (local dev).  Set via [seller].admin_api_key in
     # config.toml, or injected via the Helm provisioning-secrets profile.
@@ -266,9 +278,9 @@ def load_config() -> Config:
             "registry.identity_registry_address", None,
         ),
 
-        # Chain identity (explicit in TOML so serve never needs an RPC
-        # call to discover it; required for canonical agent ID construction).
-        chain_id=_resolve_int("chain.chain_id", 1337),
+        # Chain identity (explicit in TOML; 0 means unset — callers that need
+        # a live value should use _resolve_chain_id() which falls back to RPC).
+        chain_id=_resolve_int("chain.chain_id", 0),
 
         # Seller-only bookkeeping.
         agent_db_path=str(_resolve("seller.db_path", "/tmp/agent.db")),
@@ -373,8 +385,49 @@ def load_config() -> Config:
         publish_priceless=_resolve_bool(
             "seller.pricing.publish_priceless", False,
         ),
+
+        # Resource auto-seeding: None means disabled (the default).
+        default_resources_csv_path=_resolve("seller.resources_csv_path", None) or None,
     )
 
 
 # Module-level singleton for convenience.
 CONFIG = load_config()
+
+
+def _resolve_chain_id() -> int:
+    """Return the effective EVM chain ID.
+
+    Resolution order:
+      1. ``CONFIG.chain_id`` — pinned in ``[chain].chain_id`` in config.toml.
+         This is the fast path and the expected state for all deployments.
+      2. Live ``eth_chainId`` RPC call against ``CONFIG.chain_rpc_url`` —
+         fallback when chain_id is 0 (unset in config).
+
+    Raises ``RuntimeError`` when chain_id is 0 and the RPC call fails, so
+    that callers that depend on a correct chain ID surface the misconfiguration
+    loudly rather than silently using a wrong value.
+
+    Not cached — the value is stable for the process lifetime once the RPC
+    node is reachable, but caching here would complicate test isolation.
+    Callers that invoke this frequently should cache the result themselves.
+    """
+    if CONFIG.chain_id:
+        return CONFIG.chain_id
+    if not CONFIG.chain_rpc_url:
+        raise RuntimeError(
+            "chain.chain_id is not set in config.toml and chain.rpc_url is "
+            "absent — cannot determine chain ID. Add chain_id = <N> under "
+            "[chain] in config.toml."
+        )
+    try:
+        w3 = Web3(HTTPProvider(
+            rpc_url_for_http_provider(CONFIG.chain_rpc_url),
+            request_kwargs={"timeout": 5},
+        ))
+        return w3.eth.chain_id
+    except Exception as exc:
+        raise RuntimeError(
+            f"chain.chain_id is not set in config.toml and the RPC fallback "
+            f"failed ({exc}). Add chain_id = <N> under [chain] in config.toml."
+        ) from exc

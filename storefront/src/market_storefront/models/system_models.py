@@ -10,6 +10,9 @@ class HealthResponse(BaseModel):
     status: str
     checks: dict[str, str] = Field(default_factory=dict)
     paused: bool | None = None
+    agent_id: str | None = None
+    chain_id: int | None = None
+    resource_count: int | None = None
 
 
 class PolicyEvaluateRequest(BaseModel):
@@ -79,3 +82,22 @@ class AdminPauseResponse(BaseModel):
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
+
+
+class RegistryAgentReadyResponse(BaseModel):
+    """Response from GET /api/v1/system/wait-for-registry-agent.
+
+    ``ready=True`` means ``checks.registry_auth`` returned a definitive
+    non-pending value — either ``"ok"`` (agent indexed and owner verified)
+    or a terminal error (``"owner_mismatch"``, ``"unconfigured"``, etc.).
+    ``ready=False`` means the request timed out while the registry was still
+    returning ``"agent_not_found"`` (indexing in progress).
+
+    ``registry_auth`` carries the raw value from ``registry_auth_check()``
+    so callers can distinguish ``"ok"`` from ``"owner_mismatch"``.
+    ``elapsed_ms`` is the approximate server-side wait time.
+    """
+
+    ready: bool
+    registry_auth: str
+    elapsed_ms: int

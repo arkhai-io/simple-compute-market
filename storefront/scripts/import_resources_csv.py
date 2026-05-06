@@ -38,7 +38,14 @@ def _load_env_file(env_file: str | None) -> None:
 def _resolve_db_path(cli_db_path: str | None) -> str:
     if cli_db_path:
         return cli_db_path
-    return os.getenv("AGENT_DB_PATH", "/tmp/agent.db")
+    env_path = os.getenv("AGENT_DB_PATH")
+    if env_path:
+        return env_path
+    # Fall back to the same path the server reads — ensures the CSV importer
+    # and the running storefront always write/read the same database when no
+    # explicit path is supplied.
+    from market_storefront.utils.config import CONFIG
+    return CONFIG.agent_db_path
 
 
 async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:

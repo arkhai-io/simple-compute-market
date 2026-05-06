@@ -309,6 +309,32 @@ async def _startup_tasks():
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
 
+    # Seed the resources table from CSV if configured and the table is empty.
+    # Must run before the resource poller so the poller has rows to query.
+    if CONFIG.default_resources_csv_path:
+        import market_storefront.container as _container
+        try:
+            result = await _container.resolved_system_service.seed_resources_if_empty(
+                CONFIG.default_resources_csv_path
+            )
+            if result["seeded"]:
+                logger.info(
+                    "[STARTUP] Seeded %d resource(s) from %s",
+                    result["imported_count"],
+                    result["csv_path"],
+                )
+            else:
+                logger.info(
+                    "[STARTUP] Resource seeding skipped — %d resource(s) already present",
+                    result["imported_count"],
+                )
+        except Exception as exc:
+            logger.error(
+                "[STARTUP] Resource seeding failed for %s: %s",
+                CONFIG.default_resources_csv_path, exc,
+            )
+            raise
+
     # Probe configured contract addresses for bytecode. Logs a warning
     # naming any address that has nothing deployed at it on the
     # configured RPC. Doesn't crash startup — operators may want the

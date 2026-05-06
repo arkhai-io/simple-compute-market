@@ -71,6 +71,7 @@ def seller_settings() -> dict:
         "base_url_override": settings.SELLER.BASE_URL_OVERRIDE,
         "private_key": settings.SELLER.PRIVATE_KEY,
         "wallet_address": settings.SELLER.WALLET_ADDRESS,
+        "admin_api_key": str(getattr(settings.SELLER, "ADMIN_API_KEY", None) or ""),
     }
 
 

@@ -13,7 +13,7 @@ dependencies = [
     "arkhai-storefront-client>=0.5.4",
     "market-service",
     "market-policy",
-    "provisioning-service",
+    "provisioning-service>=0.1.4",
     "opentelemetry-exporter-gcp-trace>=1.9.0,<2.0.0",
     "google-cloud-logging>=3.12.0,<4.0.0",
     "fastapi~=0.115.8",

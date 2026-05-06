@@ -24,6 +24,10 @@ Phase 3 — Registry publication
   03b  Resume + registry confirm:
          POST /api/v1/listings/{id}/resume → registry_status=published
          GET registry/listings → listing present
+  03c  Seller agent indexed:
+         GET registry /api/v1/system/sync/wait-for-agent → indexed=True
+         (long-poll; registry blocks until EventSync indexes the on-chain
+         registration; gates all negotiation stages)
 
 Phase 4 — (removed; admin pause/resume tested in storefront smoke suite)
   TODO: Add test_admin_pause_resume to tests/smoke/test_storefront_smoke.py
@@ -170,7 +174,7 @@ class TestStage00c_ProvisioningHealth:
         /dev/null which always exists; a missing playbook means the mock
         profile isn't active.
         """
-        require_state(deal_state, "_storefront_healthy")
+        require_state(deal_state, "_storefront_healthy", "_registry_reachable")
         resp = provisioning_client.get_ansible_readiness()
         playbook_exists = resp.get("playbook", {}).get("exists", False)
         assert playbook_exists, (
@@ -193,7 +197,7 @@ class TestStage00d_NegotiationStrategy:
         attempt. If this fails, set [seller.negotiation] policy_mode = 'bisection'
         in config.toml and restart the storefront.
         """
-        require_state(deal_state, "_storefront_healthy")
+        require_state(deal_state, "_storefront_healthy", "_registry_reachable")
         status = storefront_admin_client.get_system_status()
         strat = (status.checks or {}).get("negotiation_strategy", "absent")
         assert strat != "absent", (
@@ -349,7 +353,7 @@ class TestStage02b_CreateListingPaused:
           2. local GET shows status=open, paused=True
           3. registry GET does NOT contain the listing
         """
-        require_state(deal_state, "_evaluate_create_passed")
+        require_state(deal_state, "_evaluate_create_passed", "_registry_reachable")
 
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
@@ -390,6 +394,10 @@ class TestStage02b_CreateListingPaused:
 # Phase 3 — Registry publication
 # ===========================================================================
 
+# ===========================================================================
+# Phase 3a — Validate publish payload (registry dry-run)
+# ===========================================================================
+
 class TestStage03a_ValidatePublish:
     def test_03a_listing_payload_validates_against_registry(
         self, registry_client, deal_state: DealState
@@ -422,6 +430,61 @@ class TestStage03a_ValidatePublish:
                  result.valid, result.offer_resource_type, result.demand_resource_type)
 
 
+class TestStage03c_SellerAgentIndexed:
+    def test_03c_seller_agent_indexed_in_registry(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Storefront confirms its own agent is indexed in the registry.
+
+        Long-poll (server-side via storefront): the storefront calls
+        ``registry_auth_check()`` repeatedly until the result is definitive —
+        i.e. the registry's EventSync has indexed the on-chain registration
+        and the storefront can confirm ownership — or until the timeout elapses.
+
+        This stage runs **before** 03b so that when 03b calls
+        ``resume_listing`` → ``publish_order_to_registry``, the agent row
+        already exists in the registry and the publish does not receive a 404.
+
+        Using the storefront's own ``/api/v1/system/wait-for-registry-agent``
+        endpoint instead of querying the registry directly means:
+          1. No agent ID config is required — the storefront uses its live
+             runtime agent ID (set by ``_ensure_agent_identity`` at startup).
+          2. The wait is single-call with no client-side polling loop.
+          3. The definitive states (``"ok"``, ``"owner_mismatch"``, etc.)
+             are the storefront's own evaluation, not ours.
+        """
+        require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
+
+        result = storefront_admin_client.wait_for_registry_agent_ready(timeout=90.0)
+        assert result.ready, (
+            f"Storefront's agent was not indexed by the registry within 90 s.\n"
+            f"registry_auth={result.registry_auth!r} elapsed_ms={result.elapsed_ms}\n"
+            "Check:\n"
+            "  1. The registry EventSync is running: "
+            "GET http://localhost:8080/api/v1/system/sync\n"
+            "  2. The agent is registered on-chain: run "
+            "'market-storefront register' and confirm it prints a numeric agent ID.\n"
+            "  3. The storefront config has the correct registry URL and identity "
+            "registry address."
+        )
+        assert result.registry_auth == "ok", (
+            f"Registry auth check returned a definitive but non-ok result: "
+            f"{result.registry_auth!r}\n"
+            "Possible causes:\n"
+            "  'owner_mismatch' — the agent on-chain is owned by a different wallet "
+            "than the storefront's configured wallet address.\n"
+            "  'unconfigured' — registry.url or seller.onchain_agent_id not set in "
+            "config.toml.\n"
+            f"elapsed_ms={result.elapsed_ms}"
+        )
+
+        deal_state._seller_agent_indexed = True
+        log.info(
+            "[03c] Registry auth ok — seller agent indexed (elapsed=%d ms)",
+            result.elapsed_ms,
+        )
+
+
 class TestStage03b_ResumePublishesToRegistry:
     def test_03b_resume_listing_publishes_and_registry_confirms(
         self, storefront_admin_client, registry_client, deal_state: DealState
@@ -432,7 +495,7 @@ class TestStage03b_ResumePublishesToRegistry:
         synchronously, so when registry_status=published is in the response the
         registry row already exists — no polling required.
         """
-        require_state(deal_state, "seller_listing_id", "_registry_validate_passed")
+        require_state(deal_state, "seller_listing_id", "_registry_validate_passed", "_seller_agent_indexed")
 
         result = storefront_admin_client.resume_listing(deal_state.seller_listing_id)
         assert result.paused is False, (
@@ -481,7 +544,7 @@ class TestStage05a_EvaluateNegotiate:
         without creating a thread. Catches price_unreasonable and
         torch_unavailable before committing a real negotiation.
         """
-        require_state(deal_state, "seller_listing_id", "resume_confirmed")
+        require_state(deal_state, "seller_listing_id", "resume_confirmed", "_seller_agent_indexed")
 
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
