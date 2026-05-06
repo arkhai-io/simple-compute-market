@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from .groups.chain import chain_app
 from .groups.listing import listing_app
 from .groups.config import config_app
 from .groups.logs import logs_app
@@ -82,6 +83,7 @@ app.add_typer(
 app.add_typer(logs_app, name="logs", help="Inspect past buy/negotiate runs (run-log JSONL files).")
 app.add_typer(escrow_app, name="escrow", help="Buyer-side escrow lifecycle (create, reclaim).")
 app.add_typer(network_app, name="network", help="Join the operator's ZeroTier network and list peers.")
+app.add_typer(chain_app, name="chain", help="Sanity-check chain config (eth_getCode against configured addresses).")
 
 buy_module.register(app)
 negotiate_module.register(app)

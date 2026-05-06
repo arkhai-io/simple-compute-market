@@ -42,7 +42,21 @@ async def lifespan(app: FastAPI):
         reputation_registry=settings.reputation_registry_address,
         validation_registry=settings.validation_registry_address,
     )
-    
+
+    # Probe the three ERC-8004 registry addresses for bytecode. Logs a
+    # warning naming any that have nothing deployed on the configured
+    # RPC. Doesn't crash startup — operators may want the registry HTTP
+    # surface running while they fix the config.
+    from src.services.chain_probe import probe_addresses
+    await probe_addresses(
+        settings.rpc_url,
+        {
+            "identity_registry": settings.identity_registry_address,
+            "reputation_registry": settings.reputation_registry_address,
+            "validation_registry": settings.validation_registry_address,
+        },
+    )
+
     # Start event sync service
     event_sync = EventSyncService(network_config)
     await event_sync.start(60000)  # Sync every minute

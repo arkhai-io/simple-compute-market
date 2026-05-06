@@ -218,6 +218,57 @@ async def _preflight_provisioning() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
+async def _probe_chain_addresses() -> None:
+    """Verify each configured contract address has bytecode on the RPC.
+
+    Cheap one-shot ``eth_getCode`` per address. Catches the operator
+    typing the wrong address into config.toml, pointing at the wrong
+    chain, or running before the contract deployer step has finished
+    (fresh anvil). Logs a warning naming the missing addresses; doesn't
+    fail-close because the storefront can serve unrelated endpoints
+    while the operator fixes the config.
+    """
+    if not CONFIG.chain_rpc_url:
+        return
+    from service.clients.alkahest import resolve_alkahest_address_config
+    from service.clients.chain_probe import probe_addresses
+
+    addresses: dict[str, str] = {}
+    if CONFIG.identity_registry_address:
+        addresses["identity_registry"] = CONFIG.identity_registry_address
+    try:
+        cfg = resolve_alkahest_address_config(
+            CONFIG.chain_name,
+            config_path=CONFIG.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        logger.warning(
+            "[STARTUP] Could not resolve alkahest config for probe: %s", exc,
+        )
+        cfg = None
+    if cfg is not None:
+        # arbiters_addresses + erc20_addresses are the contracts we touch
+        # at runtime (RecipientArbiter for fulfillment, EAS for the
+        # underlying attestation, escrow_obligation for buyer escrows).
+        for path, label in (
+            (("arbiters_addresses", "recipient_arbiter"), "alkahest.recipient_arbiter"),
+            (("arbiters_addresses", "eas"), "alkahest.eas"),
+            (("erc20_addresses", "escrow_obligation_nontierable"),
+             "alkahest.erc20_escrow_obligation"),
+        ):
+            obj: object | None = cfg
+            for attr in path:
+                obj = getattr(obj, attr, None)
+                if obj is None:
+                    break
+            if isinstance(obj, str) and obj.strip():
+                addresses[label] = obj
+
+    if not addresses:
+        return
+    await probe_addresses(CONFIG.chain_rpc_url, addresses)
+
+
 def _maybe_join_zerotier_network() -> None:
     """If a ZeroTier network is configured, ask the local zerotier-one
     daemon to join it. The daemon itself is brought up by the deploy
@@ -257,6 +308,12 @@ async def _startup_tasks():
     # Raises RuntimeError on hard failure (missing config + auto_register=False),
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
+
+    # Probe configured contract addresses for bytecode. Logs a warning
+    # naming any address that has nothing deployed at it on the
+    # configured RPC. Doesn't crash startup — operators may want the
+    # storefront serving while they fix a chain misconfig.
+    await _probe_chain_addresses()
 
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
