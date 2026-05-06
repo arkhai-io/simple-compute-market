@@ -331,6 +331,13 @@ def register(app: typer.Typer) -> None:
             5, "--max-matches",
             help="How many matching seller orders to try before giving up.",
         ),
+        aggregate_by: Optional[str] = typer.Option(
+            None, "--aggregate-by",
+            help="Across-seller aggregation policy. Default: "
+                 "[buyer.aggregation].policy from config.toml, falling "
+                 "back to 'cheapest_first'. Built-ins: cheapest_first, "
+                 "registry_order, random_shuffle, priceless_last.",
+        ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
             help="Per-negotiation round cap.",
@@ -542,11 +549,17 @@ def register(app: typer.Typer) -> None:
                 # User aborted, or no listing carried a min_price.
                 raise typer.Exit(2)
 
+        # Resolve aggregation policy: --aggregate-by > [buyer.aggregation].policy > default.
+        aggregation_policy = aggregate_by or resolve_config_value(
+            toml_path="buyer.aggregation.policy",
+        ) or None
+
         config = BuyConfig(
             registry_url=reg,
             buyer_address=addr,
             buyer_private_key=pk,
             ssh_public_key=ssh,
+            aggregation_policy=aggregation_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,

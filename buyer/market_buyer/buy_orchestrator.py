@@ -41,6 +41,10 @@ class BuyConfig:
     buyer_address: str
     buyer_private_key: str
     ssh_public_key: str
+    # Across-seller aggregation policy name. Looked up via
+    # ``aggregation.load_aggregation_policy``. None = default
+    # (cheapest_first). See buyer/market_buyer/aggregation.py.
+    aggregation_policy: Optional[str] = None
 
 
 @dataclass
@@ -421,6 +425,19 @@ def run_buy(
 
     if not matches:
         return BuyResult(status="no_matches")
+
+    # --- 1b. Apply across-seller aggregation policy --------------------
+    # Default policy (cheapest_first) sorts by advertised price; alternates
+    # are pluggable via aggregation.register_aggregation_policy.
+    from .aggregation import load_aggregation_policy
+    policy = load_aggregation_policy(config.aggregation_policy)
+    matches = policy(matches)
+    _event("aggregated", {
+        "policy": config.aggregation_policy or "cheapest_first",
+        "match_count_after_policy": len(matches),
+    })
+    if not matches:
+        return BuyResult(status="no_matches", reason="aggregation_filtered_all")
 
     attempts: list[dict[str, Any]] = []
 

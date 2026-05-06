@@ -130,6 +130,12 @@ _INIT_USER_TEMPLATE = """\
 # default_token = "MOCK"                       # token symbol resolved via TOKEN_REGISTRY
                                                 # when --token-contract is not supplied
 
+# [buyer.aggregation]
+# policy = "cheapest_first"                    # across-seller match policy: cheapest_first (default) |
+                                                # registry_order | random_shuffle | priceless_last |
+                                                # any custom name registered via
+                                                # market_buyer.aggregation.register_aggregation_policy
+
 # ---------------------------------------------------------------------------
 # Seller-only — uncomment the [seller] sections only on a host that runs
 # `market-storefront serve`. The `market` CLI ignores them.
