@@ -758,7 +758,7 @@ dev = [
 
 [[package]]
 name = "market-service"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../service" }
 dependencies = [
     { name = "aiohttp" },
@@ -777,6 +777,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "alkahest-py", specifier = ">=0.3.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
