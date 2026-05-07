@@ -22,6 +22,12 @@ from market_storefront.server import _set_globally_paused, is_globally_paused
 
 logger = logging.getLogger(__name__)
 
+# States that the release-reservations endpoints transition back to
+# ``available``. ``reserved`` is the in-flight provisioning hold;
+# ``leased`` is the post-fulfillment hold for the duration of the lease.
+# Anything else (``available``, ``deleted``, etc.) is a no-op.
+_HELD_STATES = frozenset({"reserved", "leased"})
+
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 @cbv(router)
@@ -59,28 +65,90 @@ class AdminController:
         )
 
     @router.post(
+        "/portfolio/resources/{resource_id}/release-reservation",
+        response_model=ReleaseReservationsResponse,
+        summary="Release one held compute resource back to available (admin)",
+    )
+    async def release_one_reservation(
+        self, resource_id: str
+    ) -> ReleaseReservationsResponse:
+        """Force a single resource in any held state back to ``available``.
+
+        Surgical counterpart to ``release-reservations``: clears exactly the
+        named row's hold, so an operator can target one stuck resource
+        without freeing every reservation in the seller's portfolio. Covers
+        both ``reserved`` (held during provisioning) and ``leased`` (held
+        for the duration of an active lease) — they're both "held" states
+        from the portfolio's perspective. The only mutation is the
+        ``state`` transition; ``value``, ``attributes``, and
+        ``lease_end_utc`` are left intact.
+
+        404 if the row doesn't exist; idempotent on already-available rows
+        (returns ``released_count=0`` rather than failing).
+
+        For an actual stuck VM with a running workload, pair this with the
+        provisioning service's
+        ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` (and optionally
+        ``/undefine``) — those run real Ansible against the host, while
+        this endpoint only clears the storefront's own bookkeeping.
+        """
+        from fastapi import HTTPException
+        row = await self._db.get_resource(resource_id=resource_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Resource {resource_id!r} not found",
+            )
+        if row.get("state") not in _HELD_STATES:
+            return ReleaseReservationsResponse(released_count=0, resource_ids=[])
+        await self._db.apply_resource_set_transition(
+            resource_id=resource_id,
+            event_type="reservation_released_by_admin",
+            idempotency_key=f"admin-release:{resource_id}:{row.get('updated_at', '')}",
+            set_state="available",
+        )
+        logger.info(
+            "[ADMIN] Released %s resource: %s",
+            row.get("state"), resource_id,
+        )
+        return ReleaseReservationsResponse(
+            released_count=1, resource_ids=[resource_id]
+        )
+
+    @router.post(
         "/portfolio/release-reservations",
         response_model=ReleaseReservationsResponse,
-        summary="Release all reserved compute resources back to available (admin)",
+        summary="Release every held compute resource back to available (admin)",
     )
     async def release_reservations(self) -> ReleaseReservationsResponse:
-        """Force every ``reserved`` resource back to ``available``.
+        """Force every resource in a held state back to ``available``.
+
+        "Held" means ``reserved`` (during provisioning) OR ``leased`` (during
+        an active lease). Both are forms of bookkeeping that the storefront
+        normally clears via ``resource_poller`` once the lease expires;
+        under mocked or short-circuited flows the poller has nothing to
+        do, so this endpoint is the explicit cleanup.
 
         Use cases:
           - e2e test teardown between back-to-back runs against the same stack
-            (mocked provisioning never expires leases, so reserved resources
+            (mocked provisioning never reaches lease end, so leased resources
             otherwise leak across runs).
-          - Operator recovery after a provisioner crash: when the storefront
-            knows a resource was reserved but the actual workload is gone,
-            this clears the reservation without touching value/inventory data.
+          - Operator recovery after a fleet-wide provisioner crash: when the
+            storefront thinks resources are held but the actual workloads
+            are gone, this clears the bookkeeping without touching
+            value/inventory data.
 
-        Does not touch resources in any other state. Idempotent — safe to call
-        repeatedly.
+        Sledgehammer — for surgical single-row release, use
+        ``POST /portfolio/resources/{resource_id}/release-reservation``
+        instead. Production operators should prefer the targeted variant.
+
+        Does not touch resources in any other state (e.g. ``available`` or
+        ``deleted``). Idempotent — safe to call repeatedly.
         """
         resources = await self._db.list_resources()
         released = []
         for r in resources:
-            if r.get("state") != "reserved":
+            if r.get("state") not in _HELD_STATES:
                 continue
             resource_id = str(r["resource_id"])
             await self._db.apply_resource_set_transition(
@@ -92,7 +160,7 @@ class AdminController:
             released.append(resource_id)
         if released:
             logger.info(
-                "[ADMIN] Released %d reservation(s): %s",
+                "[ADMIN] Released %d held resource(s): %s",
                 len(released), released,
             )
         return ReleaseReservationsResponse(

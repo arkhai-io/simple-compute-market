@@ -1203,13 +1203,37 @@ class SyncStorefrontClient(_StorefrontClientBase):
         """POST /admin/portfolio/release-reservations  (admin key required).
 
         Forces every ``reserved`` compute resource back to ``available``.
-        Intended for e2e teardown between back-to-back runs against the same
-        stack (mocked provisioning never expires leases) and for operator
-        recovery after a provisioner crash.
+        Sledgehammer — prefer ``admin_release_one_reservation(resource_id)``
+        for production operator workflows. This bulk variant is mainly for
+        e2e teardown between back-to-back runs against the same stack
+        (mocked provisioning never expires leases).
         """
         return ReleaseReservationsResponse.from_dict(
             self._post(
                 "/api/v1/admin/portfolio/release-reservations",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    def admin_release_one_reservation(
+        self, resource_id: str
+    ) -> "ReleaseReservationsResponse":
+        """POST /admin/portfolio/resources/{resource_id}/release-reservation
+        (admin key required).
+
+        Surgical: releases exactly the named reserved resource. Idempotent
+        on already-available rows (returns released_count=0 instead of
+        erroring). 404 if the row doesn't exist.
+
+        For an actually-stuck VM, pair this with provisioning's
+        ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` — that operation
+        runs real Ansible against the host, while this endpoint only clears
+        the storefront's own bookkeeping.
+        """
+        return ReleaseReservationsResponse.from_dict(
+            self._post(
+                f"/api/v1/admin/portfolio/resources/{resource_id}/release-reservation",
                 {},
                 extra_headers=self._admin_headers(),
             )
