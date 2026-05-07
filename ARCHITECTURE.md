@@ -24,19 +24,6 @@ The stack is designed so that in production, multiple independent seller nodes e
 | Overlay networking (optional) | ZeroTier |
 | Local dev chain | Anvil (Foundry) |
 
-> **Asymmetric topology.** Earlier iterations of this stack had buyer
-> *and* seller running symmetric agents based on Google ADK and the
-> A2A agent-to-agent protocol — both sides hosted HTTP servers and
-> exchanged push messages. That has been retired. Today only the
-> seller runs a server (the **storefront**, exposed by
-> `market-storefront serve`); the buyer is a pure HTTP client driven
-> by the `market` CLI. Negotiation is a sequence of synchronous
-> request/response calls from the buyer to the seller's storefront
-> over plain HTTP, with bodies authenticated via EIP-191 wallet
-> signatures. There is no agent runtime framework — `agent.py` on the
-> seller side is plain Python that wires Starlette routes to policy
-> evaluation.
-
 ---
 
 ## Service Map
@@ -48,14 +35,14 @@ The stack is designed so that in production, multiple independent seller nodes e
 │   Alkahest escrow contracts                                         │
 └──────────────────┬──────────────────────┬───────────────────────────┘
                    │ events / txns         │ events / txns
-         ┌─────────▼──────────┐   ┌───────▼────────────────┐
-         │  registry-service  │   │  storefront            │
-         │  :8080             │   │  :8001 (seller only)   │
-         │  FastAPI indexer   │◄──┤  FastAPI/Starlette     │
+         ┌─────────▼──────────┐   ┌───────▼─────────────────┐
+         │  registry-service  │   │  storefront             │
+         │  :8080             │   │  :8001 (seller only)    │
+         │  FastAPI indexer   │◄──┤  FastAPI                │
          │  SQLite/Postgres   │   │  market-storefront serve│
-         └─────────▲──────────┘   └───────┬────────────────┘
+         └─────────▲──────────┘   └────────────┬────────────┘
                    │  GET /listings            │ HTTP (provisioning API)
-                   │  signed reqs    ┌────────▼────────────────┐
+                   │  signed reqs    ┌─────────▼───────────────┐
                    │                 │ provisioning-service    │
          ┌─────────┴──────────┐      │   API  :8081  (FastAPI) │
          │  buyer (`market`)  ├─────▶│   Job loop (in-process) │
@@ -125,13 +112,14 @@ FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered
 - `POST /agents/{agentId}/listings` — publish/update an order
 - `GET /listings` — global order book query (filter by resource type, region, GPU model, SLA, status)
 - `PUT /listings/{listing_id}` — update order status (e.g., mark accepted/closed)
-- `GET /api/v1/system/sync/wait-for-agent?agent_id=<canonical_id>&timeout=<s>` — long-poll until the specified agent appears in the registry DB (server-side wait, max 120 s). Returns `{"indexed": bool, "agent_id": str, "elapsed_ms": int}`. Used by the e2e test suite at stage 03c to gate negotiation stages on indexing completion without a client-side polling loop. The `SyncRegistryClient.wait_for_agent_indexed(agent_id, timeout=60.0)` method in the registry-client wheel wraps this endpoint.
 
 **Agent identity format (ERC-8004 canonical):**
 ```
 eip155:{chainId}:{identityRegistryAddress}:{numericAgentId}
 ```
 Example: `eip155:1337:0x21df544947ba3e8b3c32561399e88b52dc8b2823:22`
+
+The agent id for a seller/storefront can be found in the status endpoint.
 
 **Source layout:**
 ```
@@ -145,6 +133,7 @@ registry-service/src/
 ```
 
 > **TODO:** Document the event sync polling interval and any known lag or missed-event issues.
+
 > **TODO:** Document the symmetric order concept visible in the test suite (`test_symmetric_orders.py`).
 
 ---
@@ -155,15 +144,8 @@ registry-service/src/
 `/negotiate`, `/settle/{escrow_uid}`, `/alerts/resource`, and
 `.well-known/erc-8004-registration.json` endpoints that buyers and the
 provisioning service call. Runs as `market-storefront serve` (uvicorn,
-FastAPI/Starlette). Internally it uses Alkahest (`alkahest_py` — a
-pre-built `.whl` in `storefront/packages/`) for on-chain escrow
+FastAPI/Starlette). Internally it uses Alkahest for on-chain escrow
 operations.
-
-There is no agent runtime framework — `agent.py` is plain Python that
-wires Starlette routes to the policy evaluation engine in
-`market_policy`. There is no `google.adk`, no A2A push protocol, and
-no symmetric agent-to-agent server on the buyer side. The earlier
-"core agent" served both roles via ADK + A2A; both have been retired.
 
 **Ports:** `8001` (default seller port; `seller.port` in config.toml).
 
@@ -203,28 +185,28 @@ storefront/src/market_storefront/
 │                           #   _preflight_provisioning, process_queued_events
 │                           #   TraderAgent class (kept for _RootAgentShim; see planned rework)
 ├── controllers/
-│   ├── listings_controller.py    # GET/POST /api/v1/listings/* + /listings/create|close|refund|…
+│   ├── listings_controller.py     # GET/POST /api/v1/listings/* + /listings/create|close|refund|…
 │   ├── negotiations_controller.py # GET/POST /api/v1/listings/*/negotiations/*
-│   ├── negotiate_controller.py   # POST /negotiate/new, /negotiate/{neg_id}
-│   ├── settle_controller.py      # POST /settle/{uid}, GET /settle/{uid}/status
-│   ├── system_controller.py      # GET /health, /api/v1/system/*, /admin/policy/*
-│   ├── admin_controller.py       # POST /admin/pause|resume, GET /admin/status
-│   ├── alerts_controller.py      # POST /alerts/resource
-│   └── identity_controller.py    # GET /.well-known/*
+│   ├── negotiate_controller.py    # POST /negotiate/new, /negotiate/{neg_id}
+│   ├── settle_controller.py       # POST /settle/{uid}, GET /settle/{uid}/status
+│   ├── system_controller.py       # GET /health, /api/v1/system/*, /admin/policy/*
+│   ├── admin_controller.py        # POST /admin/pause|resume
+│   ├── alerts_controller.py       # POST /alerts/resource
+│   └── identity_controller.py     # GET /.well-known/*
 ├── middleware/
 │   ├── admin_auth.py       # AdminAuthMiddleware (X-Admin-Key enforcement)
 │   ├── buyer_auth.py       # Depends() factories for EIP-191 buyer signature verification
 │   └── seller_auth.py      # Depends() factory for EIP-191 seller signature verification
 ├── models/
-│   ├── domain_models.py    # Domain types: ComputeResource, Listing, DomainEvent, etc.
-│   ├── listing_models.py   # HTTP shapes: ListingFilterParams, CreateListingRequest, …
+│   ├── domain_models.py      # Domain types: ComputeResource, Listing, DomainEvent, etc.
+│   ├── listing_models.py     # HTTP shapes: ListingFilterParams, CreateListingRequest, …
 │   ├── negotiation_models.py # HTTP shapes: NegotiateNewRequest, ForceAcceptRequest, …
-│   ├── settle_models.py    # HTTP shapes: SettleRequest, SettleStatusResponse
-│   ├── alert_models.py     # HTTP shapes: ResourceAlertResponse
-│   └── system_models.py    # HTTP shapes: PolicyEvaluateRequest, HealthResponse, …
+│   ├── settle_models.py      # HTTP shapes: SettleRequest, SettleStatusResponse
+│   ├── alert_models.py       # HTTP shapes: ResourceAlertResponse
+│   └── system_models.py      # HTTP shapes: PolicyEvaluateRequest, HealthResponse, …
 ├── services/
-│   ├── listing_service.py        # ListingService: create/close/refund/claim/reclaim/…
-│   ├── policy_pipeline_service.py # PolicyPipelineService: reactive event pipeline + policy infra
+│   ├── listing_service.py         # ListingService: create/close/refund/claim/reclaim/…
+│   ├── policy_service.py          # PolicyService: policy negotiation + infra
 │   ├── alkahest_service.py        # build_client(): AlkahestClient factory
 │   ├── negotiation_service.py     # NegotiationService: advance/force-accept/list/get
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
@@ -333,6 +315,45 @@ side imports the same engine at CLI invocation time but does not run a
 server.
 
 **Critical policy wiring detail:** `PolicyStore.__init__` creates an **empty** `self._registry = {}`. The `@policy_callable` decorators populate the module-level `CALLABLE_REGISTRY` dict in `market_policy.registry`. These two are only connected by an explicit call to `policy_store.register_callables(CALLABLE_REGISTRY)`. `PolicyManager.initialize()` does this wiring at startup. Any code that creates a fresh `PolicyStore` instance (controllers, tests, seed endpoints) **must** call `register_callables` before evaluating policies, or `evaluate_policy` will always return `None` despite callables being registered in `CALLABLE_REGISTRY`.
+
+**Orchestration over Event-Driven for Request-Path Operations:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline. This decision was made after examining the existing code and the e2e test requirements.
+
+**What "event-driven" meant in the original code:** The policy dispatch layer required domain events as its input format — `PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event` field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). This was preserved. What was removed was the awkward choreography that surrounded it: `process_event()` returning a human-readable string while storing structured results as side effects in `_last_action_outcomes`, and callers doing `pop_outcome()` to retrieve them.
+
+**What "orchestration" means here:** Each public service method is a named sequence of private steps:
+
+```python
+async def create_listing(self, request: CreateListingRequest, policy_svc) -> CreateListingResponse:
+    offer, demand = self._parse_offer_demand(request)          # step 1: validate inputs
+    action = await policy_svc.evaluate_create_listing_policy(  # step 2: consult policy
+        offer, demand, request.max_duration_seconds, request.paused
+    )
+    if action != "make_offer":
+        return CreateListingResponse(status="no_action")
+    listing_id = await policy_svc.execute_create_listing(      # step 3: execute
+        offer, demand, request.max_duration_seconds, request.paused
+    )
+    return CreateListingResponse(status="created", listing_id=listing_id)
+```
+
+Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
+
+**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process. `is_event_queue_enabled()` always returns `False` in normal operation (the redis path is a dead branch). The event-flavoured naming added indirection without adding capability.
+
+**The thin untested wrapper:** A future pure event-driven architecture would look like:
+
+```python
+def create_listing(request: CreateListingRequest) -> CreateListingResponse:
+    event_id = self._write_to_queue(request)           # write first event
+    result = await self._listen_for_result(event_id)   # await completion
+    return result
+```
+
+The synchronous orchestrator tests everything except this two-line wrapper, which is correct by inspection.
+
+**The in-memory event queue** (`enable_event_queue`, `enable_redis_ingest`, `is_event_queue_enabled()`) is dead code. See `## Storefront — Planned Rework` item 2 for the removal plan.
+
+`PolicyService` class exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves. The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
 
 **`domain/` package — not installed, on sys.path:** `domain/compute/agent/app/policy/store.py` contains the actual `@policy_callable` decorated functions the storefront uses. The `domain/` tree is not a pip-installable package — it is copied into the Docker image at `/app/domain/` and requires `/app` to be on `sys.path`. The Dockerfile sets `ENV PYTHONPATH="/app"` to ensure this. The `POST /admin/policy/seed` endpoint also does a defensive `sys.path` check as a fallback. `domain.compute.agent.app.policy.arkhai_common` always fails to import (requires `gymnasium`) — this is expected and non-fatal; the module we actually need is `store.py`, which has no ML dependencies.
 
@@ -822,6 +843,57 @@ Previously a separate worker admin API on port 8082; now folded into the main AP
 - `GET /inventory` — parses the Ansible INI inventory file and returns all hosts with their `ansible_host` values and inline vars; supports `?search=<substring>` for hostname filtering
 - `GET /inventory/{host}/connectivity` — runs `ansible -m ping` against a single named host, exercising the complete auth path (inventory parse → SSH key → Ansible execute); returns `{"reachable": true/false, "detail": "..."}` — returns HTTP 200 either way, only 404 if host not in inventory
 
+#### Test mock controller (`/test/*`)
+
+Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or staging.
+
+Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
+
+In provisioning-service integration tests, `/test/*` callers use a fresh
+`ProgrammableMockAnsibleService` wired through `container.resolved_ansible_service`
+for the lifetime of the test client. The regular provisioning API integration
+fixtures may still use a `MagicMock` at the Ansible subprocess boundary when a
+test needs call assertions such as `start_playbook.assert_called_once()`.
+`POST /test/evaluate-job` is a typed JSON-body route backed by
+`EvaluateJobRequest`; request/response model imports must stay concrete at
+module scope so FastAPI binds the payload as a body rather than a query
+parameter.
+
+**Endpoints:**
+
+```
+POST   /test/mock-rules                    Add a when→then mock rule
+GET    /test/mock-rules                    List active rules
+DELETE /test/mock-rules/{rule_id}          Remove a rule
+POST   /test/mock-rules/{rule_id}/resume   Release a paused job gate
+GET    /test/jobs/summary                  Status counts (non-blocking)
+GET    /test/jobs/drain                    Long-poll until all jobs terminal
+GET    /test/jobs/{job_id}/wait            Long-poll until one job is terminal
+```
+
+**Mock rule schema:**
+```json
+{
+  "rule_id": "my-ww1-create",
+  "match": {"vm_action": "create", "vm_host": "ww1"},
+  "pause_before_result": true,
+  "result_stdout": "...",
+  "fail_with": null
+}
+```
+
+Rules are evaluated in insertion order. The first rule whose `match` dict is a subset of the incoming `AnsibleJobParams` fields wins. `match: {}` is a catch-all. If no rule matches, `_FAKE_STDOUT` success path runs.
+
+`pause_before_result: true` makes `wait_for_playbook` block on an `asyncio.Event` until `POST /test/mock-rules/{rule_id}/resume` is called. This allows tests to assert on mid-flight job state without any `asyncio.sleep` polling.
+
+**`ProgrammableMockAnsibleService`** is activated instead of `MockAnsibleService` when `mock` is in `ACTIVE_PROFILES`. It extends `MockAnsibleService` with the rule dict and per-rule `asyncio.Event` gates. Both are in `services/mock_ansible_service.py`.
+
+**Rule matching seam:** `AnsibleJobService._process_job` injects the `AnsibleJobParams` onto the `AnsibleRun` handle as `run._params` immediately after `start_playbook`. `ProgrammableMockAnsibleService.wait_for_playbook` reads `getattr(run, "_params", None)` to match rules. The real `AnsibleRun` dataclass ignores unknown attributes; this is a zero-cost test seam.
+
+**Job-done event seam:** After every job reaches a terminal state, `_process_job` calls `getattr(self._ansible, "notify_job_done", None)` — a no-op on the real `AnsibleService`. `ProgrammableMockAnsibleService.notify_job_done` fires a per-job `asyncio.Event` stored in `_job_done_events`, which `GET /test/jobs/{job_id}/wait` awaits. This replaces any `asyncio.sleep` polling in test code.
+
+**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into `config-provisioning-secrets.yml` so the e2e test pod can authenticate to the test controller (same key used for storefront admin endpoints).
+
 ---
 
 #### Operational Visibility — what you can see and where
@@ -1106,6 +1178,25 @@ This mode requires the KVM host to have a publicly reachable IP, which is not al
 - The `frp_server_addr`, `frp_domain`, and `frp_dashboard_password` are passed into every `create` job (either per-request or from the provisioning service's config defaults `FRP_SERVER_ADDR`, `FRP_DOMAIN`, `FRP_DASHBOARD_PASSWORD`). They are seller-global values in the current design.
 - The FRP dashboard at `https://frp-admin.<domain>` shows all active proxy connections — this is currently the only way to get a live view of which VMs have active tunnels, since the provisioning service has no VM state table. This is another facet of the visibility gap described in TODO item 4.
 
+**Tech debt:**
+The following items represent known architectural deficiencies in `provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.
+
+> **TODO(client-compat): The provisioning-service package currently exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`). Until that refactor is done, `service/clients/provisioning.py` imports from `client.provisioning_client` rather than `provisioning_service.client.provisioning_client`.
+
+> **TODO(smoke-tests):** The provisioning smoke tests in `integration-tests/tests/smoke/test_provisioning_smoke.py` use raw `httpx` calls rather than `SyncProvisioningClient`. They should be updated to use the canonical client following the pattern established the service integration tests.
+
+#### `escrow_uid` on jobs — deal linkage and recovery
+
+The `ansible_jobs` table now carries an `escrow_uid` column (nullable, indexed). The storefront passes this when submitting a provisioning job for a settled deal. It enables the storefront to recover the provisioning job_id after a crash by querying `GET /api/v1/jobs?escrow_uid=<uid>` rather than losing the mapping.
+
+`escrow_uid` is surfaced in:
+- `AnsibleJobParams.escrow_uid` (internal DTO)
+- `JobStatusResponse.escrow_uid` (HTTP response)
+- `GET /api/v1/jobs?escrow_uid=<uid>` filter on the list endpoint
+- `ProvisioningClient.list_jobs(escrow_uid=...)` on both async and sync clients
+
+The `provisioning_job_id` is surfaced in `GET /settle/{escrow_uid}/status` on the storefront so the buyer can traverse: storefront settle status → `provisioning_job_id` → provisioning `GET /jobs/{id}`.
+
 ---
 
 ### CLIs
@@ -1271,8 +1362,6 @@ make build
 
 - **`compose/external.yml`:** Purpose unclear — needs investigation.
 
-- **`orders` → `listings` rename (partially propagated):** The SQLite table and related symbols were recently renamed from `orders` to `listings`. The rename is complete in: `sqlite_client.py` (all methods), `listings_controller.py`, `storefront-client` (models and methods), `negotiations_controller.py`. The old `orders_controller.py` was deleted. Some parts of `agent.py` and `action_executor.py` still use internal variable names like `order_id`, `created_listing_id` etc. inconsistently. The **external API URLs** (`/api/v1/listings/...`) are fully updated. The `pydantic_models.py` event class was renamed from `OrderCreateEvent` → `ListingCreatedEvent`; `EventType.ORDER_CREATE` string value is unchanged (`"order_create"`). `AcceptOfferEvent`, `MakeOfferEvent`, and `NegotiationEvent` were removed entirely; callables in `domain/compute/agent/app/policy/store.py` that depended on them are temporarily no-ops. **Note:** `load_listing` in `sqlite_client.py` previously omitted the `paused` column from its SELECT — this is fixed and covered by `test_load_listing_returns_paused_flag` in `test_order_pause_state.py`. `upsert_listing(paused=...)` now owns the initial paused value atomically at listing creation/update time; `set_listing_paused()` remains the transition helper for pause/resume endpoints. Convention: any time a new column is added to the `listings` table, both `upsert_listing` (write path) and `load_listing` (read path) must be updated together, and a round-trip unit test added.
-
 - **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The policy pipeline multiplies `demand.amount` by `10**decimals` before storing it as `our_price`. Any token with 18 decimals and a human-readable amount above ~9.2 billion will overflow. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so `amount` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time, or enforce a maximum sane price check in `_extract_initial_price_from_order()`.
 
 - **`@policy_callable` domain callables are dead code:** `domain/compute/agent/app/policy/store.py` callables for negotiation (`negotiation_guard_always_negotiate_on_price_diff`, `negotiation_action_price_interval_concession`, `negotiation_respond_to_make_offer`, etc.) all have `if True: return None` at the top because the `NegotiationEvent`, `AcceptOfferEvent`, and `MakeOfferEvent` classes they depended on were removed. The storefront's negotiation rounds are driven entirely by `NegotiationStrategy` in `market_policy.negotiation_strategy` (not the callable chain). These callables will need to be either rewired to the new event model or deleted as part of the negotiation refactor.
@@ -1283,7 +1372,7 @@ make build
 
 - **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `demand.amount` (in base units after decimal scaling) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= demand.amount` in the e2e test constants.
 
-- **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the negotiation refactor planned for the next session.
+- **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the planned negotiation refactor.
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag is in-process memory, not reset between `pytest` sessions. If a test run ends with the storefront paused (e.g., stage 06 ran but stage 07 did not), the next run immediately fails at stage 08. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running tests against a live environment that may have been left paused by a previous run, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
@@ -1295,18 +1384,22 @@ make build
 
 - **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. `_registry_reachable` was a live example of this: set by 00b, consumed by nothing, so a registry outage was invisible to all stages except 03b (which checked the registry directly). **This gap class cannot be caught by unit or integration tests** — it is a property of the test's own dependency graph. When adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it.
 
+---
 
-### 2. Remove event queue infrastructure
+# Planned Rework
+
+## Storefront
+
+### 1. Remove event queue infrastructure in storefront
 
 **Status:** Planned.
 
 **Problem:** The event queue path (`is_event_queue_enabled()`, `queue_event()`,
 `configure_default_ingestion()`, `enable_event_queue` and `enable_redis_ingest`
 config fields) is dead code in the request path. `ListingService` was refactored
-to a synchronous orchestrator model in this session, eliminating all
-`is_event_queue_enabled()` branches from the service layer. The redis ingest path
-(`start_redis_subscriber`, `stop_redis_subscriber`) in `agent.py` is the only
-remaining consumer and has no tests.
+to a synchronous orchestrator model, eliminating all `is_event_queue_enabled()`
+branches from the service layer. The redis ingest path (`start_redis_subscriber`,
+ `stop_redis_subscriber`) in `agent.py` is the only remaining consumer and has no tests.
 
 **Planned fix:**
 1. Remove `enable_event_queue` and `enable_redis_ingest` from `Config` and `config.toml`.
@@ -1318,7 +1411,7 @@ remaining consumer and has no tests.
 
 ---
 
-### 1. Remove TraderAgent class and root_agent shim from agent.py
+### 2. Remove TraderAgent class and root_agent shim from agent.py in storefront
 
 **Status:** Planned.
 
@@ -1339,7 +1432,6 @@ layer when the FastAPI conversion landed, but all callers have since been remove
    `_start_heartbeat`, `_preflight_provisioning`, `process_queued_events`).
 
 ---
-
 
 ### 3. Storefront config unification (TOML singleton → dynaconf profiles)
 
@@ -1377,7 +1469,7 @@ via the standard Helm Secret + profile pattern.
 
 ---
 
-## Registry Service — Planned Rework
+## Registry Service
 
 ### 1. Registry as shared marketplace infrastructure (not per-node)
 
@@ -1398,77 +1490,6 @@ via the standard Helm Secret + profile pattern.
 **Planned fix:** Replace the sliding window with a full enumeration using view functions: call `totalSupply()` on the IdentityRegistry to get the count of registered agents, then call `ownerOf(id)` and `tokenURI(id)` for each token ID from 0 to `totalSupply()-1`. This is a set of pure read calls with no event history dependency, works correctly on any RPC provider, and is immune to block range limits. The periodic sync can still use event filtering for incremental updates after the initial full enumeration.
 
 ---
-
-## Provisioning Service — Planned Rework
-
-The following items represent known architectural deficiencies in `provisioning-service` that are planned for remediation. They are documented here to provide context when working on this service.
-
-> **TODO(client-compat): The provisioning-service package currently exposes its modules at the flat `client.*` level (e.g. `from client.provisioning_client import ...`) because setuptools maps `src/` directly as the package root. To expose a clean `provisioning_service.*` namespace, all internal imports within the package would need to be converted from bare names (e.g. `from models.jobs_model import ...`) to relative imports (e.g. `from .models.jobs_model import ...`). Until that refactor is done, `service/clients/provisioning.py` imports from `client.provisioning_client` rather than `provisioning_service.client.provisioning_client`.
-
-> **TODO(smoke-tests):** The provisioning smoke tests in `integration-tests/tests/smoke/test_provisioning_smoke.py` use raw `httpx` calls rather than `SyncProvisioningClient`. They should be updated to use the canonical client following the pattern established in `registry-service/tests/integration/` and the storefront integration tests.
-
-#### `escrow_uid` on jobs — deal linkage and recovery
-
-The `ansible_jobs` table now carries an `escrow_uid` column (nullable, indexed). The storefront passes this when submitting a provisioning job for a settled deal. It enables the storefront to recover the provisioning job_id after a crash by querying `GET /api/v1/jobs?escrow_uid=<uid>` rather than losing the mapping.
-
-`escrow_uid` is surfaced in:
-- `AnsibleJobParams.escrow_uid` (internal DTO)
-- `JobStatusResponse.escrow_uid` (HTTP response)
-- `GET /api/v1/jobs?escrow_uid=<uid>` filter on the list endpoint
-- `ProvisioningClient.list_jobs(escrow_uid=...)` on both async and sync clients
-
-The `provisioning_job_id` is surfaced in `GET /settle/{escrow_uid}/status` on the storefront so the buyer can traverse: storefront settle status → `provisioning_job_id` → provisioning `GET /jobs/{id}`.
-
-#### Test controller (`/test/*`)
-
-Only mounted when `mock` is in `ACTIVE_PROFILES`. Never present in production or staging.
-
-Provides an HTTP API for configuring `ProgrammableMockAnsibleService` rules and waiting for job lifecycle events without polling loops.
-
-In provisioning-service integration tests, `/test/*` callers use a fresh
-`ProgrammableMockAnsibleService` wired through `container.resolved_ansible_service`
-for the lifetime of the test client. The regular provisioning API integration
-fixtures may still use a `MagicMock` at the Ansible subprocess boundary when a
-test needs call assertions such as `start_playbook.assert_called_once()`.
-`POST /test/evaluate-job` is a typed JSON-body route backed by
-`EvaluateJobRequest`; request/response model imports must stay concrete at
-module scope so FastAPI binds the payload as a body rather than a query
-parameter.
-
-**Endpoints:**
-
-```
-POST   /test/mock-rules                    Add a when→then mock rule
-GET    /test/mock-rules                    List active rules
-DELETE /test/mock-rules/{rule_id}          Remove a rule
-POST   /test/mock-rules/{rule_id}/resume   Release a paused job gate
-GET    /test/jobs/summary                  Status counts (non-blocking)
-GET    /test/jobs/drain                    Long-poll until all jobs terminal
-GET    /test/jobs/{job_id}/wait            Long-poll until one job is terminal
-```
-
-**Mock rule schema:**
-```json
-{
-  "rule_id": "my-ww1-create",
-  "match": {"vm_action": "create", "vm_host": "ww1"},
-  "pause_before_result": true,
-  "result_stdout": "...",
-  "fail_with": null
-}
-```
-
-Rules are evaluated in insertion order. The first rule whose `match` dict is a subset of the incoming `AnsibleJobParams` fields wins. `match: {}` is a catch-all. If no rule matches, `_FAKE_STDOUT` success path runs.
-
-`pause_before_result: true` makes `wait_for_playbook` block on an `asyncio.Event` until `POST /test/mock-rules/{rule_id}/resume` is called. This allows tests to assert on mid-flight job state without any `asyncio.sleep` polling.
-
-**`ProgrammableMockAnsibleService`** is activated instead of `MockAnsibleService` when `mock` is in `ACTIVE_PROFILES`. It extends `MockAnsibleService` with the rule dict and per-rule `asyncio.Event` gates. Both are in `services/mock_ansible_service.py`.
-
-**Rule matching seam:** `AnsibleJobService._process_job` injects the `AnsibleJobParams` onto the `AnsibleRun` handle as `run._params` immediately after `start_playbook`. `ProgrammableMockAnsibleService.wait_for_playbook` reads `getattr(run, "_params", None)` to match rules. The real `AnsibleRun` dataclass ignores unknown attributes; this is a zero-cost test seam.
-
-**Job-done event seam:** After every job reaches a terminal state, `_process_job` calls `getattr(self._ansible, "notify_job_done", None)` — a no-op on the real `AnsibleService`. `ProgrammableMockAnsibleService.notify_job_done` fires a per-job `asyncio.Event` stored in `_job_done_events`, which `GET /test/jobs/{job_id}/wait` awaits. This replaces any `asyncio.sleep` polling in test code.
-
-**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into `config-provisioning-secrets.yml` so the e2e test pod can authenticate to the test controller (same key used for storefront admin endpoints).
 
 #### 1. Golden image configuration (`management-vars.yaml`)
 
@@ -1506,63 +1527,6 @@ Option A is the preferred direction. The `vm_leases` table should also be expose
 ## Service Design Decisions
 
 This section records design decisions reached through implementation experience. It exists so that the reasoning is available to future sessions without having to re-derive it from code.
-
----
-
-### Orchestration over Event-Driven for Request-Path Operations
-
-**Decision:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline. This decision was made after examining the existing code and the e2e test requirements.
-
-**What "event-driven" meant in the original code:** The policy dispatch layer required domain events as its input format — `PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event` field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). This was preserved. What was removed was the awkward choreography that surrounded it: `process_event()` returning a human-readable string while storing structured results as side effects in `_last_action_outcomes`, and callers doing `pop_outcome()` to retrieve them.
-
-**What "orchestration" means here:** Each public service method is a named sequence of private steps:
-
-```python
-async def create_listing(self, request: CreateListingRequest, policy_svc) -> CreateListingResponse:
-    offer, demand = self._parse_offer_demand(request)          # step 1: validate inputs
-    action = await policy_svc.evaluate_create_listing_policy(  # step 2: consult policy
-        offer, demand, request.max_duration_seconds, request.paused
-    )
-    if action != "make_offer":
-        return CreateListingResponse(status="no_action")
-    listing_id = await policy_svc.execute_create_listing(      # step 3: execute
-        offer, demand, request.max_duration_seconds, request.paused
-    )
-    return CreateListingResponse(status="created", listing_id=listing_id)
-```
-
-Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
-
-**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process. `is_event_queue_enabled()` always returns `False` in normal operation (the redis path is a dead branch). The event-flavoured naming added indirection without adding capability.
-
-**The thin untested wrapper:** A future pure event-driven architecture would look like:
-
-```python
-def create_listing(request: CreateListingRequest) -> CreateListingResponse:
-    event_id = self._write_to_queue(request)           # write first event
-    result = await self._listen_for_result(event_id)   # await completion
-    return result
-```
-
-The synchronous orchestrator tests everything except this two-line wrapper, which is correct by inspection.
-
-**The in-memory event queue** (`enable_event_queue`, `enable_redis_ingest`, `is_event_queue_enabled()`) is dead code. See `## Storefront — Planned Rework` item 2 for the removal plan.
-
----
-
-### PolicyService API Design
-
-**Decision:** The `PolicyService` class (formerly `PolicyPipelineService`) exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves.
-
-**Public API:**
-- `evaluate_create_listing_policy(offer, demand, max_duration, paused) → str` — policy dispatch only, no side effects
-- `execute_create_listing(offer, demand, max_duration, paused) → str | None` — SQLite write + registry publish
-- `evaluate_close_listing_policy(listing_id) → str` — policy dispatch only
-- `execute_close_listing(listing_id) → dict` — SQLite + registry update
-- `evaluate_listing_create_policy_from_raw(offer_raw, demand_raw, max_duration) → PolicyEvaluateResponse` — used by `POST /api/v1/system/policy/evaluate`
-- `handle_resource_alert(alert_request) → dict` — the one remaining consumer of internal event dispatch
-
-The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
 
 ---
 
@@ -1745,19 +1709,6 @@ The primary e2e test suite. Sequential tests covering the complete buyer-seller 
 
 **Note on Phase 4:** Admin pause/resume removed from e2e — see smoke test TODO in `test_storefront_smoke.py`.
 
-**Testing gaps — dry-run endpoints not yet implemented:**
-
-| Gap | Stage slot | Planned endpoint |
-|---|---|---|
-| No evaluate-resume dry-run | Phase 3 `03a` uses registry reachability check instead | `POST /api/v1/admin/listings/{id}/evaluate-resume` |
-
-**`DealState`** — module-scoped dataclass. Key fields by phase: `_storefront_healthy`, `_registry_reachable`, `_provisioning_healthy`, `_negotiation_strategy_viable` (Phase 0); `_policy_dry_run_passed`, `_policies_seeded` (Phase 1); `_evaluate_create_passed`, `seller_listing_id` (Phase 2); `_registry_validate_passed`, `resume_confirmed`, `_seller_agent_indexed` (Phase 3); `_evaluate_negotiate_passed`, `negotiation_id`, `negotiation_terminal_state`, `agreed_price` (Phase 5-6); `provisioning_gate_armed` (Phase 7); `real_escrow_uid` (Phase 7b); `_evaluate_settle_passed`, `_evaluate_settle_vm_host` (Phase 8a); `_provision_job_evaluated` (Phase 9a); `settlement_submitted`, `provisioning_job_id` (Phase 9b); `provisioning_result_injected`, `settlement_status`, `tenant_credentials`, `seller_listing_final_status` (Phase 9c-d).
-
-**Admin dry-run settle endpoints (new this session):**
-
-- `POST /api/v1/admin/settle/{uid}/verify` — reads escrow from chain, confirms token/amount/arbiter match caller-supplied terms. No DB writes. Tests `getRecordFromChain` in isolation.
-- `POST /api/v1/admin/settle/{uid}/evaluate` — resolves a host from inventory (read-only, `reserve=False`) and builds the provisioning job spec. No chain reads, no DB writes. Tests `doWork` in isolation.
-
 **`_build_provisioning_job_spec` seam:**
 
 ```
@@ -1890,8 +1841,6 @@ The `_build_metadata_entries()` helper in `registration.py` is the single author
 |---|---|---|
 | TODO | No EVM-level test for registration *logic* (detecting existing agents, idempotent updates, event parsing) | Option A: add `eth-tester[py-evm]` to service dev deps; add fixture that deploys IdentityRegistry bytecode into `EthereumTesterProvider`; write tests for `register_onchain_from_config` against local EVM. Requires bytecode available in repo (currently only ABI is vendored). Evaluate after erc-8004-contracts compilation artifacts are stable. |
 
-
-
 **integration-tests**:
 ```
 integration-tests/
@@ -1941,25 +1890,6 @@ make build         →  docker build (COPY .dist/ /dist/, uv sync --find-links /
 ```
 
 `make dist` runs automatically as a prerequisite of `make build-runtime-images`.
-
-**Directory structure:**
-
-```
-simple-market-service/   ← monorepo root
-  .dist/                 ← gitignored; populated by make dist
-  buyer/
-  storefront/
-  policy/
-  infra/
-  service/
-  registry-client/
-  storefront-client/
-  registry-service/
-  provisioning-service/
-  ...
-```
-
-TODO: Add notes on contents of these folders.
 
 **Guard:** `make dist-provisioning` asserts the output wheel filename ends in `-none-any.whl`. If a C extension or Rust crate is ever added to a package, the build fails loudly with an error directing the developer to move compilation inside the Docker build context.
 
@@ -2110,11 +2040,3 @@ cd registry-service && make reinit && make test-integration
 | EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
 | Order | A published offer in the registry; has `offer_resource`, `demand_resource`, status |
-
-### E2E Phase 7 — AlkahestClient RPC scheme
-
-**Status:** Phase 7 creates a real buyer-side ERC20 escrow attestation with `alkahest_py.AlkahestClient` before arming the provisioning gate.
-
-**Problem:** The current `alkahest-py` Rust SDK constructs providers with Alloy `WsConnect`, so it requires `ws://` or `wss://` RPC URLs. Passing `http://` or `https://` reaches the Rust extension and fails with the opaque message `URL scheme not supported` from `sdks/rs/src/utils.rs`.
-
-**Planned fix:** Keep `rpc.url` as the HTTP endpoint for web3.py smoke tests and chain reads, but set `buyer.chain_rpc_url` to a WebSocket endpoint for escrow creation. The Phase 7 helper validates this boundary and coerces standard HTTP(S) URLs to WS(S) with a warning so staging profiles that only provide `rpc.url` fail less opaquely.

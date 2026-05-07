@@ -1,9 +1,5 @@
 """Admin API key authentication.
 
-Replaced ``AdminAuthMiddleware`` (Starlette path-matching middleware) with a
-FastAPI ``Security()`` dependency. This makes admin auth explicit per-router,
-visible to OpenAPI/Swagger, and eliminates the fragile path-pattern list.
-
 Usage on a router::
 
     from market_storefront.middleware.admin_auth import require_admin_key
@@ -19,8 +15,6 @@ Or per-endpoint::
     @router.post("/{listing_id}/pause", dependencies=[Depends(require_admin_key)])
     async def pause(...): ...
 
-TOMBSTONE: AdminAuthMiddleware has been removed.
-The server.py ``app.add_middleware(AdminAuthMiddleware, ...)`` call is deleted.
 """
 from __future__ import annotations
 
@@ -34,7 +28,6 @@ _admin_key_header = APIKeyHeader(
     auto_error=False,
     description="Admin API key. Required for all /admin/* endpoints and admin actions.",
 )
-
 
 def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
     """FastAPI dependency that enforces the X-Admin-Key header.
