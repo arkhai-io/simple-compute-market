@@ -1,4 +1,4 @@
-"""Admin controller — global pause/resume, status, and resource maintenance.
+"""Admin controller — global pause/resume, and resource maintenance.
 
 require_admin_key is applied via __init__ Depends (not router-level) to avoid
 a fastapi_utils @cbv + router-level dependencies interaction issue that causes
@@ -15,10 +15,9 @@ import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.system_models import (
     AdminPauseResponse,
-    AdminStatusResponse,
     ReleaseReservationsResponse,
 )
-from market_storefront.server import _set_globally_paused, is_globally_paused
+from market_storefront.server import _set_globally_paused
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +51,6 @@ class AdminController:
     async def resume(self) -> AdminPauseResponse:
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
-
-    @router.get("/status", response_model=AdminStatusResponse,
-                summary="Live operational snapshot (admin)")
-    async def status(self) -> AdminStatusResponse:
-        counts = await self._db.get_admin_status_counts()
-        return AdminStatusResponse(
-            paused=is_globally_paused(),
-            active_negotiations=counts.get("active_negotiations", 0),
-            open_listings=counts.get("open_orders", 0),
-            paused_listings=counts.get("paused_orders", 0),
-        )
 
     @router.post(
         "/portfolio/resources/{resource_id}/release-reservation",

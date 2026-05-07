@@ -67,13 +67,6 @@ class PolicyStatusResponse(BaseModel):
     seeded_policies: list[SeededPolicyInfo]
 
 
-class AdminStatusResponse(BaseModel):
-    paused: bool
-    active_negotiations: int = 0
-    open_listings: int = 0
-    paused_listings: int = 0
-
-
 class AdminPauseResponse(BaseModel):
     paused: bool
     message: str = ""

@@ -12,7 +12,6 @@ directly (same as production).
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import AsyncIterator
 
 import httpx
@@ -190,62 +189,6 @@ class TestAdminResume:
         await c.admin_resume()
         status = await c.get_system_status()
         assert status.paused is False
-
-
-# ---------------------------------------------------------------------------
-# GET /admin/status
-# ---------------------------------------------------------------------------
-
-class TestAdminStatus:
-    async def test_requires_admin_key(self, client_no_key):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.admin_status()
-        assert "403" in str(exc_info.value)
-
-    async def test_status_counts_when_empty(self, client):
-        c, _ = client
-        result = await c.admin_status()
-        assert result.paused is False
-        assert result.active_negotiations == 0
-        assert result.open_listings == 0
-        assert result.paused_listings == 0
-
-    async def test_status_counts_open_orders(self, client):
-        c, db = client
-        now = datetime.now().isoformat()
-        await db.upsert_listing(
-            listing_id="count-1",
-            status="open",
-            created_at=now,
-            updated_at=now,
-            offer_resource={},
-            demand_resource={},
-            fulfillment_resource=None,
-            max_duration_seconds=3600,
-            seller="http://seller:8001",
-        )
-        result = await c.admin_status()
-        assert result.open_listings == 1
-
-    async def test_status_counts_paused_orders(self, client):
-        c, db = client
-        now = datetime.now().isoformat()
-        await db.upsert_listing(
-            listing_id="pause-count",
-            status="open",
-            created_at=now,
-            updated_at=now,
-            offer_resource={},
-            demand_resource={},
-            fulfillment_resource=None,
-            max_duration_seconds=3600,
-            seller="http://seller:8001",
-        )
-        await db.set_listing_paused(listing_id="pause-count", paused=True)
-        result = await c.admin_status()
-        assert result.open_listings == 0
-        assert result.paused_listings == 1
-
 
 # ---------------------------------------------------------------------------
 # Policy seed, status, and evaluate

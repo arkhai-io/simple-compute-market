@@ -297,6 +297,8 @@ storefront/src/market_storefront/
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
+**`checks` degraded-status evaluation:** Each check value is evaluated by `_check_is_healthy(key, value)` in `system_service.py` rather than against a fixed set of `"ok"` literals. This is because `negotiation_strategy` returns a human-readable strategy name (e.g. `"bisection"`) on success rather than the literal `"ok"`. The `_check_is_healthy` function treats the `negotiation_strategy` key specially: healthy unless the value contains `"exit_on_probe"` or starts with `"unknown:"` / `"error:"`. All other check keys use the literal set `{"ok", "unconfigured", "agent_not_found", "indexing"}`. When adding a new check to `get_status()` whose success value is not `"ok"`, either: (a) return `"ok"` on success and put the diagnostic name in a separate top-level fact field, or (b) add a key-specific rule to `_check_is_healthy`.
+
 The legacy `core/agent/app/` tree is gone. Files that lived there
 either moved into `storefront/src/market_storefront/` (server,
 resource poller, watchdog, action executor) or into the standalone
@@ -1382,7 +1384,7 @@ make build
 
 - **`settings.SELLER.AGENT_ID` discrepancy in config files:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) have `seller.agent_id: "eip155:31337:...:2"`. On a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, making `:2` stale. Stage 03c no longer uses this value — it calls `storefront.wait_for_registry_agent_ready()` which uses the storefront's live runtime agent ID. The `SELLER.AGENT_ID` value is still used by `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
-- **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. `_registry_reachable` was a live example of this: set by 00b, consumed by nothing, so a registry outage was invisible to all stages except 03b (which checked the registry directly). **This gap class cannot be caught by unit or integration tests** — it is a property of the test's own dependency graph. When adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it.
+- **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. A field name typo in a `require_state` call produces the same symptom: `getattr(deal_state, "nonexistent_field", None)` silently returns `None` and the test skips regardless of pipeline state. **Rule:** when adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it, and that the field name in `require_state` exactly matches the attribute name on `DealState`. This gap class cannot be caught by unit or integration tests — it is a property of the test's own dependency graph.
 
 ---
 
@@ -2002,14 +2004,14 @@ client = SyncRegistryClient(base_url=registry_api_url)
 health = client.get_health()
 ```
 
-**Iteration workflow for wheel consumers:** When iterating on a client package during development, use `make reinit` (not `make init`) to force reinstallation without bumping the version:
+**Iteration workflow for wheel consumers:** When iterating on a client package during development, use `make reinit` (not `make init`) to force reinstallation and re-resolution to the latest version in `.dist/`:
 
 ```
 make dist-registry          # rebuild wheel
 cd registry-service && make reinit && make test-integration
 ```
 
-`reinit` runs `uv sync --reinstall-package <pkg>` which pulls fresh from `.dist/` regardless of cache.
+`reinit` runs `uv sync --upgrade-package <pkg> --reinstall-package <pkg>`. The `--upgrade-package` flag is essential: without it, `uv` re-installs whatever version is **pinned in the local `uv.lock`** rather than resolving the latest available wheel from `.dist/`. If `uv.lock` was generated when an older wheel was the only option, subsequent `make dist` runs that produce a higher version are silently ignored by `--reinstall-package` alone. `--upgrade-package` forces uv to re-resolve the constraint against the current contents of `.dist/` and update `uv.lock` to the new version.
 
 ### Client package inventory
 

@@ -26,6 +26,10 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
+	--upgrade-package arkhai-registry-client \
+	--upgrade-package arkhai-storefront-client \
+	--upgrade-package provisioning-service \
+	--upgrade-package market-storefront \
 	--reinstall-package arkhai-registry-client \
 	--reinstall-package arkhai-storefront-client \
 	--reinstall-package provisioning-service \

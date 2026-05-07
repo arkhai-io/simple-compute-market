@@ -955,7 +955,7 @@ class TestStage09b_SettlementReadyAndCredentials:
           2. GET /settle/{uid}/status → status=ready + tenant_credentials
           3. GET /api/v1/listings/{id} → status=accepted or closed
         """
-        require_state(deal_state, "escrow_uid", "provisioning_result_injected",
+        require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
                       "seller_listing_id")
 
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait

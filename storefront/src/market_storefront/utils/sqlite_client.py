@@ -3001,43 +3001,6 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_query)
 
-    # ------------------------------------------------------------------
-    # Admin status counts
-    # ------------------------------------------------------------------
-
-    async def get_admin_status_counts(self) -> dict[str, int]:
-        """Return live counts for the admin /status endpoint."""
-        def _counts() -> dict[str, int]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM negotiation_threads WHERE terminal_state IS NULL AND status = 'active'"
-                )
-                active_negotiations = int(cur.fetchone()[0] or 0)
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM listings WHERE status = 'open' AND COALESCE(paused, 0) = 0"
-                )
-                open_orders = int(cur.fetchone()[0] or 0)
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM listings WHERE COALESCE(paused, 0) = 1"
-                )
-                paused_orders = int(cur.fetchone()[0] or 0)
-
-                return {
-                    "active_negotiations": active_negotiations,
-                    "open_orders": open_orders,
-                    "paused_orders": paused_orders,
-                }
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_counts)
-
-
 _sqlite_client: SQLiteClient | None = None
 
 

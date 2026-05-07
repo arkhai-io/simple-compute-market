@@ -259,8 +259,24 @@ class SystemService:
         # alkahest configured?
         checks["alkahest"] = "ok" if _container.resolved_alkahest_configured else "unconfigured"
 
-        _non_degrading = {"ok", "unconfigured", "agent_not_found", "indexing"}
-        all_ok = all(v in _non_degrading for v in checks.values())
+        def _check_is_healthy(key: str, value: str) -> bool:
+            """Return True if this check value does not indicate a service degradation.
+
+            The ``negotiation_strategy`` check returns a human-readable strategy
+            name (e.g. ``"bisection"``) on success rather than the literal ``"ok"``,
+            so it gets its own rule: healthy unless the value contains the
+            ``exit_on_probe`` marker or starts with a known error prefix.
+            """
+            _ok_literals = {"ok", "unconfigured", "agent_not_found", "indexing"}
+            if value in _ok_literals:
+                return True
+            if key == "negotiation_strategy":
+                return "exit_on_probe" not in value and not value.startswith(
+                    ("unknown:", "error:")
+                )
+            return False
+
+        all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
 
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
 

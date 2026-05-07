@@ -153,6 +153,7 @@ async def lifespan(_: FastAPI):
 
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_alkahest_client = alkahest_client
+    _container.resolved_alkahest_configured = alkahest_client is not None
     _container.resolved_policy_service = policy_svc
     _container.resolved_policy_pipeline_service = policy_svc  # backward compat
     _container.resolved_listing_service = listing_svc
@@ -250,7 +251,6 @@ def _redirect_to(new_path: str):
 # Admin routes
 app.add_api_route("/admin/pause", _redirect_to("/api/v1/admin/pause"), methods=["POST"])
 app.add_api_route("/admin/resume", _redirect_to("/api/v1/admin/resume"), methods=["POST"])
-app.add_api_route("/admin/status", _redirect_to("/api/v1/admin/status"), methods=["GET"])
 app.add_api_route("/admin/policy/seed", _redirect_to("/api/v1/admin/policy/seed"), methods=["POST"])
 # Listing lifecycle (body-param style → path-param style handled by listings_controller)
 app.add_api_route("/listings/create", _redirect_to("/api/v1/listings/create"), methods=["POST"])
