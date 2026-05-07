@@ -76,11 +76,11 @@ ENV PYTHONPATH="/app"
 # /app/src/market_storefront so it's importable via the venv-installed
 # package; the domain/ tree is copied in for compute-domain policy
 # callables that the storefront's PolicyManager discovers at startup.
-COPY storefront/src ./src
-COPY storefront/scripts ./scripts
-COPY domain/ ./domain/
-COPY service/ ../service/
-COPY policy/ ../policy/
+COPY --chown=appuser:appuser storefront/src ./src
+COPY --chown=appuser:appuser storefront/scripts ./scripts
+COPY --chown=appuser:appuser domain/ ./domain/
+COPY --chown=appuser:appuser service/ ../service/
+COPY --chown=appuser:appuser policy/ ../policy/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);
