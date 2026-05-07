@@ -11,7 +11,7 @@ Tests focus on Pydantic validation, routing correctness, and DB interaction.
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -76,13 +76,28 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
 async def client(db):
     import market_policy.negotiation_thread as _nt_module
     from market_policy.identity import Identity
+    from market_storefront.services.policy_service import PolicyService
 
     _nt_module._thread_store = None
     _nt_module.get_thread_store(
         sqlite_client=db,
         identity=Identity(agent_url="http://test-seller:8001"),
     )
+
+    config = MagicMock()
+    config.base_url_override = "http://test-seller:8001"
+    config.base_url_override_raw = "http://test-seller:8001"
+    config.agent_id = "test-agent"
+    config.agent_priv_key = ""
+    config.chain_rpc_url = ""
+
     _container.resolved_sqlite_client = db
+    _container.resolved_policy_service = PolicyService(
+        sqlite_client=db,
+        alkahest_client=None,
+        config=config,
+        agent_id="test-agent",
+    )
 
     app = FastAPI()
     app.include_router(negotiate_router)
@@ -97,6 +112,7 @@ async def client(db):
             yield c, db
 
     _container.resolved_sqlite_client = None
+    _container.resolved_policy_service = None
 
 
 class TestNegotiateNew:

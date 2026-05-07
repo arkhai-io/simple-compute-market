@@ -93,3 +93,7 @@ test-ci:
 # (TODO) a future e2e target that drives `market buy` against a
 # compose-launched seller.
 # -----------------------------------------------------------------------
+test-e2e:
+	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
+	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
+	.venv/bin/pytest -m e2e_deal $(PYTEST_ARGS)
