@@ -1,0 +1,24 @@
+[project]
+name = "arkhai-storefront-client"
+version = "0.5.4"
+description = "Async and sync HTTP clients for the Arkhai storefront REST API."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "eth-account>=0.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/storefront_client"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

@@ -143,7 +143,7 @@ def get_zerotier_node_id() -> Optional[str]:
 
 # Convenience re-export for callers who need URL resolution
 try:
-    from core.agent.app.utils.zerotier import await_base_url_resolution
+    from market_storefront.utils.zerotier import await_base_url_resolution
 except ImportError:
     await_base_url_resolution = None  # type: ignore[assignment]
 

@@ -1,6 +1,6 @@
 [project]
 name = "market-service"
-version = "0.1.0"
+version = "0.1.1"
 description = "External service clients for the agent marketplace"
 requires-python = ">=3.10,<3.14"
 dependencies = [
@@ -20,9 +20,15 @@ packages = ["src/service"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+testpaths = ["tests/unit", "tests/integration"]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3.4,<9.0.0",
     "pytest-asyncio>=0.23.8,<1.0.0",
+    # alkahest-py is a test-time dep: src/service/clients/alkahest.py
+    # lazily imports it inside _sdk_addresses_for_chain. The service
+    # package itself doesn't ship alkahest-py — consumers (storefront,
+    # buyer) carry it as a runtime dep.
+    "alkahest-py>=0.3.0",
 ]

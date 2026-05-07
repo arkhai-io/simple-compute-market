@@ -1,19 +1,80 @@
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
+DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-runtime-images
+.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service
+
+# ---------------------------------------------------------------------------
+# Dist — build pure-Python wheels for internal packages before image builds.
+#
+# These wheels are placed in .dist/ (gitignored) and consumed by downstream
+# Docker images via --find-links.  Only pure-Python packages (py3-none-any
+# wheels) should be built here; packages with native extensions must be built
+# inside the Docker build context.
+#
+# Upgrade path: replace --find-links with a PEP 503 index served from .dist/
+# by running gen_simple_index.py and passing --index file://${PWD}/.dist/index
+# to uv sync.  Further upgrade: publish .dist/ contents to GCP Artifact
+# Registry and switch to --index https://...gar.../simple.
+# ---------------------------------------------------------------------------
+dist: dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra
+
+dist-storefront-client: ## Build arkhai-storefront-client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd storefront-client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_storefront_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-storefront-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-storefront: ## Build market-storefront wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd storefront && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_storefront-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-policy: ## Build market-policy wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd policy && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_policy-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-policy produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-provisioning: ## Build provisioning-service wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd provisioning-service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/provisioning_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: provisioning-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-registry: ## Build arkhai-registry-client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd registry-client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_registry_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-registry-client produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-service: ## Build market-service wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd service && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_service-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-service produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-infra: ## Build market-infra wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd infra && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/market_infra-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: market-infra produced a platform-specific wheel — must build inside Docker" && exit 1)
+
+dist-clean: ## Remove .dist/ directory
+	rm -rf $(DIST_DIR)
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
 # build-test-env must run after build-market-contract-deployer (uses the image).
 # build-runtime-images parallelizes the three independent service images.
-build: build-cli build-market-contract-deployer build-test-env build-runtime-images
+build: build-buyer build-market-contract-deployer build-test-env build-runtime-images build-test-image
 
-build-runtime-images:
-	$(MAKE) -j3 build-registry build-core build-provisioning
+build-runtime-images: dist
+	$(MAKE) -j3 build-registry build-storefront build-provisioning
 
-build-cli: init-prerequisites init-dependencies
-	cd cli && make build
+build-buyer: init-prerequisites init-dependencies
+	cd buyer && make build
 
 build-market-contract-deployer:
 	cd market-contract-deployer && make build
@@ -33,17 +94,23 @@ build-test-env: build-anvil-state
 	cd test-env && make build
 
 build-registry:
-	cd erc-8004-registry-py && make build
+	cd registry-service && make build
 
-build-core:
-	cd core && make build
+build-storefront:
+	cd storefront && make build
 
 build-provisioning:
-	cd async-provisioning-service && make build
+	cd provisioning-service && make build
+
+build-test-image:
+	cd integration-tests && make build
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-init: init-submodules init-cli init-images
+# `make init` resolves dependencies for all three roles. Each role's
+# Makefile owns its own venv; we just delegate so a fresh clone has one
+# entry point. Run `make build` separately to produce wheel/Docker artifacts.
+init: init-prerequisites init-submodules init-buyer init-storefront init-registry-service
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -51,39 +118,57 @@ init-prerequisites:
 init-submodules:
 	GIT_TRACE=1 GIT_CURL_TRACE=1 git submodule update --init
 
-init-dependencies: init-zero-tier init-cli
+init-dependencies: init-zero-tier init-buyer
 
 #requires sudo
 init-zero-tier:
 	cd infra && make install
 
-# Initializing the cli should be as simple as downloading a standalone exe. This shouldn't need pip, uv, or even python.
-init-cli:
-	echo "NYI"
+init-buyer:
+	cd buyer && make init
 
-# This will eventually download the docker images
-init-images:
-	echo "NYI"
+init-storefront: dist-service dist-policy dist-provisioning dist-storefront-client dist-registry
+	cd storefront && make init
+
+init-registry-service: dist-registry
+	cd registry-service && make init
 
 deploy-compose:
 	docker compose up
 	docker compose ps
 
-#Ideally a helm chart eventually replaces the different docker run statements so all you have to do is edit a values file, init a helm+docker repo, and helm install
-deploy: deploy-test-env deploy-registry deploy-agents deploy-provisioning
+# Top-level deploy: runs both Helm and docker-run deployments.
+# Override SSH_KEY_FILE and HOSTS_INI as needed:
+#   make deploy SSH_KEY_FILE=/path/to/key HOSTS_INI=/path/to/hosts
+deploy: deploy-helm
+
+IAC_DIR      ?= $(CURDIR)/compute-provisioning-iac
+HOSTS_INI    ?= $(IAC_DIR)/ansible/inventory/hosts
+SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
+
+## Install or upgrade the Helm release.
+## Requires a reachable cluster context (kubectl) and SSH_KEY_FILE.
+## HOSTS_INI defaults to the IAC submodule inventory.
+deploy-helm:
+	$(MAKE) -C helm deploy \
+		SSH_KEY_FILE=$(SSH_KEY_FILE) \
+		EXTRA_SET_FILE_ARGS="--set-file provisioning.inventory.hostsIni=$(HOSTS_INI)"
+
+## Docker-run based local deploy (legacy, still useful for local dev without k8s).
+deploy-docker: deploy-test-env deploy-registry deploy-storefront deploy-provisioning
 
 #docker run -it --rm -v ./test-env/state:/state arkhai:test-env-$(GIT_SUFFIX) anvil --load-state /state/state.json
 deploy-test-env:
 	cd test-env && make deploy
 
 deploy-registry:
-	cd erc-8004-registry-py && make deploy
+	cd registry-service && make deploy
 
-deploy-agents:
-	cd core && make deploy
+deploy-storefront:
+	cd storefront && make deploy
 
 deploy-provisioning:
-	cd async-provisioning-service && make deploy
+	cd provisioning-service && make deploy
 
 test-deployment:
 	cd integration-tests && make test
@@ -95,3 +180,11 @@ stop:
 stop-compose:
 	docker compose down
 	docker compose rm
+
+code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+	@mkdir -p .snapshot
+	@OUTFILE="$(CURDIR)/.snapshot/code-$(GIT_SUFFIX).zip"; \
+	echo "Creating $$OUTFILE ..."; \
+	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
+	echo "Done: $$OUTFILE ($$SIZE)"

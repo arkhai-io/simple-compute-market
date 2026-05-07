@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "registry.fullname" . }}
+  labels:
+    {{- include "registry.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "registry.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "registry.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: registry
+          image: {{ include "registry.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            # --- sourced from subchart values ---
+            - name: DATABASE_URL
+              value: {{ .Values.config.databaseUrl | quote }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: HOST
+              value: {{ .Values.config.host | quote }}
+            - name: ENABLE_HEALTH_CHECKS
+              value: {{ .Values.config.enableHealthChecks | quote }}
+            - name: HEALTH_CHECK_INTERVAL
+              value: {{ .Values.config.healthCheckInterval | quote }}
+            - name: ENDPOINT_CHECK_TIMEOUT
+              value: {{ .Values.config.endpointCheckTimeout | quote }}
+            - name: HEARTBEAT_TTL_SECS
+              value: {{ .Values.config.heartbeatTtlSecs | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            # --- sourced from global ---
+            - name: CHAIN_ID
+              value: {{ .Values.global.rpc.chainId | quote }}
+            - name: RPC_URL
+              value: {{ include "rpc.url" . | quote }}
+            - name: REPUTATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.reputation_address | quote }}
+            - name: VALIDATION_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.validation_address | quote }}
+            - name: IDENTITY_REGISTRY_ADDRESS
+              value: {{ .Values.global.registry.identity_address | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

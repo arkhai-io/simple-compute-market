@@ -1,0 +1,117 @@
+# Default values for the provisioning subchart.
+# These are overridden by the parent chart's provisioning: block.
+
+# ---------------------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------------------
+server:
+  image:
+    repository: ""
+    name: arkhai
+    tag: provisioning
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 8081
+  type: ClusterIP
+
+# ---------------------------------------------------------------------------
+# SSH private key — used by Ansible to authenticate against hypervisors.
+#
+# The key is mounted as a Secret volume at /home/appuser/.ssh/id_ed25519.
+# This is the default key for path-type hosts that reference this path.
+#
+# createSecret: true  — chart creates a Secret from sshPrivateKey below.
+#                       Use only for dev/test; do not commit real keys.
+# createSecret: false — chart expects a pre-existing Secret named secretName.
+#                         kubectl create secret generic <n> \
+#                           --from-file=id_ed25519=~/.ssh/id_ed25519
+# ---------------------------------------------------------------------------
+sshKey:
+  createSecret: true
+  secretName: ""
+  sshPrivateKey: ""
+
+# ---------------------------------------------------------------------------
+# Provisioning secrets — injected as a dynaconf config profile file mounted
+# at /app/config/config-provisioning-secrets.yml.
+#
+# sshDecryptionKey.key: Fernet key for embedded-type SSH keys in the DB.
+#   Required when any host is registered with ssh_key_type='embedded'.
+#   Generate:
+#     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#
+# inventory.hostsIni: Ansible INI inventory content. Upserted into the hosts
+#   table on every pod startup (idempotent via seed_from_ini).
+#   Example:
+#     [kvm_hosts]
+#     ww1  ansible_host=10.0.0.1  ansible_user=ubuntu  ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519
+#
+# createSecret: true  — chart creates a Secret from the values below.
+# createSecret: false — chart expects a pre-existing Secret named secretName
+#                       containing a config-provisioning-secrets.yml key.
+# ---------------------------------------------------------------------------
+sshDecryptionKey:
+  createSecret: true
+  secretName: ""
+  key: ""
+
+inventory:
+  hostsIni: ""
+
+# ---------------------------------------------------------------------------
+# Application config — rendered into a ConfigMap as config-production.yml
+# and mounted at CONFIG_DIRECTORY inside the container.
+#
+# Keys use snake_case to match settings.toml directly. Only keys listed here
+# are rendered; omitted keys fall back to settings.toml defaults.
+# ---------------------------------------------------------------------------
+config:
+  database_url: "sqlite:////app/data/provisioning.db"
+
+  # Ansible paths — set to the IaC submodule location inside the container.
+  # Override here for environments that mount the IaC at a different path.
+  playbook_path: "/opt/compute-provisioning-iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+  inventory_path: "/opt/compute-provisioning-iac/ansible/inventory/hosts"
+  management_vars_path: "/opt/compute-provisioning-iac/ansible/inventory/management-vars.yaml"
+
+  # Ansible runtime
+  ansible_timeout_seconds: 1800
+  default_vm_host: "ww1"
+
+  # Golden image credentials (leave empty unless using golden mode)
+  golden_root_ssh_filename: ""
+  golden_root_ssh_password: ""
+  golden_image_name: ""
+  golden_gcs_bucket: ""
+  golden_gcs_project: ""
+
+  # FRP tunneling
+  frp_server_addr: ""
+  frp_domain: ""
+  frp_dashboard_password: ""
+
+  # Authentication
+  enable_auth: false
+  registry_url: ""
+  registry_cache_ttl_seconds: 300
+  registry_cache_max_size: 256
+
+  # Rate limiting
+  enable_rate_limiting: false
+  rate_limit_requests_per_minute: 30
+
+  # Logging
+  log_level: "info"
+
+# Resource requests/limits — tune per environment
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

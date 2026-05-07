@@ -1,0 +1,180 @@
+# Global image settings shared across subcharts.
+# imageRepository can be set to a registry prefix, e.g. "registry.example.com/arkhai"
+# Leave empty ("") to use bare image names (matches local Docker builds).
+global:
+  imageRepository: ""
+
+  # ---------------------------------------------------------------------------
+  # Chain / network configuration shared across all subcharts.
+  # rpc.host and rpc.port are the single source of truth for the Anvil node's
+  # in-cluster service coordinates.
+  # ---------------------------------------------------------------------------
+  rpc:
+    chainId: 31337
+    host: "arkhai-node-operator-test-env"
+    port: 8545
+
+  # ---------------------------------------------------------------------------
+  # Registry service coordinates and contract addresses shared across all subcharts.
+  # Defaults to the service name produced by the registry subchart under a
+  # release named "arkhai-node-operator".
+  # ---------------------------------------------------------------------------
+  registry:
+    host: "arkhai-node-operator-registry"
+    port: 8080
+    identity_address:   "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+    reputation_address: "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+    validation_address: "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    owner_address:      "0x547289319C3e6aedB179C0b8e8aF0B5ACd062603"
+
+  # Provisioning service coordinates. Surfaced in globals so the
+  # storefront subchart can compose seller.provisioning.service_url
+  # without hardcoding a string.
+  provisioning:
+    host: "arkhai-node-operator-provisioning"
+    port: 8081
+
+# ---------------------------------------------------------------------------
+# test-env subchart
+# ---------------------------------------------------------------------------
+test-env:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: test-env
+    pullPolicy: IfNotPresent
+
+  service:
+    type: NodePort
+
+  env:
+    ANVIL_IP_ADDR: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# registry subchart
+# ---------------------------------------------------------------------------
+registry:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: registry
+    pullPolicy: IfNotPresent
+
+  service:
+    type: NodePort
+    port: 8080
+
+  config:
+    databaseUrl: "sqlite:///./indexer.db"
+    host: "0.0.0.0"
+    enableHealthChecks: true
+    healthCheckInterval: 60
+    endpointCheckTimeout: 10
+    heartbeatTtlSecs: 60
+    logLevel: "info"
+
+# ---------------------------------------------------------------------------
+# storefront subchart
+# ---------------------------------------------------------------------------
+storefront:
+  enabled: true
+
+  image:
+    repository: ""
+    name: arkhai
+    tag: storefront
+    pullPolicy: IfNotPresent
+
+  # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
+  # client and is invoked as a one-shot process (or a helm-test Job),
+  # not deployed alongside the storefront. Add more agents: entries to
+  # run multiple seller identities on one cluster.
+  # See helm/charts/storefront/values.yaml for the per-agent schema.
+  agents:
+    - name: bob
+      port: 8001
+      component: seller
+      agentId: ""        # pin after first registration; see storefront/values.yaml
+      autoRegister: true # set false once registered to prevent accidental re-registration
+      secret:
+        createSecret: true
+        secretName: ""
+        privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+        walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+      autoRegister: true
+      config:
+        seller:
+          agentId: bob
+          dbPath: "./agent.db"
+          logFilePath: "./logs/bob.log"
+          sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+          enableEventQueue: false
+          provisioning:
+            mode: "mock"
+          negotiation:
+            policyMode: "rl"
+          integrations:
+            geminiApiKey: ""
+        chain:
+          name: "anvil"
+
+# ---------------------------------------------------------------------------
+# provisioning subchart
+# ---------------------------------------------------------------------------
+provisioning:
+  enabled: true
+
+  server:
+    image:
+      repository: ""
+      name: arkhai
+      tag: provisioning
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8081
+    type: ClusterIP
+    host: "0.0.0.0"
+
+  sshKey:
+    createSecret: true
+    secretName: ""
+    sshPrivateKey: ""
+
+  config:
+    log_level: "info"
+    database_url: "sqlite:////app/data/provisioning.db"
+    ansible_timeout_seconds: 1800
+    default_vm_host: "ww1"
+    enable_auth: false
+    registry_cache_ttl_seconds: 300
+    registry_cache_max_size: 256
+    enable_rate_limiting: false
+    rate_limit_requests_per_minute: 30
+
+  redis:
+    image: "redis:7-alpine"
+    port: 6379
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# validate-contracts subchart
+# Runs the contract validation helm test.
+# When test-env is enabled, tests run against that deployment via global.rpc.
+# When test-env is disabled, set rpcUrl to point at your target endpoint.
+# ---------------------------------------------------------------------------
+validate-contracts:
+  enabled: true
+  # Override the RPC endpoint. Leave empty to use global.rpc.host:port
+  # (i.e. the test-env service when that subchart is enabled).
+  rpcUrl: ""
+
+integrationTests:
+  image:
+    repository: ""
+    name: arkhai
+    tag: integration-tests
+    pullPolicy: IfNotPresent

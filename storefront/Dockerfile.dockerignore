@@ -1,0 +1,33 @@
+# BuildKit per-Dockerfile ignore (requires DOCKER_BUILDKIT=1).
+# Deny everything, then allowlist what the build needs.
+
+*
+
+# ── Internal package wheels (built by make dist before docker build) ─
+!.dist/
+
+# ── storefront ───────────────────────────────────────────────────────
+!storefront/pyproject.toml
+!storefront/uv.lock
+!storefront/src/
+!storefront/scripts/
+!storefront/packages/
+!storefront/entrypoint.sh
+
+# ── service / policy / domain (imported by storefront at runtime) ─────
+!service/
+!policy/
+!domain/
+
+# ── storefront-client (workspace path source, editable in uv.lock) ────
+!storefront-client/
+
+# ── Global excludes ──────────────────────────────────────────────────
+**/.git
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.env*
+**/.DS_Store
+**/.pytest_cache
+**/*.db

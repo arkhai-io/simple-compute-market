@@ -1,0 +1,44 @@
+# Market layer: what a marketplace operator (infra provider) runs.
+#
+# A marketplace operator's only responsibility is running the registry —
+# a service that indexes agents and orders so buyers and sellers can
+# discover each other. They do NOT run agents or provisioning.
+#
+# Depends on: an external chain with contracts deployed (see external.yml
+# for a local dev version).
+#
+# Usage:
+#   # Point at contract addresses (shared-env/.env is one source):
+#   docker compose -f compose/market.yml up
+#
+# The registry reads IDENTITY_REGISTRY_ADDRESS etc. from shared-env/.env,
+# which is written either by compose/external.yml (local dev) or by
+# `scripts/deploy-contracts.sh` (any chain).
+
+services:
+  registry:
+    image: arkhai:registry
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../registry-service/.env.docker-compose
+    volumes:
+      - ../shared-env:/app/shared-env
+    networks:
+      - market-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  market-network:
+    external: true
+    name: market-network

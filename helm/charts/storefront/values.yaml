@@ -1,0 +1,88 @@
+# Default values for the storefront subchart.
+# Overridden by the parent chart's storefront: block in helm/values.yaml.
+# Values sourced from global (rpc, registry addresses) are injected in
+# the templates and do not appear here.
+
+image:
+  repository: ""
+  name: arkhai
+  tag: storefront
+  pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# Storefront agent(s). The list models per-process identity, not role —
+# only sellers run a storefront, so the typical deploy has one entry.
+# Operators running multiple seller identities on one cluster (sharded
+# by region, by hardware fleet, etc.) add more entries. Buyers do not
+# appear here at all: the buyer-side surface is the `market` CLI, run
+# as a one-shot client process (or a Job for E2E tests).
+#
+# Each entry renders one Deployment + Service + Secret. The Secret holds
+# the rendered config.toml mounted at /etc/arkhai/config.toml.
+# ---------------------------------------------------------------------------
+agents:
+  - name: bob
+    port: 8001
+    component: seller
+    # agentId: the numeric on-chain agent ID assigned at first registration.
+    # Leave empty on first deploy — the service will register automatically
+    # (requires autoRegister: true) and print the assigned ID in the logs.
+    # Pin this value after first registration to skip re-registration on
+    # subsequent deploys and to guard against accidental new registrations.
+    agentId: ""
+    # autoRegister: controls behaviour when agentId is not set.
+    #   true  → register at startup (default; safe for first deploys).
+    #   false → crash loudly if agentId is missing. Use this once an agent
+    #           has been registered to prevent a misconfigured deploy from
+    #           silently minting a new on-chain identity.
+    autoRegister: true
+    secret:
+      createSecret: true
+      secretName: ""   # auto-generated as {fullname}-{name} when empty
+      privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+      walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    # config.* lands in the rendered config.toml. Keys map 1:1 to the
+    # typed Config dataclass in market_storefront.utils.config.
+    # Whether to run `market-storefront register` as an init container
+    # before serve starts. Set false to skip (e.g. agent ID is
+    # provisioned out of band).
+    autoRegister: true
+    config:
+      seller:
+        agentId: bob
+        # base_url, provisioning.serviceUrl: composed by the chart from
+        # the agent's Service DNS / global.provisioning.* — explicit
+        # overrides go here only when the cluster topology demands
+        # something different.
+        dbPath: "./agent.db"
+        logFilePath: "./logs/bob.log"
+        sshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+        enableEventQueue: false
+        provisioning:
+          mode: "mock"
+        negotiation:
+          policyMode: "rl"
+        # Runtime credentials the agent reads. Empty = absent in TOML.
+        integrations:
+          geminiApiKey: ""
+      chain:
+        name: "anvil"
+        # alkahestAddressConfigPath + tokenRegistryPath: paths inside
+        # the container image; agent has working defaults. Override
+        # here only when mounting external JSON files.
+
+# Number of replicas per agent.
+replicaCount: 1
+
+# Resource requests/limits – tune per environment.
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

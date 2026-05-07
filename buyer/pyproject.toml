@@ -1,0 +1,68 @@
+[project]
+name = "market-buyer"
+version = "0.1.0"
+description = "Buyer-side CLI for the market: discover sellers, negotiate, place orders. Pure HTTP client; no server, no agent runtime."
+requires-python = ">=3.12"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.7.0",
+  "PyYAML>=6.0.0",
+  "pyinstaller>=6.19.0",
+  "eth-account>=0.13.0",
+  # Needed by the buyer orchestrator (market buy-sync) for in-process
+  # on-chain escrow creation. Imported lazily from
+  # market_buyer.escrow_client so loading the CLI does not pay the
+  # native-binary cost unless the orchestrator actually runs.
+  "alkahest-py>=0.3.0",
+  "market-service",
+  "market-policy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0.0",
+]
+
+# RL negotiation strategy. Mirrors the storefront's [rl] extra so a
+# buyer installed with `uv pip install -e ".[rl]"` can run against the
+# trained pufferlib checkpoints from the compute domain.
+rl = [
+  "torch>=2.7.0",
+  "pufferlib @ git+https://github.com/arkhai-io/ArkhaiPufferEnv@f18e3b42c0ae22e8aec5e8d26a26f424e6b18a30",
+]
+
+[project.scripts]
+market = "market_buyer.cli:app"
+
+# Workspace resolution for sibling packages.
+# market-service: token registry + alkahest address resolution for the
+# buyer orchestrator (buy-sync).
+# market-policy: per-round negotiation decision logic, shared with the
+# storefront so both sides drive negotiation through one engine.
+[tool.uv]
+no-build-isolation-package = ["pufferlib"]
+
+[tool.uv.extra-build-dependencies]
+pufferlib = ["setuptools", "Cython", "numpy<2"]
+
+[tool.uv.sources]
+market-service = { path = "../service", editable = true }
+market-policy = { path = "../policy", editable = true }
+torch = [
+  { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["market_buyer"]

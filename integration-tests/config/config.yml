@@ -15,20 +15,37 @@ rpc:
   retry_backoff_seconds: 2
 
 registry: # injected from environment profile file
+  api_url:
   identity_address:
   reputation_address:
   validation_address:
   owner_address:
 
-buyer: # injected from secret profile file
-  private_key:    ""
-  wallet_address: ""
+buyer:
+  # The buyer is a pure HTTP client (market_buyer CLI / library) — only
+  # wallet keys are configured here; they sign negotiation requests
+  # against the seller's storefront and on-chain escrow calls.
+  private_key:       "" # injected from secret profile file
+  wallet_address:    ""
+  # WebSocket RPC endpoint for on-chain escrow creation (AlkahestClient).
+  # Must use ws:// or wss:// — the current alkahest-py client uses Alloy WsConnect.
+  # Overridden per environment in config-<profile>.yml.
+  chain_rpc_url:     "ws://localhost:8545"
 
-seller: # injected from secret profile file
-  private_key:    ""
-  wallet_address: ""
+seller:
+  api_url:           "" # injected from environment profile file
+  base_url_override: "" # agent's seller.base_url in config.toml; used as resource_id in create_order auth. Defaults to api_url if unset.
+  private_key:       "" # injected from secret profile file
+  wallet_address:    ""
 
 tests:
   minimum_eth_balance: "0.01"
   gas_price_strategy: "medium"
   require_checksummed_addresses: true
+  order_create_timeout: 30 #time in seconds
+  order_match_timeout: 60
+  order_close_timeout: 30
+
+provisioning:
+  api_url: ""          # injected from environment profile file or ARKHAI_PROVISIONING__API_URL
+  enable_auth: false   # set to true if the deployed service has auth enabled

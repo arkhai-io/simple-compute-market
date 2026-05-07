@@ -45,19 +45,19 @@ fi
 #           Uses anvil_impersonateAccount — no owner private key needed.
 npx hardhat run scripts/upgrade-local.ts --network anvil
 
-# Step 4: Export compiled ABIs to shared-env so downstream services use the
-#          exact same interface as what was deployed — no manual ABI sync needed.
-SHARED_ENV_DIR=$(dirname "${ENV_FILE}")
-for CONTRACT in IdentityRegistryUpgradeable ReputationRegistryUpgradeable ValidationRegistryUpgradeable; do
-  ARTIFACT="/app/artifacts/contracts/${CONTRACT}.sol/${CONTRACT}.json"
-  if [ -f "${ARTIFACT}" ]; then
-    python3 -c "import json,sys; print(json.dumps(json.load(open('${ARTIFACT}'))['abi'], indent=2))" \
-      > "${SHARED_ENV_DIR}/${CONTRACT}.abi.json"
-    echo "Exported ABI: ${SHARED_ENV_DIR}/${CONTRACT}.abi.json"
-  fi
-done
+# NOTE: an earlier version of this script also exported ${CONTRACT}.abi.json
+# files to shared-env/ "so downstream services use the exact same interface as
+# what was deployed". Nothing actually consumed those files at runtime — the
+# IdentityRegistry ABI is hand-pasted into four separate Python modules
+# (service/src/service/clients/erc8004/abi.py,
+#  storefront/src/market_storefront/abi/identity_registry_abi.py,
+#  registry-service/src/abi/identity_registry_abi.py,
+#  registry-service/src/contracts/abis.py).
+# Until those four sites are unified onto a single source of truth, exporting
+# JSON ABIs is just artifact noise. Re-enable this step when consolidating the
+# Python copies.
 
-# Step 5: Write contract addresses to shared-env for downstream services
+# Step 4: Write contract addresses to shared-env for downstream services
 {
   echo "IDENTITY_REGISTRY_ADDRESS=${IDENTITY_ADDR}"
   echo "REPUTATION_REGISTRY_ADDRESS=${REPUTATION_ADDR}"
@@ -65,3 +65,10 @@ done
 } > "${ENV_FILE}"
 echo "Wrote contract addresses to ${ENV_FILE}"
 cat "${ENV_FILE}"
+
+# Step 5: Register a sentinel agent on-chain so the registry smoke test
+# (test_at_least_one_agent_registered) passes against a fresh test-env.
+# Uses Anvil account #3 — not used by any market agent (buyer/seller use
+# accounts #1/#2, deployer uses #0).  The registry service discovers this
+# agent automatically via sync_from_start() replaying the Registered event.
+IDENTITY_REGISTRY_ADDRESS=${IDENTITY_ADDR} python3 /app/seed_agent.py

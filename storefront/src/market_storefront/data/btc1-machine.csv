@@ -1,0 +1,9 @@
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.symbol,attribute.contract_address,attribute.decimals,attribute.topic,attribute.soc_percent,attribute.max_kwh,attribute.power_kw
+compute-btc1-001,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-002,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-003,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-004,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-005,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-006,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-007,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,
+compute-btc1-008,compute.gpu,rtx4090,count,1,available,100,MOCK,,RTX 4090,90.0,"California, US",btc1,,,,,,,

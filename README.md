@@ -2,20 +2,22 @@
 
 Simple Market Service (SMS) is a reference implementation of Arkhai's vision for generalized agent-driven marketplaces. The goal is to support open markets for assets and services such as compute, storage, bandwidth, energy, information, real-world assets, and, in practice, almost anything that can be described, negotiated, and exchanged by autonomous buyers and sellers over open network infrastructure instead of a centralized marketplace.
 
-More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, an A2A-capable market agent, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
+More concretely, this repo packages a marketplace architecture inspired by Arkhai's [Compositional Game Theory docs](https://github.com/arkhai-io/cgt) into working software: an ERC-8004-based agent registry, a market storefront, CLI workflows for orders and operations, and supporting services for settlement, networking, and provisioning. The original direction was to model the system more formally through CGT, but both the docs and this implementation operate at a higher level of granularity rather than using compositional game theory in a strict mathematical sense.
 
 ## Technology Stack
 
 - [Alkahest](https://github.com/arkhai-io/alkahest) for programmable peer-to-peer agreements and escrow-backed settlement flows used by the market agent.
 - [Compositional Game Theory (CGT)](https://github.com/arkhai-io/cgt) as design inspiration for the marketplace, negotiation, and distributed-systems patterns in this repo; the docs and implementation are CGT-inspired rather than strict formalizations.
 - [ZeroTier](https://www.zerotier.com/) for optional overlay networking between agents and supporting services.
-- [A2A](https://a2a-protocol.org/latest/) for agent-to-agent communication in the market agent runtime.
 - [FastAPI](https://fastapi.tiangolo.com/) for the registry/indexer and async provisioning HTTP services.
 - [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) for on-chain agent identity, metadata, and discovery.
 
 ## Repository Layout
 
-- `agent/` — A2A agent server and local test-chain helper
+- `buyer/` — Buyer-side CLI (`market` console script)
+- `storefront/` — Provider-side server + admin CLI (`market-storefront` console script)
+- `service/` — Shared infra clients (chain, alkahest, registry indexer)
+- `policy/` — Domain-agnostic negotiation policy engine
 - `erc-8004-contracts/` — ERC-8004 Identity/Reputation/Validation registries (Hardhat)
 - `erc-8004-registry-py/` — Registry/indexer API (FastAPI) for on-chain/off-chain sync
 - `infra/zerotier/` — ZeroTier controller scripts
@@ -33,10 +35,10 @@ More concretely, this repo packages a marketplace architecture inspired by Arkha
 To build the CLI and add `market` to your PATH:
 
 ```bash
-make build-cli
+make build-buyer
 ```
 
-This will make the cli at ./cli/dist/market
+This will make the cli at ./buyer/dist/market
 
 You can then run it using e.g. market -v
 
@@ -47,8 +49,8 @@ If `market` isn't found, ensure the dist folder is on PATH.
 Create a market order via the agent endpoint:
 
 ```bash
-market order create \
-  -o '{"gpu_model":"H200","quantity":1,"sla":99.9,"region":"California, US"}' \
+market listing create \
+  -o '{"gpu_model":"H200","gpu_count":1,"sla":99.9,"region":"California, US"}' \
   -d '{"token":"MOCK","amount":9.0}'
 ```
 
@@ -69,13 +71,13 @@ market portfolio import-csv path/to/resources.csv
 Try the bundled sample:
 
 ```bash
-market portfolio import-csv core/agent/app/data/resources.sample.csv --dry-run
+market portfolio import-csv storefront/src/market_storefront/data/resources.sample.csv --dry-run
 ```
 
 Optional flags:
 
 - `--dry-run` validate and report without writing to DB
-- `--env` path to env file used by core agent import script (defaults to `core/agent/.env`)
+- `--env` path to env file used by storefront import script (defaults to `storefront/.env`)
 - `--db-path` override target SQLite DB path (otherwise uses `AGENT_DB_PATH` from env)
 
 CSV columns:
@@ -118,27 +120,29 @@ make serve
 
 The registry runs on `http://localhost:8080` by default.
 
-### 4. Configure and Start Agent
+### 4. Configure and Start the Seller Agent
 
 In a new terminal:
 
 ```bash
-cd agent
-make install
-cp .env.sample .env
+cd storefront
+uv sync --find-links ../.dist
+market-storefront config init-user   # scaffolds $XDG_CONFIG_HOME/arkhai/config.toml
 ```
 
-Edit `.env` with:
+Edit the rendered config with:
 
-- Contract addresses from step 2
-- `CHAIN_RPC_URL` (from step 1)
-- `REGISTRY_URL=http://localhost:8080/`
-- `AGENT_PRIV_KEY` and `AGENT_WALLET_ADDRESS` (use test keys)
+- Contract addresses from step 2 (`registry.identity_registry_address`,
+  `chain.alkahest_address_config_path`)
+- `chain.rpc_url` (from step 1)
+- `registry.url = "http://localhost:8080"`
+- `wallet.private_key` and `wallet.address` (test keys)
 
-Start the agent:
+Register on-chain (one-shot), then start the server:
 
 ```bash
-make serve-a2a
+market-storefront register
+market-storefront serve
 ```
 
 ## ZeroTier Setup (Optional)
@@ -218,5 +222,6 @@ Required env vars in `infra/zerotier/.env`: `CONTROLLER_URL`, `ZEROTIER_NETWORK`
 
 ## Useful Commands
 
-- Agent playground: `make playground` in `agent`
 - ZeroTier network info: `sudo zerotier-cli listnetworks`
+- Inspect/edit user config: `market-storefront config show`
+- Reclaim an expired buyer escrow: `market escrow reclaim --escrow-uid 0x...`

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from threading import RLock
 from typing import Optional
@@ -36,13 +35,10 @@ class TokenRegistry:
         if source_path:
             self._path = Path(source_path)
         else:
-            env_path = os.getenv("TOKEN_REGISTRY_PATH")
-            if env_path:
-                self._path = Path(env_path)
-            else:
-                # Fall back to the core data directory if it exists
-                core_data = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry.json"
-                self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
+            # Falls back to a bundled default JSON if it exists; callers
+            # that want a specific registry pass `source_path` explicitly.
+            core_data = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry.json"
+            self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
         self._lock = RLock()
         self._tokens_by_symbol: dict[str, ERC20TokenMetadata] = {}
         self._tokens_by_address: dict[str, ERC20TokenMetadata] = {}
@@ -159,6 +155,37 @@ async def get_wallet_token_balance(
         raise ValueError(f"Failed to query token balance: {exc}") from exc
 
 
+# Module-level singleton — bound to the bundled default registry on
+# import. Callers that need a specific registry path call
+# ``init_token_registry(path)`` once at startup; the singleton is
+# mutated in place so any module that already did
+# ``from service.clients.token import TOKEN_REGISTRY`` keeps seeing the
+# updated data through the same object.
 TOKEN_REGISTRY = TokenRegistry()
 
-__all__ = ["ERC20TokenMetadata", "TokenRegistry", "TokenRegistryError", "TOKEN_REGISTRY", "get_wallet_token_balance"]
+
+def init_token_registry(source_path: str | Path | None) -> TokenRegistry:
+    """Re-point the module-level ``TOKEN_REGISTRY`` at a registry file.
+
+    Mutates the existing singleton in place rather than returning a new
+    object — this preserves references that other modules captured via
+    ``from service.clients.token import TOKEN_REGISTRY`` at their own
+    import time.
+
+    No env reads — callers pass the path resolved from their own config.
+    """
+    if source_path is None:
+        return TOKEN_REGISTRY
+    TOKEN_REGISTRY._path = Path(source_path)
+    TOKEN_REGISTRY.reload()
+    return TOKEN_REGISTRY
+
+
+__all__ = [
+    "ERC20TokenMetadata",
+    "TokenRegistry",
+    "TokenRegistryError",
+    "TOKEN_REGISTRY",
+    "init_token_registry",
+    "get_wallet_token_balance",
+]

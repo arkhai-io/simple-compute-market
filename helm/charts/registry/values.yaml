@@ -1,0 +1,44 @@
+# Default values for registry.
+# These are overridden by the parent chart's registry: block in values.yaml.
+# Chain config, RPC URL, and registry contract addresses live in the parent's
+# global: block and are passed down automatically by Helm.
+
+image:
+  repository: ""
+  name: arkhai
+  tag: registry
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# ---------------------------------------------------------------------------
+# Application settings — map directly to env vars in the container.
+# Values sourced from global (chainId, rpcUrl, contract addresses) are
+# injected in the deployment template and do not appear here.
+# ---------------------------------------------------------------------------
+config:
+  databaseUrl: "sqlite:///./indexer.db"
+  host: "0.0.0.0"
+  enableHealthChecks: true
+  healthCheckInterval: 60
+  endpointCheckTimeout: 10
+  heartbeatTtlSecs: 60
+  logLevel: "info"
+
+# Number of replicas.
+replicaCount: 1
+
+# Resource requests/limits – tune per environment.
+resources: {}
+#  requests:
+#    cpu: 100m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

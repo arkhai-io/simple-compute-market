@@ -1,0 +1,6 @@
+apiVersion: v2
+name: provisioning
+description: Async provisioning service for the Arkhai stack
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

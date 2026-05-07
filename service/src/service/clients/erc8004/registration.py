@@ -3,9 +3,9 @@ On-chain registration logic for ERC-8004 Identity Registry.
 """
 import json
 import logging
-import os
 import re
 import urllib.request
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 try:
@@ -70,64 +70,91 @@ def build_registration_file_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/.well-known/erc-8004-registration.json"
 
 
-async def register_onchain_from_env(
-    base_url: Optional[str] = None,
-    chain_id: Optional[int] = None,
-    explicit_agent_id: Optional[str] = None
-) -> Optional[Tuple[str, int, Optional[dict]]]:
-    """
-    Register agent on-chain using environment variables.
-    Convenience wrapper around register_onchain() that reads from env vars.
+def _build_metadata_entries(
+    agent_name: str,
+    agent_card_data: dict,
+    labels: dict | None = None,
+) -> list[dict]:
+    """Build MetadataEntry structs for on-chain registration.
+
+    Field names MUST match the MetadataEntry struct in the IdentityRegistry ABI:
+      - 'metadataKey'   (string)
+      - 'metadataValue' (bytes, supplied as a hex string for web3.py encoding)
+
+    If the ABI struct is ever renamed, update this function and the test in
+    service/tests/integration/test_abi_alignment.py will catch any drift.
 
     Args:
-        base_url: Optional base URL override (defaults to BASE_URL_OVERRIDE env var)
-        chain_id: Optional chain ID override (defaults to CHAIN_ID env var)
-        explicit_agent_id: Optional explicit agent ID override (defaults to ONCHAIN_AGENT_ID env var)
+        agent_name:      Human-readable name stored on-chain.
+        agent_card_data: Agent card dict serialised to JSON and stored on-chain.
+        labels:          Optional category/type labels.  Defaults to
+                         ``{"category": "compute", "type": "trader"}``.
 
     Returns:
-        Same as register_onchain(): Tuple of (tx_hash, agent_id, updates_dict) or None
+        List of MetadataEntry dicts ready to pass to ``contract.functions.register()``.
     """
-    # Read required env vars
-    agent_priv_key = os.getenv("AGENT_PRIV_KEY")
-    chain_rpc_url = os.getenv("CHAIN_RPC_URL")
-    identity_registry_address = os.getenv("IDENTITY_REGISTRY_ADDRESS")
-    agent_wallet_address = os.getenv("AGENT_WALLET_ADDRESS")
-    base_url_override = base_url or os.getenv("BASE_URL_OVERRIDE", "http://localhost:8000")
+    from web3 import Web3  # deferred — Web3 import is heavy and tests may patch it
 
-    # Validate required variables
-    missing = []
-    if not agent_priv_key:
-        missing.append("AGENT_PRIV_KEY")
-    if not chain_rpc_url:
-        missing.append("CHAIN_RPC_URL")
-    if not identity_registry_address:
-        missing.append("IDENTITY_REGISTRY_ADDRESS")
-    if not agent_wallet_address:
-        missing.append("AGENT_WALLET_ADDRESS")
+    if labels is None:
+        labels = {"category": "compute", "type": "trader"}
 
-    if missing:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    return [
+        {
+            "metadataKey": "name",
+            "metadataValue": Web3.to_hex(text=agent_name),
+        },
+        {
+            "metadataKey": "category",
+            "metadataValue": Web3.to_hex(text=labels.get("category", "compute")),
+        },
+        {
+            "metadataKey": "type",
+            "metadataValue": Web3.to_hex(text=labels.get("type", "trader")),
+        },
+        {
+            "metadataKey": "agentCard",
+            "metadataValue": Web3.to_hex(
+                text=json.dumps(agent_card_data, separators=(",", ":"))
+            ),
+        },
+    ]
 
-    # Get optional values
-    explicit_agent_id = explicit_agent_id or os.getenv("ONCHAIN_AGENT_ID")
 
-    # Get agent name (for on-chain metadata and agent card)
-    agent_name = os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
+@dataclass(frozen=True)
+class RegisterOnchainConfig:
+    """Caller-supplied inputs to ``register_onchain_from_config``.
 
-    # Build agent card URL (used to build registration file URL)
-    agent_card_url = build_agent_card_url(base_url_override)
+    Replaces the prior env-driven ``register_onchain_from_env`` shim.
+    Storefront callers populate this from ``CONFIG``; the
+    ``register_onchain.py`` script builds it from its CLI args + the
+    same TOML loader the agent uses.
+    """
+    private_key: str
+    chain_rpc_url: str
+    identity_registry_address: str
+    wallet_address: str
+    base_url: str
+    agent_name: str
+    explicit_agent_id: Optional[str] = None
 
-    # Call the core registration function
-    # Note: register_onchain will build the registration file URL from agent_card_url
+
+async def register_onchain_from_config(
+    cfg: "RegisterOnchainConfig",
+) -> Optional[Tuple[str, int, Optional[dict]]]:
+    """Register the agent on-chain using a typed config object.
+
+    Returns the same shape as ``register_onchain``.
+    """
+    agent_card_url = build_agent_card_url(cfg.base_url)
     return await register_onchain(
         agent_card_url=agent_card_url,
-        private_key=agent_priv_key,
-        rpc_url=chain_rpc_url,
-        contract_address=identity_registry_address,
-        owner_address=agent_wallet_address,
-        explicit_agent_id=explicit_agent_id,
-        indexer_url=None,  # Not needed for standalone registration
-        agent_name=agent_name
+        private_key=cfg.private_key,
+        rpc_url=cfg.chain_rpc_url,
+        contract_address=cfg.identity_registry_address,
+        owner_address=cfg.wallet_address,
+        explicit_agent_id=cfg.explicit_agent_id,
+        indexer_url=None,
+        agent_name=cfg.agent_name,
     )
 
 
@@ -218,8 +245,8 @@ async def update_existing_agent(
 
         # Fetch current metadata and compare
         for desired_meta in desired_metadata:
-            key = desired_meta['key']
-            desired_value_hex = desired_meta['value']
+            key = desired_meta['metadataKey']
+            desired_value_hex = desired_meta['metadataValue']
 
             try:
                 # Fetch current metadata value (returns bytes)
@@ -513,23 +540,14 @@ async def register_onchain(
         chain_id = w3.eth.chain_id
 
         # Build metadata for on-chain storage
-        final_agent_name = agent_name or agent_card_data.get("name") or os.getenv("AGENT_NAME") or os.getenv("AGENT_ID") or "root_agent"
-        labels = {"category": "compute", "type": "trader"}  # Default labels
+        final_agent_name = agent_name or agent_card_data.get("name") or "root_agent"
 
-        # Official contract: register(string tokenUri, MetadataEntry[] metadata)
-        # MetadataEntry is {string key, bytes value} - format matches viem's toHex output
-        # Store essential metadata on-chain for composability
-        metadata = [
-            # Store agent name on-chain (as per ERC-8004 spec example)
-            # Uses AGENT_NAME env var if provided, otherwise from agent card, otherwise AGENT_ID
-            {"key": "name", "value": Web3.to_hex(text=final_agent_name)},
-            # Store category and type for filtering/discovery
-            {"key": "category", "value": Web3.to_hex(text=labels.get("category", "compute"))},
-            {"key": "type", "value": Web3.to_hex(text=labels.get("type", "trader"))},
-            # Store full agent card JSON as bytes for on-chain access
-            # Convert agent card dict to JSON string, then to bytes, then to hex
-            {"key": "agentCard", "value": Web3.to_hex(text=json.dumps(agent_card_data, separators=(',', ':')))},
-        ]
+        # Official contract: register(string agentURI, MetadataEntry[] metadata)
+        # MetadataEntry field names are defined by the ABI struct — see _build_metadata_entries.
+        metadata = _build_metadata_entries(
+            agent_name=final_agent_name,
+            agent_card_data=agent_card_data,
+        )
 
         # If we found an existing agent ID, check for changes and update if needed (idempotent)
         # CRITICAL: Use 'is not None' instead of truthy check because agent_id 0 is valid!

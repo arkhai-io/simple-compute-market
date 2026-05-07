@@ -1,0 +1,44 @@
+{{- $it := .Values.integrationTests -}}
+{{- $repo := $it.repository -}}
+{{- if and (not $repo) .Values.global -}}
+  {{- $repo = .Values.global.imageRepository | default "" -}}
+{{- end -}}
+{{- $itImage := "" -}}
+{{- if $repo -}}
+  {{- $itImage = printf "%s/%s:%s" $repo $it.name $it.tag -}}
+{{- else -}}
+  {{- $itImage = printf "%s:%s" $it.name $it.tag -}}
+{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "validate-contracts.fullname" . }}-chain-environment-test
+  labels:
+    {{- include "validate-contracts.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: {{ include "validate-contracts.fullname" . }}-environment-test
+      image: {{ $itImage }}
+      imagePullPolicy: {{ $it.pullPolicy }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - contracts
+      env:
+        # Override the dockerfile defaults so the container loads config-helm.yml
+        # from the mounted ConfigMap alongside the baked-in config.yml.
+        - name: ACTIVE_PROFILES
+          value: "helm"
+      volumeMounts:
+        - name: helm-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+  volumes:
+    - name: helm-config
+      configMap:
+        name: {{ .Release.Name }}-test-config

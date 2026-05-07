@@ -156,8 +156,8 @@ make e2e-mock-happy       # deal lifecycle: create → negotiate → escrow → 
 make e2e-mock-failure     # provisioning fails → orders reopen
 ```
 
-Each target uses the CLI (`market order create`, `market order history`,
-`market order show --negotiation --credentials --show-password`) to drive
+Each target uses the CLI (`market listing create`, `market listing history`,
+`market listing show --negotiation --credentials --show-password`) to drive
 order creation and inspect results. CLI output is captured in the pytest log.
 
 To run against an already-running stack without lifecycle management:

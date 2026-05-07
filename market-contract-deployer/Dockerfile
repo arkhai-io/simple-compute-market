@@ -27,7 +27,7 @@ RUN npx hardhat compile
 # connects directly to Anvil via viem (bypasses Hardhat's in-process EVM).
 COPY custom-chains.ts scripts/custom-chains.ts
 COPY scripts/upgrade-local.ts scripts/upgrade-local.ts
-COPY deploy-local.sh deploy_alkahest.py alkahest-transactions.json .
+COPY deploy-local.sh deploy_alkahest.py seed_agent.py alkahest-transactions.json ./
 RUN chmod +x deploy-local.sh
 
 ENV RPC_URL=http://anvil:8545

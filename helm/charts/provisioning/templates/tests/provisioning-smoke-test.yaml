@@ -1,0 +1,49 @@
+{{- $itValues := dict -}}
+{{- if .Values.global -}}
+  {{- $itValues = .Values.global.integrationTests | default dict -}}
+{{- end -}}
+{{- $rootIt := ((.Values).integrationTests) | default dict -}}
+{{- $itRepo := $rootIt.repository | default ($itValues.repository | default "") -}}
+{{- if and (not $itRepo) .Values.global -}}
+  {{- $itRepo = .Values.global.imageRepository | default "" -}}
+{{- end -}}
+{{- $itName := $rootIt.name | default ($itValues.name | default "arkhai") -}}
+{{- $itTag  := $rootIt.tag  | default ($itValues.tag  | default "integration-tests") -}}
+{{- $itPull := $rootIt.pullPolicy | default ($itValues.pullPolicy | default "IfNotPresent") -}}
+{{- $itImage := "" -}}
+{{- if $itRepo -}}
+  {{- $itImage = printf "%s/%s:%s" $itRepo $itName $itTag -}}
+{{- else -}}
+  {{- $itImage = printf "%s:%s" $itName $itTag -}}
+{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "provisioning.fullname" . }}-smoke-test
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: {{ include "provisioning.fullname" . }}-smoke-test
+      image: {{ $itImage }}
+      imagePullPolicy: {{ $itPull }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - provisioning_smoke
+      env:
+        - name: ACTIVE_PROFILES
+          value: "helm"
+      volumeMounts:
+        - name: test-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+  volumes:
+    - name: test-config
+      configMap:
+        name: {{ .Release.Name }}-test-config

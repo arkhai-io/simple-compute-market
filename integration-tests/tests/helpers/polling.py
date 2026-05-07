@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any, Callable, TypeVar
 
-from tests.helpers.agent_client import query_registry_orders
+from tests.helpers.registry_helpers import query_registry_orders
 from tests.helpers.sqlite_reader import get_all_orders
 
 log = logging.getLogger(__name__)

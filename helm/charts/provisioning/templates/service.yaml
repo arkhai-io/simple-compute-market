@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provisioning.fullname" . }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.server.type }}
+  selector:
+    {{- include "provisioning.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.server.port }}
+      targetPort: http
+      protocol: TCP

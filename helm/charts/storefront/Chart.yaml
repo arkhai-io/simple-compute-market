@@ -1,0 +1,6 @@
+apiVersion: v2
+name: storefront
+description: Provider-side storefront server for the Arkhai market (host order book, accept buyer requests, run negotiations)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -19,7 +19,17 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
+    "httpx>=0.27",            # used by test_provisioning_smoke and SyncRegistryClient
+    # Workspace dependency: tests use the real discovery/matching logic,
+    # not a re-implementation. Keeps test behavior aligned with storefront behavior.
+    "arkhai-storefront-client>=0.5.4",
+    "arkhai-registry-client>=0.3.0",
+    "market-service>=0.1.0",
+	"market-storefront>=0.1.0",
+    "provisioning-service>=0.1.4",
 ]
+
+[tool.uv]
 
 [project.optional-dependencies]
 dev = [
@@ -30,7 +40,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["arkhai_e2e_tests"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -42,12 +52,33 @@ addopts = [
 ]
 markers = [
     "contracts: Tests that validate on-chain contract state",
-    "wallets: Tests that validate wallet balances and key pairs",
+    "wallets: Smoke tests that validate wallet balances and key pairs",
+    "registry: Smoke tests that validate the Registry REST API",
+    "storefront: Smoke tests that validate seller storefront",
+	"provisioning: Smoke tests for the deployed provisioning service REST API",
+    "e2e_deal: Full buyer-seller deal lifecycle e2e test",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",
     "mock_provisioning_happy: Happy path — deal completes successfully",
     "mock_provisioning_failure: Failure path — provisioning fails, orders reopen",
+    "roles_layer_external: External layer — EVM chain + deployed contracts",
+    "roles_layer_market: Market layer — marketplace operator's registry service",
+    "roles_layer_seller: Seller layer — a seller's agent + provisioning service",
+    "roles_layer_buyer: Buyer layer — a buyer's agent",
+    "roles_discovery_seller: Discovery stage, seller perspective",
+    "roles_discovery_buyer: Discovery stage, buyer perspective",
+    "roles_negotiation_seller: Negotiation stage, seller perspective",
+    "roles_negotiation_buyer: Negotiation stage, buyer perspective",
+    "roles_settlement_seller: Settlement stage, seller perspective",
+    "roles_settlement_buyer: Settlement stage, buyer perspective",
+    "roles_provision_seller: Provision stage, seller perspective",
+    "roles_provision_buyer: Provision stage, buyer perspective",
+    "roles_post_settlement_seller: Post-settlement stage, seller perspective",
+    "roles_post_settlement_buyer: Post-settlement stage, buyer perspective",
+    "roles_cli_buy: CLI tests for `market buy` (consumes seller inventory; run separately from roles_stage_*)",
+    "roles_cli_provide: CLI tests for `market provide` (imports a throwaway CSV, publishes orders)",
+    
 ]
 log_cli = true
 log_cli_level = "INFO"
