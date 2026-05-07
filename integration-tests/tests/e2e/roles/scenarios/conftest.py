@@ -154,11 +154,46 @@ def registry_client():
 
 
 @pytest.fixture(scope="module")
-def provisioning_client():
-    """Canonical SyncProvisioningClient."""
+def seller_agent_id(storefront_admin_client) -> str:
+    """Discover the seller's live canonical agent ID from /api/v1/system/status.
+
+    Reads the storefront's own agent_id rather than hardcoding it in the test
+    config. The hardcoded form (e.g. ``eip155:31337:0x8004A8...:2``) is only
+    deterministic on a strictly-fresh anvil where account #2 registers second
+    against IdentityRegistry — any prior registration shifts the on-chain ID
+    and breaks the auth header used by /admin/* and the provisioning service.
+
+    The storefront exposes its live agent_id at the top level of
+    /api/v1/system/status (added in 40b1b9b alongside chain_id and
+    resource_count diagnostics). Falls back to the configured ``SELLER.AGENT_ID``
+    if the status endpoint doesn't include one (e.g. seller hasn't completed
+    registration yet — should be a clear test failure rather than a silent
+    skip).
+    """
+    status = storefront_admin_client.get_system_status()
+    live = getattr(status, "agent_id", None)
+    if live:
+        return str(live)
+    fallback = str(settings.SELLER.AGENT_ID or "")
+    if not fallback:
+        pytest.skip(
+            "Storefront has no live agent_id and SELLER.AGENT_ID is not configured. "
+            "Either run `market-storefront register` against the storefront, "
+            "or set SELLER.AGENT_ID in config-<profile>.yml."
+        )
+    return fallback
+
+
+@pytest.fixture(scope="module")
+def provisioning_client(seller_agent_id):
+    """Canonical SyncProvisioningClient.
+
+    Uses the seller's live agent ID for X-Agent-ID — provisioning jobs created
+    by the storefront carry the seller's agent_id, so reads need the same value
+    or get a 403.
+    """
     from client.provisioning_client import SyncProvisioningClient
     url = _require_setting(settings.PROVISIONING.API_URL, "PROVISIONING.API_URL")
-    seller_agent_id = str(settings.SELLER.AGENT_ID or "")
     client = SyncProvisioningClient(
         base_url=url,
         agent_id=seller_agent_id or None,
@@ -233,6 +268,31 @@ def ensure_storefront_resumed(storefront_admin_client):
             log.info("[teardown] Cleared residual global pause on storefront")
     except Exception as exc:
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def release_reserved_resources(storefront_admin_client):
+    """Release any leftover reserved compute resources after the module runs.
+
+    Stage 09 reserves a compute VM for the deal but mocked provisioning never
+    expires the lease, so the resource stays in ``reserved`` state forever.
+    Without this teardown, a second back-to-back e2e_deal run against the
+    same stack hits ``no_matching_inventory`` at stage 05b.
+
+    Production storefronts release reservations via ``resource_poller`` once
+    the lease expires; this fixture is the test-only equivalent for the
+    short-circuited mock flow.
+    """
+    yield
+    try:
+        result = storefront_admin_client.admin_release_reservations()
+        if result.released_count:
+            log.info(
+                "[teardown] Released %d reserved resource(s): %s",
+                result.released_count, result.resource_ids,
+            )
+    except Exception as exc:
+        log.warning("[teardown] Could not release reserved resources: %s", exc)
 
 
 # ---------------------------------------------------------------------------

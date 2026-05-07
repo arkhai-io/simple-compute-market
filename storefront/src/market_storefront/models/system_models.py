@@ -79,6 +79,17 @@ class AdminPauseResponse(BaseModel):
     message: str = ""
 
 
+class ReleaseReservationsResponse(BaseModel):
+    """Response from POST /api/v1/admin/portfolio/release-reservations.
+
+    ``released_count`` is the number of resources transitioned from
+    ``reserved`` back to ``available``. ``resource_ids`` lists each one.
+    Both are zero/empty when no resources were reserved at call time.
+    """
+    released_count: int
+    resource_ids: list[str]
+
+
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int

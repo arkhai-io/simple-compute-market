@@ -59,6 +59,7 @@ from storefront_client.models import (
     NegotiationActionResponse,
     AdminPauseResponse,
     AdminStatusResponse,
+    ReleaseReservationsResponse,
     RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
@@ -1197,6 +1198,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return AdminStatusResponse.from_dict(resp.json())
+
+    def admin_release_reservations(self) -> "ReleaseReservationsResponse":
+        """POST /admin/portfolio/release-reservations  (admin key required).
+
+        Forces every ``reserved`` compute resource back to ``available``.
+        Intended for e2e teardown between back-to-back runs against the same
+        stack (mocked provisioning never expires leases) and for operator
+        recovery after a provisioner crash.
+        """
+        return ReleaseReservationsResponse.from_dict(
+            self._post(
+                "/api/v1/admin/portfolio/release-reservations",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
 
     def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""

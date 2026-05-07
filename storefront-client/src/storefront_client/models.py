@@ -639,6 +639,24 @@ class AdminStatusResponse:
 
 
 @dataclass
+class ReleaseReservationsResponse:
+    """Response from POST /api/v1/admin/portfolio/release-reservations."""
+
+    released_count: int = 0
+    resource_ids: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReleaseReservationsResponse":
+        known = {"released_count", "resource_ids"}
+        return cls(
+            released_count=int(d.get("released_count", 0)),
+            resource_ids=list(d.get("resource_ids", []) or []),
+            extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
 class EvaluateNegotiateResponse:
     """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
 
