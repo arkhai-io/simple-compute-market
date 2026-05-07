@@ -74,3 +74,16 @@ class EvaluateSettleResponse(BaseModel):
     vm_target: str | None = None
     required_attributes: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
+
+
+class SettleWaitResponse(BaseModel):
+    """Response for GET /api/v1/admin/settle/{escrow_uid}/wait.
+
+    Mirrors the registry-agent wait pattern: ``ready`` indicates whether a
+    terminal state was reached before the timeout; ``status`` is the raw
+    settlement job status (``ready`` | ``failed`` | ``provisioning``).
+    """
+    ready: bool
+    status: str
+    provisioning_job_id: str | None = None
+    elapsed_ms: int

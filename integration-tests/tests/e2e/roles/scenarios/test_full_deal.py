@@ -58,7 +58,7 @@ Phase 8 — Settlement pipeline
 Phase 9 — Provisioning completion
   09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
   09b  Settlement ready + credentials + listing closed:
-         wait_for_stage_event(provision, fulfilled)
+         wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
          GET /api/v1/listings/{id} → status=accepted or closed
 """
@@ -951,19 +951,23 @@ class TestStage09b_SettlementReadyAndCredentials:
         """Settlement status=ready, tenant credentials present, listing accepted/closed.
 
         Combined observation of all post-provisioning state:
-          1. wait_for_stage_event(provision, fulfilled) — event-driven, no sleep
+          1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
           2. GET /settle/{uid}/status → status=ready + tenant_credentials
           3. GET /api/v1/listings/{id} → status=accepted or closed
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
                       "seller_listing_id")
 
-        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
-        _wait(
-            storefront_admin_client,
-            "provision", "fulfilled",
-            listing_id=deal_state.seller_listing_id,
-            timeout=20.0,
+        wait_result = storefront_admin_client.wait_for_settlement(
+            deal_state.real_escrow_uid,
+            timeout=60.0,
+        )
+        assert wait_result.ready, (
+            f"Settlement did not reach a terminal state within timeout. "
+            f"Last status: {wait_result.status!r} (elapsed {wait_result.elapsed_ms}ms)"
+        )
+        assert wait_result.status == "ready", (
+            f"Settlement reached terminal state but status is not 'ready': {wait_result.status!r}"
         )
 
         status_resp = storefront_client.get_settle_status(

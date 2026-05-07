@@ -41,6 +41,9 @@ service_url = "http://provisioning:8081"
 # Compose-stack default. Tests override via PROVISIONING_MODE shell env
 # pulled into compose with ${PROVISIONING_MODE:-http}.
 mode        = "http"
+# Mock provisioning responds in milliseconds; poll frequently so the
+# storefront sees job completion quickly without waiting the 15s production default.
+poll_interval = 1
 
 [seller.negotiation]
 policy_mode = "bisection"    # was "rl" — rl requires torch which is not installed in test env

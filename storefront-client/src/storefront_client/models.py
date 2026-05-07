@@ -753,3 +753,22 @@ class SettleStatusResponse:
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,
             extra={k: v for k, v in d.items() if k not in known},
         )
+
+
+@dataclass
+class SettleWaitResponse:
+    """Response from GET /api/v1/admin/settle/{escrow_uid}/wait."""
+
+    ready: bool = False
+    status: str = ""
+    provisioning_job_id: str | None = None
+    elapsed_ms: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SettleWaitResponse":
+        return cls(
+            ready=bool(d.get("ready", False)),
+            status=str(d.get("status", "")),
+            provisioning_job_id=d.get("provisioning_job_id"),
+            elapsed_ms=int(d.get("elapsed_ms", 0)),
+        )

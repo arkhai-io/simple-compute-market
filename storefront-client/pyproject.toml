@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-storefront-client"
-version = "0.5.6"
+version = "0.5.7"
 description = "Async and sync HTTP clients for the Arkhai storefront REST API."
 requires-python = ">=3.12"
 dependencies = [

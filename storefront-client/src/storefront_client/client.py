@@ -63,6 +63,7 @@ from storefront_client.models import (
     RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
+    SettleWaitResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -797,6 +798,35 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
 
+    async def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        *,
+        timeout: float = 60.0,
+    ) -> SettleWaitResponse:
+        """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until the
+        settlement job reaches ``ready`` or ``failed``, or until *timeout* seconds
+        elapse. Returns immediately if the job is already terminal.
+
+        Callers must check ``result.ready`` and ``result.status``:
+        - ``ready=True, status="ready"`` — provisioning complete, credentials available
+        - ``ready=True, status="failed"`` — provisioning failed
+        - ``ready=False`` — timed out before reaching a terminal state
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
+        resp = await self._client.get(
+            f"/api/v1/admin/settle/{escrow_uid}/wait",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleWaitResponse.from_dict(resp.json())
+
     async def verify_settle(
         self,
         escrow_uid: str,
@@ -1526,6 +1556,35 @@ class SyncStorefrontClient(_StorefrontClientBase):
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
+
+    def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        *,
+        timeout: float = 60.0,
+    ) -> SettleWaitResponse:
+        """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until the
+        settlement job reaches ``ready`` or ``failed``, or until *timeout* seconds
+        elapse. Returns immediately if the job is already terminal.
+
+        Callers must check ``result.ready`` and ``result.status``:
+        - ``ready=True, status="ready"`` — provisioning complete, credentials available
+        - ``ready=True, status="failed"`` — provisioning failed
+        - ``ready=False`` — timed out before reaching a terminal state
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
+        resp = self._client.get(
+            f"/api/v1/admin/settle/{escrow_uid}/wait",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,  # client timeout slightly longer than server cap
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleWaitResponse.from_dict(resp.json())
 
     def verify_settle(
         self,
