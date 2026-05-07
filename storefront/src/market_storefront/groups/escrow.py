@@ -221,20 +221,25 @@ def show_cmd(
         ..., "--escrow-uid", "-u",
         help="0x-prefixed escrow UID to inspect.",
     ),
-    eas_address: Optional[str] = typer.Option(
-        None, "--eas-address",
-        help="Override EAS contract address (default: resolve from "
-             "chain.alkahest_address_config_path).",
-    ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
     Inputs come from CONFIG (chain.rpc_url, chain.name,
     chain.alkahest_address_config_path) — same TOML the seller uses
     at runtime. Symmetric with `market escrow show` on the buyer side.
+
+    The EAS contract address is read from the alkahest address config
+    (no longer overridable from the CLI — the alkahest SDK keeps every
+    obligation/EAS/arbiter address in one config object).
     """
     from ..utils.config import CONFIG
-    from service.clients.eas import read_attestation_sync, resolve_eas_address
+    from service.clients.eas import read_attestation_sync
+    from service.clients.alkahest import (
+        get_alkahest_network,
+        prewarm_alkahest_address_config_cache,
+        resolve_alkahest_address_config,
+    )
+    from alkahest_py import AlkahestClient
 
     rpc = CONFIG.chain_rpc_url
     if not rpc:
@@ -243,23 +248,35 @@ def show_cmd(
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
-
-    eas = eas_address
-    if not eas:
-        try:
-            eas = resolve_eas_address(
-                CONFIG.chain_name,
-                config_path=CONFIG.alkahest_address_config_path,
-            )
-        except ValueError as exc:
-            typer.secho(str(exc), err=True, fg=typer.colors.RED)
-            raise typer.Exit(2)
+    if not CONFIG.agent_priv_key:
+        typer.secho(
+            "Missing seller.private_key in config.toml — alkahest_py "
+            "requires a wallet key even for read-only inspection.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
 
     try:
-        att = read_attestation_sync(rpc, eas, escrow_uid)
+        prewarm_alkahest_address_config_cache(CONFIG.alkahest_address_config_path)
+        address_config = resolve_alkahest_address_config(
+            get_alkahest_network(CONFIG.chain_name),
+            config_path=CONFIG.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+
+    client = AlkahestClient(
+        private_key=CONFIG.agent_priv_key,
+        rpc_url=rpc,
+        address_config=address_config,
+    )
+
+    try:
+        att = read_attestation_sync(client, escrow_uid)
     except Exception as exc:
         typer.secho(
-            f"IEAS.getAttestation failed: {exc}",
+            f"alkahest get_obligation failed: {exc}",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc

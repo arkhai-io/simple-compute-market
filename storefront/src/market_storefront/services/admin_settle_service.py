@@ -33,12 +33,20 @@ class AdminSettleService:
 
     Args:
         sqlite_client: SQLite client for DB lookups (read-only in this service).
-        config:        Application CONFIG (for chain_rpc_url, chain_name, etc.).
+        config:        Application CONFIG (for chain name + alkahest config path).
+        alkahest_client: Optional ``AlkahestClient`` used by ``verify_escrow_dry_run``
+            to read the on-chain escrow attestation. May be None on hosts where
+            chain config is incomplete; verify_escrow_dry_run will surface that as
+            ``valid=False, reason="AlkahestClient not configured"`` rather than
+            crash.
     """
 
-    def __init__(self, sqlite_client: Any, config: Any) -> None:
+    def __init__(
+        self, sqlite_client: Any, config: Any, alkahest_client: Any = None
+    ) -> None:
         self._db = sqlite_client
         self._config = config
+        self._alkahest = alkahest_client
 
     async def verify_escrow_dry_run(
         self,
@@ -71,7 +79,7 @@ class AdminSettleService:
                 agreed_price=agreed_price,
                 agreed_duration_seconds=agreed_duration_seconds,
                 listing=listing,
-                chain_rpc_url=self._config.chain_rpc_url,
+                alkahest_client=self._alkahest,
                 chain_name=self._config.chain_name,
                 alkahest_address_config_path=self._config.alkahest_address_config_path,
             )

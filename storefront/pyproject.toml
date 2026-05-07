@@ -81,8 +81,12 @@ market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
-# alkahest-py >= 0.3.0 ships wheels for all four target platforms via PyPI
-# (PR #62 in arkhai-io/alkahest exposed the named chain configs to Python).
+# alkahest-py from git until the next published wheel includes:
+#   PR #63 — get_obligation across every escrow client (typed envelope+data)
+#   PR #64 — http RPC URL support + transport-aware event waiters
+# The git pin builds from sdks/py via maturin; dev/CI need the Rust toolchain
+# (already required by alkahest's Cargo.lock and present in our Docker images).
+alkahest-py = { git = "https://github.com/arkhai-io/alkahest", rev = "af76bf193fe74acc4ddd4ed57966780dde761a34", subdirectory = "sdks/py" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

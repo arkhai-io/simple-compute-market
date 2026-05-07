@@ -32,7 +32,7 @@ TOKEN_LOWER = TOKEN.lower()
 ARBITER = "0xbbbb000000000000000000000000000000000000"
 ARBITER_LOWER = ARBITER.lower()
 EAS = "0xcccc000000000000000000000000000000000000"
-RPC = "http://localhost:8545"
+_DUMMY_CLIENT = object()
 CHAIN = "anvil"
 CONFIG_PATH = "/tmp/addresses.json"
 
@@ -67,12 +67,11 @@ def _good_attestation(**overrides: Any) -> FakeAttestation:
 
 
 def _make_seams(attestation: FakeAttestation) -> dict[str, Any]:
-    async def _read(rpc, eas, uid):
+    async def _read(client, uid):
         return attestation
 
     return {
         "read_attestation_fn": _read,
-        "resolve_eas_address_fn": lambda chain, *, config_path=None: EAS,
         "get_recipient_arbiter_fn": lambda chain, *, config_path=None: ARBITER,
     }
 
@@ -160,7 +159,7 @@ class TestVerifyHappyPath:
             agreed_price=1000,
             agreed_duration_seconds=3600,
             listing=_good_listing(),
-            chain_rpc_url=RPC,
+            alkahest_client=_DUMMY_CLIENT,
             chain_name=CHAIN,
             alkahest_address_config_path=CONFIG_PATH,
             **_make_seams(att),
@@ -175,7 +174,7 @@ class TestVerifyHappyPath:
             agreed_price=1000,
             agreed_duration_seconds=3600,  # min = 1000
             listing=_good_listing(),
-            chain_rpc_url=RPC,
+            alkahest_client=_DUMMY_CLIENT,
             chain_name=CHAIN,
             alkahest_address_config_path=CONFIG_PATH,
             **_make_seams(att),
@@ -190,7 +189,7 @@ class TestVerifyHappyPath:
             agreed_price=1000,
             agreed_duration_seconds=3600,
             listing=_good_listing(),
-            chain_rpc_url=RPC,
+            alkahest_client=_DUMMY_CLIENT,
             chain_name=CHAIN,
             alkahest_address_config_path=CONFIG_PATH,
             now_unix=10**12,
@@ -204,15 +203,15 @@ class TestVerifyHappyPath:
 
 class TestVerifyRejections:
     @pytest.mark.asyncio
-    async def test_rejects_when_no_rpc_configured(self):
-        with pytest.raises(EscrowVerificationError, match="rpc_url is not configured"):
+    async def test_rejects_when_no_alkahest_client(self):
+        with pytest.raises(EscrowVerificationError, match="AlkahestClient not configured"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
                 seller_wallet=SELLER,
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url="",
+                alkahest_client=None,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(_good_attestation()),
@@ -227,31 +226,16 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(_good_attestation()),
             )
 
-    @pytest.mark.asyncio
-    async def test_rejects_when_eas_address_unresolvable(self):
-        def _broken_resolve(*a, **k):
-            raise ValueError("no eas for this chain")
-
-        seams = _make_seams(_good_attestation())
-        seams["resolve_eas_address_fn"] = _broken_resolve
-        with pytest.raises(EscrowVerificationError, match="Cannot resolve EAS"):
-            await verify_escrow_for_settlement(
-                escrow_uid="0xdead",
-                seller_wallet=SELLER,
-                agreed_price=1000,
-                agreed_duration_seconds=3600,
-                listing=_good_listing(),
-                chain_rpc_url=RPC,
-                chain_name=CHAIN,
-                alkahest_address_config_path=CONFIG_PATH,
-                **seams,
-            )
+    # The EAS-address-unresolvable case is gone: alkahest_client carries
+    # the EAS address inside its address_config — by the time we reach
+    # the verifier, EAS is already resolved (or AlkahestClient
+    # construction would have failed).
 
     @pytest.mark.asyncio
     async def test_rejects_when_arbiter_unresolvable(self):
@@ -267,7 +251,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **seams,
@@ -287,7 +271,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **seams,
@@ -303,7 +287,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -319,7 +303,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -335,7 +319,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 now_unix=2000,  # > expiration_time
@@ -352,7 +336,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -369,7 +353,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -385,7 +369,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -402,7 +386,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),
@@ -418,7 +402,7 @@ class TestVerifyRejections:
                 agreed_price=1000,
                 agreed_duration_seconds=3600,
                 listing=_good_listing(),
-                chain_rpc_url=RPC,
+                alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
                 **_make_seams(att),

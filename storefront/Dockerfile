@@ -47,7 +47,7 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS run
 USER root
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo && \
+    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo git && \
     curl -s https://install.zerotier.com | bash && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/lib/zerotier-one && \

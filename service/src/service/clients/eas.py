@@ -1,43 +1,27 @@
-"""EVM-side helpers for reading EAS attestations.
+"""EAS attestation reads for ERC-20 escrow verification.
 
-Used by `market escrow show` and `market-storefront escrow show` to
-inspect on-chain escrow state by uid, and by the storefront's pre-
-settlement verifier. Wraps web3.py around the vendored `IEAS` ABI;
-the alkahest_py SDK does not expose a direct "get attestation by uid"
-method (its `get_escrow_attestation` indexes by fulfillment uid, the
-wrong direction).
+Used by `market escrow show`, `market-storefront escrow show`, and the
+storefront's pre-settlement verifier (`verify_escrow_for_settlement`).
 
-The ERC-20 escrow obligation payload is decoded inline against its
-known schema:
+The actual chain interaction is delegated to alkahest-py's
+``client.erc20.escrow.non_tierable.get_obligation(uid)`` — that method
+returns both the EAS attestation envelope and the typed
+``ERC20EscrowObligation.ObligationData`` payload in one call, against
+the alkahest-deployed obligation contract. This module just reshapes the
+result into the ``EscrowAttestation`` dataclass that the verifier and
+CLI commands expect.
 
-    address arbiter, bytes demand, address token, uint256 amount
-
-(matches `ERC20EscrowObligation.ObligationData` in the alkahest
-contracts).
-
-The reader is async-first (`AsyncWeb3`); a thin `read_attestation_sync`
-wrapper exists for the typer CLI sites that can't easily go async.
+Other obligation types (ERC-721, ERC-1155, native, bundle, attestation)
+have analogous ``client.<asset>.escrow.<variant>.get_obligation`` paths;
+we only wrap ERC-20 here because that's the only obligation type the
+seller currently accepts.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Optional
-
-from eth_abi import decode as abi_decode
-from web3 import AsyncWeb3
-from web3.providers import AsyncHTTPProvider
-from web3.providers.persistent.websocket import WebSocketProvider
-
-from service.abi import load_abi
-
-
-# Tuple-encoded layout of ERC20EscrowObligation.ObligationData.
-# Wrapped in a struct ABI type because alkahest emits the data via
-# `abi.encode(obligationData)` (a single struct argument) — that form
-# carries a leading 32-byte tuple-offset that flat-tuple decoding rejects.
-_ERC20_ESCROW_OBLIGATION_TYPES = ("(address,bytes,address,uint256)",)
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -53,9 +37,11 @@ class EscrowAttestation:
     ref_uid: str
     revocable: bool
     raw_data: bytes
-    # Decoded ObligationData fields (None when raw_data couldn't be
-    # decoded under the ERC-20 escrow schema — e.g. the uid points at
-    # an obligation of a different type).
+    # Decoded ERC-20 escrow obligation fields. ``decode_error`` is
+    # populated when the attestation is not an ERC-20 escrow obligation
+    # (the alkahest call would have raised before we reach this struct,
+    # so in practice this field is always None — kept for verifier
+    # compatibility and future obligation-type dispatch).
     arbiter: Optional[str] = None
     demand: Optional[bytes] = None
     token: Optional[str] = None
@@ -71,106 +57,45 @@ class EscrowAttestation:
         return self.expiration_time if self.expiration_time != 0 else None
 
 
-def _is_websocket_url(rpc_url: str) -> bool:
-    return rpc_url.strip().startswith(("ws://", "wss://"))
+async def read_attestation(client: Any, uid: str) -> EscrowAttestation:
+    """Fetch an ERC-20 escrow attestation by uid through alkahest-py.
 
+    ``client`` is an ``alkahest_py.AlkahestClient`` already bound to the
+    target chain via its ``rpc_url`` and ``address_config``. The call
+    targets the non-tierable ERC-20 escrow obligation contract — that's
+    the only obligation type the seller's verifier currently accepts.
 
-def _hex(b: bytes | str) -> str:
-    if isinstance(b, str):
-        return b if b.startswith("0x") else "0x" + b
-    return "0x" + b.hex()
-
-
-async def read_attestation(
-    rpc_url: str,
-    eas_address: str,
-    uid: str,
-) -> EscrowAttestation:
-    """Fetch an EAS attestation by uid via `IEAS.getAttestation(bytes32)`.
-
-    Decodes the data payload against the ERC-20 escrow obligation schema.
-    Other obligation shapes will populate `decode_error` and leave the
-    decoded fields as None — the caller can still display the raw
-    attestation envelope.
+    For other obligation types, callers should reach into
+    ``client.<asset>.escrow.<variant>.get_obligation`` directly rather
+    than going through this wrapper.
     """
-    uid_bytes = bytes.fromhex(uid[2:] if uid.startswith("0x") else uid)
-    if len(uid_bytes) != 32:
-        raise ValueError(
-            f"Attestation uid must be 32 bytes (0x + 64 hex chars); got {uid!r}"
-        )
-
-    s = rpc_url.strip()
-    eas_addr = AsyncWeb3.to_checksum_address(eas_address)
-    abi = load_abi("IEAS")
-    if _is_websocket_url(s):
-        # WebSocketProvider is a persistent provider — needs the async
-        # context manager to open the socket. For a one-shot read this
-        # opens, calls, and closes within the same `await`.
-        async with AsyncWeb3(WebSocketProvider(s)) as w3:
-            contract = w3.eth.contract(address=eas_addr, abi=abi)
-            raw = await contract.functions.getAttestation(uid_bytes).call()
-    else:
-        w3 = AsyncWeb3(AsyncHTTPProvider(s))
-        contract = w3.eth.contract(address=eas_addr, abi=abi)
-        raw = await contract.functions.getAttestation(uid_bytes).call()
-    # IEAS.Attestation tuple layout (per eas-contracts/IEAS.sol):
-    #   uid, schema, time, expirationTime, revocationTime,
-    #   refUID, recipient, attester, revocable, data
-    (
-        ret_uid,
-        schema,
-        time,
-        expiration_time,
-        revocation_time,
-        ref_uid,
-        recipient,
-        attester,
-        revocable,
-        data,
-    ) = raw
-
-    arbiter = demand = token = amount = None
-    decode_error: Optional[str] = None
-    try:
-        (decoded,) = abi_decode(
-            list(_ERC20_ESCROW_OBLIGATION_TYPES),
-            bytes(data),
-        )
-        arbiter, demand, token, amount = decoded
-    except Exception as exc:
-        decode_error = (
-            f"Could not decode data as ERC20EscrowObligation: {exc}. "
-            f"Likely a different obligation type."
-        )
+    decoded = await client.erc20.escrow.non_tierable.get_obligation(uid)
+    att = decoded["attestation"]
+    data = decoded["data"]
 
     return EscrowAttestation(
-        uid=_hex(ret_uid),
-        schema=_hex(schema),
-        attester=AsyncWeb3.to_checksum_address(attester),
-        recipient=AsyncWeb3.to_checksum_address(recipient),
-        time=int(time),
-        expiration_time=int(expiration_time),
-        revocation_time=int(revocation_time),
-        ref_uid=_hex(ref_uid),
-        revocable=bool(revocable),
-        raw_data=bytes(data),
-        arbiter=AsyncWeb3.to_checksum_address(arbiter) if arbiter else None,
-        demand=bytes(demand) if demand else None,
-        token=AsyncWeb3.to_checksum_address(token) if token else None,
-        amount=int(amount) if amount is not None else None,
-        decode_error=decode_error,
+        uid=att.uid,
+        schema=att.schema,
+        attester=att.attester,
+        recipient=att.recipient,
+        time=int(att.time),
+        expiration_time=int(att.expiration_time),
+        revocation_time=int(att.revocation_time),
+        ref_uid=att.ref_uid,
+        revocable=bool(att.revocable),
+        raw_data=bytes(att.data),
+        arbiter=data.arbiter,
+        demand=bytes(data.demand) if data.demand is not None else None,
+        token=data.token,
+        amount=int(data.amount) if data.amount is not None else None,
+        decode_error=None,
     )
 
 
-def read_attestation_sync(
-    rpc_url: str,
-    eas_address: str,
-    uid: str,
-) -> EscrowAttestation:
-    """Sync wrapper around ``read_attestation`` for CLI call sites that
-    aren't running inside an event loop. Don't call from async code —
-    use ``read_attestation`` directly there."""
-    return asyncio.run(read_attestation(rpc_url, eas_address, uid))
+def read_attestation_sync(client: Any, uid: str) -> EscrowAttestation:
+    """Sync wrapper around :func:`read_attestation` for typer CLI sites
+    that aren't running inside an event loop. Don't call from async code."""
+    return asyncio.run(read_attestation(client, uid))
 
 
 def resolve_eas_address(
@@ -182,6 +107,12 @@ def resolve_eas_address(
 
     Override JSON wins; otherwise pull from the SDK's
     ``DefaultExtensionConfig.for_chain`` (alkahest-py >= 0.3.0).
+
+    Kept here as a static lookup for CLI commands that print the address
+    or need to override it explicitly. The actual EAS address is also
+    embedded inside the ``AlkahestClient`` via ``address_config``, so
+    runtime callers that already have a client can read it from there
+    instead of going through this function.
     """
     from service.clients.alkahest import (
         NETWORK_ANVIL,

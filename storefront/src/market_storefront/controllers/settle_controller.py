@@ -121,7 +121,11 @@ class AdminSettleController:
     ) -> None:
         from market_storefront.utils.config import CONFIG
         from market_storefront.services.admin_settle_service import AdminSettleService
-        self._svc = AdminSettleService(sqlite_client=db, config=CONFIG)
+        self._svc = AdminSettleService(
+            sqlite_client=db,
+            config=CONFIG,
+            alkahest_client=_container.resolved_alkahest_client,
+        )
 
     @admin_settle_router.post(
         "/{escrow_uid}/verify",

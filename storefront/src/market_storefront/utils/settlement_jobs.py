@@ -94,7 +94,7 @@ async def start_settlement_job(
         agreed_price=int(thread["agreed_price"]),
         agreed_duration_seconds=int(duration_for_amount),
         listing=our_order_dict,
-        chain_rpc_url=CONFIG.chain_rpc_url,
+        alkahest_client=alkahest_client,
         chain_name=CONFIG.chain_name,
         alkahest_address_config_path=CONFIG.alkahest_address_config_path,
     )

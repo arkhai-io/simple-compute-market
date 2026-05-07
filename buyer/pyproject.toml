@@ -48,6 +48,8 @@ pufferlib = ["setuptools", "Cython", "numpy<2"]
 [tool.uv.sources]
 market-service = { path = "../service", editable = true }
 market-policy = { path = "../policy", editable = true }
+# See storefront/pyproject.toml for the rationale on the git pin.
+alkahest-py = { git = "https://github.com/arkhai-io/alkahest", rev = "af76bf193fe74acc4ddd4ed57966780dde761a34", subdirectory = "sdks/py" }
 torch = [
   { index = "pytorch-cpu" },
 ]

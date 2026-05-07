@@ -103,12 +103,11 @@ async def verify_escrow_for_settlement(
     agreed_price: int,
     agreed_duration_seconds: int,
     listing: dict[str, Any],
-    chain_rpc_url: str,
+    alkahest_client: Any,
     chain_name: str,
     alkahest_address_config_path: str | None,
     now_unix: int | None = None,
     read_attestation_fn: Any = None,
-    resolve_eas_address_fn: Any = None,
     get_recipient_arbiter_fn: Any = None,
 ) -> None:
     """Read the on-chain escrow and assert it matches the negotiated terms.
@@ -125,13 +124,18 @@ async def verify_escrow_for_settlement(
     listing:
         The seller's listing row (after ``load_listing``); used to extract
         the negotiated token contract address.
-    chain_rpc_url, chain_name, alkahest_address_config_path:
-        Chain config; used to look up the EAS contract address and the
-        canonical RecipientArbiter address for this chain.
+    alkahest_client:
+        An ``AlkahestClient`` already bound to the right chain; we read the
+        escrow attestation through its ``erc20.escrow.non_tierable.get_obligation``
+        path. The client knows its own RPC URL + EAS address, so we no longer
+        thread those through.
+    chain_name, alkahest_address_config_path:
+        Used only to look up the canonical ``RecipientArbiter`` address —
+        a static config lookup, not an RPC call.
     now_unix:
         Override for ``time.time()`` (test seam).
-    read_attestation_fn / resolve_eas_address_fn / get_recipient_arbiter_fn:
-        Test seams. Default to the real ``service.clients`` helpers.
+    read_attestation_fn / get_recipient_arbiter_fn:
+        Test seams. Default to the real helpers.
 
     Raises
     ------
@@ -140,14 +144,12 @@ async def verify_escrow_for_settlement(
     """
     if read_attestation_fn is None:
         from service.clients.eas import read_attestation as read_attestation_fn  # type: ignore[no-redef]
-    if resolve_eas_address_fn is None:
-        from service.clients.eas import resolve_eas_address as resolve_eas_address_fn  # type: ignore[no-redef]
     if get_recipient_arbiter_fn is None:
         from service.clients.alkahest import get_recipient_arbiter as get_recipient_arbiter_fn  # type: ignore[no-redef]
 
-    if not chain_rpc_url:
+    if alkahest_client is None:
         raise EscrowVerificationError(
-            "chain.rpc_url is not configured — cannot verify escrow on chain"
+            "AlkahestClient not configured — cannot verify escrow on chain"
         )
 
     expected_token = _normalize_address(_extract_token_contract_from_listing(listing))
@@ -157,15 +159,6 @@ async def verify_escrow_for_settlement(
         raise EscrowVerificationError(
             "Seller wallet address is not configured — cannot verify escrow recipient"
         )
-
-    try:
-        eas_address = resolve_eas_address_fn(
-            chain_name, config_path=alkahest_address_config_path
-        )
-    except Exception as exc:
-        raise EscrowVerificationError(
-            f"Cannot resolve EAS address for chain={chain_name!r}: {exc}"
-        ) from exc
 
     try:
         expected_arbiter = _normalize_address(
@@ -179,9 +172,7 @@ async def verify_escrow_for_settlement(
         ) from exc
 
     try:
-        attestation = await read_attestation_fn(
-            chain_rpc_url, eas_address, escrow_uid
-        )
+        attestation = await read_attestation_fn(alkahest_client, escrow_uid)
     except Exception as exc:
         raise EscrowVerificationError(
             f"Failed to read escrow {escrow_uid} from chain: {exc}"
