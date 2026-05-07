@@ -13,6 +13,7 @@ None of these methods write to the registry or produce side-effects beyond SQLit
 from __future__ import annotations
 
 import asyncio
+import httpx
 import importlib
 import logging
 import os
@@ -310,8 +311,6 @@ class SystemService:
         Uses a 2-second timeout so the status endpoint stays fast.
         Only called from /api/v1/system/status — never from /health.
         """
-        import httpx
-
         url = (CONFIG.indexer_url or "").rstrip("/")
         if not url:
             return "unconfigured"
@@ -332,8 +331,6 @@ class SystemService:
         Returns 'ok', 'unconfigured', 'agent_not_found', 'owner_mismatch',
         or an error string.
         """
-        import httpx
-
         url = (CONFIG.indexer_url or "").rstrip("/")
         if not url:
             return "unconfigured"

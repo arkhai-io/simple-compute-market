@@ -29,11 +29,14 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
+import httpx
+
 from market_storefront.utils.config import CONFIG, _resolve_chain_id
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
+from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
 from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
 from market_storefront.utils.order_matching import match_orders
 from market_policy.negotiation_thread import (
@@ -112,8 +115,6 @@ async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) ->
     buyer calls before escrow creation to name the seller as the demanded
     recipient under RecipientArbiter.
     """
-    import httpx
-
     url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
     try:
         async with httpx.AsyncClient(timeout=timeout) as http:
@@ -388,7 +389,6 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    from models.vm_request_model import CreateVmRequest
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         CONFIG.provisioning_service_url,
@@ -442,7 +442,6 @@ async def _do_provision(
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service."""
-    from models.vm_request_model import ScheduleVmExpiryRequest
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
         CONFIG.provisioning_service_url,

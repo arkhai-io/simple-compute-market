@@ -102,7 +102,7 @@ async def _poll_once(sqlite_client: SQLiteClient, provisioning_fn: Any = None) -
         # resource below — a provisioning outage must not strand leases.
         result: dict[str, Any] | None = None
         try:
-            from service.clients.provisioning import ProvisioningClient
+            from client.provisioning_client import ProvisioningClient
             client = ProvisioningClient(
                 CONFIG.provisioning_service_url,
                 agent_id=CONFIG.onchain_agent_id,
