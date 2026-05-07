@@ -52,10 +52,11 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         seller="http://seller:8001",
     )
     # Seed at least one matching available compute resource so the
-    # seller's "refuse offers I can't fulfill" guard
-    # (sync_negotiation._has_matching_available_inventory) lets the
-    # negotiation start. Tests that want to exercise the refusal path
-    # should call _seed_listing without this fixture, or override.
+    # seller's pre-thread guard composite (default
+    # `negotiate_request.default.v1` → `negotiate.guard.has_matching_inventory`)
+    # lets the negotiation start. Tests that want to exercise the
+    # refusal path should call _seed_listing without this fixture, or
+    # override the composite's components list to drop the inventory guard.
     await db.upsert_resource(
         resource_id=f"res-{listing_id}",
         resource_type="compute.gpu",

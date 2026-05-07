@@ -27,6 +27,7 @@ from market_storefront.models.domain_models import (
     DecisionContext,
     ListingCreatedEvent,
     ListingClosedEvent,
+    NegotiationRequestedEvent,
     ComputeResource,
     ComputeResourcePortfolio,
 )
@@ -68,6 +69,85 @@ def get_compute_resource_portfolio(
     except Exception as exc:
         logger.warning("[COMPUTE POLICY] Failed to validate compute portfolio: %s", exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Pre-thread negotiation guards (used inside the negotiate_request composite)
+# ---------------------------------------------------------------------------
+
+
+def _coerce_resource_dict(value: Any) -> dict[str, Any]:
+    """Listings persist offer/demand as JSON text; normalise to a dict."""
+    import json
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+@policy_callable("negotiate.guard.has_matching_inventory")
+def negotiate_guard_has_matching_inventory(
+    context: DecisionContext,
+) -> DomainAction | None:
+    """Veto a negotiation request when no available portfolio resource
+    matches the listing's offer (gpu_model + region).
+
+    Designed for the *immediate-deal* seller: capacity must exist now.
+    Operators running futures or off-chain-matched flows drop this guard
+    from the negotiate-request composite — the seller will then accept
+    threads against listings whose inventory will materialise later.
+
+    Read-only against ``context.available_resources["resources"]``
+    (which ``policy_service._consult_policy`` populates from
+    ``db.list_resources()``); never mutates state. Listings whose offer
+    isn't compute (token-for-token swaps) are treated as always-
+    fulfillable here — capacity for those is enforced by the chain.
+    """
+    if not isinstance(context.event, NegotiationRequestedEvent):
+        return None
+
+    offer = _coerce_resource_dict(context.event.listing.get("offer_resource"))
+    if "gpu_model" not in offer:
+        return None  # not a compute listing — pass through
+
+    required: dict[str, Any] = {}
+    for key in ("region", "gpu_model"):
+        v = offer.get(key)
+        if v is not None:
+            required[key] = v
+
+    portfolio_raw = (context.available_resources or {}).get("resources") or []
+    for row in portfolio_raw:
+        # ``available_resources`` carries the full SQLite row — only
+        # ``state == 'available'`` rows are eligible. The portfolio loader
+        # in ``policy_service`` returns every resource regardless of
+        # state, so we filter here.
+        if (row.get("state") or "").strip() != "available":
+            continue
+        attrs = row.get("attributes")
+        if isinstance(attrs, str):
+            try:
+                import json
+                attrs = json.loads(attrs)
+            except (ValueError, TypeError):
+                continue
+        if not isinstance(attrs, dict):
+            continue
+        if all(attrs.get(k) == v for k, v in required.items()):
+            return None  # found a match, pass
+
+    return DomainAction(
+        action_type=DomainActionType.REJECT_OFFER,
+        parameters={
+            "reason": "no_matching_inventory",
+            "listing_id": context.event.listing_id,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -43,8 +43,10 @@ from market_storefront.models.domain_models import (
     EventType,  # retained for future callers; not used in evaluate path
     ListingClosedEvent,
     ListingCreatedEvent,
+    NegotiationRequestedEvent,
     ResourceAlertRequest,
 )
+from service.schemas import ActionType as DomainActionType
 from market_storefront.models.system_models import PolicyEvaluateResponse
 from market_storefront.policy.seeding import ComputePolicySeeder
 from market_storefront.utils.action_executor import (
@@ -172,6 +174,50 @@ class PolicyService:
         )
         await self._record_decision(event, action)
         return outcome.get("result", {"status": "closed", "listing_id": listing_id})
+
+    # ------------------------------------------------------------------
+    # Pre-thread negotiation guards
+    # ------------------------------------------------------------------
+
+    async def consult_pre_negotiation_guards(
+        self,
+        *,
+        listing_id: str,
+        listing: dict[str, Any],
+        proposed_price: int | None,
+        requested_duration_seconds: int | None,
+    ) -> str | None:
+        """Run the seeded negotiate-request policy and return a rejection
+        reason on veto, or ``None`` to let the negotiation proceed.
+
+        Called by ``sync_negotiation`` before any thread state mutates.
+        The policy composite (default ``negotiate_request.default.v1``)
+        chains guard callables; the first one that returns
+        ``REJECT_OFFER`` wins, and its ``parameters["reason"]`` becomes
+        the rejection reason — translated to HTTP 409
+        (``OfferUnfulfillableError``) by the caller.
+
+        Operators who want different gating (e.g. accept all requests
+        for a futures-deal flow, or add per-buyer trust checks) edit the
+        policy composite's components list — no code changes needed.
+        """
+        event = NegotiationRequestedEvent(
+            event_id=f"negotiate_request_{uuid.uuid4()}",
+            source=self._config.base_url_override or "",
+            listing_id=listing_id,
+            listing=listing,
+            proposed_price=proposed_price,
+            requested_duration_seconds=requested_duration_seconds,
+        )
+        action = await self._consult_policy(event)
+        if action is None:
+            return None
+        action_type = action.action_type
+        action_value = action_type.value if hasattr(action_type, "value") else str(action_type)
+        if action_value == DomainActionType.REJECT_OFFER.value:
+            reason = (action.parameters or {}).get("reason")
+            return str(reason) if reason else "rejected"
+        return None
 
     # ------------------------------------------------------------------
     # Policy dry-run from raw dicts (for /api/v1/system/policy/evaluate)

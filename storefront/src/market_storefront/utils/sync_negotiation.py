@@ -84,54 +84,6 @@ terminal and accepting a new negotiation would race with whatever owns
 the listing (settlement, refund, etc.)."""
 
 
-def _coerce_resource_dict(value: Any) -> dict[str, Any]:
-    """Normalise listing offer/demand_resource — DB stores as JSON text."""
-    import json
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except (ValueError, TypeError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
-
-
-async def _has_matching_available_inventory(
-    sqlite_client: Any, listing_dict: dict[str, Any],
-) -> bool:
-    """Return True if at least one available compute resource matches the
-    listing's offer attributes (gpu_model + region).
-
-    Read-only — does not reserve. Mirrors the matching logic
-    ``reserve_available_compute_vm`` uses at fulfillment time, but
-    short-circuits as soon as one match is found and never mutates state.
-
-    Listings whose offer isn't compute (e.g. token-for-token swaps) are
-    treated as always-fulfillable here; capacity for those is enforced
-    by the chain side, not by local inventory.
-    """
-    offer = _coerce_resource_dict(listing_dict.get("offer_resource"))
-    if "gpu_model" not in offer:
-        return True
-    required: dict[str, Any] = {}
-    for key in ("region", "gpu_model"):
-        v = offer.get(key)
-        if v is not None:
-            required[key] = v
-    rows = await sqlite_client.list_resources(
-        resource_type="compute.gpu", state="available",
-    )
-    for row in rows:
-        attrs = row.get("attributes") or {}
-        if not isinstance(attrs, dict):
-            continue
-        if all(attrs.get(k) == v for k, v in required.items()):
-            return True
-    return False
-
-
 def _maybe_register_rl_strategy() -> None:
     """Trigger self-registration of the torch RL strategy.
 
@@ -260,6 +212,7 @@ async def start_sync_negotiation(
     requested_duration_seconds: int | None = None,
     our_base_url: str,
     their_agent_url: str,
+    policy_service: Any = None,
 ) -> dict[str, Any]:
     """Create a new negotiation thread and return the seller's first response.
 
@@ -296,20 +249,33 @@ async def start_sync_negotiation(
     if not our_order_dict:
         raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
-    # Refuse offers we can't fulfill — checked before any thread state is
-    # written so the buyer gets a clean error and can try a different
-    # listing without the seller carrying an orphan thread.
+    # Listing-state-machine invariant — kept as infrastructure rather
+    # than policy. Accepting a negotiation against a closed/in-flight
+    # listing breaks consistency with whatever flow already owns it
+    # (settlement, refund, etc.); operators don't get to opt out.
     listing_status = (our_order_dict.get("status") or "").strip()
     if listing_status not in _LIVE_LISTING_STATUSES:
         raise OfferUnfulfillableError(
             f"listing_not_open (status={listing_status!r})",
             listing_id=our_listing_id,
         )
-    if not await _has_matching_available_inventory(sqlite_client, our_order_dict):
-        raise OfferUnfulfillableError(
-            "no_matching_inventory",
+
+    # Run the seeded pre-thread guard composite. The default for an
+    # immediate-deal seller checks that available portfolio inventory
+    # matches the listing's offer; operators running futures or
+    # off-chain-matched flows swap the composite's components and the
+    # same code path lets non-immediate negotiations through.
+    if policy_service is not None:
+        rejection_reason = await policy_service.consult_pre_negotiation_guards(
             listing_id=our_listing_id,
+            listing=our_order_dict,
+            proposed_price=their_proposed_price,
+            requested_duration_seconds=requested_duration_seconds,
         )
+        if rejection_reason:
+            raise OfferUnfulfillableError(
+                rejection_reason, listing_id=our_listing_id,
+            )
 
     # Validate the buyer's duration ask against the listing's advertised
     # ceiling. NULL on the listing means "unlimited" — accept any positive

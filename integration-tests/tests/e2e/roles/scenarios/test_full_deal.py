@@ -82,10 +82,10 @@ pytestmark = pytest.mark.e2e_deal
 
 OFFER_RESOURCE = {
     # Matches the inventory seeded by docker-compose's ww1-machine.csv so
-    # the seller's "refuse offers I can't fulfill" guard at /negotiate/new
-    # (sync_negotiation._has_matching_available_inventory) finds a
-    # matching available resource. Update both this constant and
-    # ww1-machine.csv together if the seeded GPU changes.
+    # the seller's pre-thread guard composite at /negotiate/new (default
+    # `negotiate_request.default.v1` chaining `negotiate.guard.has_matching_inventory`)
+    # finds a matching available resource. Update both this constant
+    # and ww1-machine.csv together if the seeded GPU changes.
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,

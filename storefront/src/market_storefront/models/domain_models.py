@@ -476,6 +476,14 @@ class EventType(str, Enum):
     ORDER_CREATE = "order_create"
     ORDER_CLOSE = "order_close"
     RESOURCE_IMBALANCE = "resource_imbalance"
+    # Pre-thread guard hook: fires from /negotiate/new before any state
+    # mutation. The seeded policy composite runs guards (e.g. inventory
+    # match) and emits REJECT_OFFER with a reason on veto, mapped to
+    # HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
+    # who want to support non-immediate deals (futures, off-chain matched)
+    # swap the composite's components for an empty list or an alternative
+    # guard set.
+    NEGOTIATION_REQUESTED = "negotiation_requested"
 DomainEvent = CoreDomainEvent
 
 
@@ -514,6 +522,37 @@ class ListingClosedEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)
     listing_id: str = Field(description="Listing ID to close")
+
+
+class NegotiationRequestedEvent(DomainEvent):
+    """Event triggered when a buyer asks to start a negotiation thread.
+
+    Fires from ``sync_negotiation.start_negotiation_for_remote_request``
+    before any thread state is written. The seeded guard composite runs
+    against this event; if any guard returns ``REJECT_OFFER``, the flow
+    short-circuits with HTTP 409 and the reason in the action's
+    ``parameters["reason"]``.
+
+    Carries the listing dict (so guards can read ``offer_resource``,
+    ``demand_resource``, ``status``, etc.) plus the buyer's proposed
+    price and duration so price-/duration-aware guards can be written
+    later without another schema change.
+    """
+
+    event_type: EventType = Field(default=EventType.NEGOTIATION_REQUESTED)
+    listing_id: str = Field(description="Listing the buyer wants to negotiate against")
+    listing: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full listing row from sqlite (offer_resource, demand_resource, status, ...)",
+    )
+    proposed_price: int | None = Field(
+        default=None,
+        description="Buyer's initial price proposal (None if not provided)",
+    )
+    requested_duration_seconds: int | None = Field(
+        default=None,
+        description="Buyer's requested lease duration in seconds (None if not provided)",
+    )
 
 
 class ResourceAlertRequest(BaseModel):

@@ -34,6 +34,7 @@ class ComputePolicySeeder:
         EventType.RESOURCE_IMBALANCE.value,
         EventType.ORDER_CREATE.value,
         EventType.ORDER_CLOSE.value,
+        EventType.NEGOTIATION_REQUESTED.value,
     }
 
     def __init__(self, policy_store: PolicyStore, sqlite_client: SQLiteClient, agent_id: str):
@@ -91,6 +92,26 @@ class ComputePolicySeeder:
             )
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save order_close policy: {e}")
+
+        # Pre-thread negotiation guard composite. The default for an
+        # immediate-deal seller checks inventory match. Operators running
+        # non-immediate (futures / off-chain matched) flows replace the
+        # composite's components in their seller config so the same
+        # /negotiate/new endpoint behaves differently without code changes.
+        try:
+            await self._policy_store.save_policy(
+                agent_id=self._agent_id,
+                policy_name="negotiate_request_default_v1",
+                trigger_type=EventType.NEGOTIATION_REQUESTED.value,
+                callable_ref="negotiate_request.default.v1",
+            )
+            await self._sqlite_client.save_policy_composite(
+                agent_id=self._agent_id,
+                policy_name="negotiate_request.default.v1",
+                components=["negotiate.guard.has_matching_inventory"],
+            )
+        except Exception as e:
+            logger.warning(f"[POLICY SEED] Failed to save negotiate_request policy: {e}")
 
     async def ensure_for_event_type(self, event_type: str | Any) -> None:
         trigger_type = event_type.value if hasattr(event_type, "value") else str(event_type)

@@ -123,7 +123,9 @@ class TestVerifyEscrowDryRun:
         assert call_kwargs["agreed_price"] == 7000
         assert call_kwargs["agreed_duration_seconds"] == 7200
         assert call_kwargs["listing"] is _LISTING_ROW
-        assert call_kwargs["chain_rpc_url"] == config.chain_rpc_url
+        # alkahest_client is now passed instead of chain_rpc_url; the
+        # service constructor receives it as None when not configured.
+        assert "alkahest_client" in call_kwargs
 
 
 # ---------------------------------------------------------------------------
