@@ -1002,6 +1002,16 @@ async def fulfill_compute_obligation(
                 escrow_uid=escrow_uid,
                 provisioning_job_id=job_id,
             )
+            # Emitted after the DB write so a consumer waking on this event
+            # is guaranteed to see provisioning_job_id populated.
+            stage_event(
+                "provision", "job_submitted",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                vm_host=reserved_vm_host,
+                provisioning_job_id=job_id,
+            )
 
         provision_result = await _do_provision(
             ssh_public_key,

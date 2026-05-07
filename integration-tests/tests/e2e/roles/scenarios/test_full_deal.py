@@ -892,23 +892,23 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         )
         deal_state.settlement_submitted = True
 
-        # Wait for the storefront to queue the provisioning job (event-driven)
+        # job_submitted fires after the DB row is updated; resource_reserved
+        # would race because it fires before the job_id exists.
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
         _wait(
             storefront_admin_client,
-            "provision", "resource_reserved",
+            "provision", "job_submitted",
             listing_id=deal_state.seller_listing_id,
             timeout=15.0,
         )
 
-        # Single read — event confirms job is queued
         status_resp = storefront_client.get_settle_status(
             deal_state.real_escrow_uid,
             buyer_address=buyer_config["wallet_address"],
         )
         prov_job_id = status_resp.provisioning_job_id
         assert prov_job_id, (
-            f"provisioning_job_id absent from settle status after resource_reserved event: "
+            f"provisioning_job_id absent from settle status after job_submitted event: "
             f"{status_resp}"
         )
 
