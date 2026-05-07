@@ -189,10 +189,15 @@ def buyer_config() -> dict[str, str]:
         getattr(settings.BUYER, "SSH_PUBLIC_KEY", None) or
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKeyForE2E test@e2e"
     )
-    # rpc_url for on-chain escrow creation — falls back to the global rpc.url setting
-    rpc_url = str(
-        getattr(settings.BUYER, "CHAIN_RPC_URL", None) or
-        getattr(settings, "RPC", {}).get("URL", "ws://localhost:8545")
+    # rpc_url for on-chain escrow creation (AlkahestClient — ws:// only).
+    # Resolved from buyer.chain_rpc_url, then rpc.url, then a localhost default.
+    # Local/docker profiles set buyer.chain_rpc_url explicitly to a WebSocket
+    # endpoint; the helper coerces http(s) fallback values for staging profiles
+    # that only define rpc.url.
+    rpc_url = (
+        str(settings.BUYER.CHAIN_RPC_URL or "").strip()
+        or str(settings.RPC.URL or "").strip()
+        or "ws://localhost:8545"
     )
     return {
         "private_key": private_key,
