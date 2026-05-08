@@ -1,10 +1,11 @@
 """Pre-settlement on-chain escrow verification.
 
 The seller's storefront calls ``verify_escrow_for_settlement`` before any
-provisioning side-effect. It reads the EAS attestation by uid and asserts
-that each escrow property matches the negotiated terms:
+provisioning side-effect. It reads the EAS attestation by uid via
+alkahest-py's ``client.erc20.escrow.non_tierable.get_obligation(uid)`` and
+asserts that each escrow property matches the negotiated terms:
 
-  - attestation exists and decodes as ERC-20 escrow
+  - attestation exists and decodes as ERC-20 escrow (alkahest raises otherwise)
   - not revoked
   - not expired (``expiration_time == 0`` is the "no expiry" sentinel)
   - arbiter == canonical RecipientArbiter for this chain
@@ -15,9 +16,9 @@ that each escrow property matches the negotiated terms:
 On any mismatch raises ``EscrowVerificationError``. The caller maps that to
 HTTP 400 — settlement aborts before any DB side effect or chain write.
 
-The ``read_attestation`` reader and ``encode_recipient_demand`` /
-``get_recipient_arbiter`` helpers are imported lazily to keep this module
-testable without web3 or the alkahest address config.
+``get_recipient_arbiter`` is imported lazily so the module stays unit-
+testable without the alkahest address config; the obligation read itself
+is also injectable as a test seam.
 """
 from __future__ import annotations
 
@@ -107,7 +108,7 @@ async def verify_escrow_for_settlement(
     chain_name: str,
     alkahest_address_config_path: str | None,
     now_unix: int | None = None,
-    read_attestation_fn: Any = None,
+    get_obligation_fn: Any = None,
     get_recipient_arbiter_fn: Any = None,
 ) -> None:
     """Read the on-chain escrow and assert it matches the negotiated terms.
@@ -134,16 +135,18 @@ async def verify_escrow_for_settlement(
         a static config lookup, not an RPC call.
     now_unix:
         Override for ``time.time()`` (test seam).
-    read_attestation_fn / get_recipient_arbiter_fn:
-        Test seams. Default to the real helpers.
+    get_obligation_fn / get_recipient_arbiter_fn:
+        Test seams. ``get_obligation_fn`` defaults to alkahest's
+        ``client.erc20.escrow.non_tierable.get_obligation`` and is
+        expected to return alkahest's decoded shape: a mapping with
+        ``"attestation"`` (EAS envelope) and ``"data"`` (typed
+        ERC20EscrowObligation.ObligationData) entries.
 
     Raises
     ------
     EscrowVerificationError
         On any mismatch. Caller should map to HTTP 400.
     """
-    if read_attestation_fn is None:
-        from service.clients.eas import read_attestation as read_attestation_fn  # type: ignore[no-redef]
     if get_recipient_arbiter_fn is None:
         from service.clients.alkahest import get_recipient_arbiter as get_recipient_arbiter_fn  # type: ignore[no-redef]
 
@@ -171,61 +174,59 @@ async def verify_escrow_for_settlement(
             f"Cannot resolve RecipientArbiter address for chain={chain_name!r}: {exc}"
         ) from exc
 
+    if get_obligation_fn is None:
+        async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
+            return await client.erc20.escrow.non_tierable.get_obligation(uid)
+
     try:
-        attestation = await read_attestation_fn(alkahest_client, escrow_uid)
+        decoded = await get_obligation_fn(alkahest_client, escrow_uid)
     except Exception as exc:
         raise EscrowVerificationError(
             f"Failed to read escrow {escrow_uid} from chain: {exc}"
         ) from exc
 
-    if attestation is None:
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} not found on chain"
-        )
+    att = decoded["attestation"]
+    obligation = decoded["data"]
 
-    if attestation.decode_error:
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} is not an ERC-20 escrow obligation: "
-            f"{attestation.decode_error}"
-        )
-
-    if attestation.is_revoked:
+    if att.revocation_time:
         raise EscrowVerificationError(
             f"Escrow {escrow_uid} is revoked (revocation_time="
-            f"{attestation.revocation_time})"
+            f"{att.revocation_time})"
         )
 
     now = int(now_unix) if now_unix is not None else int(time.time())
-    if attestation.expiration_time and attestation.expiration_time <= now:
+    if att.expiration_time and int(att.expiration_time) <= now:
         raise EscrowVerificationError(
-            f"Escrow {escrow_uid} expired at {attestation.expiration_time} "
+            f"Escrow {escrow_uid} expired at {att.expiration_time} "
             f"(now={now})"
         )
 
-    actual_arbiter = _normalize_address(attestation.arbiter)
+    actual_arbiter = _normalize_address(obligation.arbiter)
     if actual_arbiter != expected_arbiter:
         raise EscrowVerificationError(
             f"Escrow arbiter mismatch: chain={actual_arbiter} "
             f"expected RecipientArbiter={expected_arbiter}"
         )
 
-    decoded_recipient = _decode_recipient_from_demand(attestation.demand or b"")
+    raw_demand = bytes(obligation.demand) if obligation.demand is not None else b""
+    decoded_recipient = _decode_recipient_from_demand(raw_demand)
     if decoded_recipient != expected_seller:
         raise EscrowVerificationError(
             f"Escrow demand recipient mismatch: chain={decoded_recipient} "
             f"expected seller={expected_seller}"
         )
 
-    actual_token = _normalize_address(attestation.token)
+    actual_token = _normalize_address(obligation.token)
     if actual_token != expected_token:
         raise EscrowVerificationError(
             f"Escrow token mismatch: chain={actual_token} "
             f"expected={expected_token}"
         )
 
-    if attestation.amount is None or attestation.amount < expected_amount_min:
+    actual_amount = int(obligation.amount) if obligation.amount is not None else None
+    if actual_amount is None or actual_amount < expected_amount_min:
         raise EscrowVerificationError(
-            f"Escrow amount insufficient: chain={attestation.amount} "
+            f"Escrow amount insufficient: chain={actual_amount} "
             f"expected>={expected_amount_min} "
             f"(agreed_price={agreed_price}/hour × duration="
             f"{agreed_duration_seconds}s)"
@@ -234,6 +235,6 @@ async def verify_escrow_for_settlement(
     logger.info(
         "[ESCROW_VERIFY] escrow=%s ok: amount=%s token=%s arbiter=%s "
         "recipient=%s exp=%s",
-        escrow_uid, attestation.amount, actual_token, actual_arbiter,
-        decoded_recipient, attestation.expiration_time,
+        escrow_uid, actual_amount, actual_token, actual_arbiter,
+        decoded_recipient, att.expiration_time,
     )

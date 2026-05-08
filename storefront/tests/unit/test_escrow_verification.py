@@ -1,10 +1,10 @@
 """Unit tests for storefront.utils.escrow_verification.
 
 Covers each rejection case (missing chain config, missing rpc, chain
-read failure, decode error, revoked, expired, wrong arbiter, wrong
-demand recipient, wrong token, insufficient amount) and the happy path.
+read failure, revoked, expired, wrong arbiter, wrong demand recipient,
+wrong token, insufficient amount) and the happy path.
 
-The on-chain ``read_attestation`` reader is injected via a test seam so
+The alkahest ``get_obligation`` call is injected via a test seam so
 tests are fully offline — no web3, no eth-abi setup beyond what
 ``encode_recipient_demand`` already needs.
 """
@@ -45,33 +45,45 @@ def _encode_recipient(address: str) -> bytes:
 
 
 @dataclass
-class FakeAttestation:
+class _FakeAttestationEnvelope:
+    """Mirrors the fields the verifier reads off alkahest's
+    ``decoded["attestation"]`` (the EAS envelope)."""
+    revocation_time: int = 0
+    expiration_time: int = 0
+
+
+@dataclass
+class _FakeObligationData:
+    """Mirrors alkahest's ``decoded["data"]`` typed
+    ``ERC20EscrowObligation.ObligationData`` payload."""
     arbiter: str | None = ARBITER
     demand: bytes | None = None
     token: str | None = TOKEN
     amount: int | None = 1_000_000
-    revocation_time: int = 0
-    expiration_time: int = 0
-    decode_error: str | None = None
-
-    @property
-    def is_revoked(self) -> bool:
-        return self.revocation_time != 0
 
 
-def _good_attestation(**overrides: Any) -> FakeAttestation:
-    base = FakeAttestation(demand=_encode_recipient(SELLER))
+def _good_obligation(**overrides: Any) -> dict[str, Any]:
+    """Build a {'attestation': ..., 'data': ...} dict in alkahest's
+    return shape, applying overrides to whichever sub-record carries
+    each field."""
+    att = _FakeAttestationEnvelope()
+    data = _FakeObligationData(demand=_encode_recipient(SELLER))
     for k, v in overrides.items():
-        setattr(base, k, v)
-    return base
+        if hasattr(att, k):
+            setattr(att, k, v)
+        elif hasattr(data, k):
+            setattr(data, k, v)
+        else:
+            raise AttributeError(f"unknown override: {k}")
+    return {"attestation": att, "data": data}
 
 
-def _make_seams(attestation: FakeAttestation) -> dict[str, Any]:
-    async def _read(client, uid):
-        return attestation
+def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
+    async def _get_obligation(client, uid):
+        return decoded
 
     return {
-        "read_attestation_fn": _read,
+        "get_obligation_fn": _get_obligation,
         "get_recipient_arbiter_fn": lambda chain, *, config_path=None: ARBITER,
     }
 
@@ -152,7 +164,7 @@ class TestDecodeRecipientFromDemand:
 class TestVerifyHappyPath:
     @pytest.mark.asyncio
     async def test_passes_when_everything_matches(self):
-        att = _good_attestation()
+        att = _good_obligation()
         await verify_escrow_for_settlement(
             escrow_uid="0xdead",
             seller_wallet=SELLER,
@@ -167,7 +179,7 @@ class TestVerifyHappyPath:
 
     @pytest.mark.asyncio
     async def test_passes_when_amount_exceeds_minimum(self):
-        att = _good_attestation(amount=10_000)  # buyer overpaid
+        att = _good_obligation(amount=10_000)  # buyer overpaid
         await verify_escrow_for_settlement(
             escrow_uid="0xdead",
             seller_wallet=SELLER,
@@ -182,7 +194,7 @@ class TestVerifyHappyPath:
 
     @pytest.mark.asyncio
     async def test_passes_when_no_expiration(self):
-        att = _good_attestation(expiration_time=0)
+        att = _good_obligation(expiration_time=0)
         await verify_escrow_for_settlement(
             escrow_uid="0xdead",
             seller_wallet=SELLER,
@@ -214,7 +226,7 @@ class TestVerifyRejections:
                 alkahest_client=None,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
-                **_make_seams(_good_attestation()),
+                **_make_seams(_good_obligation()),
             )
 
     @pytest.mark.asyncio
@@ -229,7 +241,7 @@ class TestVerifyRejections:
                 alkahest_client=_DUMMY_CLIENT,
                 chain_name=CHAIN,
                 alkahest_address_config_path=CONFIG_PATH,
-                **_make_seams(_good_attestation()),
+                **_make_seams(_good_obligation()),
             )
 
     # The EAS-address-unresolvable case is gone: alkahest_client carries
@@ -242,7 +254,7 @@ class TestVerifyRejections:
         def _broken(*a, **k):
             raise ValueError("no arbiter for this chain")
 
-        seams = _make_seams(_good_attestation())
+        seams = _make_seams(_good_obligation())
         seams["get_recipient_arbiter_fn"] = _broken
         with pytest.raises(EscrowVerificationError, match="Cannot resolve RecipientArbiter"):
             await verify_escrow_for_settlement(
@@ -262,8 +274,8 @@ class TestVerifyRejections:
         async def _broken_read(*a, **k):
             raise RuntimeError("rpc unreachable")
 
-        seams = _make_seams(_good_attestation())
-        seams["read_attestation_fn"] = _broken_read
+        seams = _make_seams(_good_obligation())
+        seams["get_obligation_fn"] = _broken_read
         with pytest.raises(EscrowVerificationError, match="Failed to read escrow"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -278,24 +290,8 @@ class TestVerifyRejections:
             )
 
     @pytest.mark.asyncio
-    async def test_rejects_when_decode_error(self):
-        att = _good_attestation(decode_error="not an erc20 escrow obligation")
-        with pytest.raises(EscrowVerificationError, match="not an ERC-20 escrow obligation"):
-            await verify_escrow_for_settlement(
-                escrow_uid="0xdead",
-                seller_wallet=SELLER,
-                agreed_price=1000,
-                agreed_duration_seconds=3600,
-                listing=_good_listing(),
-                alkahest_client=_DUMMY_CLIENT,
-                chain_name=CHAIN,
-                alkahest_address_config_path=CONFIG_PATH,
-                **_make_seams(att),
-            )
-
-    @pytest.mark.asyncio
     async def test_rejects_when_revoked(self):
-        att = _good_attestation(revocation_time=10**12)
+        att = _good_obligation(revocation_time=10**12)
         with pytest.raises(EscrowVerificationError, match="is revoked"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -311,7 +307,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_expired(self):
-        att = _good_attestation(expiration_time=1000)
+        att = _good_obligation(expiration_time=1000)
         with pytest.raises(EscrowVerificationError, match="expired"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -328,7 +324,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_arbiter_mismatch(self):
-        att = _good_attestation(arbiter="0xdeadbeef00000000000000000000000000000000")
+        att = _good_obligation(arbiter="0xdeadbeef00000000000000000000000000000000")
         with pytest.raises(EscrowVerificationError, match="arbiter mismatch"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -345,7 +341,7 @@ class TestVerifyRejections:
     @pytest.mark.asyncio
     async def test_rejects_when_demand_recipient_is_someone_else(self):
         # Buyer encoded a DIFFERENT seller's address into the demand.
-        att = _good_attestation(demand=_encode_recipient(BUYER))
+        att = _good_obligation(demand=_encode_recipient(BUYER))
         with pytest.raises(EscrowVerificationError, match="recipient mismatch"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -361,7 +357,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_token_mismatch(self):
-        att = _good_attestation(token="0xdeadbeef00000000000000000000000000000000")
+        att = _good_obligation(token="0xdeadbeef00000000000000000000000000000000")
         with pytest.raises(EscrowVerificationError, match="token mismatch"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -378,7 +374,7 @@ class TestVerifyRejections:
     @pytest.mark.asyncio
     async def test_rejects_when_amount_insufficient(self):
         # Need >= 1000 (price=1000, duration=3600). Provide 999.
-        att = _good_attestation(amount=999)
+        att = _good_obligation(amount=999)
         with pytest.raises(EscrowVerificationError, match="amount insufficient"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",
@@ -394,7 +390,7 @@ class TestVerifyRejections:
 
     @pytest.mark.asyncio
     async def test_rejects_when_amount_is_none(self):
-        att = _good_attestation(amount=None)
+        att = _good_obligation(amount=None)
         with pytest.raises(EscrowVerificationError, match="amount insufficient"):
             await verify_escrow_for_settlement(
                 escrow_uid="0xdead",

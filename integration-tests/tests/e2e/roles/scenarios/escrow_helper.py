@@ -2,9 +2,10 @@
 
 Stage 07 of the full-deal scenario needs an EAS attestation that the
 storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
-placeholder uid would be rejected by ``read_attestation``. So we drive
-alkahest-py against the local Anvil from the buyer's wallet, the same
-way ``buyer.market_buyer.escrow_client.make_create_escrow_fn`` does in
+placeholder uid would be rejected by alkahest's ``get_obligation``
+call. So we drive alkahest-py against the local Anvil from the
+buyer's wallet, the same way
+``buyer.market_buyer.escrow_client.make_create_escrow_fn`` does in
 production — but inlined here because integration-tests doesn't
 depend on the buyer wheel.
 

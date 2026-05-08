@@ -232,8 +232,8 @@ def show_cmd(
     (no longer overridable from the CLI — the alkahest SDK keeps every
     obligation/EAS/arbiter address in one config object).
     """
+    import asyncio
     from ..utils.config import CONFIG
-    from service.clients.eas import read_attestation_sync
     from service.clients.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
@@ -273,13 +273,20 @@ def show_cmd(
     )
 
     try:
-        att = read_attestation_sync(client, escrow_uid)
+        decoded = asyncio.run(
+            client.erc20.escrow.non_tierable.get_obligation(escrow_uid)
+        )
     except Exception as exc:
         typer.secho(
             f"alkahest get_obligation failed: {exc}",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
+
+    att = decoded["attestation"]
+    obligation = decoded["data"]
+    is_revoked = bool(att.revocation_time)
+    demand_bytes = bytes(obligation.demand) if obligation.demand is not None else None
 
     console = Console()
     head = Table.grid(padding=(0, 2))
@@ -294,18 +301,17 @@ def show_cmd(
     head.add_row("Revoked at (unix)", str(att.revocation_time) or "(not revoked)")
     head.add_row("Ref UID", att.ref_uid)
     head.add_row("Revocable", "yes" if att.revocable else "no")
-    border = "red" if att.is_revoked else "green"
+    border = "red" if is_revoked else "green"
     console.print(Panel(head, title="Escrow attestation", border_style=border))
-
-    if att.decode_error:
-        typer.secho(att.decode_error, fg=typer.colors.YELLOW)
-        return
 
     body = Table.grid(padding=(0, 2))
     body.add_column(style="bold")
     body.add_column()
-    body.add_row("Arbiter", att.arbiter or "-")
-    body.add_row("Token", att.token or "-")
-    body.add_row("Amount (raw)", str(att.amount) if att.amount is not None else "-")
-    body.add_row("Demand", ("0x" + att.demand.hex()) if att.demand else "-")
+    body.add_row("Arbiter", obligation.arbiter or "-")
+    body.add_row("Token", obligation.token or "-")
+    body.add_row(
+        "Amount (raw)",
+        str(int(obligation.amount)) if obligation.amount is not None else "-",
+    )
+    body.add_row("Demand", ("0x" + demand_bytes.hex()) if demand_bytes else "-")
     console.print(Panel(body, title="ERC-20 escrow obligation data", border_style="cyan"))
