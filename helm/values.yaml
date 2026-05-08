@@ -135,6 +135,9 @@ storefront:
 # ---------------------------------------------------------------------------
 provisioning:
   enabled: true
+  # Activate MockAnsibleService for dev/CI clusters — no real Ansible or KVM needed.
+  # Set to false (and configure sshKey, inventory, ansible paths) for production.
+  mockMode: true
 
   server:
     image:

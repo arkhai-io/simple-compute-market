@@ -43,6 +43,7 @@ class DealState:
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
+    _provisioning_mock_mode: bool = False
     _negotiation_strategy_viable: bool = False
     # Phase 1 — policy pipeline
     _policy_dry_run_passed: bool = False

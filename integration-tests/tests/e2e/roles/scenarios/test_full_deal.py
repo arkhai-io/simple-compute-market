@@ -7,6 +7,7 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00b  Registry reachable:      GET /api/v1/system/status → checks.registry=ok
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
+  00e  Provisioning mock mode:  GET /api/v1/system/ansible/readiness → ansible_mode=mock
 
 Phase 1 — Policy pipeline ready
   01a  Policy dry-run:  POST /api/v1/system/policy/evaluate → action=make_offer
@@ -211,6 +212,35 @@ class TestStage00d_NegotiationStrategy:
         )
         deal_state._negotiation_strategy_viable = True
         log.info("[00d] Negotiation strategy viable: %s", strat)
+
+
+class TestStage00e_ProvisioningMockMode:
+    def test_00e_provisioning_is_in_mock_mode(
+        self, provisioning_client, deal_state: DealState
+    ):
+        """GET /api/v1/system/ansible/readiness → ansible_mode=mock.
+
+        Guards the full e2e deal flow from accidentally targeting a production
+        provisioning service. If ansible_mode is 'real', any settlement attempt
+        would run an actual Ansible playbook against a real KVM host.
+
+        Fix: set provisioning.mockMode=true in the helm values and redeploy,
+        or set ACTIVE_PROFILES=production,provisioning-secrets,mock on the
+        provisioning container.
+        """
+        require_state(deal_state, "_provisioning_healthy")
+        resp = provisioning_client.get_ansible_readiness()
+        mode = resp.get("ansible_mode", "real")
+        assert mode == "mock", (
+            f"Provisioning service is running in '{mode}' mode, not 'mock'.\n"
+            "The e2e deal flow requires mock mode to avoid running real Ansible "
+            "playbooks against live infrastructure.\n"
+            "Fix: set provisioning.mockMode=true in values.yaml and redeploy, or\n"
+            "set ACTIVE_PROFILES=production,provisioning-secrets,mock on the "
+            "provisioning container."
+        )
+        deal_state._provisioning_mock_mode = True
+        log.info("[00e] Provisioning mock mode confirmed: ansible_mode=%s", mode)
 
 
 # ===========================================================================
@@ -718,7 +748,8 @@ class TestStage07_OnChainEscrowAndProvGate:
         job before it reports success, giving stage 08b a window to assert
         queued/running before stage 09a releases it.
         """
-        require_state(deal_state, "negotiation_terminal_state", "agreed_price")
+        require_state(deal_state, "negotiation_terminal_state", "agreed_price",
+                      "_provisioning_mock_mode")
 
         from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
 

@@ -28,7 +28,7 @@ spec:
               protocol: TCP
           env:
             - name: ACTIVE_PROFILES
-              value: "production,provisioning-secrets"
+              value: {{ if .Values.mockMode }}"production,provisioning-secrets,mock"{{ else }}"production,provisioning-secrets"{{ end }}
             - name: CONFIG_DIRECTORY
               value: "/app/config"
           volumeMounts:

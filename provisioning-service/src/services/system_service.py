@@ -229,6 +229,7 @@ class SystemService:
 
         return AnsibleReadinessResponse(
             ansible_version=ansible_version(),
+            ansible_mode=("mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"),
             inventory=inventory_info,
             playbook=FileInfo(
                 path=str(playbook_path),

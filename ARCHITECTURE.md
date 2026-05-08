@@ -970,6 +970,8 @@ Mount path:       /app/config/config-provisioning-secrets.yml
 ACTIVE_PROFILES:  production,provisioning-secrets
 ```
 
+**`mockMode` (Helm provisioning subchart):** Setting `provisioning.mockMode: true` in the umbrella `values.yaml` appends `mock` to `ACTIVE_PROFILES` in the provisioning Deployment, which causes `container.py`'s `_make_ansible_service()` factory to select `ProgrammableMockAnsibleService` instead of the real `AnsibleService`. The `config-mock.yml` profile (bundled in the image) sets `ansible_cfg` and `playbook_path` to safe no-op values. `mockMode` is `true` in the default umbrella values (dev/CI cluster) and must be set to `false` for production deployments that run real Ansible against KVM hosts.
+
 The same pattern applies to helm test pods. The shared `test-config` ConfigMap provides non-secret values (service URLs, feature flags) merged by the `helm` profile. Test pods that need secret material mount an additional Secret volume as a second profile.
 
 **Why `ENV` vars are not used for application config:**

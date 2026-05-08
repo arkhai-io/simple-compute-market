@@ -2,6 +2,19 @@
 # These are overridden by the parent chart's provisioning: block.
 
 # ---------------------------------------------------------------------------
+# Mock mode — activates ProgrammableMockAnsibleService instead of the real
+# AnsibleService. No Ansible binary, SSH key, or KVM host is required.
+# Returned VM credentials are deterministic fakes.
+#
+# When true, "mock" is appended to ACTIVE_PROFILES in the Deployment so the
+# container.py factory selects MockAnsibleService at startup. The mock dynaconf
+# profile (config-mock.yml, bundled in the image) is loaded automatically.
+#
+# Set to true for dev/CI clusters. Never true in production.
+# ---------------------------------------------------------------------------
+mockMode: false
+
+# ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 server:
