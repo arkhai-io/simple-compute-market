@@ -356,9 +356,9 @@ async def client_and_queue(
     )
 
     from services.lease_service import LeaseService
-    from services.lease_check_service import LeaseCheckService
+    from services.lease_lifecycle_service import LeaseLifecycleService
     lease_service = LeaseService(session_factory=session_factory)
-    lease_check_service = LeaseCheckService(
+    lease_lifecycle_service = LeaseLifecycleService(
         lease_service=lease_service,
         settings=mock_settings,
         job_service=None,  # tests use direct-patch path; no real Ansible jobs
@@ -371,7 +371,7 @@ async def client_and_queue(
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
     app.container.lease_service.override(lease_service)
-    app.container.lease_check_service.override(lease_check_service)
+    app.container.lease_lifecycle_service.override(lease_lifecycle_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -380,7 +380,7 @@ async def client_and_queue(
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_service = host_service
     _container_module.resolved_lease_service = lease_service
-    _container_module.resolved_lease_check_service = lease_check_service
+    _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
@@ -423,7 +423,7 @@ async def client_and_queue(
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
     app.container.lease_service.reset_override()
-    app.container.lease_check_service.reset_override()
+    app.container.lease_lifecycle_service.reset_override()
 
 
 @pytest_asyncio.fixture

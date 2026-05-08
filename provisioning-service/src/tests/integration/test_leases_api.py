@@ -13,7 +13,7 @@ Coverage:
 
 What is NOT covered here (unit test jurisdiction):
   - LeaseService transition logic
-  - LeaseCheckService grace period and force logic
+  - LeaseLifecycleService grace period and force logic
   - _patch_storefront_resource HTTP interactions
 """
 
@@ -194,11 +194,11 @@ class TestCheckLeasesEndpoint:
         )
         assert expired_lease["status"] == "active"
 
-        lease_check_svc = _container_module.resolved_lease_check_service
+        lease_lifecycle_svc = _container_module.resolved_lease_lifecycle_service
         transport = ASGITransport(app=app)
         async with HttpxClient(transport=transport, base_url="http://test") as http:
             with mock_patch.object(
-                lease_check_svc,
+                lease_lifecycle_svc,
                 "_patch_storefront_resource",
                 new=AsyncMock(return_value=True),
             ):

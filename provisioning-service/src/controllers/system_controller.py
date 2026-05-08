@@ -166,10 +166,10 @@ class SystemController:
 
     @_system_router.post(
         "/check-leases",
-        summary="Trigger an immediate lease expiry check cycle (admin)",
+        summary="Trigger immediate lease lifecycle processing (admin)",
     )
     async def check_leases(self) -> dict:
-        """Run a lease expiry check cycle immediately, outside the watchdog timer.
+        """Run one lease lifecycle cycle immediately, outside the watchdog timer.
 
         Equivalent to one iteration of the LeaseWatchdog background loop.
         Finds all leases with ``lease_end_utc < now`` and status in
@@ -191,10 +191,10 @@ class SystemController:
           - Test scenarios: trigger release in integration / e2e tests without
             sleeping for the poll interval.
         """
-        lease_check_svc = getattr(_container_module, "resolved_lease_check_service", None)
-        if lease_check_svc is None:
-            return {"error": "lease_check_service not initialised", "checked": 0}
-        return await lease_check_svc.check_leases()
+        lease_lifecycle_svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
+        if lease_lifecycle_svc is None:
+            return {"error": "lease_lifecycle_service not initialised", "checked": 0}
+        return await lease_lifecycle_svc.check_leases()
 
     # ------------------------------------------------------------------
     # Router factories

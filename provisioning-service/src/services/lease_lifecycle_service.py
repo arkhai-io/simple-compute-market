@@ -1,7 +1,7 @@
-"""Lease expiry check logic.
+"""Lease lifecycle orchestration.
 
-LeaseCheckService.check_leases() is the single entry point for all lease
-expiry processing. It is called by:
+LeaseLifecycleService.check_leases() is the single entry point for all lease
+lifecycle processing. It is called by:
   - LeaseWatchdog (on a timer)
   - POST /api/v1/system/check-leases (on demand, admin only)
 
@@ -41,8 +41,8 @@ from services.lease_service import LeaseService
 logger = logging.getLogger(__name__)
 
 
-class LeaseCheckService:
-    """Service layer for lease expiry processing.
+class LeaseLifecycleService:
+    """Service layer for lease lifecycle transitions.
 
     Injected with LeaseService (DB access), job_service (Ansible job submission
     and polling), and settings. Does not own the asyncio timer — that belongs
@@ -78,12 +78,12 @@ class LeaseCheckService:
                 self._lease_svc.advance_pending(lease.id)
                 activated += 1
                 logger.info(
-                    "[LEASE_CHECK] Activated lease %s (resource=%s)",
+                    "[LEASE_LIFECYCLE] Activated lease %s (resource=%s)",
                     lease.id, lease.resource_id,
                 )
             except Exception as exc:
                 logger.exception(
-                    "[LEASE_CHECK] Failed to activate lease %s: %s", lease.id, exc
+                    "[LEASE_LIFECYCLE] Failed to activate lease %s: %s", lease.id, exc
                 )
 
         # Step 2: submit check jobs for newly expired active leases
@@ -102,7 +102,7 @@ class LeaseCheckService:
                     checked += 1
             except Exception as exc:
                 logger.exception(
-                    "[LEASE_CHECK] Failed to begin release for lease %s: %s",
+                    "[LEASE_LIFECYCLE] Failed to begin release for lease %s: %s",
                     lease.id, exc,
                 )
                 direct_skipped += 1
@@ -122,14 +122,14 @@ class LeaseCheckService:
                     skipped += 1
             except Exception as exc:
                 logger.exception(
-                    "[LEASE_CHECK] Unhandled error processing releasing lease %s: %s",
+                    "[LEASE_LIFECYCLE] Unhandled error processing releasing lease %s: %s",
                     lease.id, exc,
                 )
                 skipped += 1
 
         if activated or checked or direct_released or released or forced:
             logger.info(
-                "[LEASE_CHECK] Cycle: activated=%d checked=%d released=%d "
+                "[LEASE_LIFECYCLE] Cycle: activated=%d checked=%d released=%d "
                 "forced=%d skipped=%d",
                 activated, checked, direct_released + released, forced,
                 direct_skipped + skipped,
@@ -156,7 +156,7 @@ class LeaseCheckService:
                 return True
             else:
                 logger.warning(
-                    "[LEASE_CHECK] No job_service; direct patch failed for lease %s",
+                    "[LEASE_LIFECYCLE] No job_service; direct patch failed for lease %s",
                     lease.id,
                 )
                 return False
@@ -179,12 +179,12 @@ class LeaseCheckService:
             )
             self._lease_svc.begin_releasing(lease.id, check_job_id=submit.job_id)
             logger.info(
-                "[LEASE_CHECK] Lease %s: submitted check job %s (resource=%s)",
+                "[LEASE_LIFECYCLE] Lease %s: submitted check job %s (resource=%s)",
                 lease.id, submit.job_id, lease.resource_id,
             )
         except Exception as exc:
             logger.warning(
-                "[LEASE_CHECK] Failed to submit check job for lease %s: %s — "
+                "[LEASE_LIFECYCLE] Failed to submit check job for lease %s: %s — "
                 "will retry next cycle",
                 lease.id, exc,
             )
@@ -213,7 +213,7 @@ class LeaseCheckService:
                 elif job.status in ("failed", "cancelled"):
                     job_ok = False
                     logger.warning(
-                        "[LEASE_CHECK] Check job %s for lease %s %s — "
+                        "[LEASE_LIFECYCLE] Check job %s for lease %s %s — "
                         "proceeding with release",
                         lease.check_job_id, lease.id, job.status,
                     )
@@ -222,14 +222,14 @@ class LeaseCheckService:
                     if not past_grace:
                         return "skipped"
                     logger.warning(
-                        "[LEASE_CHECK] Check job %s still running past grace "
+                        "[LEASE_LIFECYCLE] Check job %s still running past grace "
                         "period for lease %s — force-releasing",
                         lease.check_job_id, lease.id,
                     )
                     job_ok = False
             except Exception as exc:
                 logger.warning(
-                    "[LEASE_CHECK] Could not poll check job %s for lease %s: %s",
+                    "[LEASE_LIFECYCLE] Could not poll check job %s for lease %s: %s",
                     lease.check_job_id, lease.id, exc,
                 )
 
@@ -239,7 +239,7 @@ class LeaseCheckService:
         if ok:
             self._lease_svc.mark_released(lease.id)
             logger.info(
-                "[LEASE_CHECK] Lease %s released (resource=%s escrow=%s)",
+                "[LEASE_LIFECYCLE] Lease %s released (resource=%s escrow=%s)",
                 lease.id, lease.resource_id, lease.escrow_uid,
             )
             return "released"
@@ -247,7 +247,7 @@ class LeaseCheckService:
         if past_grace:
             self._lease_svc.mark_forced(lease.id)
             logger.warning(
-                "[LEASE_CHECK] Lease %s forced past grace period "
+                "[LEASE_LIFECYCLE] Lease %s forced past grace period "
                 "(resource=%s storefront=%s)",
                 lease.id, lease.resource_id,
                 getattr(self._settings, "storefront_url", ""),
@@ -255,7 +255,7 @@ class LeaseCheckService:
             return "forced"
 
         logger.warning(
-            "[LEASE_CHECK] Lease %s storefront patch failed within grace period, "
+            "[LEASE_LIFECYCLE] Lease %s storefront patch failed within grace period, "
             "will retry (resource=%s grace_deadline=%s)",
             lease.id, lease.resource_id, grace_deadline.isoformat(),
         )
@@ -272,7 +272,7 @@ class LeaseCheckService:
 
         if not storefront_url:
             logger.error(
-                "[LEASE_CHECK] storefront_url not configured — cannot release lease %s",
+                "[LEASE_LIFECYCLE] storefront_url not configured — cannot release lease %s",
                 lease.id,
             )
             return False
@@ -294,31 +294,31 @@ class LeaseCheckService:
                 return True
             if resp.status_code == 404:
                 logger.warning(
-                    "[LEASE_CHECK] Storefront 404 for resource %s (lease %s) "
+                    "[LEASE_LIFECYCLE] Storefront 404 for resource %s (lease %s) "
                     "— treating as released",
                     lease.resource_id, lease.id,
                 )
                 return True
             logger.warning(
-                "[LEASE_CHECK] Storefront PATCH %d for resource %s (lease %s)",
+                "[LEASE_LIFECYCLE] Storefront PATCH %d for resource %s (lease %s)",
                 resp.status_code, lease.resource_id, lease.id,
             )
             return False
         except httpx.ConnectError as exc:
             logger.warning(
-                "[LEASE_CHECK] Cannot connect to storefront for lease %s: %s",
+                "[LEASE_LIFECYCLE] Cannot connect to storefront for lease %s: %s",
                 lease.id, exc,
             )
             return False
         except httpx.TimeoutException as exc:
             logger.warning(
-                "[LEASE_CHECK] Storefront PATCH timed out for lease %s: %s",
+                "[LEASE_LIFECYCLE] Storefront PATCH timed out for lease %s: %s",
                 lease.id, exc,
             )
             return False
         except Exception as exc:
             logger.exception(
-                "[LEASE_CHECK] Unexpected error patching storefront for lease %s: %s",
+                "[LEASE_LIFECYCLE] Unexpected error patching storefront for lease %s: %s",
                 lease.id, exc,
             )
             return False

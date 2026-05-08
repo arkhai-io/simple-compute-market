@@ -1637,7 +1637,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 **What was implemented:**
 - `vm_leases` table tracks active leases; `LeaseStatus`: `pending`→`active`→`releasing`→`released`/`forced`/`cancelled`
 - `LeaseService` — CRUD + lifecycle transitions
-- `LeaseCheckService.check_leases()` — per-cycle logic:
+- `LeaseLifecycleService.check_leases()` — per-cycle logic:
   1. Activate pending leases whose `lease_start_utc` has passed (`list_pending_to_activate`)
   2. Submit check Ansible job for expired active leases; transition to `releasing` (`list_due` + `begin_releasing`)
   3. Poll check jobs for `releasing` leases; PATCH storefront resource when confirmed; handle grace period
@@ -1650,7 +1650,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 - `storefront_url` / `storefront_admin_key` are global provisioning service settings. Helm renders `storefront_url` into the provisioning production config profile and `storefront_admin_key` into the `provisioning-secrets` profile. The default chart topology points the watchdog at the release's `storefront-bob` Service; non-standard topologies override `provisioning.storefront.url`.
 
 **Remaining gap — check job result interpretation:**
-`LeaseCheckService._process_releasing_lease` currently polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
+`LeaseLifecycleService._process_releasing_lease` currently polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
 
 The `at`-based scheduling on the KVM host still runs as before — the check job is a verification step, not a replacement for the `at` cleanup.
 

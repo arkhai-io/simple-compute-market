@@ -1,4 +1,4 @@
-"""Unit tests for LeaseCheckService.
+"""Unit tests for LeaseLifecycleService.
 
 Scope:
   - check_leases: processes pending→active activation
@@ -26,7 +26,7 @@ from sqlalchemy.pool import StaticPool
 from db.database import create_session_factory
 from db.models import Base, LeaseStatus, VmLease
 from models.lease_model import LeaseCreate
-from services.lease_check_service import LeaseCheckService
+from services.lease_lifecycle_service import LeaseLifecycleService
 from services.lease_service import LeaseService
 
 
@@ -66,7 +66,7 @@ def _make_settings(**overrides):
 
 
 def _make_check_svc(lease_svc, **settings_overrides):
-    return LeaseCheckService(
+    return LeaseLifecycleService(
         lease_service=lease_svc,
         settings=_make_settings(**settings_overrides),
         job_service=None,  # unit tests: no job service, direct patch path
@@ -257,7 +257,7 @@ class TestPatchStorefrontResource:
         lease = self._make_fake_lease()
 
         mock_resp = MagicMock(status_code=200)
-        with patch("services.lease_check_service.httpx.AsyncClient") as mock_cls:
+        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -274,7 +274,7 @@ class TestPatchStorefrontResource:
         lease = self._make_fake_lease()
 
         mock_resp = MagicMock(status_code=404)
-        with patch("services.lease_check_service.httpx.AsyncClient") as mock_cls:
+        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -290,7 +290,7 @@ class TestPatchStorefrontResource:
         lease = self._make_fake_lease()
 
         mock_resp = MagicMock(status_code=500)
-        with patch("services.lease_check_service.httpx.AsyncClient") as mock_cls:
+        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -306,7 +306,7 @@ class TestPatchStorefrontResource:
         svc = _make_check_svc(lease_svc)
         lease = self._make_fake_lease()
 
-        with patch("services.lease_check_service.httpx.AsyncClient") as mock_cls:
+        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
@@ -334,7 +334,7 @@ class TestPatchStorefrontResource:
         lease = self._make_fake_lease(resource_id="compute-ww1-001")
 
         mock_resp = MagicMock(status_code=200)
-        with patch("services.lease_check_service.httpx.AsyncClient") as mock_cls:
+        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)

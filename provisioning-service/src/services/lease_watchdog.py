@@ -1,12 +1,12 @@
 """Lease expiry watchdog.
 
-LeaseWatchdog is a thin asyncio timer that calls LeaseCheckService.check_leases()
-on a configurable interval. All logic lives in LeaseCheckService; the watchdog
+LeaseWatchdog is a thin asyncio timer that calls LeaseLifecycleService.check_leases()
+on a configurable interval. All logic lives in LeaseLifecycleService; the watchdog
 only owns the scheduling.
 
 Started as an asyncio background task in main.py lifespan:
 
-    watchdog = LeaseWatchdog(lease_check_service, settings)
+    watchdog = LeaseWatchdog(lease_lifecycle_service, settings)
     asyncio.create_task(watchdog.run(), name="lease-watchdog")
 
 Operators and tests trigger an immediate cycle via:
@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 class LeaseWatchdog:
-    """Periodic timer that delegates to LeaseCheckService.check_leases().
+    """Periodic timer that delegates to LeaseLifecycleService.check_leases().
 
-    All lease logic lives in LeaseCheckService. This class only owns the
+    All lease logic lives in LeaseLifecycleService. This class only owns the
     asyncio scheduling and graceful shutdown.
     """
 
-    def __init__(self, lease_check_service, settings) -> None:
-        self._svc = lease_check_service
+    def __init__(self, lease_lifecycle_service, settings) -> None:
+        self._svc = lease_lifecycle_service
         self._settings = settings
 
     async def run(self) -> None:
