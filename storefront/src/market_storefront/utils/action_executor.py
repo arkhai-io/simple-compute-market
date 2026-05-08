@@ -513,7 +513,11 @@ def _make_registry_client() -> "MultiRegistryClient":
     """
     from .multi_registry_client import MultiRegistryClient
     urls = list(CONFIG.indexer_urls) if CONFIG.indexer_urls else ["http://localhost:8080"]
-    return MultiRegistryClient(urls, timeout=CONFIG.discovery_timeout)
+    return MultiRegistryClient(
+        urls,
+        timeout=CONFIG.discovery_timeout,
+        auth=CONFIG.indexer_auth,
+    )
 
 
 def _sender_id() -> str:

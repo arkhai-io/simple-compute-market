@@ -51,7 +51,13 @@ logger = logging.getLogger(__name__)
 class MultiRegistryClient:
     """Async context manager that fans calls out over N RegistryClients."""
 
-    def __init__(self, urls: list[str], *, timeout: float | None = None) -> None:
+    def __init__(
+        self,
+        urls: list[str],
+        *,
+        timeout: float | None = None,
+        auth: dict[str, str] | None = None,
+    ) -> None:
         # Preserve order for log readability and deterministic dedupe
         # tiebreaks (first-seen wins).
         self._urls: list[str] = list(urls)
@@ -61,6 +67,9 @@ class MultiRegistryClient:
         # fan-in / fan-out call is wrapped in ``asyncio.wait_for`` so
         # one slow registry can't extend the wall time.
         self._timeout = timeout
+        # Per-URL bearer tokens. URLs without an entry get no
+        # Authorization header on their underlying RegistryClient.
+        self._auth: dict[str, str] = dict(auth or {})
 
     @property
     def urls(self) -> list[str]:
@@ -68,7 +77,7 @@ class MultiRegistryClient:
 
     async def __aenter__(self) -> "MultiRegistryClient":
         for url in self._urls:
-            client = RegistryClient(url)
+            client = RegistryClient(url, api_key=self._auth.get(url))
             await client.__aenter__()
             self._clients.append(client)
         return self

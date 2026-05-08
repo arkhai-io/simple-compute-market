@@ -51,6 +51,9 @@ class BuyConfig:
     # registry can't extend the wall time. ``None`` defers to the
     # underlying urllib default.
     discovery_timeout: Optional[float] = None
+    # Per-registry bearer tokens, keyed by URL. URLs without an entry
+    # are queried unauthenticated. See ``common.resolve_indexer_auth``.
+    indexer_auth: dict[str, str] = field(default_factory=dict)
     # Across-seller aggregation policy name. Looked up via
     # ``aggregation.load_aggregation_policy``. None = default
     # (cheapest_first). See buyer/market_buyer/aggregation.py.
@@ -109,6 +112,7 @@ def query_registry_for_matches(
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
     filters: Optional[dict[str, Any]] = None,
+    api_key: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Ask the registry for open seller listings, optionally pre-filtered.
 
@@ -116,6 +120,9 @@ def query_registry_for_matches(
     gpu_count_min, region, virtualization_type, etc.). ``None``/missing
     values are dropped; booleans are serialized as the lowercase strings
     FastAPI expects.
+
+    ``api_key``, when set, is sent as ``Authorization: Bearer <key>``
+    so private registries that gate access can recognise the buyer.
     """
     base_params: dict[str, Any] = {"status": "open"}
     if filters:
@@ -124,7 +131,10 @@ def query_registry_for_matches(
                 continue
             base_params[key] = "true" if val is True else "false" if val is False else val
     url = registry_url.rstrip("/") + "/listings?" + urllib.parse.urlencode(base_params)
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8")
@@ -155,6 +165,7 @@ def query_registry_for_matches_multi(
     timeout: float = DEFAULT_HTTP_TIMEOUT,
     *,
     filters: Optional[dict[str, Any]] = None,
+    auth: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
     """Fan-in over every registry URL, dedupe by ``listing_id``.
 
@@ -163,12 +174,18 @@ def query_registry_for_matches_multi(
     collisions, which mirrors the storefront's ``MultiRegistryClient``
     so a buyer's preferred registry (listed first in
     ``registry.urls``) implicitly takes precedence.
+
+    ``auth`` maps registry URL → bearer token; URLs without an entry
+    are queried unauthenticated.
     """
     import sys
     merged: dict[str, dict[str, Any]] = {}
+    auth = auth or {}
     for url in registry_urls:
         try:
-            items = query_registry_for_matches(url, timeout=timeout, filters=filters)
+            items = query_registry_for_matches(
+                url, timeout=timeout, filters=filters, api_key=auth.get(url),
+            )
         except RuntimeError as exc:
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             continue
@@ -184,15 +201,22 @@ def fetch_listing_dict(
     registry_url: str,
     listing_id: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    api_key: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Fetch a single registry listing by id as a raw dict.
 
     Same wire shape as ``query_registry_for_matches`` items, so
     ``extract_seller_min_price`` consumes it directly. Returns None on
     404 or unparseable responses; raises on other transport errors.
+
+    ``api_key``: see ``query_registry_for_matches``.
     """
     url = registry_url.rstrip("/") + "/listings/" + urllib.parse.quote(listing_id, safe="")
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read().decode("utf-8")
@@ -219,18 +243,23 @@ def fetch_listing_dict_multi(
     registry_urls: list[str],
     listing_id: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    auth: Optional[dict[str, str]] = None,
 ) -> Optional[dict[str, Any]]:
     """Try each registry in order; return the first hit. ``None`` only
     when every registry returned 404. Other transport errors are
     re-raised once we've exhausted the list without finding the
     listing — that's actionable for the operator (one registry being
     flaky is logged but not fatal as long as another knows the id).
+
+    ``auth``: see ``query_registry_for_matches_multi``.
     """
     import sys
+    auth = auth or {}
     last_error: Optional[Exception] = None
     for url in registry_urls:
         try:
-            result = fetch_listing_dict(url, listing_id, timeout=timeout)
+            result = fetch_listing_dict(url, listing_id, timeout=timeout, api_key=auth.get(url))
         except RuntimeError as exc:
             print(f"[registry] {url}: {exc}", file=sys.stderr)
             last_error = exc
@@ -492,6 +521,8 @@ def run_buy(
         kwargs: dict[str, Any] = {}
         if config.discovery_timeout is not None:
             kwargs["timeout"] = config.discovery_timeout
+        if config.indexer_auth:
+            kwargs["auth"] = config.indexer_auth
         matches = query_registry_for_matches_multi(config.registry_urls, **kwargs)
     _event("discover", {"match_count": len(matches)})
 

@@ -85,6 +85,25 @@ def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
     return ["http://localhost:8080"]
 
 
+def resolve_indexer_auth() -> dict[str, str]:
+    """Resolve per-registry bearer tokens from the buyer's TOML config.
+
+    Reads ``[registry.auth]``, a flat ``url → token`` table. URLs not
+    listed are queried unauthenticated. There is no CLI override —
+    credentials are config-only by design (avoids accidental shell-
+    history exposure on a multi-user box).
+    """
+    from service.config_loader import get_dotted, load_user_config
+    raw = get_dotted(load_user_config(), "registry.auth")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for url, token in raw.items():
+        if isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip():
+            out[url.strip()] = token.strip()
+    return out
+
+
 def resolve_discovery_timeout(*, override: float | None = None) -> float:
     """Resolve the buyer's per-registry discovery deadline (seconds).
 

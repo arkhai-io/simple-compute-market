@@ -154,17 +154,22 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
-        # Resolve registry URLs + per-registry deadline once.
-        from ..common import resolve_indexer_urls, resolve_discovery_timeout
+        # Resolve registry URLs + per-registry deadline + auth once.
+        from ..common import (
+            resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+        )
         reg_urls = resolve_indexer_urls(override=registry_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
+        reg_auth = resolve_indexer_auth()
 
         # Auto-resolve --seller from the registries given --listing-id.
         # First registry that knows the listing wins.
         if listing_id and not seller_url:
             from ..buy_orchestrator import fetch_listing_dict_multi
             try:
-                listing_dict = fetch_listing_dict_multi(reg_urls, listing_id, timeout=deadline)
+                listing_dict = fetch_listing_dict_multi(
+                    reg_urls, listing_id, timeout=deadline, auth=reg_auth,
+                )
             except RuntimeError as exc:
                 typer.secho(
                     f"Could not fetch listing {listing_id}: {exc}",

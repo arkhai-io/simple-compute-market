@@ -41,8 +41,9 @@ class _FakeRegistry:
     """
     responses: dict[str, dict[str, Any]] = {}
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, api_key: str | None = None) -> None:
         self.url = url
+        self.api_key = api_key
 
     async def __aenter__(self):
         return self
@@ -256,7 +257,7 @@ class TestDiscoveryTimeout:
             async def list_listings(self, **kwargs):
                 return await fast_list(**kwargs)
 
-        def _factory(url):
+        def _factory(url, *, api_key=None):
             return _SlowFake(url) if url == "http://slow" else _FastFake(url)
 
         with patch(
@@ -280,6 +281,33 @@ class TestDiscoveryTimeout:
         async with MultiRegistryClient(["http://r1"], timeout=None) as rc:
             result = await rc.list_listings()
         assert [str(l.id) for l in result.listings] == ["a"]
+
+
+class TestPerRegistryAuth:
+    @pytest.mark.asyncio
+    async def test_api_key_passed_per_url_to_registry_client(self):
+        """Each underlying RegistryClient is constructed with the
+        api_key matching its URL — URLs without an entry get
+        api_key=None."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+
+        seen: dict[str, str | None] = {}
+
+        class _SpyFake(_FakeRegistry):
+            def __init__(self, url, *, api_key=None):
+                super().__init__(url)
+                seen[url] = api_key
+
+        with patch(
+            "market_storefront.utils.multi_registry_client.RegistryClient",
+            _SpyFake,
+        ):
+            async with MultiRegistryClient(
+                ["http://public", "http://private"],
+                auth={"http://private": "secret123"},
+            ) as rc:
+                pass
+        assert seen == {"http://public": None, "http://private": "secret123"}
 
 
 class TestPublishListing:

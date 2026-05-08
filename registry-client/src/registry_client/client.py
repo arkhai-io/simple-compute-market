@@ -275,15 +275,28 @@ class RegistryClient(_RegistryClientBase):
         *,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        api_key: str | None = None,
     ) -> None:
+        """``api_key`` — optional bearer token sent on every request as
+        ``Authorization: Bearer <key>``. Private registries that gate
+        access behind an API key set this; public registries leave it
+        ``None``. The key is layered on top of any per-call EIP-191
+        signing (publish/delete/heartbeat) — both can be required in
+        parallel by stricter deployments."""
         super().__init__(base_url, timeout)
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
             transport=transport,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
-        log.info("RegistryClient (async) initialised — base_url=%s", self._base)
+        log.info(
+            "RegistryClient (async) initialised — base_url=%s api_key=%s",
+            self._base, "set" if api_key else "none",
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -560,15 +573,23 @@ class SyncRegistryClient(_RegistryClientBase):
         *,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
+        api_key: str | None = None,
     ) -> None:
+        """See ``RegistryClient.__init__`` for ``api_key`` semantics."""
         super().__init__(base_url, timeout)
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
             transport=transport,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
-        log.info("SyncRegistryClient initialised — base_url=%s", self._base)
+        log.info(
+            "SyncRegistryClient initialised — base_url=%s api_key=%s",
+            self._base, "set" if api_key else "none",
+        )
 
     def close(self) -> None:
         self._client.close()

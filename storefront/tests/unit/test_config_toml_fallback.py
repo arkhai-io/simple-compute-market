@@ -35,6 +35,7 @@ def test_empty_toml_uses_all_defaults():
     assert cfg.agent_db_path == "/tmp/agent.db"
     assert cfg.indexer_urls == ["http://localhost:8080"]
     assert cfg.discovery_timeout == 5.0
+    assert cfg.indexer_auth == {}
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
     # Default is "bisection" (not "") — prevents silent RL failures when torch
@@ -230,6 +231,27 @@ def test_registry_urls_list_form():
         },
     })
     assert cfg.indexer_urls == ["http://r1:8080", "http://r2:8080"]
+
+
+def test_indexer_auth_from_toml():
+    """[registry.auth] is a flat URL → bearer-token table; URLs not
+    listed get no Authorization header at the underlying client."""
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "registry": {
+            "urls": ["http://public:8080", "http://private:8080"],
+            "auth": {"http://private:8080": "secret123"},
+        },
+    })
+    assert cfg.indexer_auth == {"http://private:8080": "secret123"}
+
+
+def test_indexer_auth_default_is_empty():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "registry": {"urls": ["http://r:8080"]},
+    })
+    assert cfg.indexer_auth == {}
 
 
 def test_discovery_timeout_from_toml():

@@ -160,9 +160,12 @@ def listing_list(
     `_min` semantics for numerics. Without any filters, returns all open
     listings up to ``--limit``.
     """
-    from ..common import resolve_indexer_urls, resolve_discovery_timeout
+    from ..common import (
+        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+    )
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
     deadline = resolve_discovery_timeout(override=discovery_timeout)
+    auth = resolve_indexer_auth()
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
@@ -202,7 +205,10 @@ def listing_list(
     for base in urls:
         url = f"{base}/listings?{params}"
         try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            req_headers = {"Accept": "application/json"}
+            if auth.get(base):
+                req_headers["Authorization"] = f"Bearer {auth[base]}"
+            req = urllib.request.Request(url, headers=req_headers)
             with urllib.request.urlopen(req, timeout=deadline) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
@@ -278,12 +284,15 @@ def listing_show(
 ) -> None:
     """Show a single listing by ID, fetched from the configured
     registry indexers — the first one that knows the listing wins."""
-    from ..common import resolve_indexer_urls, resolve_discovery_timeout
+    from ..common import (
+        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+    )
     from ..buy_orchestrator import fetch_listing_dict_multi
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
     deadline = resolve_discovery_timeout(override=discovery_timeout)
+    auth = resolve_indexer_auth()
     try:
-        found = fetch_listing_dict_multi(urls, listing_id, timeout=deadline)
+        found = fetch_listing_dict_multi(urls, listing_id, timeout=deadline, auth=auth)
     except RuntimeError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)

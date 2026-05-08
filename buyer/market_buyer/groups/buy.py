@@ -436,11 +436,12 @@ def register(app: typer.Typer) -> None:
         )
         from ..common import (
             resolve_ssh_public_key, resolve_indexer_urls,
-            resolve_discovery_timeout,
+            resolve_discovery_timeout, resolve_indexer_auth,
         )
         ssh = resolve_ssh_public_key(override=ssh_public_key)
         reg_urls = resolve_indexer_urls(override=registry_urls)
         deadline = resolve_discovery_timeout(override=discovery_timeout)
+        reg_auth = resolve_indexer_auth()
         rpc = resolve_config_value(
             override=rpc_url, toml_path="chain.rpc_url",
         )
@@ -531,7 +532,8 @@ def register(app: typer.Typer) -> None:
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
         try:
             matches = query_registry_for_matches_multi(
-                reg_urls, timeout=deadline, filters=active_filters or None,
+                reg_urls, timeout=deadline,
+                filters=active_filters or None, auth=reg_auth,
             )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
@@ -571,6 +573,7 @@ def register(app: typer.Typer) -> None:
             buyer_private_key=pk,
             ssh_public_key=ssh,
             discovery_timeout=deadline,
+            indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
         )
         constraints = BuyConstraints(

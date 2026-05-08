@@ -153,6 +153,11 @@ class Config:
     # with whoever beat the deadline. This is the budget knob — there
     # is no separate circuit-breaker.
     discovery_timeout: float
+    # Optional per-registry bearer tokens, keyed by URL. Private
+    # registries gate access behind an API key; public ones omit
+    # their entry. The MultiRegistryClient passes each URL's token
+    # (or ``None``) into the underlying RegistryClient.
+    indexer_auth: dict[str, str]
     identity_registry_address: str | None
     onchain_agent_id: str | None
     # Registration behaviour
@@ -224,6 +229,27 @@ DEFAULT_TOKEN_REGISTRY_PATH = (
 _DEFAULT_SSH_PUBLIC_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
 )
+
+
+def _resolve_indexer_auth(resolve) -> dict[str, str]:
+    """Pull per-registry bearer tokens out of TOML.
+
+    Shape:
+      [registry.auth]
+      "http://private:8080" = "secret123"
+
+    Returns ``{url: token}``; URLs without an entry get no
+    Authorization header at the underlying RegistryClient. An empty
+    or missing ``[registry.auth]`` table yields ``{}``.
+    """
+    raw = resolve("registry.auth", None)
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for url, token in raw.items():
+        if isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip():
+            out[url.strip()] = token.strip()
+    return out
 
 
 def _resolve_indexer_urls(resolve) -> list[str]:
@@ -303,6 +329,7 @@ def load_config() -> Config:
         # Shared with buyer via [registry].
         indexer_urls=_resolve_indexer_urls(_resolve),
         discovery_timeout=float(_resolve("registry.discovery_timeout", 5.0) or 5.0),
+        indexer_auth=_resolve_indexer_auth(_resolve),
         identity_registry_address=_resolve(
             "registry.identity_registry_address", None,
         ),
