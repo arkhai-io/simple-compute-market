@@ -73,9 +73,6 @@ agents:
           geminiApiKey: ""
       chain:
         name: "anvil"
-        # alkahestAddressConfigPath + tokenRegistryPath: paths inside
-        # the container image; agent has working defaults. Override
-        # here only when mounting external JSON files.
 
 # Number of replicas per agent.
 replicaCount: 1

@@ -152,7 +152,7 @@ alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}
 
 [registry]
-url = {{ default (include "registry.url" $root) $cfg.registryUrl | quote }}
+urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
 identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
 
 [seller]

@@ -128,6 +128,8 @@ storefront:
             geminiApiKey: ""
         chain:
           name: "anvil"
+          alkahest_address_config_path: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
