@@ -318,11 +318,21 @@ class SystemService:
         urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
         if not urls:
             return "unconfigured"
+        auth = CONFIG.indexer_auth or {}
 
         async def _probe(url: str) -> str:
+            # /health is unauthenticated by design (so liveness probes
+            # don't need credentials), so the auth header is optional
+            # here; we attach it anyway to be consistent with
+            # registry_auth_check and so private registries that ever
+            # gate /health treat us identically to non-health requests.
+            headers = {}
+            token = auth.get(url) or auth.get(url + "/")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
-                    resp = await client.get(f"{url}/health")
+                    resp = await client.get(f"{url}/health", headers=headers)
                 return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
             except httpx.ConnectError:
                 return "unreachable"
@@ -351,6 +361,7 @@ class SystemService:
         urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
         if not urls:
             return "unconfigured"
+        auth = CONFIG.indexer_auth or {}
         # Read the live runtime ID (set by _ensure_agent_identity at startup),
         # not the config-file value (which may be stale or absent when auto_register=True).
         from market_storefront.agent import _AGENT_ID as _live_agent_id
@@ -363,9 +374,15 @@ class SystemService:
         wallet = (CONFIG.agent_wallet_address or "").lower()
 
         async def _probe(url: str) -> str:
+            headers = {}
+            token = auth.get(url) or auth.get(url + "/")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
-                    resp = await client.get(f"{url}/agents/{canonical}")
+                    resp = await client.get(
+                        f"{url}/agents/{canonical}", headers=headers,
+                    )
                 if resp.status_code == 404:
                     return "agent_not_found"
                 if resp.status_code >= 400:
