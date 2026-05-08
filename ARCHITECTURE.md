@@ -561,9 +561,7 @@ Enforced by `AdminAuthMiddleware` via the `X-Admin-Key` header. When
 Protected paths: any route under `/admin/`, and any route ending in `/pause`,
 `/resume`, `/advance`, or `/force-accept`.
 
-**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into both
-`config-storefront-secrets.yml` and `config-provisioning-secrets.yml` (for
-the provisioning test controller). See Deployment Topology → Helm section.
+**`global.adminApiKey`:** `values.yaml` carries `global.adminApiKey` (default `"test-api-key"` for the test cluster). The `agentConfigToml` helper renders it as `[seller] admin_api_key` in the mounted `config.toml`. The per-agent secret profile (`config-{component}-secret.yml`) also carries it under `{component}.admin_api_key` so the e2e test pod can read it via dynaconf without a separate secret mount.
 
 #### Global Pause and Per-Order Pause
 
@@ -894,7 +892,7 @@ Rules are evaluated in insertion order. The first rule whose `match` dict is a s
 
 **Job-done event seam:** After every job reaches a terminal state, `_process_job` calls `getattr(self._ansible, "notify_job_done", None)` — a no-op on the real `AnsibleService`. `ProgrammableMockAnsibleService.notify_job_done` fires a per-job `asyncio.Event` stored in `_job_done_events`, which `GET /test/jobs/{job_id}/wait` awaits. This replaces any `asyncio.sleep` polling in test code.
 
-**Helm TODO:** Add `global.adminApiKey` to `values.yaml`; render into `config-provisioning-secrets.yml` so the e2e test pod can authenticate to the test controller (same key used for storefront admin endpoints).
+**`global.adminApiKey` for provisioning test controller:** The e2e test pod mounts the storefront agent secret profile which carries `{component}.admin_api_key` — this is the same key the storefront's `AdminAuthMiddleware` enforces. The provisioning test controller (`/test/*`) does not enforce the admin key separately; it is only mounted in the `mock` profile and access is network-scoped within the cluster.
 
 ---
 
@@ -1329,10 +1327,36 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 **Notable gaps / fitness questions to investigate:**
 - No `PersistentVolumeClaim` for agent SQLite DBs — each pod restart loses negotiation history and policy state (significant given the known SQLite statefulness issues)
 - No `PersistentVolumeClaim` for registry SQLite — event sync state is also ephemeral
-- Agent `Deployment` has no liveness or readiness probes (noted as TODO in the template)
 - Agent ID persistence across pod restarts is handled by `seller.onchain_agent_id` in config (a Helm value). On first deploy with `agentId: ""` and `autoRegister: true`, the service registers and logs the assigned ID. Operators pin that ID in `values.yaml` and flip `autoRegister: false` to prevent accidental re-registration. The compose flow (which used `ONCHAIN_AGENT_ID=` env var clearing to force re-registration on fresh Anvil) is unchanged.
 - `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
 - `replicaCount` exists for the storefront and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect
+
+**Resource inventory seeding** follows the same pattern as provisioning host inventory:
+
+*Three delivery mechanisms, in priority order:*
+1. **`seller.resources_csv_inline`** (Helm) — raw CSV content injected via the per-agent Secret. Set via `make deploy RESOURCES_CSV_FILE=/path/to/resources.csv`, which passes `--set-file storefront.agents[0].secret.resourcesCsvInline=<path>` to `helm upgrade`. The CSV is stored in the Kubernetes Secret alongside the wallet key and rendered into the dynaconf profile that the storefront reads at startup. This is the production path — no CSV file ever touches the container image.
+2. **`seller.resources_csv_path`** (compose / local dev) — path to a CSV file on disk, bind-mounted into the container by `make deploy-seller-agent` via `RESOURCES_CSV_FILE` (defaults to `storefront/src/market_storefront/data/ww1-machine.csv`). Used by the docker-run compose flow.
+3. **`POST /api/v1/admin/portfolio/resources/import`** — admin endpoint for runtime clobber. Accepts a CSV file upload and upserts regardless of current table state. Used for inventory updates without restarting the pod.
+
+*Startup seeding is idempotent*: if the resources table already has rows (e.g. from a previous startup or a prior import call), seeding is skipped. Pod restarts do not overwrite operator changes. To force a full re-seed, use the import endpoint.
+
+The CSV files in `storefront/src/market_storefront/data/*.csv` are excluded from the container image via `.dockerignore`. They exist in the source tree as reference/default inventory for local dev (used by the compose bind-mount path) but are not baked into the image.
+
+**Helm test pods:**
+- `validate-contracts` — verifies RPC connectivity and contract deployment (`-m contracts`)
+- `registry` — environment smoke test (`-m registry`)
+- `storefront` — environment smoke test (`-m storefront`)
+- `provisioning` — environment smoke test (`-m provisioning_smoke`)
+
+Smoke test pods live in their respective subcharts and are designed to run in production environments (they test only stateless endpoint reachability and auth enforcement, not deal flow).
+
+**`e2e-tests` subchart** (`helm/charts/e2e-tests/`) — optional, `enabled: false` by default. Contains the full buyer-seller deal lifecycle test and the buyer/seller credential Secret it needs. Never enabled in production. Enable with `--set e2e-tests.enabled=true` for dev/CI runs.
+
+The subchart is self-contained: it owns all its own credentials and mounts nothing from the storefront subchart's Secrets (Option C). Config is assembled from two dynaconf profiles:
+- `"helm"` — `config-helm.yml` from the shared `{release}-test-config` ConfigMap (non-secret topology: service URLs, chain ID, registry addresses, seller API URL, buyer `chain_rpc_url` composed from `global.rpc.*`)
+- `"e2e-secret"` — `config-e2e-secret.yml` from the subchart's own Secret (seller private key, wallet address, admin API key; buyer private key, wallet address)
+
+`ACTIVE_PROFILES: "helm,e2e-secret"`. The admin API key prefers `e2e-tests.seller.adminApiKey` when set, falls back to `global.adminApiKey` so it only needs to be set in one place for a standard deployment.
 
 ---
 

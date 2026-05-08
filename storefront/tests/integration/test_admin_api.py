@@ -293,6 +293,75 @@ class TestPolicyEvaluate:
         assert any(code in str(exc_info.value) for code in ("400", "422"))
 
 
+class TestAdminImportResources:
+    """Tests for POST /api/v1/admin/portfolio/resources/import."""
+
+    _VALID_CSV = (
+        "resource_id,resource_type,resource_subtype,unit,value,state,"
+        "min_price,token,max_duration_seconds,"
+        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+        'compute-import-001,compute.gpu,rtx5080,count,1,available,'
+        '150,MOCK,,'
+        'RTX 5080,90.0,"California, US",ww1\n'
+    )
+
+    async def test_requires_admin_key(self, client_no_key):
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.admin_import_resources(self._VALID_CSV.encode())
+        assert "403" in str(exc_info.value)
+
+    async def test_imports_valid_csv(self, client):
+        c, db = client
+        result = await c.admin_import_resources(self._VALID_CSV.encode())
+        assert result.imported_count == 1
+        assert result.failed_count == 0
+        assert result.total_rows == 1
+        resources = await db.list_resources()
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-import-001"
+
+    async def test_upserts_when_table_already_populated(self, client):
+        """Import always upserts regardless of existing rows (clobber path)."""
+        c, db = client
+        # Pre-seed one row via the normal DB path.
+        await db.upsert_resource(
+            resource_id="pre-existing-001",
+            resource_type="compute.gpu",
+            state="available",
+        )
+        # Import a different row — both should be present (append-only upsert).
+        result = await c.admin_import_resources(self._VALID_CSV.encode())
+        assert result.imported_count == 1
+        resources = await db.list_resources()
+        assert len(resources) == 2
+
+    async def test_rejects_csv_missing_required_column(self, client):
+        c, _ = client
+        bad_csv = b"resource_id,state\ncompute-bad-001,available\n"
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.admin_import_resources(bad_csv)
+        assert "400" in str(exc_info.value)
+
+    async def test_partial_import_counts_failures(self, client):
+        """Rows with invalid data are counted in failed_count; valid rows still import."""
+        c, _ = client
+        # One valid row + one row with a type that will fail schema validation.
+        mixed_csv = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-good-001,compute.gpu,rtx5080,count,1,available,'
+            '150,MOCK,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+            # Row with missing resource_id will fail.
+            ',compute.gpu,rtx5080,count,1,available,150,MOCK,,RTX 5080,90.0,"California, US",ww1\n'
+        ).encode()
+        result = await c.admin_import_resources(mixed_csv)
+        assert result.total_rows == 2
+        # The good row should import even if one fails.
+        assert result.imported_count >= 1
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/system/events
 # ---------------------------------------------------------------------------

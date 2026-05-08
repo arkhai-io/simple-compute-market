@@ -1,0 +1,6 @@
+apiVersion: v2
+name: e2e-tests
+description: Full buyer-seller deal lifecycle e2e test suite for the Arkhai stack (dev / CI only)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

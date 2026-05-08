@@ -11,7 +11,7 @@ from typing import Any
 
 from .config import CONFIG
 from .host_csv_importer import upsert_hosts_from_csv
-from .resource_csv_importer import upsert_resources_from_csv
+from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
 
@@ -911,9 +911,30 @@ class SQLiteClient:
         csv_path: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Import resources from CSV and upsert rows into the resources table."""
+        """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+
+    async def upsert_resources_from_csv_content(
+        self,
+        *,
+        csv_content: str,
+        source_label: str = "<inline>",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import resources from a CSV string and upsert rows into the resources table.
+
+        Used when CSV content is delivered via config injection (e.g. the Helm
+        ``resources_csv_inline`` value in the per-agent Secret) rather than a
+        file path baked into the container image.
+        """
+        report = await upsert_resources_from_csv_content(
+            csv_content=csv_content,
+            source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
         )

@@ -1,0 +1,5 @@
+# Exclude operator-supplied inventory files from the container image.
+# Resource CSVs are injected at deploy time via:
+#   - Helm: --set-file storefront.agents[0].secret.resourcesCsvInline=<path>
+#   - Compose: bind-mount via RESOURCES_CSV_FILE in storefront/Makefile
+storefront/src/market_storefront/data/*.csv

@@ -200,56 +200,9 @@ class StorefrontListingClaimResponse:
             extra={k: v for k, v in d.items() if k not in known},
         )
 
-
-# ---------------------------------------------------------------------------
-# Listing discover response  (POST /listings/discover)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class DiscoverMatch:
-    """A single match returned by /listings/discover."""
-
-    their_listing_id: str | None = None
-    their_agent_url: str | None = None
-    their_price: int | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "DiscoverMatch":
-        known = {"their_listing_id", "their_agent_url", "their_price"}
-        return cls(
-            their_listing_id=d.get("their_listing_id"),
-            their_agent_url=d.get("their_agent_url"),
-            their_price=d.get("their_price"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class StorefrontListingDiscoverResponse:
-    """Response from POST /listings/discover."""
-
-    listing_id: str | None = None
-    match_count: int | None = None
-    matches: list[DiscoverMatch] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontListingDiscoverResponse":
-        known = {"listing_id", "match_count", "matches"}
-        return cls(
-            listing_id=d.get("listing_id"),
-            match_count=d.get("match_count"),
-            matches=[DiscoverMatch.from_dict(m) for m in d.get("matches", [])],
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
 # ---------------------------------------------------------------------------
 # Health / system  (GET /health, GET /api/v1/system/status)
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class HealthResponse:
@@ -617,28 +570,6 @@ class AdminPauseResponse:
 
 
 @dataclass
-class AdminStatusResponse:
-    """Response from GET /admin/status."""
-
-    paused: bool = False
-    active_negotiations: int = 0
-    open_listings: int = 0
-    paused_listings: int = 0
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "AdminStatusResponse":
-        known = {"paused", "active_negotiations", "open_listings", "paused_listings"}
-        return cls(
-            paused=bool(d.get("paused", False)),
-            active_negotiations=int(d.get("active_negotiations", 0)),
-            open_listings=int(d.get("open_listings", 0)),
-            paused_listings=int(d.get("paused_listings", 0)),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
 class ReleaseReservationsResponse:
     """Response from POST /api/v1/admin/portfolio/release-reservations."""
 
@@ -771,4 +702,21 @@ class SettleWaitResponse:
             status=str(d.get("status", "")),
             provisioning_job_id=d.get("provisioning_job_id"),
             elapsed_ms=int(d.get("elapsed_ms", 0)),
+        )
+
+
+@dataclass
+class ImportResourcesResponse:
+    """Response from POST /api/v1/admin/portfolio/resources/import."""
+
+    imported_count: int = 0
+    failed_count: int = 0
+    total_rows: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ImportResourcesResponse":
+        return cls(
+            imported_count=int(d.get("imported_count", 0)),
+            failed_count=int(d.get("failed_count", 0)),
+            total_rows=int(d.get("total_rows", 0)),
         )

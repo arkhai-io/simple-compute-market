@@ -1,4 +1,4 @@
-"""Admin controller — global pause/resume, and resource maintenance.
+"""Admin controller — global pause/resume, status, and resource maintenance.
 
 require_admin_key is applied via __init__ Depends (not router-level) to avoid
 a fastapi_utils @cbv + router-level dependencies interaction issue that causes
@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, UploadFile, File
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
 from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.system_models import (
     AdminPauseResponse,
+    ImportResourcesResponse,
     ReleaseReservationsResponse,
 )
 from market_storefront.server import _set_globally_paused
@@ -51,6 +52,57 @@ class AdminController:
     async def resume(self) -> AdminPauseResponse:
         _set_globally_paused(False)
         return AdminPauseResponse(paused=False, message="Storefront resumed.")
+
+    @router.post(
+        "/portfolio/resources/import",
+        response_model=ImportResourcesResponse,
+        summary="Bulk-import compute resources from a CSV file (admin)",
+    )
+    async def import_resources(
+        self,
+        file: UploadFile = File(..., description="Compute resource CSV file."),
+    ) -> ImportResourcesResponse:
+        """Upload a CSV file and upsert resource rows into the portfolio.
+
+        Upsert semantics: rows present in the file are inserted or updated;
+        rows absent from the file are not touched. Always upserts regardless
+        of whether the table is already populated — use this to force a
+        clobber of the current inventory.
+
+        The CSV must contain at minimum a ``resource_type`` column. Rows that
+        fail schema validation are counted in ``failed_count`` and skipped
+        without rolling back successfully imported rows.
+
+        Example::
+
+            curl -X POST http://localhost:8001/api/v1/admin/portfolio/resources/import \\
+                 -H "X-Admin-Key: <key>" \\
+                 -F "file=@/path/to/resources.csv"
+        """
+        from fastapi import HTTPException
+        try:
+            csv_content = (await file.read()).decode("utf-8")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read uploaded file: {exc}")
+        try:
+            report = await self._db.upsert_resources_from_csv_content(
+                csv_content=csv_content,
+                source_label=f"admin-import:{file.filename or 'upload'}",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        logger.info(
+            "[ADMIN] Resource import: %d imported, %d failed, %d total rows (file=%s)",
+            report.get("imported_count", 0),
+            report.get("failed_count", 0),
+            report.get("total_rows", 0),
+            file.filename,
+        )
+        return ImportResourcesResponse(
+            imported_count=report.get("imported_count", 0),
+            failed_count=report.get("failed_count", 0),
+            total_rows=report.get("total_rows", 0),
+        )
 
     @router.post(
         "/portfolio/resources/{resource_id}/release-reservation",

@@ -33,8 +33,11 @@ token_registry_path = "/app/src/market_storefront/data/token_registry_docker_com
 enable_event_queue  = false
 admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
-# The bundled ww1-machine.csv is the local dev inventory.
-resources_csv_path  = "/app/src/market_storefront/data/ww1-machine.csv"
+# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
+# the container at /app/resources.csv by `make deploy-seller-agent`.
+# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
+# the CSV content is delivered through the agent Secret, not a file path.
+resources_csv_path  = "/app/resources.csv"
 
 [seller.provisioning]
 service_url = "http://provisioning:8081"

@@ -164,16 +164,30 @@ log_file_path       = {{ $seller.logFilePath | quote }}
 {{- if $cfg.tokenRegistryPath }}
 token_registry_path = {{ $cfg.tokenRegistryPath | quote }}
 {{- end }}
+{{- if $seller.resourcesCsvPath }}
+resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
+{{- end }}
+{{- if $agent.secret.resourcesCsvInline }}
+resources_csv_inline = """
+{{ $agent.secret.resourcesCsvInline }}
+"""
+{{- end }}
 enable_event_queue  = {{ $seller.enableEventQueue | default false }}
 {{- if $agent.agentId }}
 onchain_agent_id    = {{ $agent.agentId | quote }}
 {{- end }}
 auto_register       = {{ $agent.autoRegister | default true }}
+{{- with ($root.Values.global).adminApiKey }}
+admin_api_key       = {{ . | quote }}
+{{- end }}
 
 [seller.provisioning]
 service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
 {{- if $prov.mode }}
 mode        = {{ $prov.mode | quote }}
+{{- end }}
+{{- if $prov.pollInterval }}
+poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
 [seller.negotiation]

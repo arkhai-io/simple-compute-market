@@ -414,47 +414,60 @@ class SystemService:
             "elapsed_ms": elapsed_ms,
         }
 
-    async def seed_resources_if_empty(self, csv_path: str) -> dict:
-        """Upsert resources from *csv_path* only when the resources table is empty.
+    async def seed_resources_if_empty(
+        self,
+        *,
+        csv_inline: str | None = None,
+        csv_path: str | None = None,
+    ) -> dict:
+        """Seed the resources table on startup if it is empty.
 
-        This is the idempotent startup seeding path: if a previous run already
-        populated the table (e.g. via the portfolio import CLI or a prior
-        startup), this method returns immediately without touching the DB.
+        Source priority (matches provisioning service pattern):
+          1. ``csv_inline`` — raw CSV content delivered via config injection
+             (Helm Secret ``resources_csv_inline``). Used when the CSV must not
+             be baked into the container image.
+          2. ``csv_path`` — path to a CSV file on disk (compose / local dev).
+
+        Seeding is skipped when the resources table already has rows, so that
+        operator changes made via the import API are not overwritten on pod
+        restart. To force a clobber regardless of table state, use
+        ``POST /api/v1/admin/portfolio/resources/import``.
 
         Returns a dict with keys:
-          seeded       — True if the CSV was imported, False if the table was
-                         already non-empty (skipped) or if csv_path is empty.
+          seeded         — True if the CSV was imported, False if skipped.
           imported_count — number of rows written (0 when seeded=False).
-          csv_path     — the path that was (or would have been) imported.
-
-        Raises ``FileNotFoundError`` if *csv_path* is set but does not exist on
-        disk — better to crash loudly at startup than to silently have zero
-        inventory.
+          source         — human-readable description of the data source used.
         """
-        if not csv_path:
-            return {"seeded": False, "imported_count": 0, "csv_path": csv_path}
-
         existing = await self._db.list_resources()
         if existing:
             logger.info(
                 "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
                 len(existing),
             )
-            return {"seeded": False, "imported_count": len(existing), "csv_path": csv_path}
+            return {"seeded": False, "imported_count": len(existing), "source": "already_populated"}
 
-        report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+        if csv_inline:
+            report = await self._db.upsert_resources_from_csv_content(
+                csv_content=csv_inline,
+                source_label="resources_csv_inline (config)",
+            )
+            source = "resources_csv_inline (config)"
+        elif csv_path:
+            report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+            source = csv_path
+        else:
+            logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
+            return {"seeded": False, "imported_count": 0, "source": None}
+
         imported = report.get("imported_count", 0)
         failed = report.get("failed_count", 0)
         if failed:
             logger.warning(
                 "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed, csv_path,
+                failed, source,
             )
-        logger.info(
-            "[RESOURCE SEED] Imported %d resource(s) from %s",
-            imported, csv_path,
-        )
-        return {"seeded": True, "imported_count": imported, "csv_path": csv_path}
+        logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
+        return {"seeded": True, "imported_count": imported, "source": source}
 
     def negotiation_strategy_check(self) -> str:
         """Probe the configured negotiation strategy. Returns a viability string.

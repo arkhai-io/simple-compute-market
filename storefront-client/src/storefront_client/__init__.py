@@ -7,14 +7,12 @@ from storefront_client.client import (
     _build_auth_headers,
 )
 from storefront_client.models import (
-    DiscoverMatch,
     ERC8004RegistrationFile,
     RegistrationRecord,
     StorefrontEndpoint,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
-    StorefrontListingDiscoverResponse,
     StorefrontListingRefundResponse,
 )
 
@@ -23,13 +21,11 @@ __all__ = [
     "StorefrontClientError",
     "SyncStorefrontClient",
     "_build_auth_headers",
-    "DiscoverMatch",
     "ERC8004RegistrationFile",
     "RegistrationRecord",
     "StorefrontEndpoint",
     "StorefrontListingClaimResponse",
     "StorefrontListingCloseResponse",
     "StorefrontListingCreateResponse",
-    "StorefrontListingDiscoverResponse",
     "StorefrontListingRefundResponse",
 ]

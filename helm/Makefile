@@ -12,11 +12,27 @@ SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 init:
 	helm dependency update $(CHART_DIR)
 
+## Install or upgrade the release in the target namespace
+## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
+##   make deploy SSH_KEY_FILE=/path/to/other_key
+## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
+## inject --set-file provisioning.inventory.hostsIni=<path>.
+EXTRA_SET_FILE_ARGS ?=
+
+## RESOURCES_CSV_FILE: path to the compute resource inventory CSV to seed
+## into the storefront agent on first deploy. Left empty by default — the
+## storefront starts with no inventory and the operator seeds via the API.
+## Example:
+##   make deploy RESOURCES_CSV_FILE=./storefront/src/market_storefront/data/ww1-machine.csv
+RESOURCES_CSV_FILE ?=../storefront/src/market_storefront/data/ww1-machine.csv
+
 ## Render the full parent chart (and all enabled subcharts) to stdout
 template:
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
-		--values $(VALUES)
+		--values $(VALUES) \
+		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
+		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
 
 ## Render a single subchart in isolation.
 ## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=test-env
@@ -28,18 +44,13 @@ endif
 		--namespace $(NAMESPACE) \
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
-## Install or upgrade the release in the target namespace
-## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
-##   make deploy SSH_KEY_FILE=/path/to/other_key
-## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
-## inject --set-file provisioning.inventory.hostsIni=<path>.
-EXTRA_SET_FILE_ARGS ?=
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
 		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
+		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
 		$(EXTRA_SET_FILE_ARGS) \
 		--wait
 
@@ -49,6 +60,8 @@ test:
 		--namespace $(NAMESPACE) \
 		--logs
 
+stop:
+	helm uninstall $(RELEASE)
 ## Run helm tests for a single subchart.
 ## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
 ## Valid values: validate-contracts, registry, storefront, provisioning

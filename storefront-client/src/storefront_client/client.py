@@ -42,12 +42,10 @@ from typing import Any, Optional
 import httpx
 
 from storefront_client.models import (
-    DiscoverMatch,
     EvaluateNegotiateResponse,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
-    StorefrontListingDiscoverResponse,
     StorefrontListingRefundResponse,
     ERC8004RegistrationFile,
     HealthResponse,
@@ -58,12 +56,12 @@ from storefront_client.models import (
     NegotiationDetail,
     NegotiationActionResponse,
     AdminPauseResponse,
-    AdminStatusResponse,
     ReleaseReservationsResponse,
     RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
+    ImportResourcesResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -497,16 +495,27 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
-    async def admin_status(self) -> AdminStatusResponse:
-        """GET /admin/status  (admin key required)"""
-        url = self._url("/api/v1/admin/status")
-        resp = await self._client.get(
-            "/api/v1/admin/status",
+    async def admin_import_resources(
+        self, csv_content: bytes, filename: str = "resources.csv"
+    ) -> ImportResourcesResponse:
+        """POST /admin/portfolio/resources/import  (admin key required).
+
+        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
+        upserts regardless of current table state — use to force a clobber
+        of the current inventory without restarting the pod.
+
+        ``csv_content`` is the raw bytes of the CSV file. Typically read
+        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
+        """
+        url = self._url("/api/v1/admin/portfolio/resources/import")
+        resp = await self._client.post(
+            "/api/v1/admin/portfolio/resources/import",
+            files={"file": (filename, csv_content, "text/csv")},
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return AdminStatusResponse.from_dict(resp.json())
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return ImportResourcesResponse.from_dict(resp.json())
 
     async def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
@@ -676,18 +685,6 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    async def discover_listings(
-        self,
-        *,
-        listing_id: str,
-        include_active: bool = False,
-    ) -> StorefrontListingDiscoverResponse:
-        """POST /listings/discover"""
-        headers = self._auth_headers("discover_listings", listing_id)
-        body = {"listing_id": listing_id, "include_active": include_active}
-        return StorefrontListingDiscoverResponse.from_dict(
-            await self._post("/listings/discover", body, extra_headers=headers)
-        )
 
     async def send_resource_alert(
         self,
@@ -1218,16 +1215,27 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
-    def admin_status(self) -> AdminStatusResponse:
-        """GET /admin/status  (admin key required)"""
-        url = self._url("/api/v1/admin/status")
-        resp = self._client.get(
-            "/api/v1/admin/status",
+    def admin_import_resources(
+        self, csv_content: bytes, filename: str = "resources.csv"
+    ) -> ImportResourcesResponse:
+        """POST /admin/portfolio/resources/import  (admin key required).
+
+        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
+        upserts regardless of current table state — use to force a clobber
+        of the current inventory without restarting the pod.
+
+        ``csv_content`` is the raw bytes of the CSV file. Typically read
+        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
+        """
+        url = self._url("/api/v1/admin/portfolio/resources/import")
+        resp = self._client.post(
+            "/api/v1/admin/portfolio/resources/import",
+            files={"file": (filename, csv_content, "text/csv")},
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return AdminStatusResponse.from_dict(resp.json())
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return ImportResourcesResponse.from_dict(resp.json())
 
     def admin_release_reservations(self) -> "ReleaseReservationsResponse":
         """POST /admin/portfolio/release-reservations  (admin key required).
@@ -1434,19 +1442,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             body["fulfillment_uid"] = fulfillment_uid
         return StorefrontListingClaimResponse.from_dict(
             self._post("/listings/claim", body, extra_headers=headers)
-        )
-
-    def discover_listings(
-        self,
-        *,
-        listing_id: str,
-        include_active: bool = False,
-    ) -> StorefrontListingDiscoverResponse:
-        """POST /listings/discover"""
-        headers = self._auth_headers("discover_listings", listing_id)
-        body = {"listing_id": listing_id, "include_active": include_active}
-        return StorefrontListingDiscoverResponse.from_dict(
-            self._post("/listings/discover", body, extra_headers=headers)
         )
 
     def send_resource_alert(

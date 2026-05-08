@@ -194,10 +194,14 @@ class Config:
     # unset, the strategy exits. Default False preserves the skip-on-missing
     # behavior.
     publish_priceless: bool
-    # Path to a CSV file to seed the resources table from on startup, only
-    # when the table is empty. None (the default) means no auto-seeding —
-    # the operator must seed manually via the portfolio import CLI or API.
-    # Set [seller].resources_csv_path in config.toml to enable.
+    # Resource auto-seeding — two delivery mechanisms, checked in priority order:
+    #   1. resources_csv_inline: raw CSV content injected via config (Helm Secret).
+    #      Used when the CSV is operator-supplied and must not be baked into the image.
+    #   2. default_resources_csv_path: path to a CSV file on disk (compose / local dev).
+    #      Skipped when resources_csv_inline is set.
+    # Seeding is skipped entirely when the resources table is already populated.
+    # Use POST /api/v1/admin/portfolio/resources/import to force a clobber.
+    resources_csv_inline: str | None
     default_resources_csv_path: str | None
     # Admin API key — protects /admin/* routes and admin-only resource actions.
     # None means unprotected (local dev).  Set via [seller].admin_api_key in
@@ -386,7 +390,8 @@ def load_config() -> Config:
             "seller.pricing.publish_priceless", False,
         ),
 
-        # Resource auto-seeding: None means disabled (the default).
+        # Resource auto-seeding: inline content takes priority over file path.
+        resources_csv_inline=_resolve("seller.resources_csv_inline", None) or None,
         default_resources_csv_path=_resolve("seller.resources_csv_path", None) or None,
     )
 

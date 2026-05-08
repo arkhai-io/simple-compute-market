@@ -52,12 +52,19 @@ deploy: deploy-seller-agent
 # library); they don't run a storefront. Use `make deploy-seller-agent`
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://market-agent-sell:8001`.
+## RESOURCES_CSV_FILE: host path to the compute resource inventory CSV.
+## Bind-mounted read-only into the container so the storefront can seed
+## its resources table on startup via seller.resources_csv_path in config.
+## Defaults to the dev inventory shipped in the source tree.
+RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/ww1-machine.csv
+
 deploy-seller-agent:
 	docker run --rm -d --name market-agent-sell \
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
+	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
 stop:

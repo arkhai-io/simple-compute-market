@@ -36,7 +36,11 @@ data:
     {{ $component }}:
       api_url:           {{ printf "http://%s-storefront-%s:%d" $.Release.Name $agent.name (int $agent.port) | quote }}
       base_url_override: {{ $agent.config.seller.baseUrl | quote }}
+      agent_id:          {{ $agent.agentId | default "" | quote }}
     {{- end }}
+
+    buyer:
+      chain_rpc_url: {{ printf "ws://%s:%d" $.Values.global.rpc.host (int $.Values.global.rpc.port) | quote }}
 
     provisioning:
       api_url:     {{ printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port) | quote }}

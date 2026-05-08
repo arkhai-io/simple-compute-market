@@ -298,7 +298,7 @@ class TestSeedResourcesIfEmpty:
         )
 
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(str(csv_file))
+        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
 
         assert result["seeded"] is False
         # imported_count reflects what was already there, not a new import.
@@ -324,12 +324,12 @@ class TestSeedResourcesIfEmpty:
             "attribute.disk_gb,attribute.virtualization_type\n"
             "compute-test-001,compute.gpu,rtx5080,count,1,available,"
             "150,MOCK,,"
-            "RTX 5080,90.0,\"California, US\","
+            'RTX 5080,90.0,"California, US",'
             "ww1,16,256,4000,bare_metal\n"
         )
 
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(str(csv_file))
+        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
 
         assert result["seeded"] is True
         assert result["imported_count"] == 1
@@ -338,10 +338,54 @@ class TestSeedResourcesIfEmpty:
         assert len(resources) == 1
         assert resources[0]["resource_id"] == "compute-test-001"
 
-    async def test_empty_csv_path_returns_not_seeded(self, db):
-        """Empty csv_path string skips seeding and returns seeded=False."""
+    async def test_seeds_from_inline_content(self, db):
+        """When csv_inline is provided, it is imported without touching the filesystem."""
+        csv_content = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
+            '150,MOCK,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+        )
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty("")
+        result = await svc.seed_resources_if_empty(csv_inline=csv_content)
+
+        assert result["seeded"] is True
+        assert result["imported_count"] == 1
+        resources = await db.list_resources()
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-inline-001"
+
+    async def test_inline_takes_priority_over_path(self, db, tmp_path):
+        """csv_inline is used when both inline and path are provided."""
+        csv_file = tmp_path / "resources.csv"
+        csv_file.write_text(
+            "resource_id,resource_type,state\n"
+            "compute-path-001,compute.gpu,available\n"
+        )
+        csv_content = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
+            '150,MOCK,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+        )
+        svc = _make_service(db)
+        result = await svc.seed_resources_if_empty(
+            csv_inline=csv_content, csv_path=str(csv_file)
+        )
+        assert result["seeded"] is True
+        resources = await db.list_resources()
+        # Only the inline row should be present.
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-inline-001"
+
+    async def test_empty_csv_path_returns_not_seeded(self, db):
+        """Neither source configured skips seeding and returns seeded=False."""
+        svc = _make_service(db)
+        result = await svc.seed_resources_if_empty()
         assert result["seeded"] is False
         assert result["imported_count"] == 0
 
@@ -349,4 +393,4 @@ class TestSeedResourcesIfEmpty:
         """A configured but missing CSV path raises FileNotFoundError."""
         svc = _make_service(db)
         with pytest.raises(FileNotFoundError):
-            await svc.seed_resources_if_empty("/nonexistent/path/resources.csv")
+            await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")

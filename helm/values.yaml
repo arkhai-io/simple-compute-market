@@ -34,6 +34,15 @@ global:
     host: "arkhai-node-operator-provisioning"
     port: 8081
 
+  # ---------------------------------------------------------------------------
+  # Admin API key — gates all /admin/* endpoints on the storefront.
+  # Rendered into each agent's config.toml as [seller].admin_api_key.
+  # Also injected into the per-agent secret profile consumed by test pods
+  # so the e2e suite can authenticate to admin-gated endpoints.
+  # In production, override with a strong random value.
+  # ---------------------------------------------------------------------------
+  adminApiKey: "test-api-key"
+
 # ---------------------------------------------------------------------------
 # test-env subchart
 # ---------------------------------------------------------------------------
@@ -105,7 +114,6 @@ storefront:
         secretName: ""
         privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
         walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-      autoRegister: true
       config:
         seller:
           agentId: bob
@@ -116,7 +124,7 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "rl"
+            policyMode: "bisection"
           integrations:
             geminiApiKey: ""
         chain:
@@ -178,3 +186,33 @@ integrationTests:
     name: arkhai
     tag: integration-tests
     pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# e2e-tests subchart
+# Full buyer-seller deal lifecycle test suite. Dev / CI only — disabled by
+# default. Enable with --set e2e-tests.enabled=true or in a CI values overlay.
+# Credentials default to the deterministic Anvil test keys; override for other
+# environments.
+# ---------------------------------------------------------------------------
+e2e-tests:
+  enabled: true
+
+  integrationTests:
+    repository: ""
+    name: arkhai
+    tag: integration-tests
+    pullPolicy: IfNotPresent
+
+  # Seller credentials for the agent this e2e run targets.
+  # Must match the deployed storefront agent's wallet.
+  # Defaults to the Anvil Hardhat account #2 (bob agent default).
+  seller:
+    privateKey:    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+    walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    adminApiKey:   ""  # empty → inherits global.adminApiKey
+
+  # Buyer credentials for on-chain escrow creation (stage 07).
+  # Defaults to the Anvil Hardhat account #1.
+  buyer:
+    privateKey:    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"

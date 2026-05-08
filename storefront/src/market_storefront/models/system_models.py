@@ -83,6 +83,13 @@ class ReleaseReservationsResponse(BaseModel):
     resource_ids: list[str]
 
 
+class ImportResourcesResponse(BaseModel):
+    """Response for POST /api/v1/admin/portfolio/resources/import."""
+    imported_count: int
+    failed_count: int
+    total_rows: int
+
+
 class StageEventResponse(BaseModel):
     events: list[dict[str, Any]]
     count: int
