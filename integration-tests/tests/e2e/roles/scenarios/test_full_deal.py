@@ -53,7 +53,7 @@ Phase 7 — Mock escrow + provisioning gate setup
 Phase 8 — Settlement pipeline
   08b  Settlement submitted + job queued:
          POST /api/v1/settle/{uid} → status=provisioning
-         wait_for_stage_event(provision, resource_reserved)
+         wait_for_stage_event(provision, job_submitted)
          GET /settle/{uid}/status → provisioning_job_id present
 
 Phase 9 — Provisioning completion
@@ -905,7 +905,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         """Settlement submitted + provisioning job queued — advance + async observe.
 
         Advance: POST /api/v1/settle/{uid} → status=provisioning.
-        Observe (event-driven): wait_for_stage_event(provision, resource_reserved)
+        Observe (event-driven): wait_for_stage_event(provision, job_submitted)
           then single GET /settle/{uid}/status → provisioning_job_id.
         Confirms: job visible in provisioning API with status queued/running/succeeded.
         """
