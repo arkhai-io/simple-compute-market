@@ -127,7 +127,7 @@ class TestRunBuyDerivePrices:
 
         constraints = BuyConstraints(duration_seconds=3600)  # prices None
         config = BuyConfig(
-            registry_url="http://reg",
+            registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
             ssh_public_key="ssh-ed25519 AAAA",
@@ -166,7 +166,7 @@ class TestRunBuyDerivePrices:
 
         constraints = BuyConstraints(duration_seconds=3600)
         config = BuyConfig(
-            registry_url="http://reg",
+            registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
             ssh_public_key="ssh-ed25519 AAAA",
@@ -214,7 +214,7 @@ class TestConfirmSettlementGate:
 
     def _config(self):
         return BuyConfig(
-            registry_url="http://reg",
+            registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
             ssh_public_key="ssh-ed25519 AAAA",

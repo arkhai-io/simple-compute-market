@@ -19,7 +19,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..common import resolve_config_value
-from ..buy_orchestrator import fetch_listing_dict
 from ..buyer_client import ResumeState, negotiate_with_seller
 from ..run_log import RunLog
 from ._cli_helpers import resolve_prices_from_matches
@@ -42,10 +41,12 @@ def register(app: typer.Typer) -> None:
             help="The seller's listing_id. Required for fresh runs; "
                  "resumed runs (--from) read it from the run-log.",
         ),
-        registry_url: Optional[str] = typer.Option(
-            None, "--registry-url",
-            help="Registry base URL (default: registry.url from config.toml). "
-                 "Used to resolve the seller URL and price floor from a listing_id.",
+        registry_urls: Optional[str] = typer.Option(
+            None, "--registry-urls",
+            help="Comma-separated registry base URLs (default: "
+                 "registry.urls from config.toml). Used to resolve the "
+                 "seller URL and price floor from a listing_id; the "
+                 "first registry that knows the listing wins.",
         ),
         initial_price: Optional[int] = typer.Option(
             None, "--initial-price",
@@ -148,25 +149,27 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
-        # Resolve registry URL once; used to look up the listing if --seller
-        # or prices weren't passed.
-        reg = resolve_config_value(
-            override=registry_url, toml_path="registry.url",
-        ) or "http://localhost:8080"
+        # Resolve registry URLs once; used to look up the listing if
+        # --seller or prices weren't passed.
+        from ..common import resolve_indexer_urls
+        reg_urls = resolve_indexer_urls(override=registry_urls)
 
-        # Auto-resolve --seller from the registry given --listing-id.
+        # Auto-resolve --seller from the registries given --listing-id.
+        # First registry that knows the listing wins.
         if listing_id and not seller_url:
+            from ..buy_orchestrator import fetch_listing_dict_multi
             try:
-                listing_dict = fetch_listing_dict(reg, listing_id)
+                listing_dict = fetch_listing_dict_multi(reg_urls, listing_id)
             except RuntimeError as exc:
                 typer.secho(
-                    f"Could not fetch listing {listing_id} from {reg}: {exc}",
+                    f"Could not fetch listing {listing_id}: {exc}",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             if not listing_dict:
                 typer.secho(
-                    f"No listing {listing_id!r} on registry {reg}.",
+                    f"No listing {listing_id!r} in any of "
+                    f"{len(reg_urls)} registries.",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)

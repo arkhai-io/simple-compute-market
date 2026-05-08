@@ -233,14 +233,21 @@ def alkahest_address_config_path(flag: Optional[str] = None,
     )
 
 
-def registry_url(flag: Optional[str] = None,
-                 config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="INDEXER_URL",
-        toml_path="registry.url",
-        config=config,
-    )
+def registry_urls(
+    config: Optional[dict[str, Any]] = None,
+) -> list[str]:
+    """Resolve the configured registry URL(s) as a list. Reads
+    ``registry.urls`` from the TOML config; falls back to a localhost
+    default. Mirrors the storefront's resolver — only the plural list
+    form is recognised.
+    """
+    cfg = config if config is not None else load_user_config()
+    raw = get_dotted(cfg, "registry.urls")
+    if isinstance(raw, list) and raw:
+        cleaned = [str(u).strip() for u in raw if str(u).strip()]
+        if cleaned:
+            return cleaned
+    return ["http://localhost:8080"]
 
 
 # ---------------------------------------------------------------------------

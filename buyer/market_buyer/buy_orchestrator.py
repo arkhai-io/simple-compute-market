@@ -36,8 +36,13 @@ DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
 
 @dataclass
 class BuyConfig:
-    """Buyer identity + how to reach the world. Immutable per `run_buy` call."""
-    registry_url: str
+    """Buyer identity + how to reach the world. Immutable per `run_buy` call.
+
+    ``registry_urls`` is the union of registries to consult for
+    discovery — see ``query_registry_for_matches_multi``. Single-URL
+    deployments pass a one-element list.
+    """
+    registry_urls: list[str]
     buyer_address: str
     buyer_private_key: str
     ssh_public_key: str
@@ -140,6 +145,36 @@ def query_registry_for_matches(
     return items
 
 
+def query_registry_for_matches_multi(
+    registry_urls: list[str],
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+    *,
+    filters: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """Fan-in over every registry URL, dedupe by ``listing_id``.
+
+    A registry that errors out is logged via stderr and skipped — the
+    merge proceeds with whoever responded. First-seen wins on
+    collisions, which mirrors the storefront's ``MultiRegistryClient``
+    so a buyer's preferred registry (listed first in
+    ``registry.urls``) implicitly takes precedence.
+    """
+    import sys
+    merged: dict[str, dict[str, Any]] = {}
+    for url in registry_urls:
+        try:
+            items = query_registry_for_matches(url, timeout=timeout, filters=filters)
+        except RuntimeError as exc:
+            print(f"[registry] {url}: {exc}", file=sys.stderr)
+            continue
+        for item in items:
+            lid = item.get("listing_id") or item.get("id")
+            if lid is None:
+                continue
+            merged.setdefault(str(lid), item)
+    return list(merged.values())
+
+
 def fetch_listing_dict(
     registry_url: str,
     listing_id: str,
@@ -172,6 +207,35 @@ def fetch_listing_dict(
         # Registry wraps single listing as {"listing": {...}}; some routes
         # return the dict directly. Tolerate both.
         return payload.get("listing") if "listing" in payload else payload
+    return None
+
+
+def fetch_listing_dict_multi(
+    registry_urls: list[str],
+    listing_id: str,
+    timeout: float = DEFAULT_HTTP_TIMEOUT,
+) -> Optional[dict[str, Any]]:
+    """Try each registry in order; return the first hit. ``None`` only
+    when every registry returned 404. Other transport errors are
+    re-raised once we've exhausted the list without finding the
+    listing — that's actionable for the operator (one registry being
+    flaky is logged but not fatal as long as another knows the id).
+    """
+    import sys
+    last_error: Optional[Exception] = None
+    for url in registry_urls:
+        try:
+            result = fetch_listing_dict(url, listing_id, timeout=timeout)
+        except RuntimeError as exc:
+            print(f"[registry] {url}: {exc}", file=sys.stderr)
+            last_error = exc
+            continue
+        if result is not None:
+            return result
+    if last_error is not None:
+        # Every registry that didn't 404 errored out — surface it so
+        # the caller can decide whether the run is salvageable.
+        raise last_error
     return None
 
 
@@ -420,7 +484,7 @@ def run_buy(
 
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
-        matches = query_registry_for_matches(config.registry_url)
+        matches = query_registry_for_matches_multi(config.registry_urls)
     _event("discover", {"match_count": len(matches)})
 
     if not matches:

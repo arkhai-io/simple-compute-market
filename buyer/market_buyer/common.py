@@ -58,6 +58,33 @@ def resolve_ssh_public_key(*, override: str | None = None) -> str:
     return ""
 
 
+def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
+    """Resolve the buyer's configured registry URLs as a list.
+
+    Precedence: CLI override (comma-separated) > ``registry.urls`` (list)
+    > ``http://localhost:8080`` default. Mirrors the storefront's
+    ``_resolve_indexer_urls`` shape — only the plural list form is
+    recognised, so a stray scalar ``registry.url`` falls through to
+    the default.
+
+    The override is comma-separated rather than a repeatable typer
+    option because every command that takes it already declares a
+    single string flag; comma-splitting keeps the change to those
+    declarations a one-liner.
+    """
+    if override:
+        parts = [p.strip() for p in override.split(",") if p.strip()]
+        if parts:
+            return parts
+    from service.config_loader import get_dotted, load_user_config
+    raw = get_dotted(load_user_config(), "registry.urls")
+    if isinstance(raw, list) and raw:
+        cleaned = [str(u).strip() for u in raw if str(u).strip()]
+        if cleaned:
+            return cleaned
+    return ["http://localhost:8080"]
+
+
 def resolve_default_token() -> str:
     """Pick the buyer's default token symbol for `--token-contract` resolution.
 

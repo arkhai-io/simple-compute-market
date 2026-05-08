@@ -40,7 +40,7 @@ _REGISTRY = "http://registry:4000"
 
 def _config(order_id: str = "buyer-1") -> BuyConfig:
     return BuyConfig(
-        registry_url=_REGISTRY,
+        registry_urls=[_REGISTRY],
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,        ssh_public_key="ssh-rsa AAAA...",
     )

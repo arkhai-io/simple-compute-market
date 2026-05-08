@@ -29,7 +29,7 @@ from ..buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
-    query_registry_for_matches,
+    query_registry_for_matches_multi,
     run_buy,
 )
 from ..buyer_client import ResumeState, negotiate_with_seller
@@ -299,9 +299,11 @@ def register(app: typer.Typer) -> None:
                  "appended to so `market logs show <id>` captures the "
                  "full lifecycle.",
         ),
-        registry_url: Optional[str] = typer.Option(
-            None, "--registry-url",
-            help="Registry base URL (default: registry.url from config.toml).",
+        registry_urls: Optional[str] = typer.Option(
+            None, "--registry-urls",
+            help="Comma-separated registry base URLs (default: "
+                 "registry.urls from config.toml). Discovery is the "
+                 "union across all listed registries, deduped by listing_id.",
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
@@ -427,11 +429,9 @@ def register(app: typer.Typer) -> None:
         pk = resolve_config_value(
             override=buyer_private_key, toml_path="wallet.private_key",
         )
-        from ..common import resolve_ssh_public_key
+        from ..common import resolve_ssh_public_key, resolve_indexer_urls
         ssh = resolve_ssh_public_key(override=ssh_public_key)
-        reg = resolve_config_value(
-            override=registry_url, toml_path="registry.url",
-        )
+        reg_urls = resolve_indexer_urls(override=registry_urls)
         rpc = resolve_config_value(
             override=rpc_url, toml_path="chain.rpc_url",
         )
@@ -448,12 +448,12 @@ def register(app: typer.Typer) -> None:
             "buyer_address": "wallet.address",
             "buyer_priv_key": "wallet.private_key",
             "ssh_public_key": "wallet.ssh_public_key",
-            "registry_url": "registry.url",
+            "registry_urls": "registry.urls",
             "rpc_url": "chain.rpc_url",
         }
         missing = [n for n, v in (
             ("buyer_address", addr), ("buyer_priv_key", pk),
-            ("ssh_public_key", ssh), ("registry_url", reg),
+            ("ssh_public_key", ssh), ("registry_urls", reg_urls),
             ("rpc_url", rpc),
         ) if not v]
         if missing:
@@ -521,7 +521,7 @@ def register(app: typer.Typer) -> None:
         }
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
         try:
-            matches = query_registry_for_matches(reg, filters=active_filters or None)
+            matches = query_registry_for_matches_multi(reg_urls, filters=active_filters or None)
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
@@ -555,7 +555,7 @@ def register(app: typer.Typer) -> None:
         ) or None
 
         config = BuyConfig(
-            registry_url=reg,
+            registry_urls=reg_urls,
             buyer_address=addr,
             buyer_private_key=pk,
             ssh_public_key=ssh,
@@ -570,7 +570,7 @@ def register(app: typer.Typer) -> None:
         run_log = RunLog.start(
             command="market buy",
             buyer_address=addr,
-            registry_url=reg,
+            registry_urls=reg_urls,
             initial_price=initial_price,
             max_price=max_price,
             duration_seconds=duration_seconds,
@@ -583,7 +583,7 @@ def register(app: typer.Typer) -> None:
         header.add_column(style="bold")
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
-        header.add_row("Registry", reg)
+        header.add_row("Registries", ", ".join(reg_urls))
         header.add_row("Buyer wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))

@@ -115,9 +115,11 @@ def _fetch_json(url: str) -> dict:
 
 @listing_app.command("list")
 def listing_list(
-    registry_url: str = typer.Option(
-        None, "--registry-url", "-r",
-        help="Registry indexer base URL (config.toml: registry.url).",
+    registry_urls: str = typer.Option(
+        None, "--registry-urls", "-r",
+        help="Comma-separated registry indexer base URLs "
+             "(config.toml: registry.urls). The result is the union "
+             "across all registries, deduped by listing_id.",
     ),
     listing_id: str | None = typer.Option(None, "--listing-id", help="Filter by listing ID."),
     # Spec filters — slice fields
@@ -153,12 +155,8 @@ def listing_list(
     `_min` semantics for numerics. Without any filters, returns all open
     listings up to ``--limit``.
     """
-    base_url = (
-        registry_url
-        or resolve_config_value(toml_path="registry.url")
-        or "http://localhost:8080"
-    )
-    base_url = _normalize_registry_url(base_url)
+    from ..common import resolve_indexer_urls
+    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
@@ -188,11 +186,38 @@ def listing_list(
             continue
         query_params[key] = str(val).lower() if isinstance(val, bool) else val
     params = urllib.parse.urlencode(query_params)
-    url = f"{base_url}/listings?{params}"
 
-    payload = _fetch_json(url)
-
-    items = payload.get("items", [])
+    # Fan-in across every configured registry; dedupe by listing_id.
+    # First-seen wins so the operator's preferred registry (listed
+    # first in registry.urls) takes precedence on collisions.
+    merged: dict[str, dict] = {}
+    successes = 0
+    last_error: Exception | None = None
+    for base in urls:
+        url = f"{base}/listings?{params}"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            typer.secho(
+                f"[registry] {base}: {exc}", err=True, fg=typer.colors.YELLOW,
+            )
+            last_error = exc
+            continue
+        successes += 1
+        for row in payload.get("items", []):
+            lid = row.get("listing_id") or row.get("id")
+            if lid is None:
+                continue
+            merged.setdefault(str(lid), row)
+    if successes == 0:
+        typer.secho(
+            f"All {len(urls)} configured registries failed; last error: {last_error}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    items = list(merged.values())
     console = Console()
     table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Listing ID", style="bold", overflow="fold")
@@ -231,23 +256,31 @@ def listing_list(
 @listing_app.command("show")
 def listing_show(
     listing_id: str = typer.Argument(..., help="Listing ID"),
-    registry_url: str = typer.Option(
+    registry_urls: str = typer.Option(
         None,
-        "--registry-url",
+        "--registry-urls",
         "-r",
-        help="Registry indexer base URL (config.toml: registry.url).",
+        help="Comma-separated registry indexer base URLs "
+             "(config.toml: registry.urls). The first registry that "
+             "knows the listing wins; others are skipped.",
     ),
 ) -> None:
-    """Show a single listing by ID, fetched from the registry indexer."""
-    base_url = (
-        registry_url
-        or resolve_config_value(toml_path="registry.url")
-        or "http://localhost:8080"
-    )
-    base_url = _normalize_registry_url(base_url)
-    url = f"{base_url}/listings/{listing_id}"
-    payload = _fetch_json(url)
-    found = payload.get("listing", payload)
+    """Show a single listing by ID, fetched from the configured
+    registry indexers — the first one that knows the listing wins."""
+    from ..common import resolve_indexer_urls
+    from ..buy_orchestrator import fetch_listing_dict_multi
+    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    try:
+        found = fetch_listing_dict_multi(urls, listing_id)
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if found is None:
+        typer.secho(
+            f"Listing {listing_id!r} not found in any of {len(urls)} registries.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
 
     console = Console()
     table = Table.grid(padding=(0, 2))

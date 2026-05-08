@@ -175,7 +175,7 @@ class TestRunBuyIntegration:
             return []
 
         config = BuyConfig(
-            registry_url="http://registry",
+            registry_urls=["http://registry"],
             buyer_address="0xbuyer",
             buyer_private_key="0xpk",
             ssh_public_key="ssh-rsa ...",
@@ -217,7 +217,7 @@ class TestRunBuyIntegration:
             )
 
         config = BuyConfig(
-            registry_url="http://registry",
+            registry_urls=["http://registry"],
             buyer_address="0xbuyer",
             buyer_private_key="0xpk",
             ssh_public_key="ssh-rsa ...",
