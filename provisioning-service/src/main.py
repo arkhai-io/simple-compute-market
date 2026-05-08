@@ -30,6 +30,7 @@ from controllers.system_controller import SystemController   # noqa: E402
 from controllers.jobs_controller import AnsibleJobsController  # noqa: E402
 from controllers.hosts_controller import HostController      # noqa: E402
 from controllers.vms_controller import VmController          # noqa: E402
+from controllers.leases_controller import LeasesController   # noqa: E402
 
 
 @asynccontextmanager
@@ -55,6 +56,9 @@ async def lifespan(_: FastAPI):
     _container_module.resolved_ansible_service = container.ansible_service()
     _container_module.resolved_system_service = container.system_service()
     _container_module.resolved_host_service = container.host_service()
+    _container_module.resolved_lease_service = container.lease_service()
+    _container_module.resolved_lease_check_service = container.lease_check_service()
+    _container_module.resolved_lease_watchdog = container.lease_watchdog()
 
     # ------------------------------------------------------------------
     # Inventory seeding — runs once at startup if the hosts table is empty.
@@ -112,6 +116,22 @@ async def lifespan(_: FastAPI):
         "Job processing loop started (max_concurrent=%d)", settings.max_concurrent_jobs
     )
 
+    # Lease watchdog — only started when enabled in config (default: true).
+    watchdog_task = None
+    watchdog_enabled = bool(getattr(settings, "lease_watchdog_enabled", True))
+    if watchdog_enabled:
+        watchdog_task = asyncio.create_task(
+            _container_module.resolved_lease_watchdog.run(),
+            name="lease-watchdog",
+        )
+        logger.info(
+            "Lease watchdog started (interval=%ds grace=%ds)",
+            getattr(settings, "lease_watchdog_poll_interval_seconds", 60),
+            getattr(settings, "lease_watchdog_grace_period_seconds", 300),
+        )
+    else:
+        logger.info("Lease watchdog disabled (lease_watchdog_enabled=false)")
+
     yield
 
     logger.info("Shutdown initiated...")
@@ -120,6 +140,13 @@ async def lifespan(_: FastAPI):
         await processing_task
     except asyncio.CancelledError:
         pass
+
+    if watchdog_task is not None:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
 
     container.shutdown_resources()
     logger.info("Shutdown complete")
@@ -161,6 +188,10 @@ app = FastAPI(
             "name": "system",
             "description": "Health, version, and Ansible readiness diagnostics.",
         },
+        {
+            "name": "leases",
+            "description": "VM lease lifecycle — register, query, and cancel leases.",
+        },
     ],
     lifespan=lifespan,
 )
@@ -201,6 +232,7 @@ app.include_router(SystemController.make_system_router(), prefix="/api/v1")     
 app.include_router(AnsibleJobsController.make_router(), prefix="/api/v1")          # /api/v1/jobs/*
 app.include_router(HostController.make_router(), prefix="/api/v1")                 # /api/v1/hosts/*
 app.include_router(VmController.make_router(), prefix="/api/v1")                   # /api/v1/hosts/{host}/vms/*
+app.include_router(LeasesController.make_router(), prefix="/api/v1")               # /api/v1/leases/*
 
 # Test controller — only mounted when mock profile is active.
 # Never present in production or staging.

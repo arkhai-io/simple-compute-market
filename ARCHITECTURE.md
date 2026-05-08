@@ -178,7 +178,7 @@ storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
 ├── commands/
 │   └── register.py         # in-process port of the legacy register_onchain.py
-├── server.py               # FastAPI app, lifespan, run_serve(), auto-publish loop
+├── server.py               # FastAPI app, lifespan, run_serve() (publish loop removed)
 ├── container.py            # Resolved service singletons (populated in lifespan)
 ├── agent.py                # Startup/background-task helpers only:
 │                           #   _startup_tasks, _ensure_agent_identity, _start_heartbeat,
@@ -212,7 +212,7 @@ storefront/src/market_storefront/
 │   └── system_service.py          # SystemService: health/seed/evaluate + registry checks
 ├── groups/                 # CLI groups: config, escrow, network
 ├── cli_provide.py, cli_portfolio.py, cli_logs.py, cli_common.py
-├── resource_poller.py, negotiation_watchdog.py, agent_heartbeat.py
+├── negotiation_watchdog.py, agent_heartbeat.py
 ├── policy/seeding.py
 ├── utils/
 │   ├── config.py, sqlite_client.py, action_executor.py
@@ -260,9 +260,12 @@ storefront/src/market_storefront/
 │  └───────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  Background tasks                                                   │
-│  ┌─────────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
-│  │ negotiation_watchdog│  │ resource_poller  │  │agent_heartbeat│ │
-│  └─────────────────────┘  └──────────────────┘  └───────────────┘ │
+│  ┌─────────────────────┐  ┌───────────────┐                        │
+│  │ negotiation_watchdog│  │agent_heartbeat│                        │
+│  └─────────────────────┘  └───────────────┘                        │
+│                                                                     │
+│  Resource lifecycle now owned by provisioning service LeaseWatchdog │
+│  which calls PATCH /api/v1/admin/portfolio/resources/{id} on expiry │
 │                                                                     │
 │  Outbound                                                           │
 │  ┌─────────────────────┐  ┌──────────────────┐                     │
@@ -545,10 +548,23 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 
 **Admin controller** (`controllers/admin_controller.py`):
 ```
-POST /admin/pause    Set globally paused = True — admin key required
-POST /admin/resume   Set globally paused = False — admin key required
-GET  /admin/status   Live counts: active_negotiations, open_orders, paused_orders — admin key required
+POST  /api/v1/admin/pause    Set globally paused = True — admin key required
+POST  /api/v1/admin/resume   Set globally paused = False — admin key required
+GET   /api/v1/admin/status   Live counts: active_negotiations, open_orders, paused_orders
+PATCH /api/v1/admin/portfolio/resources/{resource_id}
+      Partial update of a resource row — admin key required.
+      Body: { state?, attributes? } — only non-None fields written.
+      Primary use: lease expiry release by the provisioning LeaseWatchdog:
+        { "state": "available", "attributes": { "lease_end_utc": null } }
+      Also used for operator recovery and test state manipulation.
+      Returns: full updated row + updated=true/false (idempotent flag).
+      404 if resource_id does not exist.
+POST  /api/v1/admin/portfolio/release-reservations
+      Bulk-release all held (reserved or leased) resources — admin key required.
+      Sledgehammer; prefer PATCH above for targeted single-row release.
 ```
+
+Note: legacy redirect aliases `/admin/pause` and `/admin/resume` (without `/api/v1` prefix) are registered in `server.py` for backwards compatibility with existing scripts.
 
 #### Admin API Key
 
@@ -780,20 +796,87 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 
 ---
 
-#### Lease Lifecycle — the key design gap
+#### Lease Lifecycle — DB-driven watchdog
 
-**The lease expiry is not monitored by the provisioning service.** The `lease_end` action schedules a shell command with the Unix `at` daemon on the KVM host itself. At the scheduled UTC time, `at` runs:
+The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM and schedules its expiry, it registers a lease with the provisioning service via `POST /api/v1/leases`. The `LeaseWatchdog` then polls the `vm_leases` table and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
 
-1. `virsh destroy <vm_name>` (force-kill)
-2. `/usr/local/bin/cleanup_vm_<vm_name>.sh` — a script written to the host during `vm-create` that removes FRP config, iptables rules, UFW/firewalld rules, GPU detachment, static DHCP lease, SSH keys, cloud-init files, VM storage, and VM definition
+**`vm_leases` table:**
 
-**Nothing in the provisioning service polls for lease expiry or triggers `lease_end` automatically.** The agent is expected to call `lease_end` (via a provisioning job) when the on-chain agreement's duration expires. This means:
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUID PK | Internal lease ID |
+| `resource_id` | TEXT | Storefront-assigned resource identifier (e.g. `compute-ww1-001`). Application-level FK — unvalidated by the provisioning service. |
+| `escrow_uid` | TEXT UNIQUE | On-chain escrow UID. One deal = one lease. |
+| `vm_host` | TEXT | KVM host alias (Ansible inventory name) |
+| `vm_target` | TEXT | Libvirt domain name of the provisioned VM |
+| `lease_start_utc` | DATETIME nullable | Null = lease active immediately on creation |
+| `lease_end_utc` | DATETIME | When the lease expires |
+| `status` | TEXT | See `LeaseStatus` enum below |
+| `create_job_id` | TEXT nullable | Provisioning job_id of the VM creation job. Allows tracing from lease back to the original create job. |
+| `check_job_id` | TEXT nullable | Provisioning job_id for the most recent watchdog check job (set during `releasing` phase) |
 
-- If the agent crashes or loses its state before calling `lease_end`, the VM runs forever unless the operator intervenes manually
-- The only record of whether cleanup ran is the log file on the KVM host at `/var/log/vm-lease-end/<vm_name>/lease_end_*.log`
-- The provisioning service has no visibility into whether the `at` job actually executed
+**`LeaseStatus` values:**
 
-**`lease_remove`** is the cancel operation — it cancels a pending `at` job before it fires. Once the `at` time has passed and the job has run, `lease_remove` will find no matching job (it searches `atq` for `LEASE:<vm_name>` tag) and fail.
+| Status | Meaning |
+|---|---|
+| `pending` | `lease_start_utc` is in the future; VM may not yet be running |
+| `active` | Lease is running; `lease_end_utc` is in the future |
+| `releasing` | `lease_end_utc` passed; watchdog submitted a check job to confirm VM cleanup |
+| `released` | Storefront `PATCH /resources/{id}` called successfully; resource is available again |
+| `forced` | Grace period elapsed; storefront patched without VM confirmation |
+| `cancelled` | Lease cancelled before expiry |
+
+**Lease flow:**
+
+```
+Storefront (after provisioning + schedule_expiry succeeds)
+  │
+  └── POST /api/v1/leases  →  vm_leases row created (status=active or pending)
+
+LeaseWatchdog (every 60s, or on-demand via POST /api/v1/system/check-leases)
+  │
+  ├── list_pending_to_activate(now)  →  advance pending leases whose start has passed
+  ├── list_due(now)  →  active leases with lease_end_utc < now
+  │
+  ├── For each due lease:
+  │   ├── Submit check Ansible job (vm_action=check, vm_host, vm_target)
+  │   └── begin_releasing(check_job_id) → status=releasing
+  │
+  ├── list_releasing()  →  leases with check jobs in flight
+  │   ├── Poll check job status
+  │   ├── On succeeded / failed+past-grace:
+  │   │   ├── PATCH {settings.storefront_url}/api/v1/admin/portfolio/resources/{resource_id}
+  │   │   │     body: { state: "available", attributes: { lease_end_utc: null } }
+  │   │   │     headers: X-Admin-Key: {settings.storefront_admin_key}
+  │   │   ├── On 200/404: mark_released()
+  │   │   └── On patch failure within grace: skip (retry next cycle)
+  │   │       On patch failure past grace: mark_forced()
+  │   └── On still-running + within grace: skip (wait next cycle)
+```
+
+**Watchdog configuration** (`settings.toml` → dynaconf):
+```toml
+lease_watchdog_enabled = true
+lease_watchdog_poll_interval_seconds = 60
+lease_watchdog_grace_period_seconds = 300
+storefront_url = ""          # base URL of the storefront (global, not per-lease)
+storefront_admin_key = ""    # X-Admin-Key for storefront admin endpoints
+                             # inject via provisioning-secrets profile in production
+```
+
+`storefront_url` and `storefront_admin_key` are global settings on the provisioning service — one provisioning service instance serves one storefront. They are not stored per-lease.
+
+**On-demand trigger:** `POST /api/v1/system/check-leases` runs one watchdog cycle immediately. Used by operators and tests to avoid waiting for the 60-second timer. Returns `{ activated, checked, released, forced, skipped }`.
+
+**Leases API:**
+```
+POST   /api/v1/leases                  Register a new lease (called by storefront)
+GET    /api/v1/leases                  List leases (filter: status, vm_host, escrow_uid)
+GET    /api/v1/leases/{lease_id}       Get one lease by internal ID
+PATCH  /api/v1/leases/{lease_id}       Partial update (status, check_job_id, lease_end_utc)
+GET    /api/v1/leases/by-escrow/{uid}  Lookup by escrow_uid (storefront recovery path)
+DELETE /api/v1/leases/{lease_id}/cancel  Cancel a lease before expiry
+```
 
 ---
 
@@ -1400,7 +1483,7 @@ make build
 
 - **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the planned negotiation refactor.
 
-- **`resource_poller` leased-resource check has no integration test coverage:** `resource_poller._check_leased_resource()` imports `ProvisioningClient` at module level (moved from a function-level import inside a `try/except` that was silently swallowing `ModuleNotFoundError` on every poll cycle). A broader audit of the storefront moved all non-optional, non-circular function-level imports to module scope: `httpx` in `action_executor` and `system_service`, `CreateVmRequest` and `ScheduleVmExpiryRequest` from `models.vm_request_model` in `action_executor`. **Rule for future contributors:** function-level imports are only acceptable for (a) optional/heavy dependencies that the service degrades gracefully without (`alkahest_py`, `torch`, `web3`), (b) imports that would create a circular dependency at module scope, or (c) CLI command handlers where lazy loading is intentional. Everything else must be at module level so import failures surface as a hard startup crash rather than a silent per-call warning. The remaining function-level imports in the storefront fall into categories (a)–(c) and are intentional.
+- **`wait_for_registry_agent` retries past transient network states:** `"timeout"` and `"unreachable"` returned by `registry_auth_check._probe()` are transient network conditions. The wait loop retries past `"agent_not_found"`, `"timeout"`, and `"unreachable"`. Only definitive states (`"ok"`, `"owner_mismatch"`, `"unconfigured"`, `"owner_unknown"`, `"wallet_unconfigured"`, `"http_*"`) exit the loop immediately.
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag is in-process memory, not reset between `pytest` sessions. If a test run ends with the storefront paused (e.g., stage 06 ran but stage 07 did not), the next run immediately fails at stage 08. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running tests against a live environment that may have been left paused by a previous run, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
@@ -1539,16 +1622,29 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 **`HostController.check_capacity` — future:** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
 
-### 2. Implement reliable lease expiry detection
+### 2. Lease expiry watchdog
 
-**Problem:** The current lease mechanism schedules a Unix `at` daemon job on the KVM host at the moment `lease_end` is called. After that, the provisioning service has no further awareness of whether the lease timer fired, whether the cleanup script ran, or whether the VM was actually destroyed. There is no polling, no callback, no record in the provisioning database. If the `at` daemon is not running, if the KVM host reboots before the lease time, or if the agent never calls `lease_end` at all (e.g., due to a crash), the VM runs indefinitely.
+**Status:** Implemented.
 
-**Planned fix:** Implement a lease expiry watchdog inside the provisioning service. Design options to evaluate:
+**What was implemented:**
+- `vm_leases` table tracks active leases; `LeaseStatus`: `pending`→`active`→`releasing`→`released`/`forced`/`cancelled`
+- `LeaseService` — CRUD + lifecycle transitions
+- `LeaseCheckService.check_leases()` — per-cycle logic:
+  1. Activate pending leases whose `lease_start_utc` has passed (`list_pending_to_activate`)
+  2. Submit check Ansible job for expired active leases; transition to `releasing` (`list_due` + `begin_releasing`)
+  3. Poll check jobs for `releasing` leases; PATCH storefront resource when confirmed; handle grace period
+- `LeaseWatchdog` — thin asyncio timer that calls `check_leases()` every 60 seconds
+- `POST /api/v1/system/check-leases` — on-demand trigger for operators and tests; returns `{activated, checked, released, forced, skipped}`
+- `POST /api/v1/leases` — storefront calls this after provisioning to register a lease
+- Full CRUD leases API: `GET /api/v1/leases`, `PATCH /api/v1/leases/{id}`, `by-escrow`, `cancel`
+- Storefront `PATCH /api/v1/admin/portfolio/resources/{resource_id}` — general-purpose partial resource update
+- Storefront `resource_poller.py` removed (tombstoned). Storefront `_spawn_publish_loop()` removed.
+- `storefront_url` / `storefront_admin_key` are global provisioning service settings, injected via the `provisioning-secrets` config profile in production.
 
-- **Option A — DB-driven polling loop:** When a `lease_end` job succeeds, write the `vm_name`, `vm_host`, and `lease_end_utc` to a `vm_leases` table. A background task wakes periodically (e.g., every minute), queries for leases past their expiry time, and submits a destroy + cleanup job for each. This makes the provisioning service the authoritative lease timer rather than the KVM host's `at` daemon. The `at`-based scheduling in the Ansible playbook would be retired.
-- **Option B — polling the `at` queue:** Submit a `check` job against the host periodically to verify that expected `at` jobs are still pending. This is fragile and doesn't solve the "agent never called lease_end" case.
+**Remaining gap — check job result interpretation:**
+`LeaseCheckService._process_releasing_lease` currently polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
 
-Option A is the preferred direction. The `vm_leases` table should also be exposed via API so administrators can see what leases are active, when they expire, and what their current state is — without SSHing to the host.
+The `at`-based scheduling on the KVM host still runs as before — the check job is a verification step, not a replacement for the `at` cleanup.
 
 ---
 

@@ -14,7 +14,7 @@ DIST_DIR ?= $(abspath $(CURDIR)/../.dist)
 init: init-uv
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR)
 
-reinit: init-uv
+reinit:
 	uv sync --dev --python $(PYTHON_VERSION) --find-links $(DIST_DIR) --reinstall-package arkhai-registry-client
 
 init-uv:

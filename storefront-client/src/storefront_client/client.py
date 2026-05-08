@@ -72,6 +72,10 @@ logger = logging.getLogger(__name__)
 class StorefrontClientError(Exception):
     """HTTP or protocol error from the storefront API."""
 
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 # ---------------------------------------------------------------------------
 # EIP-191 signing helpers — shared by both clients
@@ -147,7 +151,10 @@ class _StorefrontClientBase:
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
         if status >= 400:
-            raise StorefrontClientError(f"{method} {url} returned {status}: {text[:200]}")
+            raise StorefrontClientError(
+                f"{method} {url} returned {status}: {text[:200]}",
+                status_code=status,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +527,33 @@ class StorefrontClient(_StorefrontClientBase):
     async def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
         return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
+
+    async def patch_resource(
+        self,
+        resource_id: str,
+        *,
+        state: "str | None" = None,
+        attributes: "dict | None" = None,
+    ) -> dict:
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Partial update of a resource row. Only supplied (non-None) fields are
+        written. Returns the full resource row after the patch.
+        """
+        body: dict = {}
+        if state is not None:
+            body["state"] = state
+        if attributes is not None:
+            body["attributes"] = attributes
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
+        resp = await self._client.patch(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            json=body,
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
+        return resp.json()
 
     async def policy_status(self) -> dict:
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
@@ -930,6 +964,14 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
 
+    def _patch(self, path: str, body: dict, *, extra_headers: dict | None = None) -> dict:
+        url = self._url(path)
+        resp = self._client.patch(
+            path, json=body, headers=extra_headers or {}, timeout=self._timeout
+        )
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
+        return resp.json()
+
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
         resp = self._client.get(path, params=params or {}, timeout=self._timeout)
@@ -1275,6 +1317,36 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 {},
                 extra_headers=self._admin_headers(),
             )
+        )
+
+    def patch_resource(
+        self,
+        resource_id: str,
+        *,
+        state: "str | None" = None,
+        attributes: "dict | None" = None,
+    ) -> dict:
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Partial update of a resource row. Only supplied (non-None) fields are
+        written; unspecified fields are left unchanged. Returns the full
+        resource row after the patch.
+
+        Primary use cases:
+          - Release a lease: ``patch_resource(id, state='available', attributes={'lease_end_utc': None})``
+          - Force a state transition for testing or operator recovery.
+
+        Returns the raw response dict from the endpoint.
+        """
+        body: dict = {}
+        if state is not None:
+            body["state"] = state
+        if attributes is not None:
+            body["attributes"] = attributes
+        return self._patch(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            body,
+            extra_headers=self._admin_headers(),
         )
 
     def policy_seed(self) -> dict:

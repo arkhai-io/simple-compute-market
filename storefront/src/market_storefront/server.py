@@ -16,9 +16,6 @@ Global pause state
 from __future__ import annotations
 
 import logging
-import socket
-import threading
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -47,77 +44,14 @@ def _set_globally_paused(value: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auto-publish helpers
-# ---------------------------------------------------------------------------
-
-def _wait_for_port(host: str, port: int, *, timeout: float = 30.0) -> bool:
-    connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((connect_host, port), timeout=1.0):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
-
-
-def _spawn_publish_loop(*, host: str, port: int, poll_interval: float) -> threading.Thread | None:
-    from market_storefront.cli_publish import run_watch_loop
-
-    if not CONFIG.default_min_price and not CONFIG.publish_priceless:
-        # Without a global floor and price-less mode disabled, only resources
-        # with per-row min_price in the CSV will publish. Cycles silently
-        # drop everything else — surface the misconfig once at startup so
-        # it's not buried in cycle logs.
-        logger.warning(
-            "[publish-loop] [seller.pricing].default_min_price is not set "
-            "and [seller.pricing].publish_priceless is False. Resources "
-            "without per-row min_price will be skipped. Set default_min_price "
-            "in config.toml, set per-row min_price in resources.csv, or set "
-            "publish_priceless=true to advertise unpriced listings."
-        )
-
-    def _runner() -> None:
-        if not _wait_for_port(host, port, timeout=30.0):
-            logger.warning("[publish-loop] server not reachable within 30s; aborting")
-            return
-        try:
-            run_watch_loop(
-                db_path=CONFIG.agent_db_path,
-                base_url=f"http://127.0.0.1:{port}",
-                wallet_address=CONFIG.agent_wallet_address or "",
-                private_key=CONFIG.agent_priv_key,
-                default_min_price=CONFIG.default_min_price,
-                default_token=CONFIG.default_token,
-                default_max_duration_seconds=CONFIG.default_max_duration_seconds,
-                publish_priceless=CONFIG.publish_priceless,
-                poll_interval=poll_interval,
-                log_silent_cycles=False,
-            )
-        except Exception as exc:
-            logger.exception("[publish-loop] crashed: %r", exc)
-
-    thread = threading.Thread(target=_runner, name="storefront-publish-loop", daemon=True)
-    thread.start()
-    return thread
-
-
 def run_serve(
     host: str = "0.0.0.0",
     port: int | None = None,
-    *,
-    no_publish: bool = False,
-    poll_interval: float = 30.0,
 ) -> None:
     """Launch uvicorn. Called by ``market-storefront serve``."""
     import uvicorn
 
     resolved_port = port if port is not None else CONFIG.port
-    if not no_publish:
-        _spawn_publish_loop(host=host, port=resolved_port, poll_interval=poll_interval)
-    else:
-        logger.info("[serve] --no-publish flag set; skipping publish loop")
     uvicorn.run(app, host=host, port=resolved_port)
 
 

@@ -298,7 +298,6 @@ def _maybe_join_zerotier_network() -> None:
 
 async def _startup_tasks():
     """Initialize background tasks. Called from server.py lifespan."""
-    from market_storefront.resource_poller import resource_poller_loop
     from market_storefront.negotiation_watchdog import watchdog_loop as _neg_watchdog_loop
 
     _maybe_join_zerotier_network()
@@ -363,10 +362,9 @@ async def _startup_tasks():
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
 
-    # Start resource availability poller
-    asyncio.create_task(resource_poller_loop())
-    logger.info("[STARTUP] Resource poller started (interval=%ds)",
-            CONFIG.resource_check_interval)
+    # Resource availability poller removed — lease lifecycle is now owned by
+    # the provisioning service's LeaseWatchdog, which calls back to
+    # PATCH /api/v1/admin/portfolio/resources/{id} when leases expire.
 
     # Start negotiation watchdog (marks stale threads as abandoned)
     asyncio.create_task(_neg_watchdog_loop())

@@ -70,10 +70,10 @@ test-provisioning:
 	cd provisioning-service && make test
 
 test-registry:
-	cd registry-service && make test
+	cd registry-service && make reinit && make test
 
 test-storefront:
-	cd storefront && make test
+	cd storefront && make reinit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.

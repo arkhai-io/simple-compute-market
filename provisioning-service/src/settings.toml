@@ -94,3 +94,15 @@ ssh_decryption_key = ""
 # at every service startup (idempotent).  Used by the Helm chart to inject
 # inventory via a Kubernetes Secret without requiring a POST /hosts/import call.
 inventory_ini = ""
+
+# Lease watchdog
+# Polls vm_leases for expired leases, submits a check Ansible job to confirm
+# VM cleanup, then patches the storefront resource back to 'available'.
+# The storefront_url and storefront_admin_key are global — one provisioning
+# service serves one storefront. The admin key should be injected via a
+# secrets profile (provisioning-secrets) in production.
+lease_watchdog_enabled = true
+lease_watchdog_poll_interval_seconds = 60
+lease_watchdog_grace_period_seconds = 300
+storefront_url = ""
+storefront_admin_key = ""

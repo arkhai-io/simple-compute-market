@@ -159,9 +159,7 @@ def _publish_offer(
     return {
         "status": resp.status,
         "listing_id": resp.listing_id,
-        "event_id": resp.event_id,
         "root_agent_response": resp.root_agent_response,
-        "listing_request": resp.listing_request,
         **resp.extra,
     }
 
@@ -192,9 +190,7 @@ def _close_order(
             raise typer.Exit(code=1)
     return {
         "status": resp.status,
-        "event_id": resp.event_id,
         "root_agent_response": resp.root_agent_response,
-        "listing_request": resp.listing_request,
         **resp.extra,
     }
 

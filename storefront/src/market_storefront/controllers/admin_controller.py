@@ -6,9 +6,10 @@ routes to return 404.
 """
 from __future__ import annotations
 
+import json
 import logging
 
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
@@ -17,6 +18,8 @@ from market_storefront.models.system_models import (
     AdminPauseResponse,
     ImportResourcesResponse,
     ReleaseReservationsResponse,
+    ResourcePatchRequest,
+    ResourcePatchResponse,
 )
 from market_storefront.server import _set_globally_paused
 
@@ -79,7 +82,6 @@ class AdminController:
                  -H "X-Admin-Key: <key>" \\
                  -F "file=@/path/to/resources.csv"
         """
-        from fastapi import HTTPException
         try:
             csv_content = (await file.read()).decode("utf-8")
         except Exception as exc:
@@ -104,55 +106,114 @@ class AdminController:
             total_rows=report.get("total_rows", 0),
         )
 
-    @router.post(
-        "/portfolio/resources/{resource_id}/release-reservation",
-        response_model=ReleaseReservationsResponse,
-        summary="Release one held compute resource back to available (admin)",
+    @router.patch(
+        "/portfolio/resources/{resource_id}",
+        response_model=ResourcePatchResponse,
+        summary="Partial update of a compute resource (admin)",
     )
-    async def release_one_reservation(
-        self, resource_id: str
-    ) -> ReleaseReservationsResponse:
-        """Force a single resource in any held state back to ``available``.
+    async def patch_resource(
+        self, resource_id: str, body: ResourcePatchRequest
+    ) -> ResourcePatchResponse:
+        """Partially update a resource row.
 
-        Surgical counterpart to ``release-reservations``: clears exactly the
-        named row's hold, so an operator can target one stuck resource
-        without freeing every reservation in the seller's portfolio. Covers
-        both ``reserved`` (held during provisioning) and ``leased`` (held
-        for the duration of an active lease) — they're both "held" states
-        from the portfolio's perspective. The only mutation is the
-        ``state`` transition; ``value``, ``attributes``, and
-        ``lease_end_utc`` are left intact.
+        Only fields present in the request body (non-None) are written;
+        unspecified fields are left unchanged. Idempotent: calling with the
+        same state the resource is already in returns ``updated=False`` rather
+        than erroring.
 
-        404 if the row doesn't exist; idempotent on already-available rows
-        (returns ``released_count=0`` rather than failing).
+        Primary use cases:
 
-        For an actual stuck VM with a running workload, pair this with the
-        provisioning service's
-        ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` (and optionally
-        ``/undefine``) — those run real Ansible against the host, while
-        this endpoint only clears the storefront's own bookkeeping.
+        * **Lease expiry** — the provisioning service's LeaseWatchdog calls
+          this with ``{"state": "available", "attributes": {"lease_end_utc": null}}``
+          when a VM has been cleaned up.
+        * **Manual operator intervention** — release a stuck resource, force a
+          state transition for debugging, or patch attributes for testing.
+        * **Test scenarios** — set arbitrary state without going through the
+          full settlement flow.
+
+        Returns the full resource row after the patch so callers can confirm
+        what was written without a second GET.
+
+        404 if the resource_id does not exist.
         """
-        from fastapi import HTTPException
         row = await self._db.get_resource(resource_id=resource_id)
         if row is None:
             raise HTTPException(
                 status_code=404,
                 detail=f"Resource {resource_id!r} not found",
             )
-        if row.get("state") not in _HELD_STATES:
-            return ReleaseReservationsResponse(released_count=0, resource_ids=[])
-        await self._db.apply_resource_set_transition(
+
+        old_state = row.get("state")
+        old_attrs_raw = row.get("attributes") or {}
+        if isinstance(old_attrs_raw, str):
+            try:
+                old_attrs = json.loads(old_attrs_raw)
+            except (json.JSONDecodeError, TypeError):
+                old_attrs = {}
+        else:
+            old_attrs = old_attrs_raw
+
+        # Determine what actually needs to change.
+        new_state = body.state
+        new_attrs: dict | None = None
+        if body.attributes is not None:
+            # Merge: existing attrs overwritten by supplied keys; None values
+            # clear individual keys.
+            merged = {**old_attrs}
+            for k, v in body.attributes.items():
+                if v is None:
+                    merged.pop(k, None)
+                else:
+                    merged[k] = v
+            new_attrs = merged
+
+        state_changed = new_state is not None and new_state != old_state
+        attrs_changed = new_attrs is not None and new_attrs != old_attrs
+
+        if not state_changed and not attrs_changed:
+            return ResourcePatchResponse(
+                resource_id=resource_id,
+                state=old_state,
+                attributes=old_attrs,
+                updated=False,
+            )
+
+        event_parts = []
+        if state_changed:
+            event_parts.append(f"state:{old_state}->{new_state}")
+        if attrs_changed:
+            event_parts.append("attrs_updated")
+        event_type = "admin_resource_patch:" + ",".join(event_parts)
+
+        await self._db.apply_resource_transition(
             resource_id=resource_id,
-            event_type="reservation_released_by_admin",
-            idempotency_key=f"admin-release:{resource_id}:{row.get('updated_at', '')}",
-            set_state="available",
+            event_type=event_type,
+            idempotency_key=f"admin-patch:{resource_id}:{new_state}:{json.dumps(new_attrs, sort_keys=True) if new_attrs is not None else ''}",
+            set_state=new_state if state_changed else None,
+            set_attribute=(
+                {f"$.{k}": v for k, v in body.attributes.items()}
+                if body.attributes is not None else None
+            ),
         )
-        logger.info(
-            "[ADMIN] Released %s resource: %s",
-            row.get("state"), resource_id,
-        )
-        return ReleaseReservationsResponse(
-            released_count=1, resource_ids=[resource_id]
+
+        if state_changed:
+            logger.info("[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state)
+        if attrs_changed:
+            logger.info("[ADMIN] Resource %s attributes patched", resource_id)
+
+        # Re-fetch the updated row to return accurate state.
+        updated_row = await self._db.get_resource(resource_id=resource_id)
+        attrs_out = updated_row.get("attributes") or {}
+        if isinstance(attrs_out, str):
+            try:
+                attrs_out = json.loads(attrs_out)
+            except (json.JSONDecodeError, TypeError):
+                attrs_out = {}
+        return ResourcePatchResponse(
+            resource_id=resource_id,
+            state=updated_row.get("state"),
+            attributes=attrs_out,
+            updated=True,
         )
 
     @router.post(
@@ -165,9 +226,9 @@ class AdminController:
 
         "Held" means ``reserved`` (during provisioning) OR ``leased`` (during
         an active lease). Both are forms of bookkeeping that the storefront
-        normally clears via ``resource_poller`` once the lease expires;
-        under mocked or short-circuited flows the poller has nothing to
-        do, so this endpoint is the explicit cleanup.
+        normally clears via the provisioning service's LeaseWatchdog once the
+        lease expires; under mocked or short-circuited flows the watchdog has
+        nothing to do, so this endpoint is the explicit cleanup.
 
         Use cases:
           - e2e test teardown between back-to-back runs against the same stack
@@ -179,7 +240,7 @@ class AdminController:
             value/inventory data.
 
         Sledgehammer — for surgical single-row release, use
-        ``POST /portfolio/resources/{resource_id}/release-reservation``
+        ``PATCH /portfolio/resources/{resource_id}`` with ``state=available``
         instead. Production operators should prefer the targeted variant.
 
         Does not touch resources in any other state (e.g. ``available`` or
@@ -207,3 +268,4 @@ class AdminController:
             released_count=len(released),
             resource_ids=released,
         )
+

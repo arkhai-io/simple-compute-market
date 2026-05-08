@@ -1108,6 +1108,42 @@ async def fulfill_compute_obligation(
             logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", cred_order_id, cred_err)
     await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
 
+    # Register the lease with the provisioning service so the LeaseWatchdog
+    # can call back to patch this resource to 'available' when the lease expires.
+    # storefront_url and storefront_admin_key are global settings on the
+    # provisioning service — not passed per-lease.
+    # Non-fatal: a failure here is logged but does not abort settlement.
+    if reserved_resource_id and reserved_vm_host and vm_target and escrow_uid:
+        try:
+            from client.provisioning_client import ProvisioningClient
+            from datetime import datetime as _dt
+            lease_end_dt = _dt.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
+                tzinfo=timezone.utc
+            )
+            async with ProvisioningClient(
+                CONFIG.provisioning_service_url,
+                agent_id=str(CONFIG.onchain_agent_id or ""),
+                timeout=10,
+            ) as prov_client:
+                await prov_client.register_lease(
+                    resource_id=reserved_resource_id,
+                    escrow_uid=escrow_uid,
+                    vm_host=reserved_vm_host,
+                    vm_target=vm_target,
+                    lease_end_utc=lease_end_dt,
+                )
+            logger.info(
+                "[LEASE] Registered lease with provisioning service "
+                "(resource=%s escrow=%s expires=%s)",
+                reserved_resource_id, escrow_uid, lease_end_utc,
+            )
+        except Exception as lease_err:
+            logger.warning(
+                "[LEASE] Failed to register lease with provisioning service "
+                "(resource=%s escrow=%s): %s — watchdog will not auto-release this resource",
+                reserved_resource_id, escrow_uid, lease_err,
+            )
+
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"

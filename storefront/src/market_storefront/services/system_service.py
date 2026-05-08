@@ -435,7 +435,7 @@ class SystemService:
           - Storefront startup sequence (agent.py) — wait before starting the
             heartbeat loop so the first heartbeat is not guaranteed to 404.
         """
-        _pending = {"agent_not_found"}
+        _pending = {"agent_not_found", "timeout", "unreachable"}
         poll_interval = 1.0
         start = time.monotonic()
         deadline = start + timeout

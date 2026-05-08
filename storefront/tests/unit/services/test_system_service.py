@@ -394,3 +394,108 @@ class TestSeedResourcesIfEmpty:
         svc = _make_service(db)
         with pytest.raises(FileNotFoundError):
             await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")
+
+
+# ---------------------------------------------------------------------------
+# wait_for_registry_agent — transient retry behaviour
+# ---------------------------------------------------------------------------
+
+class TestWaitForRegistryAgent:
+    """Verify that wait_for_registry_agent retries past transient states
+    and exits immediately on definitive states.
+
+    Regression guard: 'timeout' and 'unreachable' were previously treated
+    as definitive, causing the e2e stage 03c to fail with registry_auth='timeout'
+    after a single 2-second HTTP probe that hit a slow registry at startup.
+    """
+
+    def _make_svc(self, db) -> SystemService:
+        return SystemService(
+            sqlite_client=db,
+            agent_id="test-agent",
+            callable_registry={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_ok_immediately_when_check_succeeds(self, db):
+        svc = self._make_svc(db)
+        with patch.object(svc, "registry_auth_check", new=AsyncMock(return_value="ok")):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_retries_past_agent_not_found(self, db):
+        """agent_not_found is the normal indexing-lag state — must be retried."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "agent_not_found"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_retries_past_timeout(self, db):
+        """timeout is a transient network condition — must be retried, not treated as definitive."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "timeout"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_retries_past_unreachable(self, db):
+        """unreachable is a transient connectivity state — must be retried."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "unreachable"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_exits_immediately_on_owner_mismatch(self, db):
+        """owner_mismatch is definitive — exit without retrying."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "owner_mismatch"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "owner_mismatch"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_ready_false_on_timeout(self, db):
+        """All pending states until timeout → ready=False with last seen value."""
+        svc = self._make_svc(db)
+        with patch.object(svc, "registry_auth_check", new=AsyncMock(return_value="agent_not_found")):
+            result = await svc.wait_for_registry_agent(timeout=0.1)
+        assert result["ready"] is False

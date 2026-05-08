@@ -164,6 +164,38 @@ class SystemController:
         """
         return await asyncio.to_thread(self._system_service.ansible_readiness)
 
+    @_system_router.post(
+        "/check-leases",
+        summary="Trigger an immediate lease expiry check cycle (admin)",
+    )
+    async def check_leases(self) -> dict:
+        """Run a lease expiry check cycle immediately, outside the watchdog timer.
+
+        Equivalent to one iteration of the LeaseWatchdog background loop.
+        Finds all leases with ``lease_end_utc < now`` and status in
+        ``pending`` / ``active``, patches the corresponding storefront
+        resources to ``available``, and updates lease status.
+
+        Returns a summary dict::
+
+            {
+                "checked": <int>,   # leases examined
+                "released": <int>,  # successfully patched to available
+                "forced": <int>,    # force-patched after grace period
+                "skipped": <int>,   # errors or transient states
+            }
+
+        Intended for:
+          - Operator use: release leases immediately without waiting for the
+            watchdog timer.
+          - Test scenarios: trigger release in integration / e2e tests without
+            sleeping for the poll interval.
+        """
+        lease_check_svc = getattr(_container_module, "resolved_lease_check_service", None)
+        if lease_check_svc is None:
+            return {"error": "lease_check_service not initialised", "checked": 0}
+        return await lease_check_svc.check_leases()
+
     # ------------------------------------------------------------------
     # Router factories
     # ------------------------------------------------------------------

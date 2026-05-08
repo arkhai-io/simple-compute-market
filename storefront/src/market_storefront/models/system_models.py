@@ -1,7 +1,7 @@
 """HTTP request/response models for System and Admin controllers."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -112,3 +112,51 @@ class RegistryAgentReadyResponse(BaseModel):
     ready: bool
     registry_auth: str
     elapsed_ms: int
+
+
+class ResourcePatchRequest(BaseModel):
+    """Request body for PATCH /api/v1/admin/portfolio/resources/{resource_id}.
+
+    All fields are optional; only supplied (non-None) fields are written.
+    This makes the endpoint suitable for any partial update: releasing a lease
+    (state='available', clear lease_end_utc), forcing a state transition for
+    testing, or updating arbitrary resource attributes.
+
+    ``state``: any valid resource state string ('available', 'reserved',
+    'leased', 'deleted').
+
+    ``attributes``: merged into the existing JSON attributes column.  Pass
+    ``{"lease_end_utc": None}`` to clear the lease timestamp when releasing.
+
+    ``lease_end_utc``: convenience shorthand for setting
+    ``attributes.lease_end_utc``; ignored if ``attributes`` also sets it.
+    """
+
+    state: Optional[str] = Field(
+        default=None,
+        description="New resource state. Only written if provided.",
+    )
+    attributes: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Partial attribute patch. Keys present in this dict are merged "
+            "into the existing attributes JSON; absent keys are untouched. "
+            "Pass null values to clear individual attribute keys."
+        ),
+    )
+
+
+class ResourcePatchResponse(BaseModel):
+    """Response from PATCH /api/v1/admin/portfolio/resources/{resource_id}.
+
+    Returns the full resource row after the patch so callers can confirm
+    what was written without a second GET.
+    """
+
+    resource_id: str
+    state: Optional[str] = None
+    attributes: Optional[dict] = None
+    updated: bool = Field(
+        description="True if any field was actually changed; False if the "
+                    "row was already in the requested state (idempotent call)."
+    )

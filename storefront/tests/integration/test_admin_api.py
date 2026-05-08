@@ -453,3 +453,77 @@ class TestStreamEvents:
         neg_events = await c.get_events(stage="negotiation")
         assert neg_events.count == 1
         assert neg_events.events[0].stage == "negotiation"
+
+
+
+class TestPatchResource:
+    """Tests for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
+
+    async def _seed_leased_resource(self, db: SQLiteClient, resource_id: str = "compute-patch-001") -> None:
+        # Use resource_type other than compute.gpu or omit vm_host to skip capacity gate
+        await db.upsert_resource(
+            resource_id=resource_id,
+            resource_type="compute.gpu",
+            state="leased",
+            # No attributes.vm_host → capacity gate skipped
+        )
+
+    async def test_requires_admin_key(self, client_no_key):
+        c = client_no_key
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.patch_resource("compute-patch-001", state="available")
+        assert exc_info.value.status_code in (401, 403)
+
+    async def test_patch_state_to_available(self, client):
+        c, db = client
+        await self._seed_leased_resource(db)
+        result = await c.patch_resource("compute-patch-001", state="available")
+        assert result["state"] == "available"
+        assert result["updated"] is True
+
+    async def test_patch_is_idempotent_when_state_unchanged(self, client):
+        c, db = client
+        await self._seed_leased_resource(db)
+        await c.patch_resource("compute-patch-001", state="available")
+        result = await c.patch_resource("compute-patch-001", state="available")
+        assert result["updated"] is False
+
+    async def test_patch_clears_attribute(self, client):
+        c, db = client
+        await db.upsert_resource(
+            resource_id="compute-patch-002",
+            resource_type="compute.gpu",
+            state="leased",
+            attributes={"lease_end_utc": "2025-01-01 00:00"},
+        )
+        result = await c.patch_resource(
+            "compute-patch-002",
+            state="available",
+            attributes={"lease_end_utc": None},
+        )
+        assert result["state"] == "available"
+        assert result["attributes"].get("lease_end_utc") is None
+
+    async def test_patch_nonexistent_returns_404(self, client):
+        c, db = client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.patch_resource("no-such-resource", state="available")
+        assert exc_info.value.status_code == 404
+
+    async def test_patch_preserves_unspecified_fields(self, client):
+        c, db = client
+        await db.upsert_resource(
+            resource_id="compute-patch-003",
+            resource_type="compute.gpu",
+            state="leased",
+            attributes={"gpu_model": "RTX 5080", "lease_end_utc": "2025-01-01 00:00"},
+        )
+        result = await c.patch_resource(
+            "compute-patch-003",
+            attributes={"lease_end_utc": None},
+        )
+        # state not specified → should remain leased
+        assert result["state"] == "leased"
+        # gpu_model not in patch → should be preserved
+        assert result["attributes"].get("gpu_model") == "RTX 5080"
+        assert result["attributes"].get("lease_end_utc") is None
