@@ -72,6 +72,21 @@ inventory:
   hostsIni: ""
 
 # ---------------------------------------------------------------------------
+# Storefront callback target for the lease watchdog.
+#
+# The provisioning service owns the vm_leases table. When a lease expires, its
+# watchdog patches the seller storefront resource back to available through the
+# storefront admin API. url defaults to the umbrella chart's bob storefront
+# service name for the current release; override for non-standard topologies.
+# adminKey is rendered into the provisioning-secrets profile.
+# ---------------------------------------------------------------------------
+storefront:
+  url: ""
+  agentName: "bob"
+  port: 8001
+  adminKey: ""
+
+# ---------------------------------------------------------------------------
 # Application config — rendered into a ConfigMap as config-production.yml
 # and mounted at CONFIG_DIRECTORY inside the container.
 #
@@ -108,6 +123,12 @@ config:
   registry_url: ""
   registry_cache_ttl_seconds: 300
   registry_cache_max_size: 256
+
+  # Lease watchdog
+  lease_watchdog_enabled: true
+  lease_watchdog_poll_interval_seconds: 60
+  lease_watchdog_grace_period_seconds: 300
+  storefront_url: ""
 
   # Rate limiting
   enable_rate_limiting: false

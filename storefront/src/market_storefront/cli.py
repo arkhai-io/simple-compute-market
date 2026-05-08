@@ -162,30 +162,16 @@ def serve_cmd(
         None, "--port",
         help="Override seller.port from config.toml.",
     ),
-    no_publish: bool = typer.Option(
-        False, "--no-publish",
-        help="Don't auto-run the publish watch loop alongside the server. "
-             "Use for read-only deployments or when running publish in a separate process.",
-    ),
-    poll_interval: float = typer.Option(
-        30.0, "--publish-poll-interval",
-        help="Seconds between publish cycles (when auto-publish is enabled).",
-    ),
 ) -> None:
     """Run the storefront HTTP server (uvicorn, foreground).
 
-    Auto-publishes available compute inventory in a background thread by
-    default. Pass --no-publish to disable. Listings advertise an optional
-    max_duration_seconds ceiling (per-row CSV / [seller.pricing] default);
-    buyers supply the actual duration at negotiation init.
+    Listings advertise an optional max_duration_seconds ceiling
+    (per-row CSV / [seller.pricing] default); buyers supply the actual
+    duration at negotiation init.
     """
     from market_storefront.server import run_serve
 
-    run_serve(
-        host=host, port=port,
-        no_publish=no_publish,
-        poll_interval=poll_interval,
-    )
+    run_serve(host=host, port=port)
 
 
 # ---------------------------------------------------------------------------

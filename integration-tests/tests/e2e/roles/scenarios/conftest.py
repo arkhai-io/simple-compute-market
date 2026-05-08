@@ -45,6 +45,7 @@ class DealState:
     _provisioning_healthy: bool = False
     _provisioning_mock_mode: bool = False
     _negotiation_strategy_viable: bool = False
+    _resources_seeded: bool = False
     # Phase 1 — policy pipeline
     _policy_dry_run_passed: bool = False
     _policies_seeded: bool = False
@@ -72,8 +73,11 @@ class DealState:
     # Phase 8 — settlement
     settlement_submitted: bool = False
     provisioning_job_id: Optional[str] = None
+    reserved_resource_id: Optional[str] = None
     # Phase 9 — provisioning completion
     provisioning_result_injected: bool = False
+    lease_id: Optional[str] = None
+    lease_status: Optional[str] = None
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None

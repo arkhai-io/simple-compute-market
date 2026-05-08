@@ -8,6 +8,8 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
   00e  Provisioning mock mode:  GET /api/v1/system/ansible/readiness → ansible_mode=mock
+  00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
+                                upserts the compute row this test needs
 
 Phase 1 — Policy pipeline ready
   01a  Policy dry-run:  POST /api/v1/system/policy/evaluate → action=make_offer
@@ -26,9 +28,9 @@ Phase 3 — Registry publication
          POST /api/v1/listings/{id}/resume → registry_status=published
          GET registry/listings → listing present
   03c  Seller agent indexed:
-         GET registry /api/v1/system/sync/wait-for-agent → indexed=True
-         (long-poll; registry blocks until EventSync indexes the on-chain
-         registration; gates all negotiation stages)
+         GET storefront /api/v1/system/wait-for-registry-agent → registry_auth=ok
+         (long-poll; storefront blocks until registry EventSync indexes
+         the on-chain registration; gates publication/negotiation)
 
 Phase 4 — Multi-registry verification (compose runs registry + registry-b)
   04a  Dual publish: listing visible in both registries
@@ -50,14 +52,16 @@ Phase 6 — Negotiation settlement
          POST .../force-accept → action=accept
          GET .../negotiations/{neg_id} → terminal_state=success
 
-Phase 7 — Mock escrow + provisioning gate setup
-  07   Capture mock escrow_uid; add provisioning mock rule (pause_before_result=True)
+Phase 7 — On-chain escrow + provisioning gate setup
+  07   Create real escrow_uid; add provisioning mock rule (pause_before_result=True)
+  07b  Verify escrow via storefront dry-run
 
 Phase 8 — Settlement pipeline
   08b  Settlement submitted + job queued:
          POST /api/v1/settle/{uid} → status=provisioning
          wait_for_stage_event(provision, job_submitted)
          GET /settle/{uid}/status → provisioning_job_id present
+         job_submitted.resource_id == compute-e2e-deal-001
 
 Phase 9 — Provisioning completion
   09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
@@ -65,6 +69,8 @@ Phase 9 — Provisioning completion
          wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
          GET /api/v1/listings/{id} → status=accepted or closed
+  09c  Lease registered:
+         GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 """
 
 from __future__ import annotations
@@ -85,11 +91,8 @@ pytestmark = pytest.mark.e2e_deal
 # ---------------------------------------------------------------------------
 
 OFFER_RESOURCE = {
-    # Matches the inventory seeded by docker-compose's ww1-machine.csv so
-    # the seller's pre-thread guard composite at /negotiate/new (default
-    # `negotiate_request.default.v1` chaining `negotiate.guard.has_matching_inventory`)
-    # finds a matching available resource. Update both this constant
-    # and ww1-machine.csv together if the seeded GPU changes.
+    # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
+    # storefront admin API so it does not depend on a mounted resource file.
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,
@@ -113,6 +116,10 @@ DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
+E2E_RESOURCE_ID = "compute-e2e-deal-001"
+E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,MOCK,,RTX 5080,90.0,"California, US",ww1
+"""
 
 # Canonical callable name registered in domain/compute/agent/app/policy/store.py.
 # Used by test_01a (pure dry-run) and verified by test_01b (seed read-back).
@@ -246,6 +253,42 @@ class TestStage00e_ProvisioningMockMode:
         log.info("[00e] Provisioning mock mode confirmed: ansible_mode=%s", mode)
 
 
+class TestStage00f_ResourceSeed:
+    def test_00f_imports_e2e_resource_inventory(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """Import the compute resource row required by this scenario.
+
+        The e2e deal should not depend on a container-mounted CSV. Importing
+        an inline fixture through the admin API keeps this scenario
+        self-contained while exercising the same upsert path operators use.
+        """
+        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
+
+        result = storefront_admin_client.admin_import_resources(
+            E2E_RESOURCE_CSV.encode("utf-8"),
+            filename="e2e-deal-resources.csv",
+        )
+        assert result.failed_count == 0, (
+            f"E2E resource import failed for {result.failed_count} row(s): {result}"
+        )
+        assert result.imported_count >= 1, (
+            f"Expected at least one imported resource row, got: {result}"
+        )
+
+        status = storefront_admin_client.get_system_status()
+        assert (status.resource_count or 0) >= 1, (
+            f"Storefront still reports no resources after import: {status}"
+        )
+
+        deal_state._resources_seeded = True
+        log.info(
+            "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
+            E2E_RESOURCE_ID,
+            status.resource_count,
+        )
+
+
 # ===========================================================================
 # Phase 1 — Policy pipeline ready
 # ===========================================================================
@@ -357,7 +400,7 @@ class TestStage02a_EvaluateCreate:
         writing to SQLite or the registry. If this fails, listing creation
         in 02b will also fail.
         """
-        require_state(deal_state, "_policies_seeded")
+        require_state(deal_state, "_policies_seeded", "_resources_seeded")
         result = storefront_admin_client.evaluate_create_listing(
             offer=OFFER_RESOURCE,
             demand=DEMAND_RESOURCE,
@@ -1160,7 +1203,7 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
         # job_submitted fires after the DB row is updated; resource_reserved
         # would race because it fires before the job_id exists.
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
-        _wait(
+        event = _wait(
             storefront_admin_client,
             "provision", "job_submitted",
             listing_id=deal_state.seller_listing_id,
@@ -1182,6 +1225,12 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             f"Unexpected job status: {job.status}"
         )
         deal_state.provisioning_job_id = prov_job_id
+        deal_state.reserved_resource_id = event.data.get("resource_id")
+        assert deal_state.reserved_resource_id == E2E_RESOURCE_ID, (
+            f"Settlement reserved unexpected resource "
+            f"{deal_state.reserved_resource_id!r}; expected {E2E_RESOURCE_ID!r}. "
+            f"job_submitted event: {event}"
+        )
         log.info("[08b] Provisioning job %s in state %s", prov_job_id, job.status)
 
 
@@ -1257,3 +1306,37 @@ class TestStage09b_SettlementReadyAndCredentials:
         deal_state.seller_listing_final_status = listing.status
         log.info("[09b] Settlement ready; credentials present; listing status=%s",
                  listing.status)
+
+
+class TestStage09c_LeaseRegistered:
+    def test_09c_provisioning_lease_registered(
+        self, provisioning_client, deal_state: DealState
+    ):
+        """Provisioning owns the happy-path lease row after fulfillment."""
+        require_state(
+            deal_state,
+            "real_escrow_uid",
+            "settlement_status",
+            "reserved_resource_id",
+            "provisioning_job_id",
+        )
+
+        lease = provisioning_client.get_lease_by_escrow(deal_state.real_escrow_uid)
+        assert lease.get("escrow_uid") == deal_state.real_escrow_uid
+        assert lease.get("resource_id") == deal_state.reserved_resource_id
+        assert lease.get("resource_id") == E2E_RESOURCE_ID
+        assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
+        assert lease.get("create_job_id") in (None, deal_state.provisioning_job_id)
+        assert lease.get("status") in ("active", "pending"), (
+            f"Expected active/pending lease after happy-path settlement, got: {lease}"
+        )
+
+        deal_state.lease_id = lease.get("id")
+        deal_state.lease_status = lease.get("status")
+        log.info(
+            "[09c] Lease %s registered for escrow %s (resource=%s status=%s)",
+            deal_state.lease_id,
+            deal_state.real_escrow_uid,
+            deal_state.reserved_resource_id,
+            deal_state.lease_status,
+        )

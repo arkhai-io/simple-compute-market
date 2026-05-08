@@ -1315,6 +1315,12 @@ Deployment shells just compose CLI verbs:
   main container runs `./entrypoint.sh market-storefront serve` —
   same image, two CLI verbs.
 
+`market-storefront serve` only forwards `host` and `port` into
+`server.run_serve()`. The old inline publish-loop flags were removed
+with the storefront publish loop; the CLI/server argument contract is
+covered by a storefront unit test because a mismatch crashes the
+container before any integration or e2e test can run.
+
 See `docs/cli-redesign-plan.md` for the rationale and migration
 table behind the current 4-CLI surface.
 
@@ -1424,6 +1430,8 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 3. **`POST /api/v1/admin/portfolio/resources/import`** — admin endpoint for runtime clobber. Accepts a CSV file upload and upserts regardless of current table state. Used for inventory updates without restarting the pod.
 
 *Startup seeding is idempotent*: if the resources table already has rows (e.g. from a previous startup or a prior import call), seeding is skipped. Pod restarts do not overwrite operator changes. To force a full re-seed, use the import endpoint.
+
+The full-deal e2e scenario uses the admin import path: it carries an inline CSV fixture and imports the exact compute row it needs through `SyncStorefrontClient.admin_import_resources()` during readiness. This keeps the test self-contained and prevents it from depending on `ww1-machine.csv` being mounted into the storefront container.
 
 The CSV files in `storefront/src/market_storefront/data/*.csv` are excluded from the container image via `.dockerignore`. They exist in the source tree as reference/default inventory for local dev (used by the compose bind-mount path) but are not baked into the image.
 
@@ -1639,7 +1647,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 - Full CRUD leases API: `GET /api/v1/leases`, `PATCH /api/v1/leases/{id}`, `by-escrow`, `cancel`
 - Storefront `PATCH /api/v1/admin/portfolio/resources/{resource_id}` — general-purpose partial resource update
 - Storefront `resource_poller.py` removed (tombstoned). Storefront `_spawn_publish_loop()` removed.
-- `storefront_url` / `storefront_admin_key` are global provisioning service settings, injected via the `provisioning-secrets` config profile in production.
+- `storefront_url` / `storefront_admin_key` are global provisioning service settings. Helm renders `storefront_url` into the provisioning production config profile and `storefront_admin_key` into the `provisioning-secrets` profile. The default chart topology points the watchdog at the release's `storefront-bob` Service; non-standard topologies override `provisioning.storefront.url`.
 
 **Remaining gap — check job result interpretation:**
 `LeaseCheckService._process_releasing_lease` currently polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
@@ -1813,6 +1821,7 @@ The primary e2e test suite. Sequential tests covering the complete buyer-seller 
 | 00b | Registry reachable | `GET /api/v1/system/status` → checks.registry=ok |
 | 00c | Provisioning health | `GET /api/v1/system/ansible/readiness` → playbook.exists=True |
 | 00d | Negotiation strategy | checks.negotiation_strategy not exit-on-probe |
+| 00f | Resource seed | `POST /api/v1/admin/portfolio/resources/import` upserts the inline e2e compute CSV |
 | 01a | Policy dry-run | `POST /api/v1/system/policy/evaluate` with `policy_components=["oc.action.make_offer_from_order_create"]` → action=make_offer |
 | 01b | Policy seed | `POST /admin/policy/seed` → callable_count > 0; read-back from `GET /api/v1/system/policy` confirms order_create callable |
 | 02a | Evaluate-create dry-run | `POST /api/v1/admin/listings/evaluate-create` → would_create=True |
@@ -1849,6 +1858,16 @@ POST /api/v1/settle/{uid}
 `POST /test/evaluate-job` on the provisioning service's test controller. Accepts `{host, vm_target, ssh_pubkey, vm_action}`, returns `{params_valid, host_exists, rule_matched, would_pause, errors}`. Checks host existence in inventory and which mock rule (if any) would match the job params. No job is created. Used by e2e stage 9a.
 
 **`/api/v1/negotiate/new` signing:** `SyncStorefrontClient.negotiate_new()` accepts `listing_id`, `buyer_address`, `initial_price`, `duration_seconds`, and `buyer_agent_url`. It does not add auth headers — EIP-191 signing must be done by the caller using `_sign_eip191(buyer_private_key, f"negotiate_new:{listing_id}:{ts}")` from `storefront_client.client`, then passing `X-Signature` and `X-Timestamp` as extra headers via `client._client.post(...)`. The body must include `listing_id` (not `seller_listing_id`) and `duration_seconds`. TODO: add signing support directly to `negotiate_new()` so the e2e test can use it without raw `_client.post`.
+
+**Current full-deal details:** stage 03c uses the storefront's
+`GET /api/v1/system/wait-for-registry-agent` long-poll, not a direct
+registry wait. Stage 07 creates the real buyer escrow and arms the mock
+provisioning gate. Stage 08b waits for `provision/job_submitted` and
+asserts the reserved resource is the inline e2e-seeded row. Stage 09c
+asserts provisioning registered an active/pending lease for the escrow via
+`GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume and forced
+resource release are intentionally outside the full-deal happy path; they
+belong in separate smoke or e2e tests for operator interventions.
 
 **Pre-negotiation inventory guard:** `/api/v1/negotiate/new` enforces immediate-deal inventory availability through `PolicyService.consult_pre_negotiation_guards()`, not by hard-coding inventory lookup inside the controller. The default `negotiate_request.default.v1` composite contains `negotiate.guard.has_matching_inventory`; if no available resource matches the listing offer, the guard returns `REJECT_OFFER` with `reason="no_matching_inventory"`, which the controller maps to HTTP 409. In-process integration tests that assert this behavior must wire `container.resolved_policy_service` with a real `PolicyService`; otherwise `start_sync_negotiation(..., policy_service=None)` deliberately skips policy-owned guards and only validates infrastructure invariants such as pause state and listing status.
 

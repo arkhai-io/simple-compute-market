@@ -67,6 +67,15 @@ deploy-seller-agent:
 	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
+deploy-dev:
+	docker run --rm -it --name market-agent-sell \
+	--network market -p 8001:8001 \
+	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
+	-e XDG_CONFIG_HOME=/etc \
+	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
+	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
+	arkhai:storefront
+
 stop:
 	docker kill market-agent-sell
 
