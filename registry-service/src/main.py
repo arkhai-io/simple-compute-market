@@ -33,6 +33,23 @@ async def lifespan(app: FastAPI):
     # Initialize database
     init_db()
     logger.info("Database initialized")
+
+    # Bootstrap a single API key from env if configured AND the table
+    # is empty. Lets a private registry start with a known operator
+    # secret on a fresh deploy without an admin POST. Idempotent: a
+    # restart with the same env var is a no-op once the row exists.
+    if settings.bootstrap_api_key:
+        from src.api.api_key_auth import _hash_key
+        from src.db.database import SessionLocal
+        from src.db.models import ApiKey
+        with SessionLocal() as session:
+            if session.query(ApiKey).count() == 0:
+                seed = ApiKey(name="bootstrap", key_hash=_hash_key(settings.bootstrap_api_key))
+                session.add(seed)
+                session.commit()
+                logger.info("[BOOTSTRAP] seeded api_keys with the env-provided key")
+            else:
+                logger.info("[BOOTSTRAP] api_keys table not empty; bootstrap key ignored")
     
     # Create network config
     network_config = NetworkConfig(

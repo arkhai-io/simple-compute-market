@@ -54,6 +54,28 @@ class Settings(BaseSettings):
     endpoint_check_timeout: int = 10
     heartbeat_ttl_secs: int = 60
     
+    # API key authentication (opt-in; off by default for back-compat).
+    # When ``require_api_key=True`` every non-admin / non-health route
+    # rejects requests without ``Authorization: Bearer <key>`` matching
+    # an active row in the api_keys table. Operators mint and revoke
+    # keys via ``POST /admin/api-keys`` etc., gated by the
+    # ``admin_api_key`` env var (separate from the api_keys table).
+    require_api_key: bool = Field(
+        default=False, validation_alias="REGISTRY_REQUIRE_API_KEY",
+    )
+    admin_api_key: str | None = Field(
+        default=None, validation_alias="REGISTRY_ADMIN_API_KEY",
+    )
+    # Optional bootstrap secret. When set AND the api_keys table is
+    # empty at startup, the registry seeds a single row with this raw
+    # value (hashed). Lets a private registry come up with one
+    # operator-known key without an admin orchestration step. After
+    # the first run, the env var can stay set or be removed — the
+    # row persists across restarts.
+    bootstrap_api_key: str | None = Field(
+        default=None, validation_alias="REGISTRY_BOOTSTRAP_API_KEY",
+    )
+
     # Logging
     log_level: str = "info"
 

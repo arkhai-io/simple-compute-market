@@ -18,13 +18,24 @@ alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_a
 
 [registry]
 # Two registry instances: ``registry`` is the public one,
-# ``registry-b`` simulates a private/secondary registry. The seller
-# fans publishes/heartbeats out to both; buyers discover the union.
-# Drop registry-b to fall back to single-registry behaviour.
+# ``registry-b`` simulates a private/secondary registry that gates
+# access via Authorization: Bearer (REGISTRY_REQUIRE_API_KEY=true on
+# its container). The seller fans publishes/heartbeats out to both;
+# buyers discover the union. Drop registry-b from urls + auth to
+# fall back to single-public-registry behaviour.
 urls                      = ["http://registry:8080", "http://registry-b:8080"]
 # Deterministic CREATE2 vanity address — same value every time the
 # contract-deployer runs (see market-contract-deployer/deploy-local.sh).
 identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+
+# Per-registry bearer token. The matching key was seeded into
+# registry-b at startup via REGISTRY_BOOTSTRAP_API_KEY in compose.
+# Public registries (no entry here) get no Authorization header.
+# NOTE: this subsection has to come AFTER all scalar [registry] keys
+# (urls, identity_registry_address) — once you open [registry.auth]
+# any key on the next line goes into the subsection's namespace.
+[registry.auth]
+"http://registry-b:8080"  = "test-buyer-token"
 
 [seller]
 agent_id            = "bob"

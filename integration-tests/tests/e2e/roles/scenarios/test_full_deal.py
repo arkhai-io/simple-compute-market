@@ -34,6 +34,7 @@ Phase 4 — Multi-registry verification (compose runs registry + registry-b)
   04a  Dual publish: listing visible in both registries
   04b  Discovery dedupe: union of registries returns listing once
   04c  Resilience: discovery tolerates one unreachable URL
+  04d  Private registry: bearer-token gate + admin mint/revoke lifecycle
 
 Phase 5 — Negotiation lifecycle
   05a  Evaluate-negotiate dry-run:
@@ -578,6 +579,23 @@ _REGISTRY_A = "http://localhost:8080"
 _REGISTRY_B = "http://localhost:8082"
 _REGISTRY_DEAD = "http://localhost:9999"  # unbound port for stage 04c
 
+# registry-b enforces Authorization: Bearer on every non-admin route
+# (REGISTRY_REQUIRE_API_KEY=true in compose). The bootstrap secret
+# is seeded into the api_keys table at startup; bob's storefront
+# carries the matching value in [registry.auth] so its
+# publishes/heartbeats authenticate. Tests reach registry-b directly
+# with the same token.
+_REGISTRY_B_KEY = "test-buyer-token"
+_REGISTRY_B_HEADERS = {"Authorization": f"Bearer {_REGISTRY_B_KEY}"}
+_REGISTRY_B_ADMIN_TOKEN = "test-admin-token"
+_REGISTRY_B_ADMIN_HEADERS = {"Authorization": f"Bearer {_REGISTRY_B_ADMIN_TOKEN}"}
+
+
+def _headers_for(url: str) -> dict[str, str]:
+    """Auth header for whichever registry we're hitting. Public
+    registries get no header; registry-b gets the bootstrap token."""
+    return dict(_REGISTRY_B_HEADERS) if url == _REGISTRY_B else {}
+
 
 class TestStage04a_DualPublishLandsInBothRegistries:
     def test_04a_listing_appears_in_both_registries(
@@ -594,7 +612,10 @@ class TestStage04a_DualPublishLandsInBothRegistries:
 
         listing_id = deal_state.seller_listing_id
         for url in (_REGISTRY_A, _REGISTRY_B):
-            resp = httpx.get(f"{url}/listings/{listing_id}", timeout=5.0)
+            resp = httpx.get(
+                f"{url}/listings/{listing_id}", timeout=5.0,
+                headers=_headers_for(url),
+            )
             assert resp.status_code == 200, (
                 f"{url} returned {resp.status_code} for listing "
                 f"{listing_id} — expected 200. Body: {resp.text[:200]}"
@@ -613,6 +634,7 @@ def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
     integration-tests venv doesn't carry the buyer package, so we
     don't import from it. Returns the deduped union, swallowing
     per-URL transport errors so a dead URL doesn't fail the call.
+    Per-URL auth headers are looked up via ``_headers_for``.
     """
     import httpx
     merged: dict[str, dict] = {}
@@ -620,7 +642,7 @@ def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
         try:
             resp = httpx.get(
                 f"{url.rstrip('/')}/listings", params={"status": "open"},
-                timeout=timeout,
+                timeout=timeout, headers=_headers_for(url),
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -691,6 +713,84 @@ class TestStage04c_DiscoveryToleratesDeadRegistry:
             "[04c] Discovery against [live, dead] returned %d listing(s); "
             "live registry's data preserved", len(matches),
         )
+
+
+class TestStage04d_PrivateRegistryAuthLifecycle:
+    def test_04d_unauthenticated_request_is_rejected(
+        self, deal_state: DealState
+    ):
+        """registry-b runs with REGISTRY_REQUIRE_API_KEY=true. A GET
+        without ``Authorization: Bearer <key>`` must 401 — proves the
+        gate is actually enforced on the wire, not just configured."""
+        require_state(deal_state, "resume_confirmed")
+        import httpx
+        resp = httpx.get(f"{_REGISTRY_B}/listings", timeout=5.0)
+        assert resp.status_code == 401, (
+            f"Private registry-b should reject unauthenticated GET; "
+            f"got {resp.status_code}: {resp.text[:200]}"
+        )
+
+    def test_04d_admin_can_mint_and_revoke_keys(
+        self, deal_state: DealState
+    ):
+        """End-to-end admin lifecycle against the real container:
+        mint a key with the admin token, verify the key works for a
+        gated read, revoke it, verify the same key now 401s.
+        Validates the api_keys table + middleware behave the same in
+        the deployed image as they do in the registry-service unit
+        tests."""
+        require_state(deal_state, "resume_confirmed")
+        import httpx
+
+        # Admin endpoint requires the admin token.
+        wrong = httpx.post(
+            f"{_REGISTRY_B}/admin/api-keys",
+            json={"name": "e2e-test"},
+            timeout=5.0,
+        )
+        assert wrong.status_code == 401, (
+            f"Admin endpoint should refuse without token; got {wrong.status_code}"
+        )
+
+        # Mint with the correct admin token.
+        mint = httpx.post(
+            f"{_REGISTRY_B}/admin/api-keys",
+            json={"name": "e2e-test"},
+            headers=_REGISTRY_B_ADMIN_HEADERS,
+            timeout=5.0,
+        )
+        assert mint.status_code == 201, mint.text
+        body = mint.json()
+        raw_key = body["key"]
+        key_id = body["id"]
+        assert raw_key, "Mint response must carry the raw bearer token"
+
+        # The freshly-minted key authorises a gated read.
+        ok = httpx.get(
+            f"{_REGISTRY_B}/listings",
+            headers={"Authorization": f"Bearer {raw_key}"},
+            timeout=5.0,
+        )
+        assert ok.status_code == 200, (
+            f"Freshly-minted key must authorise reads; got {ok.status_code}"
+        )
+
+        # Revoke; same key must now 401.
+        revoke = httpx.delete(
+            f"{_REGISTRY_B}/admin/api-keys/{key_id}",
+            headers=_REGISTRY_B_ADMIN_HEADERS,
+            timeout=5.0,
+        )
+        assert revoke.status_code == 204, revoke.text
+        gone = httpx.get(
+            f"{_REGISTRY_B}/listings",
+            headers={"Authorization": f"Bearer {raw_key}"},
+            timeout=5.0,
+        )
+        assert gone.status_code == 401, (
+            f"Revoked key must 401 on next read; got {gone.status_code}"
+        )
+        log.info("[04d] mint→use→revoke cycle works end-to-end against registry-b")
 
 
 # ===========================================================================

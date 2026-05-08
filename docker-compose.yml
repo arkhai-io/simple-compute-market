@@ -70,6 +70,16 @@ services:
       - "8082:8080"
     env_file:
       - ./registry-service/.env.docker-compose
+    environment:
+      # Private-registry config: every non-admin request must carry
+      # ``Authorization: Bearer <key>`` matching a non-revoked row in
+      # api_keys. The BOOTSTRAP_API_KEY seeds a single row at startup
+      # so the storefront can publish to registry-b on a fresh
+      # ``compose up`` without an out-of-band mint step. Bob's
+      # config.bob.toml carries the matching token in [registry.auth].
+      - REGISTRY_REQUIRE_API_KEY=true
+      - REGISTRY_ADMIN_API_KEY=test-admin-token
+      - REGISTRY_BOOTSTRAP_API_KEY=test-buyer-token
     volumes:
       - ./shared-env:/app/shared-env
     networks:
