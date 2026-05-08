@@ -64,6 +64,17 @@ dist-infra: ## Build market-infra wheel into .dist/
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
 
+test: test-provisioning test-registry test-storefront
+
+test-provisioning:
+	cd provisioning-service && make test
+
+test-registry:
+	cd registry-service && make test
+
+test-storefront:
+	cd storefront && make test
+
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
 # build-test-env must run after build-market-contract-deployer (uses the image).
