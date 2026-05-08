@@ -223,20 +223,15 @@ _DEFAULT_SSH_PUBLIC_KEY = (
 def _resolve_indexer_urls(resolve) -> list[str]:
     """Pull the configured registry URL(s) out of TOML.
 
-    Accepts either form for backward compatibility:
-      [registry] urls = ["http://r1:8080", "http://r2:8080"]   # preferred
-      [registry] url  = "http://r:8080"                        # legacy
-    With both, ``urls`` wins. Falls back to ``http://localhost:8080``
-    only when neither key is set.
+    Only ``[registry] urls = [...]`` is recognised — single-URL
+    deployments express that as a one-element list. Falls back to a
+    one-URL localhost default when ``urls`` is unset.
     """
     urls = resolve("registry.urls", None)
     if isinstance(urls, list) and urls:
         cleaned = [str(u).strip() for u in urls if str(u).strip()]
         if cleaned:
             return cleaned
-    single = resolve("registry.url", None)
-    if isinstance(single, str) and single.strip():
-        return [single.strip()]
     return ["http://localhost:8080"]
 
 

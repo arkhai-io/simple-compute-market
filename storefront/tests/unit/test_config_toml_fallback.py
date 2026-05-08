@@ -49,7 +49,7 @@ def test_empty_toml_with_no_seller_section_still_loads():
     buyer_only = {
         "wallet": {"address": "0xbuyer", "private_key": "0xabc"},
         "chain": {"name": "base_sepolia", "rpc_url": "https://sepolia.base.org"},
-        "registry": {"url": "http://registry.example"},
+        "registry": {"urls": ["http://registry.example"]},
     }
     cfg = _load_with_toml(buyer_only)
     # Shared keys pick up TOML values.
@@ -205,10 +205,12 @@ def test_chain_id_defaults_to_zero_when_absent():
 
 
 def test_shared_registry_section():
+    """Single-URL deployments express the registry as a one-element
+    list — there is no scalar ``registry.url`` form."""
     cfg = _load_with_toml({
         "seller": {"agent_id": "test_agent"},
         "registry": {
-            "url": "http://registry.example:8080",
+            "urls": ["http://registry.example:8080"],
             "identity_registry_address": "0xreg1",
         },
     })
@@ -217,9 +219,8 @@ def test_shared_registry_section():
 
 
 def test_registry_urls_list_form():
-    """The plural ``registry.urls`` key takes a list and becomes
-    ``CONFIG.indexer_urls`` directly — this is how multi-registry
-    discovery is configured."""
+    """Multi-registry discovery: ``registry.urls`` carries every URL
+    the storefront should consult — reads fan in across the union."""
     cfg = _load_with_toml({
         "seller": {"agent_id": "test_agent"},
         "registry": {
@@ -230,17 +231,15 @@ def test_registry_urls_list_form():
     assert cfg.indexer_urls == ["http://r1:8080", "http://r2:8080"]
 
 
-def test_registry_urls_takes_precedence_over_url():
-    """When both ``urls`` (plural) and ``url`` (legacy) are set, the
-    plural form wins — this is what we'd want during a migration."""
+def test_registry_url_singular_is_ignored():
+    """Only the plural ``urls`` key is recognised; a stray scalar
+    ``url`` value falls through to the localhost default. This keeps
+    the resolver branch-free."""
     cfg = _load_with_toml({
         "seller": {"agent_id": "test_agent"},
-        "registry": {
-            "url": "http://legacy:8080",
-            "urls": ["http://r1:8080"],
-        },
+        "registry": {"url": "http://legacy:8080"},
     })
-    assert cfg.indexer_urls == ["http://r1:8080"]
+    assert cfg.indexer_urls == ["http://localhost:8080"]
 
 
 # ---------------------------------------------------------------------------
