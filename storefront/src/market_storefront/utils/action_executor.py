@@ -892,7 +892,7 @@ async def _build_provisioning_job_spec(
     if order_dict:
         compute_resource, _token = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource[key]
 
@@ -963,7 +963,7 @@ async def fulfill_compute_obligation(
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
         compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
         order_bytes = encode_compute_lease(
@@ -1106,8 +1106,6 @@ async def fulfill_compute_obligation(
                 )
         except Exception as cred_err:
             logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", cred_order_id, cred_err)
-    await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
-
     # Register the lease with the provisioning service so the LeaseWatchdog
     # can call back to patch this resource to 'available' when the lease expires.
     # storefront_url and storefront_admin_key are global settings on the
@@ -1143,6 +1141,22 @@ async def fulfill_compute_obligation(
                 "(resource=%s escrow=%s): %s — watchdog will not auto-release this resource",
                 reserved_resource_id, escrow_uid, lease_err,
             )
+
+    async def _schedule_shutdown_best_effort() -> None:
+        try:
+            await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
+        except Exception as shutdown_err:
+            logger.warning(
+                "[LEASE] Failed to schedule VM expiry with provisioning service "
+                "(resource=%s escrow=%s vm=%s/%s): %s",
+                reserved_resource_id,
+                escrow_uid,
+                reserved_vm_host,
+                vm_target,
+                shutdown_err,
+            )
+
+    asyncio.create_task(_schedule_shutdown_best_effort())
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid

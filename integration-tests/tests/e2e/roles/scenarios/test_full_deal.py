@@ -32,11 +32,8 @@ Phase 3 — Registry publication
          (long-poll; storefront blocks until registry EventSync indexes
          the on-chain registration; gates publication/negotiation)
 
-Phase 4 — Multi-registry verification (compose runs registry + registry-b)
-  04a  Dual publish: listing visible in both registries
-  04b  Discovery dedupe: union of registries returns listing once
-  04c  Resilience: discovery tolerates one unreachable URL
-  04d  Private registry: bearer-token gate + admin mint/revoke lifecycle
+Phase 4 — Registry publication
+  04a  Primary registry: listing visible in the registry used by this topology
 
 Phase 5 — Negotiation lifecycle
   05a  Evaluate-negotiate dry-run:
@@ -93,6 +90,7 @@ pytestmark = pytest.mark.e2e_deal
 OFFER_RESOURCE = {
     # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
     # storefront admin API so it does not depend on a mounted resource file.
+    "resource_id": "compute-e2e-deal-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
     "sla": 90.0,
@@ -606,58 +604,28 @@ class TestStage03b_ResumePublishesToRegistry:
 
 
 # ===========================================================================
-# Phase 4 — Multi-registry verification
-# (Three stages exercising the storefront's publish fan-out + the
-# buyer's discovery fan-in against the two registries that compose
-# brings up: ``registry`` (public, port 8080) and ``registry-b``
-# (secondary, port 8082). Drop registry-b from compose to fall back
-# to single-registry behaviour and these stages will fail fast.)
+# Phase 4 — Registry publication
+# The full-deal happy path uses the primary registry only. Multi-registry
+# fan-out/fan-in and private registry auth belong in separate topology-specific
+# e2e tests.
 # ===========================================================================
 
-# Both registries are fixed-host endpoints in the compose stack; the
-# integration-tests venv reaches them directly rather than going
-# through CONFIG.indexer_urls (which lives inside the storefront
-# container and points at the container hostname).
+# The integration-tests venv reaches the primary registry directly rather than
+# going through CONFIG.indexer_urls, which lives inside the storefront container.
 _REGISTRY_A = "http://localhost:8080"
-_REGISTRY_B = "http://localhost:8082"
-_REGISTRY_DEAD = "http://localhost:9999"  # unbound port for stage 04c
 
-# registry-b enforces Authorization: Bearer on every non-admin route
-# (REGISTRY_REQUIRE_API_KEY=true in compose). The bootstrap secret
-# is seeded into the api_keys table at startup; bob's storefront
-# carries the matching value in [registry.auth] so its
-# publishes/heartbeats authenticate. Tests reach registry-b directly
-# with the same token.
-_REGISTRY_B_KEY = "test-buyer-token"
-_REGISTRY_B_HEADERS = {"Authorization": f"Bearer {_REGISTRY_B_KEY}"}
-_REGISTRY_B_ADMIN_TOKEN = "test-admin-token"
-_REGISTRY_B_ADMIN_HEADERS = {"Authorization": f"Bearer {_REGISTRY_B_ADMIN_TOKEN}"}
-
-
-def _headers_for(url: str) -> dict[str, str]:
-    """Auth header for whichever registry we're hitting. Public
-    registries get no header; registry-b gets the bootstrap token."""
-    return dict(_REGISTRY_B_HEADERS) if url == _REGISTRY_B else {}
-
-
-class TestStage04a_DualPublishLandsInBothRegistries:
-    def test_04a_listing_appears_in_both_registries(
+class TestStage04a_PrimaryRegistryPublish:
+    def test_04a_listing_appears_in_primary_registry(
         self, deal_state: DealState
     ):
-        """The seller fans publishes out to every URL in
-        ``registry.urls``. Verify by hitting each registry directly
-        and confirming both return the listing — proves the fan-out
-        plumbing in MultiRegistryClient.publish_listing actually wrote
-        to both backends, not just the first one.
-        """
+        """The seller publishes the resumed listing to the primary registry."""
         require_state(deal_state, "resume_confirmed", "seller_listing_id")
         import httpx
 
         listing_id = deal_state.seller_listing_id
-        for url in (_REGISTRY_A, _REGISTRY_B):
+        for url in (_REGISTRY_A,):
             resp = httpx.get(
                 f"{url}/listings/{listing_id}", timeout=5.0,
-                headers=_headers_for(url),
             )
             assert resp.status_code == 200, (
                 f"{url} returned {resp.status_code} for listing "
@@ -668,7 +636,7 @@ class TestStage04a_DualPublishLandsInBothRegistries:
             assert str(row.get("listing_id") or row.get("id")) == listing_id, (
                 f"{url} returned a listing with the wrong id: {row}"
             )
-        log.info("[04a] Listing %s present in both registries", listing_id)
+        log.info("[04a] Listing %s present in primary registry", listing_id)
 
 
 def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
@@ -685,7 +653,7 @@ def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
         try:
             resp = httpx.get(
                 f"{url.rstrip('/')}/listings", params={"status": "open"},
-                timeout=timeout, headers=_headers_for(url),
+                timeout=timeout,
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -701,8 +669,8 @@ def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
     return list(merged.values())
 
 
-class TestStage04b_DiscoveryDedupesAcrossRegistries:
-    def test_04b_multi_helper_returns_listing_once(
+class MultiRegistryDiscoveryDedupesAcrossRegistries:
+    def check_04b_multi_helper_returns_listing_once(
         self, deal_state: DealState
     ):
         """A buyer querying both registries via the fan-in helper
@@ -730,8 +698,8 @@ class TestStage04b_DiscoveryDedupesAcrossRegistries:
         )
 
 
-class TestStage04c_DiscoveryToleratesDeadRegistry:
-    def test_04c_unreachable_registry_does_not_break_discovery(
+class MultiRegistryDiscoveryToleratesDeadRegistry:
+    def check_04c_unreachable_registry_does_not_break_discovery(
         self, deal_state: DealState
     ):
         """Pointing the fan-in helper at one good URL plus one
@@ -758,8 +726,8 @@ class TestStage04c_DiscoveryToleratesDeadRegistry:
         )
 
 
-class TestStage04d_PrivateRegistryAuthLifecycle:
-    def test_04d_unauthenticated_request_is_rejected(
+class PrivateRegistryAuthLifecycle:
+    def check_04d_unauthenticated_request_is_rejected(
         self, deal_state: DealState
     ):
         """registry-b runs with REGISTRY_REQUIRE_API_KEY=true. A GET
@@ -773,7 +741,7 @@ class TestStage04d_PrivateRegistryAuthLifecycle:
             f"got {resp.status_code}: {resp.text[:200]}"
         )
 
-    def test_04d_admin_can_mint_and_revoke_keys(
+    def check_04d_admin_can_mint_and_revoke_keys(
         self, deal_state: DealState
     ):
         """End-to-end admin lifecycle against the real container:

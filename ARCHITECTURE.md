@@ -798,7 +798,7 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 
 #### Lease Lifecycle — DB-driven watchdog
 
-The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM and schedules its expiry, it registers a lease with the provisioning service via `POST /api/v1/leases`. The `LeaseWatchdog` then polls the `vm_leases` table and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
+The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM, it registers a lease with the provisioning service via `POST /api/v1/leases` after the create-VM job succeeds. The legacy `lease_end` scheduling job is best-effort and must not block settlement readiness; the `LeaseWatchdog` is the authoritative release path and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
 
 **`vm_leases` table:**
 
@@ -829,7 +829,7 @@ The provisioning service owns lease lifecycle via the `vm_leases` table and the 
 **Lease flow:**
 
 ```
-Storefront (after provisioning + schedule_expiry succeeds)
+Storefront (after provisioning succeeds)
   │
   └── POST /api/v1/leases  →  vm_leases row created (status=active or pending)
 
@@ -1861,8 +1861,13 @@ POST /api/v1/settle/{uid}
 
 **Current full-deal details:** stage 03c uses the storefront's
 `GET /api/v1/system/wait-for-registry-agent` long-poll, not a direct
-registry wait. Stage 07 creates the real buyer escrow and arms the mock
-provisioning gate. Stage 08b waits for `provision/job_submitted` and
+registry wait. The full-deal happy path assumes one primary registry; private
+registry auth and multi-registry fan-out/fan-in belong in separate
+topology-specific e2e tests. Stage 07 creates the real buyer escrow and arms
+the mock provisioning gate. The test imports its own inline compute resource
+CSV and pins the offer to that row with `resource_id`, so settlement must
+reserve the e2e-seeded row rather than any matching inventory row from a
+mounted startup file. Stage 08b waits for `provision/job_submitted` and
 asserts the reserved resource is the inline e2e-seeded row. Stage 09c
 asserts provisioning registered an active/pending lease for the escrow via
 `GET /api/v1/leases/by-escrow/{uid}`. Admin pause/resume and forced

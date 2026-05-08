@@ -1393,6 +1393,7 @@ class SQLiteClient:
 
                     if required_attributes:
                         top_level = {
+                            "resource_id": resource_id,
                             "resource_type": "compute.gpu",
                             "resource_subtype": resource_subtype,
                             "unit": unit,
@@ -1504,6 +1505,7 @@ class SQLiteClient:
 
                     if required_attributes:
                         top_level = {
+                            "resource_id": resource_id,
                             "resource_type": "compute.gpu",
                             "resource_subtype": resource_subtype,
                             "unit": unit,
