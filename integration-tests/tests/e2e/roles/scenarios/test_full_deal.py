@@ -30,8 +30,10 @@ Phase 3 — Registry publication
          (long-poll; registry blocks until EventSync indexes the on-chain
          registration; gates all negotiation stages)
 
-Phase 4 — (removed; admin pause/resume tested in storefront smoke suite)
-  TODO: Add test_admin_pause_resume to tests/smoke/test_storefront_smoke.py
+Phase 4 — Multi-registry verification (compose runs registry + registry-b)
+  04a  Dual publish: listing visible in both registries
+  04b  Discovery dedupe: union of registries returns listing once
+  04c  Resilience: discovery tolerates one unreachable URL
 
 Phase 5 — Negotiation lifecycle
   05a  Evaluate-negotiate dry-run:
@@ -557,6 +559,138 @@ class TestStage03b_ResumePublishesToRegistry:
         deal_state.resume_confirmed = True
         log.info("[03b] Listing %s resumed; registry_status=%s, registry confirmed",
                  deal_state.seller_listing_id, result.registry_status)
+
+
+# ===========================================================================
+# Phase 4 — Multi-registry verification
+# (Three stages exercising the storefront's publish fan-out + the
+# buyer's discovery fan-in against the two registries that compose
+# brings up: ``registry`` (public, port 8080) and ``registry-b``
+# (secondary, port 8082). Drop registry-b from compose to fall back
+# to single-registry behaviour and these stages will fail fast.)
+# ===========================================================================
+
+# Both registries are fixed-host endpoints in the compose stack; the
+# integration-tests venv reaches them directly rather than going
+# through CONFIG.indexer_urls (which lives inside the storefront
+# container and points at the container hostname).
+_REGISTRY_A = "http://localhost:8080"
+_REGISTRY_B = "http://localhost:8082"
+_REGISTRY_DEAD = "http://localhost:9999"  # unbound port for stage 04c
+
+
+class TestStage04a_DualPublishLandsInBothRegistries:
+    def test_04a_listing_appears_in_both_registries(
+        self, deal_state: DealState
+    ):
+        """The seller fans publishes out to every URL in
+        ``registry.urls``. Verify by hitting each registry directly
+        and confirming both return the listing — proves the fan-out
+        plumbing in MultiRegistryClient.publish_listing actually wrote
+        to both backends, not just the first one.
+        """
+        require_state(deal_state, "resume_confirmed", "seller_listing_id")
+        import httpx
+
+        listing_id = deal_state.seller_listing_id
+        for url in (_REGISTRY_A, _REGISTRY_B):
+            resp = httpx.get(f"{url}/listings/{listing_id}", timeout=5.0)
+            assert resp.status_code == 200, (
+                f"{url} returned {resp.status_code} for listing "
+                f"{listing_id} — expected 200. Body: {resp.text[:200]}"
+            )
+            body = resp.json()
+            row = body.get("listing", body)
+            assert str(row.get("listing_id") or row.get("id")) == listing_id, (
+                f"{url} returned a listing with the wrong id: {row}"
+            )
+        log.info("[04a] Listing %s present in both registries", listing_id)
+
+
+def _list_listings_multi(urls: list[str], timeout: float) -> list[dict]:
+    """Inlined fan-in helper mirroring
+    ``buy_orchestrator.query_registry_for_matches_multi`` — the
+    integration-tests venv doesn't carry the buyer package, so we
+    don't import from it. Returns the deduped union, swallowing
+    per-URL transport errors so a dead URL doesn't fail the call.
+    """
+    import httpx
+    merged: dict[str, dict] = {}
+    for url in urls:
+        try:
+            resp = httpx.get(
+                f"{url.rstrip('/')}/listings", params={"status": "open"},
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            log.info("[multi-registry] %s skipped: %s", url, exc)
+            continue
+        items = payload.get("items") or payload.get("listings") or payload.get("data") or []
+        for row in items:
+            lid = row.get("listing_id") or row.get("id")
+            if lid is None:
+                continue
+            merged.setdefault(str(lid), row)
+    return list(merged.values())
+
+
+class TestStage04b_DiscoveryDedupesAcrossRegistries:
+    def test_04b_multi_helper_returns_listing_once(
+        self, deal_state: DealState
+    ):
+        """A buyer querying both registries via the fan-in helper
+        sees the listing exactly once — first-seen wins, the second
+        registry's identical row is deduped by listing_id. The unit
+        tests cover the same logic with fakes; this stage proves it
+        against real registry-service payloads.
+        """
+        require_state(deal_state, "resume_confirmed", "seller_listing_id")
+
+        matches = _list_listings_multi([_REGISTRY_A, _REGISTRY_B], timeout=5.0)
+        listing_id = deal_state.seller_listing_id
+        ours = [
+            m for m in matches
+            if str(m.get("listing_id") or m.get("id")) == listing_id
+        ]
+        assert len(ours) == 1, (
+            f"Expected listing {listing_id} to appear once in the "
+            f"deduped multi-registry result; got {len(ours)} copies. "
+            f"All matches: {[m.get('listing_id') for m in matches]}"
+        )
+        log.info(
+            "[04b] Multi-registry discovery returned %d listing(s); "
+            "ours appears once (deduped)", len(matches),
+        )
+
+
+class TestStage04c_DiscoveryToleratesDeadRegistry:
+    def test_04c_unreachable_registry_does_not_break_discovery(
+        self, deal_state: DealState
+    ):
+        """Pointing the fan-in helper at one good URL plus one
+        unreachable URL must not raise — the bad URL is logged and
+        skipped, the merge proceeds with whoever responded. This is
+        the swallow-and-continue contract the storefront's discovery
+        relies on under partial outage.
+        """
+        require_state(deal_state, "resume_confirmed", "seller_listing_id")
+
+        matches = _list_listings_multi([_REGISTRY_A, _REGISTRY_DEAD], timeout=2.0)
+        listing_id = deal_state.seller_listing_id
+        ours = [
+            m for m in matches
+            if str(m.get("listing_id") or m.get("id")) == listing_id
+        ]
+        assert len(ours) >= 1, (
+            f"Expected listing {listing_id} to surface from the live "
+            f"registry even with one dead URL; got 0 matches"
+        )
+        log.info(
+            "[04c] Discovery against [live, dead] returned %d listing(s); "
+            "live registry's data preserved", len(matches),
+        )
 
 
 # ===========================================================================
