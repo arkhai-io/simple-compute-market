@@ -147,6 +147,12 @@ class Config:
     # (union); writes fan out (best-effort). One entry is the common
     # case; private-registry deployments append their own URL.
     indexer_urls: list[str]
+    # Per-call deadline applied to every fan-in request the
+    # MultiRegistryClient sends. A registry that doesn't respond in
+    # this window is skipped (with a log line) so the merge proceeds
+    # with whoever beat the deadline. This is the budget knob — there
+    # is no separate circuit-breaker.
+    discovery_timeout: float
     identity_registry_address: str | None
     onchain_agent_id: str | None
     # Registration behaviour
@@ -296,6 +302,7 @@ def load_config() -> Config:
 
         # Shared with buyer via [registry].
         indexer_urls=_resolve_indexer_urls(_resolve),
+        discovery_timeout=float(_resolve("registry.discovery_timeout", 5.0) or 5.0),
         identity_registry_address=_resolve(
             "registry.identity_registry_address", None,
         ),

@@ -121,6 +121,11 @@ def listing_list(
              "(config.toml: registry.urls). The result is the union "
              "across all registries, deduped by listing_id.",
     ),
+    discovery_timeout: float | None = typer.Option(
+        None, "--discovery-timeout",
+        help="Per-registry deadline in seconds (default: "
+             "registry.discovery_timeout from config.toml, fallback 5).",
+    ),
     listing_id: str | None = typer.Option(None, "--listing-id", help="Filter by listing ID."),
     # Spec filters — slice fields
     gpu_model: str | None = typer.Option(None, "--gpu-model", help="Filter by GPU model (e.g., H200, RTX 5080)."),
@@ -155,8 +160,9 @@ def listing_list(
     `_min` semantics for numerics. Without any filters, returns all open
     listings up to ``--limit``.
     """
-    from ..common import resolve_indexer_urls
+    from ..common import resolve_indexer_urls, resolve_discovery_timeout
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    deadline = resolve_discovery_timeout(override=discovery_timeout)
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
@@ -197,7 +203,7 @@ def listing_list(
         url = f"{base}/listings?{params}"
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=deadline) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             typer.secho(
@@ -264,14 +270,20 @@ def listing_show(
              "(config.toml: registry.urls). The first registry that "
              "knows the listing wins; others are skipped.",
     ),
+    discovery_timeout: float | None = typer.Option(
+        None, "--discovery-timeout",
+        help="Per-registry deadline in seconds (default: "
+             "registry.discovery_timeout from config.toml, fallback 5).",
+    ),
 ) -> None:
     """Show a single listing by ID, fetched from the configured
     registry indexers — the first one that knows the listing wins."""
-    from ..common import resolve_indexer_urls
+    from ..common import resolve_indexer_urls, resolve_discovery_timeout
     from ..buy_orchestrator import fetch_listing_dict_multi
     urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    deadline = resolve_discovery_timeout(override=discovery_timeout)
     try:
-        found = fetch_listing_dict_multi(urls, listing_id)
+        found = fetch_listing_dict_multi(urls, listing_id, timeout=deadline)
     except RuntimeError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(code=1)

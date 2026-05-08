@@ -46,6 +46,11 @@ class BuyConfig:
     buyer_address: str
     buyer_private_key: str
     ssh_public_key: str
+    # Per-registry deadline for discovery fan-in (seconds). ``run_buy``
+    # passes this to ``query_registry_for_matches_multi`` so a slow
+    # registry can't extend the wall time. ``None`` defers to the
+    # underlying urllib default.
+    discovery_timeout: Optional[float] = None
     # Across-seller aggregation policy name. Looked up via
     # ``aggregation.load_aggregation_policy``. None = default
     # (cheapest_first). See buyer/market_buyer/aggregation.py.
@@ -484,7 +489,10 @@ def run_buy(
 
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
-        matches = query_registry_for_matches_multi(config.registry_urls)
+        kwargs: dict[str, Any] = {}
+        if config.discovery_timeout is not None:
+            kwargs["timeout"] = config.discovery_timeout
+        matches = query_registry_for_matches_multi(config.registry_urls, **kwargs)
     _event("discover", {"match_count": len(matches)})
 
     if not matches:

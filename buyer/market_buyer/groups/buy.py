@@ -305,6 +305,11 @@ def register(app: typer.Typer) -> None:
                  "registry.urls from config.toml). Discovery is the "
                  "union across all listed registries, deduped by listing_id.",
         ),
+        discovery_timeout: Optional[float] = typer.Option(
+            None, "--discovery-timeout",
+            help="Per-registry deadline in seconds (default: "
+                 "registry.discovery_timeout from config.toml, fallback 5).",
+        ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
             help="ERC-20 token contract address used for payment. "
@@ -429,9 +434,13 @@ def register(app: typer.Typer) -> None:
         pk = resolve_config_value(
             override=buyer_private_key, toml_path="wallet.private_key",
         )
-        from ..common import resolve_ssh_public_key, resolve_indexer_urls
+        from ..common import (
+            resolve_ssh_public_key, resolve_indexer_urls,
+            resolve_discovery_timeout,
+        )
         ssh = resolve_ssh_public_key(override=ssh_public_key)
         reg_urls = resolve_indexer_urls(override=registry_urls)
+        deadline = resolve_discovery_timeout(override=discovery_timeout)
         rpc = resolve_config_value(
             override=rpc_url, toml_path="chain.rpc_url",
         )
@@ -521,7 +530,9 @@ def register(app: typer.Typer) -> None:
         }
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
         try:
-            matches = query_registry_for_matches_multi(reg_urls, filters=active_filters or None)
+            matches = query_registry_for_matches_multi(
+                reg_urls, timeout=deadline, filters=active_filters or None,
+            )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
@@ -559,6 +570,7 @@ def register(app: typer.Typer) -> None:
             buyer_address=addr,
             buyer_private_key=pk,
             ssh_public_key=ssh,
+            discovery_timeout=deadline,
             aggregation_policy=aggregation_policy,
         )
         constraints = BuyConstraints(

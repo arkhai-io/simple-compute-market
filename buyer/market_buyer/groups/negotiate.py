@@ -48,6 +48,11 @@ def register(app: typer.Typer) -> None:
                  "seller URL and price floor from a listing_id; the "
                  "first registry that knows the listing wins.",
         ),
+        discovery_timeout: Optional[float] = typer.Option(
+            None, "--discovery-timeout",
+            help="Per-registry deadline in seconds (default: "
+                 "registry.discovery_timeout from config.toml, fallback 5).",
+        ),
         initial_price: Optional[int] = typer.Option(
             None, "--initial-price",
             help="Opening bid in raw token units. Optional — when omitted, "
@@ -149,17 +154,17 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
-        # Resolve registry URLs once; used to look up the listing if
-        # --seller or prices weren't passed.
-        from ..common import resolve_indexer_urls
+        # Resolve registry URLs + per-registry deadline once.
+        from ..common import resolve_indexer_urls, resolve_discovery_timeout
         reg_urls = resolve_indexer_urls(override=registry_urls)
+        deadline = resolve_discovery_timeout(override=discovery_timeout)
 
         # Auto-resolve --seller from the registries given --listing-id.
         # First registry that knows the listing wins.
         if listing_id and not seller_url:
             from ..buy_orchestrator import fetch_listing_dict_multi
             try:
-                listing_dict = fetch_listing_dict_multi(reg_urls, listing_id)
+                listing_dict = fetch_listing_dict_multi(reg_urls, listing_id, timeout=deadline)
             except RuntimeError as exc:
                 typer.secho(
                     f"Could not fetch listing {listing_id}: {exc}",

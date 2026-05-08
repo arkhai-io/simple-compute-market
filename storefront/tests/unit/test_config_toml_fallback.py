@@ -34,6 +34,7 @@ def test_empty_toml_uses_all_defaults():
     assert cfg.port == 8000
     assert cfg.agent_db_path == "/tmp/agent.db"
     assert cfg.indexer_urls == ["http://localhost:8080"]
+    assert cfg.discovery_timeout == 5.0
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
     # Default is "bisection" (not "") — prevents silent RL failures when torch
@@ -229,6 +230,17 @@ def test_registry_urls_list_form():
         },
     })
     assert cfg.indexer_urls == ["http://r1:8080", "http://r2:8080"]
+
+
+def test_discovery_timeout_from_toml():
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "registry": {
+            "urls": ["http://r:8080"],
+            "discovery_timeout": 2.5,
+        },
+    })
+    assert cfg.discovery_timeout == 2.5
 
 
 def test_registry_url_singular_is_ignored():

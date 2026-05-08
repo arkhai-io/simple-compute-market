@@ -85,6 +85,27 @@ def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
     return ["http://localhost:8080"]
 
 
+def resolve_discovery_timeout(*, override: float | None = None) -> float:
+    """Resolve the buyer's per-registry discovery deadline (seconds).
+
+    Precedence: CLI override > ``registry.discovery_timeout`` from
+    config.toml > ``5.0``. The orchestrator's multi-URL helpers cap
+    each per-registry request at this value so a slow registry can't
+    extend the wall time of a discovery pass.
+    """
+    if override is not None and override > 0:
+        return float(override)
+    from service.config_loader import get_dotted, load_user_config
+    raw = get_dotted(load_user_config(), "registry.discovery_timeout")
+    try:
+        v = float(raw)
+        if v > 0:
+            return v
+    except (TypeError, ValueError):
+        pass
+    return 5.0
+
+
 def resolve_default_token() -> str:
     """Pick the buyer's default token symbol for `--token-contract` resolution.
 

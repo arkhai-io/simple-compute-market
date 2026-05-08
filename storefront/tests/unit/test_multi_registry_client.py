@@ -230,6 +230,58 @@ class TestWaitForAgentIndexed:
 # Writes
 # ---------------------------------------------------------------------------
 
+class TestDiscoveryTimeout:
+    @pytest.mark.asyncio
+    async def test_slow_registry_is_skipped_at_deadline(self):
+        """A registry that takes longer than the configured timeout
+        is logged and skipped — the merge still returns whoever beat
+        the deadline."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+
+        async def slow_list(**kwargs):
+            await asyncio.sleep(1.0)
+            return ListingListResponse(listings=[_summary("slow")])
+
+        async def fast_list(**kwargs):
+            return ListingListResponse(listings=[_summary("fast")])
+
+        # Patch the fake's list_listings per-URL to use the slow/fast
+        # bodies. We attach as bound methods on a fresh subclass so the
+        # async nature is preserved.
+        class _SlowFake(_FakeRegistry):
+            async def list_listings(self, **kwargs):
+                return await slow_list(**kwargs)
+
+        class _FastFake(_FakeRegistry):
+            async def list_listings(self, **kwargs):
+                return await fast_list(**kwargs)
+
+        def _factory(url):
+            return _SlowFake(url) if url == "http://slow" else _FastFake(url)
+
+        with patch(
+            "market_storefront.utils.multi_registry_client.RegistryClient",
+            _factory,
+        ):
+            async with MultiRegistryClient(
+                ["http://slow", "http://fast"], timeout=0.05,
+            ) as rc:
+                result = await rc.list_listings()
+        assert [str(l.id) for l in result.listings] == ["fast"]
+
+    @pytest.mark.asyncio
+    async def test_timeout_none_leaves_calls_unbounded(self):
+        """``timeout=None`` means rely on the underlying client's
+        timeouts — no asyncio.wait_for wrapping."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        _FakeRegistry.responses = {
+            "http://r1": {"list_listings": ListingListResponse(listings=[_summary("a")])},
+        }
+        async with MultiRegistryClient(["http://r1"], timeout=None) as rc:
+            result = await rc.list_listings()
+        assert [str(l.id) for l in result.listings] == ["a"]
+
+
 class TestPublishListing:
     @pytest.mark.asyncio
     async def test_succeeds_when_at_least_one_registry_accepts(self):

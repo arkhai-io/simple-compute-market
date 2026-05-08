@@ -51,11 +51,16 @@ logger = logging.getLogger(__name__)
 class MultiRegistryClient:
     """Async context manager that fans calls out over N RegistryClients."""
 
-    def __init__(self, urls: list[str]) -> None:
+    def __init__(self, urls: list[str], *, timeout: float | None = None) -> None:
         # Preserve order for log readability and deterministic dedupe
         # tiebreaks (first-seen wins).
         self._urls: list[str] = list(urls)
         self._clients: list[RegistryClient] = []
+        # Per-call deadline; ``None`` means no deadline (rely on the
+        # underlying httpx client's own timeouts). When set, every
+        # fan-in / fan-out call is wrapped in ``asyncio.wait_for`` so
+        # one slow registry can't extend the wall time.
+        self._timeout = timeout
 
     @property
     def urls(self) -> list[str]:
@@ -80,6 +85,18 @@ class MultiRegistryClient:
         if errors and exc is None:
             raise errors[0]
 
+    def _bound(self, coro):
+        """Wrap a coroutine with the configured per-call deadline.
+
+        Falls through unchanged when no timeout is set; otherwise
+        ``asyncio.TimeoutError`` is raised by the wrapped task at the
+        deadline and gets caught + logged like any other per-registry
+        failure.
+        """
+        if self._timeout is None:
+            return coro
+        return asyncio.wait_for(coro, timeout=self._timeout)
+
     # ------------------------------------------------------------------
     # Reads — fan-in
     # ------------------------------------------------------------------
@@ -96,7 +113,7 @@ class MultiRegistryClient:
         if not self._clients:
             return ListingListResponse(listings=[])
         results = await asyncio.gather(
-            *[c.list_listings(**kwargs) for c in self._clients],
+            *[self._bound(c.list_listings(**kwargs)) for c in self._clients],
             return_exceptions=True,
         )
         merged: dict[str, ListingSummary] = {}
@@ -123,7 +140,7 @@ class MultiRegistryClient:
                 "no registries configured",
             )
         tasks = [
-            asyncio.create_task(c.get_listing(listing_id))
+            asyncio.create_task(self._bound(c.get_listing(listing_id)))
             for c in self._clients
         ]
         last_404: RegistryClientError | None = None
@@ -165,7 +182,9 @@ class MultiRegistryClient:
                 "no registries configured",
             )
         tasks = [
-            asyncio.create_task(c.wait_for_agent_indexed(agent_id, timeout=timeout))
+            asyncio.create_task(
+                self._bound(c.wait_for_agent_indexed(agent_id, timeout=timeout))
+            )
             for c in self._clients
         ]
         first_seen: AgentIndexedResponse | None = None
@@ -222,7 +241,7 @@ class MultiRegistryClient:
         if not self._clients:
             raise RuntimeError("No registries configured")
         results = await asyncio.gather(
-            *[c.delete_listing(listing_id, private_key) for c in self._clients],
+            *[self._bound(c.delete_listing(listing_id, private_key)) for c in self._clients],
             return_exceptions=True,
         )
         successes = sum(1 for r in results if not isinstance(r, BaseException))
@@ -243,7 +262,7 @@ class MultiRegistryClient:
         if not self._clients:
             raise RuntimeError("No registries configured")
         results = await asyncio.gather(
-            *[call(c) for c in self._clients],
+            *[self._bound(call(c)) for c in self._clients],
             return_exceptions=True,
         )
         first_ok: dict | None = None
