@@ -30,10 +30,5 @@ dev = [
     # lazily imports it inside _sdk_addresses_for_chain. The service
     # package itself doesn't ship alkahest-py — consumers (storefront,
     # buyer) carry it as a runtime dep.
-    "alkahest-py>=0.3.0",
+    "alkahest-py>=0.4.0",
 ]
-
-[tool.uv.sources]
-# Pinned to alkahest main HEAD until a published wheel ships PR #63's
-# get_obligation methods + PR #64's http transport support.
-alkahest-py = { git = "https://github.com/arkhai-io/alkahest", rev = "af76bf193fe74acc4ddd4ed57966780dde761a34", subdirectory = "sdks/py" }

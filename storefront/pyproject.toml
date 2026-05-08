@@ -20,7 +20,7 @@ dependencies = [
     "fastapi-utils>=0.8.0",
     "uvicorn~=0.34.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
-    "alkahest-py>=0.3.0",
+    "alkahest-py>=0.4.0",
     "web3>=7.14.0",
     "websockets>=15.0.1",
     "httpx>=0.27",
@@ -81,12 +81,6 @@ market-policy = { path = "../policy", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
-# alkahest-py from git until the next published wheel includes:
-#   PR #63 — get_obligation across every escrow client (typed envelope+data)
-#   PR #64 — http RPC URL support + transport-aware event waiters
-# The git pin builds from sdks/py via maturin; dev/CI need the Rust toolchain
-# (already required by alkahest's Cargo.lock and present in our Docker images).
-alkahest-py = { git = "https://github.com/arkhai-io/alkahest", rev = "af76bf193fe74acc4ddd4ed57966780dde761a34", subdirectory = "sdks/py" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

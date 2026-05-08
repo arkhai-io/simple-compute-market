@@ -111,8 +111,45 @@ wheels = [
 
 [[package]]
 name = "alkahest-py"
-version = "0.3.0"
-source = { git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=af76bf193fe74acc4ddd4ed57966780dde761a34#af76bf193fe74acc4ddd4ed57966780dde761a34" }
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/62/6b1fe64c73541718565ba19eaa97d75d8ffb892366b2b7d5e096b55696f6/alkahest_py-0.4.0.tar.gz", hash = "sha256:df2be263f7ddd9dd54155d40865b334e8ac5f9b4dfa142f9ec00df35896a09cd", size = 920209 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/9b/5e6358e160d316121a19da1a4a376791d8a7fe4cd8e1b3ada39bcba6290b/alkahest_py-0.4.0-cp310-cp310-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:762b6961fc573880a51786a75ab679218f5cb5731aacaa11ee8af8ff02f0b84e", size = 8520096 },
+    { url = "https://files.pythonhosted.org/packages/cb/ab/3ddcffd28adc54ceb0a063d3a257d1a53706c7db0b43f4fd7b6417a4fe0b/alkahest_py-0.4.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8a425bd9c8d875f1f9a233b19d50d299db0e56645acf8f094b6134994b5cb380", size = 8024987 },
+    { url = "https://files.pythonhosted.org/packages/85/67/5f667e472629cf550615fd21b618082f2728ed32062c99c25c413c1e0844/alkahest_py-0.4.0-cp310-cp310-musllinux_1_2_i686.whl", hash = "sha256:dcbb46099725ab46a107bca1fb4dd801dbd6ac2bc7a7cf7413f30fa0f0e165d5", size = 8396994 },
+    { url = "https://files.pythonhosted.org/packages/50/65/11b71924705db3f4c0e354078958d1cb5ef2ad027320c2495ef05f85ddd6/alkahest_py-0.4.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:2364d82a1ce7c2efc6055db0018561fabb5a91713f1198aa4ef0dd72bd9d0089", size = 8251920 },
+    { url = "https://files.pythonhosted.org/packages/76/52/8b1c49d691c386b5a47231e754d5e94a00f0221565902a24e92100948166/alkahest_py-0.4.0-cp310-cp310-win_amd64.whl", hash = "sha256:436558193d3fec0061dc6fa6e11339a93e6975cdc31f97d4fb123b422ed6440e", size = 7476901 },
+    { url = "https://files.pythonhosted.org/packages/2e/42/bcbcae171b726ecaae4cf00aa8eb89b20598299ff1839d1eba3c902b7975/alkahest_py-0.4.0-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:8bb7b47bb92c4099add0e4a9049a398fc1fe0202837c29f001ddd87905fe4148", size = 7620835 },
+    { url = "https://files.pythonhosted.org/packages/38/19/83313f93d628a32ce048d139922b34c3d9ca58bcf6339025ccb85909f2a2/alkahest_py-0.4.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4482b61da6033000ac7bdf727e03ed2a8260617c73e515ccbaba4b03f799a435", size = 7366005 },
+    { url = "https://files.pythonhosted.org/packages/1a/7b/3d29b82c242c38691bfd09a318337c6263daf1d99696d1ca3b061ca96592/alkahest_py-0.4.0-cp311-cp311-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:7f18b8d6d25db7ac843e50538d25c715b542ffeafe9512b489da6443748290ef", size = 8524592 },
+    { url = "https://files.pythonhosted.org/packages/3a/6b/632218f440e97fb5010c471ad0d8f1beda5a889341e53ac08b489339798e/alkahest_py-0.4.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e87f91d067606b006a8d58bf46f4425441df3724fffb0b01acc8ead0014a2645", size = 8029190 },
+    { url = "https://files.pythonhosted.org/packages/fe/b2/27e365e07b7357b997c362e55aaf5fbe5d7b6dea5b5cde2ac2b01f850291/alkahest_py-0.4.0-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:9d5c4f6b336d337683b00fb8e8a018296aa17aa59be659e741f0ccb641000dc8", size = 8396654 },
+    { url = "https://files.pythonhosted.org/packages/d8/8c/474d1bae183b22b324672ac4a829f2b423e366f343df96474bd39d864966/alkahest_py-0.4.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:05500ca4541ba17758e6f0be355dbf993cb18087c093f857c54d5fbbd8ec3d6b", size = 8258380 },
+    { url = "https://files.pythonhosted.org/packages/1f/cc/1e4b82eee65edce27f4c9730722b4cf270e6cc6343c0c70c6a3be9c63c4d/alkahest_py-0.4.0-cp311-cp311-win_amd64.whl", hash = "sha256:2e2c77436003d0f0f2dd77edb1219f422562d047f8a603860e6730d3990462d6", size = 7477927 },
+    { url = "https://files.pythonhosted.org/packages/a7/55/3be5ce6a7c908b25a83654140dd26ff61b816d322907456fd3d48e8d1934/alkahest_py-0.4.0-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:9b97289ee2d6a8be239579890804b217b301a150fd795d8cd4911afb16a76042", size = 7566616 },
+    { url = "https://files.pythonhosted.org/packages/60/dd/d7fd5361e680a4a33240d432682f3a6ffc3c90111597e568839127be9e19/alkahest_py-0.4.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:4bd58f69316be66f1b4cfb8d737ef5d29cff00bc81e1960550aa6ddd914cd592", size = 7311917 },
+    { url = "https://files.pythonhosted.org/packages/47/8e/e09be8e1e9c5c6dfe358dcf7a8cba201e824cf7b4a9a41f1f1beae604c9c/alkahest_py-0.4.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:9e5a050178f6948d104af09e8480ed7d0e4c3d09b8b5246114b3c0edcfb189bf", size = 8549318 },
+    { url = "https://files.pythonhosted.org/packages/41/eb/bf3fd9673e574b4ab8e490d462bf4ba7c86a928758e5909ce23cbf4944a0/alkahest_py-0.4.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d9f1ddae7c330fbe686fe55371a1cce7789c8c29b468478e99671c1c80fad9e2", size = 8064326 },
+    { url = "https://files.pythonhosted.org/packages/17/f5/56296e238ab2af47706bde1ac5ee532435387a04be38f6aadd682548a285/alkahest_py-0.4.0-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:e905e8beff70535edffd40e0636f96c28f47d136a513f8e11e5ab18b9b0b51fe", size = 8401537 },
+    { url = "https://files.pythonhosted.org/packages/90/74/de7889e3c6413e21313cfebdcf0f7d64ba7a88d7f80129dcfac2cd89986f/alkahest_py-0.4.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:55b943785a2be667393979bb34856c48a4606bc3bfaae3965b6247e64ca1bc49", size = 8280047 },
+    { url = "https://files.pythonhosted.org/packages/ce/60/9fa637a49b882021940beba8d00c09052fce2ad900db670714a5bb519277/alkahest_py-0.4.0-cp312-cp312-win_amd64.whl", hash = "sha256:d9e22207178693c47cf49211cdbd54117f573257ad39c42822d893212ee5b731", size = 7499970 },
+    { url = "https://files.pythonhosted.org/packages/df/8e/0291b3638a13aae757aa67071bcdbbba037ba761d80a6a17ad371586b0a0/alkahest_py-0.4.0-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:c7814ce1af6e578f90464ceafcbcb2e6642f02b337195391b0f96f1f32295182", size = 7567110 },
+    { url = "https://files.pythonhosted.org/packages/1c/cf/e892bb51151d3b2db46220ce446262746df84e7fed778a3fcd7c45104ecf/alkahest_py-0.4.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:7b873ce04724cfd639e9b3d4fcfd1033b3a41c969ff6f655d88ac4aa2c40208a", size = 7311316 },
+    { url = "https://files.pythonhosted.org/packages/b0/71/b278deee4e2b228127f729c66f8240cecdeef29ba25e4a10f5618b60e704/alkahest_py-0.4.0-cp313-cp313-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:81a0cd9b35d39d334e368bcd745f7f9420724dc80d65202abde646ed59a2484d", size = 8548728 },
+    { url = "https://files.pythonhosted.org/packages/5e/ec/d0741caf949080ade0d59d7215f2c1ebeff4a4d0d640d978c786c56e50da/alkahest_py-0.4.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9a402124dbdfb644019d0f81eb74a9e07ee8626d922fc1bff13a4b52a29e7282", size = 8064110 },
+    { url = "https://files.pythonhosted.org/packages/31/ac/3ccd241897dc88b452d10c5368a757f23de19e8ea90735213dbacb451144/alkahest_py-0.4.0-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:f94feb2e7a86f8d6393e283d3e2e56f1c74addae63b5254a0805898da1ff28ff", size = 8401134 },
+    { url = "https://files.pythonhosted.org/packages/d2/d5/f30844dace9ffc4bffc6cc72acc0bd0d17efa9f13411f828a6e36752134c/alkahest_py-0.4.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e074f724880a1d2f7cba4b6daecb4dafb12a7cdb5e077f036dadb22b5da47233", size = 8279672 },
+    { url = "https://files.pythonhosted.org/packages/92/75/c5465bd334fd9f2a10fcad7976ed97f827ff241cde465b167e3a9998c296/alkahest_py-0.4.0-cp313-cp313-win_amd64.whl", hash = "sha256:e3874ae03555ec60aba7919948bc55eecac5c02b3105be6701b0534474d40497", size = 7500992 },
+    { url = "https://files.pythonhosted.org/packages/8d/d1/d8ae70228180c996ad958effe8e78fb4fbb9dd518e2c80fbf02ba531700c/alkahest_py-0.4.0-cp313-cp313t-musllinux_1_2_i686.whl", hash = "sha256:5571d93c27d1c425dba3fad288db6f820a92440ed8986dd0c19fb836f0cc2d8a", size = 8409491 },
+    { url = "https://files.pythonhosted.org/packages/54/cb/be7f9d8dcf932d837ccba486551472c26664a28a4097982790048fe05af7/alkahest_py-0.4.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:a953c2f3c96ca9ed113bc42e68f769eaf1c81f8026ed997d3216a27406edfb3d", size = 8273404 },
+    { url = "https://files.pythonhosted.org/packages/0a/35/02acdb2f4ceb67271ebf10be57c099eaf6575ff4ac603ccd1fa1c5ed54a4/alkahest_py-0.4.0-pp310-pypy310_pp73-musllinux_1_2_i686.whl", hash = "sha256:46c6975c9b0986aaaabc4af452c4f7b7452f851c9f61d2cebd5677c391eddb93", size = 8407261 },
+    { url = "https://files.pythonhosted.org/packages/9a/37/3c23bc79962578839cd56eb525a4c23cea2cb6dea8e7d2507c4dff0063fb/alkahest_py-0.4.0-pp310-pypy310_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:d7ae2badde54d136210c07197249a1af4cfd07b910a73ef40d15eb3666f569db", size = 8252266 },
+    { url = "https://files.pythonhosted.org/packages/55/57/c4b9ba58e77695fcabe45459899f280b5fcd3b70ae5a71081b62273f9d18/alkahest_py-0.4.0-pp311-pypy311_pp73-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:934e73543006a59be27b79a32b7d690128b549024656c5531191ffeba996c2be", size = 8544470 },
+    { url = "https://files.pythonhosted.org/packages/34/e5/dfa201b5fa248f03a7dc132859e1a818e4d419aecf2ef5d3d84c0ed5e096/alkahest_py-0.4.0-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f75e52fd1e09786576dc5d06ec57403a8e3a2846e47515f9e38bd1a8347f86b5", size = 8023896 },
+    { url = "https://files.pythonhosted.org/packages/43/bc/a1e1c95d8f183f9c8e400493a77c112f2245dd470194097c2ba645fa8eb1/alkahest_py-0.4.0-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:639c9d7486af719ef1e93539cdc64893002e8037c246ae6b7ca104dff2c5259e", size = 8406505 },
+    { url = "https://files.pythonhosted.org/packages/74/59/e3f9a25e85464bcf963ce2b43e4a091d559f4b0041a6a7613b5d00032962/alkahest_py-0.4.0-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:2417cad0b3f4cd38bd067fbdd96286066d96d2da19298f1a3473d9169681b3ef", size = 8253244 },
+]
 
 [[package]]
 name = "annotated-types"
@@ -727,7 +764,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "alkahest-py", git = "https://github.com/arkhai-io/alkahest?subdirectory=sdks%2Fpy&rev=af76bf193fe74acc4ddd4ed57966780dde761a34" },
+    { name = "alkahest-py", specifier = ">=0.4.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]
