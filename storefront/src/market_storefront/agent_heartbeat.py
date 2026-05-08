@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 async def start_agent_heartbeat(config: "Config") -> Optional[str]:
     """Backward-compat wrapper: accepts Config, converts to dict for service layer."""
     return await _start_agent_heartbeat({
-        "indexer_url": config.indexer_url,
+        "indexer_urls": config.indexer_urls,
         "identity_registry_address": config.identity_registry_address,
         "agent_wallet_address": config.agent_wallet_address,
         "onchain_agent_id": config.onchain_agent_id,

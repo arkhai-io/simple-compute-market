@@ -174,20 +174,32 @@ async def heartbeat_loop(
 
 async def start_agent_heartbeat(config: dict) -> Optional[str]:
     """
-    Start agent heartbeat loop. Requires onchain_agent_id from config dict.
+    Start agent heartbeat loops, one per configured indexer URL.
 
     Args:
-        config: dict with keys: indexer_url, identity_registry_address,
-                agent_wallet_address, onchain_agent_id, chain_rpc_url, agent_priv_key
+        config: dict with keys: indexer_urls (list[str]) or legacy
+                indexer_url (str), identity_registry_address,
+                agent_wallet_address, onchain_agent_id, chain_rpc_url,
+                agent_priv_key. With multiple URLs, one independent
+                heartbeat task is spawned per registry so a slow
+                registry can't gate heartbeats to the others.
     """
-    indexer_url = config.get("indexer_url")
+    indexer_urls = config.get("indexer_urls")
+    if not indexer_urls:
+        legacy = config.get("indexer_url")
+        indexer_urls = [legacy] if legacy else []
+    elif isinstance(indexer_urls, str):
+        # Defensive: caller passed a single string under the new key.
+        indexer_urls = [indexer_urls]
+    indexer_urls = [u for u in indexer_urls if u]
+
     identity_registry_address = config.get("identity_registry_address")
     agent_wallet_address = config.get("agent_wallet_address")
     onchain_agent_id = config.get("onchain_agent_id")
     chain_rpc_url = config.get("chain_rpc_url")
     agent_priv_key = config.get("agent_priv_key")
 
-    if not indexer_url or not identity_registry_address:
+    if not indexer_urls or not identity_registry_address:
         return None
 
     if not agent_wallet_address:
@@ -225,6 +237,10 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
         agent_id=agent_id,
     )
 
-    asyncio.create_task(heartbeat_loop(canonical_id, indexer_url, agent_priv_key))
-    logger.info(f"[HEARTBEAT] Started heartbeat for {canonical_id}")
+    for url in indexer_urls:
+        asyncio.create_task(heartbeat_loop(canonical_id, url, agent_priv_key))
+    logger.info(
+        "[HEARTBEAT] Started heartbeat for %s across %d registry/registries: %s",
+        canonical_id, len(indexer_urls), indexer_urls,
+    )
     return agent_wallet_address

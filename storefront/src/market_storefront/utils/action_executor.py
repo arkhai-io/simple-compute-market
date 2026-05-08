@@ -502,17 +502,18 @@ def _canonical_agent_id() -> str | None:
         return str(raw)
 
 
-def _make_registry_client() -> RegistryClient:
-    """Construct a RegistryClient from environment/CONFIG.
+def _make_registry_client() -> "MultiRegistryClient":
+    """Construct a multi-registry client wrapping every configured URL.
 
-    Each call returns a new client instance — callers should use it as a
-    context manager or call close() when done.  Singletons are avoided here
-    because the private_key and agent_id config values can theoretically
-    change between calls during testing.
+    Each call returns a fresh wrapper — callers use it as an async
+    context manager (``async with _make_registry_client() as rc:``).
+    The wrapper exposes the same surface as ``RegistryClient`` so call
+    sites (and the test mocks that patch this function) don't change
+    shape; reads fan in across every URL, writes fan out best-effort.
     """
-    return RegistryClient(
-        CONFIG.indexer_url or "http://localhost:8080",
-    )
+    from .multi_registry_client import MultiRegistryClient
+    urls = list(CONFIG.indexer_urls) if CONFIG.indexer_urls else ["http://localhost:8080"]
+    return MultiRegistryClient(urls)
 
 
 def _sender_id() -> str:

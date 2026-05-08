@@ -150,7 +150,7 @@ async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from service.clients.erc8004.heartbeat import start_agent_heartbeat
     await start_agent_heartbeat({
-        "indexer_url": CONFIG.indexer_url,
+        "indexer_urls": CONFIG.indexer_urls,
         "identity_registry_address": CONFIG.identity_registry_address,
         "agent_wallet_address": CONFIG.agent_wallet_address,
         "onchain_agent_id": str(_AGENT_ID) if _AGENT_ID is not None else None,

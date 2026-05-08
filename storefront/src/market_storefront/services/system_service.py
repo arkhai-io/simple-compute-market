@@ -306,33 +306,50 @@ class SystemService:
         return result
 
     async def registry_check(self) -> str:
-        """Probe the configured registry URL. Returns 'ok' or an error string.
+        """Probe every configured registry URL concurrently. Returns
+        'ok' if at least one responded successfully; otherwise returns
+        the last error string (so the operator at least gets *some*
+        signal about what's wrong).
 
-        Uses a 2-second timeout so the status endpoint stays fast.
-        Only called from /api/v1/system/status — never from /health.
+        Uses a 2-second timeout per registry so the status endpoint
+        stays fast even with several configured. Only called from
+        /api/v1/system/status — never from /health.
         """
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        if not url:
+        urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
+        if not urls:
             return "unconfigured"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{url}/health")
-            return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
-        except httpx.ConnectError:
-            return "unreachable"
-        except httpx.TimeoutException:
-            return "timeout"
-        except Exception as exc:
-            return f"error: {exc}"
+
+        async def _probe(url: str) -> str:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(f"{url}/health")
+                return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
+            except httpx.ConnectError:
+                return "unreachable"
+            except httpx.TimeoutException:
+                return "timeout"
+            except Exception as exc:
+                return f"error: {exc}"
+
+        import asyncio
+        results = await asyncio.gather(*[_probe(u) for u in urls])
+        if any(r == "ok" for r in results):
+            return "ok"
+        # Surface the most recent non-ok result (all are non-ok here).
+        return results[-1]
 
     async def registry_auth_check(self) -> str:
         """Verify this agent's wallet owns its configured on-chain agent ID.
 
-        Returns 'ok', 'unconfigured', 'agent_not_found', 'owner_mismatch',
-        or an error string.
+        Probes every configured registry concurrently. Returns 'ok' if
+        at least one registry confirms the agent's owner matches our
+        wallet. ``agent_not_found`` only when *every* registry reports
+        404 (none have indexed us yet). Other definitive non-ok
+        results win over agent_not_found because they're more
+        actionable for the operator.
         """
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        if not url:
+        urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
+        if not urls:
             return "unconfigured"
         # Read the live runtime ID (set by _ensure_agent_identity at startup),
         # not the config-file value (which may be stale or absent when auto_register=True).
@@ -343,27 +360,41 @@ class SystemService:
         chain_id = _resolve_chain_id()
         identity_addr = (CONFIG.identity_registry_address or "").lower()
         canonical = f"eip155:{chain_id}:{identity_addr}:{onchain_id}"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{url}/agents/{canonical}")
-            if resp.status_code == 404:
-                return "agent_not_found"
-            if resp.status_code >= 400:
-                return f"http_{resp.status_code}"
-            data = resp.json()
-            owner = (data.get("owner") or "").lower()
-            wallet = (CONFIG.agent_wallet_address or "").lower()
-            if not owner:
-                return "owner_unknown"
-            if not wallet:
-                return "wallet_unconfigured"
-            return "ok" if owner == wallet else "owner_mismatch"
-        except httpx.ConnectError:
-            return "unreachable"
-        except httpx.TimeoutException:
-            return "timeout"
-        except Exception as exc:
-            return f"error: {exc}"
+        wallet = (CONFIG.agent_wallet_address or "").lower()
+
+        async def _probe(url: str) -> str:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(f"{url}/agents/{canonical}")
+                if resp.status_code == 404:
+                    return "agent_not_found"
+                if resp.status_code >= 400:
+                    return f"http_{resp.status_code}"
+                data = resp.json()
+                owner = (data.get("owner") or "").lower()
+                if not owner:
+                    return "owner_unknown"
+                if not wallet:
+                    return "wallet_unconfigured"
+                return "ok" if owner == wallet else "owner_mismatch"
+            except httpx.ConnectError:
+                return "unreachable"
+            except httpx.TimeoutException:
+                return "timeout"
+            except Exception as exc:
+                return f"error: {exc}"
+
+        import asyncio
+        results = await asyncio.gather(*[_probe(u) for u in urls])
+        if "ok" in results:
+            return "ok"
+        # Prefer a definitive non-ok result over agent_not_found, since
+        # the latter is the transient "registry hasn't EventSynced yet"
+        # state that wait_for_registry_agent retries past.
+        for r in results:
+            if r not in ("agent_not_found",):
+                return r
+        return "agent_not_found"
 
     async def wait_for_registry_agent(self, timeout: float) -> dict:
         """Block until registry_auth_check() returns a definitive result.

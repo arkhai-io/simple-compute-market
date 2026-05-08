@@ -33,7 +33,7 @@ def test_empty_toml_uses_all_defaults():
     assert cfg.chain_name == "ethereum_sepolia"
     assert cfg.port == 8000
     assert cfg.agent_db_path == "/tmp/agent.db"
-    assert cfg.indexer_url == "http://localhost:8080"
+    assert cfg.indexer_urls == ["http://localhost:8080"]
     assert cfg.provisioning_service_url == "http://localhost:8085"
     assert cfg.provisioning_timeout == 3600
     # Default is "bisection" (not "") — prevents silent RL failures when torch
@@ -57,7 +57,7 @@ def test_empty_toml_with_no_seller_section_still_loads():
     assert cfg.chain_rpc_url == "https://sepolia.base.org"
     assert cfg.agent_wallet_address == "0xbuyer"
     assert cfg.agent_priv_key == "0xabc"
-    assert cfg.indexer_url == "http://registry.example"
+    assert cfg.indexer_urls == ["http://registry.example"]
     # Seller-only keys still get defaults.
     assert cfg.port == 8000
     assert cfg.agent_db_path == "/tmp/agent.db"
@@ -212,8 +212,35 @@ def test_shared_registry_section():
             "identity_registry_address": "0xreg1",
         },
     })
-    assert cfg.indexer_url == "http://registry.example:8080"
+    assert cfg.indexer_urls == ["http://registry.example:8080"]
     assert cfg.identity_registry_address == "0xreg1"
+
+
+def test_registry_urls_list_form():
+    """The plural ``registry.urls`` key takes a list and becomes
+    ``CONFIG.indexer_urls`` directly — this is how multi-registry
+    discovery is configured."""
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "registry": {
+            "urls": ["http://r1:8080", "http://r2:8080"],
+            "identity_registry_address": "0xreg1",
+        },
+    })
+    assert cfg.indexer_urls == ["http://r1:8080", "http://r2:8080"]
+
+
+def test_registry_urls_takes_precedence_over_url():
+    """When both ``urls`` (plural) and ``url`` (legacy) are set, the
+    plural form wins — this is what we'd want during a migration."""
+    cfg = _load_with_toml({
+        "seller": {"agent_id": "test_agent"},
+        "registry": {
+            "url": "http://legacy:8080",
+            "urls": ["http://r1:8080"],
+        },
+    })
+    assert cfg.indexer_urls == ["http://r1:8080"]
 
 
 # ---------------------------------------------------------------------------

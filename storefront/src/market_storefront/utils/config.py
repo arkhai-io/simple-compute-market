@@ -142,8 +142,11 @@ class Config:
     zerotier_network: str | None
     # Chain identity
     chain_id: int
-    # Indexer/Registry settings
-    indexer_url: str
+    # Indexer/Registry settings — list because "registry" is a role
+    # rather than a canonical service. Reads fan in across every URL
+    # (union); writes fan out (best-effort). One entry is the common
+    # case; private-registry deployments append their own URL.
+    indexer_urls: list[str]
     identity_registry_address: str | None
     onchain_agent_id: str | None
     # Registration behaviour
@@ -217,6 +220,26 @@ _DEFAULT_SSH_PUBLIC_KEY = (
 )
 
 
+def _resolve_indexer_urls(resolve) -> list[str]:
+    """Pull the configured registry URL(s) out of TOML.
+
+    Accepts either form for backward compatibility:
+      [registry] urls = ["http://r1:8080", "http://r2:8080"]   # preferred
+      [registry] url  = "http://r:8080"                        # legacy
+    With both, ``urls`` wins. Falls back to ``http://localhost:8080``
+    only when neither key is set.
+    """
+    urls = resolve("registry.urls", None)
+    if isinstance(urls, list) and urls:
+        cleaned = [str(u).strip() for u in urls if str(u).strip()]
+        if cleaned:
+            return cleaned
+    single = resolve("registry.url", None)
+    if isinstance(single, str) and single.strip():
+        return [single.strip()]
+    return ["http://localhost:8080"]
+
+
 def load_config() -> Config:
     agent_id = get_agent_id()
     if agent_id == DEFAULT_AGENT_ID and not _resolve("seller.agent_id", None):
@@ -277,7 +300,7 @@ def load_config() -> Config:
         zerotier_network=_resolve("seller.zerotier_network", None),
 
         # Shared with buyer via [registry].
-        indexer_url=str(_resolve("registry.url", "http://localhost:8080")),
+        indexer_urls=_resolve_indexer_urls(_resolve),
         identity_registry_address=_resolve(
             "registry.identity_registry_address", None,
         ),
