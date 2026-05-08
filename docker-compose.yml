@@ -89,6 +89,10 @@ services:
       - PYTHONPATH=/app:/app/src
     volumes:
       - ./storefront/config.bob.toml:/etc/arkhai/config.toml:ro
+      # Compute inventory seed CSV — config.bob.toml's
+      # seller.resources_csv_path expects this at /app/resources.csv.
+      # Mirrors the deploy-seller-agent Makefile target.
+      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
       - zerotier-sell:/var/lib/zerotier-one
       # Named volume so `docker compose down -v` actually wipes seller state
       # (resources, listings, negotiations, settlement jobs). Replaced the
