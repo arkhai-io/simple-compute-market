@@ -66,6 +66,12 @@ class SystemController:
     # ------------------------------------------------------------------
 
     async def _health_impl(self) -> JSONResponse:
+        """Fast liveness/readiness probe — local checks only, no outbound HTTP.
+
+        Checks: api, database, job_processor.
+        Used by Kubernetes liveness and readiness probes at GET /health.
+        Must complete within the probe timeout (default 1s in most clusters).
+        """
         checks: dict[str, str] = {"api": "ok"}
 
         try:
@@ -85,6 +91,39 @@ class SystemController:
             content={"status": "ok" if all_ok else "degraded", "checks": checks},
             status_code=200 if all_ok else 503,
         )
+
+    @_system_router.get(
+        "/status",
+        response_model=HealthResponse,
+        summary="Full diagnostic status — storefront connectivity, watchdog state",
+    )
+    async def system_status(self) -> JSONResponse:
+        """Full service status for operator diagnostics and e2e pre-flight checks.
+
+        Heavier than ``GET /health`` — includes outbound HTTP probes against the
+        storefront and lease watchdog state inspection. Do NOT use as a Kubernetes
+        probe; use ``GET /health`` for that.
+
+        Checks returned:
+
+        ``storefront``
+            Can the provisioning service reach the storefront's ``/health`` endpoint?
+            Values: ``ok``, ``unreachable``, ``timeout``, ``unconfigured``, ``http_N``.
+
+        ``storefront_auth``
+            Can the provisioning service authenticate to the storefront admin API?
+            Values: ``ok``, ``unauthorized``, ``unconfigured``, or mirrors
+            ``storefront`` when the storefront is not reachable.
+
+        ``lease_watchdog``
+            Current watchdog scheduling state.
+            Values: ``running`` (timer active), ``paused`` (pause gate held),
+            ``disabled`` (lease_watchdog_enabled=false or service not initialised).
+        """
+        body = await self._system_service.get_status()
+        all_ok = body.get("status") == "ok"
+        return JSONResponse(content=body, status_code=200 if all_ok else 503)
+
 
     @_health_router.get(
         "/health",
@@ -166,35 +205,68 @@ class SystemController:
 
     @_system_router.post(
         "/check-leases",
-        summary="Trigger immediate lease lifecycle processing (admin)",
+        summary="Trigger immediate lease lifecycle cycle — bypasses pause flag (admin)",
     )
     async def check_leases(self) -> dict:
-        """Run one lease lifecycle cycle immediately, outside the watchdog timer.
+        """Run one lease lifecycle cycle immediately, bypassing the pause flag.
 
-        Equivalent to one iteration of the LeaseWatchdog background loop.
-        Finds all leases with ``lease_end_utc < now`` and status in
-        ``pending`` / ``active``, patches the corresponding storefront
-        resources to ``available``, and updates lease status.
+        Equivalent to one iteration of the LeaseWatchdog background loop but
+        ignores the paused state — always runs. Use this in tests and operator
+        scripts to drive individual lifecycle advances while the watchdog timer
+        is paused.
 
         Returns a summary dict::
 
             {
-                "checked": <int>,   # leases examined
-                "released": <int>,  # successfully patched to available
-                "forced": <int>,    # force-patched after grace period
-                "skipped": <int>,   # errors or transient states
+                "activated": <int>,  # pending leases advanced to active
+                "checked":   <int>,  # expired leases for which check jobs were submitted
+                "released":  <int>,  # successfully patched to available
+                "forced":    <int>,  # force-patched after grace period
+                "skipped":   <int>,  # errors or transient states
             }
-
-        Intended for:
-          - Operator use: release leases immediately without waiting for the
-            watchdog timer.
-          - Test scenarios: trigger release in integration / e2e tests without
-            sleeping for the poll interval.
         """
-        lease_lifecycle_svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
-        if lease_lifecycle_svc is None:
+        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
+        if svc is None:
             return {"error": "lease_lifecycle_service not initialised", "checked": 0}
-        return await lease_lifecycle_svc.check_leases()
+        return await svc.force_check_leases()
+
+    @_system_router.post(
+        "/lease-watchdog/pause",
+        summary="Pause timer-driven lease watchdog cycles (admin)",
+    )
+    async def pause_lease_watchdog(self) -> dict:
+        """Pause the lease watchdog timer.
+
+        After this call, the background LeaseWatchdog timer calls check_leases()
+        which blocks at the pause gate. No automatic lease lifecycle advances
+        happen until resume_lease_watchdog() is called.
+
+        POST /api/v1/system/check-leases always bypasses the pause flag.
+
+        Primary use: e2e tests that need deterministic control over when lease
+        lifecycle transitions occur.
+        """
+        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
+        if svc is None:
+            return {"error": "lease_lifecycle_service not initialised", "paused": False}
+        svc.pause()
+        return {"paused": True}
+
+    @_system_router.post(
+        "/lease-watchdog/resume",
+        summary="Resume timer-driven lease watchdog cycles (admin)",
+    )
+    async def resume_lease_watchdog(self) -> dict:
+        """Resume the lease watchdog timer.
+
+        Clears the pause flag set by pause_lease_watchdog(). Any blocked
+        check_leases() call in the timer loop is unblocked immediately.
+        """
+        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
+        if svc is None:
+            return {"error": "lease_lifecycle_service not initialised", "paused": True}
+        svc.resume()
+        return {"paused": False}
 
     # ------------------------------------------------------------------
     # Router factories

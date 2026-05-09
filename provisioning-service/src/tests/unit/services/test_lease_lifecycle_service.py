@@ -10,12 +10,13 @@ Scope:
     False on other errors and network failures
   - _patch_storefront_resource: correct URL construction and headers
 
-External boundaries mocked: httpx.AsyncClient (storefront HTTP calls).
+External boundaries mocked: StorefrontClient (storefront HTTP calls via typed client).
 LeaseService uses a real in-memory SQLite DB.
 """
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -242,6 +243,13 @@ class TestCheckLeasesGracePeriod:
 # ---------------------------------------------------------------------------
 
 class TestPatchStorefrontResource:
+    """Unit tests for _patch_storefront_resource.
+
+    The external boundary is now StorefrontClient (not raw httpx). We mock
+    StorefrontClient at the import site inside the method
+    (services.lease_lifecycle_service.StorefrontClient).
+    """
+
     def _make_fake_lease(self, resource_id="r1"):
         lease = VmLease()
         lease.id = "test-lease-id"
@@ -251,69 +259,56 @@ class TestPatchStorefrontResource:
         lease.vm_target = "t1"
         return lease
 
+    def _mock_sf_client(self, *, patch_raises=None):
+        """Return a context manager that yields a mock StorefrontClient."""
+        mock_sf = AsyncMock()
+        mock_sf.__aenter__ = AsyncMock(return_value=mock_sf)
+        mock_sf.__aexit__ = AsyncMock(return_value=None)
+        if patch_raises is not None:
+            mock_sf.patch_resource = AsyncMock(side_effect=patch_raises)
+        else:
+            mock_sf.patch_resource = AsyncMock(return_value={"state": "available", "updated": True})
+        return mock_sf
+
     @pytest.mark.asyncio
-    async def test_returns_true_on_200(self, lease_svc):
+    async def test_returns_true_on_success(self, lease_svc):
         svc = _make_check_svc(lease_svc)
         lease = self._make_fake_lease()
-
-        mock_resp = MagicMock(status_code=200)
-        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.patch = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
+        mock_sf = self._mock_sf_client()
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf):
             result = await svc._patch_storefront_resource(lease)
-
         assert result is True
 
     @pytest.mark.asyncio
     async def test_returns_true_on_404(self, lease_svc):
-        """404 means resource already gone — idempotent, treat as success."""
+        """404 StorefrontClientError means resource gone — idempotent, treat as success."""
+        from storefront_client import StorefrontClientError
         svc = _make_check_svc(lease_svc)
         lease = self._make_fake_lease()
-
-        mock_resp = MagicMock(status_code=404)
-        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.patch = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
+        mock_sf = self._mock_sf_client(patch_raises=StorefrontClientError("not found", status_code=404))
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf):
             result = await svc._patch_storefront_resource(lease)
-
         assert result is True
 
     @pytest.mark.asyncio
     async def test_returns_false_on_5xx(self, lease_svc):
+        from storefront_client import StorefrontClientError
         svc = _make_check_svc(lease_svc)
         lease = self._make_fake_lease()
-
-        mock_resp = MagicMock(status_code=500)
-        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.patch = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
+        mock_sf = self._mock_sf_client(patch_raises=StorefrontClientError("server error", status_code=500))
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf):
             result = await svc._patch_storefront_resource(lease)
-
         assert result is False
 
     @pytest.mark.asyncio
     async def test_returns_false_on_connect_error(self, lease_svc):
-        import httpx
         svc = _make_check_svc(lease_svc)
         lease = self._make_fake_lease()
-
-        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.patch = AsyncMock(side_effect=httpx.ConnectError("refused"))
-            mock_cls.return_value = mock_client
+        # Simulate httpx.ConnectError propagating through StorefrontClient
+        import httpx
+        mock_sf = self._mock_sf_client(patch_raises=httpx.ConnectError("refused"))
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf):
             result = await svc._patch_storefront_resource(lease)
-
         assert result is False
 
     @pytest.mark.asyncio
@@ -325,27 +320,93 @@ class TestPatchStorefrontResource:
 
     @pytest.mark.asyncio
     async def test_uses_global_url_and_admin_key_from_settings(self, lease_svc):
-        """storefront_url and admin_key come from settings, not lease fields."""
+        """StorefrontClient is constructed with url and admin_key from settings."""
         svc = _make_check_svc(
             lease_svc,
             storefront_url="http://mysf:8001",
             storefront_admin_key="my-key",
         )
         lease = self._make_fake_lease(resource_id="compute-ww1-001")
+        mock_sf = self._mock_sf_client()
 
-        mock_resp = MagicMock(status_code=200)
-        with patch("services.lease_lifecycle_service.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-            mock_client.patch = AsyncMock(return_value=mock_resp)
-            mock_cls.return_value = mock_client
+        with patch("storefront_client.StorefrontClient", return_value=mock_sf) as mock_cls:
             await svc._patch_storefront_resource(lease)
 
-        call_kwargs = mock_client.patch.call_args
-        url = call_kwargs.args[0]
-        assert "mysf:8001" in url
-        assert "compute-ww1-001" in url
-        assert call_kwargs.kwargs["json"]["state"] == "available"
-        assert call_kwargs.kwargs["json"]["attributes"]["lease_end_utc"] is None
-        assert call_kwargs.kwargs["headers"]["X-Admin-Key"] == "my-key"
+        # StorefrontClient was instantiated with the right base_url and admin_key
+        call_kwargs = mock_cls.call_args
+        assert call_kwargs.kwargs.get("base_url") == "http://mysf:8001" or                (call_kwargs.args and call_kwargs.args[0] == "http://mysf:8001")
+        assert call_kwargs.kwargs.get("admin_key") == "my-key"
+
+        # patch_resource was called with correct resource_id and body
+        pr_call = mock_sf.patch_resource.call_args
+        assert pr_call.args[0] == "compute-ww1-001"
+        assert pr_call.kwargs.get("state") == "available"
+        assert pr_call.kwargs.get("attributes") == {"lease_end_utc": None}
+
+
+# ---------------------------------------------------------------------------
+# pause / resume / force_check_leases
+# ---------------------------------------------------------------------------
+
+class TestPauseResume:
+    """Verify the watchdog pause gate and force_check_leases bypass.
+
+    check_leases() blocks when paused; force_check_leases() ignores the flag.
+    Both paths ultimately call _run_cycle(), so functional behaviour is the
+    same — only the gate logic differs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_check_leases_runs_when_not_paused(self, lease_svc):
+        svc = _make_check_svc(lease_svc)
+        with patch.object(svc, "_patch_storefront_resource", new=AsyncMock(return_value=True)):
+            result = await svc.check_leases()
+        # No leases seeded — should return all-zero summary without blocking
+        assert result["checked"] == 0
+
+    @pytest.mark.asyncio
+    async def test_check_leases_unblocks_after_resume(self, lease_svc):
+        """Pause then resume; check_leases() must unblock when resumed."""
+        import asyncio as _asyncio
+        svc = _make_check_svc(lease_svc)
+        svc.pause()
+
+        # Start check_leases in background — it should block at the pause gate
+        task = _asyncio.create_task(svc.check_leases())
+
+        # Give the event loop a tick to let check_leases reach the gate
+        await _asyncio.sleep(0)
+        assert not task.done(), "check_leases() should be blocked while paused"
+
+        # Resume — task should complete quickly
+        svc.resume()
+        await _asyncio.wait_for(task, timeout=2.0)
+        assert task.done()
+
+    @pytest.mark.asyncio
+    async def test_force_check_leases_bypasses_pause(self, lease_svc):
+        """force_check_leases() runs immediately even when paused."""
+        svc = _make_check_svc(lease_svc)
+        svc.pause()
+
+        with patch.object(svc, "_patch_storefront_resource", new=AsyncMock(return_value=True)):
+            # Must complete without blocking
+            result = await _asyncio.wait_for(svc.force_check_leases(), timeout=2.0)
+        assert "checked" in result  # returned a normal cycle summary
+
+    @pytest.mark.asyncio
+    async def test_resume_is_idempotent(self, lease_svc):
+        """Calling resume() on an already-running service doesn't error."""
+        svc = _make_check_svc(lease_svc)
+        svc.resume()  # already running — should be a no-op
+        result = await svc.check_leases()
+        assert "checked" in result
+
+    def test_pause_resume_toggle(self, lease_svc):
+        """pause() sets the flag; resume() clears it."""
+        svc = _make_check_svc(lease_svc)
+        assert svc._resume_event.is_set()  # not paused initially
+        svc.pause()
+        assert not svc._resume_event.is_set()
+        svc.resume()
+        assert svc._resume_event.is_set()

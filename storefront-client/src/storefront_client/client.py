@@ -528,6 +528,21 @@ class StorefrontClient(_StorefrontClientBase):
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
         return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
 
+    async def get_resource(self, resource_id: str) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Returns the current state of the resource row — same shape as patch_resource.
+        404 if the resource_id does not exist.
+        """
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
+        resp = await self._client.get(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
     async def patch_resource(
         self,
         resource_id: str,
@@ -1318,6 +1333,21 @@ class SyncStorefrontClient(_StorefrontClientBase):
                 extra_headers=self._admin_headers(),
             )
         )
+
+    def get_resource(self, resource_id: str) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Returns the current state of the resource row — same shape as patch_resource.
+        404 if the resource_id does not exist.
+        """
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
+        resp = self._client.get(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
 
     def patch_resource(
         self,

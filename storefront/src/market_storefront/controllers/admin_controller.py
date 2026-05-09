@@ -106,6 +106,40 @@ class AdminController:
             total_rows=report.get("total_rows", 0),
         )
 
+    @router.get(
+        "/portfolio/resources/{resource_id}",
+        response_model=ResourcePatchResponse,
+        summary="Get a compute resource by ID (admin)",
+    )
+    async def get_resource(self, resource_id: str) -> ResourcePatchResponse:
+        """Fetch the current state of a single resource row.
+
+        Returns the same shape as PATCH so callers can use one model for
+        both reads and writes.
+
+        404 if the resource_id does not exist.
+        """
+        row = await self._db.get_resource(resource_id=resource_id)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Resource {resource_id!r} not found",
+            )
+        attrs_raw = row.get("attributes") or {}
+        if isinstance(attrs_raw, str):
+            try:
+                attrs = json.loads(attrs_raw)
+            except (json.JSONDecodeError, TypeError):
+                attrs = {}
+        else:
+            attrs = attrs_raw
+        return ResourcePatchResponse(
+            resource_id=resource_id,
+            state=row.get("state"),
+            attributes=attrs,
+            updated=False,  # read-only — no write happened
+        )
+
     @router.patch(
         "/portfolio/resources/{resource_id}",
         response_model=ResourcePatchResponse,

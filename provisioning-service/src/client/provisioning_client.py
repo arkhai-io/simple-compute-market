@@ -337,6 +337,28 @@ class ProvisioningClient(_ProvisioningClientBase):
     # System / readiness
     # ------------------------------------------------------------------
 
+    async def get_health(self) -> dict:
+        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        """
+        return await self._get("/health")
+
+    async def get_system_status(self) -> dict:
+        """GET /api/v1/system/status — full diagnostic status.
+
+        Includes outbound HTTP probes against the storefront and lease watchdog
+        state. Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+
+        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
+        responses — 503 indicates a degraded but reachable service, not an error.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = await self._client.get("/api/v1/system/status", headers=self._headers())
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
     async def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
 
@@ -633,6 +655,33 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         )))
 
     # System / readiness (sync mirrors)
+    def get_health(self) -> dict:
+        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        Use ``get_system_status()`` for the full diagnostic status including
+        storefront connectivity and watchdog state.
+        """
+        return self._get("/health")
+
+    def get_system_status(self) -> dict:
+        """GET /api/v1/system/status — full diagnostic status.
+
+        Includes outbound HTTP probes against the storefront (storefront,
+        storefront_auth checks) and lease watchdog state. Suitable for
+        operator diagnostics and e2e pre-flight checks.
+
+        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
+        responses — 503 indicates a degraded but reachable service, not an error.
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = self._client.get("/api/v1/system/status", headers=self._headers())
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
     def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
 
@@ -755,3 +804,23 @@ class SyncProvisioningClient(_ProvisioningClientBase):
     def cancel_lease(self, lease_id: str) -> dict:
         """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
         return self._delete(f"/api/v1/leases/{lease_id}/cancel")
+
+    # ------------------------------------------------------------------
+    # Lease watchdog control
+    # ------------------------------------------------------------------
+
+    def check_leases(self) -> dict:
+        """POST /api/v1/system/check-leases — run one lifecycle cycle immediately.
+
+        Bypasses the watchdog pause flag. Returns summary dict with
+        activated, checked, released, forced, skipped counts.
+        """
+        return self._post("/api/v1/system/check-leases", {})
+
+    def pause_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
+        return self._post("/api/v1/system/lease-watchdog/pause", {})
+
+    def resume_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/resume — resume timer-driven cycles."""
+        return self._post("/api/v1/system/lease-watchdog/resume", {})

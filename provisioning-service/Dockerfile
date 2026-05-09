@@ -21,10 +21,14 @@ WORKDIR /app
 RUN chown appuser:appuser /app
 USER appuser
 
-COPY --chown=appuser:appuser provisioning-service/pyproject.toml provisioning-service/uv.lock ./
+# Copy pre-built internal wheels (built by make dist before docker build).
+# arkhai-storefront-client and other internal packages are resolved from here.
+COPY --chown=appuser:appuser .dist/ /dist/
+
+COPY --chown=appuser:appuser provisioning-service/pyproject.toml ./
 COPY --chown=appuser:appuser provisioning-service/src ./src
 RUN --mount=type=cache,target=/home/appuser/.cache/uv,uid=1000 \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --no-dev --no-install-project --find-links /dist
 
 COPY --chown=appuser:appuser compute-provisioning-iac/ansible/requirements.yml /tmp/requirements.yml
 # Two RUN layers: install first, then invoke ansible-galaxy from the venv

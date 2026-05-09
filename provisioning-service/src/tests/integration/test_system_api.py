@@ -4,15 +4,15 @@ Integration tests for the system API endpoints.
 All calls go through ProvisioningClient methods — no route strings in test code.
 
 Coverage:
-  - GET /api/v1/system/ansible/readiness returns 200 with expected fields
-  - playbook.exists reflects the configured playbook path
-  - inventory source is 'database' (DB-backed, not INI file)
-  - ProvisioningClient.get_ansible_readiness() matches the API contract end-to-end
+  - GET /health — fast liveness probe (api, database, job_processor checks only)
+  - GET /api/v1/system/status — full diagnostic status (storefront checks, watchdog state)
+  - GET /api/v1/system/ansible/readiness — Ansible config diagnostics
 
 What is NOT covered here (unit test jurisdiction):
   - Filesystem checks for SSH key paths
   - ansible --version subprocess output parsing
   - AnsibleReadinessResponse field validation edge cases
+  - get_status() HTTP logic — covered by SystemService unit tests
 """
 
 from __future__ import annotations
@@ -20,6 +20,229 @@ from __future__ import annotations
 import pytest
 
 from client.provisioning_client import ProvisioningClient
+
+
+class TestHealthEndpoint:
+    """GET /health — fast liveness probe via ProvisioningClient.get_health().
+
+    The health endpoint performs only local checks (api, database, job_processor).
+    It must never make outbound HTTP calls — that would make it unsuitable as a
+    Kubernetes liveness/readiness probe.
+    """
+
+    async def test_returns_status_and_checks(self, client_and_queue):
+        """Response always contains 'status' and 'checks' keys."""
+        client, _ = client_and_queue
+        resp = await client.get_health()
+        assert isinstance(resp, dict), f"Expected dict, got {type(resp)}"
+        assert "status" in resp, f"Missing 'status' in health response: {resp}"
+        assert "checks" in resp, f"Missing 'checks' in health response: {resp}"
+
+    async def test_local_checks_present(self, client_and_queue):
+        """Health response includes api, database, and job_processor checks."""
+        client, _ = client_and_queue
+        resp = await client.get_health()
+        checks = resp.get("checks", {})
+        assert "api" in checks, f"Missing 'api' check: {checks}"
+        assert "database" in checks, f"Missing 'database' check: {checks}"
+        assert "job_processor" in checks, f"Missing 'job_processor' check: {checks}"
+
+    async def test_api_check_is_ok(self, client_and_queue):
+        """checks.api is always 'ok' when the service is reachable."""
+        client, _ = client_and_queue
+        resp = await client.get_health()
+        assert resp["checks"].get("api") == "ok"
+
+    async def test_database_check_is_ok(self, client_and_queue):
+        """checks.database is 'ok' against the in-memory test DB."""
+        client, _ = client_and_queue
+        resp = await client.get_health()
+        assert resp["checks"].get("database") == "ok", (
+            f"Database check failed: {resp['checks'].get('database')}"
+        )
+
+    async def test_no_storefront_checks_in_health(self, client_and_queue):
+        """Health endpoint must NOT include storefront or lease_watchdog checks.
+
+        These are outbound/heavyweight checks that belong in /api/v1/system/status,
+        not the fast liveness probe.
+        """
+        client, _ = client_and_queue
+        resp = await client.get_health()
+        checks = resp.get("checks", {})
+        assert "storefront" not in checks, (
+            "storefront check must not appear in /health — it makes an outbound "
+            "HTTP call which would make the liveness probe fail during storefront restarts."
+        )
+        assert "storefront_auth" not in checks, (
+            "storefront_auth check must not appear in /health."
+        )
+        assert "lease_watchdog" not in checks, (
+            "lease_watchdog check must not appear in /health."
+        )
+
+
+class TestSystemStatus:
+    """GET /api/v1/system/status — full diagnostic status via get_system_status().
+
+    This endpoint includes outbound storefront connectivity checks and watchdog
+    state. In the integration test environment there is no real storefront, so
+    the storefront checks will reflect that (unreachable or unconfigured).
+
+    Tests assert structure and value domain — not specific connectivity outcomes,
+    which depend on the deployment environment.
+    """
+
+    _STOREFRONT_VALUES = {"ok", "unreachable", "timeout", "unconfigured"}
+    _AUTH_VALUES = {"ok", "unauthorized", "unconfigured", "unreachable", "timeout"}
+    _WATCHDOG_VALUES = {"running", "paused", "disabled"}
+
+    async def test_returns_status_and_checks(self, client_and_queue):
+        """Response always contains 'status' and 'checks' keys."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        assert isinstance(resp, dict), f"Expected dict, got {type(resp)}"
+        assert "status" in resp, f"Missing 'status' in status response: {resp}"
+        assert "checks" in resp, f"Missing 'checks' in status response: {resp}"
+
+    async def test_storefront_check_is_present(self, client_and_queue):
+        """checks.storefront is present in the diagnostic status."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        checks = resp.get("checks", {})
+        assert "storefront" in checks, (
+            f"Missing 'storefront' check in /api/v1/system/status: {checks}"
+        )
+
+    async def test_storefront_auth_check_is_present(self, client_and_queue):
+        """checks.storefront_auth is present in the diagnostic status."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        checks = resp.get("checks", {})
+        assert "storefront_auth" in checks, (
+            f"Missing 'storefront_auth' check in /api/v1/system/status: {checks}"
+        )
+
+    async def test_lease_watchdog_check_is_present(self, client_and_queue):
+        """checks.lease_watchdog is present in the diagnostic status."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        checks = resp.get("checks", {})
+        assert "lease_watchdog" in checks, (
+            f"Missing 'lease_watchdog' check in /api/v1/system/status: {checks}"
+        )
+
+    async def test_storefront_check_has_valid_value(self, client_and_queue):
+        """checks.storefront value is one of the documented domain values."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        value = resp["checks"].get("storefront", "")
+        # Also allow http_N responses
+        assert (
+            value in self._STOREFRONT_VALUES
+            or (isinstance(value, str) and value.startswith("http_"))
+            or (isinstance(value, str) and value.startswith("error:"))
+        ), (
+            f"checks.storefront={value!r} is not a documented value. "
+            f"Expected one of {self._STOREFRONT_VALUES} or http_N / error:*"
+        )
+
+    async def test_storefront_auth_check_has_valid_value(self, client_and_queue):
+        """checks.storefront_auth value is one of the documented domain values."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        value = resp["checks"].get("storefront_auth", "")
+        assert (
+            value in self._AUTH_VALUES
+            or (isinstance(value, str) and value.startswith("http_"))
+            or (isinstance(value, str) and value.startswith("error:"))
+        ), (
+            f"checks.storefront_auth={value!r} is not a documented value. "
+            f"Expected one of {self._AUTH_VALUES} or http_N / error:*"
+        )
+
+    async def test_lease_watchdog_check_has_valid_value(self, client_and_queue):
+        """checks.lease_watchdog value is one of: running, paused, disabled."""
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        value = resp["checks"].get("lease_watchdog", "")
+        assert value in self._WATCHDOG_VALUES, (
+            f"checks.lease_watchdog={value!r} is not a documented value. "
+            f"Expected one of {self._WATCHDOG_VALUES}"
+        )
+
+    async def test_watchdog_disabled_in_test_environment(self, client_and_queue):
+        """Watchdog reports 'disabled' when lease_watchdog_enabled=False in test settings.
+
+        Integration tests set lease_watchdog_enabled=False (conftest mock_settings)
+        to prevent background timer cycles. The status endpoint reflects this.
+        """
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        assert resp["checks"].get("lease_watchdog") == "disabled", (
+            f"Expected lease_watchdog='disabled' in test environment "
+            f"(lease_watchdog_enabled=False in mock_settings), "
+            f"got {resp['checks'].get('lease_watchdog')!r}"
+        )
+
+    async def test_storefront_checks_reflect_configured_url(self, client_and_queue):
+        """When storefront_url is configured but not reachable, storefront='unreachable'.
+
+        The test conftest sets storefront_url='http://test-storefront:8001' — a URL
+        that is configured but not reachable in the test environment. This confirms
+        the connectivity probe actually runs (rather than returning 'unconfigured').
+        """
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        storefront_val = resp["checks"].get("storefront")
+        # URL is configured, so must not be 'unconfigured'
+        assert storefront_val != "unconfigured", (
+            f"Expected storefront check to attempt a connection since storefront_url "
+            f"is set in mock_settings, but got 'unconfigured'. "
+            f"Check that mock_settings.storefront_url is non-empty in conftest."
+        )
+        # Must be unreachable (no real storefront in test env)
+        assert storefront_val in ("unreachable", "timeout") or (
+            isinstance(storefront_val, str) and storefront_val.startswith("error:")
+        ), (
+            f"Expected storefront check to be unreachable/timeout in test env, "
+            f"got {storefront_val!r}"
+        )
+
+    async def test_status_does_not_include_local_probe_checks(self, client_and_queue):
+        """The status endpoint does not duplicate /health's local checks.
+
+        api, database, and job_processor are liveness-probe concerns belonging
+        to /health. The status endpoint focuses on connectivity diagnostics.
+        """
+        client, _ = client_and_queue
+        resp = await client.get_system_status()
+        checks = resp.get("checks", {})
+        assert "api" not in checks, (
+            "checks.api should not appear in /api/v1/system/status — it belongs in /health."
+        )
+        assert "database" not in checks, (
+            "checks.database should not appear in /api/v1/system/status — it belongs in /health."
+        )
+
+    async def test_status_and_health_are_independent(self, client_and_queue):
+        """Both endpoints return independently — status degraded doesn't affect health.
+
+        The health endpoint must return 200/ok even when the status endpoint
+        reports storefront connectivity issues.
+        """
+        client, _ = client_and_queue
+        health = await client.get_health()
+        status = await client.get_system_status()
+
+        # Health should be ok (local checks pass in test env)
+        assert health.get("status") == "ok", (
+            f"Expected health=ok but got {health.get('status')!r}. "
+            f"Local checks should always pass: {health.get('checks')}"
+        )
+        # Status may be degraded (storefront unreachable) — that's expected
+        assert "status" in status
+
 
 
 class TestAnsibleReadiness:

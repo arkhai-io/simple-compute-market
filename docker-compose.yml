@@ -186,6 +186,12 @@ services:
       # Mounts /test/* router used by integration tests' provisioning_test_client
       # (TestStage07 mock-rules). Should never be set in staging/prod.
       - ACTIVE_PROFILES=mock
+      # Storefront callback target for the lease watchdog.
+      # When the watchdog releases a lease, it PATCHes this URL to mark the
+      # storefront resource available. Must match the sell_agent service name
+      # and port defined in this compose file.
+      - PROVISIONING_STOREFRONT_URL=http://sell_agent:8001
+      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:-test-api-key}
     volumes:
       - ./compute-provisioning-iac:/app/compute-provisioning-iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro

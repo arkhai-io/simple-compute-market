@@ -10,6 +10,10 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00e  Provisioning mock mode:  GET /api/v1/system/ansible/readiness → ansible_mode=mock
   00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
                                 upserts the compute row this test needs
+  00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
+                                gates Phase 7b (on-chain escrow verification)
+  00h  Provisioning→storefront: GET provisioning /api/v1/system/status →
+                                checks.storefront=ok, checks.storefront_auth=ok
 
 Phase 1 — Policy pipeline ready
   01a  Policy dry-run:  POST /api/v1/system/policy/evaluate → action=make_offer
@@ -68,6 +72,19 @@ Phase 9 — Provisioning completion
          GET /api/v1/listings/{id} → status=accepted or closed
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
+
+Phase 10 — Lease expiry setup and watchdog advance to releasing
+  10a  Setup: pause watchdog, arm check mock rule, patch lease_end_utc to past,
+       dry-run evaluate_job → rule_matched=check-gate, would_pause=True
+  10b  Trigger check-leases cycle → lease transitions to releasing,
+       check_job_id written; storefront resource still leased
+
+Phase 11 — VM cleanup confirmation and resource release
+  11a  Assert releasing state holds: check job paused, resource still leased.
+       Represents stable "VM being torn down, not yet available" invariant —
+       structurally identical to the planned vm_destroy rework.
+  11b  Release check gate, trigger another check-leases cycle →
+       lease released, storefront resource available; resume watchdog
 """
 
 from __future__ import annotations
@@ -114,6 +131,7 @@ DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
 PROV_RULE_ID = "e2e-create-pause"
+CHECK_RULE_ID = "e2e-check-pause"   # mock rule that pauses the lease check job
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
 compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,MOCK,,RTX 5080,90.0,"California, US",ww1
@@ -284,6 +302,114 @@ class TestStage00f_ResourceSeed:
             "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
             E2E_RESOURCE_ID,
             status.resource_count,
+        )
+
+
+class TestStage00g_AlkahestConfigured:
+    def test_00g_alkahest_is_configured(
+        self, storefront_admin_client, deal_state: DealState
+    ):
+        """GET /api/v1/system/status → checks.alkahest=ok.
+
+        Alkahest must be configured before the on-chain escrow phases (07/07b).
+        If this fails with alkahest='unconfigured', the storefront config.toml
+        is missing the [chain] section or the alkahest address config path.
+
+        Common cause on Helm deployments: the values.yaml key under
+        agents[].config.chain uses snake_case ``alkahest_address_config_path``
+        but the _helpers.tpl template reads the camelCase
+        ``alkahestAddressConfigPath`` key — so the path is never written into
+        config.toml.
+
+        Fix: use camelCase in helm/values.yaml::
+
+            chain:
+              name: "anvil"
+              alkahestAddressConfigPath: "/app/src/.../alkahest_anvil_addresses.json"
+
+        For docker-compose, ensure config.bob.toml contains::
+
+            [chain]
+            alkahest_address_config_path = "/app/src/.../alkahest_anvil_addresses.json"
+        """
+        require_state(deal_state, "_storefront_healthy")
+        status = storefront_admin_client.get_system_status()
+        alkahest_check = (status.checks or {}).get("alkahest", "absent")
+        assert alkahest_check == "ok", (
+            f"Storefront alkahest client is not configured: checks.alkahest={alkahest_check!r}\n"
+            "The on-chain escrow phases (07, 07b) will fail without a working AlkahestClient.\n"
+            "Fix for Helm: use camelCase key 'alkahestAddressConfigPath' in values.yaml "
+            "under agents[].config.chain.\n"
+            "Fix for docker-compose: set alkahest_address_config_path in config.bob.toml "
+            "under [chain]."
+        )
+        deal_state._alkahest_configured = True
+        log.info("[00g] Alkahest configured: checks.alkahest=%s", alkahest_check)
+
+
+class TestStage00h_ProvisioningStorefrontLink:
+    def test_00h_provisioning_can_reach_storefront(
+        self, provisioning_client, deal_state: DealState
+    ):
+        """GET /api/v1/system/status → checks.storefront=ok, checks.storefront_auth=ok.
+
+        Validates that the provisioning service's lease watchdog can reach and
+        authenticate to the storefront admin API. This is the connectivity path
+        the watchdog uses when it releases leases at expiry:
+
+            provisioning LeaseWatchdog
+              → PATCH {storefront_url}/api/v1/admin/portfolio/resources/{id}
+                  X-Admin-Key: {storefront_admin_key}
+
+        Two sub-checks from the provisioning health endpoint:
+          - storefront      — GET {storefront_url}/health responded 200
+          - storefront_auth — GET {storefront_url}/api/v1/system/status with
+                              X-Admin-Key responded 200
+
+        If this fails with storefront='unconfigured':
+          - For deploy-docker: ensure storefront_url and storefront_admin_key
+            are set in provisioning-service/src/config/config-docker.yml.
+            The container name on the market network is 'market-agent-sell'.
+          - For Helm: provisioning.storefront.url defaults to the release's
+            bob storefront Service; provisioning.storefront.adminKey defaults
+            to global.adminApiKey.
+
+        If this fails with storefront='unreachable':
+          - Both services must be on the same Docker network.
+          - Check that the storefront container is running and healthy (00a/00c).
+
+        If this fails with storefront_auth='unauthorized':
+          - The admin key in config-docker.yml / provisioning-secrets must
+            match the storefront's admin_api_key in config.bob.toml.
+        """
+        require_state(deal_state, "_provisioning_healthy", "_storefront_healthy")
+
+        health = provisioning_client.get_system_status()
+        checks = health.get("checks", {})
+
+        sf_check = checks.get("storefront", "absent")
+        assert sf_check == "ok", (
+            f"Provisioning cannot reach storefront: checks.storefront={sf_check!r}\n"
+            "The lease watchdog will not be able to release resources when leases expire.\n"
+            "For deploy-docker: verify storefront_url in "
+            "provisioning-service/src/config/config-docker.yml points to "
+            "'http://market-agent-sell:8001' and both containers are on the 'market' network.\n"
+            f"Full health response: {health}"
+        )
+
+        auth_check = checks.get("storefront_auth", "absent")
+        assert auth_check == "ok", (
+            f"Provisioning storefront auth failed: checks.storefront_auth={auth_check!r}\n"
+            "The lease watchdog uses X-Admin-Key to authenticate; 'unauthorized' means\n"
+            "storefront_admin_key in config-docker.yml does not match the storefront's\n"
+            "admin_api_key in config.bob.toml.\n"
+            f"Full health response: {health}"
+        )
+
+        deal_state._provisioning_storefront_ok = True
+        log.info(
+            "[00h] Provisioning→storefront link ok: storefront=%s storefront_auth=%s",
+            sf_check, auth_check,
         )
 
 
@@ -876,7 +1002,8 @@ class TestStage07b_VerifyEscrow:
         Exercises getRecordFromChain in isolation: reads the escrow from chain
         and confirms token, amount, and seller recipient match. No DB writes.
         """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price")
+        require_state(deal_state, "real_escrow_uid", "seller_listing_id", "agreed_price",
+                      "_alkahest_configured")
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
@@ -1143,3 +1270,277 @@ class TestStage09c_LeaseRegistered:
             deal_state.reserved_resource_id,
             deal_state.lease_status,
         )
+
+# ===========================================================================
+# Phase 10 — Lease expiry setup and watchdog advance to releasing
+# ===========================================================================
+
+class TestStage10a_LeaseExpirySetup:
+    def test_10a_setup_lease_expiry_and_arm_check_gate(
+        self,
+        provisioning_client,
+        provisioning_test_client,
+        deal_state: DealState,
+    ):
+        """Prepare deterministic control over the lease expiry lifecycle.
+
+        Three setup steps run before any watchdog cycle is triggered:
+
+        1. Pause the watchdog — no background timer cycles will fire from this
+           point. The test drives all advances explicitly via check-leases.
+        2. Arm check mock rule — a paused ProgrammableMockAnsibleService rule
+           for vm_action=check will hold the check job in a non-terminal state,
+           keeping the lease in 'releasing' long enough for phase 10b and 11a
+           assertions.
+        3. Back-date lease_end_utc to the past — the watchdog sees an expired
+           active lease on the next check-leases cycle.
+
+        Dry-run validation via evaluate_job confirms the check rule is armed
+        before any live cycle is triggered.
+
+        Forward-compatibility note: when the planned rework replaces the check
+        job with a vm_destroy Ansible job, only the mock rule's vm_action field
+        changes (check → destroy). The structural test shape — pause, arm rule,
+        back-date, cycle, assert releasing, release gate, cycle, assert released
+        — is identical regardless of the underlying Ansible action.
+        """
+        require_state(deal_state, "lease_id", "settlement_status",
+                      "_evaluate_settle_vm_host", "_evaluate_settle_vm_target",
+                      "_provisioning_storefront_ok")
+
+        # Step 1 — pause the watchdog timer
+        result = provisioning_test_client.pause_watchdog()
+        assert result.get("paused") is True, (
+            f"Failed to pause watchdog: {result}"
+        )
+        log.info("[10a] Watchdog paused")
+
+        # Step 2 — arm mock rule that pauses the check job
+        provisioning_test_client.add_mock_rule(
+            rule_id=CHECK_RULE_ID,
+            match={"vm_action": "check"},
+            pause_before_result=True,
+        )
+        log.info("[10a] Check mock rule %r armed (pause_before_result=True)", CHECK_RULE_ID)
+
+        # Dry-run: confirm evaluate_job sees the rule before we fire a real cycle
+        eval_result = provisioning_test_client.evaluate_job(
+            host=deal_state._evaluate_settle_vm_host,
+            vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
+            vm_action="check",
+        )
+        assert eval_result.get("params_valid") is True, (
+            f"evaluate_job params rejected: {eval_result.get('errors')}"
+        )
+        assert eval_result.get("rule_matched") == CHECK_RULE_ID, (
+            f"Expected check mock rule {CHECK_RULE_ID!r} to match, "
+            f"got rule_matched={eval_result.get('rule_matched')!r}.\n"
+            f"Registered rules: {provisioning_test_client.list_mock_rules()}"
+        )
+        assert eval_result.get("would_pause") is True, (
+            f"Check rule matched but would_pause=False — rule not armed correctly: {eval_result}"
+        )
+        log.info("[10a] evaluate_job dry-run: rule_matched=%s would_pause=%s",
+                 eval_result.get("rule_matched"), eval_result.get("would_pause"))
+
+        # Step 3 — back-date lease_end_utc so the next cycle sees an expired lease
+        from datetime import datetime, timedelta, timezone as _tz
+        past_end = (datetime.now(_tz.utc) - timedelta(seconds=30)).isoformat()
+        updated = provisioning_client.update_lease(
+            deal_state.lease_id,
+            lease_end_utc=past_end,
+        )
+        assert updated.get("id") == deal_state.lease_id, (
+            f"update_lease returned unexpected lease: {updated}"
+        )
+        log.info(
+            "[10a] lease_end_utc back-dated to %s for lease %s",
+            past_end, deal_state.lease_id,
+        )
+
+        deal_state._lease_expiry_armed = True
+
+
+class TestStage10b_WatchdogAdvancesToReleasing:
+    def test_10b_check_leases_transitions_to_releasing(
+        self,
+        provisioning_client,
+        storefront_admin_client,
+        deal_state: DealState,
+    ):
+        """POST /api/v1/system/check-leases → lease=releasing, check_job_id written.
+
+        check-leases bypasses the watchdog pause flag, so this fires exactly
+        one lifecycle cycle. The check mock rule is still holding, so the
+        submitted check job will pause before returning a result — this keeps
+        the lease in 'releasing' for the 11a assertion.
+
+        The storefront resource must still be 'leased' at this point — the
+        watchdog has not confirmed VM cleanup yet.
+        """
+        require_state(deal_state, "_lease_expiry_armed", "lease_id",
+                      "reserved_resource_id")
+
+        result = provisioning_client.check_leases()
+        assert result.get("checked", 0) >= 1 or result.get("released", 0) >= 1, (
+            f"Expected at least one lease processed, got: {result}\n"
+            "Ensure lease_end_utc was back-dated in stage 10a and the lease "
+            "is in 'active' status."
+        )
+        log.info("[10b] check-leases result: %s", result)
+
+        # Fetch updated lease — expect 'releasing' now that check job was submitted
+        lease = provisioning_client.get_lease(deal_state.lease_id)
+        assert lease.get("status") == "releasing", (
+            f"Expected lease status='releasing' after check-leases cycle, "
+            f"got {lease.get('status')!r}.\n"
+            f"Full lease: {lease}\n"
+            "If status='released' the check job completed before this assertion — "
+            "ensure CHECK_RULE_ID mock rule is armed and the job_service is wired."
+        )
+        assert lease.get("check_job_id") is not None, (
+            f"check_job_id should be set after transitioning to 'releasing': {lease}"
+        )
+        log.info("[10b] Lease %s is releasing (check_job=%s)",
+                 deal_state.lease_id, lease.get("check_job_id"))
+
+        # Storefront resource must still be leased — VM not yet confirmed gone
+        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
+        assert resource.get("state") == "leased", (
+            f"Storefront resource {deal_state.reserved_resource_id!r} should still be "
+            f"'leased' while check job is pending, got {resource.get('state')!r}."
+        )
+        log.info("[10b] Storefront resource %s still leased (VM not yet confirmed gone)",
+                 deal_state.reserved_resource_id)
+
+        deal_state.check_job_id = lease.get("check_job_id")
+        deal_state.lease_status = "releasing"
+
+
+# ===========================================================================
+# Phase 11 — VM cleanup confirmation and resource release
+# ===========================================================================
+
+class TestStage11a_VerifyReleasingState:
+    def test_11a_releasing_state_holds_while_check_job_pending(
+        self,
+        provisioning_client,
+        storefront_admin_client,
+        deal_state: DealState,
+    ):
+        """Assert the 'releasing' invariant: check job not yet done, resource still leased.
+
+        This stage has no side effects — it only reads state. It validates the
+        boundary condition where:
+          - The provisioning service knows the lease is expiring (status=releasing)
+          - The Ansible check job is submitted but not yet complete (paused by mock)
+          - The storefront resource has not been released yet (state=leased)
+
+        This observable invariant is structurally identical to the state the
+        system will enter when the planned rework replaces the check action with
+        a vm_destroy Ansible job. In both cases, 'releasing' means "cleanup
+        initiated, not yet confirmed" and the storefront resource must remain
+        unavailable until the provisioning service confirms cleanup is done.
+
+        If the lease is already 'released' here, the check job completed before
+        this assertion — ensure the CHECK_RULE_ID mock gate is still armed.
+        """
+        require_state(deal_state, "lease_status", "check_job_id", "reserved_resource_id")
+        assert deal_state.lease_status == "releasing", (
+            f"Stage 10b did not leave lease in 'releasing' state. "
+            f"Current: {deal_state.lease_status!r}"
+        )
+
+        # Check job must be in a non-terminal state (paused by mock rule)
+        job = provisioning_client.get_job(deal_state.check_job_id)
+        assert job.status in ("queued", "running"), (
+            f"Check job {deal_state.check_job_id!r} is already terminal: "
+            f"status={job.status!r}.\n"
+            "The mock pause gate may not be armed — CHECK_RULE_ID rule may be missing."
+        )
+        log.info("[11a] Check job %s is %s (paused by mock gate — VM not yet confirmed gone)",
+                 deal_state.check_job_id, job.status)
+
+        # Storefront resource must still be leased
+        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
+        assert resource.get("state") == "leased", (
+            f"Storefront resource {deal_state.reserved_resource_id!r} should remain "
+            f"'leased' while VM cleanup is in progress, got {resource.get('state')!r}."
+        )
+        log.info("[11a] Storefront resource %s is leased — watchdog has not released it yet",
+                 deal_state.reserved_resource_id)
+
+
+class TestStage11b_WatchdogReleasesResource:
+    def test_11b_release_check_gate_and_confirm_resource_available(
+        self,
+        provisioning_client,
+        provisioning_test_client,
+        storefront_admin_client,
+        deal_state: DealState,
+    ):
+        """Release check gate → check job succeeds → watchdog patches resource to available.
+
+        Three steps:
+        1. resume_rule(CHECK_RULE_ID) — unblocks the check job; mock returns success.
+        2. wait_for_job(check_job_id) — long-poll until the job reaches a terminal state.
+        3. check-leases — watchdog sees the succeeded check job, patches storefront,
+           transitions lease to 'released'.
+
+        Final assertions:
+          - lease.status == 'released'
+          - storefront resource.state == 'available'
+
+        Teardown: resume_watchdog() so background timer cycles work normally
+        after the test module completes.
+        """
+        require_state(deal_state, "check_job_id", "lease_id",
+                      "reserved_resource_id", "_lease_expiry_armed")
+
+        # Step 1 — unblock the check job
+        provisioning_test_client.resume_rule(CHECK_RULE_ID)
+        log.info("[11b] Released check gate (rule=%s)", CHECK_RULE_ID)
+
+        # Step 2 — wait for the check job to complete
+        job_result = provisioning_test_client.wait_for_job(
+            deal_state.check_job_id, timeout=30
+        )
+        assert job_result.get("status") == "succeeded", (
+            f"Check job {deal_state.check_job_id!r} did not succeed: {job_result}"
+        )
+        log.info("[11b] Check job %s succeeded", deal_state.check_job_id)
+
+        # Step 3 — trigger the lifecycle cycle that processes the completed check job
+        result = provisioning_client.check_leases()
+        assert result.get("released", 0) >= 1, (
+            f"Expected at least one lease released, got: {result}\n"
+            "The check job succeeded but the watchdog cycle did not release the lease. "
+            "Check _process_releasing_lease in lease_lifecycle_service.py."
+        )
+        log.info("[11b] check-leases result: %s", result)
+
+        # Lease must be 'released'
+        lease = provisioning_client.get_lease(deal_state.lease_id)
+        assert lease.get("status") == "released", (
+            f"Expected lease status='released', got {lease.get('status')!r}.\n"
+            f"Full lease: {lease}"
+        )
+        log.info("[11b] Lease %s released", deal_state.lease_id)
+
+        # Storefront resource must be available — watchdog has patched it
+        resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)
+        assert resource.get("state") == "available", (
+            f"Storefront resource {deal_state.reserved_resource_id!r} should be 'available' "
+            f"after lease release, got {resource.get('state')!r}.\n"
+            "The watchdog may have failed to PATCH the storefront. Check provisioning "
+            "logs for [LEASE_LIFECYCLE] PATCH errors and verify storefront_url / "
+            "storefront_admin_key are configured in the provisioning service settings."
+        )
+        log.info("[11b] Storefront resource %s is available — lease lifecycle complete",
+                 deal_state.reserved_resource_id)
+
+        deal_state.lease_status = "released"
+
+        # Teardown — resume watchdog so background timer cycles work normally
+        provisioning_test_client.resume_watchdog()
+        log.info("[11b] Watchdog resumed — lease lifecycle test complete")

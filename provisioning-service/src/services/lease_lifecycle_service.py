@@ -33,8 +33,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import httpx
-
 from db.models import LeaseStatus, VmLease
 from services.lease_service import LeaseService
 
@@ -53,8 +51,48 @@ class LeaseLifecycleService:
         self._lease_svc = lease_service
         self._settings = settings
         self._job_svc = job_service  # AnsibleJobService | None; None disables check jobs
+        self._paused = False
+        self._resume_event = asyncio.Event()
+        self._resume_event.set()  # not paused initially
+
+    def pause(self) -> None:
+        """Pause timer-driven watchdog cycles.
+
+        Subsequent calls to check_leases() will block until resume() is called.
+        force_check_leases() bypasses this flag entirely — it always runs.
+        """
+        self._paused = True
+        self._resume_event.clear()
+        logger.info("[LEASE_LIFECYCLE] Watchdog paused — timer cycles will block")
+
+    def resume(self) -> None:
+        """Resume timer-driven watchdog cycles."""
+        self._paused = False
+        self._resume_event.set()
+        logger.info("[LEASE_LIFECYCLE] Watchdog resumed")
 
     async def check_leases(self) -> dict:
+        """Process one lease lifecycle cycle, blocking if paused.
+
+        Called by the LeaseWatchdog timer. Blocks at the pause gate so tests
+        can suspend automatic advances. Use force_check_leases() to bypass
+        the gate explicitly.
+        """
+        if not self._resume_event.is_set():
+            logger.debug("[LEASE_LIFECYCLE] Cycle blocked — watchdog is paused")
+            await self._resume_event.wait()
+        return await self._run_cycle()
+
+    async def force_check_leases(self) -> dict:
+        """Run one lease lifecycle cycle immediately, ignoring the pause flag.
+
+        Called by POST /api/v1/system/check-leases. Bypasses the pause gate
+        so operators and tests can drive individual lifecycle advances while
+        the watchdog timer is paused.
+        """
+        return await self._run_cycle()
+
+    async def _run_cycle(self) -> dict:
         """Process all lease lifecycle transitions for one watchdog cycle.
 
         Returns a summary dict:
@@ -262,11 +300,14 @@ class LeaseLifecycleService:
         return "skipped"
 
     async def _patch_storefront_resource(self, lease: VmLease) -> bool:
-        """Call PATCH {storefront_url}/api/v1/admin/portfolio/resources/{resource_id}.
+        """PATCH the storefront resource back to available via StorefrontClient.
 
         storefront_url and storefront_admin_key are read from global settings.
-        Returns True on success (2xx or 404), False on any other error.
+        Returns True on success or 404 (idempotent — resource already gone),
+        False on any connectivity or auth failure.
         """
+        from storefront_client import StorefrontClient, StorefrontClientError
+
         storefront_url = str(getattr(self._settings, "storefront_url", "") or "").rstrip("/")
         storefront_admin_key = str(getattr(self._settings, "storefront_admin_key", "") or "")
 
@@ -277,22 +318,20 @@ class LeaseLifecycleService:
             )
             return False
 
-        url = f"{storefront_url}/api/v1/admin/portfolio/resources/{lease.resource_id}"
-        headers: dict = {"Content-Type": "application/json"}
-        if storefront_admin_key:
-            headers["X-Admin-Key"] = storefront_admin_key
-
-        body = {
-            "state": "available",
-            "attributes": {"lease_end_utc": None},
-        }
-
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.patch(url, json=body, headers=headers)
-            if resp.status_code == 200:
-                return True
-            if resp.status_code == 404:
+            async with StorefrontClient(
+                base_url=storefront_url,
+                admin_key=storefront_admin_key or None,
+            ) as sf:
+                await sf.patch_resource(
+                    lease.resource_id,
+                    state="available",
+                    attributes={"lease_end_utc": None},
+                )
+            return True
+        except StorefrontClientError as exc:
+            if exc.status_code == 404:
+                # Resource no longer exists on the storefront — treat as released
                 logger.warning(
                     "[LEASE_LIFECYCLE] Storefront 404 for resource %s (lease %s) "
                     "— treating as released",
@@ -300,25 +339,25 @@ class LeaseLifecycleService:
                 )
                 return True
             logger.warning(
-                "[LEASE_LIFECYCLE] Storefront PATCH %d for resource %s (lease %s)",
-                resp.status_code, lease.resource_id, lease.id,
-            )
-            return False
-        except httpx.ConnectError as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] Cannot connect to storefront for lease %s: %s",
-                lease.id, exc,
-            )
-            return False
-        except httpx.TimeoutException as exc:
-            logger.warning(
-                "[LEASE_LIFECYCLE] Storefront PATCH timed out for lease %s: %s",
-                lease.id, exc,
+                "[LEASE_LIFECYCLE] Storefront PATCH failed for resource %s (lease %s): %s",
+                lease.resource_id, lease.id, exc,
             )
             return False
         except Exception as exc:
-            logger.exception(
-                "[LEASE_LIFECYCLE] Unexpected error patching storefront for lease %s: %s",
-                lease.id, exc,
-            )
+            name = type(exc).__name__
+            if "Connect" in name or "connection" in str(exc).lower():
+                logger.warning(
+                    "[LEASE_LIFECYCLE] Cannot connect to storefront for lease %s: %s",
+                    lease.id, exc,
+                )
+            elif "Timeout" in name or "timeout" in str(exc).lower():
+                logger.warning(
+                    "[LEASE_LIFECYCLE] Storefront PATCH timed out for lease %s: %s",
+                    lease.id, exc,
+                )
+            else:
+                logger.exception(
+                    "[LEASE_LIFECYCLE] Unexpected error patching storefront for lease %s: %s",
+                    lease.id, exc,
+                )
             return False

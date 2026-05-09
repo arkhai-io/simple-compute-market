@@ -46,6 +46,8 @@ class DealState:
     _provisioning_mock_mode: bool = False
     _negotiation_strategy_viable: bool = False
     _resources_seeded: bool = False
+    _alkahest_configured: bool = False
+    _provisioning_storefront_ok: bool = False
     # Phase 1 — policy pipeline
     _policy_dry_run_passed: bool = False
     _policies_seeded: bool = False
@@ -81,6 +83,9 @@ class DealState:
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
+    # Phase 10-11 — lease expiry lifecycle
+    _lease_expiry_armed: bool = False
+    check_job_id: Optional[str] = None
 
 
 def require_state(deal_state: DealState, *fields: str) -> None:

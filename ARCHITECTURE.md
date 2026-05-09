@@ -2066,10 +2066,20 @@ Three pure-Python internal packages are distributed as wheels:
 |---------|-----------|--------|-------------------|
 | `market-service` | `market_service-*.whl` | `service/` | `core`, `integration-tests` |
 | `provisioning-service` | `provisioning_service-*.whl` | `provisioning-service/` | `integration-tests`, `service` |
-| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests` |
+| `arkhai-storefront-client` | `arkhai_storefront_client-*.whl` | `storefront-client/` | `storefront`, `integration-tests`, `provisioning-service` |
 | `arkhai-registry-client` | `arkhai_registry_client-*.whl` | `registry-client/` | `integration-tests` |
 
 `arkhai-storefront-client` exists as a separate lightweight package to avoid pulling `market-storefront`'s heavyweight dependencies (`pufferlib`, `torch`, native RL wheels under the `[rl]` extra) into projects that only need the HTTP client and EIP-191 signing helper. The canonical implementation lives in `storefront-client/src/storefront_client/client.py` and exposes `StorefrontClient` (async) and `SyncStorefrontClient` (sync).
+
+**Dependency direction note — provisioning-service → arkhai-storefront-client:**
+
+The provisioning service depends on `arkhai-storefront-client` for two call sites:
+1. `lease_lifecycle_service._patch_storefront_resource()` — PATCH storefront resource on lease expiry
+2. `system_service.get_status()` — probe storefront reachability for the diagnostic status endpoint
+
+This inverts the conceptual layer (provisioning is infrastructure; storefront is a consumer). It does not create a circular import — `storefront-client` has no dependency on `provisioning-service`. The `make dist` ordering already builds `arkhai-storefront-client` before `provisioning-service`, so wheel resolution is correct.
+
+**TODO:** If the dependency direction becomes a maintenance problem, extract the two call sites into a thin `StorefrontCallbackClient` inside `provisioning-service/src/client/storefront_callback_client.py` that wraps `httpx` directly for just the two endpoints needed (`GET /health`, `PATCH /api/v1/admin/portfolio/resources/{id}`). This keeps `provisioning-service` self-contained without a wheel dependency on the storefront layer.
 
 **`arkhai-storefront-client` versioning policy:**
 
