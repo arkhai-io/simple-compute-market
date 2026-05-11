@@ -1,0 +1,285 @@
+"""Aggregation policy tests — the new `(candidates, negotiate) -> winner` seam.
+
+Verifies:
+- The policy receives a curried `negotiate` callback.
+- `best_price` picks the lowest *agreed* price, not the lowest advertised.
+- Default `cheapest_first` preserves the historical first-agreed loop semantics.
+- A custom registered policy can short-circuit / re-order arbitrarily.
+
+These tests drive `run_buy` end-to-end so the orchestrator's currying
+and asyncio.run wiring is exercised, not just the policy in isolation.
+The urlopen stub routes by request host so parallel negotiations
+(asyncio.gather) don't depend on call order.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from unittest.mock import patch
+from urllib.parse import urlparse
+
+from market_buyer.aggregation import (
+    NegotiateFn,
+    gather_outcomes,
+    register_aggregation_policy,
+)
+from market_buyer.buy_orchestrator import (
+    AgreedTerms,
+    BuyConfig,
+    BuyConstraints,
+    run_buy,
+)
+from market_buyer.buyer_client import NegotiationOutcome
+
+
+_BUYER_PK = "0x" + "11" * 32
+_BUYER_ADDR = "0x" + "cc" * 20
+_REGISTRY = "http://registry:4000"
+_SELLER_WALLET_A = "0x" + "aa" * 20
+_SELLER_WALLET_B = "0x" + "bb" * 20
+
+
+def _config(aggregation_policy: str | None = None) -> BuyConfig:
+    return BuyConfig(
+        registry_urls=[_REGISTRY],
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        ssh_public_key="ssh-rsa AAAA...",
+        aggregation_policy=aggregation_policy,
+    )
+
+
+def _constraints() -> BuyConstraints:
+    return BuyConstraints(max_price=100, initial_price=50, duration_seconds=3600)
+
+
+@dataclass
+class _FakeResp:
+    text: str
+
+    def read(self):
+        return self.text.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
+
+def _route_by_url(routes: dict[str, list]):
+    """urlopen stub: pick the next response from routes[host] each call.
+
+    routes maps a substring of the request URL to a list of responses.
+    First matching key wins (so `"seller-a"` matches `"http://seller-a:8001/..."`).
+    Each value is consumed in FIFO order — same convention as
+    `_urlopen_sequence` but indexed by URL substring.
+    """
+    def _fn(req, timeout=None):
+        # urlopen accepts either a Request object (signed POSTs) or a
+        # bare URL string (well-known GETs).
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        for key, queue in routes.items():
+            if key in url:
+                if not queue:
+                    raise AssertionError(f"No more responses for {key!r} ({url})")
+                nxt = queue.pop(0)
+                body = nxt if isinstance(nxt, str) else json.dumps(nxt)
+                return _FakeResp(body)
+        raise AssertionError(f"Unrouted URL: {url}")
+
+    return _fn
+
+
+def test_best_price_picks_lowest_agreed_not_lowest_advertised():
+    """seller-a advertises lower but agrees to 80; seller-b advertises higher
+    but agrees to 60. best_price must pick seller-b."""
+    routes = {
+        "registry": [
+            {"items": [
+                {"listing_id": "list-a", "seller": "http://seller-a:8001",
+                 "demand_resource": {"amount": 50}},
+                {"listing_id": "list-b", "seller": "http://seller-b:8001",
+                 "demand_resource": {"amount": 70}},
+            ]},
+        ],
+        "seller-a": [
+            # /negotiate/new — seller-a accepts at 80 (worse for buyer)
+            {"negotiation_id": "neg-a", "action": "accept", "price": 80},
+            # Settlement flow only runs for the *winner*; seller-a never gets here
+        ],
+        "seller-b": [
+            # /negotiate/new — seller-b accepts at 60 (better for buyer)
+            {"negotiation_id": "neg-b", "action": "accept", "price": 60},
+            # Wallet + settle for the winner
+            {"agent_wallet_address": _SELLER_WALLET_B},
+            {"escrow_uid": "0xescrow", "status": "provisioning"},
+            {"status": "ready", "attestation_uid": "0xattest"},
+        ],
+    }
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_route_by_url(routes),
+    ):
+        result = run_buy(
+            config=_config(aggregation_policy="best_price"),
+            constraints=_constraints(),
+            create_escrow=lambda terms: "0xescrow",
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "ready", (
+        f"got status={result.status} reason={result.reason} attempts={result.attempts}"
+    )
+    assert result.seller_url == "http://seller-b:8001"
+    assert result.agreed_price == 60
+    assert result.negotiation_id == "neg-b"
+    seller_urls = {a.get("seller_url") for a in result.attempts}
+    assert seller_urls == {"http://seller-a:8001", "http://seller-b:8001"}
+
+
+def test_cheapest_first_preserves_first_agreed_semantics():
+    """The default policy walks in advertised-price order and takes the
+    first match that agrees — identical to the pre-callback loop."""
+    routes = {
+        "registry": [
+            {"items": [
+                # Higher advertised price first in the registry response.
+                {"listing_id": "expensive", "seller": "http://seller-b:8001",
+                 "demand_resource": {"amount": 70}},
+                # Cheaper advertised — should be tried first under cheapest_first.
+                {"listing_id": "cheap", "seller": "http://seller-a:8001",
+                 "demand_resource": {"amount": 50}},
+            ]},
+        ],
+        "seller-a": [
+            {"negotiation_id": "neg-a", "action": "accept", "price": 50},
+            {"agent_wallet_address": _SELLER_WALLET_A},
+            {"escrow_uid": "0xescrow", "status": "provisioning"},
+            {"status": "ready", "attestation_uid": "0xattest"},
+        ],
+        # seller-b never gets queried — cheapest_first stops at first agreed.
+        "seller-b": [],
+    }
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_route_by_url(routes),
+    ):
+        result = run_buy(
+            config=_config(),  # default cheapest_first
+            constraints=_constraints(),
+            create_escrow=lambda terms: "0xescrow",
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "ready"
+    assert result.seller_url == "http://seller-a:8001"
+    assert result.agreed_price == 50
+    # Only seller-a was negotiated — cheapest_first short-circuited.
+    seller_urls = {a.get("seller_url") for a in result.attempts}
+    assert seller_urls == {"http://seller-a:8001"}
+
+
+def test_custom_policy_can_short_circuit():
+    """A user-registered policy decides when to stop — here, return the
+    second candidate unconditionally without negotiating either."""
+
+    @register_aggregation_policy("pick_second_no_negotiate")
+    async def _pick_second(matches, negotiate: NegotiateFn):
+        # Demonstrates the contract: the policy isn't obligated to call
+        # negotiate at all. Returning a synthetic outcome means the
+        # orchestrator will try to settle it — which requires us to
+        # actually have a negotiation_id, so this test mainly checks
+        # the policy is invoked and the orchestrator routes through it.
+        if len(matches) < 2:
+            return None
+        return (matches[1], NegotiationOutcome(
+            status="agreed",
+            negotiation_id="synthetic-1",
+            agreed_price=42,
+        ))
+
+    routes = {
+        "registry": [
+            {"items": [
+                {"listing_id": "ignored", "seller": "http://seller-a:8001"},
+                {"listing_id": "chosen", "seller": "http://seller-b:8001"},
+            ]},
+        ],
+        # Policy didn't call negotiate, so no negotiate responses needed.
+        "seller-b": [
+            {"agent_wallet_address": _SELLER_WALLET_B},
+            {"escrow_uid": "0xescrow", "status": "provisioning"},
+            {"status": "ready"},
+        ],
+    }
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_route_by_url(routes),
+    ):
+        result = run_buy(
+            config=_config(aggregation_policy="pick_second_no_negotiate"),
+            constraints=_constraints(),
+            create_escrow=lambda terms: "0xescrow",
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "ready"
+    assert result.seller_url == "http://seller-b:8001"
+    assert result.agreed_price == 42
+
+
+def test_policy_returning_none_yields_exited():
+    @register_aggregation_policy("always_none")
+    async def _always_none(matches, negotiate):
+        return None
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_route_by_url({
+            "registry": [
+                {"items": [{"listing_id": "x", "seller": "http://seller-a:8001"}]},
+            ],
+        }),
+    ):
+        result = run_buy(
+            config=_config(aggregation_policy="always_none"),
+            constraints=_constraints(),
+            create_escrow=lambda terms: "0xnever",
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "exited"
+    assert result.reason == "no_match_agreed_to_terms"
+
+
+def test_gather_outcomes_captures_exceptions_per_candidate():
+    """The convenience helper for parallel comparison swallows per-task
+    failures so one flaky seller doesn't kill the whole comparison."""
+    import asyncio
+
+    async def _flaky_negotiate(match):
+        if match["listing_id"] == "broken":
+            raise RuntimeError("seller down")
+        return NegotiationOutcome(
+            status="agreed",
+            negotiation_id=f"neg-{match['listing_id']}",
+            agreed_price=50,
+        )
+
+    candidates = [
+        {"listing_id": "good"},
+        {"listing_id": "broken"},
+        {"listing_id": "good2"},
+    ]
+
+    results = asyncio.run(gather_outcomes(_flaky_negotiate, candidates))
+    assert len(results) == 3
+    by_id = {c["listing_id"]: r for c, r in results}
+    assert isinstance(by_id["good"], NegotiationOutcome)
+    assert isinstance(by_id["broken"], RuntimeError)
+    assert isinstance(by_id["good2"], NegotiationOutcome)
