@@ -50,6 +50,13 @@ addopts = [
     "-v",
     "--strict-markers",
 ]
+# Third-party deprecation noise we can't fix at our level. Keep filters
+# narrow so genuine new deprecations still surface.
+filterwarnings = [
+    # web3 7.x still uses websockets.legacy and pins websockets<16; the
+    # warning fires on first import. Library-level migration upstream.
+    "ignore:websockets.legacy is deprecated:DeprecationWarning:websockets.legacy",
+]
 markers = [
     "contracts: Tests that validate on-chain contract state",
     "wallets: Smoke tests that validate wallet balances and key pairs",
