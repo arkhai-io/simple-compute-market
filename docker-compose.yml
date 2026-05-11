@@ -151,6 +151,49 @@ services:
         limits:
           memory: 512m
 
+  # 5b. Second seller agent (Alice) — exercises heterogeneous
+  # registry topology in the multi-registry e2e scenario. Alice's
+  # config.toml lists only the public registry, so her listings
+  # appear only there, while Bob's fan out to both. This is the
+  # only thing that makes the multi-registry scenario non-trivial:
+  # without an Alice, every listing has the same registry footprint
+  # and the test can't distinguish per-provider config from per-
+  # listing config.
+  alice_agent:
+    image: arkhai:storefront
+    platform: linux/amd64
+    container_name: market-agent-alice
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - XDG_CONFIG_HOME=/etc
+      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+      - PYTHONPATH=/app:/app/src
+    volumes:
+      - ./storefront/config.alice.toml:/etc/arkhai/config.toml:ro
+      # Reuses Bob's seed CSV — the multi-registry test seeds inventory
+      # at runtime via admin_import_resources anyway, so the on-disk CSV
+      # content is irrelevant. Bind-mounted to satisfy the config's
+      # resources_csv_path requirement.
+      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
+      - zerotier-alice:/var/lib/zerotier-one
+      - alice-agent-data:/app/src/market_storefront/data/alice-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
   # 6. Redis (job queue for provisioning service)
   redis:
     image: redis:7-alpine
@@ -209,4 +252,6 @@ networks:
 
 volumes:
   zerotier-sell:
+  zerotier-alice:
   sell-agent-data:
+  alice-agent-data:

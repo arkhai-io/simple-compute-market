@@ -57,6 +57,7 @@ markers = [
     "storefront: Smoke tests that validate seller storefront",
 	"provisioning: Smoke tests for the deployed provisioning service REST API",
     "e2e_deal: Full buyer-seller deal lifecycle e2e test",
+    "multi_registry: Multi-registry publish + discovery e2e scenario (stops at negotiation start)",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",
     "mock_provisioning: E2E mock provisioning flow tests",

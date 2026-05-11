@@ -31,6 +31,17 @@ seller:
   agent_id:          "eip155:31337:0x8004a818bfb912233c491871b3d84c89a494bd9e:2"
   admin_api_key:     "test-api-key"  # set to match [seller].admin_api_key in config.toml
 
+# Second seller (Alice) — only used by the multi-registry scenario.
+# Anvil account #3. Her storefront is configured against registry-A
+# only, so the multi-registry test can assert per-provider registry
+# footprint differs from Bob's.
+alice:
+  api_url:        "http://localhost:8002"
+  # Anvil account #4 — see config.alice.toml for why not #3.
+  private_key:    "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
+  wallet_address: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+  admin_api_key:  "test-api-key"
+
 provisioning:
   api_url: "http://localhost:8081"
 
