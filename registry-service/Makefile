@@ -41,9 +41,14 @@ smoke:
 
 ENV_FILE := $(if $(wildcard .env.local),.env.local,$(if $(wildcard .env),.env,))
 ENV_ARG := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
+# Hoisted into a variable: macOS-shipped GNU Make 3.81 mis-parses
+# ``$$`` inside single quotes inside ``$(shell ...)`` and refuses the
+# whole Makefile with "unterminated call to function `shell'". Also
+# uses POSIX [[:space:]] instead of GNU sed's \s for BSD-sed compat.
+ENV_SED_PROG := /^[[:space:]]*\#/d;/^[[:space:]]*$$/d;s/=.*//
 ifneq (,$(ENV_FILE))
   include $(ENV_FILE)
-  export $(shell sed '/^\s*#/d;/^\s*$$/d;s/=.*//' $(ENV_FILE))
+  export $(shell sed '$(ENV_SED_PROG)' $(ENV_FILE))
 endif
 
 serve:
