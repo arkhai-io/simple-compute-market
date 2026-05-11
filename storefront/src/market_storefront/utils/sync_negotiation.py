@@ -25,8 +25,11 @@ rounds through the same engine.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 from market_policy.negotiation_strategy import (
@@ -35,6 +38,7 @@ from market_policy.negotiation_strategy import (
     NegotiationRound,
     NegotiationRoundInput,
     load_strategy,
+    register_strategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,6 +88,88 @@ terminal and accepting a new negotiation would race with whatever owns
 the listing (settlement, refund, etc.)."""
 
 
+_FILE_POLICIES_DISCOVERED = False
+
+
+def _default_policy_dir() -> Path:
+    """Resolve the XDG-flavoured default policy directory.
+
+    Honours ``$XDG_CONFIG_HOME`` so it lines up with the existing TOML
+    config loader; falls back to ``~/.config/arkhai/policies/`` on hosts
+    that don't set it. In the docker-compose stack the storefront runs
+    with ``XDG_CONFIG_HOME=/etc``, so this resolves to
+    ``/etc/arkhai/policies/`` — bind-mount a host directory there to
+    drop in custom policies.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "arkhai" / "policies"
+
+
+def _register_file_policy(folder: Path) -> bool:
+    """Load ``folder/policy.py`` and register its ``factory`` under the
+    folder name. Returns True on success, False if the folder doesn't
+    look like a policy (missing ``policy.py`` or ``factory``)."""
+    policy_file = folder / "policy.py"
+    if not policy_file.is_file():
+        return False
+
+    name = folder.name
+    module_id = f"market_storefront._file_policies.{name}"
+    try:
+        spec = importlib.util.spec_from_file_location(module_id, policy_file)
+        if spec is None or spec.loader is None:
+            logger.warning("[POLICY] couldn't build spec for %s", policy_file)
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        logger.warning(
+            "[POLICY] failed to import file policy %s from %s: %s",
+            name, policy_file, exc,
+        )
+        return False
+
+    factory = getattr(module, "factory", None)
+    if not callable(factory):
+        logger.warning(
+            "[POLICY] %s has no callable 'factory' — skipping",
+            policy_file,
+        )
+        return False
+
+    register_strategy(name, factory)
+    logger.info("[POLICY] registered file policy %r from %s", name, policy_file)
+    return True
+
+
+def _discover_file_policies(force: bool = False) -> None:
+    """Scan the default + configured policy directories and register
+    each subdirectory as a policy named after the folder.
+
+    Runs at most once per process unless ``force=True`` (used by tests).
+    Failures in individual folders are logged but don't block other
+    folders. Built-in registrations win on cold start; a file policy
+    with the same name overwrites them by design — that's the override
+    UX for ad-hoc tuning.
+    """
+    global _FILE_POLICIES_DISCOVERED
+    if _FILE_POLICIES_DISCOVERED and not force:
+        return
+    _FILE_POLICIES_DISCOVERED = True
+
+    from market_storefront.utils.config import CONFIG
+    candidates = [_default_policy_dir(), *(Path(p) for p in CONFIG.extra_policy_paths)]
+
+    for root in candidates:
+        if not root.is_dir():
+            logger.debug("[POLICY] skipping non-existent policy dir %s", root)
+            continue
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir() or entry.name.startswith((".", "_")):
+                continue
+            _register_file_policy(entry)
+
+
 def _maybe_register_rl_strategy() -> None:
     """Trigger self-registration of the torch RL strategy.
 
@@ -107,6 +193,7 @@ def _load_storefront_strategy():
     """
     from market_storefront.utils.config import CONFIG
     name = (CONFIG.negotiation_policy_mode or "").strip() or None
+    _discover_file_policies()
     if (name or DEFAULT_STRATEGY) == "rl":
         _maybe_register_rl_strategy()
     return load_strategy(name)

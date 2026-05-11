@@ -192,6 +192,11 @@ class Config:
     negotiation_policy_mode: str
     arkhai_negotiator_seller_model_path: str
     arkhai_negotiator_buyer_model_path: str
+    # Extra directories to scan for file-based policies, in addition to
+    # $XDG_CONFIG_HOME/arkhai/policies/. Each immediate subdirectory is
+    # treated as a policy named after the folder, loaded via its
+    # ``policy.py`` exposing ``factory(cfg) -> NegotiationStrategy``.
+    extra_policy_paths: list[str]
     # Pricing defaults — fallback for resources whose CSV row leaves
     # min_price / token blank. None means "no default; rows must set it
     # or they're skipped at publish time."
@@ -250,6 +255,24 @@ def _resolve_indexer_auth(resolve) -> dict[str, str]:
         if isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip():
             out[url.strip()] = token.strip()
     return out
+
+
+def _resolve_extra_policy_paths(resolve) -> list[str]:
+    """Pull extra file-policy search directories out of TOML.
+
+    Accepts either a TOML array (``extra_policy_paths = [".../a", ".../b"]``)
+    or a single string (``extra_policy_paths = "..."``). Empty / unset →
+    empty list. Paths are returned verbatim; existence is checked at
+    load time in the strategy loader.
+    """
+    raw = resolve("seller.negotiation.extra_policy_paths", None)
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, list):
+        return [str(p).strip() for p in raw if str(p).strip()]
+    return []
 
 
 def _resolve_indexer_urls(resolve) -> list[str]:
@@ -429,6 +452,7 @@ def load_config() -> Config:
             "seller.negotiation.buyer_model_path",
             "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt",
         )),
+        extra_policy_paths=_resolve_extra_policy_paths(_resolve),
         admin_api_key=_resolve("seller.admin_api_key", None) or None,
 
         # Pricing defaults — applied to resources whose CSV row leaves
