@@ -19,7 +19,26 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from service.schemas import EscrowTermsProposal, ProvisionTerms
+
 from market_buyer.buyer_client import NegotiationOutcome, negotiate_with_seller
+
+
+# Canonical provision / escrow proposals used by every negotiate test —
+# kept here so individual tests don't need to repeat the boilerplate.
+def _provision(duration_seconds: int = 3600) -> ProvisionTerms:
+    return ProvisionTerms(
+        duration_seconds=duration_seconds, ssh_public_key="ssh-rsa AAAA",
+    )
+
+
+def _escrow_proposal() -> EscrowTermsProposal:
+    return EscrowTermsProposal(
+        escrow_kind="erc20_non_tierable",
+        arbiter_kind="recipient",
+        payment_token="0x" + "ab" * 20,
+        expiration_unix=1_800_000_000,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +86,7 @@ def test_round_0_seller_accepts_immediately(mock_urlopen):
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,        listing_id="seller-1",
         initial_price=50,
-        max_price=100, duration_seconds=3600,
+        max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_price == 50
@@ -83,7 +102,7 @@ def test_round_0_seller_exits(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=10, max_price=20, duration_seconds=3600,
+        initial_price=10, max_price=20, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     assert outcome.status == "exited"
     assert outcome.reason == "price_unreasonable"
@@ -101,7 +120,7 @@ def test_counter_loop_converges_to_accept(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=50, max_price=100, duration_seconds=3600,
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     assert outcome.status == "agreed"
     assert outcome.agreed_price == 90
@@ -120,7 +139,7 @@ def test_counter_loop_seller_walks_away(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=50, max_price=100, duration_seconds=3600,
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     assert outcome.status == "exited"
     assert outcome.reason == "price_unreasonable"
@@ -138,7 +157,7 @@ def test_buyer_exits_when_seller_unreasonable(mock_urlopen):
     outcome = negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=50, max_price=100, duration_seconds=3600,
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     assert outcome.status == "exited"
     # Exit was buyer-initiated (we detected unreasonable seller price).
@@ -159,7 +178,7 @@ def test_signed_requests_include_signature_and_timestamp(mock_urlopen):
     negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=50, max_price=100, duration_seconds=3600,
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
     )
     # One round, one request.
     assert len(seen_headers) == 1
@@ -180,7 +199,7 @@ def test_on_round_hook_receives_each_round(mock_urlopen):
     negotiate_with_seller(
         seller_url="http://seller:8001",
         buyer_address=_BUYER_ADDR, buyer_private_key=_BUYER_PK, listing_id="seller-1",
-        initial_price=50, max_price=100, duration_seconds=3600,
+        initial_price=50, max_price=100, provision_terms=_provision(3600), escrow_terms_proposal=_escrow_proposal(),
         on_round=lambda i, msg, reply: seen.append((i, msg, reply)),
     )
     assert len(seen) == 2

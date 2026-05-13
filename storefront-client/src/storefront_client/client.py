@@ -768,15 +768,37 @@ class StorefrontClient(_StorefrontClientBase):
         initial_price: int,
         duration_seconds: int,
         buyer_agent_url: str = "",
+        ssh_public_key: str = "",
+        payment_token: str = "",
+        escrow_expiration_unix: int | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+
+        ``provision_terms`` and ``escrow_terms_proposal`` are required by
+        the wire protocol; this helper builds canonical defaults from the
+        scalar args so smoke / integration tests can keep their current
+        call shape. ``payment_token`` is the ERC-20 contract address; if
+        empty, a zero-address placeholder is sent (legal in environments
+        where the seller's listing has no typed payment token).
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
             "initial_price": initial_price,
-            "duration_seconds": duration_seconds,
+            "provision_terms": {
+                "duration_seconds": duration_seconds,
+                "ssh_public_key": ssh_public_key,
+                "compute_resource": None,
+            },
+            "escrow_terms_proposal": {
+                "escrow_kind": "erc20_non_tierable",
+                "arbiter_kind": "recipient",
+                "payment_token": payment_token or ("0x" + "0" * 40),
+                "expiration_unix": exp_unix,
+            },
             "buyer_agent_url": buyer_agent_url,
         }
         return await self._post(
@@ -1578,15 +1600,34 @@ class SyncStorefrontClient(_StorefrontClientBase):
         initial_price: int,
         duration_seconds: int,
         buyer_agent_url: str = "",
+        ssh_public_key: str = "",
+        payment_token: str = "",
+        escrow_expiration_unix: int | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+
+        ``provision_terms`` and ``escrow_terms_proposal`` are required by
+        the wire protocol; this helper builds canonical defaults from the
+        scalar args. See the async variant for the field semantics.
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
             "initial_price": initial_price,
-            "duration_seconds": duration_seconds,
+            "provision_terms": {
+                "duration_seconds": duration_seconds,
+                "ssh_public_key": ssh_public_key,
+                "compute_resource": None,
+            },
+            "escrow_terms_proposal": {
+                "escrow_kind": "erc20_non_tierable",
+                "arbiter_kind": "recipient",
+                "payment_token": payment_token or ("0x" + "0" * 40),
+                "expiration_unix": exp_unix,
+            },
             "buyer_agent_url": buyer_agent_url,
         }
         return self._post(

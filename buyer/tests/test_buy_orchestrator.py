@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from service.schemas import EscrowTerms, ProvisionTerms
+from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
 
 from market_buyer.buy_orchestrator import (
     AgreedTerms,
@@ -62,6 +62,15 @@ def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> Provi
     return ProvisionTerms(
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
+    )
+
+
+def _escrow_proposal() -> EscrowTermsProposal:
+    return EscrowTermsProposal(
+        escrow_kind="erc20_non_tierable",
+        arbiter_kind="recipient",
+        payment_token=_TOKEN,
+        expiration_unix=1_800_000_000,
     )
 
 
@@ -130,6 +139,7 @@ def test_no_matches_returns_no_matches_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
         )
@@ -151,6 +161,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xnever"],
             matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
@@ -204,6 +215,7 @@ def test_happy_path_drives_to_ready():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms,
             create_escrow=_create_escrow,
             on_event=lambda name, body: events.append((name, body)),
@@ -281,6 +293,7 @@ def test_first_match_exits_second_agrees():
             config=config,
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -315,6 +328,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=_broken_escrow,
             sleep=lambda _: None,
@@ -344,6 +358,7 @@ def test_provisioning_failed_returns_failed_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -375,6 +390,7 @@ def test_settlement_timeout_returns_timeout_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=lambda escrows: ["0xescrow"],
             settlement_poll_interval=0.01,

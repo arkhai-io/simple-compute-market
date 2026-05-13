@@ -5,20 +5,45 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from service.schemas import EscrowTermsProposal, ProvisionTerms
+
 
 class NegotiateNewRequest(BaseModel):
+    """Round 0 of a negotiation.
+
+    The buyer publishes the structured artifacts they're proposing:
+    ``provision_terms`` (what they want the seller to deliver) and
+    ``escrow_terms_proposal`` (the on-chain escrow shape they'll post).
+    Both are validated against the listing's acceptance set on the
+    seller side; today the listing's acceptance set is implicit and
+    trivial (one canonical shape), but the protocol slot is in place
+    for richer listings later.
+    """
+
     listing_id: str
     buyer_address: str
     initial_price: int = Field(ge=0)
-    duration_seconds: int = Field(gt=0)
+    provision_terms: ProvisionTerms
+    escrow_terms_proposal: EscrowTermsProposal
     buyer_agent_url: str = ""
 
 
 class NegotiateNewResponse(BaseModel):
+    """Seller's round-0 response.
+
+    ``accepted_provision_terms`` and ``accepted_escrow_terms_proposal``
+    echo back what the seller validated against its listing. They appear
+    on every non-rejection response (counter, accept) so the buyer can
+    use the seller-confirmed values rather than its local proposal —
+    protects against accidental drift between sides.
+    """
+
     negotiation_id: str
     action: str
     price: int | None = None
     reason: str | None = None
+    accepted_provision_terms: ProvisionTerms | None = None
+    accepted_escrow_terms_proposal: EscrowTermsProposal | None = None
 
 
 class NegotiateContinueRequest(BaseModel):

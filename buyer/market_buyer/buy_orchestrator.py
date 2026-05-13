@@ -27,7 +27,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from service.schemas import EscrowTerms, ProvisionTerms
+from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn
@@ -470,6 +470,7 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
+    escrow_terms_proposal: EscrowTermsProposal,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
@@ -486,12 +487,14 @@ def run_buy(
 
     Parameters
     ----------
-    config, constraints, provision
-        Buyer identity + price bounds + what to provision. Immutable
-        for this call. ``provision.duration_seconds`` is the negotiation-
-        init ask sent to the seller and the lease window the escrow
-        amount is computed from; ``provision.ssh_public_key`` is sent
-        in the settle request for VM injection.
+    config, constraints, provision, escrow_terms_proposal
+        Buyer identity + price bounds + what to provision + the on-chain
+        escrow shape the buyer proposes. Immutable for this call.
+        ``provision.duration_seconds`` is the lease window;
+        ``provision.ssh_public_key`` is sent in the settle request;
+        ``escrow_terms_proposal`` (escrow_kind + arbiter_kind +
+        payment_token + expiration_unix) goes on the negotiate-init
+        request and the seller validates it against the listing.
     build_escrow_terms
         Materializes the agreed negotiation into the canonical
         ``list[EscrowTerms]`` (the escrow specs that will be submitted
@@ -633,7 +636,8 @@ def run_buy(
                 listing_id=listing_id,
                 initial_price=initial_price,
                 max_price=max_price,
-                duration_seconds=provision.duration_seconds,
+                provision_terms=provision,
+                escrow_terms_proposal=escrow_terms_proposal,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
             )

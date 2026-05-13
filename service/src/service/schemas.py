@@ -202,6 +202,64 @@ class EscrowTerms(BaseModel):
     )
 
 
+class EscrowTermsProposal(BaseModel):
+    """Buyer's proposed escrow shape at negotiation round 0.
+
+    Captures the *kind axes* the buyer commits to — which on-chain
+    escrow contract, which arbiter kind, which payment token, and the
+    absolute expiration timestamp. Concrete obligation_data values
+    (arbiter address, demand bytes, payment amount) are derived
+    deterministically at settlement from this proposal plus the
+    agreed price + duration + chain config, so the wire-level
+    artifact stays narrow.
+
+    The seller validates the proposal against the listing's
+    acceptance set: today the listing implicitly defines the canonical
+    shape (``erc20_non_tierable`` + ``recipient`` + listing's
+    ``demand_resource.token`` contract). Future listings may advertise
+    multiple acceptable proposals, letting the buyer pick. The
+    structural slot is the same.
+
+    Amount is intentionally not on the proposal — it depends on the
+    agreed price (not known at round 0) and the duration (which the
+    seller may negotiate down via ``max_duration_seconds``). Materializing
+    the full EscrowTerms at settlement keeps the proposal stable
+    across the price negotiation rounds.
+    """
+
+    escrow_kind: str = Field(
+        description=(
+            "Which on-chain escrow obligation contract — keys into the "
+            "service.clients.alkahest EscrowKindCodec registry. Today "
+            "only ``'erc20_non_tierable'`` is supported."
+        ),
+    )
+    arbiter_kind: str = Field(
+        description=(
+            "Which arbiter encoder produces the escrow's demand bytes — "
+            "keys into the ArbiterCodec registry. Today only "
+            "``'recipient'`` is supported."
+        ),
+    )
+    payment_token: str = Field(
+        description=(
+            "ERC-20 token contract address the buyer pays in. Must match "
+            "the listing's ``demand_resource.token.contract_address``."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time the on-chain escrow attestation "
+            "expires. The buyer commits to creating the escrow before "
+            "this moment; the seller verifies the chain attestation's "
+            "``expirationTime`` matches. Absolute (not relative) so both "
+            "sides have a single agreed timestamp with no clock-drift "
+            "tolerance window."
+        ),
+    )
+
+
 class Attestation(BaseModel):
     """Mutual attestations exchanged between maker and taker."""
 

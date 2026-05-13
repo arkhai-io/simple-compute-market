@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from service.schemas import EscrowTerms, ProvisionTerms
+from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
 
 from market_buyer.aggregation import (
     NegotiateFn,
@@ -57,6 +57,15 @@ def _constraints() -> BuyConstraints:
 
 def _provision() -> ProvisionTerms:
     return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA...")
+
+
+def _escrow_proposal() -> EscrowTermsProposal:
+    return EscrowTermsProposal(
+        escrow_kind="erc20_non_tierable",
+        arbiter_kind="recipient",
+        payment_token="0x" + "ab" * 20,
+        expiration_unix=1_800_000_000,
+    )
 
 
 def _build_escrow_terms_stub(seller_wallet, agreed_price, duration_seconds):
@@ -147,6 +156,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -198,6 +208,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -253,6 +264,7 @@ def test_custom_policy_can_short_circuit():
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -280,6 +292,7 @@ def test_policy_returning_none_yields_exited():
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
             provision=_provision(),
+            escrow_terms_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xnever"],
             sleep=lambda _: None,

@@ -41,7 +41,90 @@ from market_policy.negotiation_strategy import (
     register_strategy,
 )
 
+from service.schemas import EscrowTermsProposal
+
 logger = logging.getLogger(__name__)
+
+
+# Today's only acceptable escrow shape. Future listings will advertise
+# their acceptance set (potentially multiple shapes); the validator
+# below interprets the listing-derived expected shape against the
+# buyer's proposal.
+_SUPPORTED_ESCROW_KIND = "erc20_non_tierable"
+_SUPPORTED_ARBITER_KIND = "recipient"
+
+
+def _validate_escrow_terms_proposal(
+    *,
+    proposal: EscrowTermsProposal | None,
+    listing: dict[str, Any],
+) -> EscrowTermsProposal | None:
+    """Validate the buyer's escrow proposal against the listing.
+
+    Today's listing implicitly accepts exactly one shape:
+    ``erc20_non_tierable`` + ``recipient`` + the
+    listing's ``demand_resource.token.contract_address``. Any deviation
+    raises ``OfferUnfulfillableError``. Future step: listings advertise
+    an explicit acceptance set and this validator picks the matching
+    shape (or rejects).
+
+    Returns the validated proposal unchanged so the caller can echo it
+    back. Returns None when the buyer didn't include a proposal (legacy
+    clients) — in that case the seller assumes the canonical shape.
+    """
+    if proposal is None:
+        # Legacy buyer pre-step-7; we can't echo what they didn't send.
+        return None
+
+    if proposal.escrow_kind != _SUPPORTED_ESCROW_KIND:
+        raise OfferUnfulfillableError(
+            f"escrow_kind_unsupported: got {proposal.escrow_kind!r}, "
+            f"expected {_SUPPORTED_ESCROW_KIND!r}",
+            listing_id=listing.get("listing_id"),
+        )
+    if proposal.arbiter_kind != _SUPPORTED_ARBITER_KIND:
+        raise OfferUnfulfillableError(
+            f"arbiter_kind_unsupported: got {proposal.arbiter_kind!r}, "
+            f"expected {_SUPPORTED_ARBITER_KIND!r}",
+            listing_id=listing.get("listing_id"),
+        )
+
+    # Token must match the listing's demand_resource.token.contract_address.
+    expected_token = _extract_listing_payment_token(listing)
+    if expected_token is None:
+        # Listing has no token to validate against — accept whatever
+        # the buyer proposed (relaxed for listings without a typed
+        # payment token, e.g. legacy compute listings).
+        return proposal
+    if proposal.payment_token.lower() != expected_token.lower():
+        raise OfferUnfulfillableError(
+            f"payment_token_mismatch: buyer proposed {proposal.payment_token}, "
+            f"listing demands {expected_token}",
+            listing_id=listing.get("listing_id"),
+        )
+    return proposal
+
+
+def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
+    """Pull the payment-token contract address off the listing's
+    ``demand_resource``. Returns None when the listing has no typed
+    token side (e.g. compute-for-compute trades)."""
+    import json as _json
+
+    raw = listing.get("demand_resource")
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(raw, dict):
+        return None
+    token = raw.get("token")
+    if isinstance(token, dict):
+        addr = token.get("contract_address")
+        if isinstance(addr, str):
+            return addr
+    return None
 
 
 class StorefrontPausedError(Exception):
@@ -296,7 +379,8 @@ async def start_sync_negotiation(
     our_listing_id: str,
     buyer_address: str,
     their_proposed_price: int,
-    requested_duration_seconds: int | None = None,
+    provision_terms: Any = None,
+    escrow_terms_proposal: Any = None,
     our_base_url: str,
     their_agent_url: str,
     policy_service: Any = None,
@@ -308,16 +392,24 @@ async def start_sync_negotiation(
     uses it for all subsequent ``/negotiate/{neg_id}`` rounds — the
     canonical id is server-assigned, not client-derived.
 
-    ``requested_duration_seconds`` is the buyer's lease ask, validated
-    against the listing's ``max_duration_seconds`` ceiling (NULL there
-    means unlimited). Stored on the thread so settlement reads it back
-    without re-querying the buyer.
+    ``provision_terms`` carries the buyer's lease duration, ssh key, and
+    eventually compute spec. ``escrow_terms_proposal`` is the buyer's
+    on-chain escrow shape proposal. Both are validated against the
+    listing's acceptance set (today: trivial — only the canonical
+    erc20+recipient shape is supported with the listing's
+    demand_resource token). Persisted on the negotiation thread (in a
+    future step) so settlement reads them back without re-querying
+    the buyer; echoed back to the buyer in the response so settlement-
+    time escrow construction can use the seller-confirmed values.
 
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
-    listing) or if ``requested_duration_seconds`` exceeds the listing's
-    advertised max.
+    listing) or if the buyer's duration / proposal doesn't match what
+    the listing accepts.
     """
+    requested_duration_seconds = (
+        provision_terms.duration_seconds if provision_terms is not None else None
+    )
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
@@ -379,6 +471,17 @@ async def start_sync_negotiation(
             f"listing's max_duration_seconds={listing_max_seconds}s"
         )
 
+    # Validate the buyer's escrow terms proposal against the listing's
+    # acceptance set. Today's acceptance set is implicit and trivial:
+    # one canonical shape per listing (erc20_non_tierable + recipient +
+    # the listing's demand_resource token). Future listings may
+    # advertise multiple acceptable proposals; for now any deviation
+    # from the canonical shape rejects.
+    _accepted_escrow_proposal = _validate_escrow_terms_proposal(
+        proposal=escrow_terms_proposal,
+        listing=our_order_dict,
+    )
+
     our_order = Listing.model_validate(our_order_dict)
 
     # Pure compute: resolve strategy and get round-0 decision without writing anything.
@@ -436,7 +539,15 @@ async def start_sync_negotiation(
         decision_price=decision.price,
         decision_reason=decision.reason,
     )
-    return {"negotiation_id": neg_id, **decision.to_dict()}
+    response: dict[str, Any] = {"negotiation_id": neg_id, **decision.to_dict()}
+    # Echo back what the seller validated so settlement-time escrow
+    # construction can use the seller-confirmed values. Skipped on
+    # rejection paths (which raise before reaching here).
+    if provision_terms is not None:
+        response["accepted_provision_terms"] = provision_terms.model_dump()
+    if _accepted_escrow_proposal is not None:
+        response["accepted_escrow_terms_proposal"] = _accepted_escrow_proposal.model_dump()
+    return response
 
 
 async def continue_sync_negotiation(

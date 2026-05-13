@@ -25,7 +25,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from service.schemas import ProvisionTerms
+from service.schemas import EscrowTermsProposal, ProvisionTerms
 
 from ..buy_orchestrator import (
     BuyConfig,
@@ -596,6 +596,17 @@ def register(app: typer.Typer) -> None:
             duration_seconds=duration_seconds,
             ssh_public_key=ssh,
         )
+        # Buyer's escrow shape proposal — today's only supported pairing
+        # (ERC20 non-tierable + RecipientArbiter). The seller validates
+        # against its listing's acceptance set; today that's trivially
+        # this same shape with the listing's demand_resource token.
+        import time as _time
+        escrow_terms_proposal = EscrowTermsProposal(
+            escrow_kind="erc20_non_tierable",
+            arbiter_kind="recipient",
+            payment_token=tc,
+            expiration_unix=int(_time.time()) + int(expiration_seconds),
+        )
 
         run_log = RunLog.start(
             command="market buy",
@@ -670,6 +681,7 @@ def register(app: typer.Typer) -> None:
                 config=config,
                 constraints=constraints,
                 provision=provision,
+                escrow_terms_proposal=escrow_terms_proposal,
                 build_escrow_terms=build_escrow_terms,
                 create_escrow=create_escrow,
                 matches=matches,

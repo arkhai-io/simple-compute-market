@@ -298,6 +298,28 @@ def register(app: typer.Typer) -> None:
                 str(reply.get("price", "-")),
             )
 
+        # Build provision + escrow proposal for the negotiate request.
+        # The standalone `market negotiate` subcommand doesn't reach
+        # settlement, so the escrow proposal is largely a formality
+        # (the seller still validates it). Resume mode skips the
+        # round-0 send and these fields are ignored.
+        from service.schemas import EscrowTermsProposal, ProvisionTerms
+        import time as _time
+        provision_terms: Optional[ProvisionTerms] = None
+        escrow_terms_proposal: Optional[EscrowTermsProposal] = None
+        if resume_state is None:
+            assert duration_seconds is not None  # gated above
+            provision_terms = ProvisionTerms(
+                duration_seconds=int(duration_seconds),
+                ssh_public_key="",  # negotiate-only flow; settle is a separate command
+            )
+            escrow_terms_proposal = EscrowTermsProposal(
+                escrow_kind="erc20_non_tierable",
+                arbiter_kind="recipient",
+                payment_token=token_contract or ("0x" + "0" * 40),
+                expiration_unix=int(_time.time()) + 3600,
+            )
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
@@ -306,7 +328,8 @@ def register(app: typer.Typer) -> None:
                 listing_id=listing_id,
                 initial_price=initial_price or 0,
                 max_price=max_price,
-                duration_seconds=duration_seconds,
+                provision_terms=provision_terms,
+                escrow_terms_proposal=escrow_terms_proposal,
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,

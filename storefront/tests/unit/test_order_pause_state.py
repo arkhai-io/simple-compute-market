@@ -241,13 +241,16 @@ class TestStartSyncNegotiationPauseGuard:
         )
 
         from market_storefront.utils.sync_negotiation import start_sync_negotiation
+        from service.schemas import ProvisionTerms
         with pytest.raises(OfferUnfulfillableError) as exc_info:
             await start_sync_negotiation(
                 sqlite_client=db,
                 our_listing_id="order-001",
                 buyer_address="0xBuyer",
                 their_proposed_price=5000,
-                requested_duration_seconds=1800,
+                provision_terms=ProvisionTerms(
+                    duration_seconds=1800, ssh_public_key="ssh-rsa AAAA",
+                ),
                 our_base_url="http://seller:8001",
                 their_agent_url="0xBuyer",
                 policy_service=policy_service,
