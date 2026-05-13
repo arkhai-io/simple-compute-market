@@ -244,6 +244,16 @@ def test_happy_path_drives_to_ready():
 
 
 def test_first_match_exits_second_agrees():
+    # Use cheapest_first (sequential) since this test exercises
+    # the "first match exits, fall through to second" semantic.
+    # The default best_price runs negotiations in parallel, which
+    # races for the FIFO urlopen mock and makes the test flaky.
+    config = BuyConfig(
+        registry_urls=[_REGISTRY],
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        aggregation_policy="cheapest_first",
+    )
     responses = [
         # Registry returns two matches
         {"items": [
@@ -268,7 +278,7 @@ def test_first_match_exits_second_agrees():
         side_effect=_urlopen_sequence(responses),
     ):
         result = run_buy(
-            config=_config(),
+            config=config,
             constraints=_constraints(),
             provision=_provision(),
             build_escrow_terms=_build_escrow_terms_ok,

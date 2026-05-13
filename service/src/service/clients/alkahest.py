@@ -227,3 +227,43 @@ def encode_recipient_demand(recipient_address: str) -> bytes:
         raise ValueError(
             f"recipient_address {recipient_address!r} is not valid hex: {exc}"
         ) from exc
+
+
+def build_payment_obligation_data(
+    *,
+    seller_wallet: str,
+    agreed_price: int,
+    duration_seconds: int,
+    token_contract_address: str,
+    chain_name: str,
+    addr_config_path: str | None = None,
+) -> dict[str, Any]:
+    """Canonical obligation_data for an ERC20 + RecipientArbiter payment escrow.
+
+    Both the buyer (at escrow creation) and the seller (at verification)
+    call this helper with the negotiated inputs and the chain config, so
+    they're guaranteed to produce identical expected obligation_data. Any
+    divergence between sides means a misconfiguration somewhere — wrong
+    token contract, wrong chain config, wrong amount formula — and the
+    seller's verifier flags it before any provisioning side-effect.
+
+    Returns the literal ``ERC20EscrowObligation.ObligationData`` struct:
+
+        {arbiter: <RecipientArbiter address for chain_name>,
+         demand:  "0x" + abi.encode(["address"], [seller_wallet]),
+         token:   token_contract_address,
+         amount:  agreed_price * duration_seconds / 3600}
+
+    Step 5 (arbiter codec extraction) replaces the inlined demand encoding
+    with a codec lookup keyed by arbiter address; the function's external
+    contract stays the same.
+    """
+    arbiter_address = get_recipient_arbiter(chain_name, config_path=addr_config_path)
+    demand_bytes = encode_recipient_demand(seller_wallet)
+    amount_raw = int(agreed_price) * int(max(duration_seconds, 1)) // 3600
+    return {
+        "arbiter": arbiter_address,
+        "demand": "0x" + demand_bytes.hex(),
+        "token": token_contract_address,
+        "amount": amount_raw,
+    }

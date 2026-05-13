@@ -86,38 +86,30 @@ def make_buyer_payment_escrow_terms_fn(
         # Late imports — alkahest is heavyweight; tests that mock this
         # builder shouldn't pay for it.
         from service.clients.alkahest import (
-            encode_recipient_demand,
+            build_payment_obligation_data,
             get_erc20_escrow_obligation_nontierable,
-            get_recipient_arbiter,
         )
 
-        arbiter_address = get_recipient_arbiter(
-            chain_name, config_path=addr_config_path,
+        # Canonical obligation_data — same helper the seller's verifier
+        # calls, so both sides see identical expected values for the same
+        # negotiated inputs.
+        obligation_data = build_payment_obligation_data(
+            seller_wallet=seller_wallet_address,
+            agreed_price=agreed_price,
+            duration_seconds=duration_seconds,
+            token_contract_address=token_contract_address,
+            chain_name=chain_name,
+            addr_config_path=addr_config_path,
         )
-        # Under RecipientArbiter, the demand is literally the seller's address.
-        demand_bytes = encode_recipient_demand(seller_wallet_address)
-        # Total payment = per-hour rate × duration_seconds / 3600. Integer
-        # math truncates fractional sub-second base units; fine for token
-        # amounts since the raw amount is always an integer.
-        amount_raw = int(agreed_price) * int(max(duration_seconds, 1)) // 3600
         escrow_contract = get_erc20_escrow_obligation_nontierable(
             chain_name, config_path=addr_config_path,
         )
         expiration_unix = int(time.time()) + int(expiration_seconds)
 
-        # ERC20EscrowObligation.ObligationData layout:
-        # (address arbiter, bytes demand, address token, uint256 amount).
-        # Stored hex-encoded for the demand bytes so the model is
-        # JSON-friendly; chain submission decodes back to bytes.
         terms = EscrowTerms(
             maker="buyer",
             escrow_contract=escrow_contract,
-            obligation_data={
-                "arbiter": arbiter_address,
-                "demand": "0x" + demand_bytes.hex(),
-                "token": token_contract_address,
-                "amount": amount_raw,
-            },
+            obligation_data=obligation_data,
             expiration_unix=expiration_unix,
         )
         return [terms]

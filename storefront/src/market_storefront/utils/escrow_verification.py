@@ -3,22 +3,33 @@
 The seller's storefront calls ``verify_escrow_for_settlement`` before any
 provisioning side-effect. It reads the EAS attestation by uid via
 alkahest-py's ``client.erc20.escrow.non_tierable.get_obligation(uid)`` and
-asserts that each escrow property matches the negotiated terms:
+asserts the on-chain obligation_data dict-matches what the seller
+expects, computed via ``build_payment_obligation_data`` from the same
+negotiation inputs the buyer used.
 
-  - attestation exists and decodes as ERC-20 escrow (alkahest raises otherwise)
-  - not revoked
-  - not expired (``expiration_time == 0`` is the "no expiry" sentinel)
-  - arbiter == canonical RecipientArbiter for this chain
-  - decoded demand recipient == seller's wallet
-  - token contract == negotiated token contract
-  - amount >= ``agreed_price * agreed_duration_seconds // 3600``
+Verification is two-phase:
 
-On any mismatch raises ``EscrowVerificationError``. The caller maps that to
-HTTP 400 — settlement aborts before any DB side effect or chain write.
+1. Attestation envelope: the EAS attestation exists, is not revoked, and
+   has a non-zero expirationTime in the future.
 
-``get_recipient_arbiter`` is imported lazily so the module stays unit-
-testable without the alkahest address config; the obligation read itself
-is also injectable as a test seam.
+2. Obligation data: the chain's ObligationData (arbiter + demand + token
+   + amount for ERC20EscrowObligation) dict-equals the expected
+   obligation_data byte-for-byte (modulo address-case normalization and
+   bytes/hex normalization). Single dict-compare replaces the per-field
+   hard-coded checks; adding new arbiter / escrow kinds later only
+   requires updating ``build_payment_obligation_data`` (or its successor
+   codec lookup in step 5), not this verifier.
+
+The expected ``expiration_unix`` doesn't participate in dict-compare —
+it's buyer-clock-stamped at escrow creation and the seller can't
+reproduce it without the buyer publishing the value. Step 7 makes the
+buyer publish the full EscrowTerms via the negotiation protocol so this
+check can become exact-equal.
+
+On any mismatch raises ``EscrowVerificationError``. The caller maps that
+to HTTP 400 — settlement aborts before any DB side effect or chain
+write. ``get_obligation_fn`` and ``build_obligation_data_fn`` are
+injectable test seams.
 """
 from __future__ import annotations
 
@@ -27,8 +38,6 @@ import logging
 import time
 from typing import Any
 
-from eth_abi import decode as abi_decode
-
 logger = logging.getLogger(__name__)
 
 
@@ -36,10 +45,45 @@ class EscrowVerificationError(ValueError):
     """Raised when an on-chain escrow does not match the negotiated terms."""
 
 
-def _normalize_address(addr: str | None) -> str | None:
+def _normalize_address(addr: Any) -> str | None:
+    """Lowercase address for case-insensitive comparison.
+
+    Returns None when the input isn't a usable address string — caller
+    distinguishes missing-from-listing (raise) vs. missing-on-chain
+    (also raise, but with a different message).
+    """
     if not addr or not isinstance(addr, str):
         return None
     return addr.lower()
+
+
+def _normalize_bytes(value: Any) -> str | None:
+    """Canonicalize a demand-bytes-like value to a "0x"-prefixed hex string.
+
+    Accepts:
+      - bytes / bytearray → hex-encode
+      - "0x..."-prefixed hex string → lowercase
+      - bare hex string (no 0x) → lowercase + prepend 0x
+
+    Returns None for anything else (which the caller treats as a
+    verification failure — chain reads should always produce one of
+    the accepted shapes).
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "0x" + bytes(value).hex()
+    if isinstance(value, str):
+        s = value.lower()
+        if s.startswith("0x"):
+            return s
+        # tolerate bare hex (no leading 0x)
+        try:
+            bytes.fromhex(s)
+            return "0x" + s
+        except ValueError:
+            return None
+    return None
 
 
 def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
@@ -62,39 +106,49 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
                 addr = token.get("contract_address")
                 if isinstance(addr, str):
                     return addr
-            # token can also be just a symbol string in legacy listings; that
-            # has no contract address and cannot be verified — the caller
-            # should fall back to bypassing the token check, but we want to
-            # surface that explicitly rather than silently skipping.
     raise EscrowVerificationError(
         "Cannot extract token contract address from listing — "
         "no demand/offer resource with token.contract_address"
     )
 
 
-def _decode_recipient_from_demand(demand: bytes) -> str | None:
-    """Decode ``RecipientArbiter.DemandData{address recipient}`` -> address.
+def _normalize_obligation_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Canonical form for dict-compare.
 
-    Mirrors the buyer's ``encode_recipient_demand`` (which abi-encodes a
-    single ``address``). Returns the recipient address (lowercase) or None
-    if decoding fails.
+    Addresses → lowercase, demand bytes → "0x"-prefixed hex, amount → int.
+    Keys outside the canonical set pass through unchanged so we can
+    spot-check shape-correctness alongside value-correctness.
     """
-    try:
-        (recipient,) = abi_decode(["address"], demand)
-        return str(recipient).lower()
-    except Exception as exc:
-        logger.debug("[ESCROW_VERIFY] could not decode demand: %s", exc)
-        return None
+    out: dict[str, Any] = {}
+    for key, val in data.items():
+        if key in ("arbiter", "token"):
+            out[key] = _normalize_address(val)
+        elif key == "demand":
+            out[key] = _normalize_bytes(val)
+        elif key == "amount":
+            out[key] = int(val) if val is not None else None
+        else:
+            out[key] = val
+    return out
 
 
-def _expected_amount_raw(agreed_price: int, agreed_duration_seconds: int) -> int:
-    """Mirror buyer's ``escrow_client._create.amount_raw`` formula.
+def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
+    """Read fields off the alkahest-py decoded ObligationData object.
 
-    ``agreed_price`` is per-hour in raw token units; ``agreed_duration_seconds``
-    is the buyer's lease ask echoed by the seller. Integer math truncates
-    the same way the buyer's encoder does.
+    The SDK returns a typed struct (not a dict). We pull the four
+    canonical ERC20EscrowObligation fields off it into a normalized
+    dict so dict-compare can run.
     """
-    return int(agreed_price) * int(max(agreed_duration_seconds, 1)) // 3600
+    return _normalize_obligation_data({
+        "arbiter": getattr(obligation, "arbiter", None),
+        "demand": (
+            bytes(obligation.demand)
+            if getattr(obligation, "demand", None) is not None
+            else None
+        ),
+        "token": getattr(obligation, "token", None),
+        "amount": getattr(obligation, "amount", None),
+    })
 
 
 async def verify_escrow_for_settlement(
@@ -109,7 +163,7 @@ async def verify_escrow_for_settlement(
     alkahest_address_config_path: str | None,
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
-    get_recipient_arbiter_fn: Any = None,
+    build_obligation_data_fn: Any = None,
 ) -> None:
     """Read the on-chain escrow and assert it matches the negotiated terms.
 
@@ -118,66 +172,72 @@ async def verify_escrow_for_settlement(
     escrow_uid:
         The 0x-prefixed 32-byte attestation uid handed to us by the buyer.
     seller_wallet:
-        Our wallet address; the escrow's decoded demand recipient must match.
+        Our wallet address; participates in the expected obligation_data
+        via the RecipientArbiter demand encoding.
     agreed_price, agreed_duration_seconds:
-        From the negotiation thread; together they reconstruct the buyer's
-        ``amount_raw`` floor.
+        From the negotiation thread; together with the listing's token
+        and the chain config they determine the entire expected
+        obligation_data dict.
     listing:
-        The seller's listing row (after ``load_listing``); used to extract
-        the negotiated token contract address.
+        The seller's listing row (after ``load_listing``); supplies the
+        negotiated token contract address.
     alkahest_client:
-        An ``AlkahestClient`` already bound to the right chain; we read the
-        escrow attestation through its ``erc20.escrow.non_tierable.get_obligation``
-        path. The client knows its own RPC URL + EAS address, so we no longer
-        thread those through.
+        An ``AlkahestClient`` already bound to the right chain.
     chain_name, alkahest_address_config_path:
-        Used only to look up the canonical ``RecipientArbiter`` address —
-        a static config lookup, not an RPC call.
+        Used to resolve the canonical RecipientArbiter + escrow contract
+        addresses for the chain (a static config lookup, not an RPC call).
     now_unix:
         Override for ``time.time()`` (test seam).
-    get_obligation_fn / get_recipient_arbiter_fn:
+    get_obligation_fn / build_obligation_data_fn:
         Test seams. ``get_obligation_fn`` defaults to alkahest's
-        ``client.erc20.escrow.non_tierable.get_obligation`` and is
-        expected to return alkahest's decoded shape: a mapping with
-        ``"attestation"`` (EAS envelope) and ``"data"`` (typed
-        ERC20EscrowObligation.ObligationData) entries.
+        ``client.erc20.escrow.non_tierable.get_obligation`` and returns
+        the decoded ``{"attestation", "data"}`` shape;
+        ``build_obligation_data_fn`` defaults to the canonical helper
+        that constructs the expected obligation_data dict.
 
     Raises
     ------
     EscrowVerificationError
         On any mismatch. Caller should map to HTTP 400.
     """
-    if get_recipient_arbiter_fn is None:
-        from service.clients.alkahest import get_recipient_arbiter as get_recipient_arbiter_fn  # type: ignore[no-redef]
-
     if alkahest_client is None:
         raise EscrowVerificationError(
             "AlkahestClient not configured — cannot verify escrow on chain"
         )
 
-    expected_token = _normalize_address(_extract_token_contract_from_listing(listing))
-    expected_amount_min = _expected_amount_raw(agreed_price, agreed_duration_seconds)
-    expected_seller = _normalize_address(seller_wallet)
-    if not expected_seller:
-        raise EscrowVerificationError(
-            "Seller wallet address is not configured — cannot verify escrow recipient"
+    if build_obligation_data_fn is None:
+        from service.clients.alkahest import (
+            build_payment_obligation_data as build_obligation_data_fn,
         )
-
-    try:
-        expected_arbiter = _normalize_address(
-            get_recipient_arbiter_fn(
-                chain_name, config_path=alkahest_address_config_path
-            )
-        )
-    except Exception as exc:
-        raise EscrowVerificationError(
-            f"Cannot resolve RecipientArbiter address for chain={chain_name!r}: {exc}"
-        ) from exc
 
     if get_obligation_fn is None:
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
             return await client.erc20.escrow.non_tierable.get_obligation(uid)
 
+    if not seller_wallet:
+        raise EscrowVerificationError(
+            "Seller wallet address is not configured — cannot verify escrow recipient"
+        )
+    token_contract_address = _extract_token_contract_from_listing(listing)
+
+    # Build the expected obligation_data via the same helper the buyer uses.
+    # Any divergence between sides means a misconfigured chain/token/arbiter.
+    try:
+        expected_obligation_raw = build_obligation_data_fn(
+            seller_wallet=seller_wallet,
+            agreed_price=int(agreed_price),
+            duration_seconds=int(agreed_duration_seconds),
+            token_contract_address=token_contract_address,
+            chain_name=chain_name,
+            addr_config_path=alkahest_address_config_path,
+        )
+    except Exception as exc:
+        raise EscrowVerificationError(
+            f"Cannot construct expected obligation_data for chain={chain_name!r}: {exc}"
+        ) from exc
+    expected = _normalize_obligation_data(expected_obligation_raw)
+
+    # Read the on-chain attestation + obligation.
     try:
         decoded = await get_obligation_fn(alkahest_client, escrow_uid)
     except Exception as exc:
@@ -188,6 +248,7 @@ async def verify_escrow_for_settlement(
     att = decoded["attestation"]
     obligation = decoded["data"]
 
+    # Attestation envelope checks (independent of obligation_data shape).
     if att.revocation_time:
         raise EscrowVerificationError(
             f"Escrow {escrow_uid} is revoked (revocation_time="
@@ -200,41 +261,33 @@ async def verify_escrow_for_settlement(
             f"Escrow {escrow_uid} expired at {att.expiration_time} "
             f"(now={now})"
         )
-
-    actual_arbiter = _normalize_address(obligation.arbiter)
-    if actual_arbiter != expected_arbiter:
+    if not att.expiration_time:
+        # The EAS contract treats expiration_time=0 as "never expires";
+        # for escrow obligations we always want a deadline so a stale
+        # escrow can be reclaimed. Reject the no-expiry shape.
         raise EscrowVerificationError(
-            f"Escrow arbiter mismatch: chain={actual_arbiter} "
-            f"expected RecipientArbiter={expected_arbiter}"
+            f"Escrow {escrow_uid} has no expirationTime — refusing to settle"
         )
 
-    raw_demand = bytes(obligation.demand) if obligation.demand is not None else b""
-    decoded_recipient = _decode_recipient_from_demand(raw_demand)
-    if decoded_recipient != expected_seller:
+    # Dict-compare the canonical ObligationData. One check covers every
+    # field the contract enforces at collection time (arbiter, demand,
+    # token, amount) and adds nothing arbiter-specific to this verifier.
+    actual = _read_chain_obligation_data(obligation)
+    if actual != expected:
+        # Build a focused diff so the operator sees exactly which fields
+        # diverged. Stringify byte-y / large-int values for the message.
+        diffs = []
+        for key in sorted(set(actual) | set(expected)):
+            if actual.get(key) != expected.get(key):
+                diffs.append(
+                    f"{key}: chain={actual.get(key)!r} expected={expected.get(key)!r}"
+                )
         raise EscrowVerificationError(
-            f"Escrow demand recipient mismatch: chain={decoded_recipient} "
-            f"expected seller={expected_seller}"
-        )
-
-    actual_token = _normalize_address(obligation.token)
-    if actual_token != expected_token:
-        raise EscrowVerificationError(
-            f"Escrow token mismatch: chain={actual_token} "
-            f"expected={expected_token}"
-        )
-
-    actual_amount = int(obligation.amount) if obligation.amount is not None else None
-    if actual_amount is None or actual_amount < expected_amount_min:
-        raise EscrowVerificationError(
-            f"Escrow amount insufficient: chain={actual_amount} "
-            f"expected>={expected_amount_min} "
-            f"(agreed_price={agreed_price}/hour × duration="
-            f"{agreed_duration_seconds}s)"
+            f"Escrow {escrow_uid} obligation_data mismatch: " + "; ".join(diffs)
         )
 
     logger.info(
-        "[ESCROW_VERIFY] escrow=%s ok: amount=%s token=%s arbiter=%s "
-        "recipient=%s exp=%s",
-        escrow_uid, actual_amount, actual_token, actual_arbiter,
-        decoded_recipient, att.expiration_time,
+        "[ESCROW_VERIFY] escrow=%s ok: amount=%s token=%s arbiter=%s exp=%s",
+        escrow_uid, actual["amount"], actual["token"], actual["arbiter"],
+        att.expiration_time,
     )
