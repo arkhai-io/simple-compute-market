@@ -36,7 +36,7 @@ build-no-cache: reinit ## Full Docker cache bust — use when .dist/ changes are
 	docker build --no-cache -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
-test: test-unit test-integration ## Run all tests
+test: reinit test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
 	uv run --find-links $(DIST_DIR) pytest tests/unit/ -v

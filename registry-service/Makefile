@@ -110,8 +110,7 @@ create-migration:
 # ==============================================================================
 
 # Run tests
-test:
-	uv run pytest
+test: reinit test-unit test-integration
 
 test-unit:
 	uv run pytest tests/unit/ -v

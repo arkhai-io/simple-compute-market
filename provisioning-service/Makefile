@@ -33,7 +33,7 @@ serve: ## Start the unified API + job processing server locally
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-test: test-unit test-integration ## Run all tests
+test: reinit test-unit test-integration ## Run all tests
 
 test-unit: ## Run unit tests
 	PYTHONPATH=src uv run --find-links $(DIST_DIR) pytest src/tests/unit/ -v

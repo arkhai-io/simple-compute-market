@@ -24,6 +24,7 @@ from market_storefront.middleware import buyer_auth
 from storefront_client import StorefrontClient, StorefrontClientError
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
+_PAYMENT_TOKEN = "0x0000000000000000000000000000000000000001"
 
 
 @pytest_asyncio.fixture
@@ -42,7 +43,7 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         demand_resource={
             "token": {
                 "symbol": "MOCK",
-                "contract_address": "0x0000000000000000000000000000000000000001",
+                "contract_address": _PAYMENT_TOKEN,
                 "decimals": 0,
             },
             "amount": demand_amount,
@@ -150,6 +151,7 @@ class TestNegotiateNew:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
+            payment_token=_PAYMENT_TOKEN,
         )
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
@@ -215,7 +217,7 @@ class TestNegotiateNew:
             demand_resource={
                 "token": {
                     "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "contract_address": _PAYMENT_TOKEN,
                     "decimals": 0,
                 },
                 "amount": 5000,
@@ -252,7 +254,7 @@ class TestNegotiateNew:
             demand_resource={
                 "token": {
                     "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "contract_address": _PAYMENT_TOKEN,
                     "decimals": 0,
                 },
                 "amount": None,  # hidden-reserve listing (distinct from amount=0 = free)
@@ -279,6 +281,7 @@ class TestNegotiateNew:
                 buyer_address=_BUYER,
                 initial_price=5000,
                 duration_seconds=3600,
+                payment_token=_PAYMENT_TOKEN,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -305,7 +308,7 @@ class TestNegotiateNew:
             demand_resource={
                 "token": {
                     "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
+                    "contract_address": _PAYMENT_TOKEN,
                     "decimals": 0,
                 },
                 "amount": 5000,
@@ -359,6 +362,7 @@ class TestNegotiateContinue:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
+            payment_token=_PAYMENT_TOKEN,
         )
         if "negotiation_id" not in result:
             pytest.skip("Could not start negotiation")
