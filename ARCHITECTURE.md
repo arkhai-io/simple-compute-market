@@ -1457,15 +1457,85 @@ The subchart is self-contained: it owns all its own credentials and mounts nothi
 
 ```
 make build
-  ├── build-cli                  # PyInstaller → cli/dist/market
+  ├── build-buyer                # PyInstaller → buyer/dist/market
   ├── build-market-contract-deployer
   ├── build-test-env
   │     └── build-anvil-state   # Runs deployer against fresh Anvil, saves state.json
   └── build-runtime-images (parallel)
-        ├── build-registry       # registry-service Docker image
-        ├── build-core           # core Docker image
-        └── build-provisioning   # async-provisioning-service Docker image
+        ├── build-registry       # arkhai:registry / arkhai:registry-<sha>
+        ├── build-storefront     # arkhai:storefront / arkhai:storefront-<sha>
+        └── build-provisioning   # arkhai:provisioning / arkhai:provisioning-<sha>
 ```
+
+Wheel builds happen separately via `make dist` (called automatically by
+`build-runtime-images`):
+
+```
+make dist
+  ├── dist-storefront-client  → .dist/arkhai_storefront_client-*.whl
+  ├── dist-registry           → .dist/arkhai_registry_client-*.whl
+  ├── dist-provisioning       → .dist/provisioning_service-*.whl
+  ├── dist-storefront         → .dist/market_storefront-*.whl      (Docker builds only)
+  ├── dist-policy             → .dist/market_policy-*.whl          (Docker builds only)
+  ├── dist-service            → .dist/market_service-*.whl         (Docker builds only)
+  └── dist-infra              → .dist/market_infra-*.whl           (Docker builds only)
+```
+
+---
+
+## Artifact Registry Publishing
+
+Built runtime artifacts are published to GCP Artifact Registry in the `compute-market-internal-infra` 
+repo. The registries and their IAM are managed there; this repo only pushes.
+
+**Artifact inventory:**
+
+| Artifact | AR format | Repo key | Tag at push |
+|---|---|---|---|
+| Docker images (registry, storefront, provisioning) | DOCKER | `docker` | git short SHA |
+| Helm chart (`arkhai-node-operator`) | DOCKER (OCI) | `helm` | git short SHA |
+| `arkhai-storefront-client` wheel | PYTHON | `python` | wheel version |
+| `arkhai-registry-client` wheel | PYTHON | `python` | wheel version |
+| `provisioning-service` wheel | PYTHON | `python` | wheel version |
+| `market` CLI binary | GENERIC | `cli` | git short SHA |
+
+The four internal-only wheels (`market-storefront`, `market-policy`,
+`market-service`, `market-infra`) are consumed only via `--find-links` inside
+Docker builds and are never pushed to AR.
+
+**Push flow:**
+
+```
+make build
+make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
+  ├── push-images   # docker tag + docker push × 3
+  ├── push-helm     # helm push (OCI)
+  ├── push-wheels   # uv publish × 3 wheels
+  └── push-cli      # gcloud artifacts generic upload
+```
+
+**Tag model:** artifacts are pushed with the git short SHA as the only tag.
+Semver tags (`<version>-rc.N` for preprod, `<version>` for prod) are applied
+at promotion time by the `compute-market-ops` CI/CD pipeline — never by this
+repo.
+
+**Targeting an environment:**
+
+```sh
+make push-runtime-artifacts                                   # dev (default)
+make push-runtime-artifacts AR_PROJECT=compute-market-1-preprod
+make push-runtime-artifacts AR_PROJECT=compute-market-1-prod
+```
+
+**One-time machine setup:** before the first push, configure the Docker
+credential helper and ensure ADC is set up:
+
+```sh
+gcloud auth configure-docker us-central1-docker.pkg.dev   # covers docker + helm OCI
+gcloud auth application-default login                      # covers wheels + CLI upload
+```
+
+See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 ---
 
@@ -2093,11 +2163,19 @@ This inverts the conceptual layer (provisioning is infrastructure; storefront is
 
 When either contract changes: bump `version` in `storefront-client/pyproject.toml`, update the minimum version constraint in all consuming `pyproject.toml` files, rebuild the wheel with `make dist-storefront-client`, and run `make init` in each consumer. Keep all changes in one commit so the version boundary is auditable in git history. See `storefront-client/README.md` for the full checklist.
 
-### Upgrade path
+### Distribution path
 
-**Near term — PEP 503 local index:** Run `scripts/gen_simple_index.py .dist/` after `make dist` to generate `index.html` files. Switch from `--find-links .dist` to `--index file://${PWD}/.dist`. The script is 50 lines of stdlib Python and requires no maintenance per package added.
+**Internal builds (Docker images):** `.dist/` wheels are consumed via
+`--find-links` inside Docker `RUN` instructions. This path is unchanged.
 
-**Long term — GCP Artifact Registry:** The project already uses GAR for `alkahest-py`. When ready: `uv publish --index https://...gar.../simple .dist/*.whl`. Consumer-side change is one URL in `pyproject.toml`. No structural changes elsewhere.
+**External distribution:** The three client packages (`arkhai-storefront-client`,
+`arkhai-registry-client`, `provisioning-service`) are published to GCP Artifact
+Registry via `make push-wheels`. See the `## Artifact Registry Publishing`
+section for the full push flow.
+
+**PEP 503 local index (optional):** `scripts/gen_simple_index.py .dist/` generates
+a local `simple/` index. Useful if a consumer needs `--index` rather than
+`--find-links`. No structural changes to the wheel build are needed.
 
 ### Canonical client design pattern
 

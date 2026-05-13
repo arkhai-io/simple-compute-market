@@ -85,6 +85,59 @@ CSV columns:
 - Core columns: `resource_id` (optional, UUID auto-generated if blank), `resource_type` (required), `resource_subtype`, `unit`, `value`, `state`
 - Attribute columns: any `attribute.*` column maps into `attributes` JSON (e.g., `attribute.region`, `attribute.vm_host`)
 
+## Publishing Artifacts to Artifact Registry
+
+Built artifacts (Docker images, Helm chart, Python wheels, CLI binary) are
+pushed to GCP Artifact Registry in `compute-market-internal-infra`. Registry URLs and
+IAM are managed there; this repo only pushes.
+
+### One-time machine setup
+
+Configure the Docker credential helper so `docker push` and `helm push` (OCI)
+authenticate via your `gcloud` identity:
+
+```sh
+gcloud auth configure-docker us-central1-docker.pkg.dev
+```
+
+`gcloud` ADC must also be configured (see ADC setup in the `compute-market-internal-infra`
+README). The Python wheel push and CLI upload use ADC directly; no additional
+setup is needed for those.
+
+### Build before pushing
+
+```sh
+make build
+```
+
+### Push to dev (default)
+
+```sh
+make push-runtime-artifacts
+```
+
+### Push to a specific environment
+
+Override `AR_PROJECT` to target preprod or prod:
+
+```sh
+make push-runtime-artifacts AR_PROJECT=compute-market-1-preprod
+make push-runtime-artifacts AR_PROJECT=compute-market-1-prod
+```
+
+### Push individual artifact types
+
+```sh
+make push-images   # Docker images (registry, storefront, provisioning)
+make push-helm     # Helm chart (OCI push to helm repo)
+make push-wheels   # Python wheels (storefront-client, registry-client, provisioning-service)
+make push-cli      # CLI binary (market executable)
+```
+
+Artifacts are tagged with the current git short SHA. The SHA tag is the only
+tag written at push time; semver tags are applied at promotion time by the
+CI/CD pipeline in `compute-market-internal-infra`.
+
 ## Quick Start
 
 ### 1. Start Local Chain
