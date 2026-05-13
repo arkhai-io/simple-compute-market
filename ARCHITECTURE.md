@@ -1510,14 +1510,39 @@ make build
 make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
   ├── push-images   # docker tag + docker push × 3
   ├── push-helm     # helm push (OCI)
-  ├── push-wheels   # uv publish × 3 wheels
+  ├── push-wheels   # gcloud existence check + uv publish for missing wheels
   └── push-cli      # gcloud artifacts generic upload
 ```
 
-**Tag model:** artifacts are pushed with the git short SHA as the only tag.
-Semver tags (`<version>-rc.N` for preprod, `<version>` for prod) are applied
-at promotion time by the `compute-market-ops` CI/CD pipeline — never by this
-repo.
+**Tag model:** Docker images and the generic CLI binary are pushed with the git
+short SHA as the only tag. Python wheels are addressed by package version and
+filename, so `push-wheels` uses `gcloud artifacts versions describe` before each
+upload and skips versions that already exist. A changed wheel must still get a
+version bump before publishing; Artifact Registry will not replace an existing
+wheel with the same package/version/filename. Semver tags (`<version>-rc.N` for
+preprod, `<version>` for prod) are applied at promotion time by the
+`compute-market-ops` CI/CD pipeline — never by this repo.
+
+**Dev wheel overwrite path:** during dev-cluster iteration, use
+`make clobber-wheels` to delete the current published versions of
+`arkhai-storefront-client`, `arkhai-registry-client`, and
+`provisioning-service`, then immediately re-upload the local `.dist/` wheels.
+This is intentionally separate from `push-wheels` because it mutates the Python
+repository by deleting package versions. Use it only for development
+repositories; preprod/prod wheel changes should bump package versions instead.
+
+**Wheel duplicate diagnostic:** if `make push-wheels` fails with a 400 while
+uploading a wheel, first check whether that package version already exists:
+
+```sh
+gcloud artifacts versions list \
+  --project=compute-market-1-dev \
+  --location=us-central1 \
+  --repository=compute-market-1-dev-python \
+  --package=provisioning-service
+```
+
+Use the target `AR_PROJECT` and package name as needed.
 
 **Targeting an environment:**
 
