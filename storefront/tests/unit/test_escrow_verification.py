@@ -107,7 +107,8 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
         return decoded
 
     def _build(*, seller_wallet, agreed_price, duration_seconds,
-               token_contract_address, chain_name, addr_config_path=None):
+               token_contract_address, chain_name, addr_config_path=None,
+               arbiter_kind="recipient"):
         return _canonical_obligation_data(
             seller_wallet=seller_wallet,
             agreed_price=agreed_price,

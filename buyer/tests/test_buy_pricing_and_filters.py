@@ -30,17 +30,17 @@ def _escrow_proposal() -> EscrowTermsProposal:
     )
 
 
-def _stub_build_escrow_terms(seller_wallet, agreed_price, duration_seconds):
+def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
     return [EscrowTerms(
         maker="buyer",
         escrow_contract="0x" + "ee" * 20,
         obligation_data={
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
-            "token": "0x" + "ab" * 20,
+            "token": proposal.payment_token,
             "amount": int(agreed_price) * int(duration_seconds) // 3600,
         },
-        expiration_unix=1_800_000_000,
+        expiration_unix=proposal.expiration_unix,
     )]
 
 
@@ -227,9 +227,16 @@ def _agree_negotiate_factory(price: int = 100):
     """Build a fake negotiate_with_seller that always agrees at the given price."""
     def fake(**kwargs):
         from market_buyer.buyer_client import NegotiationOutcome
+        provision_terms = kwargs.get("provision_terms")
+        escrow_terms_proposal = kwargs.get("escrow_terms_proposal")
         return NegotiationOutcome(
             status="agreed", agreed_price=price, rounds=2, reason=None,
-            negotiation_id="neg-id", duration_seconds=kwargs.get("duration_seconds"),
+            negotiation_id="neg-id",
+            duration_seconds=(
+                provision_terms.duration_seconds if provision_terms is not None else None
+            ),
+            accepted_provision_terms=provision_terms,
+            accepted_escrow_terms_proposal=escrow_terms_proposal,
         )
     return fake
 

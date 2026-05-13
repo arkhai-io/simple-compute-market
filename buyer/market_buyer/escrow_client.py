@@ -29,22 +29,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any, Callable, Optional
 
-from service.schemas import EscrowTerms
+from service.schemas import EscrowTerms, EscrowTermsProposal
 
 
 logger = logging.getLogger(__name__)
 
 
-BuildEscrowTermsFn = Callable[[str, int, int], list[EscrowTerms]]
-"""``(seller_wallet, agreed_price, duration_seconds) -> list[EscrowTerms]``.
+BuildEscrowTermsFn = Callable[
+    [EscrowTermsProposal, str, int, int], list[EscrowTerms],
+]
+"""``(proposal, seller_wallet, agreed_price, duration_seconds) -> list[EscrowTerms]``.
 
-Returns the canonical escrow specs for a finalized negotiation. The list
-shape (rather than a single EscrowTerms) is forward-looking for
-multi-escrow designs (payment + seller penalty deposit, etc.). Today
-the list is always length 1 with ``maker == "buyer"``.
+Materializes the seller-confirmed proposal (echoed back in the
+negotiation response) into the canonical EscrowTerms list. The list
+shape is forward-looking for multi-escrow designs (payment + seller
+penalty deposit, etc.); today the list is always length 1 with
+``maker == "buyer"``.
 """
 
 
@@ -62,55 +64,55 @@ def make_buyer_payment_escrow_terms_fn(
     *,
     chain_name: str,
     addr_config_path: Optional[str],
-    token_contract_address: str,
-    expiration_seconds: int = 3600,
 ) -> BuildEscrowTermsFn:
-    """Build a ``(seller_wallet, agreed_price, duration_seconds) -> [EscrowTerms]``
-    closure.
+    """Build a ``(proposal, seller_wallet, agreed_price, duration_seconds)
+    -> [EscrowTerms]`` closure.
 
-    The closure resolves the per-chain ``RecipientArbiter`` and
-    ``ERC20EscrowObligation`` addresses on first call (cached by the
-    service.clients.alkahest layer), encodes the seller wallet as the
-    arbiter's demand, computes the total payment as
-    ``agreed_price * duration_seconds / 3600``, and stamps an absolute
-    expiration ``now + expiration_seconds``.
+    The closure delegates to the canonical
+    ``service.clients.alkahest.build_payment_obligation_data`` helper —
+    same one the seller's verifier calls — so both sides produce
+    identical obligation_data for the same negotiated inputs. The
+    proposal supplies the token + arbiter_kind + expiration; the
+    closure supplies the chain config (which determines the on-chain
+    arbiter + escrow-contract addresses).
 
-    The amount formula and arbiter choice are today's hard-coded
-    policy. Step 5 (arbiter codec) and step 6 (escrow SDK wrapper)
-    will move these into pluggable codecs keyed by arbiter / escrow
-    contract address; the closure's external signature stays the same.
+    Token and expiration_unix come from the proposal, not from
+    closure state — the seller's echoed proposal is the source of
+    truth for these. The closure's chain config is purely local
+    plumbing (how to talk to the chain), not negotiated.
     """
     def _build(
-        seller_wallet_address: str, agreed_price: int, duration_seconds: int,
+        proposal: EscrowTermsProposal,
+        seller_wallet_address: str,
+        agreed_price: int,
+        duration_seconds: int,
     ) -> list[EscrowTerms]:
         # Late imports — alkahest is heavyweight; tests that mock this
         # builder shouldn't pay for it.
         from service.clients.alkahest import (
             build_payment_obligation_data,
-            get_erc20_escrow_obligation_nontierable,
+            get_escrow_kind_codec,
         )
 
-        # Canonical obligation_data — same helper the seller's verifier
-        # calls, so both sides see identical expected values for the same
-        # negotiated inputs.
         obligation_data = build_payment_obligation_data(
             seller_wallet=seller_wallet_address,
             agreed_price=agreed_price,
             duration_seconds=duration_seconds,
-            token_contract_address=token_contract_address,
+            token_contract_address=proposal.payment_token,
             chain_name=chain_name,
             addr_config_path=addr_config_path,
+            arbiter_kind=proposal.arbiter_kind,
         )
-        escrow_contract = get_erc20_escrow_obligation_nontierable(
+        escrow_codec = get_escrow_kind_codec(proposal.escrow_kind)
+        escrow_contract = escrow_codec.resolve_address(
             chain_name, config_path=addr_config_path,
         )
-        expiration_unix = int(time.time()) + int(expiration_seconds)
 
         terms = EscrowTerms(
             maker="buyer",
             escrow_contract=escrow_contract,
             obligation_data=obligation_data,
-            expiration_unix=expiration_unix,
+            expiration_unix=proposal.expiration_unix,
         )
         return [terms]
 

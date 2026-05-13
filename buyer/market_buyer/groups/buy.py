@@ -511,11 +511,11 @@ def register(app: typer.Typer) -> None:
             make_buyer_payment_escrow_terms_fn,
             make_create_escrow_fn,
         )
+        # Token + expiration come from the proposal (echoed by the seller).
+        # The closure only needs chain config to resolve on-chain addresses.
         build_escrow_terms = make_buyer_payment_escrow_terms_fn(
             chain_name=chain,
             addr_config_path=addr_cfg or None,
-            token_contract_address=tc,
-            expiration_seconds=expiration_seconds,
         )
         create_escrow = make_create_escrow_fn(
             private_key=pk,

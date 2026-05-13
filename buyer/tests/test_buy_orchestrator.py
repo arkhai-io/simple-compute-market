@@ -74,6 +74,24 @@ def _escrow_proposal() -> EscrowTermsProposal:
     )
 
 
+# Seller-echoed accept-time terms: must be included in /negotiate/new mock
+# replies so _settle_one can read outcome.accepted_escrow_terms_proposal
+# and dispatch escrow construction off it.
+_ACCEPTED_ECHO = {
+    "accepted_provision_terms": {
+        "duration_seconds": 7200,
+        "ssh_public_key": "ssh-rsa AAAA...",
+        "compute_resource": None,
+    },
+    "accepted_escrow_terms_proposal": {
+        "escrow_kind": "erc20_non_tierable",
+        "arbiter_kind": "recipient",
+        "payment_token": _TOKEN,
+        "expiration_unix": 1_800_000_000,
+    },
+}
+
+
 def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
     """An ERC20-shaped EscrowTerms for tests that don't care about codec details."""
     return EscrowTerms(
@@ -89,7 +107,7 @@ def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
     )
 
 
-def _build_escrow_terms_ok(seller_wallet, agreed_price, duration_seconds):
+def _build_escrow_terms_ok(proposal, seller_wallet, agreed_price, duration_seconds):
     return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
 
 
@@ -182,7 +200,7 @@ def test_happy_path_drives_to_ready():
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL,
                       "max_duration_seconds": 7200}]},
         # 2. /negotiate/new — seller accepts immediately
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
         # 3. GET /.well-known/agent-wallet.json on seller
         {"agent_wallet_address": _SELLER_WALLET},
         # 4. POST /settle/{uid}
@@ -194,11 +212,11 @@ def test_happy_path_drives_to_ready():
          "tenant_credentials": {"password": "hunter2"}},
     ]
 
-    build_calls: list[tuple[str, int, int]] = []
+    build_calls: list[tuple[EscrowTermsProposal, str, int, int]] = []
     create_calls: list[list[EscrowTerms]] = []
 
-    def _build_escrow_terms(seller_wallet, agreed_price, duration_seconds):
-        build_calls.append((seller_wallet, agreed_price, duration_seconds))
+    def _build_escrow_terms(proposal, seller_wallet, agreed_price, duration_seconds):
+        build_calls.append((proposal, seller_wallet, agreed_price, duration_seconds))
         return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
 
     def _create_escrow(escrows):
@@ -230,8 +248,13 @@ def test_happy_path_drives_to_ready():
     assert result.agreed_price == 50
     assert result.negotiation_id == "neg-1"
 
-    # build_escrow_terms received the negotiated agreement.
-    assert build_calls == [(_SELLER_WALLET, 50, 7200)]
+    # build_escrow_terms received the proposal echoed by the seller +
+    # the negotiated agreement.
+    assert len(build_calls) == 1
+    captured_proposal, captured_seller, captured_price, captured_duration = build_calls[0]
+    assert captured_proposal.escrow_kind == "erc20_non_tierable"
+    assert captured_proposal.payment_token == _TOKEN
+    assert (captured_seller, captured_price, captured_duration) == (_SELLER_WALLET, 50, 7200)
     # create_escrow received the canonical EscrowTerms list.
     assert len(create_calls) == 1
     assert len(create_calls[0]) == 1
@@ -277,7 +300,7 @@ def test_first_match_exits_second_agrees():
         {"negotiation_id": "neg-1", "action": "exit",
          "reason": "price_unreasonable"},
         # /negotiate/new on seller2 — accepts
-        {"negotiation_id": "neg-2", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-2", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
         # Seller2 wallet
         {"agent_wallet_address": _SELLER_WALLET},
         # POST /settle/{uid}
@@ -313,7 +336,7 @@ def test_first_match_exits_second_agrees():
 def test_escrow_hook_failure_returns_exited_with_reason():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
     ]
 
@@ -345,7 +368,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
 def test_provisioning_failed_returns_failed_status():
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         {"status": "failed", "reason": "no available VM"},
@@ -377,7 +400,7 @@ def test_settlement_timeout_returns_timeout_status():
     """Seller stays provisioning past the timeout → status=timeout."""
     responses = [
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        {"negotiation_id": "neg-1", "action": "accept", "price": 50},
+        {"negotiation_id": "neg-1", "action": "accept", "price": 50, **_ACCEPTED_ECHO},
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
     ] + [{"status": "provisioning"}] * 50  # never terminal

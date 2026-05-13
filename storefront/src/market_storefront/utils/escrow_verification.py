@@ -161,6 +161,7 @@ async def verify_escrow_for_settlement(
     alkahest_client: Any,
     chain_name: str,
     alkahest_address_config_path: str | None,
+    escrow_terms_proposal: Any = None,
     escrow_kind: str = "erc20_non_tierable",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
@@ -176,24 +177,27 @@ async def verify_escrow_for_settlement(
         Our wallet address; participates in the expected obligation_data
         via the RecipientArbiter demand encoding.
     agreed_price, agreed_duration_seconds:
-        From the negotiation thread; together with the listing's token
-        and the chain config they determine the entire expected
-        obligation_data dict.
+        From the negotiation thread; together with the proposal's token
+        + arbiter_kind and the chain config they determine the entire
+        expected obligation_data dict.
     listing:
-        The seller's listing row (after ``load_listing``); supplies the
-        negotiated token contract address.
+        The seller's listing row (after ``load_listing``); used as the
+        fallback source for the payment token when no proposal is
+        available (legacy threads).
     alkahest_client:
         An ``AlkahestClient`` already bound to the right chain.
     chain_name, alkahest_address_config_path:
-        Used to resolve the canonical RecipientArbiter + escrow contract
+        Used to resolve the canonical arbiter + escrow contract
         addresses for the chain (a static config lookup, not an RPC call).
+    escrow_terms_proposal:
+        The buyer's proposal, persisted on the negotiation thread by
+        step 7's protocol. When present, supplies the payment_token,
+        arbiter_kind, and escrow_kind (overriding the kwargs below).
+        None for legacy threads — verifier falls back to the listing-
+        derived token and ``escrow_kind`` / arbiter defaults.
     escrow_kind:
-        Which on-chain escrow contract holds this escrow. Looked up in
-        the EscrowKindCodec registry to pick the SDK read path. Today
-        only ``"erc20_non_tierable"`` is registered; the parameter is
-        explicit so step 7 (protocol-level EscrowTerms exchange) can
-        thread the buyer's chosen kind through without further changes
-        here.
+        Fallback when ``escrow_terms_proposal`` is None. Today only
+        ``"erc20_non_tierable"`` is registered.
     now_unix:
         Override for ``time.time()`` (test seam).
     get_obligation_fn / build_obligation_data_fn:
@@ -218,10 +222,22 @@ async def verify_escrow_for_settlement(
             build_payment_obligation_data as build_obligation_data_fn,
         )
 
+    # The proposal (when present) is the source of truth for which on-chain
+    # contracts to consult. Falls back to the parameter defaults for legacy
+    # threads that pre-date the protocol-level proposal exchange.
+    if escrow_terms_proposal is not None:
+        effective_escrow_kind = escrow_terms_proposal.escrow_kind
+        effective_arbiter_kind = escrow_terms_proposal.arbiter_kind
+        effective_token = escrow_terms_proposal.payment_token
+    else:
+        effective_escrow_kind = escrow_kind
+        effective_arbiter_kind = "recipient"
+        effective_token = _extract_token_contract_from_listing(listing)
+
     if get_obligation_fn is None:
         from service.clients.alkahest import get_escrow_kind_codec
         try:
-            _codec = get_escrow_kind_codec(escrow_kind)
+            _codec = get_escrow_kind_codec(effective_escrow_kind)
         except ValueError as exc:
             raise EscrowVerificationError(
                 f"Cannot read escrow {escrow_uid}: {exc}"
@@ -234,7 +250,6 @@ async def verify_escrow_for_settlement(
         raise EscrowVerificationError(
             "Seller wallet address is not configured — cannot verify escrow recipient"
         )
-    token_contract_address = _extract_token_contract_from_listing(listing)
 
     # Build the expected obligation_data via the same helper the buyer uses.
     # Any divergence between sides means a misconfigured chain/token/arbiter.
@@ -243,9 +258,10 @@ async def verify_escrow_for_settlement(
             seller_wallet=seller_wallet,
             agreed_price=int(agreed_price),
             duration_seconds=int(agreed_duration_seconds),
-            token_contract_address=token_contract_address,
+            token_contract_address=effective_token,
             chain_name=chain_name,
             addr_config_path=alkahest_address_config_path,
+            arbiter_kind=effective_arbiter_kind,
         )
     except Exception as exc:
         raise EscrowVerificationError(

@@ -514,6 +514,11 @@ async def start_sync_negotiation(
             our_initial_price=our_price,
             our_strategy=strategy,
             requested_duration_seconds=requested_duration_seconds,
+            buyer_escrow_terms_proposal=(
+                _accepted_escrow_proposal.model_dump()
+                if _accepted_escrow_proposal is not None
+                else None
+            ),
         )
         # Round-0 record of the buyer's opening proposal.
         await txn.add_message(

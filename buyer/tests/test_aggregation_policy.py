@@ -68,7 +68,7 @@ def _escrow_proposal() -> EscrowTermsProposal:
     )
 
 
-def _build_escrow_terms_stub(seller_wallet, agreed_price, duration_seconds):
+def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
         maker="buyer",
@@ -76,11 +76,28 @@ def _build_escrow_terms_stub(seller_wallet, agreed_price, duration_seconds):
         obligation_data={
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
-            "token": "0x" + "ab" * 20,
+            "token": proposal.payment_token,
             "amount": int(agreed_price) * int(duration_seconds) // 3600,
         },
-        expiration_unix=1_800_000_000,
+        expiration_unix=proposal.expiration_unix,
     )]
+
+
+# Echo for /negotiate/new mock replies so _settle_one can read the
+# accepted proposal off the outcome.
+_ACCEPTED_ECHO_AGG = {
+    "accepted_provision_terms": {
+        "duration_seconds": 3600,
+        "ssh_public_key": "ssh-rsa AAAA...",
+        "compute_resource": None,
+    },
+    "accepted_escrow_terms_proposal": {
+        "escrow_kind": "erc20_non_tierable",
+        "arbiter_kind": "recipient",
+        "payment_token": "0x" + "ab" * 20,
+        "expiration_unix": 1_800_000_000,
+    },
+}
 
 
 @dataclass
@@ -135,12 +152,12 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         ],
         "seller-a": [
             # /negotiate/new — seller-a accepts at 80 (worse for buyer)
-            {"negotiation_id": "neg-a", "action": "accept", "price": 80},
+            {"negotiation_id": "neg-a", "action": "accept", "price": 80, **_ACCEPTED_ECHO_AGG},
             # Settlement flow only runs for the *winner*; seller-a never gets here
         ],
         "seller-b": [
             # /negotiate/new — seller-b accepts at 60 (better for buyer)
-            {"negotiation_id": "neg-b", "action": "accept", "price": 60},
+            {"negotiation_id": "neg-b", "action": "accept", "price": 60, **_ACCEPTED_ECHO_AGG},
             # Wallet + settle for the winner
             {"agent_wallet_address": _SELLER_WALLET_B},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -191,7 +208,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             ]},
         ],
         "seller-a": [
-            {"negotiation_id": "neg-a", "action": "accept", "price": 50},
+            {"negotiation_id": "neg-a", "action": "accept", "price": 50, **_ACCEPTED_ECHO_AGG},
             {"agent_wallet_address": _SELLER_WALLET_A},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
             {"status": "ready", "attestation_uid": "0xattest"},
@@ -231,14 +248,18 @@ def test_custom_policy_can_short_circuit():
         # Demonstrates the contract: the policy isn't obligated to call
         # negotiate at all. Returning a synthetic outcome means the
         # orchestrator will try to settle it — which requires us to
-        # actually have a negotiation_id, so this test mainly checks
-        # the policy is invoked and the orchestrator routes through it.
+        # populate accepted_escrow_terms_proposal as the seller would
+        # normally have echoed back. Policies that don't negotiate are
+        # responsible for synthesizing this themselves.
         if len(matches) < 2:
             return None
         return (matches[1], NegotiationOutcome(
             status="agreed",
             negotiation_id="synthetic-1",
             agreed_price=42,
+            duration_seconds=3600,
+            accepted_provision_terms=_provision(),
+            accepted_escrow_terms_proposal=_escrow_proposal(),
         ))
 
     routes = {

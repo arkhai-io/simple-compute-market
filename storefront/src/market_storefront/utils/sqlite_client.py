@@ -196,6 +196,14 @@ class SQLiteClient:
                   -- unlimited). Stays for the lifetime of the thread; the agreed
                   -- value below is just an echo when the negotiation succeeds.
                   requested_duration_seconds INTEGER,
+                  -- Buyer's escrow shape proposal — opaque JSON blob captured at
+                  -- /negotiate/new (validated against the listing's acceptance
+                  -- set). Persisted because settlement-time verification
+                  -- reconstructs the expected on-chain obligation_data from
+                  -- this; reading from the thread instead of re-deriving from
+                  -- the listing means the negotiated artifact is the literal
+                  -- source of truth.
+                  buyer_escrow_terms_proposal TEXT,
                   -- Committed agreement artifact: populated when terminal_state='success'.
                   -- Captures the negotiation's output as queryable state so settlement
                   -- can run (or be retried) as a separate step without replaying rounds.
@@ -249,6 +257,10 @@ class SQLiteClient:
                 pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN requested_duration_seconds INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN buyer_escrow_terms_proposal TEXT")
             except sqlite3.OperationalError:
                 pass
             try:
@@ -2172,7 +2184,12 @@ class SQLiteClient:
         *,
         negotiation_id: str,
     ) -> dict[str, Any] | None:
-        """Return the negotiation_threads row as a dict, or None if absent."""
+        """Return the negotiation_threads row as a dict, or None if absent.
+
+        ``buyer_escrow_terms_proposal`` is the persisted JSON blob captured
+        at /negotiate/new; deserialized back to a dict for the caller. The
+        caller (settlement) re-types it via service.schemas.EscrowTermsProposal.
+        """
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -2183,6 +2200,7 @@ class SQLiteClient:
                            our_agent_id, their_agent_id, status,
                            created_at, updated_at, terminal_state,
                            requested_duration_seconds,
+                           buyer_escrow_terms_proposal,
                            agreed_price, agreed_duration_seconds, agreed_at
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
@@ -2196,9 +2214,21 @@ class SQLiteClient:
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
                     "requested_duration_seconds",
+                    "buyer_escrow_terms_proposal",
                     "agreed_price", "agreed_duration_seconds", "agreed_at",
                 ]
-                return dict(zip(keys, row))
+                result = dict(zip(keys, row))
+                # Deserialize the JSON blob back to a dict for the caller.
+                raw_proposal = result.get("buyer_escrow_terms_proposal")
+                if isinstance(raw_proposal, str) and raw_proposal:
+                    try:
+                        result["buyer_escrow_terms_proposal"] = json.loads(raw_proposal)
+                    except (ValueError, TypeError):
+                        # Preserve as the raw string if it doesn't parse;
+                        # the caller can decide whether to error or proceed
+                        # without the proposal.
+                        pass
+                return result
             finally:
                 conn.close()
 
@@ -2362,6 +2392,7 @@ class SQLiteClient:
         our_initial_price: int | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        buyer_escrow_terms_proposal: dict[str, Any] | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
 
@@ -2377,12 +2408,21 @@ class SQLiteClient:
             our_strategy: Private strategy
             requested_duration_seconds: Buyer's duration ask from /negotiate/new.
                 Validated against the listing's max_duration_seconds upstream.
+            buyer_escrow_terms_proposal: The buyer's accepted escrow shape
+                proposal, persisted as a JSON blob. Settlement reads this
+                back to reconstruct the expected on-chain obligation_data.
+                None for legacy clients that didn't send a proposal.
         """
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 timestamp = datetime.now().isoformat()
+                proposal_blob = (
+                    json.dumps(buyer_escrow_terms_proposal)
+                    if buyer_escrow_terms_proposal is not None
+                    else None
+                )
 
                 # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
@@ -2391,14 +2431,16 @@ class SQLiteClient:
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        buyer_escrow_terms_proposal,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        proposal_blob,
                         timestamp, timestamp,
                     ),
                 )

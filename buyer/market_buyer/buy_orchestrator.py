@@ -787,11 +787,29 @@ def _settle_one(
             )
 
     # Materialize the negotiated outcome into on-chain-ready EscrowTerms,
-    # then submit. Today this is one buyer-made ERC20 escrow; the list
-    # shape is forward-looking for multi-escrow designs.
+    # then submit. The seller echoed the accepted proposal back in the
+    # negotiation response — using *that* (not the buyer's locally-built
+    # proposal) means any drift between sides surfaces as a runtime
+    # error here rather than silently mismatching on-chain.
+    accepted_proposal = outcome.accepted_escrow_terms_proposal
+    if accepted_proposal is None:
+        on_event(
+            "escrow_create_failed",
+            {"error": "seller did not echo accepted_escrow_terms_proposal"},
+        )
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_price=outcome.agreed_price,
+            reason="missing_accepted_escrow_terms_proposal",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
     try:
         escrows = build_escrow_terms(
-            seller_wallet, terms.agreed_price, terms.duration_seconds,
+            accepted_proposal, seller_wallet,
+            terms.agreed_price, terms.duration_seconds,
         )
     except Exception as exc:
         on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
