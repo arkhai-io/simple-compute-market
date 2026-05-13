@@ -161,6 +161,7 @@ async def verify_escrow_for_settlement(
     alkahest_client: Any,
     chain_name: str,
     alkahest_address_config_path: str | None,
+    escrow_kind: str = "erc20_non_tierable",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
     build_obligation_data_fn: Any = None,
@@ -186,14 +187,21 @@ async def verify_escrow_for_settlement(
     chain_name, alkahest_address_config_path:
         Used to resolve the canonical RecipientArbiter + escrow contract
         addresses for the chain (a static config lookup, not an RPC call).
+    escrow_kind:
+        Which on-chain escrow contract holds this escrow. Looked up in
+        the EscrowKindCodec registry to pick the SDK read path. Today
+        only ``"erc20_non_tierable"`` is registered; the parameter is
+        explicit so step 7 (protocol-level EscrowTerms exchange) can
+        thread the buyer's chosen kind through without further changes
+        here.
     now_unix:
         Override for ``time.time()`` (test seam).
     get_obligation_fn / build_obligation_data_fn:
-        Test seams. ``get_obligation_fn`` defaults to alkahest's
-        ``client.erc20.escrow.non_tierable.get_obligation`` and returns
-        the decoded ``{"attestation", "data"}`` shape;
-        ``build_obligation_data_fn`` defaults to the canonical helper
-        that constructs the expected obligation_data dict.
+        Test seams. ``get_obligation_fn`` defaults to the registered
+        escrow-kind codec's ``get_obligation`` (returns the decoded
+        ``{"attestation", "data"}`` shape). ``build_obligation_data_fn``
+        defaults to the canonical helper that constructs the expected
+        obligation_data dict.
 
     Raises
     ------
@@ -211,8 +219,16 @@ async def verify_escrow_for_settlement(
         )
 
     if get_obligation_fn is None:
+        from service.clients.alkahest import get_escrow_kind_codec
+        try:
+            _codec = get_escrow_kind_codec(escrow_kind)
+        except ValueError as exc:
+            raise EscrowVerificationError(
+                f"Cannot read escrow {escrow_uid}: {exc}"
+            ) from exc
+
         async def get_obligation_fn(client, uid):  # type: ignore[no-redef]
-            return await client.erc20.escrow.non_tierable.get_obligation(uid)
+            return await _codec.get_obligation(client, uid)
 
     if not seller_wallet:
         raise EscrowVerificationError(

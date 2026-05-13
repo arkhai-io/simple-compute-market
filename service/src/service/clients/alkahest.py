@@ -395,3 +395,177 @@ def build_payment_obligation_data(
         "token": token_contract_address,
         "amount": amount_raw,
     }
+
+
+# ---------------------------------------------------------------------------
+# Escrow-kind codecs
+# ---------------------------------------------------------------------------
+#
+# An EscrowKindCodec encapsulates everything escrow-contract-specific:
+#   - which on-chain contract address holds the escrow obligation
+#   - how to call ``doObligation`` for it via the alkahest SDK
+#   - how to read the obligation back via ``get_obligation``
+#
+# The buyer's create_escrow hook looks up the codec by
+# ``EscrowTerms.escrow_contract`` address — the address is the natural
+# identity, so the same EscrowTerms artifact dispatches the right SDK
+# path without any side-channel "what kind is this" metadata.
+#
+# Today only ``Erc20NonTierableEscrowCodec`` is registered. Adding
+# native / ERC721 / token-bundle / attestation escrows later means
+# writing a codec + registering it — neither the buyer's submit hook
+# nor the seller's verifier needs to learn about new kinds.
+
+
+def _normalize_demand_bytes(value: Any) -> bytes:
+    """Coerce a demand value (hex string or bytes) to raw bytes.
+
+    Buyer's EscrowTerms stores demand as a "0x"-prefixed hex string for
+    JSON-friendly transport; chain submission needs raw bytes. Tolerate
+    bare hex (no 0x) and existing bytes so callers don't have to
+    normalize themselves.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, str):
+        s = value
+        if s.startswith("0x"):
+            s = s[2:]
+        return bytes.fromhex(s)
+    raise TypeError(
+        f"demand must be bytes or hex-string, got {type(value).__name__}: {value!r}"
+    )
+
+
+@runtime_checkable
+class EscrowKindCodec(Protocol):
+    """Per-escrow-contract SDK adapter.
+
+    Maps an abstract ``EscrowTerms`` (flat ``obligation_data`` dict +
+    expiration) to the alkahest SDK's create-obligation / read-obligation
+    calls for one specific obligation contract. Stateless module-level
+    singletons in ``_ESCROW_KIND_CODECS``; lookup is by ``kind`` or by
+    on-chain contract address (the codec's ``resolve_address`` output).
+    """
+
+    kind: str
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str: ...
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str: ...
+
+    async def get_obligation(self, client: Any, uid: str) -> Any: ...
+
+
+class Erc20NonTierableEscrowCodec:
+    """``ERC20EscrowObligation`` (non-tierable variant).
+
+    Solidity ObligationData layout:
+        (address arbiter, bytes demand, address token, uint256 amount)
+
+    SDK call shape splits the four fields into:
+      - ``price_data = {"address": token, "value": amount}``
+      - ``arbiter_data = {"arbiter": arbiter, "demand": <bytes>}``
+      - ``expiration`` as a separate uint64
+    """
+
+    kind = "erc20_non_tierable"
+
+    def resolve_address(
+        self, chain_name: str, *, config_path: str | None
+    ) -> str:
+        return get_erc20_escrow_obligation_nontierable(
+            chain_name, config_path=config_path,
+        )
+
+    async def create_obligation(
+        self,
+        client: Any,
+        obligation_data: dict[str, Any],
+        expiration_unix: int,
+    ) -> str:
+        price_data = {
+            "address": obligation_data["token"],
+            "value": int(obligation_data["amount"]),
+        }
+        arbiter_data = {
+            "arbiter": obligation_data["arbiter"],
+            "demand": _normalize_demand_bytes(obligation_data["demand"]),
+        }
+        await client.erc20.util.approve(price_data, "escrow")
+        receipt = await client.erc20.escrow.non_tierable.create(
+            price_data, arbiter_data, expiration_unix,
+        )
+        uid = (receipt or {}).get("log", {}).get("uid")
+        if not uid:
+            raise RuntimeError(
+                f"escrow.create did not return a uid: {receipt!r}"
+            )
+        return uid
+
+    async def get_obligation(self, client: Any, uid: str) -> Any:
+        return await client.erc20.escrow.non_tierable.get_obligation(uid)
+
+
+_ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
+    "erc20_non_tierable": Erc20NonTierableEscrowCodec(),
+}
+
+
+def register_escrow_kind_codec(codec: EscrowKindCodec) -> None:
+    """Add or replace a codec under its ``kind``. Idempotent on kind."""
+    _ESCROW_KIND_CODECS[codec.kind] = codec
+
+
+def get_escrow_kind_codec(kind: str) -> EscrowKindCodec:
+    """Lookup by kind; raises ValueError on unknown kinds."""
+    codec = _ESCROW_KIND_CODECS.get(kind)
+    if codec is None:
+        raise ValueError(
+            f"Unknown escrow_kind={kind!r}; "
+            f"registered: {sorted(_ESCROW_KIND_CODECS)}"
+        )
+    return codec
+
+
+def get_escrow_kind_codec_by_address(
+    address: str,
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> EscrowKindCodec:
+    """Find the codec whose resolved address matches ``address`` on
+    ``chain_name``.
+
+    Iterates registered codecs (O(n); n is small). Used by the buyer's
+    submit hook to pick the SDK path from ``EscrowTerms.escrow_contract``
+    without carrying a separate escrow_kind tag. Raises ValueError when
+    no codec matches — usually means the buyer's EscrowTerms was built
+    against a different chain config than what's now configured.
+    """
+    target = address.lower()
+    for codec in _ESCROW_KIND_CODECS.values():
+        try:
+            resolved = codec.resolve_address(chain_name, config_path=config_path)
+        except Exception:
+            # A codec that can't resolve on this chain (e.g. anvil without
+            # an override JSON) is simply not a candidate; skip it.
+            continue
+        if resolved.lower() == target:
+            return codec
+    raise ValueError(
+        f"No escrow-kind codec found for address={address!r} on chain={chain_name!r}; "
+        f"registered: {sorted(_ESCROW_KIND_CODECS)}"
+    )
+
+
+def known_escrow_kinds() -> list[str]:
+    """Snapshot of currently-registered escrow kinds (for diagnostics)."""
+    return sorted(_ESCROW_KIND_CODECS)

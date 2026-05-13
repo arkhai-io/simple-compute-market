@@ -140,7 +140,7 @@ def make_create_escrow_fn(
         from alkahest_py import AlkahestClient
         from service.clients.alkahest import (
             get_alkahest_network,
-            get_erc20_escrow_obligation_nontierable,
+            get_escrow_kind_codec_by_address,
             prewarm_alkahest_address_config_cache,
             resolve_alkahest_address_config,
         )
@@ -161,49 +161,21 @@ def make_create_escrow_fn(
             address_config=address_config,
         )
 
-        # Only the ERC20 non-tierable path is implemented today. Refuse
-        # anything else so a misconfigured EscrowTerms doesn't silently
-        # get submitted to the wrong contract.
-        expected_erc20 = get_erc20_escrow_obligation_nontierable(
-            chain_name, config_path=addr_config_path,
-        ).lower()
-
         async def _do_one(escrow: EscrowTerms) -> str:
-            if escrow.escrow_contract.lower() != expected_erc20:
-                raise NotImplementedError(
-                    f"escrow_contract={escrow.escrow_contract!r} not supported "
-                    f"yet — only ERC20 non-tierable ({expected_erc20!r}) is wired"
-                )
-            obligation = escrow.obligation_data
-            # ObligationData fields → SDK's split shape.
-            price_data = {
-                "address": obligation["token"],
-                "value": int(obligation["amount"]),
-            }
-            demand_raw = obligation["demand"]
-            demand_bytes = (
-                bytes.fromhex(demand_raw[2:])
-                if isinstance(demand_raw, str) and demand_raw.startswith("0x")
-                else bytes(demand_raw)
+            # Codec lookup is the dispatch gate — an EscrowTerms whose
+            # escrow_contract doesn't match a registered codec raises
+            # at this point (rather than being silently misrouted).
+            codec = get_escrow_kind_codec_by_address(
+                escrow.escrow_contract, chain_name, config_path=addr_config_path,
             )
-            arbiter_data = {
-                "arbiter": obligation["arbiter"],
-                "demand": demand_bytes,
-            }
             logger.info(
-                "[CLI_ESCROW] Creating escrow contract=%s amount=%s exp=%s",
-                escrow.escrow_contract, obligation["amount"], escrow.expiration_unix,
+                "[CLI_ESCROW] Creating escrow kind=%s contract=%s amount=%s exp=%s",
+                codec.kind, escrow.escrow_contract,
+                escrow.obligation_data.get("amount"), escrow.expiration_unix,
             )
-            await client.erc20.util.approve(price_data, "escrow")
-            receipt = await client.erc20.escrow.non_tierable.create(
-                price_data, arbiter_data, escrow.expiration_unix,
+            return await codec.create_obligation(
+                client, escrow.obligation_data, escrow.expiration_unix,
             )
-            uid = (receipt or {}).get("log", {}).get("uid")
-            if not uid:
-                raise RuntimeError(
-                    f"escrow.create did not return a uid: {receipt!r}"
-                )
-            return uid
 
         async def _do_all() -> list[str]:
             return [await _do_one(e) for e in buyer_escrows]
