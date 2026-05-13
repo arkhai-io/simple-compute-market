@@ -89,3 +89,21 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ---------------------------------------------------------------------------
+# zerotierEnabled: controls whether ZeroTier networking infrastructure is
+# included in the pod spec (NET_ADMIN/SYS_MODULE capabilities and the
+# /dev/net/tun hostPath volume).
+#
+# true  (default) — full ZeroTier support; required for peer-to-peer overlay
+#                   networking between seller and buyer agents.
+# false           — ZeroTier daemon still starts via entrypoint.sh (fail-soft)
+#                   but the pod requests no privileged capabilities and mounts
+#                   no hostPath volumes. Use for GKE Autopilot or any
+#                   environment where the agent is reachable via an API gateway
+#                   rather than a ZeroTier overlay network.
+#
+# The application runtime is unaffected when seller.zerotier_network is unset
+# in config.toml — all ZeroTier code paths are conditional on that value.
+# ---------------------------------------------------------------------------
+zerotierEnabled: true

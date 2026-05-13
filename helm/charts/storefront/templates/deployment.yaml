@@ -2,6 +2,15 @@
 One Deployment per agent in .Values.agents. Each pod mounts its
 per-agent Secret as a single config.toml file at /etc/arkhai/config.toml
 and points XDG_CONFIG_HOME at /etc — no env-var-based config.
+
+zerotierEnabled (default: true) controls whether ZeroTier networking
+infrastructure is included in the pod spec. Set to false for environments
+where ZeroTier is unnecessary (e.g. GKE Autopilot, API-gateway-fronted
+deployments) or where the required Linux capabilities (NET_ADMIN, SYS_MODULE)
+and hostPath volumes are not permitted. The application runtime is unaffected
+when zerotier_network is unset in config.toml — entrypoint.sh is already
+fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
+when seller.zerotier_network is absent.
 */}}
 {{- range $agent := .Values.agents }}
 apiVersion: apps/v1
@@ -63,11 +72,13 @@ spec:
             - name: http
               containerPort: {{ $agent.port }}
               protocol: TCP
+          {{- if $.Values.zerotierEnabled }}
           securityContext:
             capabilities:
               add:
                 - NET_ADMIN
                 - SYS_MODULE
+          {{- end }}
           env:
             # Sole env var: tell the typed config loader where to find
             # the mounted TOML. service.config_loader.user_config_dir()
@@ -77,8 +88,10 @@ spec:
             - name: XDG_CONFIG_HOME
               value: /etc
           volumeMounts:
+            {{- if $.Values.zerotierEnabled }}
             - name: tun-device
               mountPath: /dev/net/tun
+            {{- end }}
             - name: arkhai-config
               mountPath: /etc/arkhai
               readOnly: true
@@ -101,9 +114,11 @@ spec:
           resources:
             {{- toYaml $.Values.resources | nindent 12 }}
       volumes:
+        {{- if $.Values.zerotierEnabled }}
         - name: tun-device
           hostPath:
             path: /dev/net/tun
+        {{- end }}
         - name: arkhai-config
           secret:
             secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}

@@ -15,6 +15,18 @@ integrationTests:
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
+# createSecret: controls whether the chart creates the e2e credentials Secret.
+#
+# true  (default) — chart renders the Secret from the values below.
+#                   Use for local dev and CI runs against a local cluster.
+# false           — chart skips Secret creation; a pre-existing Secret with
+#                   the correct name must exist (e.g. created by ESO).
+#                   Use for GKE environments where secrets come from
+#                   Secret Manager via External Secrets Operator.
+# ---------------------------------------------------------------------------
+createSecret: true
+
+# ---------------------------------------------------------------------------
 # Seller credentials — must match the storefront agent that the e2e test
 # targets. Duplicated from storefront.agents[*].secret deliberately: the
 # e2e subchart is self-contained and mounts nothing from the storefront
