@@ -175,6 +175,33 @@ def get_recipient_arbiter(
     )
 
 
+def get_erc20_escrow_obligation_nontierable(
+    chain_name: str,
+    *,
+    config_path: str | None = None,
+) -> str:
+    """Resolve the address of ``ERC20EscrowObligation`` (non-tierable variant).
+
+    This is where buyer-side ERC20 payment escrows live on-chain. It's the
+    contract the buyer calls ``doObligation`` on at escrow creation, and the
+    one the seller reads back via ``get_obligation`` at settlement-time
+    verification. Populates ``EscrowTerms.escrow_contract`` so settlement
+    code can dispatch the right SDK read shape without consulting a codec
+    registry — the address is the natural identity.
+    """
+    selected = get_alkahest_network(chain_name)
+    override = _load_override_config(config_path)
+    if override is not None:
+        return str(override["erc20_addresses"]["escrow_obligation_nontierable"])
+    if selected == NETWORK_ANVIL:
+        raise ValueError(
+            "chain_name='anvil' requires an explicit alkahest_address_config_path "
+            "with deployed local addresses."
+        )
+    cfg = _sdk_addresses_for_chain(selected)
+    return str(cfg.erc20_addresses.escrow_obligation_nontierable)
+
+
 def encode_recipient_demand(recipient_address: str) -> bytes:
     """ABI-encode RecipientArbiter.DemandData{address recipient}.
 

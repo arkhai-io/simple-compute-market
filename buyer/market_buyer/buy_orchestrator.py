@@ -27,9 +27,10 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from service.schemas import ProvisionTerms
+from service.schemas import EscrowTerms, ProvisionTerms
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
+from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn
 
 
 DEFAULT_HTTP_TIMEOUT = 30.0
@@ -423,11 +424,12 @@ def wait_for_settlement(
 
 @dataclass
 class AgreedTerms:
-    """What the buyer needs to turn an agreement into an on-chain escrow.
+    """Human-facing summary of a finalized negotiation.
 
-    Passed into the `create_escrow` hook. The hook is responsible for
-    knowing the chain / token / arbiter details (those are config in
-    the buyer's environment) and returning the on-chain escrow UID.
+    Passed to the optional ``confirm_settlement`` callback so the user
+    can review what they're about to commit to before any chain write.
+    Not used by ``create_escrow`` itself — that hook reads
+    ``list[EscrowTerms]`` built by ``build_escrow_terms``.
     """
     seller_url: str
     seller_wallet_address: str
@@ -435,10 +437,6 @@ class AgreedTerms:
     listing_id: str
     agreed_price: int               # base units, per-hour rate
     duration_seconds: int           # buyer's lease ask (negotiation init)
-
-
-CreateEscrowFn = Callable[[AgreedTerms], str]
-"""A function `terms -> escrow_uid`. Synchronous; on-chain call may block."""
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +470,7 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
+    build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
     max_matches_to_try: int = 5,
@@ -493,9 +492,15 @@ def run_buy(
         init ask sent to the seller and the lease window the escrow
         amount is computed from; ``provision.ssh_public_key`` is sent
         in the settle request for VM injection.
+    build_escrow_terms
+        Materializes the agreed negotiation into the canonical
+        ``list[EscrowTerms]`` (the escrow specs that will be submitted
+        on-chain). Today returns a single-element list; later steps
+        may return multiple (e.g. payment + seller penalty deposit).
     create_escrow
-        Hook that takes AgreedTerms and returns an on-chain escrow UID.
-        Injected so the orchestrator itself is testable without alkahest-py.
+        Thin submit hook: takes the EscrowTerms list, returns the
+        uids of the buyer-made escrows in input order. Injected so
+        the orchestrator itself is testable without alkahest-py.
     matches
         Pre-computed match list. If None, queries the registry directly.
     on_event
@@ -693,6 +698,7 @@ def run_buy(
         outcome=outcome,
         config=config,
         provision=provision,
+        build_escrow_terms=build_escrow_terms,
         create_escrow=create_escrow,
         confirm_settlement=confirm_settlement,
         settlement_poll_interval=settlement_poll_interval,
@@ -709,7 +715,8 @@ def _settle_one(
     outcome: NegotiationOutcome,
     config: "BuyConfig",
     provision: ProvisionTerms,
-    create_escrow: "CreateEscrowFn",
+    build_escrow_terms: BuildEscrowTermsFn,
+    create_escrow: CreateEscrowFn,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
     settlement_poll_interval: float,
     settlement_total_timeout: float,
@@ -775,9 +782,31 @@ def _settle_one(
                 attempts=attempts,
             )
 
-    on_event("escrow_create_start", {"terms": terms.__dict__})
+    # Materialize the negotiated outcome into on-chain-ready EscrowTerms,
+    # then submit. Today this is one buyer-made ERC20 escrow; the list
+    # shape is forward-looking for multi-escrow designs.
     try:
-        escrow_uid = create_escrow(terms)
+        escrows = build_escrow_terms(
+            seller_wallet, terms.agreed_price, terms.duration_seconds,
+        )
+    except Exception as exc:
+        on_event("escrow_create_failed", {"error": f"build_escrow_terms: {exc}"})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_price=outcome.agreed_price,
+            reason=f"build_escrow_terms_failed: {exc}",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
+
+    on_event(
+        "escrow_create_start",
+        {"terms": terms.__dict__, "escrows": [e.model_dump() for e in escrows]},
+    )
+    try:
+        escrow_uids = create_escrow(escrows)
     except Exception as exc:
         on_event("escrow_create_failed", {"error": str(exc)})
         return BuyResult(
@@ -789,7 +818,39 @@ def _settle_one(
             rounds=outcome.rounds,
             attempts=attempts,
         )
-    on_event("escrow_created", {"escrow_uid": escrow_uid})
+
+    # The hook returns uids for buyer-made entries in input order. The
+    # primary payment escrow is the first one; that's what carries
+    # through to /settle and the seller's verification.
+    buyer_escrows = [e for e in escrows if e.maker == "buyer"]
+    if len(escrow_uids) != len(buyer_escrows):
+        on_event(
+            "escrow_create_failed",
+            {"error": f"create_escrow returned {len(escrow_uids)} uids, "
+                      f"expected {len(buyer_escrows)} for buyer-made entries"},
+        )
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_price=outcome.agreed_price,
+            reason="create_escrow_uid_count_mismatch",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
+    if not escrow_uids:
+        on_event("escrow_create_failed", {"error": "no buyer-made escrows in list"})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_price=outcome.agreed_price,
+            reason="no_buyer_made_escrow",
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
+    escrow_uid = escrow_uids[0]
+    on_event("escrow_created", {"escrow_uid": escrow_uid, "all_uids": escrow_uids})
 
     submit_settlement(
         seller_url=seller_url,

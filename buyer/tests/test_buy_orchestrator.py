@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from service.schemas import ProvisionTerms
+from service.schemas import EscrowTerms, ProvisionTerms
 
 from market_buyer.buy_orchestrator import (
     AgreedTerms,
@@ -38,6 +38,9 @@ _BUYER_ADDR = "0x" + "cc" * 20
 _SELLER_URL = "http://seller:8001"
 _SELLER_WALLET = "0x" + "bb" * 20
 _REGISTRY = "http://registry:4000"
+_ERC20_ESCROW = "0x" + "ee" * 20
+_RECIPIENT_ARBITER = "0x" + "cd" * 20
+_TOKEN = "0x" + "ab" * 20
 
 
 def _config(order_id: str = "buyer-1") -> BuyConfig:
@@ -60,6 +63,25 @@ def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> Provi
         duration_seconds=duration_seconds,
         ssh_public_key=ssh_public_key,
     )
+
+
+def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
+    """An ERC20-shaped EscrowTerms for tests that don't care about codec details."""
+    return EscrowTerms(
+        maker="buyer",
+        escrow_contract=_ERC20_ESCROW,
+        obligation_data={
+            "arbiter": _RECIPIENT_ARBITER,
+            "demand": "0x" + "00" * 31 + seller_wallet[2:].rjust(2, "0"),
+            "token": _TOKEN,
+            "amount": int(agreed_price) * int(max(duration_seconds, 1)) // 3600,
+        },
+        expiration_unix=1_800_000_000,
+    )
+
+
+def _build_escrow_terms_ok(seller_wallet, agreed_price, duration_seconds):
+    return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
 
 
 @dataclass
@@ -108,7 +130,8 @@ def test_no_matches_returns_no_matches_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            create_escrow=lambda terms: "0xnever",
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xnever"],
         )
     assert result.status == "no_matches"
 
@@ -128,7 +151,8 @@ def test_matches_can_be_preseeded_skipping_registry_query():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            create_escrow=lambda terms: "0xnever",
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xnever"],
             matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
         )
     assert result.status == "exited"
@@ -159,11 +183,16 @@ def test_happy_path_drives_to_ready():
          "tenant_credentials": {"password": "hunter2"}},
     ]
 
-    escrow_calls: list[AgreedTerms] = []
+    build_calls: list[tuple[str, int, int]] = []
+    create_calls: list[list[EscrowTerms]] = []
 
-    def _create_escrow(terms: AgreedTerms) -> str:
-        escrow_calls.append(terms)
-        return "0xescrow"
+    def _build_escrow_terms(seller_wallet, agreed_price, duration_seconds):
+        build_calls.append((seller_wallet, agreed_price, duration_seconds))
+        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+
+    def _create_escrow(escrows):
+        create_calls.append(escrows)
+        return ["0xescrow"]
 
     events: list[tuple[str, dict]] = []
 
@@ -175,6 +204,7 @@ def test_happy_path_drives_to_ready():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            build_escrow_terms=_build_escrow_terms,
             create_escrow=_create_escrow,
             on_event=lambda name, body: events.append((name, body)),
             sleep=lambda _s: None,
@@ -188,13 +218,15 @@ def test_happy_path_drives_to_ready():
     assert result.agreed_price == 50
     assert result.negotiation_id == "neg-1"
 
-    # Escrow hook was called with the negotiated terms.
-    assert len(escrow_calls) == 1
-    terms = escrow_calls[0]
-    assert terms.agreed_price == 50
-    assert terms.seller_wallet_address == _SELLER_WALLET
-    assert terms.duration_seconds == 7200
-    assert terms.negotiation_id == "neg-1"
+    # build_escrow_terms received the negotiated agreement.
+    assert build_calls == [(_SELLER_WALLET, 50, 7200)]
+    # create_escrow received the canonical EscrowTerms list.
+    assert len(create_calls) == 1
+    assert len(create_calls[0]) == 1
+    assert create_calls[0][0].maker == "buyer"
+    assert create_calls[0][0].obligation_data["token"] == _TOKEN
+    # amount = price × duration / 3600 = 50 × 7200 / 3600 = 100
+    assert create_calls[0][0].obligation_data["amount"] == 100
 
     # Observer saw the key stages.
     stages = [name for name, _ in events]
@@ -239,7 +271,8 @@ def test_first_match_exits_second_agrees():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            create_escrow=lambda terms: "0xescrow",
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
         )
     assert result.status == "ready"
@@ -261,7 +294,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
         {"agent_wallet_address": _SELLER_WALLET},
     ]
 
-    def _broken_escrow(terms: AgreedTerms) -> str:
+    def _broken_escrow(escrows):
         raise RuntimeError("chain RPC down")
 
     with patch(
@@ -272,6 +305,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
+            build_escrow_terms=_build_escrow_terms_ok,
             create_escrow=_broken_escrow,
             sleep=lambda _: None,
         )
@@ -300,7 +334,8 @@ def test_provisioning_failed_returns_failed_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            create_escrow=lambda terms: "0xescrow",
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
         )
     assert result.status == "failed"
@@ -330,7 +365,8 @@ def test_settlement_timeout_returns_timeout_status():
             config=_config(),
             constraints=_constraints(),
             provision=_provision(),
-            create_escrow=lambda terms: "0xescrow",
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xescrow"],
             settlement_poll_interval=0.01,
             settlement_total_timeout=0.05,  # very short
             sleep=lambda _: None,

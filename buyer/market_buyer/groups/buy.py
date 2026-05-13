@@ -502,16 +502,26 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(2)
 
-        # Build the escrow hook.
-        from ..escrow_client import make_create_escrow_fn
+        # Build the escrow-terms builder + on-chain submit hook. The
+        # builder materializes the negotiation outcome into EscrowTerms
+        # (today: one buyer-made ERC20 escrow); the hook submits each
+        # buyer-made entry on-chain. Both are env-config-closed at this
+        # layer so the orchestrator doesn't see chain creds.
+        from ..escrow_client import (
+            make_buyer_payment_escrow_terms_fn,
+            make_create_escrow_fn,
+        )
+        build_escrow_terms = make_buyer_payment_escrow_terms_fn(
+            chain_name=chain,
+            addr_config_path=addr_cfg or None,
+            token_contract_address=tc,
+            expiration_seconds=expiration_seconds,
+        )
         create_escrow = make_create_escrow_fn(
             private_key=pk,
             rpc_url=rpc,
             chain_name=chain,
             addr_config_path=addr_cfg or None,
-            token_contract_address=tc,
-            token_decimals=token_decimals,
-            expiration_seconds=expiration_seconds,
         )
 
         # Filter-aware discovery: pre-fetch matches with spec filters applied
@@ -660,6 +670,7 @@ def register(app: typer.Typer) -> None:
                 config=config,
                 constraints=constraints,
                 provision=provision,
+                build_escrow_terms=build_escrow_terms,
                 create_escrow=create_escrow,
                 matches=matches,
                 max_matches_to_try=max_matches,
