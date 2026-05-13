@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Literal
 
 UTC = timezone.utc
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
@@ -129,6 +129,75 @@ class ProvisionTerms(BaseModel):
             "time. None on the buyer's side before a specific match "
             "is selected; populated by the seller (or buyer post-match) "
             "and persisted on the negotiation thread."
+        ),
+    )
+
+
+class EscrowTerms(BaseModel):
+    """One on-chain escrow obligation in flat, self-describing form.
+
+    Mirrors the call shape of any alkahest escrow contract's
+    ``doObligation(data, expirationTime)`` entry point. The
+    ``obligation_data`` dict is literally the ``ObligationData`` struct
+    for whichever contract ``escrow_contract`` points to — different
+    contracts have different shapes, but every one begins with
+    ``(address arbiter, bytes demand, …)`` followed by payment fields
+    specific to that contract (token+amount for ERC20, tokenId for
+    ERC721, native amount, bundle arrays, attestation refs, etc.).
+
+    Readers extract universal fields by key: ``obligation_data["arbiter"]``
+    and ``obligation_data["demand"]`` are present on every escrow kind.
+    The rest is contract-specific; consumers that need typed access
+    parse the dict against whichever ``ObligationData`` shape goes with
+    ``escrow_contract``.
+
+    Stored flat (not wrapped in a kind+params discriminator) so that:
+      * settlement verification is a byte-compare against the chain-read
+        obligation, with no codec dispatch needed on the read path.
+      * adding new escrow kinds (ERC721, native, bundle, attestation)
+        does not change this type — only the keys present in
+        ``obligation_data`` differ.
+
+    A negotiation outcome carries ``list[EscrowTerms]`` so multi-escrow
+    designs (e.g. payment + seller penalty deposit) are expressible
+    without a separate plan wrapper. ``maker`` distinguishes who calls
+    ``doObligation`` for each entry.
+    """
+
+    maker: Literal["buyer", "seller"] = Field(
+        description=(
+            "Which side calls ``doObligation`` for this escrow. ``buyer`` "
+            "for the standard payment escrow; ``seller`` for cases like "
+            "penalty deposits the seller posts as bond."
+        ),
+    )
+    escrow_contract: str = Field(
+        description=(
+            "Address of the on-chain escrow obligation contract — e.g. "
+            "ERC20EscrowObligation, ERC721EscrowObligation, "
+            "NativeTokenEscrowObligation, TokenBundleEscrowObligation, "
+            "AttestationEscrowObligation. The address determines the "
+            "expected shape of ``obligation_data``."
+        ),
+    )
+    obligation_data: dict[str, Any] = Field(
+        description=(
+            "The literal ``ObligationData`` struct passed to "
+            "``escrow_contract.doObligation``. Always contains at least "
+            "``arbiter`` (address) and ``demand`` (bytes, hex-encoded for "
+            "transport); the remaining keys are payment fields specific "
+            "to the escrow kind."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time at which the escrow expires on-chain. "
+            "Buyer commits to creating the escrow before this moment; "
+            "seller verifies the on-chain attestation's ``expirationTime`` "
+            "equals this value. Absolute (not relative-to-creation) so "
+            "both sides have a single agreed timestamp with no clock-drift "
+            "tolerance window."
         ),
     )
 
