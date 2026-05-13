@@ -1422,6 +1422,29 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 - `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
 - `replicaCount` exists for the storefront and provisioning API but running multiple replicas of either without shared persistent storage would be incorrect
 
+**GKE Autopilot constraints:**
+
+Two chart features are incompatible with GKE Autopilot's security policy and
+must be disabled for all GKE-hosted deployments:
+
+1. **ZeroTier networking** — the storefront requires `NET_ADMIN`/`SYS_MODULE`
+   Linux capabilities and a writable `/dev/net/tun` hostPath volume for the
+   ZeroTier daemon. Autopilot forbids both cluster-wide. The storefront chart
+   exposes `zerotierEnabled` (default `true`); set `storefront.zerotierEnabled:
+   false` in the GKE values overlay. The application runtime is unaffected when
+   `seller.zerotier_network` is absent from `config.toml` — `entrypoint.sh` is
+   fail-soft on daemon startup and all ZeroTier code paths are conditional.
+   In GKE deployments the storefront is reachable via the API gateway instead.
+
+2. **e2e-tests secret conflict** — the `helm/charts/e2e-tests/templates/secret.yaml`
+   template renders the credentials Secret unconditionally. In GKE environments,
+   External Secrets Operator (ESO) manages this Secret, causing a Helm ownership
+   conflict on install. **Fix:** add a `{{- if .Values.createSecret | default true }}`
+   guard to `secret.yaml` and add `createSecret: true` to
+   `helm/charts/e2e-tests/values.yaml`. Then set `e2e-tests.createSecret: false`
+   in the GKE values overlay (the ops repo already does this). Until the patch
+   is applied, set `e2e-tests.enabled: false` in the GKE overlay.
+
 **Resource inventory seeding** follows the same pattern as provisioning host inventory:
 
 *Three delivery mechanisms, in priority order:*
@@ -1514,13 +1537,32 @@ make push-runtime-artifacts [AR_PROJECT=compute-market-1-dev]
   └── push-cli      # gcloud artifacts generic upload
 ```
 
-**Tag model:** Docker images and the generic CLI binary are pushed with the git
-short SHA as the only tag. Python wheels are addressed by package version and
-filename, so `push-wheels` uses `gcloud artifacts versions describe` before each
-upload and skips versions that already exist. A changed wheel must still get a
-version bump before publishing; Artifact Registry will not replace an existing
-wheel with the same package/version/filename. Semver tags (`<version>-rc.N` for
-preprod, `<version>` for prod) are applied at promotion time by the
+**Image naming convention:** All service images share the image name `arkhai`
+in the docker repository, distinguished by tag. This matches `image.name: arkhai`
+in each subchart's `values.yaml`. The full AR path is:
+
+```
+us-central1-docker.pkg.dev/<project>/<project>-docker/arkhai:<tag>
+```
+
+**Tag model:** The `push-images` target uses a `push_image` macro that pushes
+two tags per service on every push:
+
+- `arkhai:<service>-<sha>-` — immutable identity (e.g. `storefront-bb5db95`)
+- `arkhai:<service>` — mutable bare tag (e.g. `storefront`); overwritten on each push
+
+GKE cluster deployments pull the bare `<service>` tag by default (matches
+`image.tag: <service>` in each subchart's `values.yaml`). The SHA tag provides
+an audit trail and supports rollback. Per-service SHA disambiguation
+(e.g. `storefront-bb5db95` vs `registry-bb5db95`) is necessary because all
+services share the `arkhai` image name in the same docker repository.
+
+Python wheels are addressed by package version and filename, so `push-wheels`
+uses `gcloud artifacts versions describe` before each upload and skips versions
+that already exist. A changed wheel must still get a version bump before
+publishing; Artifact Registry will not replace an existing wheel with the same
+package/version/filename. Semver tags (`<version>-rc.N` for preprod,
+`<version>` for prod) are applied at promotion time by the
 `compute-market-ops` CI/CD pipeline — never by this repo.
 
 **Dev wheel overwrite path:** during dev-cluster iteration, use
@@ -1680,6 +1722,40 @@ following the provisioning service pattern:
 
 This is a prerequisite for clean secret injection (wallet keys, API keys)
 via the standard Helm Secret + profile pattern.
+
+---
+
+### 4. Storefront GKE secret injection (interim workaround)
+
+**Status:** Interim workaround in place. Superseded by item 3 above when complete.
+
+**Problem:** Until the storefront migrates to dynaconf profiles (item 3), the
+`compute-market-1-ops` repo bootstraps the storefront GKE secret by rendering
+a complete `config.toml` via `helm template` and pushing it as a single opaque
+Secret Manager value (`simple-market-service-storefront-arkhai`). This means:
+
+- The wallet private key, wallet address, and admin API key cannot be rotated
+  independently — rotating any one requires re-running `make bootstrap-storefront-secret`
+  with all three values.
+- The admin API key is duplicated: embedded in the storefront `config.toml` and
+  also stored as its own Secret Manager entry (`simple-market-service-admin-api-key`)
+  consumed by provisioning and e2e-tests.
+- The e2e ExternalSecret in the ops repo hardcodes the Anvil seller private key
+  (the Anvil test value) because ESO cannot extract a field from a TOML blob.
+
+**Planned fix (requires item 3 first):**
+
+1. Once the storefront reads from a `config-storefront-secrets.yml` dynaconf
+   profile, the ops repo can manage `simple-market-service-storefront-arkhai`
+   as a structured YAML profile with `private_key`, `wallet_address`, and
+   `admin_api_key` as separate keys.
+2. `bootstrap-storefront-secret` Makefile target is removed from the ops repo.
+3. The e2e ExternalSecret can pull `sellerPrivKey` from its own dedicated Secret
+   Manager entry rather than using hardcoded Anvil values.
+4. Admin API key duplication is eliminated.
+
+**Cross-reference:** `compute-market-1-ops` `ARCHITECTURE.md § OPS-REWORK-1`
+documents the full ops-side impact.
 
 ---
 
