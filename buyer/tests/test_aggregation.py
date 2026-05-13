@@ -112,8 +112,12 @@ class TestCheapestFirst:
         _drive(policy, matches, neg)
         assert seen == ["b", "a"]
 
-    def test_default_is_cheapest_first(self):
-        assert DEFAULT_POLICY_NAME == "cheapest_first"
+    def test_default_is_best_price(self):
+        # Comparison shopping over cross-seller parallel negotiation is
+        # the headline reason the orchestrator owns this seam. The
+        # sequential alternatives are still available, but only need
+        # to be opted into.
+        assert DEFAULT_POLICY_NAME == "best_price"
 
 
 class TestRegistryOrder:
@@ -155,6 +159,127 @@ class TestPricelessLast:
         ]
         _drive(policy, matches, neg)
         assert seen == ["priced_low", "priced_high", "priceless1", "priceless2"]
+
+
+class TestFastestAgreed:
+    def test_returns_first_to_agree_regardless_of_advertised_order(self):
+        """`fast` agrees immediately; `slow` would agree later but never
+        gets a chance because the race ends first."""
+        policy = load_aggregation_policy("fastest_agreed")
+
+        async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
+            if match["listing_id"] == "fast":
+                # Yield once so the event loop schedules both tasks
+                # before either resolves; without this asyncio may
+                # short-circuit on the first task it scheduled.
+                await asyncio.sleep(0)
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-fast",
+                    agreed_price=100,
+                )
+            # `slow` never finishes within the race; the policy must
+            # not block on it.
+            await asyncio.sleep(10)
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id="neg-slow",
+                agreed_price=50,
+            )
+
+        # Order `slow` first to make sure ordering doesn't decide.
+        result = _drive(policy, [_match("slow"), _match("fast")], _negotiate)
+        assert result is not None
+        winner, outcome = result
+        assert winner["listing_id"] == "fast"
+        assert outcome.agreed_price == 100
+
+    def test_returns_none_when_no_candidate_agrees(self):
+        policy = load_aggregation_policy("fastest_agreed")
+
+        async def _all_exit(_match: dict[str, Any]) -> NegotiationOutcome:
+            return NegotiationOutcome(
+                status="exited", negotiation_id=None, reason="no_deal",
+            )
+
+        result = _drive(policy, [_match("a"), _match("b"), _match("c")], _all_exit)
+        assert result is None
+
+    def test_continues_racing_past_exiters(self):
+        """An exiting seller doesn't win the race — the policy keeps
+        waiting for an agreement from the survivors."""
+        policy = load_aggregation_policy("fastest_agreed")
+
+        async def _mixed(match: dict[str, Any]) -> NegotiationOutcome:
+            if match["listing_id"] == "exiter":
+                # Finishes immediately, but with status=exited, so it
+                # must NOT be picked as the winner.
+                return NegotiationOutcome(
+                    status="exited", negotiation_id=None, reason="no",
+                )
+            await asyncio.sleep(0)
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=f"neg-{match['listing_id']}",
+                agreed_price=50,
+            )
+
+        result = _drive(policy, [_match("exiter"), _match("good")], _mixed)
+        assert result is not None
+        winner, _ = result
+        assert winner["listing_id"] == "good"
+
+    def test_swallows_exceptions_and_keeps_racing(self):
+        policy = load_aggregation_policy("fastest_agreed")
+
+        async def _flaky(match: dict[str, Any]) -> NegotiationOutcome:
+            if match["listing_id"] == "broken":
+                raise RuntimeError("seller down")
+            await asyncio.sleep(0)
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=f"neg-{match['listing_id']}",
+                agreed_price=50,
+            )
+
+        result = _drive(policy, [_match("broken"), _match("good")], _flaky)
+        assert result is not None
+        winner, _ = result
+        assert winner["listing_id"] == "good"
+
+    def test_cancels_pending_tasks_after_winner(self):
+        """Once a winner emerges, the still-pending negotiations must
+        be cancelled — otherwise we'd waste compute (and on the real
+        network, leave dangling state on losing sellers)."""
+        policy = load_aggregation_policy("fastest_agreed")
+        slow_completed = 0
+
+        async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
+            nonlocal slow_completed
+            if match["listing_id"] == "fast":
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-fast",
+                    agreed_price=100,
+                )
+            # If the policy doesn't cancel, this sleep runs to
+            # completion and increments the counter.
+            await asyncio.sleep(0.1)
+            slow_completed += 1
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=f"neg-{match['listing_id']}",
+                agreed_price=50,
+            )
+
+        matches = [_match("fast"), _match("slow1"), _match("slow2")]
+        result = _drive(policy, matches, _negotiate)
+        assert result is not None
+        winner, _ = result
+        assert winner["listing_id"] == "fast"
+        # Both slow tasks must have been cancelled before reaching the
+        # increment — otherwise the race policy is leaking work.
+        assert slow_completed == 0
 
 
 class TestBestPrice:
@@ -212,6 +337,161 @@ class TestBestPrice:
         assert winner["listing_id"] in {"good", "alsogood"}
 
 
+class TestBestPriceTimeoutResolver:
+    """Direct tests of ``_resolve_best_price_timeout`` so the policy
+    body can assume the value is either a positive float or None."""
+
+    def _with_cfg(self, raw):
+        from unittest.mock import patch
+
+        from market_buyer import aggregation as agg
+
+        # Patch the config load to return a single key. get_dotted
+        # then traverses it normally — so we exercise the real
+        # parsing path, not a stub.
+        cfg = {"buyer": {"aggregation": {"best_price_timeout": raw}}}
+        with patch.object(agg, "_load_buyer_config", lambda: cfg):
+            return agg._resolve_best_price_timeout()
+
+    def test_unset_returns_none(self):
+        from market_buyer import aggregation as agg
+        from unittest.mock import patch
+        with patch.object(agg, "_load_buyer_config", lambda: {}):
+            assert agg._resolve_best_price_timeout() is None
+
+    def test_positive_float_passes_through(self):
+        assert self._with_cfg(30.0) == 30.0
+        assert self._with_cfg(0.5) == 0.5
+
+    def test_positive_int_coerces_to_float(self):
+        assert self._with_cfg(30) == 30.0
+
+    def test_string_numeric_coerces(self):
+        # TOML normally types numerics, but if the user accidentally
+        # quotes the value we still try to parse it before giving up.
+        assert self._with_cfg("15") == 15.0
+
+    def test_zero_and_negative_treated_as_unset(self):
+        assert self._with_cfg(0) is None
+        assert self._with_cfg(-5) is None
+
+    def test_non_numeric_treated_as_unset(self):
+        assert self._with_cfg("forever") is None
+        assert self._with_cfg([1, 2]) is None
+
+
+class TestBestPriceTimeout:
+    """The optional `[buyer.aggregation] best_price_timeout` knob.
+
+    Patches the resolver directly rather than touching real TOML —
+    keeps the tests self-contained and avoids buyer-config singleton
+    state.
+    """
+
+    def test_returns_best_of_completed_when_slow_seller_misses_deadline(self):
+        """Slow seller's hypothetical lower price doesn't count if it
+        hasn't agreed by the deadline. The best of the in-time
+        completions wins."""
+        from unittest.mock import patch
+
+        from market_buyer import aggregation as agg
+
+        slow_completed = 0
+
+        async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
+            nonlocal slow_completed
+            if match["listing_id"] == "fast_expensive":
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-fast-expensive",
+                    agreed_price=100,
+                )
+            if match["listing_id"] == "fast_cheap":
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-fast-cheap",
+                    agreed_price=70,
+                )
+            # `slow_cheapest` would have won on price had it agreed in
+            # time, but it sleeps past the 50ms budget.
+            await asyncio.sleep(0.5)
+            slow_completed += 1
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id="neg-slow",
+                agreed_price=10,
+            )
+
+        matches = [
+            _match("fast_expensive"),
+            _match("fast_cheap"),
+            _match("slow_cheapest"),
+        ]
+        with patch.object(agg, "_resolve_best_price_timeout", lambda: 0.05):
+            result = _drive(agg.load_aggregation_policy("best_price"), matches, _negotiate)
+
+        assert result is not None
+        winner, outcome = result
+        assert winner["listing_id"] == "fast_cheap"
+        assert outcome.agreed_price == 70
+        # The slow seller's task must have been cancelled — if not,
+        # the test would have either slept the full 500ms or recorded
+        # a completion.
+        assert slow_completed == 0
+
+    def test_returns_none_when_nobody_agrees_in_time(self):
+        from unittest.mock import patch
+
+        from market_buyer import aggregation as agg
+
+        async def _all_slow(_m: dict[str, Any]) -> NegotiationOutcome:
+            await asyncio.sleep(0.5)
+            return NegotiationOutcome(
+                status="agreed", negotiation_id="x", agreed_price=10,
+            )
+
+        with patch.object(agg, "_resolve_best_price_timeout", lambda: 0.05):
+            result = _drive(
+                agg.load_aggregation_policy("best_price"),
+                [_match("a"), _match("b")],
+                _all_slow,
+            )
+        assert result is None
+
+    def test_unset_timeout_waits_for_all(self):
+        """With no timeout configured, behavior is unchanged: the
+        slowest seller's outcome still counts toward the comparison."""
+        from unittest.mock import patch
+
+        from market_buyer import aggregation as agg
+
+        async def _negotiate(match: dict[str, Any]) -> NegotiationOutcome:
+            if match["listing_id"] == "slow_cheapest":
+                # Small but real delay so the test exercises the wait.
+                await asyncio.sleep(0.01)
+                return NegotiationOutcome(
+                    status="agreed",
+                    negotiation_id="neg-slow",
+                    agreed_price=10,
+                )
+            return NegotiationOutcome(
+                status="agreed",
+                negotiation_id=f"neg-{match['listing_id']}",
+                agreed_price=100,
+            )
+
+        with patch.object(agg, "_resolve_best_price_timeout", lambda: None):
+            result = _drive(
+                agg.load_aggregation_policy("best_price"),
+                [_match("fast"), _match("slow_cheapest")],
+                _negotiate,
+            )
+        assert result is not None
+        winner, outcome = result
+        assert winner["listing_id"] == "slow_cheapest"
+        assert outcome.agreed_price == 10
+
+
 # ---------------------------------------------------------------------------
 # Pluggability
 # ---------------------------------------------------------------------------
@@ -223,7 +503,7 @@ class TestRegistry:
             load_aggregation_policy("does_not_exist")
 
     def test_none_returns_default(self):
-        assert load_aggregation_policy(None) is load_aggregation_policy("cheapest_first")
+        assert load_aggregation_policy(None) is load_aggregation_policy("best_price")
 
     def test_register_custom_policy(self):
         @register_aggregation_policy("test_reverse")

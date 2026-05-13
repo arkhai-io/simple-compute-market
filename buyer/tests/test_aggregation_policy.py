@@ -2,8 +2,8 @@
 
 Verifies:
 - The policy receives a curried `negotiate` callback.
-- `best_price` picks the lowest *agreed* price, not the lowest advertised.
-- Default `cheapest_first` preserves the historical first-agreed loop semantics.
+- `best_price` (the default) picks the lowest *agreed* price, not the lowest advertised.
+- Opting into `cheapest_first` preserves the historical first-agreed loop semantics.
 - A custom registered policy can short-circuit / re-order arbitrarily.
 
 These tests drive `run_buy` end-to-end so the orchestrator's currying
@@ -141,8 +141,12 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
 
 
 def test_cheapest_first_preserves_first_agreed_semantics():
-    """The default policy walks in advertised-price order and takes the
-    first match that agrees — identical to the pre-callback loop."""
+    """`cheapest_first` walks in advertised-price order and takes the
+    first match that agrees — identical to the pre-callback loop.
+
+    Opted into explicitly via aggregation_policy; the default is now
+    `best_price`, which would negotiate with both sellers in parallel.
+    """
     routes = {
         "registry": [
             {"items": [
@@ -169,7 +173,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
         side_effect=_route_by_url(routes),
     ):
         result = run_buy(
-            config=_config(),  # default cheapest_first
+            config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,

@@ -21,15 +21,23 @@ knows the comparison rule, so the orchestrator stays dumb.
 
 Built-in flavors:
 
+- ``best_price`` (default) — negotiate with *all* candidates in parallel,
+  pick the lowest agreed_price. The canonical "comparison shopping"
+  example. Default because the sequential alternatives give up the
+  comparison's headline benefit (cross-seller price discovery) in
+  exchange for slightly less per-buy work; with ``max_matches_to_try``
+  bounding fan-out, the cost is acceptable.
+- ``fastest_agreed`` — race all candidates in parallel, take whichever
+  agrees first; cancel the rest. For "provision ASAP, price-insensitive"
+  buys.
 - ``cheapest_first`` — sort by advertised price, negotiate sequentially,
-  first agreed wins. The historical default: same effective behavior
-  as the pre-callback loop, ported onto the new protocol.
+  first agreed wins. Pre-callback historical behavior. Useful when each
+  negotiation has nontrivial side effects (audit-log reveal, future-price
+  signaling) you want to minimize.
 - ``registry_order`` — pass through in registry order, otherwise
   sequential-first-agreed.
 - ``random_shuffle`` — shuffle for load spreading, sequential-first-agreed.
 - ``priceless_last`` — priced cheapest first, priceless after.
-- ``best_price`` — negotiate with *all* candidates in parallel, pick
-  the lowest agreed_price. The canonical "comparison shopping" example.
 
 Forward compatibility: returning ``tuple | None`` rather than a list
 means today's single-settlement orchestrator can consume the result as
@@ -47,18 +55,36 @@ Registration / discovery:
     async def _my(matches, negotiate):
         ...
 
-Third-party plugins publish entry points in group
-``market_buyer.aggregation_policies``; ``load_aggregation_policy``
-consults that group as a fallback after the in-process registry.
+Three places ``load_aggregation_policy`` looks, in order:
+
+1. In-process ``_REGISTRY`` (built-ins + anything decorated with
+   ``@register_aggregation_policy``).
+2. File-based: ``$XDG_CONFIG_HOME/arkhai/aggregation_policies/<name>/policy.py``
+   plus any folder added via ``[buyer.aggregation] extra_policy_paths``.
+   Each subdir's name becomes the policy name. The file exports
+   ``factory(cfg) -> AggregationPolicy``; ``cfg`` is the buyer's full
+   TOML config so policies can read per-policy knobs without us baking
+   in a fixed schema. Discovery runs once per process on first
+   ``load_aggregation_policy()`` call; failures in one folder are
+   logged but don't poison its siblings. A file policy with the same
+   name as a built-in overwrites it — the local-tuning override UX,
+   matching the storefront's behaviour.
+3. Python entry points in group ``market_buyer.aggregation_policies``.
 """
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
+import logging
+import os
 import random as _random
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .buyer_client import NegotiationOutcome
+
+logger = logging.getLogger(__name__)
 
 
 NegotiateFn = Callable[[dict[str, Any]], Awaitable[NegotiationOutcome]]
@@ -76,7 +102,142 @@ AggregationPolicy = Callable[
 
 _REGISTRY: dict[str, AggregationPolicy] = {}
 
-DEFAULT_POLICY_NAME = "cheapest_first"
+DEFAULT_POLICY_NAME = "best_price"
+
+_FILE_POLICIES_DISCOVERED = False
+
+
+def _default_policy_dir() -> Path:
+    """Resolve the XDG-flavoured default aggregation-policy directory.
+
+    Honours ``$XDG_CONFIG_HOME`` so it lines up with the rest of the
+    buyer config; falls back to ``~/.config/arkhai/aggregation_policies/``
+    on hosts that don't set it. Distinct folder from the storefront's
+    negotiation ``policies/`` since the two policy types are unrelated
+    and folder names map to the registry without disambiguation.
+    """
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "arkhai" / "aggregation_policies"
+
+
+def _load_buyer_config() -> dict[str, Any]:
+    """Read the buyer's TOML config — best effort, never raises.
+
+    Returns ``{}`` if the loader isn't importable (no service package
+    on path) or the file doesn't exist. The buyer reads config inline
+    via ``service.config_loader.load_user_config`` everywhere else;
+    this mirrors that pattern instead of building a singleton.
+    """
+    try:
+        from service.config_loader import load_user_config
+        return load_user_config() or {}
+    except Exception as exc:
+        logger.debug("[AGG-POLICY] config load failed (%s); using empty dict", exc)
+        return {}
+
+
+def _resolve_extra_policy_paths(cfg: dict[str, Any]) -> list[str]:
+    """Pull extra aggregation-policy directories out of TOML.
+
+    Accepts ``[buyer.aggregation] extra_policy_paths = [".../a", ...]``
+    (list) or a single string. Empty / unset → empty list.
+    """
+    try:
+        from service.config_loader import get_dotted
+    except Exception:
+        return []
+    raw = get_dotted(cfg, "buyer.aggregation.extra_policy_paths")
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, list):
+        return [str(p).strip() for p in raw if str(p).strip()]
+    return []
+
+
+def _register_file_policy(folder: Path, cfg: dict[str, Any]) -> bool:
+    """Load ``folder/policy.py`` and register its ``factory`` under the
+    folder name. Returns True on success, False if the folder doesn't
+    look like a policy (missing ``policy.py``/``factory``, or factory
+    didn't return a callable). Failures are logged at WARNING; the
+    caller continues with siblings.
+    """
+    policy_file = folder / "policy.py"
+    if not policy_file.is_file():
+        return False
+
+    name = folder.name
+    module_id = f"market_buyer._file_aggregation_policies.{name}"
+    try:
+        spec = importlib.util.spec_from_file_location(module_id, policy_file)
+        if spec is None or spec.loader is None:
+            logger.warning("[AGG-POLICY] couldn't build spec for %s", policy_file)
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        logger.warning(
+            "[AGG-POLICY] failed to import file policy %s from %s: %s",
+            name, policy_file, exc,
+        )
+        return False
+
+    factory = getattr(module, "factory", None)
+    if not callable(factory):
+        logger.warning(
+            "[AGG-POLICY] %s has no callable 'factory' — skipping",
+            policy_file,
+        )
+        return False
+
+    try:
+        policy = factory(cfg)
+    except Exception as exc:
+        logger.warning(
+            "[AGG-POLICY] factory() raised in %s: %s",
+            policy_file, exc,
+        )
+        return False
+
+    if not callable(policy):
+        logger.warning(
+            "[AGG-POLICY] factory() in %s did not return a callable — skipping",
+            policy_file,
+        )
+        return False
+
+    _REGISTRY[name] = policy
+    logger.info("[AGG-POLICY] registered file policy %r from %s", name, policy_file)
+    return True
+
+
+def _discover_file_policies(force: bool = False) -> None:
+    """Scan the default + configured policy directories and register
+    each subdirectory as a policy named after the folder.
+
+    Runs at most once per process unless ``force=True`` (used by tests).
+    Failures in individual folders are logged but don't block other
+    folders. Built-in registrations win on cold start; a file policy
+    with the same name overwrites them by design — that's the override
+    UX for ad-hoc tuning.
+    """
+    global _FILE_POLICIES_DISCOVERED
+    if _FILE_POLICIES_DISCOVERED and not force:
+        return
+    _FILE_POLICIES_DISCOVERED = True
+
+    cfg = _load_buyer_config()
+    candidates = [_default_policy_dir(), *(Path(p) for p in _resolve_extra_policy_paths(cfg))]
+
+    for root in candidates:
+        if not root.is_dir():
+            logger.debug("[AGG-POLICY] skipping non-existent policy dir %s", root)
+            continue
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir() or entry.name.startswith((".", "_")):
+                continue
+            _register_file_policy(entry, cfg)
 
 
 def register_aggregation_policy(
@@ -96,10 +257,14 @@ def register_aggregation_policy(
 def load_aggregation_policy(name: str | None) -> AggregationPolicy:
     """Resolve a policy by name. ``None`` returns the default.
 
-    Lookup order:
-    1. In-process registry (built-ins + ``register_aggregation_policy``).
-    2. Python entry points in group ``market_buyer.aggregation_policies``.
+    Triggers a one-shot scan of file-based policies on first call (see
+    ``_discover_file_policies``). Lookup order: in-process registry →
+    Python entry points in group ``market_buyer.aggregation_policies``.
+    File policies are registered into the in-process registry by the
+    scan, so they're found at step 1.
     """
+    _discover_file_policies()
+
     if not name:
         name = DEFAULT_POLICY_NAME
     if name in _REGISTRY:
@@ -250,6 +415,47 @@ async def _priceless_last(
     return await _sequential_first_agreed(ordered, negotiate)
 
 
+def _resolve_best_price_timeout() -> float | None:
+    """Optional wall-clock budget for ``best_price`` (seconds).
+
+    Read from ``[buyer.aggregation] best_price_timeout`` in TOML. Unset,
+    non-numeric, or non-positive → no timeout (the policy waits for
+    every candidate). A positive value caps the comparison at the
+    given number of seconds; any candidate still negotiating when the
+    timeout fires is cancelled and excluded from the winner pool.
+    """
+    cfg = _load_buyer_config()
+    try:
+        from service.config_loader import get_dotted
+    except Exception:
+        return None
+    raw = get_dotted(cfg, "buyer.aggregation.best_price_timeout")
+    if raw is None:
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def _pick_min_agreed(
+    results: list[tuple[dict[str, Any], NegotiationOutcome | BaseException]],
+) -> tuple[dict[str, Any], NegotiationOutcome] | None:
+    """Pick the candidate with the lowest agreed_price from a result set."""
+    agreed: list[tuple[dict[str, Any], NegotiationOutcome]] = []
+    for c, r in results:
+        if (
+            isinstance(r, NegotiationOutcome)
+            and r.status == "agreed"
+            and r.agreed_price is not None
+        ):
+            agreed.append((c, r))
+    if not agreed:
+        return None
+    return min(agreed, key=lambda p: p[1].agreed_price or 0)
+
+
 @register_aggregation_policy("best_price")
 async def _best_price(
     candidates: list[dict[str, Any]],
@@ -257,19 +463,101 @@ async def _best_price(
 ) -> tuple[dict[str, Any], NegotiationOutcome] | None:
     """Negotiate with every candidate in parallel; pick the lowest agreed price.
 
-    The canonical "comparison shopping" example. Costs N negotiations
-    of wall time at most — bound the candidate list upstream
-    (``max_matches_to_try``) to control fan-out. Per-candidate failures
-    are skipped, not raised; if you want failures to abort the buy,
-    write a policy that doesn't use ``gather_outcomes``.
+    The canonical "comparison shopping" example. Bound the candidate
+    list upstream (``max_matches_to_try``) to control fan-out;
+    optionally cap wall time with ``[buyer.aggregation] best_price_timeout``
+    so one slow seller can't hold up the whole buy.
+
+    Without a timeout, costs N negotiations of wall time at most. With
+    a timeout, returns the best of whoever completed by the deadline;
+    pending negotiations are cancelled and their outcomes discarded.
+    Per-candidate failures (network, signature) are skipped, not
+    raised — if you want failures to abort the buy, write a policy
+    that doesn't use ``gather_outcomes``.
     """
-    results = await gather_outcomes(negotiate, candidates)
-    agreed: list[tuple[dict[str, Any], NegotiationOutcome]] = []
-    for c, r in results:
-        if isinstance(r, NegotiationOutcome) \
-                and r.status == "agreed" \
-                and r.agreed_price is not None:
-            agreed.append((c, r))
-    if not agreed:
+    timeout = _resolve_best_price_timeout()
+    if timeout is None:
+        return _pick_min_agreed(await gather_outcomes(negotiate, candidates))
+
+    async def _one(
+        c: dict[str, Any],
+    ) -> tuple[dict[str, Any], NegotiationOutcome | BaseException]:
+        try:
+            return (c, await negotiate(c))
+        except BaseException as exc:  # noqa: BLE001 — comparison swallows per-task
+            return (c, exc)
+
+    tasks = [asyncio.create_task(_one(c)) for c in candidates]
+    try:
+        done, _pending = await asyncio.wait(
+            tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED,
+        )
+        if len(done) < len(tasks):
+            logger.info(
+                "[AGG-POLICY] best_price timeout fired at %.2fs; "
+                "settling on %d/%d completed candidates",
+                timeout, len(done), len(tasks),
+            )
+        return _pick_min_agreed([t.result() for t in done])
+    finally:
+        pending_now = [t for t in tasks if not t.done()]
+        for t in pending_now:
+            t.cancel()
+        if pending_now:
+            # Drain so cancellation propagates and we don't leak
+            # warnings about un-awaited tasks at shutdown.
+            await asyncio.gather(*pending_now, return_exceptions=True)
+
+
+@register_aggregation_policy("fastest_agreed")
+async def _fastest_agreed(
+    candidates: list[dict[str, Any]],
+    negotiate: NegotiateFn,
+) -> tuple[dict[str, Any], NegotiationOutcome] | None:
+    """Race N parallel negotiations; take whichever agrees first.
+
+    For "provision ASAP, price-insensitive" buys. Sellers that exit or
+    raise are dropped and the race continues against the survivors;
+    once a winner is found, the remaining in-flight tasks are
+    cancelled. Returns None if nobody ever agrees.
+
+    Note on cancellation: cancelling a task that's mid-``negotiate``
+    surfaces a ``CancelledError`` inside the underlying HTTP call; in
+    practice the buyer's request is dropped without writing anything,
+    and the seller's side may briefly hold an open thread that the
+    server-side watchdog reaps. Acceptable for the fast-buy use case
+    this policy exists for.
+    """
+    if not candidates:
         return None
-    return min(agreed, key=lambda p: p[1].agreed_price or 0)
+
+    async def _one(
+        c: dict[str, Any],
+    ) -> tuple[dict[str, Any], NegotiationOutcome | BaseException]:
+        try:
+            return (c, await negotiate(c))
+        except BaseException as exc:  # noqa: BLE001 — exceptions belong to the race
+            return (c, exc)
+
+    pending: set[asyncio.Task[Any]] = {asyncio.create_task(_one(c)) for c in candidates}
+    try:
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                c, outcome = task.result()
+                if (
+                    isinstance(outcome, NegotiationOutcome)
+                    and outcome.status == "agreed"
+                    and outcome.agreed_price is not None
+                ):
+                    return (c, outcome)
+        return None
+    finally:
+        for t in pending:
+            t.cancel()
+        if pending:
+            # Drain so cancellation propagates and we don't leak warnings
+            # about un-awaited tasks at interpreter shutdown.
+            await asyncio.gather(*pending, return_exceptions=True)

@@ -131,10 +131,20 @@ _INIT_USER_TEMPLATE = """\
                                                 # when --token-contract is not supplied
 
 # [buyer.aggregation]
-# policy = "cheapest_first"                    # across-seller match policy: cheapest_first (default) |
-                                                # registry_order | random_shuffle | priceless_last |
-                                                # any custom name registered via
-                                                # market_buyer.aggregation.register_aggregation_policy
+# policy = "best_price"                        # across-seller match policy: best_price (default) |
+                                                # fastest_agreed | cheapest_first | registry_order |
+                                                # random_shuffle | priceless_last | any custom name registered
+                                                # via market_buyer.aggregation.register_aggregation_policy,
+                                                # or a folder name under
+                                                # $XDG_CONFIG_HOME/arkhai/aggregation_policies/.
+# extra_policy_paths = []                      # additional directories to scan for file-based policies.
+                                                # Each immediate subdirectory is treated as a policy named
+                                                # after the folder; the subdir must contain a policy.py
+                                                # exposing `factory(cfg) -> AggregationPolicy`.
+# best_price_timeout = 30.0                    # optional wall-clock cap (seconds) for the `best_price`
+                                                # policy. When set, candidates still negotiating at the
+                                                # deadline are cancelled and the lowest agreed price among
+                                                # those that completed wins. Unset = wait for all.
 
 # ---------------------------------------------------------------------------
 # Seller-only — uncomment the [seller] sections only on a host that runs
