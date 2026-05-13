@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+from service.schemas import ProvisionTerms
+
 from market_buyer.aggregation import (
     NegotiateFn,
     gather_outcomes,
@@ -45,13 +47,16 @@ def _config(aggregation_policy: str | None = None) -> BuyConfig:
         registry_urls=[_REGISTRY],
         buyer_address=_BUYER_ADDR,
         buyer_private_key=_BUYER_PK,
-        ssh_public_key="ssh-rsa AAAA...",
         aggregation_policy=aggregation_policy,
     )
 
 
 def _constraints() -> BuyConstraints:
-    return BuyConstraints(max_price=100, initial_price=50, duration_seconds=3600)
+    return BuyConstraints(max_price=100, initial_price=50)
+
+
+def _provision() -> ProvisionTerms:
+    return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA...")
 
 
 @dataclass
@@ -126,6 +131,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
         result = run_buy(
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,
         )
@@ -175,6 +181,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
         result = run_buy(
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,
         )
@@ -228,6 +235,7 @@ def test_custom_policy_can_short_circuit():
         result = run_buy(
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,
         )
@@ -253,6 +261,7 @@ def test_policy_returning_none_yields_exited():
         result = run_buy(
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xnever",
             sleep=lambda _: None,
         )

@@ -27,6 +27,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from service.schemas import ProvisionTerms
+
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
 
 
@@ -42,11 +44,14 @@ class BuyConfig:
     ``registry_urls`` is the union of registries to consult for
     discovery — see ``query_registry_for_matches_multi``. Single-URL
     deployments pass a one-element list.
+
+    Provision-related fields (``ssh_public_key``, ``duration_seconds``)
+    moved to ``ProvisionTerms``; price-related fields stay on
+    ``BuyConstraints``. The three together fully parameterize ``run_buy``.
     """
     registry_urls: list[str]
     buyer_address: str
     buyer_private_key: str
-    ssh_public_key: str
     # Per-registry deadline for discovery fan-in (seconds). ``run_buy``
     # passes this to ``query_registry_for_matches_multi`` so a slow
     # registry can't extend the wall time. ``None`` defers to the
@@ -57,19 +62,18 @@ class BuyConfig:
     indexer_auth: dict[str, str] = field(default_factory=dict)
     # Across-seller aggregation policy name. Looked up via
     # ``aggregation.load_aggregation_policy``. None = default
-    # (cheapest_first). See buyer/market_buyer/aggregation.py.
+    # (best_price). See buyer/market_buyer/aggregation.py.
     aggregation_policy: Optional[str] = None
 
 
 @dataclass
 class BuyConstraints:
-    """What the buyer wants, enforced locally during negotiation.
+    """Price bounds the buyer enforces locally during negotiation.
 
     ``max_price`` and ``initial_price`` may be ``None`` when ``run_buy`` is
     invoked with a ``derive_prices`` callback that computes per-listing
     prices from the seller's advertised min_price.
     """
-    duration_seconds: int               # buyer's lease ask, sent on /negotiate/new
     max_price: Optional[int] = None     # ceiling per order (base units, per-hour rate)
     initial_price: Optional[int] = None # opening bid per order
 
@@ -467,6 +471,7 @@ def run_buy(
     *,
     config: BuyConfig,
     constraints: BuyConstraints,
+    provision: ProvisionTerms,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
     max_matches_to_try: int = 5,
@@ -482,8 +487,12 @@ def run_buy(
 
     Parameters
     ----------
-    config, constraints
-        Buyer identity + what we want. Immutable for this call.
+    config, constraints, provision
+        Buyer identity + price bounds + what to provision. Immutable
+        for this call. ``provision.duration_seconds`` is the negotiation-
+        init ask sent to the seller and the lease window the escrow
+        amount is computed from; ``provision.ssh_public_key`` is sent
+        in the settle request for VM injection.
     create_escrow
         Hook that takes AgreedTerms and returns an on-chain escrow UID.
         Injected so the orchestrator itself is testable without alkahest-py.
@@ -619,7 +628,7 @@ def run_buy(
                 listing_id=listing_id,
                 initial_price=initial_price,
                 max_price=max_price,
-                duration_seconds=constraints.duration_seconds,
+                duration_seconds=provision.duration_seconds,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
             )
@@ -657,7 +666,7 @@ def run_buy(
     policy = load_aggregation_policy(config.aggregation_policy)
     capped = matches[:max_matches_to_try]
     _event("aggregated", {
-        "policy": config.aggregation_policy or "cheapest_first",
+        "policy": config.aggregation_policy or "best_price",
         "match_count_after_cap": len(capped),
     })
 
@@ -683,7 +692,7 @@ def run_buy(
         match=match,
         outcome=outcome,
         config=config,
-        constraints=constraints,
+        provision=provision,
         create_escrow=create_escrow,
         confirm_settlement=confirm_settlement,
         settlement_poll_interval=settlement_poll_interval,
@@ -699,7 +708,7 @@ def _settle_one(
     match: dict[str, Any],
     outcome: NegotiationOutcome,
     config: "BuyConfig",
-    constraints: "BuyConstraints",
+    provision: ProvisionTerms,
     create_escrow: "CreateEscrowFn",
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]],
     settlement_poll_interval: float,
@@ -737,7 +746,7 @@ def _settle_one(
         negotiation_id=outcome.negotiation_id or "",
         listing_id=listing_id,
         agreed_price=outcome.agreed_price or 0,
-        duration_seconds=constraints.duration_seconds,
+        duration_seconds=provision.duration_seconds,
     )
 
     if confirm_settlement is not None:
@@ -786,7 +795,7 @@ def _settle_one(
         seller_url=seller_url,
         escrow_uid=escrow_uid,
         negotiation_id=outcome.negotiation_id or "",
-        ssh_public_key=config.ssh_public_key,
+        ssh_public_key=provision.ssh_public_key,
         buyer_address=config.buyer_address,
         buyer_private_key=config.buyer_private_key,
     )

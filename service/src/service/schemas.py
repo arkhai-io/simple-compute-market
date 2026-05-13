@@ -91,6 +91,48 @@ class TokenResource(Resource):
     )
 
 
+class ProvisionTerms(BaseModel):
+    """What the seller commits to provision off-chain.
+
+    Distinct from on-chain escrow terms (payment + arbiter): those gate
+    payment release; these describe the actual resource the seller
+    delivers. The two are independent — an escrow's arbiter may enforce
+    none, some, or all of the provision fields depending on its design
+    (a ``RecipientArbiter`` enforces none; a ``TrustedOracleArbiter``
+    could attest delivery against a hash of these terms).
+
+    Materialized at negotiation agreement and read by the seller's
+    settlement / provisioning pipeline as the single source of truth
+    for what to deliver. The compute_resource field is opaque at this
+    layer (carried as a dict) because the typed marketplace model
+    (``ComputeResource``) lives in the storefront package; the seller
+    parses it back into typed form when needed.
+    """
+
+    duration_seconds: int = Field(
+        gt=0,
+        description=(
+            "Buyer's lease window. The seller commits to provisioning "
+            "for at least this long once escrow is verified on-chain."
+        ),
+    )
+    ssh_public_key: str = Field(
+        description=(
+            "Public key to inject into the provisioned VM/container "
+            "for buyer access. Empty string allowed for non-VM modes."
+        ),
+    )
+    compute_resource: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Snapshot of the listing's offer_resource at agreement "
+            "time. None on the buyer's side before a specific match "
+            "is selected; populated by the seller (or buyer post-match) "
+            "and persisted on the negotiation thread."
+        ),
+    )
+
+
 class Attestation(BaseModel):
     """Mutual attestations exchanged between maker and taker."""
 

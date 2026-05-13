@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from service.schemas import ProvisionTerms
+
 from market_buyer.buy_orchestrator import (
     AgreedTerms,
     BuyConfig,
@@ -42,15 +44,21 @@ def _config(order_id: str = "buyer-1") -> BuyConfig:
     return BuyConfig(
         registry_urls=[_REGISTRY],
         buyer_address=_BUYER_ADDR,
-        buyer_private_key=_BUYER_PK,        ssh_public_key="ssh-rsa AAAA...",
+        buyer_private_key=_BUYER_PK,
     )
 
 
-def _constraints(max_price=100, initial_price=50, duration_seconds=7200) -> BuyConstraints:
+def _constraints(max_price=100, initial_price=50) -> BuyConstraints:
     return BuyConstraints(
         max_price=max_price,
         initial_price=initial_price,
+    )
+
+
+def _provision(duration_seconds=7200, ssh_public_key="ssh-rsa AAAA...") -> ProvisionTerms:
+    return ProvisionTerms(
         duration_seconds=duration_seconds,
+        ssh_public_key=ssh_public_key,
     )
 
 
@@ -99,6 +107,7 @@ def test_no_matches_returns_no_matches_status():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xnever",
         )
     assert result.status == "no_matches"
@@ -118,6 +127,7 @@ def test_matches_can_be_preseeded_skipping_registry_query():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xnever",
             matches=[{"listing_id": "seller-1", "seller": _SELLER_URL}],
         )
@@ -164,6 +174,7 @@ def test_happy_path_drives_to_ready():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=_create_escrow,
             on_event=lambda name, body: events.append((name, body)),
             sleep=lambda _s: None,
@@ -227,6 +238,7 @@ def test_first_match_exits_second_agrees():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,
         )
@@ -259,6 +271,7 @@ def test_escrow_hook_failure_returns_exited_with_reason():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=_broken_escrow,
             sleep=lambda _: None,
         )
@@ -286,6 +299,7 @@ def test_provisioning_failed_returns_failed_status():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             sleep=lambda _: None,
         )
@@ -315,6 +329,7 @@ def test_settlement_timeout_returns_timeout_status():
         result = run_buy(
             config=_config(),
             constraints=_constraints(),
+            provision=_provision(),
             create_escrow=lambda terms: "0xescrow",
             settlement_poll_interval=0.01,
             settlement_total_timeout=0.05,  # very short

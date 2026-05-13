@@ -10,6 +10,8 @@ from unittest import mock
 
 import pytest
 
+from service.schemas import ProvisionTerms
+
 from market_buyer.buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -125,12 +127,12 @@ class TestRunBuyDerivePrices:
             lambda url, timeout=5.0: "0x" + "0" * 40,
         )
 
-        constraints = BuyConstraints(duration_seconds=3600)  # prices None
+        constraints = BuyConstraints()  # prices None
+        provision = ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
-            ssh_public_key="ssh-ed25519 AAAA",
         )
         matches = [
             {"listing_id": "L1", "seller": "http://s1", "demand_resource": {"amount": 100}},
@@ -142,7 +144,7 @@ class TestRunBuyDerivePrices:
             return base, base * 2
 
         result = run_buy(
-            config=config, constraints=constraints,
+            config=config, constraints=constraints, provision=provision,
             create_escrow=lambda terms: pytest.fail("escrow shouldn't run on exited"),
             matches=matches, max_matches_to_try=2,
             derive_prices=derive,
@@ -164,16 +166,16 @@ class TestRunBuyDerivePrices:
             "market_buyer.buy_orchestrator.negotiate_with_seller", fake_negotiate,
         )
 
-        constraints = BuyConstraints(duration_seconds=3600)
+        constraints = BuyConstraints()
+        provision = ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
         config = BuyConfig(
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
-            ssh_public_key="ssh-ed25519 AAAA",
         )
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
         result = run_buy(
-            config=config, constraints=constraints,
+            config=config, constraints=constraints, provision=provision,
             create_escrow=lambda terms: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,
         )
@@ -217,11 +219,13 @@ class TestConfirmSettlementGate:
             registry_urls=["http://reg"],
             buyer_address="0x" + "1" * 40,
             buyer_private_key="0x" + "2" * 64,
-            ssh_public_key="ssh-ed25519 AAAA",
         )
 
     def _constraints(self):
-        return BuyConstraints(duration_seconds=3600, initial_price=50, max_price=200)
+        return BuyConstraints(initial_price=50, max_price=200)
+
+    def _provision(self):
+        return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-ed25519 AAAA")
 
     def test_confirm_returning_false_aborts_before_escrow(self, monkeypatch):
         """User decline keeps the on-chain side completely untouched."""
@@ -232,6 +236,7 @@ class TestConfirmSettlementGate:
         result = run_buy(
             config=self._config(),
             constraints=self._constraints(),
+            provision=self._provision(),
             create_escrow=lambda terms: pytest.fail("escrow MUST NOT run when declined"),
             matches=matches, max_matches_to_try=1,
             on_event=lambda stage, body: events.append((stage, body)),
@@ -269,6 +274,7 @@ class TestConfirmSettlementGate:
         result = run_buy(
             config=self._config(),
             constraints=self._constraints(),
+            provision=self._provision(),
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
             confirm_settlement=lambda terms, listing: True,
@@ -299,6 +305,7 @@ class TestConfirmSettlementGate:
         result = run_buy(
             config=self._config(),
             constraints=self._constraints(),
+            provision=self._provision(),
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
         )
@@ -316,6 +323,7 @@ class TestConfirmSettlementGate:
         result = run_buy(
             config=self._config(),
             constraints=self._constraints(),
+            provision=self._provision(),
             create_escrow=lambda terms: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,
             confirm_settlement=boom,

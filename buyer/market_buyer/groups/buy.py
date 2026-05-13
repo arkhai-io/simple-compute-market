@@ -25,6 +25,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from service.schemas import ProvisionTerms
+
 from ..buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
@@ -342,8 +344,9 @@ def register(app: typer.Typer) -> None:
             None, "--aggregate-by",
             help="Across-seller aggregation policy. Default: "
                  "[buyer.aggregation].policy from config.toml, falling "
-                 "back to 'cheapest_first'. Built-ins: cheapest_first, "
-                 "registry_order, random_shuffle, priceless_last.",
+                 "back to 'best_price'. Built-ins: best_price, "
+                 "fastest_agreed, cheapest_first, registry_order, "
+                 "random_shuffle, priceless_last.",
         ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
@@ -571,7 +574,6 @@ def register(app: typer.Typer) -> None:
             registry_urls=reg_urls,
             buyer_address=addr,
             buyer_private_key=pk,
-            ssh_public_key=ssh,
             discovery_timeout=deadline,
             indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
@@ -579,7 +581,10 @@ def register(app: typer.Typer) -> None:
         constraints = BuyConstraints(
             max_price=max_price,
             initial_price=initial_price,
+        )
+        provision = ProvisionTerms(
             duration_seconds=duration_seconds,
+            ssh_public_key=ssh,
         )
 
         run_log = RunLog.start(
@@ -654,6 +659,7 @@ def register(app: typer.Typer) -> None:
             result = run_buy(
                 config=config,
                 constraints=constraints,
+                provision=provision,
                 create_escrow=create_escrow,
                 matches=matches,
                 max_matches_to_try=max_matches,

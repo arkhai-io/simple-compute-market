@@ -23,7 +23,46 @@ import json
 import logging
 from typing import Any
 
+from service.schemas import ProvisionTerms
+
 logger = logging.getLogger(__name__)
+
+
+def _resolve_duration_seconds(thread: dict[str, Any], order_dict: dict[str, Any]) -> int:
+    """Duration the buyer's lease was negotiated for.
+
+    Falls back through the negotiation thread, the listing's advertised
+    ceiling, and finally a 1h default. The fallback chain exists for
+    legacy threads (pre-buyer-supplied duration) and missing-listing
+    edge cases; new flows always have ``agreed_duration_seconds`` set
+    when the round terminated ``agreed``.
+    """
+    return int(
+        thread.get("agreed_duration_seconds")
+        or thread.get("requested_duration_seconds")
+        or order_dict.get("max_duration_seconds")
+        or 3600
+    )
+
+
+def _resolve_compute_resource(order_dict: dict[str, Any]) -> dict[str, Any] | None:
+    """Best-effort extraction of the listing's offer_resource as a dict.
+
+    SQLite stores resources as JSON text; the listing-load path may
+    have already deserialized it, or it may still be a string. None
+    when the field is missing or unparseable — the resulting
+    ``ProvisionTerms`` simply has no compute snapshot in that case.
+    """
+    raw = order_dict.get("offer_resource")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
 
 
 async def start_settlement_job(
@@ -78,21 +117,24 @@ async def start_settlement_job(
             "is gone from the local DB"
         )
 
+    # Single source of truth for what the seller commits to deliver.
+    # Same shape the buyer will eventually send in the negotiate-init
+    # request; for now built locally from the negotiation thread + listing.
+    provision = ProvisionTerms(
+        duration_seconds=_resolve_duration_seconds(thread, our_order_dict),
+        ssh_public_key=ssh_public_key,
+        compute_resource=_resolve_compute_resource(our_order_dict),
+    )
+
     # Fail-closed on-chain verification: the escrow must exist, be live,
     # and match the negotiated terms before we touch any local state or
     # provision a VM.  Raises EscrowVerificationError on mismatch; the
     # controller maps that to HTTP 400.
-    duration_for_amount = (
-        thread.get("agreed_duration_seconds")
-        or thread.get("requested_duration_seconds")
-        or our_order_dict.get("max_duration_seconds")
-        or 3600
-    )
     await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=CONFIG.agent_wallet_address or "",
         agreed_price=int(thread["agreed_price"]),
-        agreed_duration_seconds=int(duration_for_amount),
+        agreed_duration_seconds=provision.duration_seconds,
         listing=our_order_dict,
         alkahest_client=alkahest_client,
         chain_name=CONFIG.chain_name,
@@ -128,24 +170,12 @@ async def start_settlement_job(
             our_listing_id, exc,
         )
 
-    # The buyer's lease ask was committed on the negotiation thread when
-    # the round terminated `agreed`. Fall back to the listing's max
-    # ceiling, then 1h, only for legacy threads from before duration
-    # became buyer-supplied.
-    duration_seconds = (
-        thread.get("agreed_duration_seconds")
-        or thread.get("requested_duration_seconds")
-        or our_order_dict.get("max_duration_seconds")
-        or 3600
-    )
-
     asyncio.create_task(
         _run_settlement_job_bg(
             escrow_uid=escrow_uid,
-            ssh_public_key=ssh_public_key,
+            provision=provision,
             listing_id=our_listing_id,
             order_dict=our_order_dict,
-            duration_seconds=int(duration_seconds),
             sqlite_client=sqlite_client,
             alkahest_client=alkahest_client,
         )
@@ -161,10 +191,9 @@ async def start_settlement_job(
 async def _run_settlement_job_bg(
     *,
     escrow_uid: str,
-    ssh_public_key: str,
+    provision: ProvisionTerms,
     listing_id: str,
     order_dict: dict[str, Any],
-    duration_seconds: int,
     sqlite_client: Any,
     alkahest_client: Any,
 ) -> None:
@@ -178,10 +207,10 @@ async def _run_settlement_job_bg(
         result = await fulfill_compute_obligation(
             client=alkahest_client,
             escrow_uid=escrow_uid,
-            ssh_public_key=ssh_public_key,
+            ssh_public_key=provision.ssh_public_key,
             oracle_address=CONFIG.agent_wallet_address,
             order=order_dict,
-            duration_seconds=duration_seconds,
+            duration_seconds=provision.duration_seconds,
             listing_id=listing_id,
         )
     except Exception as exc:
