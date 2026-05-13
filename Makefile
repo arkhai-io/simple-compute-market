@@ -276,19 +276,21 @@ define clobber_python_wheel
 	  "$(3)"
 endef
 
+define push_image
+	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
+	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)
+	docker push $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
+	docker push $(DOCKER_REGISTRY)/arkhai:$(1)
+endef
+
 push-runtime-artifacts: push-images push-helm push-wheels push-cli
 
 push-images: _require-ar-project
-	docker tag arkhai:registry-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/registry:$(GIT_SUFFIX)
-	docker tag arkhai:storefront-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/storefront:$(GIT_SUFFIX)
-	docker tag arkhai:provisioning-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/provisioning:$(GIT_SUFFIX)
-	docker tag arkhai:test-env-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/test-env:$(GIT_SUFFIX)
-	docker tag arkhai:integration-tests-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/integration-tests:$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/registry:$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/storefront:$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/provisioning:$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/test-env:$(GIT_SUFFIX)
-	docker push $(DOCKER_REGISTRY)/integration-tests:$(GIT_SUFFIX)
+	$(call push_image,registry,registry)
+	$(call push_image,storefront,storefront)
+	$(call push_image,provisioning,provisioning)
+	$(call push_image,test-env,test-env)
+	$(call push_image,integration-tests,integration-tests)
 
 push-helm: _require-ar-project
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
