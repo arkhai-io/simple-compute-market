@@ -1,7 +1,8 @@
 """Tests for the seller's price-extraction logic.
 
 ``_extract_initial_price_from_order(order)`` is the seller's read of the
-listing's price floor. Tristate semantics on ``demand.amount``:
+listing's price floor. Post the demand_resource cutover the source is
+``accepted_escrows[0].price_per_hour``. Tristate semantics:
 
   * positive int — public price, returned directly.
   * ``0``         — free / public-test offering, returned as 0.
@@ -18,21 +19,15 @@ import pytest
 
 from market_storefront.models.domain_models import (
     ComputeResource,
-    ERC20TokenMetadata,
     GPUModel,
     Listing,
     Region,
-    TokenResource,
 )
 from market_storefront.utils.action_executor import _extract_initial_price_from_order
 from market_storefront.utils.config import CONFIG
 
 
-_TOKEN = ERC20TokenMetadata(
-    symbol="MOCK",
-    contract_address="0x1234567890123456789012345678901234567890",
-    decimals=6,
-)
+_TOKEN_ADDR = "0x1234567890123456789012345678901234567890"
 
 
 def _make_listing(*, demand_amount: int | None) -> Listing:
@@ -43,11 +38,15 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
         sla=99.0,
         region=Region.CALIFORNIA_US,
     )
-    token = TokenResource(token=_TOKEN, amount=demand_amount)
     return Listing(
         listing_id="lst-1",
         offer_resource=compute,
-        demand_resource=token,
+        accepted_escrows=[{
+            "chain_name": "test_chain",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": _TOKEN_ADDR},
+            "price_per_hour": demand_amount,
+        }],
         seller="http://seller:8001",
     )
 

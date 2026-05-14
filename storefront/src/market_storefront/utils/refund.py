@@ -75,11 +75,17 @@ def derive_refund_params(
             {"error": "Listing already refunded", "listing_id": listing_id, "status": "refunded"},
         )
 
-    demand_raw = order.get("demand_resource") or "{}"
-    try:
-        demand = json.loads(demand_raw) if isinstance(demand_raw, str) else demand_raw
-    except json.JSONDecodeError:
-        demand = {}
+    accepted_raw = order.get("accepted_escrows")
+    if isinstance(accepted_raw, str):
+        try:
+            accepted = json.loads(accepted_raw)
+        except json.JSONDecodeError:
+            accepted = None
+    else:
+        accepted = accepted_raw
+    first_escrow: dict[str, Any] | None = None
+    if isinstance(accepted, list) and accepted and isinstance(accepted[0], dict):
+        first_escrow = accepted[0]
 
     token_override = payload.get("token")
     amount_override = payload.get("amount")
@@ -87,16 +93,20 @@ def derive_refund_params(
     if token_override:
         token_meta = resolve_token(token_override)
     else:
-        demand_token = demand.get("token") if isinstance(demand, dict) else None
-        if isinstance(demand_token, dict):
-            token_meta = dict(demand_token)
-        elif isinstance(demand_token, str):
-            token_meta = resolve_token(demand_token)
+        token_addr_from_escrow = None
+        if first_escrow is not None:
+            fields = first_escrow.get("fields") or {}
+            candidate = fields.get("payment_token")
+            if isinstance(candidate, str) and candidate:
+                token_addr_from_escrow = candidate
+        if token_addr_from_escrow:
+            token_meta = resolve_token(token_addr_from_escrow)
         else:
             return (
                 "error",
                 400,
-                {"error": "Order demand has no resolvable token; pass explicit 'token'"},
+                {"error": "Order has no resolvable payment_token in "
+                          "accepted_escrows; pass explicit 'token'"},
             )
 
     decimals = int(token_meta.get("decimals", 0))
@@ -114,13 +124,14 @@ def derive_refund_params(
             raise ValueError(f"Amount {amount_override} has more decimals than {decimals}")
         amount_raw = int(scaled)
     else:
-        if not isinstance(demand, dict) or "amount" not in demand:
+        if first_escrow is None:
             return (
                 "error",
                 400,
-                {"error": "Order demand has no amount; pass explicit 'amount'"},
+                {"error": "Order has no accepted_escrows entry; "
+                          "pass explicit 'amount'"},
             )
-        amount_raw_in = demand.get("amount")
+        amount_raw_in = first_escrow.get("price_per_hour")
         if amount_raw_in is None:
             # Hidden-reserve listing: refund total can't be derived from
             # the listing alone. Caller must pass an explicit --amount.
@@ -128,7 +139,7 @@ def derive_refund_params(
                 "error",
                 400,
                 {"error": "Listing was published with hidden reserve "
-                          "(amount=None); pass explicit 'amount' to refund"},
+                          "(price_per_hour=None); pass explicit 'amount' to refund"},
             )
         try:
             base_raw = int(amount_raw_in)
@@ -136,7 +147,8 @@ def derive_refund_params(
             return (
                 "error",
                 400,
-                {"error": "Order demand amount is not an integer; pass explicit 'amount'"},
+                {"error": "Order accepted_escrows[0].price_per_hour is not "
+                          "an integer; pass explicit 'amount'"},
             )
         # Refund uses the agreed duration from the negotiation thread when
         # available (Slice C), else falls back to the listing's max ceiling,

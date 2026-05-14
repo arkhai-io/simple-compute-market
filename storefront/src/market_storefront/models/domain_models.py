@@ -40,7 +40,7 @@ from service.clients.token import ERC20TokenMetadata
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
 # │   ├── offer_resource: ComputeResource | TokenResource
-# │   └── demand_resource: ComputeResource | TokenResource
+# │   └── accepted_escrows: list[AcceptedEscrow] | None
 # ├── Host                          Physical host metadata (capacity, hardware)
 # ├── ComputeResourcePortfolio      Collection of ComputeResource slices
 # └── ResourceAlertRequest          HTTP input for POST /alerts/resource
@@ -418,25 +418,23 @@ class Listing(BaseModel):
     offer_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
-    demand_resource: Union[ComputeResource, TokenResource] = Field(
-        description="The resource being demanded, which may be a token or compute resource."
-    )
     accepted_escrows: list[AcceptedEscrow] | None = Field(
         default=None,
         description=(
             "Per-listing list of accepted on-chain escrow shapes (chain + "
             "escrow address + advertised partial fields + per-hour price). "
-            "Canonical pricing+escrow advertisement; ``demand_resource`` is "
-            "the legacy single-token equivalent. None for legacy rows; "
-            "synthesized at upsert from demand_resource going forward."
+            "Canonical pricing+escrow advertisement; the buyer's escrow "
+            "proposal must pick one of these entries by (chain_name, "
+            "escrow_address)."
         ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
         description=(
             "Optional ceiling on lease duration in seconds. None = unlimited. "
-            "demand_resource.amount is per-hour; total payment is computed at "
-            "agreement time as amount * agreed_duration_seconds / 3600."
+            "accepted_escrows[i].price_per_hour is the advertised per-hour "
+            "rate; total payment is computed at agreement time as "
+            "price_per_hour * agreed_duration_seconds / 3600."
         ),
     )
     seller_attestation: str | None = Field(
@@ -461,9 +459,6 @@ class Listing(BaseModel):
 
         if "offer_resource" in data:
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
-
-        if "demand_resource" in data:
-            data["demand_resource"] = ComputeDomainResource.parse_from_dict(data["demand_resource"])
 
         return data
 
@@ -545,7 +540,7 @@ class NegotiationRequestedEvent(DomainEvent):
     ``parameters["reason"]``.
 
     Carries the listing dict (so guards can read ``offer_resource``,
-    ``demand_resource``, ``status``, etc.) plus the buyer's proposed
+    ``accepted_escrows``, ``status``, etc.) plus the buyer's proposed
     price and duration so price-/duration-aware guards can be written
     later without another schema change.
     """
@@ -554,7 +549,7 @@ class NegotiationRequestedEvent(DomainEvent):
     listing_id: str = Field(description="Listing the buyer wants to negotiate against")
     listing: dict[str, Any] = Field(
         default_factory=dict,
-        description="Full listing row from sqlite (offer_resource, demand_resource, status, ...)",
+        description="Full listing row from sqlite (offer_resource, accepted_escrows, status, ...)",
     )
     proposed_price: int | None = Field(
         default=None,

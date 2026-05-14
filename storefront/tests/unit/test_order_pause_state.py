@@ -35,7 +35,12 @@ async def db(tmp_path) -> SQLiteClient:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 1000},
+        accepted_escrows=[{
+            "chain_name": "test",
+            "escrow_address": "0x000000000000000000000000000000000000abcd",
+            "fields": {"payment_token": "0x0000000000000000000000000000000000000001"},
+            "price_per_hour": 1000,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
         seller="http://seller:8001",
@@ -101,7 +106,7 @@ class TestOrderPauseHelpers:
             created_at=now,
             updated_at=now,
             offer_resource={},
-            demand_resource={},
+            
             fulfillment_resource=None,
             max_duration_seconds=3600,
             seller="http://seller:8001",
@@ -126,7 +131,7 @@ class TestOrderPauseHelpers:
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
             offer_resource={},
-            demand_resource={},
+            
             fulfillment_resource=None,
             max_duration_seconds=3600,
             seller="http://seller:8001",

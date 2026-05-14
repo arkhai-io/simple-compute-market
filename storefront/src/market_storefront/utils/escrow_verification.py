@@ -87,28 +87,31 @@ def _normalize_bytes(value: Any) -> str | None:
 
 
 def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
-    """Pull the negotiated token contract address from the seller's listing.
+    """Pull the negotiated token contract address from the seller's
+    listing's ``accepted_escrows[0].fields.payment_token``.
 
-    The listing's token side is whichever of offer/demand is the
-    ``TokenResource`` — the other is the compute resource.
+    Used as the fallback when the buyer didn't include an
+    ``escrow_proposal`` on the negotiation thread. With a proposal in
+    hand the verifier reads ``proposal.fields["payment_token"]``
+    directly.
     """
-    for field in ("demand_resource", "offer_resource"):
-        raw = listing.get(field)
-        parsed = raw
-        if isinstance(raw, str):
-            try:
-                parsed = json.loads(raw)
-            except Exception:
-                parsed = None
-        if isinstance(parsed, dict) and "token" in parsed:
-            token = parsed.get("token")
-            if isinstance(token, dict):
-                addr = token.get("contract_address")
-                if isinstance(addr, str):
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        try:
+            accepted = json.loads(accepted)
+        except Exception:
+            accepted = None
+    if isinstance(accepted, list) and accepted:
+        first = accepted[0]
+        if isinstance(first, dict):
+            fields = first.get("fields")
+            if isinstance(fields, dict):
+                addr = fields.get("payment_token")
+                if isinstance(addr, str) and addr:
                     return addr
     raise EscrowVerificationError(
         "Cannot extract token contract address from listing — "
-        "no demand/offer resource with token.contract_address"
+        "no accepted_escrows[0].fields.payment_token"
     )
 
 

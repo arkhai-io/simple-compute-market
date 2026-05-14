@@ -34,7 +34,10 @@ import httpx
 from market_storefront.utils.config import CONFIG, _resolve_chain_id
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
-from market_storefront.utils.sqlite_client import get_sqlite_client
+from market_storefront.utils.sqlite_client import (
+    get_sqlite_client,
+    synthesize_accepted_escrows_from_demand,
+)
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
 from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
@@ -85,18 +88,6 @@ def _resource_is_compute(resource: Any) -> bool:
     if isinstance(resource, dict):
         return "gpu_model" in resource
     return hasattr(resource, "gpu_model")
-
-
-def _we_are_compute_buyer(order_dict: dict[str, Any]) -> bool:
-    """True when we are the compute-buying (token-paying) side of this order.
-
-    Two cases:
-    - Seller-as-maker: maker offers compute, we are the taker → we buy compute.
-    - Buyer-as-maker: maker offers tokens (us), we are the maker → we buy compute.
-    """
-    maker_offers_compute = _resource_is_compute(order_dict.get("offer_resource"))
-    we_are_maker = _agent_urls_match(order_dict.get("seller"), BASE_URL_OVERRIDE)
-    return (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
 
 
 def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | None:
@@ -201,25 +192,40 @@ async def execute_action(
         case ActionType.MAKE_OFFER.value:
             offer_param = parameters.get("offer")
             demand_param = parameters.get("demand")
-            if offer_param is None or demand_param is None:
-                raise ValueError("MAKE_OFFER requires explicit 'offer' and 'demand' parameters")
+            accepted_escrows_param = parameters.get("accepted_escrows")
+            if offer_param is None:
+                raise ValueError("MAKE_OFFER requires an 'offer' parameter")
+            if accepted_escrows_param is None and demand_param is None:
+                raise ValueError(
+                    "MAKE_OFFER requires either 'accepted_escrows' or "
+                    "'demand' (legacy single-token shape, synthesized into "
+                    "accepted_escrows at this boundary)"
+                )
 
             try:
                 offer_resource = parse_resource_from_dict(offer_param)
-                demand_resource = parse_resource_from_dict(demand_param)
             except Exception as exc:
-                raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+                raise ValueError(f"Invalid offer resource: {exc}") from exc
 
-            offer_is_compute = isinstance(offer_resource, ComputeResource)
-            offer_is_token = isinstance(offer_resource, TokenResource)
-            demand_is_compute = isinstance(demand_resource, ComputeResource)
-            demand_is_token = isinstance(demand_resource, TokenResource)
-            if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
-                raise ValueError("Offer and demand must be one compute and one token resource")
+            if not isinstance(offer_resource, ComputeResource):
+                # Only seller-side compute listings are supported. The
+                # token-offer / compute-demand "buyer-as-maker" path was
+                # deleted with the demand_resource cutover — buyers
+                # propose escrows against seller listings, they don't
+                # publish their own listings.
+                raise ValueError(
+                    "MAKE_OFFER offer must be a compute resource; "
+                    f"got {type(offer_resource).__name__}"
+                )
+
+            if accepted_escrows_param is None:
+                accepted_escrows_param = synthesize_accepted_escrows_from_demand(
+                    demand_param
+                )
 
             order = create_order(
                 offer_resource=offer_resource,
-                demand_resource=demand_resource,
+                accepted_escrows=accepted_escrows_param,
                 max_duration_seconds=parameters.get("max_duration_seconds"),
             )
             created_listing_id = order.get("listing_id") if isinstance(order, dict) else None
@@ -241,7 +247,7 @@ async def execute_action(
                         created_at=now_iso,
                         updated_at=now_iso,
                         offer_resource=order.get("offer_resource"),
-                        demand_resource=order.get("demand_resource"),
+                        accepted_escrows=order.get("accepted_escrows"),
                         fulfillment_resource=None,
                         max_duration_seconds=order.get("max_duration_seconds"),
                         seller=order.get("seller", BASE_URL_OVERRIDE),
@@ -529,43 +535,34 @@ def _sender_id() -> str:
     return _canonical_agent_id() or AGENT_ID
 
 
-def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
-    """Given an order, take the demand and offer and extract which is compute and which is tokens.
+def extract_compute_from_order(order: dict) -> dict:
+    """Return the compute dict from an order's ``offer_resource``.
 
-    SQLite stores offer/demand_resource as JSON strings; downstream encoders
-    (encode_compute_lease, ComputeResource.model_validate) expect dicts, so
-    json-decode here rather than push that responsibility to every caller.
+    Listings only carry compute as the offered resource since the
+    demand_resource cutover; the buyer-side token info comes from
+    ``accepted_escrows[0]`` (see ``_listing_payment_token`` in
+    ``sync_negotiation``).
     """
     offer_resource = order.get("offer_resource", {})
-    demand_resource = order.get("demand_resource", {})
     if isinstance(offer_resource, str):
         offer_resource = json.loads(offer_resource)
-    if isinstance(demand_resource, str):
-        demand_resource = json.loads(demand_resource)
-
-    offer_is_compute = _resource_is_compute(offer_resource)
-    demand_is_compute = _resource_is_compute(demand_resource)
-
-    if offer_is_compute:
-        compute_resource = offer_resource
-        token_resource = demand_resource
-    elif demand_is_compute:
-        compute_resource = demand_resource
-        token_resource = offer_resource
-    else:
-        raise ValueError("Neither offer nor demand resource is compute in the provided order.")
-
-    return compute_resource, token_resource
+    if not _resource_is_compute(offer_resource):
+        raise ValueError(
+            f"Order offer_resource is not compute: "
+            f"listing_id={order.get('listing_id')}"
+        )
+    return offer_resource
 
 
 def _extract_initial_price_from_order(order: Listing | dict) -> int:
-    """Extract the initial negotiation floor from an order's token resource.
+    """Extract the initial negotiation floor from a listing's
+    ``accepted_escrows[0].price_per_hour``.
 
-    Tristate semantics on ``demand.amount``:
-      * ``> 0`` — public price; returned directly (current behavior).
+    Tristate semantics on the advertised price:
+      * ``> 0`` — public price; returned directly.
       * ``0``  — free / public-test offering; returned as 0. The seller's
         strategy accepts any non-negative offer.
-      * ``None`` — hidden reserve; falls back to
+      * ``None`` or missing entry — hidden reserve; falls back to
         ``[seller.pricing].default_min_price`` so the strategy has a real
         floor. If that's also unset, raises ``ValueError`` — the caller
         (sync_negotiation) translates that to a 409 refusal.
@@ -573,13 +570,10 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised: int | None
-    if isinstance(order.offer_resource, TokenResource):
-        advertised = order.offer_resource.amount
-    elif isinstance(order.demand_resource, TokenResource):
-        advertised = order.demand_resource.amount
-    else:
-        raise ValueError(f"Order has no token resource: {order.listing_id}")
+    advertised: int | None = None
+    if order.accepted_escrows:
+        first = order.accepted_escrows[0]
+        advertised = first.price_per_hour
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
@@ -601,8 +595,9 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
             return parsed
 
     raise ValueError(
-        f"Listing {order.listing_id} has hidden reserve (demand.amount=None) "
-        "and [seller.pricing].default_min_price is not configured. The seller "
+        f"Listing {order.listing_id} has hidden reserve "
+        "(accepted_escrows[0].price_per_hour=None) and "
+        "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
 
@@ -611,7 +606,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
 def create_order(
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
-    demand_resource: ComputeResource | TokenResource = None,
+    accepted_escrows: list[dict[str, Any]] | None = None,
     max_duration_seconds: int | None = None,
 ) -> dict | None:
     """Create an order in the market.
@@ -624,7 +619,11 @@ def create_order(
     Args:
         publish_to_registry: Whether to publish order to registry (default: True)
         offer_resource: Offer resource (required)
-        demand_resource: Demand resource (required)
+        accepted_escrows: List of accepted escrow shapes the seller will
+            honour for this listing. May be ``None`` when the chain
+            config can't resolve an escrow address (synthesis falls
+            through); the listing still gets created but has no
+            pricing/escrow advertisement until callers populate one.
         max_duration_seconds: Optional ceiling on lease duration in seconds.
             None = unlimited. Buyer specifies the actual duration at
             negotiation init time.
@@ -638,34 +637,25 @@ def create_order(
     if not offer_resource:
         logger.error("[TOOL] offer_resource is required")
         return None
-    if not demand_resource:
-        logger.error("[TOOL] demand_resource is required")
-        return None
-
-    # The token-offering side is always the oracle/buyer.
-    offering_tokens = isinstance(offer_resource, TokenResource) or (
-        isinstance(offer_resource, dict) and "token" in offer_resource
-    )
-    oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
 
     order = Listing(
         listing_id=str(uuid.uuid4()),
         seller=BASE_URL_OVERRIDE,
         buyer=None,
         offer_resource=offer_resource,
-        demand_resource=demand_resource,
+        accepted_escrows=accepted_escrows,
         max_duration_seconds=max_duration_seconds,
         seller_attestation=None,
         buyer_attestation=None,
-        oracle_address=oracle_address,
+        oracle_address=None,
     )
 
     order_dict = order.model_dump(mode='json')
-    
+
     # Note: Order publishing to registry happens in make_offer() to ensure
     # it's done in an async context. This keeps create_order() synchronous
     # for compatibility with existing callers.
-    
+
     return order_dict
 
 
@@ -780,13 +770,21 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     if not CONFIG.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
 
+    # Registry still expects a single-token ``demand`` payload (its own
+    # demand_resource cleanup is a separate milestone). Synthesize from
+    # accepted_escrows[0] so the registry sees the same pricing
+    # advertisement the storefront stores locally.
+    demand_for_registry = _synthesize_demand_for_registry(
+        order_dict.get("accepted_escrows")
+    )
+
     try:
         agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
-                demand=order_dict.get("demand_resource", {}),
+                demand=demand_for_registry,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             await registry_client.publish_listing(
@@ -798,13 +796,83 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             order_id=order_id,
             agent_url=BASE_URL_OVERRIDE,
             offer=order_dict.get("offer_resource"),
-            demand=order_dict.get("demand_resource"),
+            demand=demand_for_registry,
             max_duration_seconds=order_dict.get("max_duration_seconds"),
         )
         return {"status": "published", "listing_id": order_id}
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
         return {"status": "error", "listing_id": order_id, "message": str(exc)}
+
+
+def _synthesize_demand_for_registry(
+    accepted_escrows: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Build a legacy ``demand`` payload (``{token, amount}``) from
+    ``accepted_escrows[0]`` for the registry's still-old API.
+
+    Returns an empty dict when there's no usable entry — the registry
+    will reject or absorb that, but at least we don't crash on a missing
+    ``accepted_escrows``.
+    """
+    if not accepted_escrows:
+        return {}
+    entry = accepted_escrows[0]
+    if not isinstance(entry, dict):
+        return {}
+    payment_token = (entry.get("fields") or {}).get("payment_token")
+    if not isinstance(payment_token, str) or not payment_token:
+        return {}
+    try:
+        from service.clients.token import TOKEN_REGISTRY
+        meta = TOKEN_REGISTRY.get_by_address(payment_token)
+    except Exception:
+        meta = None
+    if meta is not None:
+        token_payload = {
+            "symbol": meta.symbol,
+            "contract_address": meta.contract_address,
+            "decimals": meta.decimals,
+        }
+    else:
+        token_payload = {"contract_address": payment_token}
+    return {"token": token_payload, "amount": entry.get("price_per_hour")}
+
+
+def _token_resource_from_accepted_escrow(
+    accepted_escrow: dict[str, Any] | Any,
+) -> TokenResource | None:
+    """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
+
+    Looks up ERC20 metadata by the entry's ``fields.payment_token``
+    address in TOKEN_REGISTRY, falling back to address-only metadata
+    when the registry doesn't recognise it. Returns ``None`` when the
+    entry lacks a payment_token. The token amount is the entry's
+    ``price_per_hour`` (per-hour rate in base units); ``None`` becomes 0.
+    """
+    if not isinstance(accepted_escrow, dict):
+        return None
+    fields = accepted_escrow.get("fields") or {}
+    payment_token = fields.get("payment_token")
+    if not isinstance(payment_token, str) or not payment_token:
+        return None
+    try:
+        from service.clients.token import TOKEN_REGISTRY, ERC20TokenMetadata
+    except Exception:
+        return None
+    meta = TOKEN_REGISTRY.get_by_address(payment_token)
+    if meta is None:
+        # Fall back to a minimal metadata object so the encoder has
+        # something to serialise. Decimals=0 means amounts are rendered
+        # as integers; better than failing the lease entirely.
+        meta = ERC20TokenMetadata(
+            symbol="UNKNOWN",
+            contract_address=payment_token,
+            decimals=0,
+        )
+    price_per_hour = accepted_escrow.get("price_per_hour")
+    amount = int(price_per_hour) if isinstance(price_per_hour, (int, float)) else 0
+    return TokenResource(token=meta, amount=amount)
 
 
 def encode_compute_lease(
@@ -890,7 +958,7 @@ async def _build_provisioning_job_spec(
     """
     required_attributes: dict[str, Any] = {}
     if order_dict:
-        compute_resource, _token = extract_compute_and_token_from_order_dict(order_dict)
+        compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
@@ -961,11 +1029,19 @@ async def fulfill_compute_obligation(
         # still pass order_id. Prefer listing_id since that's what the rest
         # of the system (sqlite, stage events, registry) keys off of.
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
-        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
             for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
+        accepted_escrows = order_dict.get("accepted_escrows") or []
+        first_escrow = accepted_escrows[0] if accepted_escrows else None
+        token_resource = _token_resource_from_accepted_escrow(first_escrow)
+        if token_resource is None:
+            raise ValueError(
+                f"Cannot encode compute lease for listing "
+                f"{order_id!r}: no usable accepted_escrows[0].payment_token"
+            )
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,

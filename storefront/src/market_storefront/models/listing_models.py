@@ -172,7 +172,7 @@ class ListingResponse(BaseModel):
     status: str
     paused: bool = False
     offer_resource: Any = None    # dict or JSON string from SQLite
-    demand_resource: Any = None   # dict or JSON string from SQLite
+    accepted_escrows: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
     seller: str | None = None
     model_config = ConfigDict(extra="allow")

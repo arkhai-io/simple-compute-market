@@ -57,14 +57,12 @@ async def _seed_listing(db: SQLiteClient, listing_id: str) -> None:
             "gpu_model": "H200", "gpu_count": 1, "sla": 99.0,
             "region": "California, US",
         },
-        demand_resource={
-            "token": {
-                "symbol": "MOCK",
-                "contract_address": "0x0000000000000000000000000000000000000001",
-                "decimals": 0,
-            },
-            "amount": 5000,
-        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": "0x0000000000000000000000000000000000000001"},
+            "price_per_hour": 5000,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
         seller="http://seller:8001",

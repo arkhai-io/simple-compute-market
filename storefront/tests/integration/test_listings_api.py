@@ -56,7 +56,12 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": "0x0000000000000000000000000000000000000001"},
+            "price_per_hour": 9000,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -170,7 +175,7 @@ class TestListListings:
                     "gpu_model": "H200", "gpu_count": gpu_count,
                     "sla": 99.9, "region": "California, US",
                 },
-                demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
+                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "0x"}, "price_per_hour": 100}],
                 fulfillment_resource=None,
                 max_duration_seconds=7200, seller="http://seller:8001",
             )
@@ -186,7 +191,7 @@ class TestListListings:
                 created_at=datetime.now().isoformat(),
                 updated_at=datetime.now().isoformat(),
                 offer_resource={"gpu_model": model, "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
+                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "0x"}, "price_per_hour": 100}],
                 fulfillment_resource=None,
                 max_duration_seconds=3600, seller="http://seller:8001",
             )
@@ -204,7 +209,7 @@ class TestListListings:
                 "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000,
                 "gpu_interconnect": "nvswitch", "datacenter_grade": True,
             },
-            demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 1000},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "0x"}, "price_per_hour": 1000}],
             fulfillment_resource=None,
             max_duration_seconds=86400, seller="http://seller:8001",
         )
@@ -216,7 +221,7 @@ class TestListListings:
                 "vcpu_count": 16, "ram_gb": 64, "disk_gb": 2000,
                 "gpu_interconnect": "pcie_only", "datacenter_grade": False,
             },
-            demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "0x"}, "price_per_hour": 100}],
             fulfillment_resource=None,
             max_duration_seconds=3600, seller="http://seller:8001",
         )

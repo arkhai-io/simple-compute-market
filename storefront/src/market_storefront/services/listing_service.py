@@ -116,11 +116,13 @@ class ListingService:
         except Exception as exc:
             raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
         if not (
-            (isinstance(offer_resource, ComputeResource) and isinstance(demand_resource, _TR))
-            or (isinstance(offer_resource, _TR) and isinstance(demand_resource, ComputeResource))
+            isinstance(offer_resource, ComputeResource)
+            and isinstance(demand_resource, _TR)
         ):
             raise ValueError(
-                "Offer and demand must be one compute resource and one token resource"
+                "Listing must offer a compute resource and demand a token "
+                "resource (the buyer-as-maker shape was removed with the "
+                "demand_resource cutover)."
             )
         return offer_resource, demand_resource
 

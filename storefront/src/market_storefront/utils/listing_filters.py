@@ -90,17 +90,16 @@ def matches_listing_filters(
 ) -> bool:
     """Return True if ``listing`` matches all provided filter constraints.
 
-    ``listing`` is a dict with ``offer_resource`` and ``demand_resource``
-    keys (as returned by ``SQLiteClient.list_listings``). Either of those
-    may be a dict or a JSON-encoded string.
+    ``listing`` is a dict with an ``offer_resource`` key (as returned by
+    ``SQLiteClient.list_listings``). It may be a dict or a JSON-encoded
+    string.
     """
     offer = _ensure_dict(listing.get("offer_resource"))
-    demand = _ensure_dict(listing.get("demand_resource"))
 
     # SLA preserves legacy exact-equality semantics for compat with
     # registry-service.
     if sla is not None:
-        if offer.get("sla") != sla and demand.get("sla") != sla:
+        if offer.get("sla") != sla:
             return False
 
     bidir_values = {
@@ -118,7 +117,7 @@ def matches_listing_filters(
         val = bidir_values[field]
         if val is None:
             continue
-        if offer.get(field) != val and demand.get(field) != val:
+        if offer.get(field) != val:
             return False
 
     min_values = {

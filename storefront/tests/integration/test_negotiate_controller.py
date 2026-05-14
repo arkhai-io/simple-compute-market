@@ -40,14 +40,12 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={
-            "token": {
-                "symbol": "MOCK",
-                "contract_address": _PAYMENT_TOKEN,
-                "decimals": 0,
-            },
-            "amount": demand_amount,
-        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": _PAYMENT_TOKEN},
+            "price_per_hour": demand_amount,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -214,14 +212,12 @@ class TestNegotiateNew:
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": _PAYMENT_TOKEN,
-                    "decimals": 0,
-                },
-                "amount": 5000,
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "price_per_hour": 5000,
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",
@@ -251,14 +247,12 @@ class TestNegotiateNew:
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": _PAYMENT_TOKEN,
-                    "decimals": 0,
-                },
-                "amount": None,  # hidden-reserve listing (distinct from amount=0 = free)
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "price_per_hour": None,  # hidden reserve
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",
@@ -305,14 +299,12 @@ class TestNegotiateNew:
                 "gpu_model": "RTX 4090", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": _PAYMENT_TOKEN,
-                    "decimals": 0,
-                },
-                "amount": 5000,
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "price_per_hour": 5000,
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",

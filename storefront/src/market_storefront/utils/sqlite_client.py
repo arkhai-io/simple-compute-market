@@ -16,6 +16,69 @@ from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_f
 logger = logging.getLogger(__name__)
 
 
+def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def synthesize_accepted_escrows_from_demand(
+    demand_resource: Any,
+) -> list[dict[str, Any]] | None:
+    """Build a single-entry ``accepted_escrows`` list from a legacy
+    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+
+    Used by:
+      * the one-shot schema-init backfill (pre-cutover rows still carrying
+        ``demand_resource`` in SQLite),
+      * action_executor's MAKE_OFFER entry point (policy layer still emits
+        ``demand``; storefront converts at the boundary before persisting).
+
+    Returns ``None`` when the demand can't be mapped (no token, missing
+    contract_address, or alkahest config can't resolve the erc20 escrow
+    obligation address for the configured chain).
+    """
+    normalized = _normalize_to_dict(demand_resource)
+    if not normalized:
+        return None
+    token = normalized.get("token")
+    if not isinstance(token, dict):
+        return None
+    contract_address = token.get("contract_address")
+    if not isinstance(contract_address, str) or not contract_address:
+        return None
+    try:
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
+        escrow_address = get_erc20_escrow_obligation_nontierable(
+            CONFIG.chain_name,
+            config_path=CONFIG.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Skipping accepted_escrows synthesis for chain %r: %s",
+            CONFIG.chain_name, exc,
+        )
+        return None
+    amount = normalized.get("amount")
+    price_per_hour = int(amount) if isinstance(amount, (int, float)) else None
+    return [{
+        "chain_name": CONFIG.chain_name,
+        "escrow_address": escrow_address.lower(),
+        "fields": {"payment_token": contract_address},
+        "price_per_hour": price_per_hour,
+    }]
+
+
 class SQLiteClient:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -348,9 +411,9 @@ class SQLiteClient:
             # OPTIONAL ceiling (max_duration_seconds; NULL = unlimited).
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
             # fields, price_per_hour} — the canonical pricing+escrow advertisement.
-            # demand_resource is the legacy shape (single token + per-hour rate);
-            # it is being phased out as call sites migrate to accepted_escrows.
-            # During the migration both columns are populated for back-compat.
+            # The legacy demand_resource column was dropped post-cutover; any
+            # pre-cutover DB still carrying it gets backfilled then DROP COLUMN'd
+            # below.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -359,7 +422,6 @@ class SQLiteClient:
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   offer_resource TEXT NOT NULL,
-                  demand_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
@@ -381,13 +443,21 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # One-shot backfill: synthesize accepted_escrows from
-            # demand_resource for any pre-migration rows. Idempotent — only
-            # touches rows where accepted_escrows IS NULL. If the chain
-            # config can't resolve an erc20 escrow address (e.g. anvil
-            # without an override JSON), the row is left NULL and readers
-            # fall back to demand_resource.
-            self._backfill_accepted_escrows(cur)
+            # One-shot backfill: synthesize accepted_escrows from the legacy
+            # demand_resource column for any pre-cutover rows. No-op when the
+            # column has already been dropped. Skips rows the synthesis can't
+            # resolve (e.g. anvil without an override JSON).
+            existing_listing_cols = {
+                r[1] for r in cur.execute("PRAGMA table_info(listings)")
+            }
+            if "demand_resource" in existing_listing_cols:
+                self._backfill_accepted_escrows(cur)
+                # Post-backfill, drop the demand_resource column. Requires
+                # SQLite 3.35+ (Mar 2021); silently skipped on older builds.
+                try:
+                    cur.execute("ALTER TABLE listings DROP COLUMN demand_resource")
+                except sqlite3.OperationalError:
+                    pass
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
@@ -707,72 +777,25 @@ class SQLiteClient:
         return None
 
     def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
-        """One-shot in-place backfill of ``accepted_escrows`` from
-        ``demand_resource`` for any pre-migration rows.
-
-        Runs during schema init; only touches rows where the column is
-        currently NULL so it's safe to re-run. Skips rows whose
-        demand_resource can't be mapped (no token, missing chain config,
-        etc.) — readers fall back to demand_resource for those.
+        """One-shot in-place backfill of ``accepted_escrows`` from the
+        legacy ``demand_resource`` column. Runs during schema init; only
+        touches rows where ``accepted_escrows`` is NULL so it's safe to
+        re-run. Skips rows whose demand_resource can't be mapped (no
+        token, missing chain config, etc.) — those rows lose their
+        pricing advertisement after the column is dropped.
         """
         rows = cur.execute(
             "SELECT listing_id, demand_resource FROM listings "
             "WHERE accepted_escrows IS NULL AND demand_resource IS NOT NULL"
         ).fetchall()
         for listing_id, demand_resource in rows:
-            synthesized = self._synthesize_accepted_escrows_from_demand(
-                demand_resource
-            )
+            synthesized = synthesize_accepted_escrows_from_demand(demand_resource)
             if not synthesized:
                 continue
             cur.execute(
                 "UPDATE listings SET accepted_escrows=? WHERE listing_id=?",
                 (json.dumps(synthesized), listing_id),
             )
-
-    def _synthesize_accepted_escrows_from_demand(
-        self, demand_resource: Any,
-    ) -> list[dict[str, Any]] | None:
-        """Build a single-entry ``accepted_escrows`` list from a legacy
-        ``demand_resource`` payload.
-
-        Returns ``None`` when the demand can't be mapped (no token, missing
-        contract_address, or alkahest config can't resolve the erc20
-        escrow obligation address for the configured chain). Callers
-        store ``None`` as NULL — readers fall back to ``demand_resource``
-        for those rows.
-        """
-        normalized = self._normalize_resource(demand_resource)
-        if not normalized:
-            return None
-        token = normalized.get("token")
-        if not isinstance(token, dict):
-            return None
-        contract_address = token.get("contract_address")
-        if not isinstance(contract_address, str) or not contract_address:
-            return None
-        try:
-            from service.clients.alkahest import (
-                get_erc20_escrow_obligation_nontierable,
-            )
-            escrow_address = get_erc20_escrow_obligation_nontierable(
-                CONFIG.chain_name,
-                config_path=CONFIG.alkahest_address_config_path,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Skipping accepted_escrows synthesis for chain %r: %s",
-                CONFIG.chain_name, exc,
-            )
-            return None
-        amount = normalized.get("amount")
-        price_per_hour = int(amount) if isinstance(amount, (int, float)) else None
-        return [{
-            "chain_name": CONFIG.chain_name,
-            "escrow_address": escrow_address.lower(),
-            "fields": {"payment_token": contract_address},
-            "price_per_hour": price_per_hour,
-        }]
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:
@@ -1693,7 +1716,6 @@ class SQLiteClient:
         created_at: str,
         updated_at: str,
         offer_resource: Any,
-        demand_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         seller: str,
@@ -1706,11 +1728,6 @@ class SQLiteClient:
         paused: bool = False,
         accepted_escrows: Any | None = None,
     ) -> None:
-        if accepted_escrows is None:
-            accepted_escrows = self._synthesize_accepted_escrows_from_demand(
-                demand_resource
-            )
-
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -1723,7 +1740,6 @@ class SQLiteClient:
                       created_at,
                       updated_at,
                       offer_resource,
-                      demand_resource,
                       fulfillment_resource,
                       max_duration_seconds,
                       seller,
@@ -1736,12 +1752,11 @@ class SQLiteClient:
                       paused,
                       accepted_escrows
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
                       offer_resource=excluded.offer_resource,
-                      demand_resource=excluded.demand_resource,
                       fulfillment_resource=excluded.fulfillment_resource,
                       max_duration_seconds=excluded.max_duration_seconds,
                       seller=excluded.seller,
@@ -1760,7 +1775,6 @@ class SQLiteClient:
                         created_at,
                         updated_at,
                         self._serialize_resource(offer_resource),
-                        self._serialize_resource(demand_resource),
                         self._serialize_resource(fulfillment_resource),
                         max_duration_seconds,
                         seller,
@@ -1787,7 +1801,6 @@ class SQLiteClient:
         status: str | None = None,
         updated_at: str | None = None,
         offer_resource: Any | None = None,
-        demand_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
         seller: str | None = None,
@@ -1812,7 +1825,6 @@ class SQLiteClient:
             add("status", status)
             add("updated_at", updated_at or datetime.now().isoformat())
             add("offer_resource", offer_resource, serialize=True)
-            add("demand_resource", demand_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("max_duration_seconds", max_duration_seconds)
             add("seller", seller)
@@ -1849,7 +1861,7 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, demand_resource, fulfillment_resource,
+                           offer_resource, fulfillment_resource,
                            max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
@@ -1864,7 +1876,7 @@ class SQLiteClient:
                     return None
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
-                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "offer_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address", "paused", "accepted_escrows",
@@ -2928,7 +2940,7 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, demand_resource, fulfillment_resource,
+                           offer_resource, fulfillment_resource,
                            max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
@@ -2942,7 +2954,7 @@ class SQLiteClient:
                 )
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
-                    "offer_resource", "demand_resource", "fulfillment_resource",
+                    "offer_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
                     "escrow_uid", "oracle_address", "paused", "accepted_escrows",

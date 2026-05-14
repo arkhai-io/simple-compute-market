@@ -124,10 +124,12 @@ def _make_seams(decoded: dict[str, Any]) -> dict[str, Any]:
 
 def _good_listing() -> dict:
     return {
-        "demand_resource": {
-            "token": {"contract_address": TOKEN, "decimals": 6, "symbol": "USDT"},
-            "amount": 100,
-        },
+        "accepted_escrows": [{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": TOKEN},
+            "price_per_hour": 100,
+        }],
         "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
     }
 
@@ -189,31 +191,36 @@ class TestNormalizeObligationData:
 
 
 class TestExtractTokenContractFromListing:
-    def test_demand_resource_with_token_dict(self):
+    def test_reads_accepted_escrows_payment_token(self):
         assert _extract_token_contract_from_listing(_good_listing()) == TOKEN
 
-    def test_offer_resource_token_fallback(self):
-        listing = {
-            "demand_resource": {"gpu_model": "H200"},
-            "offer_resource": {"token": {"contract_address": TOKEN}, "amount": 1},
-        }
-        assert _extract_token_contract_from_listing(listing) == TOKEN
-
-    def test_serialized_json_string_demand(self):
+    def test_serialized_json_string_accepted_escrows(self):
         import json
         listing = {
-            "demand_resource": json.dumps(
-                {"token": {"contract_address": TOKEN}, "amount": 1}
-            ),
+            "accepted_escrows": json.dumps([{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"payment_token": TOKEN},
+                "price_per_hour": 1,
+            }]),
             "offer_resource": {"gpu_model": "H200"},
         }
         assert _extract_token_contract_from_listing(listing) == TOKEN
 
-    def test_no_token_field_raises(self):
+    def test_no_payment_token_raises(self):
         listing = {
-            "demand_resource": {"amount": 1},
+            "accepted_escrows": [{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {},
+            }],
             "offer_resource": {"gpu_model": "H200"},
         }
+        with pytest.raises(EscrowVerificationError, match="Cannot extract token"):
+            _extract_token_contract_from_listing(listing)
+
+    def test_empty_accepted_escrows_raises(self):
+        listing = {"accepted_escrows": [], "offer_resource": {"gpu_model": "H200"}}
         with pytest.raises(EscrowVerificationError, match="Cannot extract token"):
             _extract_token_contract_from_listing(listing)
 

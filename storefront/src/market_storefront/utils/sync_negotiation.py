@@ -56,9 +56,9 @@ def _validate_escrow_proposal(
     Structural checks: the proposal's ``(chain_name, escrow_address)``
     must reference an entry in the listing's ``accepted_escrows``, and
     every seller-set field on the matched entry must equal the buyer's
-    value. Listings without an ``accepted_escrows`` entry fall back to
-    the legacy ``demand_resource.token.contract_address`` check while
-    the storefront finishes the cutover.
+    value. Listings without an ``accepted_escrows`` entry pass through
+    unchecked (synthesis on publish couldn't resolve the chain; the
+    buyer's strategy is on its own).
 
     Returns the validated proposal unchanged so the caller can echo it
     back. Returns ``None`` when the buyer didn't include a proposal
@@ -69,35 +69,17 @@ def _validate_escrow_proposal(
         return None
 
     matched = _match_accepted_escrow(listing, proposal)
-    if matched is not None:
-        seller_fields = matched.get("fields") or {}
-        for key, seller_value in seller_fields.items():
-            buyer_value = proposal.fields.get(key)
-            if _normalize_field(buyer_value) != _normalize_field(seller_value):
-                raise OfferUnfulfillableError(
-                    f"escrow_field_mismatch: field {key!r} — buyer proposed "
-                    f"{buyer_value!r}, listing requires {seller_value!r}",
-                    listing_id=listing.get("listing_id"),
-                )
+    if matched is None:
         return proposal
-
-    # Legacy fallback: validate payment_token against demand_resource.
-    expected_token = _extract_listing_payment_token(listing)
-    if expected_token is None:
-        return proposal
-    buyer_token = proposal.fields.get("payment_token")
-    if not isinstance(buyer_token, str):
-        raise OfferUnfulfillableError(
-            f"payment_token_missing_on_proposal: buyer's escrow proposal "
-            f"omitted fields['payment_token']; listing demands {expected_token}",
-            listing_id=listing.get("listing_id"),
-        )
-    if buyer_token.lower() != expected_token.lower():
-        raise OfferUnfulfillableError(
-            f"payment_token_mismatch: buyer proposed {buyer_token}, "
-            f"listing demands {expected_token}",
-            listing_id=listing.get("listing_id"),
-        )
+    seller_fields = matched.get("fields") or {}
+    for key, seller_value in seller_fields.items():
+        buyer_value = proposal.fields.get(key)
+        if _normalize_field(buyer_value) != _normalize_field(seller_value):
+            raise OfferUnfulfillableError(
+                f"escrow_field_mismatch: field {key!r} — buyer proposed "
+                f"{buyer_value!r}, listing requires {seller_value!r}",
+                listing_id=listing.get("listing_id"),
+            )
     return proposal
 
 
@@ -110,12 +92,12 @@ def _match_accepted_escrow(
     """Find the listing's ``accepted_escrows`` entry matching the
     proposal's ``(chain_name, escrow_address)``.
 
-    Returns the entry dict on hit. Returns ``None`` to signal "fall
-    back to legacy validation" when the listing has no
-    ``accepted_escrows`` advertised or the buyer sent the placeholder
-    zero address (legacy clients that don't resolve the seller's
-    escrow contract). Raises ``OfferUnfulfillableError`` when both
-    sides advertised real addresses and they don't match.
+    Returns the entry dict on hit. Returns ``None`` to skip the strict
+    match when the listing has no ``accepted_escrows`` advertised (the
+    seller couldn't synthesise one at publish time) or when the buyer
+    sent the placeholder zero address (legacy clients). Raises
+    ``OfferUnfulfillableError`` when both sides advertised real
+    addresses and they don't match.
     """
     import json as _json
 
@@ -131,8 +113,7 @@ def _match_accepted_escrow(
     proposal_addr = proposal.escrow_address.lower()
     if proposal_addr == _ZERO_ADDRESS:
         # Legacy buyer client sends the placeholder address. Skip the
-        # strict (chain, address) match and let the legacy
-        # payment_token check enforce what it can.
+        # strict (chain, address) match.
         return None
 
     proposal_chain = proposal.chain_name
@@ -163,13 +144,12 @@ def _normalize_field(value: Any) -> Any:
 
 
 def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
-    """Pull the payment-token contract address from the listing.
+    """Pull the payment-token contract address from a listing's
+    ``accepted_escrows[0].fields.payment_token`` advertisement.
 
-    Prefers ``accepted_escrows[0].fields.payment_token`` — the canonical
-    advertisement under the new shape. Falls back to legacy
-    ``demand_resource.token.contract_address`` for pre-migration rows.
-    Returns ``None`` when neither source has a typed token side (e.g.
-    compute-for-compute trades or hidden-reserve listings).
+    Returns ``None`` when no entry is advertised (compute-for-compute
+    listings, or rows where synthesis at publish time couldn't resolve
+    an escrow address).
     """
     import json as _json
 
@@ -178,7 +158,7 @@ def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
         try:
             accepted = _json.loads(accepted)
         except (ValueError, TypeError):
-            accepted = None
+            return None
     if isinstance(accepted, list) and accepted:
         first = accepted[0]
         if isinstance(first, dict):
@@ -187,20 +167,6 @@ def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
                 addr = fields.get("payment_token")
                 if isinstance(addr, str) and addr:
                     return addr
-
-    raw = listing.get("demand_resource")
-    if isinstance(raw, str):
-        try:
-            raw = _json.loads(raw)
-        except (ValueError, TypeError):
-            return None
-    if not isinstance(raw, dict):
-        return None
-    token = raw.get("token")
-    if isinstance(token, dict):
-        addr = token.get("contract_address")
-        if isinstance(addr, str):
-            return addr
     return None
 
 

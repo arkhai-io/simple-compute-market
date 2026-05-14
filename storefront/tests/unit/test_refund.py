@@ -4,6 +4,9 @@
 transfer. It encodes the policy decisions (required fields, default
 amount, required token lookup) and returns a structured outcome that
 the endpoint translates into an HTTP status + body.
+
+Post the demand_resource cutover, refunds read pricing from
+``accepted_escrows[0].fields.payment_token`` + ``price_per_hour``.
 """
 
 from __future__ import annotations
@@ -38,21 +41,33 @@ def _fake_resolver(registry: dict[str, dict]):
     return _resolve
 
 
+def _accepted_escrow(
+    *,
+    payment_token: str = _MOCK_TOKEN["contract_address"],
+    price_per_hour: int | None = 1_000_000_000_000_000_000,
+) -> dict:
+    return {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "fields": {"payment_token": payment_token},
+        "price_per_hour": price_per_hour,
+    }
+
+
 def _order(
     *,
     listing_id: str = "ord-1",
     status: str = "open",
-    demand: dict | None = None,
+    accepted_escrows: list[dict] | str | None = None,
     duration_hours: int = 3,
     escrow_uid: str | None = "0xescrow-1",
 ) -> dict:
-    # Slice C will replace this with agreed_duration_seconds from the
-    # negotiation thread. For now the kludge: encode hours in the
-    # listing's max_duration_seconds (the refund logic divides by 3600).
+    if accepted_escrows is None:
+        accepted_escrows = [_accepted_escrow()]
     return {
         "listing_id": listing_id,
         "status": status,
-        "demand_resource": json.dumps(demand or {"token": _MOCK_TOKEN, "amount": 1_000_000_000_000_000_000}),
+        "accepted_escrows": accepted_escrows,
         "max_duration_seconds": duration_hours * 3600,
         "escrow_uid": escrow_uid,
     }
@@ -73,7 +88,7 @@ def test_happy_path_uses_order_defaults(resolver):
     assert params["buyer_address"] == "0x" + "a" * 40
     assert params["token_address"] == _MOCK_TOKEN["contract_address"]
     assert params["decimals"] == 18
-    # Demand 1e18 (1 MOCK raw) × duration 3 = 3e18 raw
+    # price_per_hour 1e18 × duration 3 = 3e18 raw
     assert params["amount_raw"] == 3 * 10**18
     assert params["escrow_uid"] == "0xescrow-1"
 
@@ -129,8 +144,9 @@ def test_explicit_amount_overrides_order_default(resolver):
 
 
 def test_explicit_token_symbol_is_resolved(resolver):
-    # Order demand has a fully-spelled token dict; operator overrides with symbol lookup
-    order = _order(demand={"token": dict(_MOCK_TOKEN), "amount": 500})
+    order = _order(
+        accepted_escrows=[_accepted_escrow(price_per_hour=500)],
+    )
     payload = {
         "listing_id": "ord-1",
         "buyer_address": "0x" + "c" * 40,
@@ -155,7 +171,9 @@ def test_amount_with_too_many_decimals_is_value_error(resolver):
 
 
 def test_zero_amount_returns_400(resolver):
-    order = _order(demand={"token": _MOCK_TOKEN, "amount": 0})
+    order = _order(
+        accepted_escrows=[_accepted_escrow(price_per_hour=0)],
+    )
     payload = {"listing_id": "ord-1", "buyer_address": "0x" + "e" * 40}
     tag, status, body = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "error"
@@ -163,20 +181,26 @@ def test_zero_amount_returns_400(resolver):
     assert "positive" in body["error"]
 
 
-def test_demand_with_string_token_symbol_resolves(resolver):
-    order = _order(demand={"token": "MOCK", "amount": 100})
+def test_accepted_escrows_as_json_string_is_parsed(resolver):
+    """SQLite returns accepted_escrows as a JSON string for legacy
+    rows that bypassed the deserializer; the refund derivation handles
+    both shapes."""
+    order = _order(
+        accepted_escrows=json.dumps([_accepted_escrow(price_per_hour=100)]),
+        duration_hours=3,
+    )
     payload = {"listing_id": "ord-1", "buyer_address": "0x" + "f" * 40}
     tag, params = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "ok"
     assert params["token_address"] == _MOCK_TOKEN["contract_address"]
-    # 100 raw × duration 3 = 300 raw
+    # price_per_hour 100 × duration 3 = 300 raw
     assert params["amount_raw"] == 300
 
 
-def test_demand_with_no_token_and_no_override_returns_400(resolver):
-    order = _order(demand={"amount": 100})
+def test_order_without_accepted_escrows_returns_400(resolver):
+    order = _order(accepted_escrows=[])
     payload = {"listing_id": "ord-1", "buyer_address": "0x" + "a" * 40}
     tag, status, body = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "error"
     assert status == 400
-    assert "token" in body["error"].lower()
+    assert "payment_token" in body["error"].lower()

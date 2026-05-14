@@ -130,10 +130,10 @@ async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord
     try:
         conn.execute(
             """INSERT INTO listings (listing_id, status, created_at, updated_at,
-                                   offer_resource, demand_resource, max_duration_seconds,
+                                   offer_resource, max_duration_seconds,
                                    seller, buyer, escrow_uid)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
-                       '{}', '{}', 3600, 'http://seller:8001', NULL, NULL)""",
+                       '{}', 3600, 'http://seller:8001', NULL, NULL)""",
             (listing_id,),
         )
         conn.commit()

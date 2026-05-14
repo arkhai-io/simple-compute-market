@@ -33,7 +33,7 @@ def _listing(**offer_overrides) -> dict:
         "open_ports_count": 128,
         **offer_overrides,
     }
-    return {"offer_resource": offer, "demand_resource": {"token": "USDC", "amount": 1}}
+    return {"offer_resource": offer}
 
 
 class TestEqualityFilters:
@@ -115,39 +115,12 @@ class TestJsonStringResources:
         import json
         listing = {
             "offer_resource": json.dumps({"gpu_model": "H200", "gpu_count": 4}),
-            "demand_resource": json.dumps({"token": "USDC"}),
         }
         assert matches_listing_filters(listing, gpu_model="H200", gpu_count_min=2) is True
         assert matches_listing_filters(listing, gpu_count_min=8) is False
 
     def test_malformed_json_treated_as_empty(self):
-        listing = {"offer_resource": "not-json-at-all", "demand_resource": {}}
+        listing = {"offer_resource": "not-json-at-all"}
         # Filter still returns True with no constraints; rejects when constraints required.
         assert matches_listing_filters(listing) is True
         assert matches_listing_filters(listing, gpu_model="H200") is False
-
-
-class TestBidirectional:
-    def test_filter_matches_demand_side(self):
-        """If a buyer's listing has gpu_model in demand (asking for H200) and
-        offer is the token, the bidirectional region/gpu_model/cpu_type
-        equality match accepts either direction."""
-        listing = {
-            "offer_resource": {"token": "USDC", "amount": 1000},
-            "demand_resource": {"gpu_model": "H200", "region": "Tokyo, JP", "cpu_type": "Intel Xeon"},
-        }
-        assert matches_listing_filters(listing, gpu_model="H200") is True
-        assert matches_listing_filters(listing, region="Tokyo, JP") is True
-        assert matches_listing_filters(listing, cpu_type="Intel Xeon") is True
-        # Mismatch fails
-        assert matches_listing_filters(listing, gpu_model="RTX 4090") is False
-
-    def test_min_filter_only_checks_offer(self):
-        """Numeric ``_min`` filters check the offer side, not demand —
-        the seller's slice is what's being compared against the buyer's floor."""
-        listing = {
-            "offer_resource": {"token": "USDC", "amount": 1000},
-            "demand_resource": {"gpu_model": "H200", "gpu_count": 8},
-        }
-        # Demand asks for 8 GPUs but offer carries no gpu_count → reject for min filter
-        assert matches_listing_filters(listing, gpu_count_min=4) is False
