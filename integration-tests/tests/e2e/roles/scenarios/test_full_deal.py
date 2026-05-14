@@ -1511,6 +1511,21 @@ class TestStage11b_WatchdogReleasesResource:
         )
         log.info("[11b] Check job %s succeeded", deal_state.check_job_id)
 
+        # Snapshot the storefront's latest lease_lifecycle event id
+        # before triggering the watchdog cycle. The cycle's PATCH back
+        # to the storefront (which flips state leased→available and
+        # emits lease_lifecycle.resource_released) lands *after*
+        # check_leases() returns — we need a sync point below.
+        #
+        # Filter by stage so the row count stays small (one event per
+        # past test run); the events endpoint orders ASC and caps at
+        # 500, so an unfiltered snapshot would miss the latest events
+        # once enough total stage events accumulate across runs.
+        existing_lifecycle = storefront_admin_client.get_events(
+            limit=500, stage="lease_lifecycle",
+        )
+        since_id = max((ev.id for ev in existing_lifecycle.events), default=0)
+
         # Step 3 — trigger the lifecycle cycle that processes the completed check job
         result = provisioning_client.check_leases()
         assert result.get("released", 0) >= 1, (
@@ -1527,6 +1542,19 @@ class TestStage11b_WatchdogReleasesResource:
             f"Full lease: {lease}"
         )
         log.info("[11b] Lease %s released", deal_state.lease_id)
+
+        # Wait for the storefront to confirm the resource is available.
+        # The watchdog PATCH races check_leases()'s response — the cycle
+        # marks the lease released *locally* before awaiting the
+        # storefront PATCH, so the GET below would otherwise see 'leased'
+        # for ~1-2s after this point.
+        from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
+        _wait(
+            storefront_admin_client,
+            "lease_lifecycle", "resource_released",
+            since_id=since_id,
+            timeout=10.0,
+        )
 
         # Storefront resource must be available — watchdog has patched it
         resource = storefront_admin_client.get_resource(deal_state.reserved_resource_id)

@@ -306,16 +306,22 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        since_id: int = 0,
         timeout: float = 30.0,
         poll_interval: float = 0.5,
     ) -> StageEvent:
         """Poll GET /api/v1/system/events until a matching event appears.
 
+        Pass ``since_id`` to ignore events older than that id — useful
+        when waiting for the *next* matching event after triggering an
+        action. Snapshot ``max(e.id for e in get_events().events)``
+        before the trigger, then pass it here.
+
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
         deadline = _time.monotonic() + timeout
-        cursor = 0
+        cursor = since_id
         while _time.monotonic() < deadline:
             result = await self.get_events(
                 since_id=cursor,
@@ -332,7 +338,8 @@ class StorefrontClient(_StorefrontClientBase):
             await _asyncio.sleep(poll_interval)
         raise TimeoutError(
             f"Stage event stage={stage!r} event={event!r} "
-            f"listing_id={listing_id!r} not seen within {timeout}s"
+            f"listing_id={listing_id!r} not seen within {timeout}s "
+            f"(since_id={since_id})"
         )
 
     # ------------------------------------------------------------------
@@ -1108,16 +1115,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        since_id: int = 0,
         timeout: float = 30.0,
         poll_interval: float = 0.5,
     ) -> StageEvent:
         """Poll GET /api/v1/system/events until a matching event appears.
 
+        Pass ``since_id`` to ignore events older than that id — useful
+        when waiting for the *next* matching event after triggering an
+        action. Snapshot ``max(e.id for e in get_events().events)``
+        before the trigger, then pass it here.
+
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
         deadline = _time.monotonic() + timeout
-        cursor = 0
+        cursor = since_id
         while _time.monotonic() < deadline:
             result = self.get_events(
                 since_id=cursor,
@@ -1133,7 +1146,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
             _time.sleep(poll_interval)
         raise TimeoutError(
             f"Stage event stage={stage!r} event={event!r} "
-            f"listing_id={listing_id!r} not seen within {timeout}s"
+            f"listing_id={listing_id!r} not seen within {timeout}s "
+            f"(since_id={since_id})"
         )
 
     # ------------------------------------------------------------------

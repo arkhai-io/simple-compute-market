@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi_utils.cbv import cbv
@@ -22,6 +23,7 @@ from market_storefront.models.system_models import (
     ResourcePatchResponse,
 )
 from market_storefront.server import _set_globally_paused
+from market_storefront.utils.stage_log import stage_event
 
 logger = logging.getLogger(__name__)
 
@@ -219,21 +221,44 @@ class AdminController:
             event_parts.append("attrs_updated")
         event_type = "admin_resource_patch:" + ",".join(event_parts)
 
-        await self._db.apply_resource_transition(
+        # Each admin PATCH is an independent operation — the inputs
+        # (resource_id, new_state, new_attrs) repeat across calls
+        # (lease watchdog issues the same {state:available,
+        # lease_end_utc:null} every time a lease expires), but each
+        # call is a real transition that must apply, not a retry of a
+        # past one. Idempotency-key dedup is only useful at the HTTP
+        # retry layer; we generate a fresh uuid here so each call hits
+        # the resources table.
+        result = await self._db.apply_resource_transition(
             resource_id=resource_id,
             event_type=event_type,
-            idempotency_key=f"admin-patch:{resource_id}:{new_state}:{json.dumps(new_attrs, sort_keys=True) if new_attrs is not None else ''}",
+            idempotency_key=f"admin-patch:{resource_id}:{uuid.uuid4()}",
             set_state=new_state if state_changed else None,
             set_attribute=(
                 {f"$.{k}": v for k, v in body.attributes.items()}
                 if body.attributes is not None else None
             ),
         )
+        applied = bool(result.get("applied"))
 
-        if state_changed:
+        if state_changed and applied:
             logger.info("[ADMIN] Resource %s state: %s → %s", resource_id, old_state, new_state)
-        if attrs_changed:
+        if attrs_changed and applied:
             logger.info("[ADMIN] Resource %s attributes patched", resource_id)
+
+        # Emit a wait-able event when the lease watchdog releases a
+        # resource. The provisioning service calls this endpoint with
+        # state=available after a lease ends; tests and operators need a
+        # synchronization point because the PATCH completes after the
+        # /lifecycle/check-leases response returns. Other state
+        # transitions (manual ops, init bookkeeping) don't produce this
+        # event — it's specifically the leased→available edge.
+        if applied and state_changed and old_state == "leased" and new_state == "available":
+            stage_event(
+                "lease_lifecycle",
+                "resource_released",
+                resource_id=resource_id,
+            )
 
         # Re-fetch the updated row to return accurate state.
         updated_row = await self._db.get_resource(resource_id=resource_id)

@@ -316,6 +316,7 @@ def wait_for_stage_event(
     *,
     listing_id: str | None = None,
     negotiation_id: str | None = None,
+    since_id: int = 0,
     timeout: float = 30.0,
 ):
     """Block until the matching stage event appears in /api/v1/system/events.
@@ -331,6 +332,10 @@ def wait_for_stage_event(
         Stage and event strings to match (e.g. ``"discovery"``, ``"order_published"``).
     listing_id, negotiation_id:
         Optional filters passed through to the events query.
+    since_id:
+        Ignore events older than this id. Use when waiting for the
+        *next* event after triggering an action — snapshot the latest
+        id via ``get_events`` first, then pass it here.
     timeout:
         Seconds to wait before raising AssertionError.
     """
@@ -339,6 +344,7 @@ def wait_for_stage_event(
             stage, event,
             listing_id=listing_id,
             negotiation_id=negotiation_id,
+            since_id=since_id,
             timeout=timeout,
         )
     except TimeoutError as exc:
