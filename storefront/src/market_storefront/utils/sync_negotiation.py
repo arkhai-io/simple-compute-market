@@ -51,14 +51,17 @@ def _validate_escrow_proposal(
     proposal: EscrowProposal | None,
     listing: dict[str, Any],
 ) -> EscrowProposal | None:
-    """Validate the buyer's escrow proposal against the listing.
+    """Structural validation of the buyer's escrow proposal.
 
-    Structural checks: the proposal's ``(chain_name, escrow_address)``
-    must reference an entry in the listing's ``accepted_escrows``, and
-    every seller-set field on the matched entry must equal the buyer's
-    value. Listings without an ``accepted_escrows`` entry pass through
-    unchecked (synthesis on publish couldn't resolve the chain; the
-    buyer's strategy is on its own).
+    Confirms the proposal's ``(chain_name, escrow_address)`` resolves to
+    an entry in the listing's ``accepted_escrows``. Listings without an
+    advertised set pass through unchecked (publish-time synthesis
+    couldn't resolve a chain; the buyer's strategy is on its own).
+
+    Field-by-field equality against the matched entry's ``fields`` map
+    is *seller policy*, not protocol — it lives in the
+    ``negotiate.guard.escrow_fields_strict_match`` policy callable so
+    operators can swap it for softer matching without code changes.
 
     Returns the validated proposal unchanged so the caller can echo it
     back. Returns ``None`` when the buyer didn't include a proposal
@@ -67,19 +70,7 @@ def _validate_escrow_proposal(
     """
     if proposal is None:
         return None
-
-    matched = _match_accepted_escrow(listing, proposal)
-    if matched is None:
-        return proposal
-    seller_fields = matched.get("fields") or {}
-    for key, seller_value in seller_fields.items():
-        buyer_value = proposal.fields.get(key)
-        if _normalize_field(buyer_value) != _normalize_field(seller_value):
-            raise OfferUnfulfillableError(
-                f"escrow_field_mismatch: field {key!r} — buyer proposed "
-                f"{buyer_value!r}, listing requires {seller_value!r}",
-                listing_id=listing.get("listing_id"),
-            )
+    _match_accepted_escrow(listing, proposal)
     return proposal
 
 
@@ -134,13 +125,6 @@ def _match_accepted_escrow(
         f"accepted_escrows",
         listing_id=listing.get("listing_id"),
     )
-
-
-def _normalize_field(value: Any) -> Any:
-    """Case-insensitive compare for hex addresses; identity otherwise."""
-    if isinstance(value, str) and value.startswith("0x") and len(value) == 42:
-        return value.lower()
-    return value
 
 
 def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
@@ -492,6 +476,12 @@ async def start_sync_negotiation(
             listing=our_order_dict,
             proposed_price=their_proposed_price,
             requested_duration_seconds=requested_duration_seconds,
+            escrow_proposal=(
+                escrow_proposal.model_dump()
+                if escrow_proposal is not None
+                and hasattr(escrow_proposal, "model_dump")
+                else escrow_proposal
+            ),
         )
         if rejection_reason:
             raise OfferUnfulfillableError(

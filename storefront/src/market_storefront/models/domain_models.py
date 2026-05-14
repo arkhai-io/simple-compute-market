@@ -541,8 +541,9 @@ class NegotiationRequestedEvent(DomainEvent):
 
     Carries the listing dict (so guards can read ``offer_resource``,
     ``accepted_escrows``, ``status``, etc.) plus the buyer's proposed
-    price and duration so price-/duration-aware guards can be written
-    later without another schema change.
+    price, duration, and escrow proposal so escrow- and price-aware
+    guards can run against the request before any thread state is
+    written.
     """
 
     event_type: EventType = Field(default=EventType.NEGOTIATION_REQUESTED)
@@ -558,6 +559,13 @@ class NegotiationRequestedEvent(DomainEvent):
     requested_duration_seconds: int | None = Field(
         default=None,
         description="Buyer's requested lease duration in seconds (None if not provided)",
+    )
+    escrow_proposal: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Buyer's EscrowProposal as a dict (chain_name, escrow_address, "
+            "fields, expiration_unix). None for legacy clients."
+        ),
     )
 
 

@@ -150,6 +150,108 @@ def negotiate_guard_has_matching_inventory(
     )
 
 
+_ZERO_ADDRESS = "0x" + "0" * 40
+
+
+def _normalize_escrow_field(value: Any) -> Any:
+    """Case-insensitive compare for hex addresses; identity otherwise."""
+    if isinstance(value, str) and value.startswith("0x") and len(value) == 42:
+        return value.lower()
+    return value
+
+
+@policy_callable("negotiate.guard.escrow_fields_strict_match")
+def negotiate_guard_escrow_fields_strict_match(
+    context: DecisionContext,
+) -> DomainAction | None:
+    """Veto a negotiation request when the buyer's escrow proposal
+    diverges from the seller's advertised ``accepted_escrows`` entry on
+    any field the seller pinned.
+
+    Strict equality: every key the seller set on the matched entry's
+    ``fields`` map must equal the buyer's value. Operators who want
+    softer matching (allow the buyer to upgrade arbiter, swap payment
+    token, etc.) drop this guard from the composite and write their own.
+
+    Passes through when:
+      * no escrow_proposal in the event (legacy buyer client),
+      * listing has no ``accepted_escrows`` advertised (publish-time
+        synthesis couldn't resolve a chain — the seller is on their own),
+      * proposal's ``escrow_address`` is the zero placeholder (legacy
+        clients that don't pick an entry).
+
+    The structural ``(chain, address)`` lookup against
+    ``accepted_escrows`` lives in ``sync_negotiation._match_accepted_escrow``
+    — that's protocol-fixed shape resolution. Here we only express the
+    *seller's* opinion about which fields must match.
+    """
+    if not isinstance(context.event, NegotiationRequestedEvent):
+        return None
+    proposal = context.event.escrow_proposal
+    if not isinstance(proposal, dict):
+        return None
+
+    listing = context.event.listing or {}
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        import json
+        try:
+            accepted = json.loads(accepted)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(accepted, list) or not accepted:
+        return None
+
+    proposal_addr_raw = proposal.get("escrow_address")
+    if not isinstance(proposal_addr_raw, str) or not proposal_addr_raw:
+        return None
+    proposal_addr = proposal_addr_raw.lower()
+    if proposal_addr == _ZERO_ADDRESS:
+        return None
+
+    proposal_chain = proposal.get("chain_name")
+    proposal_fields = proposal.get("fields") or {}
+
+    matched: dict[str, Any] | None = None
+    for entry in accepted:
+        if not isinstance(entry, dict):
+            continue
+        entry_addr = entry.get("escrow_address")
+        if (
+            entry.get("chain_name") == proposal_chain
+            and isinstance(entry_addr, str)
+            and entry_addr.lower() == proposal_addr
+        ):
+            matched = entry
+            break
+    if matched is None:
+        # No structural match in this composite — the protocol layer in
+        # sync_negotiation handles the "address advertised but not in
+        # set" rejection. Don't double-report from here.
+        return None
+
+    seller_fields = matched.get("fields") or {}
+    if not isinstance(seller_fields, dict):
+        return None
+
+    for key, seller_value in seller_fields.items():
+        buyer_value = proposal_fields.get(key) if isinstance(proposal_fields, dict) else None
+        if _normalize_escrow_field(buyer_value) != _normalize_escrow_field(seller_value):
+            return DomainAction(
+                action_type=DomainActionType.REJECT_OFFER,
+                parameters={
+                    "reason": (
+                        f"escrow_field_mismatch: field {key!r} — buyer "
+                        f"proposed {buyer_value!r}, listing requires "
+                        f"{seller_value!r}"
+                    ),
+                    "listing_id": context.event.listing_id,
+                    "field": key,
+                },
+            )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Resource-imbalance guards (used inside the resource_imbalance composite)
 # ---------------------------------------------------------------------------

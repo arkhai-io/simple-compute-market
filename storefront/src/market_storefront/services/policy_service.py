@@ -186,6 +186,7 @@ class PolicyService:
         listing: dict[str, Any],
         proposed_price: int | None,
         requested_duration_seconds: int | None,
+        escrow_proposal: dict[str, Any] | None = None,
     ) -> str | None:
         """Run the seeded negotiate-request policy and return a rejection
         reason on veto, or ``None`` to let the negotiation proceed.
@@ -208,6 +209,7 @@ class PolicyService:
             listing=listing,
             proposed_price=proposed_price,
             requested_duration_seconds=requested_duration_seconds,
+            escrow_proposal=escrow_proposal,
         )
         action = await self._consult_policy(event)
         if action is None:

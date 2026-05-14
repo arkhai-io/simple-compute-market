@@ -108,7 +108,10 @@ class ComputePolicySeeder:
             await self._sqlite_client.save_policy_composite(
                 agent_id=self._agent_id,
                 policy_name="negotiate_request.default.v1",
-                components=["negotiate.guard.has_matching_inventory"],
+                components=[
+                    "negotiate.guard.has_matching_inventory",
+                    "negotiate.guard.escrow_fields_strict_match",
+                ],
             )
         except Exception as e:
             logger.warning(f"[POLICY SEED] Failed to save negotiate_request policy: {e}")
