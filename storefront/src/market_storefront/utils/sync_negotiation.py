@@ -106,10 +106,30 @@ def _validate_escrow_terms_proposal(
 
 
 def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
-    """Pull the payment-token contract address off the listing's
-    ``demand_resource``. Returns None when the listing has no typed
-    token side (e.g. compute-for-compute trades)."""
+    """Pull the payment-token contract address from the listing.
+
+    Prefers ``accepted_escrows[0].fields.payment_token`` — the canonical
+    advertisement under the new shape. Falls back to legacy
+    ``demand_resource.token.contract_address`` for pre-migration rows.
+    Returns ``None`` when neither source has a typed token side (e.g.
+    compute-for-compute trades or hidden-reserve listings).
+    """
     import json as _json
+
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        try:
+            accepted = _json.loads(accepted)
+        except (ValueError, TypeError):
+            accepted = None
+    if isinstance(accepted, list) and accepted:
+        first = accepted[0]
+        if isinstance(first, dict):
+            fields = first.get("fields")
+            if isinstance(fields, dict):
+                addr = fields.get("payment_token")
+                if isinstance(addr, str) and addr:
+                    return addr
 
     raw = listing.get("demand_resource")
     if isinstance(raw, str):

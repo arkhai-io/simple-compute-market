@@ -356,6 +356,13 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            # One-shot backfill: synthesize accepted_escrows from
+            # demand_resource for any pre-migration rows. Idempotent — only
+            # touches rows where accepted_escrows IS NULL. If the chain
+            # config can't resolve an erc20 escrow address (e.g. anvil
+            # without an override JSON), the row is left NULL and readers
+            # fall back to demand_resource.
+            self._backfill_accepted_escrows(cur)
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
@@ -673,6 +680,74 @@ class SQLiteClient:
             except Exception:
                 return None
         return None
+
+    def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
+        """One-shot in-place backfill of ``accepted_escrows`` from
+        ``demand_resource`` for any pre-migration rows.
+
+        Runs during schema init; only touches rows where the column is
+        currently NULL so it's safe to re-run. Skips rows whose
+        demand_resource can't be mapped (no token, missing chain config,
+        etc.) — readers fall back to demand_resource for those.
+        """
+        rows = cur.execute(
+            "SELECT listing_id, demand_resource FROM listings "
+            "WHERE accepted_escrows IS NULL AND demand_resource IS NOT NULL"
+        ).fetchall()
+        for listing_id, demand_resource in rows:
+            synthesized = self._synthesize_accepted_escrows_from_demand(
+                demand_resource
+            )
+            if not synthesized:
+                continue
+            cur.execute(
+                "UPDATE listings SET accepted_escrows=? WHERE listing_id=?",
+                (json.dumps(synthesized), listing_id),
+            )
+
+    def _synthesize_accepted_escrows_from_demand(
+        self, demand_resource: Any,
+    ) -> list[dict[str, Any]] | None:
+        """Build a single-entry ``accepted_escrows`` list from a legacy
+        ``demand_resource`` payload.
+
+        Returns ``None`` when the demand can't be mapped (no token, missing
+        contract_address, or alkahest config can't resolve the erc20
+        escrow obligation address for the configured chain). Callers
+        store ``None`` as NULL — readers fall back to ``demand_resource``
+        for those rows.
+        """
+        normalized = self._normalize_resource(demand_resource)
+        if not normalized:
+            return None
+        token = normalized.get("token")
+        if not isinstance(token, dict):
+            return None
+        contract_address = token.get("contract_address")
+        if not isinstance(contract_address, str) or not contract_address:
+            return None
+        try:
+            from service.clients.alkahest import (
+                get_erc20_escrow_obligation_nontierable,
+            )
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                CONFIG.chain_name,
+                config_path=CONFIG.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Skipping accepted_escrows synthesis for chain %r: %s",
+                CONFIG.chain_name, exc,
+            )
+            return None
+        amount = normalized.get("amount")
+        price_per_hour = int(amount) if isinstance(amount, (int, float)) else None
+        return [{
+            "chain_name": CONFIG.chain_name,
+            "escrow_address": escrow_address.lower(),
+            "fields": {"payment_token": contract_address},
+            "price_per_hour": price_per_hour,
+        }]
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:
@@ -1606,6 +1681,11 @@ class SQLiteClient:
         paused: bool = False,
         accepted_escrows: Any | None = None,
     ) -> None:
+        if accepted_escrows is None:
+            accepted_escrows = self._synthesize_accepted_escrows_from_demand(
+                demand_resource
+            )
+
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
             try:

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 from service.schemas import (
+    AcceptedEscrow,
     ActionType,
     Attestation as CoreAttestation,
     Decision as CoreDecision,
@@ -419,6 +420,16 @@ class Listing(BaseModel):
     )
     demand_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being demanded, which may be a token or compute resource."
+    )
+    accepted_escrows: list[AcceptedEscrow] | None = Field(
+        default=None,
+        description=(
+            "Per-listing list of accepted on-chain escrow shapes (chain + "
+            "escrow address + advertised partial fields + per-hour price). "
+            "Canonical pricing+escrow advertisement; ``demand_resource`` is "
+            "the legacy single-token equivalent. None for legacy rows; "
+            "synthesized at upsert from demand_resource going forward."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
