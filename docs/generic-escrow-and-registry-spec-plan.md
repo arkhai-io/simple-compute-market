@@ -79,6 +79,17 @@ different payloads in different registries.
 that synthesizes `accepted_escrows` rows from existing `demand_resource`
 JSON and drops the column.
 
+**Listing is one-sided.** A listing represents a seller's offer of
+compute (or any single resource) plus an upper bound on what they
+accept in exchange (the `accepted_escrows` advertisement). The buyer
+proposes a specific instance against that bound — they don't publish
+their own listings. The `_we_are_compute_buyer` / "buyer-as-maker"
+branch in `action_executor.py` is dormant code from an earlier
+symmetric-maker/taker design; nothing publishes orders with
+`offer=TokenResource, demand=ComputeResource`. That branch (plus the
+`MAKE_OFFER` handling of token-side-offer) gets deleted as part of
+the `demand_resource` removal, not preserved.
+
 ### New listing core (protocol-required)
 
 ```python
