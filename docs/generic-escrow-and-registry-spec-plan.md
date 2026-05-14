@@ -99,9 +99,13 @@ class Listing(BaseModel):
     offer_resource: dict[str, Any]       # registry-specific shape; protocol stays opaque
     accepted_escrows: list[AcceptedEscrow]
     max_duration_seconds: int | None
-    seller_attestation: str | None
-    buyer_attestation: str | None
     oracle_address: str | None
+
+# Attestation UIDs (seller_attestation, buyer_attestation) and deal-record
+# fields (buyer, matched_offer_id, escrow_uid) are intentionally NOT on the
+# listing. Multi-escrow deals (payment + bond + penalty) need per-escrow
+# attestation tracking — those live on the `escrows` table (evolved from
+# settlement_jobs; see "Multi-escrow deal record" below).
 
 class AcceptedEscrow(BaseModel):
     chain_id: int
@@ -166,6 +170,90 @@ CREATE TABLE publications (
 The current "fan-out and remember nothing" path becomes a thin wrapper
 that builds a uniform `{registry_url: same_payload, ...}` dict and
 delegates to the new path.
+
+### Multi-escrow deal record (`settlement_jobs` → `escrows`)
+
+Today's `listings` row absorbs the deal outcome with flat columns:
+`buyer`, `matched_offer_id`, `escrow_uid`, `seller_attestation`,
+`buyer_attestation`. That shape assumes **one escrow per deal**. Real
+deals will have multiple escrows attached — primary payment, performance
+bond, penalty escrow, etc. — and each has its own lock/fulfill attestation
+pair on chain. Flat columns don't accommodate that.
+
+`settlement_jobs` is already keyed on `escrow_uid PK + negotiation_id` and
+carries an `attestation_uid` column + provisioning state. It's the
+**per-escrow record**, just hardcoded to one row per deal. Evolution:
+
+- Rename `settlement_jobs` → `escrows`.
+- Add `chain_id INTEGER`, `escrow_address TEXT` — resolves which contract.
+  Same `(chain_id, escrow_address)` pair as the listing's
+  `accepted_escrows` and the buyer's `EscrowProposal`.
+- Split `attestation_uid` into `buyer_attestation_uid` (set when buyer
+  locks escrow) and `seller_attestation_uid` (set when seller posts
+  fulfillment against that escrow).
+- Add `is_primary INTEGER NOT NULL DEFAULT 0`. The primary escrow drives
+  provisioning — existing `provisioning_job_id`, `tenant_credentials`,
+  `connection_details` columns are populated only on the primary row.
+  Non-primary escrows are lifecycle-tracked but don't trigger fulfillment.
+
+`listings` sheds the deal-outcome columns entirely: `escrow_uid`,
+`buyer_attestation`, `seller_attestation` drop. `buyer` and
+`matched_offer_id` move to `negotiation_threads` where they conceptually
+belong (the thread is the buyer↔seller pairing).
+
+The `Listing.is_open()` / `is_closed()` predicates become derived queries
+joining `escrows` via the winning `negotiation_id`: "any escrow row
+missing either attestation UID = open; all rows have both UIDs = closed."
+
+#### Migration
+
+```python
+# pseudo-code, idempotent — guarded on column existence
+cur.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
+cur.execute("ALTER TABLE escrows ADD COLUMN buyer_attestation_uid TEXT")
+cur.execute("ALTER TABLE escrows ADD COLUMN seller_attestation_uid TEXT")
+cur.execute("ALTER TABLE escrows ADD COLUMN chain_id INTEGER")
+cur.execute("ALTER TABLE escrows ADD COLUMN escrow_address TEXT")
+cur.execute("ALTER TABLE escrows ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 1")
+cur.execute("ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT")
+cur.execute("ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT")
+
+# Backfill the per-escrow row from the pre-cutover listings:
+#   buyer_attestation_uid  <- listings.buyer_attestation  (joined via negotiation_id)
+#   seller_attestation_uid <- listings.seller_attestation
+#   chain_id, escrow_address <- listing.accepted_escrows[0]
+#   is_primary = 1 (every existing row was the only escrow)
+# And the negotiation-side backfill:
+#   negotiation_threads.buyer            <- listings.buyer
+#   negotiation_threads.matched_offer_id <- listings.matched_offer_id
+
+cur.execute("ALTER TABLE escrows DROP COLUMN attestation_uid")
+cur.execute("ALTER TABLE listings DROP COLUMN escrow_uid")
+cur.execute("ALTER TABLE listings DROP COLUMN buyer_attestation")
+cur.execute("ALTER TABLE listings DROP COLUMN seller_attestation")
+cur.execute("ALTER TABLE listings DROP COLUMN buyer")
+cur.execute("ALTER TABLE listings DROP COLUMN matched_offer_id")
+```
+
+#### Callers that touch attestation fields
+
+Concentrated in `storefront/src/market_storefront/utils/`: `action_executor.py`
+(writes `seller_attestation` post-fulfillment), `recovery.py` (reads to
+detect mid-settlement crash recovery), `settlement_jobs.py`, `sqlite_client.py`
+(persistence). Plus `registry-service`: the `/listings/closed` endpoint
+filters on `seller_attestation IS NOT NULL AND buyer_attestation IS NOT NULL`;
+moves to a join against `escrows` (or a denormalized
+`listings.is_settled` flag maintained at attestation-write time, if the
+join cost matters).
+
+#### Open questions, not blocking
+
+- `oracle_address` lives on `listings` today and is also per-deal. Multi-
+  escrow with different arbiters would want it per-escrow row too. Defer
+  until the first non-recipient-arbiter escrow ships; the move is small.
+- Whether `is_primary` should be a `role TEXT` discriminator (`payment` /
+  `bond` / `penalty`) or stay as a boolean flag. Boolean fits today's
+  use; widen to enum when a second non-primary role appears.
 
 ### Migration
 
@@ -461,8 +549,6 @@ The protocol-required core fields on every listing, across all registries:
 - `seller: str` (agent card URL)
 - `accepted_escrows: list[AcceptedEscrow]`
 - `max_duration_seconds: int | None`
-- `seller_attestation: str | None`
-- `buyer_attestation: str | None`
 - `oracle_address: str | None`
 
 Plus `offer_resource: dict[str, Any]` — present on every listing, but
@@ -471,6 +557,13 @@ the registry's `listing_shape` constrains it.
 
 `AcceptedEscrow` and `EscrowProposal` shapes are protocol-fixed; their
 inner `fields` map is ABI-defined per `(chain_id, escrow_address)`.
+
+**Not on the listing.** Attestation UIDs (`buyer_attestation_uid`,
+`seller_attestation_uid`) and deal-record fields (`buyer`,
+`matched_offer_id`) are settlement-side state, not advertisement. They
+live on the `escrows` table (one row per attached escrow, joined via
+`negotiation_id`) and on `negotiation_threads`. Registries that want a
+"deal closed" view query that join, not a flag on the listing.
 
 Everything else (filter vocabulary, listing extensions like `region`,
 `gpu_model`, `ram_gb`, etc.) is registry-userland.
@@ -487,9 +580,15 @@ Everything else (filter vocabulary, listing extensions like `region`,
    seller policy; structural checks stay in protocol layer.
 4. **PR (c2):** Buyer-side counter-offer handling (if (c1) didn't
    already cover it).
-5. **PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
+5. **PR (b3):** Evolve `settlement_jobs` → `escrows` (multi-escrow per
+   deal). Drop attestation/buyer/matched_offer_id from `listings`; move
+   buyer/matched to `negotiation_threads`. Registry `/listings/closed`
+   filter becomes a join. Sequenced after (c) so the negotiation-policy
+   surface is settled before the deal-record shape changes underneath
+   it; could move earlier if the multi-escrow use case becomes urgent.
+6. **PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
    validation; storefront `/api/v1/listings` dropped.
-6. **PR (a2):** Per-query `on_missing` override + `indexed: true` side
+7. **PR (a2):** Per-query `on_missing` override + `indexed: true` side
    indexes (defer until proven necessary).
 
 Each PR runs the full verification process documented in
