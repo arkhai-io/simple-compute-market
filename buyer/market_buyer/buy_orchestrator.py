@@ -27,7 +27,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowTerms, EscrowProposal, ProvisionTerms
 
 from .buyer_client import NegotiationOutcome, negotiate_with_seller, _sign
 from .escrow_client import BuildEscrowTermsFn, CreateEscrowFn
@@ -470,7 +470,7 @@ def run_buy(
     config: BuyConfig,
     constraints: BuyConstraints,
     provision: ProvisionTerms,
-    escrow_terms_proposal: EscrowTermsProposal,
+    escrow_proposal: EscrowProposal,
     build_escrow_terms: BuildEscrowTermsFn,
     create_escrow: CreateEscrowFn,
     matches: Optional[list[dict[str, Any]]] = None,
@@ -487,14 +487,14 @@ def run_buy(
 
     Parameters
     ----------
-    config, constraints, provision, escrow_terms_proposal
+    config, constraints, provision, escrow_proposal
         Buyer identity + price bounds + what to provision + the on-chain
         escrow shape the buyer proposes. Immutable for this call.
         ``provision.duration_seconds`` is the lease window;
         ``provision.ssh_public_key`` is sent in the settle request;
-        ``escrow_terms_proposal`` (escrow_kind + arbiter_kind +
-        payment_token + expiration_unix) goes on the negotiate-init
-        request and the seller validates it against the listing.
+        ``escrow_proposal`` (chain_name + escrow_address + fields +
+        expiration_unix) goes on the negotiate-init request and the
+        seller validates it against the listing's accepted_escrows.
     build_escrow_terms
         Materializes the agreed negotiation into the canonical
         ``list[EscrowTerms]`` (the escrow specs that will be submitted
@@ -637,7 +637,7 @@ def run_buy(
                 initial_price=initial_price,
                 max_price=max_price,
                 provision_terms=provision,
-                escrow_terms_proposal=escrow_terms_proposal,
+                escrow_proposal=escrow_proposal,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
             )
@@ -791,18 +791,18 @@ def _settle_one(
     # negotiation response — using *that* (not the buyer's locally-built
     # proposal) means any drift between sides surfaces as a runtime
     # error here rather than silently mismatching on-chain.
-    accepted_proposal = outcome.accepted_escrow_terms_proposal
+    accepted_proposal = outcome.accepted_escrow_proposal
     if accepted_proposal is None:
         on_event(
             "escrow_create_failed",
-            {"error": "seller did not echo accepted_escrow_terms_proposal"},
+            {"error": "seller did not echo accepted_escrow_proposal"},
         )
         return BuyResult(
             status="exited",
             negotiation_id=outcome.negotiation_id,
             seller_url=seller_url,
             agreed_price=outcome.agreed_price,
-            reason="missing_accepted_escrow_terms_proposal",
+            reason="missing_accepted_escrow_proposal",
             rounds=outcome.rounds,
             attempts=attempts,
         )

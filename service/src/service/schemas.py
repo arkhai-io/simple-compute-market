@@ -298,53 +298,6 @@ class EscrowProposal(BaseModel):
     )
 
 
-class EscrowTermsProposal(BaseModel):
-    """DEPRECATED legacy shape — superseded by ``EscrowProposal``.
-
-    Retained for the duration of the (b) → (c) → (a) migration so call
-    sites can switch one package at a time. New code must construct
-    ``EscrowProposal`` directly. This class will be removed once every
-    storefront / buyer / policy / test reference is migrated.
-
-    Mapping to the new shape:
-      * ``escrow_kind`` is now derivable from the (chain, escrow_address)
-        slot lookup; no longer carried on the wire.
-      * ``arbiter_kind`` is now derivable from the (chain, fields.arbiter)
-        slot lookup; the buyer puts the arbiter address into the
-        proposal's ``fields`` map.
-      * ``payment_token`` moves into ``fields["payment_token"]``.
-      * ``expiration_unix`` stays.
-    """
-
-    escrow_kind: str = Field(
-        description=(
-            "Legacy escrow-kind discriminator. Today only "
-            "``'erc20_non_tierable'`` is supported by call sites that "
-            "still construct this type."
-        ),
-    )
-    arbiter_kind: str = Field(
-        description=(
-            "Legacy arbiter-kind discriminator. Today only "
-            "``'recipient'`` is supported by call sites that still "
-            "construct this type."
-        ),
-    )
-    payment_token: str = Field(
-        description=(
-            "ERC-20 token contract address the buyer pays in. Moves to "
-            "``EscrowProposal.fields['payment_token']`` in the new shape."
-        ),
-    )
-    expiration_unix: int = Field(
-        gt=0,
-        description=(
-            "Absolute UTC unix-time the on-chain escrow attestation "
-            "expires."
-        ),
-    )
-
-
 class Attestation(BaseModel):
     """Mutual attestations exchanged between maker and taker."""
 

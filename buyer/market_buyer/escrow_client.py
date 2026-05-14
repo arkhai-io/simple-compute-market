@@ -31,14 +31,14 @@ import asyncio
 import logging
 from typing import Any, Callable, Optional
 
-from service.schemas import EscrowTerms, EscrowTermsProposal
+from service.schemas import EscrowProposal, EscrowTerms
 
 
 logger = logging.getLogger(__name__)
 
 
 BuildEscrowTermsFn = Callable[
-    [EscrowTermsProposal, str, int, int], list[EscrowTerms],
+    [EscrowProposal, str, int, int], list[EscrowTerms],
 ]
 """``(proposal, seller_wallet, agreed_price, duration_seconds) -> list[EscrowTerms]``.
 
@@ -72,17 +72,14 @@ def make_buyer_payment_escrow_terms_fn(
     ``service.clients.alkahest.build_payment_obligation_data`` helper —
     same one the seller's verifier calls — so both sides produce
     identical obligation_data for the same negotiated inputs. The
-    proposal supplies the token + arbiter_kind + expiration; the
-    closure supplies the chain config (which determines the on-chain
-    arbiter + escrow-contract addresses).
-
-    Token and expiration_unix come from the proposal, not from
-    closure state — the seller's echoed proposal is the source of
-    truth for these. The closure's chain config is purely local
-    plumbing (how to talk to the chain), not negotiated.
+    proposal's ``(chain_name, escrow_address)`` identifies the escrow
+    contract via the reverse address lookup; ``fields["payment_token"]``
+    supplies the token; ``fields["arbiter"]`` (when present) overrides
+    the default ``recipient_arbiter``. The closure's chain config is
+    purely local plumbing (how to talk to the chain), not negotiated.
     """
     def _build(
-        proposal: EscrowTermsProposal,
+        proposal: EscrowProposal,
         seller_wallet_address: str,
         agreed_price: int,
         duration_seconds: int,
@@ -90,27 +87,39 @@ def make_buyer_payment_escrow_terms_fn(
         # Late imports — alkahest is heavyweight; tests that mock this
         # builder shouldn't pay for it.
         from service.clients.alkahest import (
+            address_to_slot,
             build_payment_obligation_data,
-            get_escrow_kind_codec,
         )
+
+        payment_token = proposal.fields.get("payment_token")
+        if not isinstance(payment_token, str):
+            raise ValueError(
+                "EscrowProposal.fields['payment_token'] missing or "
+                "non-string; cannot build buyer-side obligation_data"
+            )
+        arbiter_kind = "recipient_arbiter"
+        proposal_arbiter = proposal.fields.get("arbiter")
+        if isinstance(proposal_arbiter, str) and proposal_arbiter:
+            arbiter_slot = address_to_slot(
+                proposal.chain_name, proposal_arbiter,
+                config_path=addr_config_path,
+            )
+            if arbiter_slot:
+                arbiter_kind = arbiter_slot
 
         obligation_data = build_payment_obligation_data(
             seller_wallet=seller_wallet_address,
             agreed_price=agreed_price,
             duration_seconds=duration_seconds,
-            token_contract_address=proposal.payment_token,
+            token_contract_address=payment_token,
             chain_name=chain_name,
             addr_config_path=addr_config_path,
-            arbiter_kind=proposal.arbiter_kind,
-        )
-        escrow_codec = get_escrow_kind_codec(proposal.escrow_kind)
-        escrow_contract = escrow_codec.resolve_address(
-            chain_name, config_path=addr_config_path,
+            arbiter_kind=arbiter_kind,
         )
 
         terms = EscrowTerms(
             maker="buyer",
-            escrow_contract=escrow_contract,
+            escrow_contract=proposal.escrow_address,
             obligation_data=obligation_data,
             expiration_unix=proposal.expiration_unix,
         )

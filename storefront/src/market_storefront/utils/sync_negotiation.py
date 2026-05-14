@@ -41,68 +41,125 @@ from market_policy.negotiation_strategy import (
     register_strategy,
 )
 
-from service.schemas import EscrowTermsProposal
+from service.schemas import EscrowProposal
 
 logger = logging.getLogger(__name__)
 
 
-# Today's only acceptable escrow shape. Future listings will advertise
-# their acceptance set (potentially multiple shapes); the validator
-# below interprets the listing-derived expected shape against the
-# buyer's proposal.
-_SUPPORTED_ESCROW_KIND = "erc20_non_tierable"
-_SUPPORTED_ARBITER_KIND = "recipient"
-
-
-def _validate_escrow_terms_proposal(
+def _validate_escrow_proposal(
     *,
-    proposal: EscrowTermsProposal | None,
+    proposal: EscrowProposal | None,
     listing: dict[str, Any],
-) -> EscrowTermsProposal | None:
+) -> EscrowProposal | None:
     """Validate the buyer's escrow proposal against the listing.
 
-    Today's listing implicitly accepts exactly one shape:
-    ``erc20_non_tierable`` + ``recipient`` + the
-    listing's ``demand_resource.token.contract_address``. Any deviation
-    raises ``OfferUnfulfillableError``. Future step: listings advertise
-    an explicit acceptance set and this validator picks the matching
-    shape (or rejects).
+    Structural checks: the proposal's ``(chain_name, escrow_address)``
+    must reference an entry in the listing's ``accepted_escrows``, and
+    every seller-set field on the matched entry must equal the buyer's
+    value. Listings without an ``accepted_escrows`` entry fall back to
+    the legacy ``demand_resource.token.contract_address`` check while
+    the storefront finishes the cutover.
 
     Returns the validated proposal unchanged so the caller can echo it
-    back. Returns None when the buyer didn't include a proposal (legacy
-    clients) — in that case the seller assumes the canonical shape.
+    back. Returns ``None`` when the buyer didn't include a proposal
+    (legacy clients) — in that case the seller assumes the canonical
+    shape.
     """
     if proposal is None:
-        # Legacy buyer pre-step-7; we can't echo what they didn't send.
         return None
 
-    if proposal.escrow_kind != _SUPPORTED_ESCROW_KIND:
-        raise OfferUnfulfillableError(
-            f"escrow_kind_unsupported: got {proposal.escrow_kind!r}, "
-            f"expected {_SUPPORTED_ESCROW_KIND!r}",
-            listing_id=listing.get("listing_id"),
-        )
-    if proposal.arbiter_kind != _SUPPORTED_ARBITER_KIND:
-        raise OfferUnfulfillableError(
-            f"arbiter_kind_unsupported: got {proposal.arbiter_kind!r}, "
-            f"expected {_SUPPORTED_ARBITER_KIND!r}",
-            listing_id=listing.get("listing_id"),
-        )
+    matched = _match_accepted_escrow(listing, proposal)
+    if matched is not None:
+        seller_fields = matched.get("fields") or {}
+        for key, seller_value in seller_fields.items():
+            buyer_value = proposal.fields.get(key)
+            if _normalize_field(buyer_value) != _normalize_field(seller_value):
+                raise OfferUnfulfillableError(
+                    f"escrow_field_mismatch: field {key!r} — buyer proposed "
+                    f"{buyer_value!r}, listing requires {seller_value!r}",
+                    listing_id=listing.get("listing_id"),
+                )
+        return proposal
 
-    # Token must match the listing's demand_resource.token.contract_address.
+    # Legacy fallback: validate payment_token against demand_resource.
     expected_token = _extract_listing_payment_token(listing)
     if expected_token is None:
-        # Listing has no token to validate against — accept whatever
-        # the buyer proposed (relaxed for listings without a typed
-        # payment token, e.g. legacy compute listings).
         return proposal
-    if proposal.payment_token.lower() != expected_token.lower():
+    buyer_token = proposal.fields.get("payment_token")
+    if not isinstance(buyer_token, str):
         raise OfferUnfulfillableError(
-            f"payment_token_mismatch: buyer proposed {proposal.payment_token}, "
+            f"payment_token_missing_on_proposal: buyer's escrow proposal "
+            f"omitted fields['payment_token']; listing demands {expected_token}",
+            listing_id=listing.get("listing_id"),
+        )
+    if buyer_token.lower() != expected_token.lower():
+        raise OfferUnfulfillableError(
+            f"payment_token_mismatch: buyer proposed {buyer_token}, "
             f"listing demands {expected_token}",
             listing_id=listing.get("listing_id"),
         )
     return proposal
+
+
+_ZERO_ADDRESS = "0x" + "0" * 40
+
+
+def _match_accepted_escrow(
+    listing: dict[str, Any], proposal: "EscrowProposal",
+) -> dict[str, Any] | None:
+    """Find the listing's ``accepted_escrows`` entry matching the
+    proposal's ``(chain_name, escrow_address)``.
+
+    Returns the entry dict on hit. Returns ``None`` to signal "fall
+    back to legacy validation" when the listing has no
+    ``accepted_escrows`` advertised or the buyer sent the placeholder
+    zero address (legacy clients that don't resolve the seller's
+    escrow contract). Raises ``OfferUnfulfillableError`` when both
+    sides advertised real addresses and they don't match.
+    """
+    import json as _json
+
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        try:
+            accepted = _json.loads(accepted)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(accepted, list) or not accepted:
+        return None
+
+    proposal_addr = proposal.escrow_address.lower()
+    if proposal_addr == _ZERO_ADDRESS:
+        # Legacy buyer client sends the placeholder address. Skip the
+        # strict (chain, address) match and let the legacy
+        # payment_token check enforce what it can.
+        return None
+
+    proposal_chain = proposal.chain_name
+    for entry in accepted:
+        if not isinstance(entry, dict):
+            continue
+        entry_chain = entry.get("chain_name")
+        entry_addr = entry.get("escrow_address")
+        if (
+            entry_chain == proposal_chain
+            and isinstance(entry_addr, str)
+            and entry_addr.lower() == proposal_addr
+        ):
+            return entry
+    raise OfferUnfulfillableError(
+        f"escrow_not_in_accepted_set: (chain={proposal_chain!r}, "
+        f"address={proposal.escrow_address!r}) not in listing's "
+        f"accepted_escrows",
+        listing_id=listing.get("listing_id"),
+    )
+
+
+def _normalize_field(value: Any) -> Any:
+    """Case-insensitive compare for hex addresses; identity otherwise."""
+    if isinstance(value, str) and value.startswith("0x") and len(value) == 42:
+        return value.lower()
+    return value
 
 
 def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
@@ -400,7 +457,7 @@ async def start_sync_negotiation(
     buyer_address: str,
     their_proposed_price: int,
     provision_terms: Any = None,
-    escrow_terms_proposal: Any = None,
+    escrow_proposal: Any = None,
     our_base_url: str,
     their_agent_url: str,
     policy_service: Any = None,
@@ -413,14 +470,13 @@ async def start_sync_negotiation(
     canonical id is server-assigned, not client-derived.
 
     ``provision_terms`` carries the buyer's lease duration, ssh key, and
-    eventually compute spec. ``escrow_terms_proposal`` is the buyer's
-    on-chain escrow shape proposal. Both are validated against the
-    listing's acceptance set (today: trivial — only the canonical
-    erc20+recipient shape is supported with the listing's
-    demand_resource token). Persisted on the negotiation thread (in a
-    future step) so settlement reads them back without re-querying
-    the buyer; echoed back to the buyer in the response so settlement-
-    time escrow construction can use the seller-confirmed values.
+    eventually compute spec. ``escrow_proposal`` is the buyer's on-chain
+    escrow shape proposal — picks a ``(chain_name, escrow_address)``
+    entry from the listing's ``accepted_escrows`` and supplies the
+    buyer-committable EscrowData fields. Both are validated against the
+    listing's acceptance set; the seller-confirmed values are persisted
+    on the negotiation thread and echoed back so settlement-time escrow
+    construction can use them.
 
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
@@ -491,14 +547,12 @@ async def start_sync_negotiation(
             f"listing's max_duration_seconds={listing_max_seconds}s"
         )
 
-    # Validate the buyer's escrow terms proposal against the listing's
-    # acceptance set. Today's acceptance set is implicit and trivial:
-    # one canonical shape per listing (erc20_non_tierable + recipient +
-    # the listing's demand_resource token). Future listings may
-    # advertise multiple acceptable proposals; for now any deviation
-    # from the canonical shape rejects.
-    _accepted_escrow_proposal = _validate_escrow_terms_proposal(
-        proposal=escrow_terms_proposal,
+    # Validate the buyer's escrow proposal against the listing's
+    # accepted_escrows set: the proposal must reference one of the
+    # advertised (chain, escrow_address) tuples and every seller-set
+    # field on that entry must equal the buyer's value.
+    _accepted_escrow_proposal = _validate_escrow_proposal(
+        proposal=escrow_proposal,
         listing=our_order_dict,
     )
 
@@ -534,7 +588,7 @@ async def start_sync_negotiation(
             our_initial_price=our_price,
             our_strategy=strategy,
             requested_duration_seconds=requested_duration_seconds,
-            buyer_escrow_terms_proposal=(
+            buyer_escrow_proposal=(
                 _accepted_escrow_proposal.model_dump()
                 if _accepted_escrow_proposal is not None
                 else None
@@ -571,7 +625,7 @@ async def start_sync_negotiation(
     if provision_terms is not None:
         response["accepted_provision_terms"] = provision_terms.model_dump()
     if _accepted_escrow_proposal is not None:
-        response["accepted_escrow_terms_proposal"] = _accepted_escrow_proposal.model_dump()
+        response["accepted_escrow_proposal"] = _accepted_escrow_proposal.model_dump()
     return response
 
 

@@ -161,8 +161,8 @@ async def verify_escrow_for_settlement(
     alkahest_client: Any,
     chain_name: str,
     alkahest_address_config_path: str | None,
-    escrow_terms_proposal: Any = None,
-    escrow_kind: str = "erc20_non_tierable",
+    escrow_proposal: Any = None,
+    escrow_kind: str = "erc20_escrow_obligation_nontierable",
     now_unix: int | None = None,
     get_obligation_fn: Any = None,
     build_obligation_data_fn: Any = None,
@@ -177,9 +177,9 @@ async def verify_escrow_for_settlement(
         Our wallet address; participates in the expected obligation_data
         via the RecipientArbiter demand encoding.
     agreed_price, agreed_duration_seconds:
-        From the negotiation thread; together with the proposal's token
-        + arbiter_kind and the chain config they determine the entire
-        expected obligation_data dict.
+        From the negotiation thread; together with the proposal's token +
+        arbiter and the chain config they determine the entire expected
+        obligation_data dict.
     listing:
         The seller's listing row (after ``load_listing``); used as the
         fallback source for the payment token when no proposal is
@@ -189,15 +189,17 @@ async def verify_escrow_for_settlement(
     chain_name, alkahest_address_config_path:
         Used to resolve the canonical arbiter + escrow contract
         addresses for the chain (a static config lookup, not an RPC call).
-    escrow_terms_proposal:
-        The buyer's proposal, persisted on the negotiation thread by
-        step 7's protocol. When present, supplies the payment_token,
-        arbiter_kind, and escrow_kind (overriding the kwargs below).
-        None for legacy threads — verifier falls back to the listing-
-        derived token and ``escrow_kind`` / arbiter defaults.
+    escrow_proposal:
+        The buyer's ``EscrowProposal``, persisted on the negotiation
+        thread at /negotiate/new. When present, supplies the payment
+        token via ``fields["payment_token"]`` and the escrow slot via
+        the ``(chain_name, escrow_address)`` reverse lookup. None for
+        legacy threads — verifier falls back to the listing-derived
+        token and the ``escrow_kind`` default.
     escrow_kind:
-        Fallback when ``escrow_terms_proposal`` is None. Today only
-        ``"erc20_non_tierable"`` is registered.
+        Fallback escrow slot name when ``escrow_proposal`` is None.
+        Today only ``"erc20_escrow_obligation_nontierable"`` is
+        registered.
     now_unix:
         Override for ``time.time()`` (test seam).
     get_obligation_fn / build_obligation_data_fn:
@@ -222,16 +224,37 @@ async def verify_escrow_for_settlement(
             build_payment_obligation_data as build_obligation_data_fn,
         )
 
-    # The proposal (when present) is the source of truth for which on-chain
-    # contracts to consult. Falls back to the parameter defaults for legacy
-    # threads that pre-date the protocol-level proposal exchange.
-    if escrow_terms_proposal is not None:
-        effective_escrow_kind = escrow_terms_proposal.escrow_kind
-        effective_arbiter_kind = escrow_terms_proposal.arbiter_kind
-        effective_token = escrow_terms_proposal.payment_token
+    # The proposal (when present) is the source of truth: its
+    # (chain_name, escrow_address) identifies the escrow contract and
+    # its fields["payment_token"] / fields["arbiter"] supply the
+    # buyer-committed values. Legacy threads with no proposal fall
+    # back to the kwarg defaults + a listing-derived token.
+    effective_arbiter_kind = "recipient_arbiter"
+    if escrow_proposal is not None:
+        from service.clients.alkahest import address_to_slot
+        slot = address_to_slot(
+            escrow_proposal.chain_name,
+            escrow_proposal.escrow_address,
+            config_path=alkahest_address_config_path,
+        )
+        effective_escrow_kind = slot or escrow_kind
+        proposal_token = escrow_proposal.fields.get("payment_token")
+        if not isinstance(proposal_token, str):
+            raise EscrowVerificationError(
+                f"escrow proposal for {escrow_uid} omitted "
+                f"fields['payment_token']; cannot verify against chain"
+            )
+        effective_token = proposal_token
+        proposal_arbiter = escrow_proposal.fields.get("arbiter")
+        if isinstance(proposal_arbiter, str) and proposal_arbiter:
+            arbiter_slot = address_to_slot(
+                escrow_proposal.chain_name, proposal_arbiter,
+                config_path=alkahest_address_config_path,
+            )
+            if arbiter_slot:
+                effective_arbiter_kind = arbiter_slot
     else:
         effective_escrow_kind = escrow_kind
-        effective_arbiter_kind = "recipient"
         effective_token = _extract_token_contract_from_listing(listing)
 
     if get_obligation_fn is None:

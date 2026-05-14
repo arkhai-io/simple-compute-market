@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from service.schemas import EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowProposal, ProvisionTerms
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +130,10 @@ async def start_settlement_job(
     # this at /negotiate/new; we validated it and stored as JSON. None
     # for legacy threads (pre-step-7) — the verifier falls back to
     # listing-derived defaults in that case.
-    proposal_raw = thread.get("buyer_escrow_terms_proposal")
-    proposal: EscrowTermsProposal | None = None
+    proposal_raw = thread.get("buyer_escrow_proposal")
+    proposal: EscrowProposal | None = None
     if isinstance(proposal_raw, dict):
-        proposal = EscrowTermsProposal.model_validate(proposal_raw)
+        proposal = EscrowProposal.model_validate(proposal_raw)
 
     # Fail-closed on-chain verification: the escrow must exist, be live,
     # and match the negotiated terms before we touch any local state or
@@ -148,7 +148,7 @@ async def start_settlement_job(
         alkahest_client=alkahest_client,
         chain_name=CONFIG.chain_name,
         alkahest_address_config_path=CONFIG.alkahest_address_config_path,
-        escrow_terms_proposal=proposal,
+        escrow_proposal=proposal,
     )
 
     inserted = await sqlite_client.insert_settlement_job(

@@ -303,20 +303,32 @@ def register(app: typer.Typer) -> None:
         # settlement, so the escrow proposal is largely a formality
         # (the seller still validates it). Resume mode skips the
         # round-0 send and these fields are ignored.
-        from service.schemas import EscrowTermsProposal, ProvisionTerms
+        from service.schemas import EscrowProposal, ProvisionTerms
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
         import time as _time
         provision_terms: Optional[ProvisionTerms] = None
-        escrow_terms_proposal: Optional[EscrowTermsProposal] = None
+        escrow_proposal: Optional[EscrowProposal] = None
         if resume_state is None:
             assert duration_seconds is not None  # gated above
             provision_terms = ProvisionTerms(
                 duration_seconds=int(duration_seconds),
                 ssh_public_key="",  # negotiate-only flow; settle is a separate command
             )
-            escrow_terms_proposal = EscrowTermsProposal(
-                escrow_kind="erc20_non_tierable",
-                arbiter_kind="recipient",
-                payment_token=token_contract or ("0x" + "0" * 40),
+            _chain = resolve_config_value(
+                toml_path="chain.name", default="ethereum_sepolia",
+            )
+            _addr_cfg = resolve_config_value(
+                toml_path="chain.alkahest_address_config_path",
+            )
+            _escrow_addr = get_erc20_escrow_obligation_nontierable(
+                _chain, config_path=_addr_cfg or None,
+            )
+            escrow_proposal = EscrowProposal(
+                chain_name=_chain,
+                escrow_address=_escrow_addr,
+                fields={"payment_token": token_contract or ("0x" + "0" * 40)},
                 expiration_unix=int(_time.time()) + 3600,
             )
 
@@ -329,7 +341,7 @@ def register(app: typer.Typer) -> None:
                 initial_price=initial_price or 0,
                 max_price=max_price,
                 provision_terms=provision_terms,
-                escrow_terms_proposal=escrow_terms_proposal,
+                escrow_proposal=escrow_proposal,
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,

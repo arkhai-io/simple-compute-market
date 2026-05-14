@@ -65,7 +65,7 @@ class NegotiateController:
                 buyer_address=body.buyer_address,
                 their_proposed_price=body.initial_price,
                 provision_terms=body.provision_terms,
-                escrow_terms_proposal=body.escrow_terms_proposal,
+                escrow_proposal=body.escrow_proposal,
                 our_base_url=base_url,
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
                 policy_service=_container.resolved_policy_service,

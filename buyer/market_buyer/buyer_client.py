@@ -33,7 +33,7 @@ from market_policy.negotiation_strategy import (
     NegotiationStrategy,
     load_strategy,
 )
-from service.schemas import EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowProposal, ProvisionTerms
 
 
 def _maybe_register_rl_strategy() -> None:
@@ -58,7 +58,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 class NegotiationOutcome:
     """What came out of a full negotiation run from the buyer's POV.
 
-    ``accepted_provision_terms`` and ``accepted_escrow_terms_proposal``
+    ``accepted_provision_terms`` and ``accepted_escrow_proposal``
     are populated when the seller echoed them back in the negotiation
     response (always on non-rejection paths). Settlement-time escrow
     construction reads from these — using the *seller-confirmed* values
@@ -72,7 +72,7 @@ class NegotiationOutcome:
     reason: Optional[str] = None    # populated on exit
     rounds: int = 0
     accepted_provision_terms: Optional[ProvisionTerms] = None
-    accepted_escrow_terms_proposal: Optional[EscrowTermsProposal] = None
+    accepted_escrow_proposal: Optional[EscrowProposal] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
@@ -86,14 +86,14 @@ class NegotiationOutcome:
             d["reason"] = self.reason
         if self.accepted_provision_terms is not None:
             d["accepted_provision_terms"] = self.accepted_provision_terms.model_dump()
-        if self.accepted_escrow_terms_proposal is not None:
-            d["accepted_escrow_terms_proposal"] = self.accepted_escrow_terms_proposal.model_dump()
+        if self.accepted_escrow_proposal is not None:
+            d["accepted_escrow_proposal"] = self.accepted_escrow_proposal.model_dump()
         return d
 
 
 def _parse_accepted_terms_from_reply(
     reply: dict[str, Any],
-) -> tuple[Optional[ProvisionTerms], Optional[EscrowTermsProposal]]:
+) -> tuple[Optional[ProvisionTerms], Optional[EscrowProposal]]:
     """Extract the seller's echoed accepted terms from a negotiate reply.
 
     Returns (None, None) if the seller didn't include them — happens on
@@ -101,9 +101,9 @@ def _parse_accepted_terms_from_reply(
     new fields yet.
     """
     raw_prov = reply.get("accepted_provision_terms")
-    raw_esc = reply.get("accepted_escrow_terms_proposal")
+    raw_esc = reply.get("accepted_escrow_proposal")
     prov = ProvisionTerms.model_validate(raw_prov) if isinstance(raw_prov, dict) else None
-    esc = EscrowTermsProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
+    esc = EscrowProposal.model_validate(raw_esc) if isinstance(raw_esc, dict) else None
     return prov, esc
 
 
@@ -188,7 +188,7 @@ def negotiate_with_seller(
     initial_price: int,
     max_price: int,
     provision_terms: Optional[ProvisionTerms] = None,
-    escrow_terms_proposal: Optional[EscrowTermsProposal] = None,
+    escrow_proposal: Optional[EscrowProposal] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
     on_round: Optional[Callable[[int, dict, dict], None]] = None,
     strategy: Optional[NegotiationStrategy] = None,
@@ -201,9 +201,11 @@ def negotiate_with_seller(
     counter at or below convergence to this gets accepted.
 
     `provision_terms` describes what the buyer wants the seller to
-    deliver (duration, ssh key, compute spec) and `escrow_terms_proposal`
-    is the buyer's proposed on-chain escrow shape (escrow_kind +
-    arbiter_kind + payment_token + expiration). Both are sent on
+    deliver (duration, ssh key, compute spec) and `escrow_proposal`
+    is the buyer's proposed on-chain escrow tuple — picks one of the
+    listing's ``accepted_escrows`` entries by ``(chain_name,
+    escrow_address)`` and supplies the buyer-committable EscrowData
+    in ``fields`` plus ``expiration_unix``. Both are sent on
     /api/v1/negotiate/new and validated server-side against the
     listing's acceptance set. Required for fresh starts; ignored in
     resume mode (the negotiation thread already has them committed).
@@ -227,7 +229,7 @@ def negotiate_with_seller(
     # The seller commits to these at /negotiate/new (they're persisted on
     # the negotiation thread); subsequent rounds don't re-echo them.
     accepted_prov: Optional[ProvisionTerms] = None
-    accepted_esc: Optional[EscrowTermsProposal] = None
+    accepted_esc: Optional[EscrowProposal] = None
     duration_seconds: Optional[int] = None  # populated from provision_terms or resume
     if strategy is None:
         # Default to the registered default ("rl"); pull the torch
@@ -259,10 +261,10 @@ def negotiate_with_seller(
                 "provision_terms is required for fresh negotiations "
                 "(what the seller will provision: duration, ssh_key, compute)"
             )
-        if escrow_terms_proposal is None:
+        if escrow_proposal is None:
             raise RuntimeError(
-                "escrow_terms_proposal is required for fresh negotiations "
-                "(escrow_kind + arbiter_kind + payment_token + expiration_unix)"
+                "escrow_proposal is required for fresh negotiations "
+                "(chain_name + escrow_address + fields + expiration_unix)"
             )
         duration_seconds = provision_terms.duration_seconds
         new_body = {
@@ -270,7 +272,7 @@ def negotiate_with_seller(
             "buyer_address": buyer_address,
             "initial_price": int(initial_price),
             "provision_terms": provision_terms.model_dump(),
-            "escrow_terms_proposal": escrow_terms_proposal.model_dump(),
+            "escrow_proposal": escrow_proposal.model_dump(),
         }
         sig, ts = _sign(f"negotiate_new:{listing_id}", buyer_private_key)
         reply = _post(
@@ -292,7 +294,7 @@ def negotiate_with_seller(
                 duration_seconds=duration_seconds,
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
-                accepted_escrow_terms_proposal=accepted_esc,
+                accepted_escrow_proposal=accepted_esc,
             )
         # On non-agreed paths we still carry forward what the seller
         # validated — used if the negotiation ends up agreed in later
@@ -364,7 +366,7 @@ def negotiate_with_seller(
                     duration_seconds=duration_seconds,
                     rounds=round_idx,
                     accepted_provision_terms=accepted_prov,
-                    accepted_escrow_terms_proposal=accepted_esc,
+                    accepted_escrow_proposal=accepted_esc,
                 )
             # Non-accept reply to our accept is anomalous but treat as terminal.
             return NegotiationOutcome(
@@ -407,7 +409,7 @@ def negotiate_with_seller(
                 duration_seconds=duration_seconds,
                 rounds=round_idx,
                 accepted_provision_terms=accepted_prov,
-                accepted_escrow_terms_proposal=accepted_esc,
+                accepted_escrow_proposal=accepted_esc,
             )
         if seller_action in ("exit", "reject"):
             return NegotiationOutcome(

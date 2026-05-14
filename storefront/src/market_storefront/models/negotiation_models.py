@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from service.schemas import EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowProposal, ProvisionTerms
 
 
 class NegotiateNewRequest(BaseModel):
@@ -13,25 +13,24 @@ class NegotiateNewRequest(BaseModel):
 
     The buyer publishes the structured artifacts they're proposing:
     ``provision_terms`` (what they want the seller to deliver) and
-    ``escrow_terms_proposal`` (the on-chain escrow shape they'll post).
+    ``escrow_proposal`` (the on-chain escrow tuple they pick from the
+    listing's ``accepted_escrows`` plus the ABI-defined ``fields``).
     Both are validated against the listing's acceptance set on the
-    seller side; today the listing's acceptance set is implicit and
-    trivial (one canonical shape), but the protocol slot is in place
-    for richer listings later.
+    seller side.
     """
 
     listing_id: str
     buyer_address: str
     initial_price: int = Field(ge=0)
     provision_terms: ProvisionTerms
-    escrow_terms_proposal: EscrowTermsProposal
+    escrow_proposal: EscrowProposal
     buyer_agent_url: str = ""
 
 
 class NegotiateNewResponse(BaseModel):
     """Seller's round-0 response.
 
-    ``accepted_provision_terms`` and ``accepted_escrow_terms_proposal``
+    ``accepted_provision_terms`` and ``accepted_escrow_proposal``
     echo back what the seller validated against its listing. They appear
     on every non-rejection response (counter, accept) so the buyer can
     use the seller-confirmed values rather than its local proposal —
@@ -43,7 +42,7 @@ class NegotiateNewResponse(BaseModel):
     price: int | None = None
     reason: str | None = None
     accepted_provision_terms: ProvisionTerms | None = None
-    accepted_escrow_terms_proposal: EscrowTermsProposal | None = None
+    accepted_escrow_proposal: EscrowProposal | None = None
 
 
 class NegotiateContinueRequest(BaseModel):

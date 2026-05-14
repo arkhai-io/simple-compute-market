@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
+
+_ESCROW_ADDR_AGG = "0x" + "cd" * 20
 
 from market_buyer.aggregation import (
     NegotiateFn,
@@ -59,11 +61,11 @@ def _provision() -> ProvisionTerms:
     return ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa AAAA...")
 
 
-def _escrow_proposal() -> EscrowTermsProposal:
-    return EscrowTermsProposal(
-        escrow_kind="erc20_non_tierable",
-        arbiter_kind="recipient",
-        payment_token="0x" + "ab" * 20,
+def _escrow_proposal() -> EscrowProposal:
+    return EscrowProposal(
+        chain_name="anvil",
+        escrow_address=_ESCROW_ADDR_AGG,
+        fields={"payment_token": "0x" + "ab" * 20},
         expiration_unix=1_800_000_000,
     )
 
@@ -76,7 +78,7 @@ def _build_escrow_terms_stub(proposal, seller_wallet, agreed_price, duration_sec
         obligation_data={
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
-            "token": proposal.payment_token,
+            "token": proposal.fields["payment_token"],
             "amount": int(agreed_price) * int(duration_seconds) // 3600,
         },
         expiration_unix=proposal.expiration_unix,
@@ -91,10 +93,10 @@ _ACCEPTED_ECHO_AGG = {
         "ssh_public_key": "ssh-rsa AAAA...",
         "compute_resource": None,
     },
-    "accepted_escrow_terms_proposal": {
-        "escrow_kind": "erc20_non_tierable",
-        "arbiter_kind": "recipient",
-        "payment_token": "0x" + "ab" * 20,
+    "accepted_escrow_proposal": {
+        "chain_name": "anvil",
+        "escrow_address": _ESCROW_ADDR_AGG,
+        "fields": {"payment_token": "0x" + "ab" * 20},
         "expiration_unix": 1_800_000_000,
     },
 }
@@ -173,7 +175,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
             config=_config(aggregation_policy="best_price"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -225,7 +227,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             config=_config(aggregation_policy="cheapest_first"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -248,7 +250,7 @@ def test_custom_policy_can_short_circuit():
         # Demonstrates the contract: the policy isn't obligated to call
         # negotiate at all. Returning a synthetic outcome means the
         # orchestrator will try to settle it — which requires us to
-        # populate accepted_escrow_terms_proposal as the seller would
+        # populate accepted_escrow_proposal as the seller would
         # normally have echoed back. Policies that don't negotiate are
         # responsible for synthesizing this themselves.
         if len(matches) < 2:
@@ -259,7 +261,7 @@ def test_custom_policy_can_short_circuit():
             agreed_price=42,
             duration_seconds=3600,
             accepted_provision_terms=_provision(),
-            accepted_escrow_terms_proposal=_escrow_proposal(),
+            accepted_escrow_proposal=_escrow_proposal(),
         ))
 
     routes = {
@@ -285,7 +287,7 @@ def test_custom_policy_can_short_circuit():
             config=_config(aggregation_policy="pick_second_no_negotiate"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xescrow"],
             sleep=lambda _: None,
@@ -313,7 +315,7 @@ def test_policy_returning_none_yields_exited():
             config=_config(aggregation_policy="always_none"),
             constraints=_constraints(),
             provision=_provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_build_escrow_terms_stub,
             create_escrow=lambda escrows: ["0xnever"],
             sleep=lambda _: None,

@@ -10,7 +10,7 @@ from unittest import mock
 
 import pytest
 
-from service.schemas import EscrowTerms, EscrowTermsProposal, ProvisionTerms
+from service.schemas import EscrowProposal, EscrowTerms, ProvisionTerms
 
 from market_buyer.buy_orchestrator import (
     BuyConfig,
@@ -21,11 +21,11 @@ from market_buyer.buy_orchestrator import (
 )
 
 
-def _escrow_proposal() -> EscrowTermsProposal:
-    return EscrowTermsProposal(
-        escrow_kind="erc20_non_tierable",
-        arbiter_kind="recipient",
-        payment_token="0x" + "ab" * 20,
+def _escrow_proposal() -> EscrowProposal:
+    return EscrowProposal(
+        chain_name="anvil",
+        escrow_address="0x" + "cd" * 20,
+        fields={"payment_token": "0x" + "ab" * 20},
         expiration_unix=1_800_000_000,
     )
 
@@ -37,7 +37,7 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_sec
         obligation_data={
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
-            "token": proposal.payment_token,
+            "token": proposal.fields["payment_token"],
             "amount": int(agreed_price) * int(duration_seconds) // 3600,
         },
         expiration_unix=proposal.expiration_unix,
@@ -172,7 +172,7 @@ class TestRunBuyDerivePrices:
 
         result = run_buy(
             config=config, constraints=constraints, provision=provision,
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("escrow shouldn't run on exited"),
             matches=matches, max_matches_to_try=2,
@@ -205,7 +205,7 @@ class TestRunBuyDerivePrices:
         matches = [{"listing_id": "L1", "seller": "http://s1"}]
         result = run_buy(
             config=config, constraints=constraints, provision=provision,
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,
@@ -228,7 +228,7 @@ def _agree_negotiate_factory(price: int = 100):
     def fake(**kwargs):
         from market_buyer.buyer_client import NegotiationOutcome
         provision_terms = kwargs.get("provision_terms")
-        escrow_terms_proposal = kwargs.get("escrow_terms_proposal")
+        escrow_proposal = kwargs.get("escrow_proposal")
         return NegotiationOutcome(
             status="agreed", agreed_price=price, rounds=2, reason=None,
             negotiation_id="neg-id",
@@ -236,7 +236,7 @@ def _agree_negotiate_factory(price: int = 100):
                 provision_terms.duration_seconds if provision_terms is not None else None
             ),
             accepted_provision_terms=provision_terms,
-            accepted_escrow_terms_proposal=escrow_terms_proposal,
+            accepted_escrow_proposal=escrow_proposal,
         )
     return fake
 
@@ -275,7 +275,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("escrow MUST NOT run when declined"),
             matches=matches, max_matches_to_try=1,
@@ -315,7 +315,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
@@ -348,7 +348,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_stub_build_escrow_terms,
             create_escrow=fake_create,
             matches=matches, max_matches_to_try=1,
@@ -368,7 +368,7 @@ class TestConfirmSettlementGate:
             config=self._config(),
             constraints=self._constraints(),
             provision=self._provision(),
-            escrow_terms_proposal=_escrow_proposal(),
+            escrow_proposal=_escrow_proposal(),
             build_escrow_terms=_fail_build_escrow_terms,
             create_escrow=lambda escrows: pytest.fail("never"),
             matches=matches, max_matches_to_try=1,
