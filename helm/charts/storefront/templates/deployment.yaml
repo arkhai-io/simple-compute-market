@@ -87,6 +87,11 @@ spec:
             # secrets) lives inside that file.
             - name: XDG_CONFIG_HOME
               value: /etc
+            # Gateway path prefix for this agent — used by FastAPI to generate
+            # correct OpenAPI schema URLs when behind the ops gateway.
+            # Set via the ops repo values overlay; empty for local dev.
+            - name: ROOT_PATH
+              value: {{ $agent.rootPath | default "" | quote }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device

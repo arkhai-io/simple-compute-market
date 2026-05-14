@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     # Server Configuration
     port: int = 8080
     host: str = "0.0.0.0"
+    # root_path: set to the gateway path prefix for this service (e.g. "/registry").
+    # Used by FastAPI to generate correct OpenAPI schema URLs when behind a
+    # reverse proxy that strips the prefix. Set via ROOT_PATH env var in the
+    # Helm values overlay in the ops repo.
+    root_path: str = ""
 
     # Optional ZeroTier configuration (used by deployment/Makefile, not by app logic)
     zerotier_network: str | None = Field(default=None, env="ZEROTIER_NETWORK")

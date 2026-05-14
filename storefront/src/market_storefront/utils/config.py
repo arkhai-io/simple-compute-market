@@ -15,6 +15,7 @@ module.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -129,6 +130,10 @@ class Config:
     base_url_override_raw: str
     base_url_override: str
     port: int
+    # root_path: gateway path prefix for this agent (e.g. "/storefront").
+    # Used by FastAPI to generate correct OpenAPI schema URLs when behind a
+    # reverse proxy. Set via ROOT_PATH env var from the ops repo values overlay.
+    root_path: str
     chain_name: str
     chain_rpc_url: str
     agent_priv_key: str
@@ -332,6 +337,7 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_resolve_int("seller.port", 8000),
+        root_path=os.environ.get("ROOT_PATH", ""),
 
         # Shared with buyer via [chain].
         chain_name=str(_resolve("chain.name", "ethereum_sepolia")),

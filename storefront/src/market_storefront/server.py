@@ -120,6 +120,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     swagger_ui_parameters={"persistAuthorization": True},
+    root_path=CONFIG.root_path,
 )
 
 

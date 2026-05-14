@@ -105,6 +105,7 @@ app = FastAPI(
     title="ERC-8004 Indexer",
     version="0.1.0",
     lifespan=lifespan,
+    root_path=settings.root_path,
 )
 
 # Add CORS middleware
