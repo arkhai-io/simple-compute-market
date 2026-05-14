@@ -203,6 +203,107 @@ def get_erc20_escrow_obligation_nontierable(
     return str(cfg.erc20_addresses.escrow_obligation_nontierable)
 
 
+_ADDRESS_CATEGORIES: tuple[tuple[str, str], ...] = (
+    # (attribute on DefaultExtensionConfig, prefix for slot name).
+    # Arbiters' field names are already ``*_arbiter``-suffixed, so the
+    # empty prefix produces e.g. ``recipient_arbiter`` rather than
+    # the redundant ``arbiters_recipient_arbiter``.
+    ("arbiters_addresses", ""),
+    ("string_obligation_addresses", "string_obligation"),
+    ("commit_reveal_obligation_addresses", "commit_reveal_obligation"),
+    ("erc20_addresses", "erc20"),
+    ("erc721_addresses", "erc721"),
+    ("erc1155_addresses", "erc1155"),
+    ("native_token_addresses", "native_token"),
+    ("token_bundle_addresses", "token_bundle"),
+    ("attestation_addresses", "attestation"),
+)
+
+
+def _list_category_fields(category: Any) -> list[str]:
+    """Best-effort enumeration of address-field names on a category.
+
+    SimpleNamespace (override JSON path) → ``vars()``; pyo3 binding
+    (SDK path) → ``dir()`` filtering. Both produce the same set of
+    field names for valid configs.
+    """
+    if hasattr(category, "__dict__"):
+        return [k for k in vars(category).keys() if not k.startswith("_")]
+    return [
+        k for k in dir(category)
+        if not k.startswith("_") and not callable(getattr(category, k, None))
+    ]
+
+
+@lru_cache(maxsize=64)
+def _reverse_address_map(
+    chain_name: str, config_path_or_none: str,
+) -> dict[str, str]:
+    """Build ``{lowercase_address: slot_name}`` for a chain.
+
+    Slot name format: ``<category_prefix>_<field>`` (e.g.
+    ``erc20_escrow_obligation_nontierable``); arbiters keep their
+    field names unprefixed. Zero-address slots are skipped — they
+    represent contracts not yet deployed on this chain.
+
+    Cache key is a flat ``(chain_name, config_path_str)`` tuple so the
+    lru_cache works against hashable arguments; pass empty string for
+    "no config path."
+    """
+    config_path = config_path_or_none or None
+    selected = get_alkahest_network(chain_name)
+    override = _load_override_config(config_path)
+    source: Any
+    if override is not None:
+        source = _dict_to_namespace(override)
+    elif selected == NETWORK_ANVIL:
+        raise ValueError(
+            "chain_name='anvil' requires an explicit alkahest_address_config_path "
+            "with deployed local addresses."
+        )
+    else:
+        source = _sdk_addresses_for_chain(selected)
+
+    result: dict[str, str] = {}
+    for category_attr, prefix in _ADDRESS_CATEGORIES:
+        category = getattr(source, category_attr, None)
+        if category is None:
+            continue
+        for field_name in _list_category_fields(category):
+            try:
+                value = getattr(category, field_name)
+            except Exception:
+                continue
+            if not isinstance(value, str) or not value.startswith("0x"):
+                continue
+            if len(value) != 42:
+                continue
+            try:
+                if int(value, 16) == 0:
+                    continue  # undeployed slot placeholder
+            except ValueError:
+                continue
+            slot = f"{prefix}_{field_name}" if prefix else field_name
+            result[value.lower()] = slot
+    return result
+
+
+def address_to_slot(
+    chain_name: str,
+    address: str,
+    *,
+    config_path: str | None = None,
+) -> str | None:
+    """Return the slot name for a deployed address on a chain.
+
+    Returns ``None`` when the address isn't registered in the chain's
+    DefaultExtensionConfig — typically a non-alkahest contract such as
+    the payment ERC20 token itself, which lives on-chain but isn't part
+    of any alkahest deployment slot.
+    """
+    return _reverse_address_map(chain_name, config_path or "").get(address.lower())
+
+
 def encode_recipient_demand(recipient_address: str) -> bytes:
     """ABI-encode RecipientArbiter.DemandData{address recipient}.
 
@@ -304,9 +405,14 @@ class RecipientArbiterCodec:
     commitment to actually deliver the agreed compute is honor-system.
     Future codecs that bind more of the agreement (TrustedOracle,
     AttestationProperty) tighten this.
+
+    ``kind`` matches the alkahest slot name (``recipient_arbiter``)
+    so the codec is keyed by the same identifier ``address_to_slot``
+    produces when handed the deployed arbiter address. The address is
+    the natural identity; the slot name is the codec lookup key.
     """
 
-    kind = "recipient"
+    kind = "recipient_arbiter"
 
     def resolve_address(
         self, chain_name: str, *, config_path: str | None
@@ -318,7 +424,7 @@ class RecipientArbiterCodec:
 
 
 _ARBITER_CODECS: dict[str, ArbiterCodec] = {
-    "recipient": RecipientArbiterCodec(),
+    "recipient_arbiter": RecipientArbiterCodec(),
 }
 
 
@@ -356,7 +462,7 @@ def build_payment_obligation_data(
     token_contract_address: str,
     chain_name: str,
     addr_config_path: str | None = None,
-    arbiter_kind: str = "recipient",
+    arbiter_kind: str = "recipient_arbiter",
 ) -> dict[str, Any]:
     """Canonical obligation_data for an ERC20 + arbiter-kind payment escrow.
 
@@ -474,9 +580,13 @@ class Erc20NonTierableEscrowCodec:
       - ``price_data = {"address": token, "value": amount}``
       - ``arbiter_data = {"arbiter": arbiter, "demand": <bytes>}``
       - ``expiration`` as a separate uint64
+
+    ``kind`` matches the alkahest slot name produced by
+    ``address_to_slot`` so codecs and reverse address lookups share
+    the same identifier namespace.
     """
 
-    kind = "erc20_non_tierable"
+    kind = "erc20_escrow_obligation_nontierable"
 
     def resolve_address(
         self, chain_name: str, *, config_path: str | None
@@ -515,7 +625,7 @@ class Erc20NonTierableEscrowCodec:
 
 
 _ESCROW_KIND_CODECS: dict[str, EscrowKindCodec] = {
-    "erc20_non_tierable": Erc20NonTierableEscrowCodec(),
+    "erc20_escrow_obligation_nontierable": Erc20NonTierableEscrowCodec(),
 }
 
 
@@ -569,3 +679,63 @@ def get_escrow_kind_codec_by_address(
 def known_escrow_kinds() -> list[str]:
     """Snapshot of currently-registered escrow kinds (for diagnostics)."""
     return sorted(_ESCROW_KIND_CODECS)
+
+
+def get_escrow_codec_for(
+    chain_name: str,
+    escrow_address: str,
+    *,
+    config_path: str | None = None,
+) -> EscrowKindCodec:
+    """Resolve a codec by (chain, address) via ``address_to_slot``.
+
+    Convenience wrapper that bridges the reverse-address-map lookup
+    with the codec registry: first look up which alkahest slot the
+    address occupies on this chain, then find the codec keyed on that
+    slot. Falls back to the iterative ``get_escrow_kind_codec_by_address``
+    when the address isn't a registered alkahest slot (e.g. a freshly
+    deployed contract whose address isn't yet in the SDK's defaults).
+
+    Raises ``ValueError`` when no codec matches — typically a sign the
+    listing was built against a different chain config than what's
+    currently active.
+    """
+    slot = address_to_slot(chain_name, escrow_address, config_path=config_path)
+    if slot is not None:
+        codec = _ESCROW_KIND_CODECS.get(slot)
+        if codec is not None:
+            return codec
+    return get_escrow_kind_codec_by_address(
+        escrow_address, chain_name, config_path=config_path,
+    )
+
+
+def get_arbiter_codec_for(
+    chain_name: str,
+    arbiter_address: str,
+    *,
+    config_path: str | None = None,
+) -> ArbiterCodec:
+    """Resolve an arbiter codec by (chain, address) via ``address_to_slot``.
+
+    Mirror of ``get_escrow_codec_for`` for arbiter codecs. Falls back
+    to an iterative scan if the slot lookup misses; raises if no codec
+    can resolve the address on this chain.
+    """
+    slot = address_to_slot(chain_name, arbiter_address, config_path=config_path)
+    if slot is not None:
+        codec = _ARBITER_CODECS.get(slot)
+        if codec is not None:
+            return codec
+    target = arbiter_address.lower()
+    for codec in _ARBITER_CODECS.values():
+        try:
+            resolved = codec.resolve_address(chain_name, config_path=config_path)
+        except Exception:
+            continue
+        if resolved.lower() == target:
+            return codec
+    raise ValueError(
+        f"No arbiter codec found for address={arbiter_address!r} "
+        f"on chain={chain_name!r}; registered: {sorted(_ARBITER_CODECS)}"
+    )

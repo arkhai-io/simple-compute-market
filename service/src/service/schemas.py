@@ -202,60 +202,145 @@ class EscrowTerms(BaseModel):
     )
 
 
-class EscrowTermsProposal(BaseModel):
-    """Buyer's proposed escrow shape at negotiation round 0.
+class AcceptedEscrow(BaseModel):
+    """One escrow shape the seller will accept for this listing.
 
-    Captures the *kind axes* the buyer commits to — which on-chain
-    escrow contract, which arbiter kind, which payment token, and the
-    absolute expiration timestamp. Concrete obligation_data values
-    (arbiter address, demand bytes, payment amount) are derived
-    deterministically at settlement from this proposal plus the
-    agreed price + duration + chain config, so the wire-level
-    artifact stays narrow.
+    Each entry pins the (chain, escrow contract) tuple plus a partial
+    EscrowData advertisement. The buyer's proposal must reference one
+    of the listing's accepted entries by (chain_name, escrow_address)
+    and supply the buyer-committable EscrowData keys in ``fields``.
 
-    The seller validates the proposal against the listing's
-    acceptance set: today the listing implicitly defines the canonical
-    shape (``erc20_non_tierable`` + ``recipient`` + listing's
-    ``demand_resource.token`` contract). Future listings may advertise
-    multiple acceptable proposals, letting the buyer pick. The
-    structural slot is the same.
+    ``fields`` is shape-only: keys present advertise a seller-preferred
+    value; keys absent are open. Whether a set field is a hard constraint
+    or a negotiable default is the seller's negotiation policy's concern,
+    not protocol infrastructure.
 
-    Amount is intentionally not on the proposal — it depends on the
-    agreed price (not known at round 0) and the duration (which the
-    seller may negotiate down via ``max_duration_seconds``). Materializing
-    the full EscrowTerms at settlement keeps the proposal stable
-    across the price negotiation rounds.
+    ``amount`` is intentionally never present in ``fields`` — the
+    on-chain ObligationData.amount is a per-deal total derived at
+    settlement from ``price_per_hour * duration_seconds / 3600``. The
+    advertised per-hour rate lives in the sibling ``price_per_hour``
+    field so ``fields`` stays a pure Partial<ObligationData>.
     """
 
-    escrow_kind: str = Field(
+    chain_name: str = Field(
         description=(
-            "Which on-chain escrow obligation contract — keys into the "
-            "service.clients.alkahest EscrowKindCodec registry. Today "
-            "only ``'erc20_non_tierable'`` is supported."
+            "Alkahest chain identifier (e.g. ``base_sepolia``, ``anvil``). "
+            "Combined with ``escrow_address`` to look up the SDK codec via "
+            "``service.clients.alkahest.address_to_slot``."
         ),
     )
-    arbiter_kind: str = Field(
+    escrow_address: str = Field(
         description=(
-            "Which arbiter encoder produces the escrow's demand bytes — "
-            "keys into the ArbiterCodec registry. Today only "
-            "``'recipient'`` is supported."
+            "Deployed escrow obligation contract address on ``chain_name``. "
+            "The (chain, address) pair determines the EscrowData ABI."
         ),
     )
-    payment_token: str = Field(
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
         description=(
-            "ERC-20 token contract address the buyer pays in. Must match "
-            "the listing's ``demand_resource.token.contract_address``."
+            "Partial EscrowData advertised by the seller. Keys present = "
+            "seller-preferred values; keys absent = open. Never includes "
+            "``amount`` (derived at settlement from ``price_per_hour`` × "
+            "duration / 3600)."
+        ),
+    )
+    price_per_hour: int | None = Field(
+        default=None,
+        description=(
+            "Advertised per-hour rate in the escrow's payment token, in "
+            "base units (token-amount × 10^decimals). ``None`` = hidden "
+            "reserve (seller did not publish a rate; negotiation must "
+            "establish one via the strategy's ``default_min_price``). "
+            "Drives the total amount that gets populated into "
+            "ObligationData.amount at settlement."
+        ),
+    )
+
+
+class EscrowProposal(BaseModel):
+    """Buyer's escrow proposal at negotiation round 0.
+
+    References one of the listing's ``accepted_escrows`` entries by
+    ``(chain_name, escrow_address)`` and supplies the buyer-committable
+    EscrowData fields. ``amount`` is intentionally not on the proposal —
+    it's derived at settlement from the agreed price + duration. The
+    seller echoes back the accepted proposal verbatim on the negotiation
+    outcome so settlement code reconstructs the same on-chain
+    obligation_data on both sides.
+    """
+
+    chain_name: str = Field(
+        description=(
+            "Chain identifier; must match the picked accepted_escrows entry."
+        ),
+    )
+    escrow_address: str = Field(
+        description=(
+            "Escrow contract address; must match the picked "
+            "accepted_escrows entry."
+        ),
+    )
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Complete buyer-committable EscrowData fields (arbiter, "
+            "payment_token, …). Excludes ``amount`` and ``demand``, "
+            "which are derived at settlement."
         ),
     )
     expiration_unix: int = Field(
         gt=0,
         description=(
             "Absolute UTC unix-time the on-chain escrow attestation "
-            "expires. The buyer commits to creating the escrow before "
-            "this moment; the seller verifies the chain attestation's "
-            "``expirationTime`` matches. Absolute (not relative) so both "
-            "sides have a single agreed timestamp with no clock-drift "
-            "tolerance window."
+            "expires. Both sides commit to this single timestamp; no "
+            "clock-drift tolerance window."
+        ),
+    )
+
+
+class EscrowTermsProposal(BaseModel):
+    """DEPRECATED legacy shape — superseded by ``EscrowProposal``.
+
+    Retained for the duration of the (b) → (c) → (a) migration so call
+    sites can switch one package at a time. New code must construct
+    ``EscrowProposal`` directly. This class will be removed once every
+    storefront / buyer / policy / test reference is migrated.
+
+    Mapping to the new shape:
+      * ``escrow_kind`` is now derivable from the (chain, escrow_address)
+        slot lookup; no longer carried on the wire.
+      * ``arbiter_kind`` is now derivable from the (chain, fields.arbiter)
+        slot lookup; the buyer puts the arbiter address into the
+        proposal's ``fields`` map.
+      * ``payment_token`` moves into ``fields["payment_token"]``.
+      * ``expiration_unix`` stays.
+    """
+
+    escrow_kind: str = Field(
+        description=(
+            "Legacy escrow-kind discriminator. Today only "
+            "``'erc20_non_tierable'`` is supported by call sites that "
+            "still construct this type."
+        ),
+    )
+    arbiter_kind: str = Field(
+        description=(
+            "Legacy arbiter-kind discriminator. Today only "
+            "``'recipient'`` is supported by call sites that still "
+            "construct this type."
+        ),
+    )
+    payment_token: str = Field(
+        description=(
+            "ERC-20 token contract address the buyer pays in. Moves to "
+            "``EscrowProposal.fields['payment_token']`` in the new shape."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time the on-chain escrow attestation "
+            "expires."
         ),
     )
 

@@ -53,22 +53,22 @@ def restore_registry():
 
 
 def test_recipient_is_registered_by_default():
-    assert "recipient" in known_arbiter_kinds()
+    assert "recipient_arbiter" in known_arbiter_kinds()
 
 
 def test_get_arbiter_codec_returns_recipient_impl():
-    codec = get_arbiter_codec("recipient")
+    codec = get_arbiter_codec("recipient_arbiter")
     assert isinstance(codec, RecipientArbiterCodec)
-    assert codec.kind == "recipient"
+    assert codec.kind == "recipient_arbiter"
 
 
 def test_get_arbiter_codec_raises_for_unknown_kind():
     with pytest.raises(ValueError) as exc:
-        get_arbiter_codec("trusted_oracle")
+        get_arbiter_codec("trusted_oracle_arbiter")
     msg = str(exc.value)
-    assert "trusted_oracle" in msg
+    assert "trusted_oracle_arbiter" in msg
     # Diagnostic includes the registered kinds so the operator can spot typos.
-    assert "recipient" in msg
+    assert "recipient_arbiter" in msg
 
 
 def test_register_arbiter_codec_adds_new_kind(restore_registry):
@@ -93,7 +93,7 @@ def test_register_arbiter_codec_replaces_existing(restore_registry):
     in test setup."""
 
     class _MockRecipient:
-        kind = "recipient"
+        kind = "recipient_arbiter"
 
         def resolve_address(self, chain_name, *, config_path):
             return _ARBITER_ADDR
@@ -102,7 +102,7 @@ def test_register_arbiter_codec_replaces_existing(restore_registry):
             return b"\x00" * 32
 
     register_arbiter_codec(_MockRecipient())
-    codec = get_arbiter_codec("recipient")
+    codec = get_arbiter_codec("recipient_arbiter")
     assert isinstance(codec, _MockRecipient)
 
 
@@ -164,7 +164,7 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
     captured: dict = {}
 
     class _CapturingCodec:
-        kind = "recipient"
+        kind = "recipient_arbiter"
 
         def resolve_address(self, chain_name, *, config_path):
             captured["resolve"] = (chain_name, config_path)
@@ -200,14 +200,14 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
 
 
 def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
-    with pytest.raises(ValueError, match="trusted_oracle"):
+    with pytest.raises(ValueError, match="trusted_oracle_arbiter"):
         build_payment_obligation_data(
             seller_wallet=_SELLER_WALLET,
             agreed_price=1000,
             duration_seconds=3600,
             token_contract_address=_TOKEN,
             chain_name="some_chain",
-            arbiter_kind="trusted_oracle",  # not registered
+            arbiter_kind="trusted_oracle_arbiter",  # not registered
         )
 
 
@@ -215,7 +215,7 @@ def test_build_payment_obligation_data_amount_unchanged_by_codec_swap(restore_re
     """The amount formula (price × duration / 3600) lives outside the
     codec — swapping arbiters doesn't change it."""
     class _NoopCodec:
-        kind = "recipient"
+        kind = "recipient_arbiter"
 
         def resolve_address(self, chain_name, *, config_path):
             return _ARBITER_ADDR

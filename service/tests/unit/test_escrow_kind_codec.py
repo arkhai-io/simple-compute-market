@@ -77,13 +77,13 @@ class TestNormalizeDemandBytes:
 
 
 def test_erc20_non_tierable_registered_by_default():
-    assert "erc20_non_tierable" in known_escrow_kinds()
+    assert "erc20_escrow_obligation_nontierable" in known_escrow_kinds()
 
 
 def test_get_escrow_kind_codec_returns_erc20_impl():
-    codec = get_escrow_kind_codec("erc20_non_tierable")
+    codec = get_escrow_kind_codec("erc20_escrow_obligation_nontierable")
     assert isinstance(codec, Erc20NonTierableEscrowCodec)
-    assert codec.kind == "erc20_non_tierable"
+    assert codec.kind == "erc20_escrow_obligation_nontierable"
 
 
 def test_get_escrow_kind_codec_unknown_kind_raises():
@@ -91,7 +91,7 @@ def test_get_escrow_kind_codec_unknown_kind_raises():
         get_escrow_kind_codec("native_token")
     msg = str(exc.value)
     assert "native_token" in msg
-    assert "erc20_non_tierable" in msg
+    assert "erc20_escrow_obligation_nontierable" in msg
 
 
 def test_register_escrow_kind_codec_adds_new_kind(restore_registry):
@@ -115,7 +115,7 @@ def test_register_escrow_kind_codec_adds_new_kind(restore_registry):
 
 def test_register_escrow_kind_codec_replaces_existing(restore_registry):
     class _MockErc20:
-        kind = "erc20_non_tierable"
+        kind = "erc20_escrow_obligation_nontierable"
 
         def resolve_address(self, chain_name, *, config_path):
             return "0x" + "00" * 20
@@ -127,7 +127,7 @@ def test_register_escrow_kind_codec_replaces_existing(restore_registry):
             return None
 
     register_escrow_kind_codec(_MockErc20())
-    assert isinstance(get_escrow_kind_codec("erc20_non_tierable"), _MockErc20)
+    assert isinstance(get_escrow_kind_codec("erc20_escrow_obligation_nontierable"), _MockErc20)
 
 
 # ---------------------------------------------------------------------------

@@ -61,3 +61,68 @@ def test_resolve_alkahest_address_config_ethereum_sepolia_returns_config():
     result = resolve_alkahest_address_config("ethereum_sepolia")
     assert result is not None
     assert result.erc20_addresses.eas.lower() == "0xc2679fbd37d54388ce493f1db75320d236e1815e"
+
+
+def test_address_to_slot_base_sepolia_recipient_arbiter():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_recipient_arbiter,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    ra = get_recipient_arbiter("base_sepolia")
+    assert address_to_slot("base_sepolia", ra) == "recipient_arbiter"
+
+
+def test_address_to_slot_base_sepolia_erc20_escrow():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_erc20_escrow_obligation_nontierable,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    escrow = get_erc20_escrow_obligation_nontierable("base_sepolia")
+    assert address_to_slot("base_sepolia", escrow) == "erc20_escrow_obligation_nontierable"
+
+
+def test_address_to_slot_unknown_address_returns_none():
+    from service.clients.alkahest import address_to_slot, _reverse_address_map
+    _reverse_address_map.cache_clear()
+    unknown = "0x" + "12" * 20
+    assert address_to_slot("base_sepolia", unknown) is None
+
+
+def test_address_to_slot_case_insensitive():
+    from service.clients.alkahest import (
+        address_to_slot,
+        get_recipient_arbiter,
+        _reverse_address_map,
+    )
+    _reverse_address_map.cache_clear()
+    ra = get_recipient_arbiter("base_sepolia")
+    assert address_to_slot("base_sepolia", ra.upper()) == "recipient_arbiter"
+    assert address_to_slot("base_sepolia", ra.lower()) == "recipient_arbiter"
+
+
+def test_address_to_slot_anvil_override(tmp_path):
+    """Override JSON path (anvil) — uses the same enumeration as SDK
+    objects but via SimpleNamespace."""
+    import json
+    from service.clients.alkahest import address_to_slot, _reverse_address_map
+    _reverse_address_map.cache_clear()
+    override = tmp_path / "anvil.json"
+    arbiter_addr = "0x" + "ab" * 20
+    escrow_addr = "0x" + "cd" * 20
+    override.write_text(json.dumps({
+        "arbiters_addresses": {
+            "recipient_arbiter": arbiter_addr,
+            "eas": "0x" + "00" * 20,  # zero-address slot should be skipped
+        },
+        "erc20_addresses": {
+            "escrow_obligation_nontierable": escrow_addr,
+        },
+    }))
+    cfg_path = str(override)
+    assert address_to_slot("anvil", arbiter_addr, config_path=cfg_path) == "recipient_arbiter"
+    assert address_to_slot("anvil", escrow_addr, config_path=cfg_path) == "erc20_escrow_obligation_nontierable"
+    assert address_to_slot("anvil", "0x" + "00" * 20, config_path=cfg_path) is None
