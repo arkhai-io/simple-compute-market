@@ -321,8 +321,11 @@ class SQLiteClient:
             # Listings table (local source of truth).
             # Duration is buyer-driven (Slice C): the seller advertises an
             # OPTIONAL ceiling (max_duration_seconds; NULL = unlimited).
-            # demand.amount is per-hour; total payment at agreement time
-            # is amount × agreed_duration_seconds / 3600.
+            # accepted_escrows is a JSON array of {chain_name, escrow_address,
+            # fields, price_per_hour} — the canonical pricing+escrow advertisement.
+            # demand_resource is the legacy shape (single token + per-hour rate);
+            # it is being phased out as call sites migrate to accepted_escrows.
+            # During the migration both columns are populated for back-compat.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -341,10 +344,18 @@ class SQLiteClient:
                   buyer_attestation TEXT,
                   escrow_uid TEXT,
                   oracle_address TEXT,
-                  paused INTEGER NOT NULL DEFAULT 0
+                  paused INTEGER NOT NULL DEFAULT 0,
+                  accepted_escrows TEXT
                 )
                 """
             )
+            # Migrate: add accepted_escrows column if missing (existing
+            # databases). Backfill in a separate pass so we don't fail when
+            # the column has already been added by an earlier process.
+            try:
+                cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
@@ -641,6 +652,27 @@ class SQLiteClient:
             return json.dumps(value)
         except Exception:
             return str(value)
+
+    def _deserialize_accepted_escrows(self, value: Any) -> list[dict[str, Any]] | None:
+        """Return the ``accepted_escrows`` column as a Python list.
+
+        The column is a JSON-serialised list of AcceptedEscrow entries
+        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        Returns ``None`` when the column is NULL — callers that need to
+        synthesise an entry from the legacy ``demand_resource`` field
+        do so themselves.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else None
+            except Exception:
+                return None
+        return None
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:
@@ -1572,6 +1604,7 @@ class SQLiteClient:
         escrow_uid: str | None = None,
         oracle_address: str | None = None,
         paused: bool = False,
+        accepted_escrows: Any | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -1595,9 +1628,10 @@ class SQLiteClient:
                       buyer_attestation,
                       escrow_uid,
                       oracle_address,
-                      paused
+                      paused,
+                      accepted_escrows
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -1612,7 +1646,8 @@ class SQLiteClient:
                       buyer_attestation=excluded.buyer_attestation,
                       escrow_uid=excluded.escrow_uid,
                       oracle_address=excluded.oracle_address,
-                      paused=excluded.paused
+                      paused=excluded.paused,
+                      accepted_escrows=excluded.accepted_escrows
                     """,
                     (
                         listing_id,
@@ -1631,6 +1666,7 @@ class SQLiteClient:
                         escrow_uid,
                         oracle_address,
                         1 if paused else 0,
+                        self._serialize_resource(accepted_escrows),
                     ),
                 )
                 conn.commit()
@@ -1656,6 +1692,7 @@ class SQLiteClient:
         buyer_attestation: str | None = None,
         escrow_uid: str | None = None,
         oracle_address: str | None = None,
+        accepted_escrows: Any | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -1680,6 +1717,7 @@ class SQLiteClient:
             add("buyer_attestation", buyer_attestation)
             add("escrow_uid", escrow_uid)
             add("oracle_address", oracle_address)
+            add("accepted_escrows", accepted_escrows, serialize=True)
 
             if not updates:
                 return
@@ -1710,7 +1748,8 @@ class SQLiteClient:
                            max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
-                           COALESCE(paused, 0) AS paused
+                           COALESCE(paused, 0) AS paused,
+                           accepted_escrows
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1723,10 +1762,13 @@ class SQLiteClient:
                     "offer_resource", "demand_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused",
+                    "escrow_uid", "oracle_address", "paused", "accepted_escrows",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
+                d["accepted_escrows"] = self._deserialize_accepted_escrows(
+                    d.get("accepted_escrows"),
+                )
                 return d
             finally:
                 conn.close()
@@ -2785,7 +2827,8 @@ class SQLiteClient:
                            max_duration_seconds, seller, buyer,
                            matched_offer_id, seller_attestation, buyer_attestation,
                            escrow_uid, oracle_address,
-                           COALESCE(paused, 0) AS paused
+                           COALESCE(paused, 0) AS paused,
+                           accepted_escrows
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -2797,13 +2840,16 @@ class SQLiteClient:
                     "offer_resource", "demand_resource", "fulfillment_resource",
                     "max_duration_seconds", "seller", "buyer",
                     "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused",
+                    "escrow_uid", "oracle_address", "paused", "accepted_escrows",
                 ]
                 rows = cur.fetchall()
                 result = []
                 for row in rows:
                     d = dict(zip(keys, row))
                     d["paused"] = bool(d["paused"])
+                    d["accepted_escrows"] = self._deserialize_accepted_escrows(
+                        d.get("accepted_escrows"),
+                    )
                     result.append(d)
                 return result
             finally:
