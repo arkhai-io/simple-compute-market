@@ -352,20 +352,27 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 
     try:
         async with _make_registry_client() as registry_client:
-            result = await registry_client.update_listing(
-                order_id,
-                UpdateListingRequest(
-                    updates={"status": "closed"},
-                    private_key=CONFIG.agent_priv_key,
-                    agent_id=_canonical_agent_id(),
-                ),
+            target_urls = await _registries_to_target(order_id, registry_client.urls)
+            update_request = UpdateListingRequest(
+                updates={"status": "closed"},
+                private_key=CONFIG.agent_priv_key,
+                agent_id=_canonical_agent_id(),
             )
-        if result:
+            payloads = {url: update_request for url in target_urls}
+            results = await registry_client.update_listing_per_registry(
+                order_id, payloads,
+            )
+        await _record_publications(order_id, results)
+        first_ok = next(
+            (r["response"] for r in results if r["success"] and r["response"]),
+            None,
+        )
+        if first_ok:
             return {
                 "status": "closed",
                 "message": f"Order {order_id} marked closed in registry",
                 "listing_id": order_id,
-                "registry_result": result,
+                "registry_result": first_ok,
             }
         return {
             "status": "error",
@@ -787,22 +794,86 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 demand=demand_for_registry,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
-            await registry_client.publish_listing(
-                agent_id_for_registry, order_request, private_key=CONFIG.agent_priv_key
+            payloads = {url: order_request for url in registry_client.urls}
+            results = await registry_client.publish_listing_per_registry(
+                agent_id_for_registry, payloads, private_key=CONFIG.agent_priv_key,
             )
-        logger.info("[REGISTRY] Published order %s", order_id)
-        stage_event(
-            "discovery", "order_published",
-            order_id=order_id,
-            agent_url=BASE_URL_OVERRIDE,
-            offer=order_dict.get("offer_resource"),
-            demand=demand_for_registry,
-            max_duration_seconds=order_dict.get("max_duration_seconds"),
-        )
-        return {"status": "published", "listing_id": order_id}
+        await _record_publications(order_id, results)
+        any_ok = any(r["success"] for r in results)
+        if any_ok:
+            logger.info("[REGISTRY] Published order %s", order_id)
+            stage_event(
+                "discovery", "order_published",
+                order_id=order_id,
+                agent_url=BASE_URL_OVERRIDE,
+                offer=order_dict.get("offer_resource"),
+                demand=demand_for_registry,
+                max_duration_seconds=order_dict.get("max_duration_seconds"),
+            )
+            return {"status": "published", "listing_id": order_id}
+        # No registry accepted the publish — surface the first error.
+        first_err = next((r["error"] for r in results if r["error"]), "unknown")
+        logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, first_err)
+        return {"status": "error", "listing_id": order_id, "message": first_err}
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
         return {"status": "error", "listing_id": order_id, "message": str(exc)}
+
+
+async def _registries_to_target(
+    listing_id: str, fallback_urls: list[str],
+) -> list[str]:
+    """Return the set of registry URLs to target for an update/delete on
+    ``listing_id``.
+
+    Consults the ``publications`` table — only registries that previously
+    received this listing get the update. Falls back to ``fallback_urls``
+    (typically ``registry_client.urls``) when no publications row exists
+    yet, which keeps update-before-publish flows (e.g. close_order on a
+    listing the storefront never published) functioning.
+
+    'unpublished' rows are skipped so a previously deleted listing doesn't
+    receive an update.
+    """
+    try:
+        sqlite_client = get_sqlite_client()
+        pubs = await sqlite_client.load_publications(listing_id=listing_id)
+    except Exception:
+        return list(fallback_urls)
+    active = [p["registry_url"] for p in pubs if p.get("status") != "unpublished"]
+    return active if active else list(fallback_urls)
+
+
+async def _record_publications(
+    listing_id: str, results: list[dict[str, Any]],
+) -> None:
+    """Persist one ``publications`` row per per-registry result.
+
+    Called after every fan-out write (publish / update / delete). Logged
+    rather than raised on persistence errors — the registry-side write
+    has already happened (or failed); the local audit row is best-effort.
+    """
+    try:
+        sqlite_client = get_sqlite_client()
+    except Exception:
+        return
+    for r in results:
+        payload = r.get("payload") or {}
+        status = "published" if r.get("success") else "failed"
+        try:
+            await sqlite_client.upsert_publication(
+                listing_id=listing_id,
+                registry_url=r["registry_url"],
+                payload=payload,
+                status=status,
+                registry_assigned_id=r.get("registry_assigned_id"),
+                last_error=r.get("error"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
+                listing_id, r.get("registry_url"), exc,
+            )
 
 
 def _synthesize_demand_for_registry(
@@ -1261,18 +1332,23 @@ async def fulfill_compute_obligation(
     if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
         try:
             async with _make_registry_client() as registry_client:
-                result = await registry_client.update_listing(
-                    order_id,
-                    UpdateListingRequest(
-                        updates={"seller_attestation": maker_attestation},
-                        private_key=CONFIG.agent_priv_key,
-                        agent_id=_canonical_agent_id(),
-                    ),
+                target_urls = await _registries_to_target(
+                    order_id, registry_client.urls,
                 )
-                if result:
-                    logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
-                else:
-                    logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
+                update_request = UpdateListingRequest(
+                    updates={"seller_attestation": maker_attestation},
+                    private_key=CONFIG.agent_priv_key,
+                    agent_id=_canonical_agent_id(),
+                )
+                payloads = {url: update_request for url in target_urls}
+                results = await registry_client.update_listing_per_registry(
+                    order_id, payloads,
+                )
+            await _record_publications(order_id, results)
+            if any(r["success"] for r in results):
+                logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
+            else:
+                logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
         except Exception as e:
             logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
 

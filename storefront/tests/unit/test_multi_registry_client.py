@@ -342,3 +342,172 @@ class TestPublishListing:
                     ListingRequest(listing_id="x", offer={}, demand={}, max_duration_seconds=None),
                     "0xkey",
                 )
+
+
+# ---------------------------------------------------------------------------
+# Per-registry writes (publications-table feeders)
+# ---------------------------------------------------------------------------
+
+class TestPublishListingPerRegistry:
+    """``publish_listing_per_registry`` returns one PublishResult per URL
+    so callers can persist a ``publications`` row for each — including
+    failures, which the back-compat wrapper would otherwise swallow."""
+
+    @pytest.mark.asyncio
+    async def test_returns_result_per_registry(self):
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        from registry_client.models import ListingRequest
+        _FakeRegistry.responses = {
+            "http://r1": {"publish_listing": {"listing_id": "r1-id"}},
+            "http://r2": {"publish_listing": {"listing_id": "r2-id"}},
+        }
+        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
+            payloads = {
+                "http://r1": ListingRequest(
+                    listing_id="x", offer={"variant": "r1"}, demand={},
+                    max_duration_seconds=None,
+                ),
+                "http://r2": ListingRequest(
+                    listing_id="x", offer={"variant": "r2"}, demand={},
+                    max_duration_seconds=None,
+                ),
+            }
+            results = await rc.publish_listing_per_registry(
+                "agent-1", payloads, "0xkey",
+            )
+        assert [r["registry_url"] for r in results] == ["http://r1", "http://r2"]
+        assert all(r["success"] for r in results)
+        # registry_assigned_id is extracted from the response's listing_id key.
+        assert [r["registry_assigned_id"] for r in results] == ["r1-id", "r2-id"]
+        # The per-registry payload is preserved on the result so the
+        # caller can persist it without re-deriving. ListingRequest's
+        # to_dict serialises offer→offer_resource (the registry-wire key).
+        assert results[0]["payload"]["offer_resource"] == {"variant": "r1"}
+        assert results[1]["payload"]["offer_resource"] == {"variant": "r2"}
+
+    @pytest.mark.asyncio
+    async def test_failures_are_reported_not_swallowed(self):
+        """The back-compat ``publish_listing`` returns only the first OK;
+        the per-registry variant must report each failure as a
+        ``success=False`` row so the caller can persist a 'failed' status
+        in publications."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        from registry_client.models import ListingRequest
+        _FakeRegistry.responses = {
+            "http://r1": {"publish_listing": RuntimeError("r1 down")},
+            "http://r2": {"publish_listing": {"listing_id": "r2-id"}},
+        }
+        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
+            payloads = {
+                url: ListingRequest(
+                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                )
+                for url in ("http://r1", "http://r2")
+            }
+            results = await rc.publish_listing_per_registry(
+                "agent-1", payloads, "0xkey",
+            )
+        assert results[0]["success"] is False
+        assert "r1 down" in (results[0]["error"] or "")
+        assert results[1]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_unknown_url_marked_failed_without_call(self):
+        """Payload aimed at a URL the client wasn't constructed with —
+        result is a synthetic failure, no network call is made."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        from registry_client.models import ListingRequest
+        _FakeRegistry.responses = {
+            "http://r1": {"publish_listing": {"listing_id": "r1-id"}},
+        }
+        async with MultiRegistryClient(["http://r1"]) as rc:
+            payloads = {
+                "http://r1": ListingRequest(
+                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                ),
+                "http://stranger": ListingRequest(
+                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                ),
+            }
+            results = await rc.publish_listing_per_registry(
+                "agent-1", payloads, "0xkey",
+            )
+        stranger = [r for r in results if r["registry_url"] == "http://stranger"][0]
+        assert stranger["success"] is False
+        assert stranger["error"] == "registry not configured"
+
+
+class TestUpdateListingPerRegistry:
+    @pytest.mark.asyncio
+    async def test_distinct_updates_per_registry(self):
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        from registry_client import UpdateListingRequest
+        _FakeRegistry.responses = {
+            "http://r1": {"update_listing": {"updated": "r1"}},
+            "http://r2": {"update_listing": {"updated": "r2"}},
+        }
+        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
+            payloads = {
+                "http://r1": UpdateListingRequest(
+                    updates={"status": "closed"},
+                    private_key="0xkey", agent_id="agent-1",
+                ),
+                "http://r2": UpdateListingRequest(
+                    updates={"status": "closed"},
+                    private_key="0xkey", agent_id="agent-1",
+                ),
+            }
+            results = await rc.update_listing_per_registry("x", payloads)
+        assert all(r["success"] for r in results)
+        assert results[0]["response"] == {"updated": "r1"}
+
+
+class TestDeleteListingPerRegistry:
+    @pytest.mark.asyncio
+    async def test_targets_only_listed_urls(self):
+        """The delete-per-registry variant takes a URL subset so callers
+        consulting ``publications`` only delete from registries the
+        listing actually went to."""
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        called: dict[str, int] = {"http://r1": 0, "http://r2": 0}
+
+        async def _track(url):
+            async def _impl(listing_id, private_key):
+                called[url] += 1
+                return None
+            return _impl
+
+        _FakeRegistry.responses = {
+            "http://r1": {"delete_listing": None},
+            "http://r2": {"delete_listing": None},
+        }
+        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
+            # Only target r1 — r2 should not receive a call.
+            results = await rc.delete_listing_per_registry(
+                "x", ["http://r1"], "0xkey",
+            )
+        assert [r["registry_url"] for r in results] == ["http://r1"]
+        assert results[0]["success"] is True
+
+
+class TestBackcompatWrappersStillReturnFirstOk:
+    """The legacy ``publish_listing(agent, listing, key)`` /
+    ``update_listing(id, request)`` callers still get back the first
+    successful response dict — the rewrite uses the per-registry
+    variant under the hood without changing the wrapper's contract."""
+
+    @pytest.mark.asyncio
+    async def test_publish_returns_first_ok(self):
+        from market_storefront.utils.multi_registry_client import MultiRegistryClient
+        from registry_client.models import ListingRequest
+        _FakeRegistry.responses = {
+            "http://r1": {"publish_listing": RuntimeError("nope")},
+            "http://r2": {"publish_listing": {"ok": True}},
+        }
+        async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
+            result = await rc.publish_listing(
+                "agent-1",
+                ListingRequest(listing_id="x", offer={}, demand={}, max_duration_seconds=None),
+                "0xkey",
+            )
+        assert result == {"ok": True}

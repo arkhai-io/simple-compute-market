@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from typing import Any
@@ -77,6 +78,26 @@ def synthesize_accepted_escrows_from_demand(
         "fields": {"payment_token": contract_address},
         "price_per_hour": price_per_hour,
     }]
+
+
+def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
+    """Decode a publications row tuple into a dict, parsing payload_json."""
+    listing_id, registry_url, payload_json, published_at, \
+        registry_assigned_id, status, last_error = row
+    try:
+        payload = json.loads(payload_json) if payload_json else None
+    except Exception:
+        payload = None
+    return {
+        "listing_id": listing_id,
+        "registry_url": registry_url,
+        "payload": payload,
+        "payload_json": payload_json,
+        "published_at": published_at,
+        "registry_assigned_id": registry_assigned_id,
+        "status": status,
+        "last_error": last_error,
+    }
 
 
 class SQLiteClient:
@@ -740,6 +761,31 @@ class SQLiteClient:
             )
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_negotiation ON settlement_jobs(negotiation_id)"
+            )
+            # Publications — record of which registries received which
+            # payload for which listing. Updates and deletes consult this
+            # to know what's where; per-registry payload mode (milestone b)
+            # uses this as the durable record of fan-out shape divergence.
+            # status: 'published' | 'failed' | 'unpublished'.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS publications (
+                  listing_id TEXT NOT NULL,
+                  registry_url TEXT NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  published_at INTEGER NOT NULL,
+                  registry_assigned_id TEXT,
+                  status TEXT NOT NULL,
+                  last_error TEXT,
+                  PRIMARY KEY (listing_id, registry_url)
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publications_registry ON publications(registry_url)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status)"
             )
             conn.commit()
         finally:
@@ -2506,6 +2552,153 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    async def upsert_publication(
+        self,
+        *,
+        listing_id: str,
+        registry_url: str,
+        payload: dict[str, Any] | str,
+        status: str,
+        registry_assigned_id: str | None = None,
+        last_error: str | None = None,
+        published_at: int | None = None,
+    ) -> None:
+        """Record (or refresh) a publish attempt for one (listing, registry)
+        pair. The row carries the exact payload sent — the registry may have
+        a different listing_shape than another registry in the fan-out — so
+        the caller can read it back later for updates/deletes.
+
+        ``payload`` accepts a dict (json.dumps'd) or a pre-serialised string.
+        ``published_at`` defaults to the current epoch second.
+        """
+        def _upsert() -> None:
+            if isinstance(payload, str):
+                payload_str = payload
+            else:
+                payload_str = json.dumps(payload)
+            now = published_at if published_at is not None else int(time.time())
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO publications
+                      (listing_id, registry_url, payload_json, published_at,
+                       registry_assigned_id, status, last_error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(listing_id, registry_url) DO UPDATE SET
+                      payload_json = excluded.payload_json,
+                      published_at = excluded.published_at,
+                      registry_assigned_id = excluded.registry_assigned_id,
+                      status = excluded.status,
+                      last_error = excluded.last_error
+                    """,
+                    (
+                        listing_id, registry_url, payload_str, now,
+                        registry_assigned_id, status, last_error,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_upsert)
+
+    async def load_publication(
+        self, *, listing_id: str, registry_url: str,
+    ) -> dict[str, Any] | None:
+        """Return a single publications row as a dict, or None."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications
+                    WHERE listing_id = ? AND registry_url = ?
+                    """,
+                    (listing_id, registry_url),
+                ).fetchone()
+                if not row:
+                    return None
+                return _publication_row_to_dict(row)
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_publications(
+        self, *, listing_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return all publications for one listing (one row per registry)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications WHERE listing_id = ?
+                    ORDER BY registry_url
+                    """,
+                    (listing_id,),
+                ).fetchall()
+                return [_publication_row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_publications(
+        self, *, registry_url: str | None = None, status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return publications optionally filtered by registry and/or status."""
+        def _list() -> list[dict[str, Any]]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if registry_url is not None:
+                clauses.append("registry_url = ?")
+                params.append(registry_url)
+            if status is not None:
+                clauses.append("status = ?")
+                params.append(status)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications {where}
+                    ORDER BY listing_id, registry_url
+                    """,
+                    tuple(params),
+                ).fetchall()
+                return [_publication_row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
+    async def delete_publication(
+        self, *, listing_id: str, registry_url: str,
+    ) -> None:
+        """Hard-delete a publications row (used when a registry-side listing
+        is gone for good — distinct from status='unpublished' which keeps
+        the row as a tombstone)."""
+        def _delete() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "DELETE FROM publications WHERE listing_id = ? AND registry_url = ?",
+                    (listing_id, registry_url),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_delete)
 
     async def delete_negotiation_thread(
         self,

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, TypedDict
 
 from registry_client import (
     RegistryClient,
@@ -46,6 +46,23 @@ from registry_client.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class PublishResult(TypedDict):
+    """Per-registry outcome of a fan-out write.
+
+    Returned by the per-registry write methods so callers can persist
+    a ``publications`` row reflecting the actual shape of the payload
+    sent to each registry. ``payload`` is the exact dict transmitted —
+    useful when the wrapper built it from a uniform request (back-compat
+    fan-out) and the caller wants to record it.
+    """
+    registry_url: str
+    success: bool
+    response: dict | None
+    error: str | None
+    payload: dict | None
+    registry_assigned_id: str | None
 
 
 class MultiRegistryClient:
@@ -233,58 +250,209 @@ class MultiRegistryClient:
     async def publish_listing(
         self, agent_id: str, listing: ListingRequest, private_key: str,
     ) -> dict:
-        return await self._fanout_write(
-            "publish_listing",
-            lambda c: c.publish_listing(agent_id, listing, private_key),
+        """Fan out the same ``listing`` payload to every configured
+        registry. Back-compat wrapper around
+        :meth:`publish_listing_per_registry`. Returns the first
+        registry's successful response."""
+        payloads = {url: listing for url in self._urls}
+        results = await self.publish_listing_per_registry(
+            agent_id, payloads, private_key,
         )
+        return _first_ok_response(results, op="publish_listing")
 
     async def update_listing(
         self, listing_id: str, request: UpdateListingRequest,
     ) -> dict:
-        return await self._fanout_write(
-            "update_listing",
-            lambda c: c.update_listing(listing_id, request),
-        )
+        """Fan out the same ``request`` to every configured registry.
+        Back-compat wrapper around :meth:`update_listing_per_registry`."""
+        payloads = {url: request for url in self._urls}
+        results = await self.update_listing_per_registry(listing_id, payloads)
+        return _first_ok_response(results, op="update_listing")
 
     async def delete_listing(self, listing_id: str, private_key: str) -> None:
-        if not self._clients:
-            raise RuntimeError("No registries configured")
-        results = await asyncio.gather(
-            *[self._bound(c.delete_listing(listing_id, private_key)) for c in self._clients],
-            return_exceptions=True,
+        """Fan out a delete to every configured registry. At least one
+        must succeed or the call raises."""
+        results = await self.delete_listing_per_registry(
+            listing_id, self._urls, private_key,
         )
-        successes = sum(1 for r in results if not isinstance(r, BaseException))
-        for url, r in zip(self._urls, results):
-            if isinstance(r, BaseException):
-                logger.warning(
-                    "[MULTI_REGISTRY] %s delete_listing failed: %s", url, r,
-                )
-        if successes == 0:
+        if not any(r["success"] for r in results):
             raise RuntimeError(
-                f"delete_listing failed for all {len(self._urls)} registries"
+                f"delete_listing failed for all {len(results)} registries"
             )
 
-    async def _fanout_write(self, op_name: str, call):
-        """Run ``call(client)`` on every client concurrently. Return
-        the first registry's successful response. Raises if every
-        registry failed."""
-        if not self._clients:
-            raise RuntimeError("No registries configured")
-        results = await asyncio.gather(
-            *[self._bound(call(c)) for c in self._clients],
-            return_exceptions=True,
+    async def publish_listing_per_registry(
+        self,
+        agent_id: str,
+        payloads: dict[str, ListingRequest],
+        private_key: str,
+    ) -> list[PublishResult]:
+        """Publish a (possibly distinct) ``ListingRequest`` payload to each
+        registry independently. Returns one :class:`PublishResult` per entry
+        in ``payloads`` — including failures, so the caller can record a
+        ``publications`` row for every attempt.
+
+        Only registries present in this client's configured URLs are
+        contacted; entries in ``payloads`` for unknown URLs are returned
+        as failures with ``error="registry not configured"``.
+        """
+        return await self._fanout_per_registry(
+            "publish_listing",
+            payloads,
+            lambda client, payload: client.publish_listing(
+                agent_id, payload, private_key,
+            ),
         )
-        first_ok: dict | None = None
-        for url, r in zip(self._urls, results):
-            if isinstance(r, BaseException):
-                logger.warning(
-                    "[MULTI_REGISTRY] %s %s failed: %s", url, op_name, r,
-                )
+
+    async def update_listing_per_registry(
+        self,
+        listing_id: str,
+        payloads: dict[str, UpdateListingRequest],
+    ) -> list[PublishResult]:
+        """Update a listing with per-registry request payloads. Same
+        semantics as :meth:`publish_listing_per_registry`."""
+        return await self._fanout_per_registry(
+            "update_listing",
+            payloads,
+            lambda client, payload: client.update_listing(listing_id, payload),
+        )
+
+    async def delete_listing_per_registry(
+        self,
+        listing_id: str,
+        registry_urls: list[str],
+        private_key: str,
+    ) -> list[PublishResult]:
+        """Delete a listing from a specific subset of registries (typically
+        the ones recorded in the ``publications`` table for this listing).
+        Returns one :class:`PublishResult` per requested URL."""
+        # delete has no payload, but the per-registry contract carries one
+        # placeholder per URL so callers see the same result shape.
+        synthetic: dict[str, object] = {url: {} for url in registry_urls}
+        return await self._fanout_per_registry(
+            "delete_listing",
+            synthetic,
+            lambda client, _payload: client.delete_listing(
+                listing_id, private_key,
+            ),
+        )
+
+    async def _fanout_per_registry(
+        self,
+        op_name: str,
+        payloads: dict[str, Any],
+        call,
+    ) -> list[PublishResult]:
+        """Shared fan-out machinery for the per-registry write methods.
+
+        Builds an ordered :class:`PublishResult` list — one per entry in
+        ``payloads`` — preserving the input dict's iteration order so
+        callers can match results to inputs positionally. URLs that
+        aren't configured on this client are recorded as failures
+        without making a network call.
+        """
+        url_to_client = dict(zip(self._urls, self._clients))
+        results: list[PublishResult] = []
+        coro_indices: list[int] = []
+        coros: list[Any] = []
+
+        for url, payload in payloads.items():
+            payload_dict = _payload_to_dict(payload)
+            client = url_to_client.get(url)
+            if client is None:
+                results.append(PublishResult(
+                    registry_url=url,
+                    success=False,
+                    response=None,
+                    error="registry not configured",
+                    payload=payload_dict,
+                    registry_assigned_id=None,
+                ))
                 continue
-            if first_ok is None:
-                first_ok = r
-        if first_ok is None:
-            raise RuntimeError(
-                f"{op_name} failed for all {len(self._urls)} registries"
-            )
-        return first_ok
+            results.append(PublishResult(
+                registry_url=url,
+                success=False,
+                response=None,
+                error=None,
+                payload=payload_dict,
+                registry_assigned_id=None,
+            ))
+            coro_indices.append(len(results) - 1)
+            coros.append(self._bound(call(client, payload)))
+
+        if coros:
+            outcomes = await asyncio.gather(*coros, return_exceptions=True)
+            for idx, outcome in zip(coro_indices, outcomes):
+                url = results[idx]["registry_url"]
+                if isinstance(outcome, BaseException):
+                    logger.warning(
+                        "[MULTI_REGISTRY] %s %s failed: %s", url, op_name, outcome,
+                    )
+                    results[idx] = PublishResult(
+                        registry_url=url,
+                        success=False,
+                        response=None,
+                        error=str(outcome),
+                        payload=results[idx]["payload"],
+                        registry_assigned_id=None,
+                    )
+                else:
+                    response = outcome if isinstance(outcome, dict) else None
+                    assigned_id = None
+                    if isinstance(response, dict):
+                        for key in ("listing_id", "id", "registry_listing_id"):
+                            val = response.get(key)
+                            if isinstance(val, str) and val:
+                                assigned_id = val
+                                break
+                    results[idx] = PublishResult(
+                        registry_url=url,
+                        success=True,
+                        response=response,
+                        error=None,
+                        payload=results[idx]["payload"],
+                        registry_assigned_id=assigned_id,
+                    )
+
+        return results
+
+
+def _payload_to_dict(payload: Any) -> dict | None:
+    """Best-effort coerce a request payload to a dict for persistence.
+
+    Recognises Pydantic models (``model_dump``), dataclass-style request
+    objects from ``registry_client`` (``to_dict``), and plain dicts.
+    Returns ``None`` for anything else so the caller can decide whether
+    to record a NULL payload or skip the row entirely."""
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    dump = getattr(payload, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json")
+        except Exception:
+            try:
+                return dump()
+            except Exception:
+                pass
+    to_dict = getattr(payload, "to_dict", None)
+    if callable(to_dict):
+        try:
+            result = to_dict()
+            return result if isinstance(result, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def _first_ok_response(results: list[PublishResult], *, op: str) -> dict:
+    """Return the first successful response dict or raise if all failed.
+
+    Used by the back-compat fan-out wrappers (``publish_listing`` /
+    ``update_listing``) that only surface a single response shape.
+    """
+    for r in results:
+        if r["success"] and r["response"] is not None:
+            return r["response"]
+    raise RuntimeError(f"{op} failed for all {len(results)} registries")
