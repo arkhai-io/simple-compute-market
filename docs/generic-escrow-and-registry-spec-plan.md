@@ -249,6 +249,25 @@ moves to a join against `escrows` (or a denormalized
 `listings.is_settled` flag maintained at attestation-write time, if the
 join cost matters).
 
+#### Surfacing escrows on the per-negotiation endpoint
+
+Post-b3 the per-deal attestation data lives on `escrows` joined to
+`negotiation_threads` via `negotiation_id`, but
+`GET /api/v1/listings/{listing_id}/negotiations/{neg_id}` (backed by
+`sqlite_client.load_negotiation_detail`) returns only thread + messages +
+stage_events — it doesn't JOIN `escrows`. That's the natural home for
+the data (was previously rolled up into the registry's now-deleted
+`/system/stats/attestations`). Extend `load_negotiation_detail` to
+include `escrows: [{escrow_uid, fulfillment_uid, chain_name,
+escrow_address, is_primary, status}, ...]` populated from
+`SELECT ... FROM escrows WHERE negotiation_id = ?`, and add the field
+to the controller's response schema.
+
+A cross-storefront aggregate (the old roll-up's shape) is a different
+concern — would be a separate `GET /api/v1/system/stats/escrows` over
+the storefront's own escrows table, counting open vs fulfilled. Defer
+until someone needs a smoke-test signal back.
+
 #### Open questions, not blocking
 
 - `oracle_address` lives on `listings` today and is also per-deal. Multi-
