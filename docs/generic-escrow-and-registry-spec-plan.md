@@ -412,13 +412,45 @@ the storefront's policy package — reuse rather than invent.
 
 ---
 
-## Milestone (a) — Registry self-description (filter-spec + listing_shape)
+## ~~Milestone (a1) — Registry self-description (filter-spec + listing_shape)~~ (landed)
 
 **Goal:** registries advertise their own listing shape (JSON Schema) and
 filter set; storefront's `/api/v1/listings` sheds its discovery
 vocabulary (filter params, schema-validation duplication) and reverts
 to a plain REST collection view of the seller's own resources.
 Buyer-side discovery happens against registries.
+
+Landed as commits a1b-1 through a1b-6 on `test/role-separated-stage-tests`:
+
+- **a1b-1**: `/filter-spec` endpoint serving the YAML-driven spec with a
+  sha256 etag over `{version, listing_shape, filters}`. Loader uses
+  pydantic for shape validation + `extra='forbid'` on filter
+  declarations so YAML typos surface at startup.
+- **a1b-2**: `POST /api/v1/listings/validate-publish` drives off the
+  loaded JSON Schema (Draft202012Validator). Old hardcoded
+  compute/token heuristics gone; enum violations + integer/null
+  bounds now caught for free.
+- **a1b-3**: `GET /listings` filter evaluator over jsonpath-ng, set-
+  theoretic op model (in / not_in / range / exists), URL sugar via
+  `alias_kind: lower_bound|upper_bound`, ETag gate via `If-Match` →
+  412 with current etag in body, unknown filter → 400. Dropped
+  `matches_resource_filters` + dead helpers (`get_resource_type`,
+  `resources_match`).
+- **a1b-4**: Storefront's `/api/v1/listings` trimmed to a plain
+  resource-enumeration view (`limit/offset/status/paused`). Dropped
+  `storefront/src/market_storefront/utils/listing_filters.py`,
+  `ListingFilterParams`, `listing_filter_params` factory.
+- **a1b-5**: `arkhai-registry-client 0.5.0 → 0.6.0` — typed filter
+  surface on `list_listings` replaced with `**filters` passthrough +
+  `etag=` → `If-Match` header. `get_filter_spec()` added. `arkhai-
+  storefront-client 0.8.0 → 0.9.0` — discovery kwargs dropped.
+- **a1b-6**: registry Dockerfile copies `filter-spec.yaml` into the
+  image (otherwise the runtime `FileNotFoundError`s on any /listings
+  call).
+
+Deferred to **PR (a2)**: per-query `on_missing` override, `indexed: true`
+side indexes, raw set-form URL syntax (`?gpu_model=in:[H100,A100]`).
+The sections below describe the design as it landed.
 
 ### `/filter-spec` endpoint
 
@@ -695,13 +727,18 @@ all of it.
    filter becomes a join. Sequenced after (c) so the negotiation-policy
    surface is settled before the deal-record shape changes underneath
    it; could move earlier if the multi-escrow use case becomes urgent.
-6. **PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
+6. ~~**PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
    validation. Storefront `/api/v1/listings` sheds its discovery filter
    vocabulary (drop `listing_filters.py`, drop `ListingFilterParams`);
    the endpoint stays as a REST collection view over the seller's own
-   resources with just `limit` / `offset` / `status`.
+   resources with just `limit` / `offset` / `status`.~~ landed as a1b-1
+   through a1b-6 (out of the original PR sequence; (b)/(c) still ahead).
 7. **PR (a2):** Per-query `on_missing` override + `indexed: true` side
-   indexes (defer until proven necessary).
+   indexes (defer until proven necessary). Raw set-form URL syntax
+   (`?gpu_model=in:[H100,A100]`) — currently only the URL-sugar layer
+   (single-value `in` and `range` via `alias_kind`) is wired up; the
+   raw form needs URL parsing + the `not_in` and `exists` ops have
+   eval support but no URL surface yet.
 
 Each PR runs the full verification process documented in
 `memory/reference_full_verification_process.md`: per-package unit +
