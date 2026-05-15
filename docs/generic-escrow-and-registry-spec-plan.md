@@ -616,6 +616,83 @@ live on the `escrows` table (one row per attached escrow, joined via
 Everything else (filter vocabulary, listing extensions like `region`,
 `gpu_model`, `ram_gb`, etc.) is registry-userland.
 
+## Post-(a1a) follow-ups
+
+Surfaced during the (a1a) registry catch-up review. Not blocking (a1b),
+but each belongs to an upcoming slice when it touches the relevant code.
+
+### `fields` should match on-chain ObligationData keys
+
+`accepted_escrows[i].fields` and `EscrowProposal.fields` use
+`payment_token`, but the on-chain `ERC20EscrowObligation.ObligationData`
+struct's key is `token`. Both sides hardcode the translation
+(`buyer/market_buyer/escrow_client.py:94`,
+`storefront/.../escrow_verification.py:244`). The schema docstring
+claims `fields` is a "Partial<ObligationData>" — that's the right goal,
+but the implementation violates it.
+
+Principle: **DB and wire field names match the on-chain shape**. Codec
+conversion is reserved for cases where the wire shape genuinely cannot
+be the on-chain shape (e.g. per-period rates; see next item).
+
+Cleanup:
+- Rename `fields["payment_token"]` → `fields["token"]` across schemas,
+  buyer escrow builder, storefront verifier, refund, and tests.
+- Drop the `payment_token` → `token` translation in
+  `escrow_client.py` and `escrow_verification.py` — the value passes
+  through unchanged.
+- For future escrow kinds (ERC721, native, bundle): each
+  `EscrowKindCodec` owns a `fields_to_obligation_data(fields,
+  agreed_price, duration_seconds)` method that maps `fields` directly
+  into the contract's ObligationData layout. Today's ERC20-specific
+  `build_payment_obligation_data` in `service/clients/alkahest.py`
+  becomes the ERC20 codec's implementation of that method (the
+  docstring at `alkahest.py:486` already flags this as "step 6 when
+  the dispatch becomes polymorphic").
+
+### `price_per_hour` representation
+
+Today: integer in base units (token-amount × 10^decimals). For USDC at
+6 decimals, 100 USDC is `100_000_000`. This bakes token-decimals
+knowledge into the wire layer — adding/removing decimals on a forked
+token, or onboarding tokens with rare decimal values, means hunting
+for hardcoded scaling.
+
+Pick one:
+- **Float**: 100 USDC = `100.0`. Codec applies decimals at
+  obligation-build time (`int(price_per_hour * duration_seconds *
+  10^decimals / 3600)`).
+- **Raw integer token units** (no decimals scaling on the wire):
+  100 USDC = `100`. Whole tokens only.
+
+The current "integer × 10^decimals" is the worst of both — bakes
+decimals into the wire while still constraining values to integers.
+
+### Token references: addresses, not symbols
+
+Storage carries addresses everywhere. Symbols are a presentation-layer
+convenience attached at render time via `TOKEN_REGISTRY`.
+
+Today symbol-as-shorthand leaks into storage / API in a few places:
+- `storefront/resources.py:212-263` — CSV import accepts
+  symbol-only entries, resolves via registry.
+- `storefront/services/listing_service.py:72-75` — POST create-listing
+  accepts symbol-only token entries.
+- `storefront/data/token_registry_*.json` — symbol-indexed lookup tables.
+
+Cleanup principle:
+- API boundaries (listing creation, CSV import) resolve symbol →
+  address; everything downstream sees only addresses.
+- Display surfaces (CLI `market listing show`, dashboards) look up
+  symbol from address at render time.
+- `service/clients/token.py` keeps the by-symbol index but reframes
+  it as a presentation cache — not primary identity.
+
+Symbols are bug-prone across multi-chain configs (USDC has different
+addresses per chain, occasional symbol collisions), make grep harder,
+and need decimals-lookup-by-symbol for amount math. Addresses sidestep
+all of it.
+
 ## Suggested PR sequence
 
 1. **PR (b1):** `accepted_escrows` schema + codec rekey + DB migration,
