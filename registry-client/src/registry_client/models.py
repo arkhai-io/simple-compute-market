@@ -473,6 +473,31 @@ class ValidatePublishRequest:
 
 
 @dataclass
+class FilterSpecResponse:
+    """Response from GET /filter-spec — what the registry advertises.
+
+    ``etag`` is a stable hash over ``{version, listing_shape, filters}``.
+    Buyers should cache by URL+etag and send ``If-Match: <etag>`` on
+    every ``list_listings`` call so a spec rotation surfaces as a 412
+    instead of a silent shape change.
+    """
+
+    version: int
+    etag: str
+    listing_shape: dict
+    filters: list[dict]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FilterSpecResponse":
+        return cls(
+            version=int(d.get("version", 0)),
+            etag=str(d.get("etag", "")),
+            listing_shape=dict(d.get("listing_shape") or {}),
+            filters=list(d.get("filters") or []),
+        )
+
+
+@dataclass
 class ValidatePublishResponse:
     """Response from POST /api/v1/listings/validate-publish."""
 

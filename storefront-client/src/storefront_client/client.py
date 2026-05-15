@@ -351,49 +351,17 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         status: str | None = None,
         paused: bool | None = None,
-        # Spec filters — equality
-        region: str | None = None,
-        gpu_model: str | None = None,
-        sla: float | None = None,
-        cpu_type: str | None = None,
-        host_disk_type: str | None = None,
-        motherboard: str | None = None,
-        gpu_interconnect: str | None = None,
-        virtualization_type: str | None = None,
-        static_ip: bool | None = None,
-        datacenter_grade: bool | None = None,
-        # Spec filters — numeric ">="
-        gpu_count_min: int | None = None,
-        vcpu_count_min: int | None = None,
-        ram_gb_min: int | None = None,
-        disk_gb_min: int | None = None,
-        host_cpu_cores_min: int | None = None,
-        host_ram_gb_min: int | None = None,
-        host_disk_gb_min: int | None = None,
-        total_gpu_count_min: int | None = None,
-        nic_speed_gbps_min: int | None = None,
-        internet_download_mbps_min: int | None = None,
-        internet_upload_mbps_min: int | None = None,
-        open_ports_count_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> ListingListResponse:
-        """GET /api/v1/listings"""
+        """GET /api/v1/listings — local resource enumeration.
+
+        Discovery filters (gpu_model, region, token, etc.) moved to
+        registries with milestone (a1b); query a registry's
+        ``/filter-spec`` and ``/listings`` for those.
+        """
         params = _build_listings_params(
-            status=status, paused=paused,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            limit=limit, offset=offset,
+            status=status, paused=paused, limit=limit, offset=offset,
         )
         return ListingListResponse.from_dict(
             await self._get("/api/v1/listings", params=params)
@@ -1159,47 +1127,12 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         status: str | None = None,
         paused: bool | None = None,
-        region: str | None = None,
-        gpu_model: str | None = None,
-        sla: float | None = None,
-        cpu_type: str | None = None,
-        host_disk_type: str | None = None,
-        motherboard: str | None = None,
-        gpu_interconnect: str | None = None,
-        virtualization_type: str | None = None,
-        static_ip: bool | None = None,
-        datacenter_grade: bool | None = None,
-        gpu_count_min: int | None = None,
-        vcpu_count_min: int | None = None,
-        ram_gb_min: int | None = None,
-        disk_gb_min: int | None = None,
-        host_cpu_cores_min: int | None = None,
-        host_ram_gb_min: int | None = None,
-        host_disk_gb_min: int | None = None,
-        total_gpu_count_min: int | None = None,
-        nic_speed_gbps_min: int | None = None,
-        internet_download_mbps_min: int | None = None,
-        internet_upload_mbps_min: int | None = None,
-        open_ports_count_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> ListingListResponse:
-        """GET /api/v1/listings"""
+        """GET /api/v1/listings — see :meth:`StorefrontClient.list_listings`."""
         params = _build_listings_params(
-            status=status, paused=paused,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            limit=limit, offset=offset,
+            status=status, paused=paused, limit=limit, offset=offset,
         )
         return ListingListResponse.from_dict(
             self._get("/api/v1/listings", params=params)

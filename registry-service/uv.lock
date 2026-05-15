@@ -155,14 +155,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-registry-client"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "eth-account" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_registry_client-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_registry_client-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1669,7 +1669,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-registry-client", specifier = ">=0.5.0" },
+    { name = "arkhai-registry-client", specifier = ">=0.6.0" },
     { name = "black", specifier = ">=23.11.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pytest", specifier = ">=7.4.0" },
