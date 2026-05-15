@@ -158,7 +158,7 @@ async def verify_escrow_for_settlement(
     *,
     escrow_uid: str,
     seller_wallet: str,
-    agreed_price: int,
+    agreed_price: float,
     agreed_duration_seconds: int,
     listing: dict[str, Any],
     alkahest_client: Any,
@@ -282,7 +282,7 @@ async def verify_escrow_for_settlement(
     try:
         expected_obligation_raw = build_obligation_data_fn(
             seller_wallet=seller_wallet,
-            agreed_price=int(agreed_price),
+            agreed_price=float(agreed_price),
             duration_seconds=int(agreed_duration_seconds),
             token_contract_address=effective_token,
             chain_name=chain_name,

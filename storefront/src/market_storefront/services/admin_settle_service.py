@@ -54,7 +54,7 @@ class AdminSettleService:
         escrow_uid: str,
         listing_id: str,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
     ) -> dict:
         """Read the escrow from chain and confirm it matches the supplied terms.

@@ -71,7 +71,7 @@ async def _seed_thread(
     order_id: str,
     *,
     terminal_state: str | None = None,
-    agreed_price: int | None = None,
+    agreed_price: float | None = None,
 ) -> None:
     """Insert a minimal negotiation thread and two messages directly into SQLite."""
     now = datetime.now().isoformat()

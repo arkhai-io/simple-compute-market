@@ -103,7 +103,7 @@ def _stub_escrow_terms(seller_wallet, agreed_price, duration_seconds):
             "arbiter": _RECIPIENT_ARBITER,
             "demand": "0x" + "00" * 31 + seller_wallet[2:].rjust(2, "0"),
             "token": _TOKEN,
-            "amount": int(agreed_price) * int(max(duration_seconds, 1)) // 3600,
+            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=1_800_000_000,
     )

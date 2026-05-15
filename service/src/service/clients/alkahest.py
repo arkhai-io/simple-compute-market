@@ -366,7 +366,7 @@ class AgreementContext:
     """
 
     seller_wallet: str
-    agreed_price: int
+    agreed_price: float
     duration_seconds: int
 
 
@@ -457,7 +457,7 @@ def known_arbiter_kinds() -> list[str]:
 def build_payment_obligation_data(
     *,
     seller_wallet: str,
-    agreed_price: int,
+    agreed_price: float,
     duration_seconds: int,
     token_contract_address: str,
     chain_name: str,
@@ -478,7 +478,12 @@ def build_payment_obligation_data(
         {arbiter: <kind-specific address for chain_name>,
          demand:  "0x" + <kind-specific demand bytes>,
          token:   token_contract_address,
-         amount:  agreed_price * duration_seconds / 3600}
+         amount:  int(agreed_price * duration_seconds / 3600)}
+
+    ``agreed_price`` is a float in base units per hour; multiplying by
+    duration and dividing by 3600 in float, then rounding to int once,
+    keeps sub-hour leases precise (integer ``agreed_price // 3600`` would
+    truncate to zero for small rates and short durations).
 
     The arbiter address and demand bytes are produced by the registered
     ``ArbiterCodec`` matching ``arbiter_kind``. The amount formula is
@@ -494,7 +499,7 @@ def build_payment_obligation_data(
     )
     arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
     demand_bytes = codec.encode_demand(agreement)
-    amount_raw = int(agreed_price) * int(max(duration_seconds, 1)) // 3600
+    amount_raw = int(float(agreed_price) * max(duration_seconds, 1) / 3600)
     return {
         "arbiter": arbiter_address,
         "demand": "0x" + demand_bytes.hex(),

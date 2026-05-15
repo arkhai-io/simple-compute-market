@@ -80,8 +80,8 @@ class BuyConstraints:
     invoked with a ``derive_prices`` callback that computes per-listing
     prices from the seller's advertised min_price.
     """
-    max_price: Optional[int] = None     # ceiling per order (base units, per-hour rate)
-    initial_price: Optional[int] = None # opening bid per order
+    max_price: Optional[float] = None     # ceiling per order (base units, per-hour rate)
+    initial_price: Optional[float] = None # opening bid per order
 
 
 @dataclass
@@ -89,7 +89,7 @@ class BuyResult:
     status: str
     negotiation_id: Optional[str] = None
     seller_url: Optional[str] = None
-    agreed_price: Optional[int] = None
+    agreed_price: Optional[float] = None
     escrow_uid: Optional[str] = None
     fulfillment_uid: Optional[str] = None
     connection_details: Optional[str] = None
@@ -284,7 +284,7 @@ def fetch_listing_dict_multi(
     return None
 
 
-def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
+def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
     """Pull the seller's per-hour floor out of a registry listing dict.
 
     Reads ``accepted_escrows[0].price_per_hour`` — the per-hour token rate
@@ -304,7 +304,7 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
         return None
     amount = first.get("price_per_hour")
     try:
-        return int(amount) if amount is not None else None
+        return float(amount) if amount is not None else None
     except (ValueError, TypeError):
         return None
 
@@ -441,7 +441,7 @@ class AgreedTerms:
     seller_wallet_address: str
     negotiation_id: str
     listing_id: str
-    agreed_price: int               # base units, per-hour rate
+    agreed_price: float               # base units, per-hour rate
     duration_seconds: int           # buyer's lease ask (negotiation init)
 
 

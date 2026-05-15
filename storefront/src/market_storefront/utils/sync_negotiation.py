@@ -340,7 +340,7 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
             round_number=i,
             sender=sender,
             action=action,
-            price=int(price) if price is not None else None,
+            price=float(price) if price is not None else None,
         ))
     return out
 
@@ -354,7 +354,7 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
 def _compute_round_zero_decision(
     *,
     listing: Any,
-    their_proposed_price: int,
+    their_proposed_price: float,
 ) -> tuple[int, str, str, NegotiationDecision]:
     """Determine the seller's round-0 decision for a given buyer price.
 
@@ -405,7 +405,7 @@ async def start_sync_negotiation(
     sqlite_client: Any,
     our_listing_id: str,
     buyer_address: str,
-    their_proposed_price: int,
+    their_proposed_price: float,
     provision_terms: Any = None,
     escrow_proposal: Any = None,
     our_base_url: str,
@@ -590,7 +590,7 @@ async def continue_sync_negotiation(
     sqlite_client: Any,
     neg_id: str,
     buyer_action: str,
-    buyer_price: int | None,
+    buyer_price: float | None,
     buyer_reason: str | None,
     buyer_address: str,
 ) -> dict[str, Any]:
@@ -629,7 +629,7 @@ async def continue_sync_negotiation(
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
-        int(m["proposed_price"])
+        float(m["proposed_price"])
         for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
@@ -639,7 +639,7 @@ async def continue_sync_negotiation(
     if buyer_action == "accept":
         # The buyer is accepting our last offered price. Commit terms.
         last_seller_price = next(
-            (int(m["proposed_price"]) for m in reversed(messages)
+            (float(m["proposed_price"]) for m in reversed(messages)
              if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
             our_price,
         )
@@ -708,8 +708,8 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             sender=buyer_address,
             our_price=our_price,
-            their_price=int(buyer_price),
-            proposed_price=int(buyer_price),
+            their_price=float(buyer_price),
+            proposed_price=float(buyer_price),
             action_taken="counter_offer",
             message_type="counter_proposal",
         )
@@ -720,12 +720,12 @@ async def continue_sync_negotiation(
     decision = strategy_obj.decide(NegotiationRoundInput(
         direction=_direction_from_strategy_label(strategy),
         our_reference_price=our_price,
-        their_proposed_price=int(buyer_price),
+        their_proposed_price=float(buyer_price),
         history=_history_from_messages(messages, our_sender),
     ))
     await _record_seller_decision(
         neg_id=neg_id, our_price=our_price,
-        their_price=int(buyer_price), decision=decision,
+        their_price=float(buyer_price), decision=decision,
     )
     if decision.action == "accept":
         agreed_duration_seconds = (
@@ -735,7 +735,7 @@ async def continue_sync_negotiation(
         )
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=int(decision.price),
+            agreed_price=float(decision.price),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
@@ -743,7 +743,7 @@ async def continue_sync_negotiation(
         negotiation_id=neg_id,
         round=len(our_previous_counters) + 1,
         our_price=our_price,
-        their_price=int(buyer_price),
+        their_price=float(buyer_price),
         decision=decision.action,
         decision_price=decision.price,
         decision_reason=decision.reason,
@@ -754,8 +754,8 @@ async def continue_sync_negotiation(
 async def _record_seller_decision(
     *,
     neg_id: str,
-    our_price: int,
-    their_price: int,
+    our_price: float,
+    their_price: float,
     decision: NegotiationDecision,
 ) -> None:
     """Persist the seller's decision as a message + terminal state if applicable."""

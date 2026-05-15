@@ -113,7 +113,7 @@ class NegotiateController:
         buyer_auth._verify(request, "negotiate_continue", neg_id, body.buyer_address)
 
         if body.action == "counter" and body.price is None:
-            raise HTTPException(status_code=400, detail="'price' required as int for counter")
+            raise HTTPException(status_code=400, detail="'price' required as number for counter")
 
         try:
             result = await continue_sync_negotiation(

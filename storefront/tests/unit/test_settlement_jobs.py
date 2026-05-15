@@ -131,7 +131,7 @@ async def _seed_negotiation(
     neg_id: str = "neg-1",
     our_listing_id: str = "seller-ord-1",
     terminal: str | None = "success",
-    agreed_price: int | None = 10**18,
+    agreed_price: float | None = 10**18,
     agreed_duration_seconds: int | None = 3600,
 ) -> None:
     conn = sqlite3.connect(client.db_path)

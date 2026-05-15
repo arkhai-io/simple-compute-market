@@ -44,7 +44,7 @@ def _fake_resolver(registry: dict[str, dict]):
 def _accepted_escrow(
     *,
     token: str = _MOCK_TOKEN["contract_address"],
-    price_per_hour: int | None = 1_000_000_000_000_000_000,
+    price_per_hour: float | None = 1_000_000_000_000_000_000,
 ) -> dict:
     return {
         "chain_name": "anvil",

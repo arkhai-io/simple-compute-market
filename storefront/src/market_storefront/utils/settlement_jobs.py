@@ -142,7 +142,7 @@ async def start_settlement_job(
     await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=CONFIG.agent_wallet_address or "",
-        agreed_price=int(thread["agreed_price"]),
+        agreed_price=float(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=our_order_dict,
         alkahest_client=alkahest_client,

@@ -979,7 +979,7 @@ class TestStage07_OnChainEscrowAndProvGate:
         escrow_uid = create_buyer_escrow(
             buyer_private_key=buyer_config["private_key"],
             seller_wallet_address=seller_wallet,
-            agreed_price=int(deal_state.agreed_price),
+            agreed_price=float(deal_state.agreed_price),
             duration_seconds=DURATION_HOURS * 3600,
             token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
             rpc_url=buyer_config["rpc_url"],

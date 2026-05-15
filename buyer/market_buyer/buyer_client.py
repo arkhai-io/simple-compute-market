@@ -67,8 +67,8 @@ class NegotiationOutcome:
     """
     status: str                     # "agreed" | "exited"
     negotiation_id: Optional[str]   # None only if /new itself failed
-    agreed_price: Optional[int] = None
-    duration_seconds: Optional[int] = None  # echoed from buyer's negotiation-init ask
+    agreed_price: Optional[float] = None
+    duration_seconds: Optional[float] = None  # echoed from buyer's negotiation-init ask
     reason: Optional[str] = None    # populated on exit
     rounds: int = 0
     accepted_provision_terms: Optional[ProvisionTerms] = None
@@ -175,7 +175,7 @@ class ResumeState:
     """
     negotiation_id: str
     transcript: list[NegotiationRound]
-    last_seller_price: int | None
+    last_seller_price: float | None
     rounds_completed: int
 
 
@@ -185,8 +185,8 @@ def negotiate_with_seller(
     buyer_address: str,
     buyer_private_key: str,
     listing_id: str,
-    initial_price: int,
-    max_price: int,
+    initial_price: float,
+    max_price: float,
     provision_terms: Optional[ProvisionTerms] = None,
     escrow_proposal: Optional[EscrowProposal] = None,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
@@ -230,7 +230,7 @@ def negotiate_with_seller(
     # the negotiation thread); subsequent rounds don't re-echo them.
     accepted_prov: Optional[ProvisionTerms] = None
     accepted_esc: Optional[EscrowProposal] = None
-    duration_seconds: Optional[int] = None  # populated from provision_terms or resume
+    duration_seconds: Optional[float] = None  # populated from provision_terms or resume
     if strategy is None:
         # Default to the registered default ("rl"); pull the torch
         # module in if installed so its registration fires.
@@ -251,7 +251,7 @@ def negotiate_with_seller(
         reply: dict[str, Any] = {
             "negotiation_id": neg_id,
             "action": "counter",
-            "price": int(resume.last_seller_price),
+            "price": float(resume.last_seller_price),
         }
         round_idx = max(1, resume.rounds_completed)
     else:
@@ -270,7 +270,7 @@ def negotiate_with_seller(
         new_body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
-            "initial_price": int(initial_price),
+            "initial_price": float(initial_price),
             "provision_terms": provision_terms.model_dump(),
             "escrow_proposal": escrow_proposal.model_dump(),
         }
@@ -290,7 +290,7 @@ def negotiate_with_seller(
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_price=int(reply.get("price", initial_price)),
+                agreed_price=float(reply.get("price", initial_price)),
                 duration_seconds=duration_seconds,
                 rounds=0,
                 accepted_provision_terms=accepted_prov,
@@ -313,13 +313,13 @@ def negotiate_with_seller(
         if not neg_id:
             raise RuntimeError("/api/v1/negotiate/new returned counter but no negotiation_id")
 
-        our_counters.append(int(initial_price))
+        our_counters.append(float(initial_price))
         transcript.append(NegotiationRound(
-            round_number=0, sender="us", action="initial", price=int(initial_price),
+            round_number=0, sender="us", action="initial", price=float(initial_price),
         ))
         transcript.append(NegotiationRound(
             round_number=0, sender="them", action="counter",
-            price=int(reply.get("price")) if reply.get("price") is not None else None,
+            price=float(reply.get("price")) if reply.get("price") is not None else None,
         ))
         round_idx = 1
 
@@ -331,8 +331,8 @@ def negotiate_with_seller(
 
         next_move = strategy.decide(NegotiationRoundInput(
             direction="minimize",
-            our_reference_price=int(max_price),
-            their_proposed_price=int(seller_counter_price),
+            our_reference_price=float(max_price),
+            their_proposed_price=float(seller_counter_price),
             history=transcript,
             max_rounds=max_rounds,
         ))
@@ -342,7 +342,7 @@ def negotiate_with_seller(
             "buyer_address": buyer_address,
         }
         if next_move.action == "counter":
-            body["price"] = int(next_move.price)
+            body["price"] = float(next_move.price)
         elif next_move.action == "exit":
             body["reason"] = next_move.reason or "buyer_exit"
 
@@ -362,7 +362,7 @@ def negotiate_with_seller(
                 return NegotiationOutcome(
                     status="agreed",
                     negotiation_id=neg_id,
-                    agreed_price=int(reply.get("price", seller_counter_price)),
+                    agreed_price=float(reply.get("price", seller_counter_price)),
                     duration_seconds=duration_seconds,
                     rounds=round_idx,
                     accepted_provision_terms=accepted_prov,
@@ -386,9 +386,9 @@ def negotiate_with_seller(
             )
 
         # next_move was counter → state appended, loop continues.
-        our_counters.append(int(next_move.price))
+        our_counters.append(float(next_move.price))
         transcript.append(NegotiationRound(
-            round_number=round_idx, sender="us", action="counter", price=int(next_move.price),
+            round_number=round_idx, sender="us", action="counter", price=float(next_move.price),
         ))
         # Record the seller's reply to this round.
         seller_reply_action = reply.get("action") or "counter"
@@ -397,7 +397,7 @@ def negotiate_with_seller(
             round_number=round_idx,
             sender="them",
             action=seller_reply_action if seller_reply_action in ("counter", "accept", "exit", "reject") else "counter",
-            price=int(seller_reply_price) if seller_reply_price is not None else None,
+            price=float(seller_reply_price) if seller_reply_price is not None else None,
         ))
 
         seller_action = reply.get("action")
@@ -405,7 +405,7 @@ def negotiate_with_seller(
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=neg_id,
-                agreed_price=int(reply.get("price", next_move.price)),
+                agreed_price=float(reply.get("price", next_move.price)),
                 duration_seconds=duration_seconds,
                 rounds=round_idx,
                 accepted_provision_terms=accepted_prov,

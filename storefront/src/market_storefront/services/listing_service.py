@@ -182,7 +182,7 @@ class ListingService:
         )
 
     async def evaluate_negotiate(
-        self, listing_id: str, their_proposed_price: int
+        self, listing_id: str, their_proposed_price: float
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 

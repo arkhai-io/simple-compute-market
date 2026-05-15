@@ -38,7 +38,7 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_sec
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
             "token": proposal.fields["token"],
-            "amount": int(agreed_price) * int(duration_seconds) // 3600,
+            "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
         },
         expiration_unix=proposal.expiration_unix,
     )]

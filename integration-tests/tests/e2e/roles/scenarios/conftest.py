@@ -62,7 +62,7 @@ class DealState:
     _evaluate_negotiate_passed: bool = False
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
-    agreed_price: Optional[int] = None
+    agreed_price: Optional[float] = None
     # Phase 7 — mock escrow + provisioning gate
     real_escrow_uid: Optional[str] = None
     provisioning_gate_armed: bool = False

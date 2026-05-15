@@ -142,13 +142,13 @@ def derive_refund_params(
                           "(price_per_hour=None); pass explicit 'amount' to refund"},
             )
         try:
-            base_raw = int(amount_raw_in)
+            base_rate = float(amount_raw_in)
         except (TypeError, ValueError):
             return (
                 "error",
                 400,
                 {"error": "Order accepted_escrows[0].price_per_hour is not "
-                          "an integer; pass explicit 'amount'"},
+                          "a number; pass explicit 'amount'"},
             )
         # Refund uses the agreed duration from the negotiation thread when
         # available (Slice C), else falls back to the listing's max ceiling,
@@ -156,7 +156,7 @@ def derive_refund_params(
         agreed_seconds = order.get("agreed_duration_seconds")
         if not agreed_seconds:
             agreed_seconds = order.get("max_duration_seconds") or 3600
-        amount_raw = base_raw * max(int(agreed_seconds), 1) // 3600
+        amount_raw = int(base_rate * max(int(agreed_seconds), 1) / 3600)
 
     if amount_raw <= 0:
         return ("error", 400, {"error": f"Refund amount must be positive (got {amount_raw})"})

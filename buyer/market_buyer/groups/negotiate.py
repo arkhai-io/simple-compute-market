@@ -53,12 +53,12 @@ def register(app: typer.Typer) -> None:
             help="Per-registry deadline in seconds (default: "
                  "registry.discovery_timeout from config.toml, fallback 5).",
         ),
-        initial_price: Optional[int] = typer.Option(
+        initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
             help="Opening bid in raw token units. Optional — when omitted, "
                  "anchored on the listing's advertised min_price.",
         ),
-        max_price: Optional[int] = typer.Option(
+        max_price: Optional[float] = typer.Option(
             None, "--max-price",
             help="Ceiling — accept any seller counter at or under this. "
                  "Optional — when omitted, derived as min_price * --price-markup. "
@@ -105,7 +105,7 @@ def register(app: typer.Typer) -> None:
             help="Payment token contract address. Logged for downstream "
                  "`market settle` / `escrow create`.",
         ),
-        token_decimals: Optional[int] = typer.Option(
+        token_decimals: Optional[float] = typer.Option(
             None, "--token-decimals",
             help="Payment token decimals. Logged for downstream "
                  "`market settle` / `escrow create`.",

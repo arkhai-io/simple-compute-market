@@ -460,7 +460,7 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
@@ -482,7 +482,7 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: int,
+        price: float,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
@@ -636,7 +636,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        their_proposed_price: int,
+        their_proposed_price: float,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
@@ -772,7 +772,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: int,
+        initial_price: float,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -824,7 +824,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}"""
@@ -912,7 +912,7 @@ class StorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
     ) -> dict:
@@ -1264,7 +1264,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> NegotiationActionResponse:
         """POST .../advance  (admin key required)"""
@@ -1286,7 +1286,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: int,
+        price: float,
     ) -> NegotiationActionResponse:
         """POST .../force-accept  (admin key required)"""
         return NegotiationActionResponse.from_dict(
@@ -1483,7 +1483,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        their_proposed_price: int,
+        their_proposed_price: float,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
@@ -1616,7 +1616,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: int,
+        initial_price: float,
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
@@ -1662,7 +1662,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}"""
@@ -1750,7 +1750,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
     ) -> dict:

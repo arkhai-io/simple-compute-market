@@ -373,7 +373,7 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
             "contract_address": token_meta.contract_address,
             "decimals": token_meta.decimals,
         },
-        "amount": int(CONFIG.default_min_price),
+        "amount": float(CONFIG.default_min_price),
     }
 
     return DomainAction(

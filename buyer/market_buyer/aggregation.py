@@ -319,7 +319,7 @@ async def gather_outcomes(
     return await asyncio.gather(*(_one(c) for c in candidates))
 
 
-def _extract_advertised_price(match: dict[str, Any]) -> int | None:
+def _extract_advertised_price(match: dict[str, Any]) -> float | None:
     """Pull the per-hour advertised price from a match's first accepted escrow.
 
     Mirrors what the seller advertises: ``accepted_escrows[0].price_per_hour``
@@ -339,7 +339,7 @@ def _extract_advertised_price(match: dict[str, Any]) -> int | None:
         return None
     amount = first.get("price_per_hour")
     try:
-        parsed = int(amount) if amount is not None else None
+        parsed = float(amount) if amount is not None else None
     except (ValueError, TypeError):
         return None
     if parsed is None or parsed <= 0:

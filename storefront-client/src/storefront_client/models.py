@@ -394,9 +394,9 @@ class NegotiationMessage:
     round: int = 0
     sender: str = ""
     action_taken: str = ""
-    proposed_price: int | None = None
-    our_price: int | None = None
-    their_price: int | None = None
+    proposed_price: float | None = None
+    our_price: float | None = None
+    their_price: float | None = None
     message_type: str = ""
     timestamp: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
@@ -429,7 +429,7 @@ class NegotiationSummary:
     buyer_address: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: int | None = None
+    agreed_price: float | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     created_at: str = ""
@@ -489,7 +489,7 @@ class NegotiationDetail:
     their_agent_id: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: int | None = None
+    agreed_price: float | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     round_count: int = 0
@@ -530,7 +530,7 @@ class NegotiationActionResponse:
     neg_id: str = ""
     listing_id: str = ""
     action: str = ""
-    price: int | None = None
+    price: float | None = None
     reason: str | None = None
     source: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -595,12 +595,12 @@ class EvaluateNegotiateResponse:
     """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
 
     listing_id: str = ""
-    our_reference_price: int = 0
-    their_proposed_price: int = 0
+    our_reference_price: float = 0
+    their_proposed_price: float = 0
     direction: str = ""
     strategy: str = ""
     decision: str = ""
-    decision_price: int | None = None
+    decision_price: float | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
@@ -614,8 +614,8 @@ class EvaluateNegotiateResponse:
         }
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_price=int(d.get("our_reference_price", 0)),
-            their_proposed_price=int(d.get("their_proposed_price", 0)),
+            our_reference_price=float(d.get("our_reference_price", 0)),
+            their_proposed_price=float(d.get("their_proposed_price", 0)),
             direction=d.get("direction", ""),
             strategy=d.get("strategy", ""),
             decision=d.get("decision", ""),

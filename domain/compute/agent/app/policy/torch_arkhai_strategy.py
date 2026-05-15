@@ -202,7 +202,7 @@ class TorchArkhaiStrategy:
             return NegotiationDecision(action="exit", reason=f"inference_failed:{exc}")
 
         price_idx, _sell_flag = extract_actions_from_logits(output)
-        proposed = int(ri.our_reference_price * (1.0 + _MULTIPLIERS[price_idx]))
+        proposed = ri.our_reference_price * (1.0 + _MULTIPLIERS[price_idx])
 
         their = ri.their_proposed_price
         our = ri.our_reference_price

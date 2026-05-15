@@ -244,15 +244,17 @@ class AcceptedEscrow(BaseModel):
             "duration / 3600)."
         ),
     )
-    price_per_hour: int | None = Field(
+    price_per_hour: float | None = Field(
         default=None,
         description=(
             "Advertised per-hour rate in the escrow's payment token, in "
-            "base units (token-amount × 10^decimals). ``None`` = hidden "
-            "reserve (seller did not publish a rate; negotiation must "
-            "establish one via the strategy's ``default_min_price``). "
-            "Drives the total amount that gets populated into "
-            "ObligationData.amount at settlement."
+            "base units (token-amount × 10^decimals). Float so the rate "
+            "stays precise when duration is sub-hour and the integer-base-"
+            "unit amount comes from ``int(price_per_hour × duration_seconds "
+            "/ 3600)``. ``None`` = hidden reserve (seller did not publish a "
+            "rate; negotiation must establish one via the strategy's "
+            "``default_min_price``). Drives the total amount that gets "
+            "populated into ObligationData.amount at settlement."
         ),
     )
 

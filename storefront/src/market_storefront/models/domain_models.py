@@ -532,7 +532,7 @@ class NegotiationRequestedEvent(DomainEvent):
         default_factory=dict,
         description="Full listing row from sqlite (offer_resource, accepted_escrows, status, ...)",
     )
-    proposed_price: int | None = Field(
+    proposed_price: float | None = Field(
         default=None,
         description="Buyer's initial price proposal (None if not provided)",
     )

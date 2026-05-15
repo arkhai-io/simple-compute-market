@@ -534,7 +534,7 @@ def extract_compute_from_order(order: dict) -> dict:
     return offer_resource
 
 
-def _extract_initial_price_from_order(order: Listing | dict) -> int:
+def _extract_initial_price_from_order(order: Listing | dict) -> float:
     """Extract the initial negotiation floor from a listing's
     ``accepted_escrows[0].price_per_hour``.
 
@@ -550,25 +550,25 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised: int | None = None
+    advertised: float | None = None
     if order.accepted_escrows:
         first = order.accepted_escrows[0]
         advertised = first.price_per_hour
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
-        return int(advertised)
+        return float(advertised)
 
     # Hidden reserve: fall back to the seller's config default.
     from market_storefront.utils.config import CONFIG
     fallback = CONFIG.default_min_price
     if fallback is not None and str(fallback).strip():
         try:
-            parsed = int(fallback)
+            parsed = float(fallback)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"[seller.pricing].default_min_price={fallback!r} is not a "
-                f"valid integer; hidden-reserve listing {order.listing_id} has "
+                f"valid number; hidden-reserve listing {order.listing_id} has "
                 "no usable floor."
             ) from exc
         if parsed > 0:

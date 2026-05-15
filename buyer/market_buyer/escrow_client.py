@@ -81,7 +81,7 @@ def make_buyer_payment_escrow_terms_fn(
     def _build(
         proposal: EscrowProposal,
         seller_wallet_address: str,
-        agreed_price: int,
+        agreed_price: float,
         duration_seconds: int,
     ) -> list[EscrowTerms]:
         # Late imports — alkahest is heavyweight; tests that mock this

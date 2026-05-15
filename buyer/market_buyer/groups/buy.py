@@ -80,7 +80,7 @@ from ._cli_helpers import resolve_prices_from_matches as _resolve_prices_from_ma
 def _run_resume_from(
     *,
     from_run: str,
-    max_price: Optional[int],
+    max_price: Optional[float],
     buyer_address: Optional[str],
     buyer_private_key: Optional[str],
     ssh_public_key: Optional[str],
@@ -237,14 +237,14 @@ def register(app: typer.Typer) -> None:
 
     @app.command("buy")
     def buy(
-        initial_price: Optional[int] = typer.Option(
+        initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
             help="Opening bid per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, prices are derived from the "
                  "seller's advertised min_price (interactively confirmed "
                  "in TTY runs, derived silently with --yes).",
         ),
-        max_price: Optional[int] = typer.Option(
+        max_price: Optional[float] = typer.Option(
             None, "--max-price",
             help="Ceiling per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, derived as min_price × "
@@ -272,18 +272,18 @@ def register(app: typer.Typer) -> None:
         ),
         # Spec filters — slice fields
         gpu_model: Optional[str] = typer.Option(None, "--gpu-model", help="Filter listings by GPU model (e.g., H200)."),
-        gpu_count_min: Optional[int] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
-        vcpu_count_min: Optional[int] = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
-        ram_gb_min: Optional[int] = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
-        disk_gb_min: Optional[int] = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
+        gpu_count_min: Optional[float] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
+        vcpu_count_min: Optional[float] = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
+        ram_gb_min: Optional[float] = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
+        disk_gb_min: Optional[float] = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
         region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
         virtualization_type: Optional[str] = typer.Option(
             None, "--virt", help="Virtualization mode (bare_metal|vm|container).",
         ),
         # Spec filters — host context
         cpu_type: Optional[str] = typer.Option(None, "--cpu-type", help="Filter by host CPU model string."),
-        host_cpu_cores_min: Optional[int] = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
-        host_ram_gb_min: Optional[int] = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
+        host_cpu_cores_min: Optional[float] = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
+        host_ram_gb_min: Optional[float] = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
         gpu_interconnect: Optional[str] = typer.Option(
             None, "--interconnect", help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
         ),

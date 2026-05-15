@@ -85,7 +85,7 @@ def _good_obligation(**overrides: Any) -> dict[str, Any]:
 def _canonical_obligation_data(
     *,
     seller_wallet: str = SELLER,
-    agreed_price: int = 1000,
+    agreed_price: float = 1000,
     duration_seconds: int = 3600,
     token_contract_address: str = TOKEN,
     arbiter_address: str = ARBITER,
@@ -98,7 +98,7 @@ def _canonical_obligation_data(
         "arbiter": arbiter_address,
         "demand": "0x" + _encode_recipient(seller_wallet).hex(),
         "token": token_contract_address,
-        "amount": int(agreed_price) * int(max(duration_seconds, 1)) // 3600,
+        "amount": int(float(agreed_price) * max(duration_seconds, 1) / 3600),
     }
 
 

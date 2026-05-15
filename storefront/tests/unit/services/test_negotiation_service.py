@@ -32,7 +32,7 @@ def _thread(
     order_id: str = "ord-1",
     *,
     terminal_state: str | None = None,
-    agreed_price: int | None = None,
+    agreed_price: float | None = None,
     requested_duration_seconds: int | None = None,
 ) -> dict:
     return {

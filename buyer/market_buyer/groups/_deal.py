@@ -25,7 +25,7 @@ class DealContext:
     seller_url: str
     listing_id: str
     negotiation_id: str
-    agreed_price: int
+    agreed_price: float
     escrow_uid: Optional[str] = None
     # Buyer's lease ask, in seconds. Captured at /negotiate/new time and
     # echoed by the seller in the agreement; settlement multiplies the
@@ -36,7 +36,7 @@ class DealContext:
     # back to flags / config.toml defaults / a fresh HTTP lookup.
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
-    token_decimals: Optional[int] = None
+    token_decimals: Optional[float] = None
 
 
 def load_deal_context(run_id: str) -> DealContext:
@@ -58,12 +58,12 @@ def load_deal_context(run_id: str) -> DealContext:
     seller_url: Optional[str] = None
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
-    agreed_price: Optional[int] = None
+    agreed_price: Optional[float] = None
     escrow_uid: Optional[str] = None
     duration_seconds: int = 3600
     seller_wallet_address: Optional[str] = None
     token_contract: Optional[str] = None
-    token_decimals: Optional[int] = None
+    token_decimals: Optional[float] = None
     last_status: Optional[str] = None
 
     for ev in events:
@@ -73,7 +73,7 @@ def load_deal_context(run_id: str) -> DealContext:
         if ev_type == "run_ended":
             last_status = ev.get("status")
             if ev.get("agreed_price") is not None:
-                agreed_price = int(ev["agreed_price"])
+                agreed_price = float(ev["agreed_price"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
 
@@ -81,7 +81,7 @@ def load_deal_context(run_id: str) -> DealContext:
         if ev_type == "negotiation_completed" and ev.get("status") == "agreed":
             seller_url = ev.get("seller_url") or seller_url
             if ev.get("agreed_price") is not None:
-                agreed_price = int(ev["agreed_price"])
+                agreed_price = float(ev["agreed_price"])
             if ev.get("negotiation_id"):
                 negotiation_id = str(ev["negotiation_id"])
             if ev.get("listing_id"):
@@ -276,7 +276,7 @@ class NegotiationResumePoint:
     listing_id: str
     negotiation_id: str
     transcript: list  # list[NegotiationRound] — typed downstream
-    last_seller_price: Optional[int]
+    last_seller_price: Optional[float]
     rounds_completed: int
     last_status: Optional[str]
 
@@ -316,7 +316,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
     listing_id: Optional[str] = None
     negotiation_id: Optional[str] = None
     transcript: list = []
-    last_seller_price: Optional[int] = None
+    last_seller_price: Optional[float] = None
     last_status: Optional[str] = None
     rounds_completed = 0
 
@@ -342,7 +342,7 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
                 round_number=round_idx,
                 sender="us",
                 action=our_action,
-                price=int(our_price_raw) if our_price_raw is not None else None,
+                price=float(our_price_raw) if our_price_raw is not None else None,
             ))
             their_action = their.get("action") or "counter"
             their_price_raw = their.get("price")
@@ -350,10 +350,10 @@ def load_negotiation_resume_point(run_id: str) -> NegotiationResumePoint:
                 round_number=round_idx,
                 sender="them",
                 action=their_action,
-                price=int(their_price_raw) if their_price_raw is not None else None,
+                price=float(their_price_raw) if their_price_raw is not None else None,
             ))
             if their_action == "counter" and their_price_raw is not None:
-                last_seller_price = int(their_price_raw)
+                last_seller_price = float(their_price_raw)
         elif et == "negotiation_completed":
             last_status = ev.get("status") or last_status
             if ev.get("negotiation_id"):

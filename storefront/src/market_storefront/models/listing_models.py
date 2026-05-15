@@ -275,7 +275,7 @@ class AdminEvaluateCloseResponse(BaseModel):
 
 class EvaluateNegotiateRequest(BaseModel):
     """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
-    their_proposed_price: int = Field(
+    their_proposed_price: float = Field(
         description="The buyer's proposed price (in base token units) to evaluate"
     )
     buyer_address: str = Field(
@@ -292,11 +292,11 @@ class EvaluateNegotiateResponse(BaseModel):
     thread or writing to the database.
     """
     listing_id: str
-    our_reference_price: int    # Seller's floor extracted from the listing's demand resource
-    their_proposed_price: int   # Echoed back from the request
+    our_reference_price: float    # Seller's floor extracted from the listing's demand resource
+    their_proposed_price: float   # Echoed back from the request
     direction: str              # "maximize" (seller always maximises price)
     strategy: str               # e.g. "bisection" or "rl"
     decision: str               # "accept" | "counter" | "exit"
-    decision_price: int | None = None
+    decision_price: float | None = None
     decision_reason: str | None = None
     would_negotiate: bool       # True when decision != "exit"

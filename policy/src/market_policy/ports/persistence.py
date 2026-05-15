@@ -48,7 +48,7 @@ class NegotiationThreadPersistencePort(Protocol):
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,
-        our_initial_price: int | None = None,
+        our_initial_price: float | None = None,
         our_strategy: str | None = None,
     ) -> None: ...
 
@@ -71,9 +71,9 @@ class NegotiationThreadPersistencePort(Protocol):
         negotiation_id: str,
         round: int | None,
         sender: str,
-        our_price: int | None,
-        their_price: int | None,
-        proposed_price: int | None,
+        our_price: float | None,
+        their_price: float | None,
+        proposed_price: float | None,
         action_taken: str,
         message_type: str,
         timestamp: str,

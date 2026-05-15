@@ -100,5 +100,5 @@ class TestExtractInitialPrice:
         listing = _make_listing(demand_amount=None)
         cfg = _patched_config(default_min_price="not-a-number")
         with patch("market_storefront.utils.config.CONFIG", cfg):
-            with pytest.raises(ValueError, match="not a valid integer"):
+            with pytest.raises(ValueError, match="not a valid number"):
                 _extract_initial_price_from_order(listing)

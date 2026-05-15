@@ -71,7 +71,7 @@ def synthesize_accepted_escrows_from_demand(
         )
         return None
     amount = normalized.get("amount")
-    price_per_hour = int(amount) if isinstance(amount, (int, float)) else None
+    price_per_hour = float(amount) if isinstance(amount, (int, float)) else None
     return [{
         "chain_name": CONFIG.chain_name,
         "escrow_address": escrow_address.lower(),
@@ -2320,9 +2320,9 @@ class SQLiteClient:
         negotiation_id: str,
         round: int | None = None,
         sender: str,
-        our_price: int | None,
-        their_price: int | None,
-        proposed_price: int | None,
+        our_price: float | None,
+        their_price: float | None,
+        proposed_price: float | None,
         action_taken: str,
         message_type: str,
         timestamp: str,
@@ -2474,7 +2474,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
@@ -2501,7 +2501,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        int(agreed_price),
+                        float(agreed_price),
                         int(agreed_duration_seconds),
                         now,
                         now,
@@ -2986,7 +2986,7 @@ class SQLiteClient:
         their_agent_id: str,
         owner_id: str,  # The agent creating this record
         status: str = "active",
-        our_initial_price: int | None = None,
+        our_initial_price: float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
         buyer_escrow_proposal: dict[str, Any] | None = None,

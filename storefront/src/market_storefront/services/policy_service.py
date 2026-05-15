@@ -184,7 +184,7 @@ class PolicyService:
         *,
         listing_id: str,
         listing: dict[str, Any],
-        proposed_price: int | None,
+        proposed_price: float | None,
         requested_duration_seconds: int | None,
         escrow_proposal: dict[str, Any] | None = None,
     ) -> str | None:

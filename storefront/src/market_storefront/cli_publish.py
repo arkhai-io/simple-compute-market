@@ -285,11 +285,11 @@ def _publish_round(
         else:
             # min_price is "0" (free) or "N" (public price); pass through.
             try:
-                advertised_amount = int(min_price)
+                advertised_amount = float(min_price)
             except (ValueError, TypeError):
                 failed.append((
                     res,
-                    f"unparseable min_price={min_price!r}; expected integer string",
+                    f"unparseable min_price={min_price!r}; expected numeric string",
                 ))
                 continue
         max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
