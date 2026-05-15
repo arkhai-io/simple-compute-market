@@ -2379,6 +2379,130 @@ cd registry-service && make reinit && make test-integration
 
 **`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`. A future task can update the smoke test imports and delete this file.
 
+---
+
+## Provisioning Service Planned Rework
+
+This section documents architectural decisions reached for the provisioning service
+multi-provider refactor. Items are sequenced and cross-referenced with the
+`compute-market-internal-infra` ops repo ARCHITECTURE.md planned work section.
+
+### Background: Resource Pool Architecture
+
+The provisioning service is being extended from a single-provider (Ansible/KVM)
+system to a multi-provider, multi-pool system. The driver is GCP deployment: GPU
+workloads on GCE cannot use nested VM provisioning (GPU passthrough from L1 GCE VM
+to L2 nested VM is not a supported GCP configuration), so a GCP Compute API provider
+is needed alongside the existing Ansible provider.
+
+The design uses a `ComputeProvider` abstraction with per-lease pool selection via a
+`PoolSelectorService` (label/tag matching analogous to Kubernetes node selectors). This allows a single provisioning service deployment to route leases to different providers and pool types based on the lease's resource requirements.
+
+**Provider types planned:**
+- `AnsibleProvider` — existing path, SSH into a KVM host and run `virt-install`.
+  Requires pre-provisioned hosts in the `hosts` table.
+- `GCPComputeProvider` — new, calls GCP Compute API directly. No pre-provisioned
+  hosts required. Teardown via Compute API (independent of VM-internal state).
+
+**Pool types:**
+- `kvm_host` — Physical hosts in a data center or VMs acting as KVM hosts, Ansible provider
+- `gce_vm` — GCE VMs as direct-access compute, GCP provider (GPU)
+
+### Data Model Changes
+
+**New table: `resource_pools`**
+```sql
+CREATE TABLE resource_pools (
+    id              TEXT PRIMARY KEY,
+    provider        TEXT NOT NULL,  -- 'ansible' | 'gcp'
+    pool_type       TEXT NOT NULL,  -- 'kvm_host | 'gce_vm'
+	pool_config     TEXT FOREIGN KEY
+    label           TEXT,
+    policy_tags     JSON,           -- used by node selector service to choose a resource pool
+);
+
+CREATE TABLE gcp_pool_configs (
+    id           TEXT PRIMARY KEY,
+    project      TEXT,
+    region       TEXT,
+    zone         TEXT,
+);
+```
+
+**Modified tables (migrations, backwards compatible):**
+- `hosts`: add `pool_id TEXT REFERENCES resource_pools(id)`
+- `vms`: add `pool_id TEXT REFERENCES resource_pools(id)` (nullable; set at VM
+  creation time)
+- `jobs`: add `provider_log_ref TEXT` (nullable; for GCP jobs, stores GCE operation
+  ID for Cloud Logging cross-reference)
+- `leases`: no changes
+
+Initialization pattern for resource_pools and gcp_pool_configs should mirror host inventory
+seeding (populate on startup from file, admin enabled clobber endpoint for reconcilation)
+
+### New Service Classes
+
+**`ComputeProvider` (ABC)** — `create_vm`, `destroy_vm`, `get_capacity`,
+`get_status`. All providers implement this interface.
+
+**`AnsibleProvider(ComputeProvider)`** — extracts existing Ansible job runner logic.
+Behavior identical to current implementation; this is a rename/extraction, not a
+rewrite. Existing tests continue to pass.
+
+**`GCPComputeProvider(ComputeProvider)`** — calls `google-cloud-compute` SDK.
+`create_vm` uses Compute API create with data from lease and gcp_pool_config.
+`destroy_vm` uses Compute API delete (no SSH required — critical security improvement).
+Authenticates via Workload Identity Federation (WIF annotation on provisioning KSA).
+
+**`ResourcePoolService`** — CRUD for resource pools; lookup by ID and tag filter.
+JOIN with gcp_pool_config when provider is gcp
+
+**`PoolSelectorService`** — pool selection given a lease request. v1: priority-ordered tag
+matching. Designed to extend to scoring (cost, utilization) in a future item.
+
+Design intended to mirror Kubernetes node selectors.
+
+**`ProviderRegistry`** — maps `pool.provider` string to `ComputeProvider` instance.
+Constructed in DI container at startup.
+
+### Modified Service Classes
+
+**`LeaseService`** — calls `PoolSelectorService.select_pool(request)` before VM creation,
+then dispatches to the selected pool's provider. All existing Ansible calls route
+through `AnsibleProvider` unchanged.
+
+**`LeaseWatchdog`** — looks up the lease's pool on expiry, dispatches to the pool's
+provider for `destroy_vm`. Replaces hardcoded Ansible teardown dispatch.
+
+**`mockMode` flag** — becomes a `MockProvider` registered in `ProviderRegistry` rather
+than a service-level branch. Helm values flag preserved for backwards compatibility.
+
+### New Pool Controller
+
+All gated by existing admin API key auth.
+
+`POST /api/v1/pools` — create a resource pool. Body: pool table fields.
+
+`GET /api/v1/pools` — list pools with tags and host counts.
+
+### GCP Provider e2e Test Scenario
+
+A new e2e scenario (addition to `integration-tests/tests/e2e/`) validates the GCP
+provider without mock provisioning:
+
+1. `POST /api/v1/pools` — create a `gce_vm` pool.
+2. `POST /system/lease-watchdog/pause` — hold expiry for inspection.
+3. Full storefront → negotiate → settle → provisioning flow (reuse existing helpers).
+4. Poll `GET /api/v1/jobs/{id}` until GCE VM is running (90-second timeout).
+5. Verify SSH credentials returned; attempt SSH to GCE external IP.
+6. `POST /system/lease-watchdog/resume` — trigger expiry.
+7. Poll until lease `expired`; verify GCE instance deleted via Compute API.
+
+This scenario validates the watchdog pause/resume admin endpoints, that GCPComputeProvider
+creates real VMs, and that teardown is Compute-API-based (no SSH key required on the VM).
+
+---
+
 | Term | Meaning |
 |---|---|
 | Alkahest | Arkhai's smart contract suite for peer-to-peer agreements and escrow |
