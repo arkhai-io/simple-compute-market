@@ -7,7 +7,6 @@ import uuid
 from service.schemas import (
     AcceptedEscrow,
     ActionType,
-    Attestation as CoreAttestation,
     Decision as CoreDecision,
     DecisionContext as CoreDecisionContext,
     DomainAction as CoreDomainAction,
@@ -148,9 +147,6 @@ class Host(BaseModel):
         description="Free-form provider tags under the 'tag.*' namespace.",
     )
     enabled: bool = Field(default=True, description="Whether the host is active")
-
-
-Attestation = CoreAttestation
 
 
 class ComputeDomainResource(CoreResource):

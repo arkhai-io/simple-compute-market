@@ -298,13 +298,6 @@ class EscrowProposal(BaseModel):
     )
 
 
-class Attestation(BaseModel):
-    """Mutual attestations exchanged between maker and taker."""
-
-    maker_attestation: str = Field(description="The attestation of the maker")
-    taker_attestation: str = Field(description="The attestation of the taker")
-
-
 class DomainEvent(BaseModel):
     """Generic domain event transported through core orchestration."""
 
