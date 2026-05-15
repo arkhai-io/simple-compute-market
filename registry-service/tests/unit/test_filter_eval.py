@@ -207,3 +207,231 @@ class TestCombination:
     def test_invalid_bool_raises(self, spec):
         with pytest.raises(FilterParamError, match="expected boolean"):
             build_criteria(spec, {"datacenter_grade": "maybe"})
+
+
+# ---------------------------------------------------------------------------
+# Raw set-form URL syntax (a2)
+# ---------------------------------------------------------------------------
+
+
+class TestSetFormIn:
+    """``?<filter>=in:[v1,v2,...]`` — multi-value membership."""
+
+    def test_multi_value_passes_on_any_match(self, spec):
+        listing = _listing(gpu_model="H200")
+        assert _match(spec, listing, gpu_model="in:[H100,H200,A100]") is True
+        assert _match(spec, listing, gpu_model="in:[H100,A100]") is False
+
+    def test_single_value_in_set_form(self, spec):
+        listing = _listing(gpu_model="H200")
+        assert _match(spec, listing, gpu_model="in:[H200]") is True
+        assert _match(spec, listing, gpu_model="in:[A100]") is False
+
+    def test_empty_set_matches_nothing(self, spec):
+        listing = _listing()
+        assert _match(spec, listing, gpu_model="in:[]") is False
+
+    def test_array_projection_token(self, spec):
+        listing = _listing()
+        listing["accepted_escrows"] = [
+            {"chain_name": "anvil", "escrow_address": "0xa", "fields": {"token": "USDC"}},
+            {"chain_name": "anvil", "escrow_address": "0xb", "fields": {"token": "WETH"}},
+        ]
+        assert _match(spec, listing, token="in:[USDC,DAI]") is True
+        assert _match(spec, listing, token="in:[DAI,FRAX]") is False
+
+    def test_whitespace_around_items_stripped(self, spec):
+        listing = _listing(gpu_model="H200")
+        assert _match(spec, listing, gpu_model="in:[ H100 , H200 , A100 ]") is True
+
+    def test_unbracketed_value_falls_through_to_sugar(self, spec):
+        """``?gpu_model=in:foo`` (no brackets) is the literal string ``in:foo``."""
+        listing = _listing(gpu_model="in:foo")
+        assert _match(spec, listing, gpu_model="in:foo") is True
+        assert _match(spec, listing, gpu_model="H200") is False
+
+
+class TestSetFormNotIn:
+    """``?<filter>=not_in:[v1,v2,...]`` — set complement."""
+
+    def test_excluded_value_rejects(self, spec):
+        listing = _listing()
+        listing["accepted_escrows"] = [
+            {"chain_name": "anvil", "escrow_address": "0xa", "fields": {"token": "USDC"}},
+        ]
+        assert _match(spec, listing, token_exclude="not_in:[USDC]") is False
+        assert _match(spec, listing, token_exclude="not_in:[DAI,FRAX]") is True
+
+    def test_not_in_requires_set_form(self, spec):
+        """Single-value URL form on a not_in filter raises (ambiguous)."""
+        with pytest.raises(FilterParamError, match="must be invoked via set-form"):
+            build_criteria(spec, {"token_exclude": "USDC"})
+
+    def test_not_in_with_empty_escrows_passes(self, spec):
+        """on_missing: pass — seller with no escrows isn't filtered out."""
+        listing = _listing()
+        listing["accepted_escrows"] = []
+        assert _match(spec, listing, token_exclude="not_in:[USDC]") is True
+
+
+class TestSetFormRange:
+    """``?<filter>=range:[min,max]`` — bounded intervals with bracket/paren."""
+
+    def test_closed_interval(self, spec):
+        listing = _listing(ram_gb=64)
+        assert _match(spec, listing, ram_gb_min="range:[32,128]") is True
+        assert _match(spec, listing, ram_gb_min="range:[128,256]") is False
+
+    def test_inclusive_boundary(self, spec):
+        listing = _listing(ram_gb=64)
+        assert _match(spec, listing, ram_gb_min="range:[64,128]") is True
+
+    def test_exclusive_boundary(self, spec):
+        listing = _listing(ram_gb=64)
+        # (64,128] — strictly > 64, so 64 fails
+        assert _match(spec, listing, ram_gb_min="range:(64,128]") is False
+        # [16,64) — strictly < 64, so 64 fails
+        assert _match(spec, listing, ram_gb_min="range:[16,64)") is False
+        # [16,64] — inclusive, 64 passes
+        assert _match(spec, listing, ram_gb_min="range:[16,64]") is True
+
+    def test_open_upper(self, spec):
+        listing = _listing(ram_gb=1024)
+        assert _match(spec, listing, ram_gb_min="range:[16,)") is True
+        assert _match(spec, listing, ram_gb_min="range:[2048,)") is False
+
+    def test_open_lower(self, spec):
+        listing = _listing(ram_gb=64)
+        assert _match(spec, listing, ram_gb_min="range:(,128]") is True
+        assert _match(spec, listing, ram_gb_min="range:(,32]") is False
+
+    def test_set_form_overrides_alias_kind(self, spec):
+        """A ``lower_bound``-aliased filter still accepts full range:[a,b]."""
+        listing = _listing(ram_gb=64)
+        assert _match(spec, listing, ram_gb_min="range:[32,128]") is True
+        assert _match(spec, listing, ram_gb_min="range:[100,200]") is False
+
+    def test_unbounded_both_sides_raises(self, spec):
+        with pytest.raises(FilterParamError, match="needs at least one bound"):
+            build_criteria(spec, {"ram_gb_min": "range:(,)"})
+
+    def test_missing_comma_raises(self, spec):
+        with pytest.raises(FilterParamError, match="needs a ',' separator"):
+            build_criteria(spec, {"ram_gb_min": "range:[64]"})
+
+
+class TestSetFormExists:
+    """``?<filter>=exists:true|false`` — presence test."""
+
+    def test_exists_true_matches_when_present(self, spec):
+        listing = _listing()
+        listing["oracle_address"] = "0x" + "22" * 20
+        assert _match(spec, listing, has_oracle="exists:true") is True
+
+    def test_exists_true_rejects_when_absent(self, spec):
+        listing = _listing()
+        listing.pop("oracle_address", None)
+        # on_missing: fail by default → no path → criterion fails
+        assert _match(spec, listing, has_oracle="exists:true") is False
+
+    def test_exists_false_matches_when_absent(self, spec):
+        """exists:false + on_missing override is the cleanest way to ask
+        'show me listings WITHOUT an oracle' since on_missing=fail
+        otherwise rejects them first."""
+        listing = _listing()
+        listing.pop("oracle_address", None)
+        # Without strict override, on_missing=fail rejects before we get
+        # to evaluate the exists target.
+        assert _match(spec, listing, has_oracle="exists:false") is False
+        # With strict.has_oracle=false (override on_missing → pass),
+        # the criterion ignores the missing path entirely.
+        assert _match(
+            spec, listing,
+            **{"has_oracle": "exists:false", "strict.has_oracle": "false"},
+        ) is True
+
+    def test_exists_unbracketed_payload_falls_through_to_sugar(self, spec):
+        """``?has_oracle=exists:maybe`` is not a valid exists payload."""
+        # exists isn't in the URL-sugar table either, so this raises.
+        with pytest.raises(FilterParamError, match="must be invoked via set-form"):
+            build_criteria(spec, {"has_oracle": "exists:maybe"})
+
+
+# ---------------------------------------------------------------------------
+# Per-query strict.* override (a2)
+# ---------------------------------------------------------------------------
+
+
+class TestStrictOverride:
+    """``?strict.<filter>=true|false`` flips spec-level on_missing per request."""
+
+    def test_strict_true_tightens_token_filter(self, spec):
+        """token defaults to on_missing: pass; strict tightens to fail."""
+        listing = _listing()
+        listing["accepted_escrows"] = []
+        # Default behavior: empty escrows passes the token criterion.
+        assert _match(spec, listing, token="USDC") is True
+        # Strict: empty escrows fails.
+        assert _match(spec, listing, **{"token": "USDC", "strict.token": "true"}) is False
+
+    def test_strict_false_loosens_gpu_model(self, spec):
+        """gpu_model defaults to on_missing: fail; strict=false loosens."""
+        listing = _listing()
+        del listing["offer_resource"]["gpu_model"]
+        assert _match(spec, listing, gpu_model="H200") is False
+        assert _match(
+            spec, listing,
+            **{"gpu_model": "H200", "strict.gpu_model": "false"},
+        ) is True
+
+    def test_strict_unknown_filter_raises(self, spec):
+        with pytest.raises(FilterParamError, match="strict.banana: unknown filter"):
+            build_criteria(spec, {"strict.banana": "true"})
+
+    def test_strict_empty_target_raises(self, spec):
+        with pytest.raises(FilterParamError, match="missing filter name"):
+            build_criteria(spec, {"strict.": "true"})
+
+    def test_strict_invalid_bool_raises(self, spec):
+        with pytest.raises(FilterParamError, match="expected boolean"):
+            build_criteria(spec, {"strict.token": "maybe"})
+
+    def test_strict_without_filter_use_is_a_noop(self, spec):
+        """Specifying strict.X but no ?X=... is allowed — the override
+        just doesn't end up in any criterion. (Typo of an unrelated
+        existing filter name; caller's bug, not our problem.)"""
+        listing = _listing()
+        assert _match(spec, listing, **{"strict.gpu_model": "true"}) is True
+
+
+# ---------------------------------------------------------------------------
+# Op-mismatch and structural guards
+# ---------------------------------------------------------------------------
+
+
+class TestSetFormOpMismatch:
+    def test_in_filter_rejects_not_in_set_form(self, spec):
+        """gpu_model declares op: in — not_in:[...] must be rejected."""
+        with pytest.raises(FilterParamError, match="declares op='in'"):
+            build_criteria(spec, {"gpu_model": "not_in:[H100]"})
+
+    def test_range_filter_rejects_exists_set_form(self, spec):
+        with pytest.raises(FilterParamError, match="declares op='range'"):
+            build_criteria(spec, {"ram_gb_min": "exists:true"})
+
+
+# ---------------------------------------------------------------------------
+# Coexistence — set-form and URL-sugar on the same request
+# ---------------------------------------------------------------------------
+
+
+class TestMixedForms:
+    def test_set_form_and_sugar_both_applied(self, spec):
+        """One query, one criterion in each form — both ANDed together."""
+        listing = _listing(gpu_model="H200", ram_gb=64)
+        assert _match(spec, listing,
+                      gpu_model="in:[H200,A100]", ram_gb_min=32) is True
+        assert _match(spec, listing,
+                      gpu_model="in:[A100]", ram_gb_min=32) is False
+        assert _match(spec, listing,
+                      gpu_model="in:[H200,A100]", ram_gb_min=128) is False

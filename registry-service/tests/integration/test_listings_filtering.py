@@ -163,3 +163,121 @@ async def test_no_filters_returns_all_open(_raw_client, db_session, maker_agent)
     body = resp.json()
     assert body["count"] == 3
     assert body["total_after_filter"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Raw set-form URL syntax + strict.* override (a2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_form_in_multi_value(_raw_client, db_session, maker_agent):
+    _make_listing(db_session, maker_agent, "a100", gpu_model="A100")
+    _make_listing(db_session, maker_agent, "h200", gpu_model="H200")
+    _make_listing(db_session, maker_agent, "b200", gpu_model="B200")
+
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"gpu_model": "in:[A100,B200]"})
+    body = resp.json()
+    ids = {item["listing_id"] for item in body["items"]}
+    assert ids == {"a100", "b200"}
+
+
+@pytest.mark.asyncio
+async def test_set_form_range_full_interval(_raw_client, db_session, maker_agent):
+    _make_listing(db_session, maker_agent, "small", ram_gb=64)
+    _make_listing(db_session, maker_agent, "mid", ram_gb=256)
+    _make_listing(db_session, maker_agent, "big", ram_gb=1024)
+
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"ram_gb_min": "range:[128,512]"})
+    body = resp.json()
+    ids = {item["listing_id"] for item in body["items"]}
+    assert ids == {"mid"}
+
+
+@pytest.mark.asyncio
+async def test_set_form_not_in_excludes_token(_raw_client, db_session, maker_agent):
+    usdc = "0x" + "ab" * 20
+    weth = "0x" + "cd" * 20
+
+    a = _make_listing(db_session, maker_agent, "usdc-listing", gpu_model="A100")
+    a.accepted_escrows = [
+        {"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": usdc}},
+    ]
+    b = _make_listing(db_session, maker_agent, "weth-listing", gpu_model="A100")
+    b.accepted_escrows = [
+        {"chain_name": "anvil", "escrow_address": "0x" + "22" * 20, "fields": {"token": weth}},
+    ]
+    db_session.commit()
+
+    async with _raw_client as c:
+        resp = await c.get(
+            "/listings", params={"token_exclude": f"not_in:[{usdc}]"}
+        )
+    body = resp.json()
+    ids = {item["listing_id"] for item in body["items"]}
+    assert "weth-listing" in ids
+    assert "usdc-listing" not in ids
+
+
+@pytest.mark.asyncio
+async def test_set_form_exists_oracle(_raw_client, db_session, maker_agent):
+    a = _make_listing(db_session, maker_agent, "with-oracle", gpu_model="A100")
+    a.oracle_address = "0x" + "ff" * 20
+    _make_listing(db_session, maker_agent, "no-oracle", gpu_model="A100")
+    db_session.commit()
+
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"has_oracle": "exists:true"})
+    body = resp.json()
+    ids = {item["listing_id"] for item in body["items"]}
+    assert ids == {"with-oracle"}
+
+
+@pytest.mark.asyncio
+async def test_strict_token_tightens_default(_raw_client, db_session, maker_agent):
+    """token defaults to on_missing: pass; strict tightens for this query.
+
+    A listing with no escrows passes the default token filter (lenient)
+    but fails when strict.token=true is set.
+    """
+    usdc = "0x" + "ab" * 20
+
+    a = _make_listing(db_session, maker_agent, "no-escrows", gpu_model="A100")
+    a.accepted_escrows = []
+    _make_listing(db_session, maker_agent, "has-escrows", gpu_model="A100")  # default usdc-stand-in
+    db_session.commit()
+
+    async with _raw_client as c:
+        loose = await c.get("/listings", params={"token": usdc})
+        strict = await c.get(
+            "/listings", params={"token": usdc, "strict.token": "true"}
+        )
+    loose_ids = {it["listing_id"] for it in loose.json()["items"]}
+    strict_ids = {it["listing_id"] for it in strict.json()["items"]}
+    # Lenient: both listings pass.
+    assert "no-escrows" in loose_ids
+    assert "has-escrows" in loose_ids
+    # Strict: only the listing that actually advertises the token.
+    assert "no-escrows" not in strict_ids
+    assert "has-escrows" in strict_ids
+
+
+@pytest.mark.asyncio
+async def test_strict_unknown_filter_returns_400(_raw_client, db_session, maker_agent):
+    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"strict.banana": "true"})
+    assert resp.status_code == 400
+    assert "banana" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_set_form_op_mismatch_returns_400(_raw_client, db_session, maker_agent):
+    """``gpu_model`` declares op: in; not_in:[...] in set-form must 400."""
+    _make_listing(db_session, maker_agent, "x", gpu_model="A100")
+    async with _raw_client as c:
+        resp = await c.get("/listings", params={"gpu_model": "not_in:[H100]"})
+    assert resp.status_code == 400
+    assert "op=" in resp.json()["detail"]

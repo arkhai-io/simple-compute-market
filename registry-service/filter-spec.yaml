@@ -106,4 +106,16 @@ filters:
   # Payment-token filter: array projection over accepted_escrows[*].fields.token.
   # `on_missing: pass` is underreport-friendly — a seller advertising no
   # tokens shouldn't be invisible to a query asking for any specific token.
-  - {name: token,                      path: "$.accepted_escrows[*].fields.token",    op: in, value_type: string, on_missing: pass}
+  # Buyers that want strict matching pass `?strict.token=true` per-query.
+  - {name: token,                      path: "$.accepted_escrows[*].fields.token",    op: in,     value_type: string,  on_missing: pass}
+
+  # Exclude-tokens filter: array projection, ``not_in`` semantics.
+  # ``?token_exclude=not_in:[0x...]`` rejects listings that accept any of
+  # the listed token addresses. `on_missing: pass` is again underreport-
+  # friendly — a seller with no escrows has no conflict to assert.
+  - {name: token_exclude,              path: "$.accepted_escrows[*].fields.token",    op: not_in, value_type: string,  on_missing: pass}
+
+  # Oracle-presence filter: ``?has_oracle=exists:true`` matches listings
+  # with a non-null oracle_address. Pure presence check — value of the
+  # field is irrelevant.
+  - {name: has_oracle,                 path: $.oracle_address,                        op: exists, value_type: boolean, on_missing: fail}
