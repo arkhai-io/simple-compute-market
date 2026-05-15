@@ -44,7 +44,7 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
         accepted_escrows=[{
             "chain_name": "test_chain",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"payment_token": _TOKEN_ADDR},
+            "fields": {"token": _TOKEN_ADDR},
             "price_per_hour": demand_amount,
         }],
         seller="http://seller:8001",

@@ -24,7 +24,7 @@ from market_storefront.middleware import buyer_auth
 from storefront_client import StorefrontClient, StorefrontClientError
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
-_PAYMENT_TOKEN = "0x0000000000000000000000000000000000000001"
+_TOKEN = "0x0000000000000000000000000000000000000001"
 
 
 @pytest_asyncio.fixture
@@ -43,7 +43,7 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"payment_token": _PAYMENT_TOKEN},
+            "fields": {"token": _TOKEN},
             "price_per_hour": demand_amount,
         }],
         fulfillment_resource=None,
@@ -149,7 +149,7 @@ class TestNegotiateNew:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
-            payment_token=_PAYMENT_TOKEN,
+            token=_TOKEN,
         )
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
@@ -215,7 +215,7 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "fields": {"token": _TOKEN},
                 "price_per_hour": 5000,
             }],
             fulfillment_resource=None,
@@ -250,7 +250,7 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "fields": {"token": _TOKEN},
                 "price_per_hour": None,  # hidden reserve
             }],
             fulfillment_resource=None,
@@ -275,7 +275,7 @@ class TestNegotiateNew:
                 buyer_address=_BUYER,
                 initial_price=5000,
                 duration_seconds=3600,
-                payment_token=_PAYMENT_TOKEN,
+                token=_TOKEN,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -302,7 +302,7 @@ class TestNegotiateNew:
             accepted_escrows=[{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"payment_token": _PAYMENT_TOKEN},
+                "fields": {"token": _TOKEN},
                 "price_per_hour": 5000,
             }],
             fulfillment_resource=None,
@@ -354,7 +354,7 @@ class TestNegotiateContinue:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
-            payment_token=_PAYMENT_TOKEN,
+            token=_TOKEN,
         )
         if "negotiation_id" not in result:
             pytest.skip("Could not start negotiation")

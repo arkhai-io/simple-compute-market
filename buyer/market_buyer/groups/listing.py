@@ -95,10 +95,10 @@ def _format_accepted_escrows(entries: list) -> str:
         addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
         price = entry.get("price_per_hour")
         fields = entry.get("fields") or {}
-        payment_token = fields.get("payment_token") if isinstance(fields, dict) else None
+        token = fields.get("token") if isinstance(fields, dict) else None
         parts = [f"chain={chain}", f"escrow={addr}"]
-        if payment_token:
-            parts.append(f"token={_short_contract_address(str(payment_token))}")
+        if token:
+            parts.append(f"token={_short_contract_address(str(token))}")
         if price is not None:
             parts.append(f"price/hr={price}")
         lines.append(" ".join(parts))

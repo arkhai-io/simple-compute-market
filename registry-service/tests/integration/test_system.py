@@ -115,7 +115,7 @@ class TestSystemStats:
             agent_id=agent_no_owner.agent_id,
             seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
             max_duration_seconds=3600,
             status=OrderStatusEnum.closed,
         ))

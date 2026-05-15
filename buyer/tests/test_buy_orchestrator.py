@@ -71,7 +71,7 @@ def _escrow_proposal() -> EscrowProposal:
     return EscrowProposal(
         chain_name="anvil",
         escrow_address=_ESCROW_ADDR,
-        fields={"payment_token": _TOKEN},
+        fields={"token": _TOKEN},
         expiration_unix=1_800_000_000,
     )
 
@@ -88,7 +88,7 @@ _ACCEPTED_ECHO = {
     "accepted_escrow_proposal": {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR,
-        "fields": {"payment_token": _TOKEN},
+        "fields": {"token": _TOKEN},
         "expiration_unix": 1_800_000_000,
     },
 }
@@ -256,7 +256,7 @@ def test_happy_path_drives_to_ready():
     captured_proposal, captured_seller, captured_price, captured_duration = build_calls[0]
     assert captured_proposal.chain_name == "anvil"
     assert captured_proposal.escrow_address == _ESCROW_ADDR
-    assert captured_proposal.fields["payment_token"] == _TOKEN
+    assert captured_proposal.fields["token"] == _TOKEN
     assert (captured_seller, captured_price, captured_duration) == (_SELLER_WALLET, 50, 7200)
     # create_escrow received the canonical EscrowTerms list.
     assert len(create_calls) == 1
@@ -406,12 +406,12 @@ def _counter_echo_with(**overrides) -> dict:
     """Build an ACCEPTED echo block whose escrow proposal can be tweaked.
 
     Defaults to the same shape as ``_ACCEPTED_ECHO`` but with fields
-    overridable via kwargs (e.g. swap payment_token).
+    overridable via kwargs (e.g. swap token).
     """
     proposal = {
         "chain_name": "anvil",
         "escrow_address": _ESCROW_ADDR,
-        "fields": {"payment_token": _TOKEN},
+        "fields": {"token": _TOKEN},
         "expiration_unix": 1_800_000_000,
     }
     proposal.update(overrides)
@@ -421,7 +421,7 @@ def _counter_echo_with(**overrides) -> dict:
     }
 
 
-def test_strict_echo_default_rejects_payment_token_swap_before_settle():
+def test_strict_echo_default_rejects_token_swap_before_settle():
     """Seller agrees on price but counters with a different payment token;
     the default counter policy short-circuits to exited before any
     escrow / settle call is made.
@@ -429,12 +429,12 @@ def test_strict_echo_default_rejects_payment_token_swap_before_settle():
     responses = [
         # Registry
         {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
-        # /negotiate/new — seller accepts price but swaps payment_token
+        # /negotiate/new — seller accepts price but swaps token
         {
             "negotiation_id": "neg-1",
             "action": "accept",
             "price": 50,
-            **_counter_echo_with(fields={"payment_token": _OTHER_TOKEN}),
+            **_counter_echo_with(fields={"token": _OTHER_TOKEN}),
         },
         # No more responses — if the test reaches settle, urlopen raises.
     ]
@@ -465,16 +465,16 @@ def test_strict_echo_default_rejects_payment_token_swap_before_settle():
     attempt = result.attempts[0]
     assert attempt["outcome"]["status"] == "exited"
     assert "counter_rejected" in (attempt["outcome"].get("reason") or "")
-    assert "payment_token" in (attempt["outcome"].get("reason") or "")
+    assert "token" in (attempt["outcome"].get("reason") or "")
 
     # And a counter_rejected event fired with the offending field info.
     rejected = [body for name, body in events if name == "counter_rejected"]
     assert len(rejected) == 1
     assert rejected[0]["reason"] is not None
-    assert "payment_token" in rejected[0]["reason"]
+    assert "token" in rejected[0]["reason"]
 
 
-def test_always_accept_lets_seller_swap_payment_token():
+def test_always_accept_lets_seller_swap_token():
     """always_accept opts out of the strict echo check; settlement proceeds."""
     config = BuyConfig(
         registry_urls=[_REGISTRY],
@@ -488,7 +488,7 @@ def test_always_accept_lets_seller_swap_payment_token():
             "negotiation_id": "neg-1",
             "action": "accept",
             "price": 50,
-            **_counter_echo_with(fields={"payment_token": _OTHER_TOKEN}),
+            **_counter_echo_with(fields={"token": _OTHER_TOKEN}),
         },
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
@@ -518,7 +518,7 @@ def test_always_accept_lets_seller_swap_payment_token():
     assert result.status == "ready"
     # build_escrow_terms ran with the seller's counter (the swapped token).
     assert len(build_calls) == 1
-    assert build_calls[0].fields["payment_token"] == _OTHER_TOKEN
+    assert build_calls[0].fields["token"] == _OTHER_TOKEN
 
 
 def test_strict_echo_default_rejects_missing_seller_echo():

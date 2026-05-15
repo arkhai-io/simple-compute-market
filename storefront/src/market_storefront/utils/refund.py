@@ -96,7 +96,7 @@ def derive_refund_params(
         token_addr_from_escrow = None
         if first_escrow is not None:
             fields = first_escrow.get("fields") or {}
-            candidate = fields.get("payment_token")
+            candidate = fields.get("token")
             if isinstance(candidate, str) and candidate:
                 token_addr_from_escrow = candidate
         if token_addr_from_escrow:
@@ -105,7 +105,7 @@ def derive_refund_params(
             return (
                 "error",
                 400,
-                {"error": "Order has no resolvable payment_token in "
+                {"error": "Order has no resolvable token in "
                           "accepted_escrows; pass explicit 'token'"},
             )
 

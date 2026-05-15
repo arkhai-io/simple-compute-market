@@ -88,11 +88,11 @@ def _normalize_bytes(value: Any) -> str | None:
 
 def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
     """Pull the negotiated token contract address from the seller's
-    listing's ``accepted_escrows[0].fields.payment_token``.
+    listing's ``accepted_escrows[0].fields.token``.
 
     Used as the fallback when the buyer didn't include an
     ``escrow_proposal`` on the negotiation thread. With a proposal in
-    hand the verifier reads ``proposal.fields["payment_token"]``
+    hand the verifier reads ``proposal.fields["token"]``
     directly.
     """
     accepted = listing.get("accepted_escrows")
@@ -106,12 +106,12 @@ def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
         if isinstance(first, dict):
             fields = first.get("fields")
             if isinstance(fields, dict):
-                addr = fields.get("payment_token")
+                addr = fields.get("token")
                 if isinstance(addr, str) and addr:
                     return addr
     raise EscrowVerificationError(
         "Cannot extract token contract address from listing — "
-        "no accepted_escrows[0].fields.payment_token"
+        "no accepted_escrows[0].fields.token"
     )
 
 
@@ -195,7 +195,7 @@ async def verify_escrow_for_settlement(
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
         thread at /negotiate/new. When present, supplies the payment
-        token via ``fields["payment_token"]`` and the escrow slot via
+        token via ``fields["token"]`` and the escrow slot via
         the ``(chain_name, escrow_address)`` reverse lookup. None for
         legacy threads — verifier falls back to the listing-derived
         token and the ``escrow_kind`` default.
@@ -229,7 +229,7 @@ async def verify_escrow_for_settlement(
 
     # The proposal (when present) is the source of truth: its
     # (chain_name, escrow_address) identifies the escrow contract and
-    # its fields["payment_token"] / fields["arbiter"] supply the
+    # its fields["token"] / fields["arbiter"] supply the
     # buyer-committed values. Legacy threads with no proposal fall
     # back to the kwarg defaults + a listing-derived token.
     effective_arbiter_kind = "recipient_arbiter"
@@ -241,11 +241,11 @@ async def verify_escrow_for_settlement(
             config_path=alkahest_address_config_path,
         )
         effective_escrow_kind = slot or escrow_kind
-        proposal_token = escrow_proposal.fields.get("payment_token")
+        proposal_token = escrow_proposal.fields.get("token")
         if not isinstance(proposal_token, str):
             raise EscrowVerificationError(
                 f"escrow proposal for {escrow_uid} omitted "
-                f"fields['payment_token']; cannot verify against chain"
+                f"fields['token']; cannot verify against chain"
             )
         effective_token = proposal_token
         proposal_arbiter = escrow_proposal.fields.get("arbiter")

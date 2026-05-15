@@ -328,7 +328,7 @@ def register(app: typer.Typer) -> None:
             escrow_proposal = EscrowProposal(
                 chain_name=_chain,
                 escrow_address=_escrow_addr,
-                fields={"payment_token": token_contract or ("0x" + "0" * 40)},
+                fields={"token": token_contract or ("0x" + "0" * 40)},
                 expiration_unix=int(_time.time()) + 3600,
             )
 

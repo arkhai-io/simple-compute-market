@@ -6,7 +6,7 @@ amount, required token lookup) and returns a structured outcome that
 the endpoint translates into an HTTP status + body.
 
 Post the demand_resource cutover, refunds read pricing from
-``accepted_escrows[0].fields.payment_token`` + ``price_per_hour``.
+``accepted_escrows[0].fields.token`` + ``price_per_hour``.
 """
 
 from __future__ import annotations
@@ -43,13 +43,13 @@ def _fake_resolver(registry: dict[str, dict]):
 
 def _accepted_escrow(
     *,
-    payment_token: str = _MOCK_TOKEN["contract_address"],
+    token: str = _MOCK_TOKEN["contract_address"],
     price_per_hour: int | None = 1_000_000_000_000_000_000,
 ) -> dict:
     return {
         "chain_name": "anvil",
         "escrow_address": "0x" + "11" * 20,
-        "fields": {"payment_token": payment_token},
+        "fields": {"token": token},
         "price_per_hour": price_per_hour,
     }
 
@@ -203,4 +203,4 @@ def test_order_without_accepted_escrows_returns_400(resolver):
     tag, status, body = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "error"
     assert status == 400
-    assert "payment_token" in body["error"].lower()
+    assert "token" in body["error"].lower()

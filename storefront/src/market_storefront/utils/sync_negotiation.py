@@ -127,9 +127,9 @@ def _match_accepted_escrow(
     )
 
 
-def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
+def _extract_listing_token(listing: dict[str, Any]) -> str | None:
     """Pull the payment-token contract address from a listing's
-    ``accepted_escrows[0].fields.payment_token`` advertisement.
+    ``accepted_escrows[0].fields.token`` advertisement.
 
     Returns ``None`` when no entry is advertised (compute-for-compute
     listings, or rows where synthesis at publish time couldn't resolve
@@ -148,7 +148,7 @@ def _extract_listing_payment_token(listing: dict[str, Any]) -> str | None:
         if isinstance(first, dict):
             fields = first.get("fields")
             if isinstance(fields, dict):
-                addr = fields.get("payment_token")
+                addr = fields.get("token")
                 if isinstance(addr, str) and addr:
                     return addr
     return None

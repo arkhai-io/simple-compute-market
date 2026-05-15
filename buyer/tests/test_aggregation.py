@@ -29,7 +29,7 @@ def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s
     entry: dict[str, Any] = {
         "chain_name": "anvil",
         "escrow_address": "0xE",
-        "fields": {"payment_token": "0xT"},
+        "fields": {"token": "0xT"},
     }
     if price is not None:
         entry["price_per_hour"] = price

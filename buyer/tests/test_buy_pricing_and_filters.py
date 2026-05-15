@@ -25,7 +25,7 @@ def _escrow_proposal() -> EscrowProposal:
     return EscrowProposal(
         chain_name="anvil",
         escrow_address="0x" + "cd" * 20,
-        fields={"payment_token": "0x" + "ab" * 20},
+        fields={"token": "0x" + "ab" * 20},
         expiration_unix=1_800_000_000,
     )
 
@@ -37,7 +37,7 @@ def _stub_build_escrow_terms(proposal, seller_wallet, agreed_price, duration_sec
         obligation_data={
             "arbiter": "0x" + "cd" * 20,
             "demand": "0x" + "00" * 32,
-            "token": proposal.fields["payment_token"],
+            "token": proposal.fields["token"],
             "amount": int(agreed_price) * int(duration_seconds) // 3600,
         },
         expiration_unix=proposal.expiration_unix,

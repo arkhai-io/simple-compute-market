@@ -776,7 +776,7 @@ class StorefrontClient(_StorefrontClientBase):
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
-        payment_token: str = "",
+        token: str = "",
         chain_name: str = "",
         escrow_address: str = "",
         escrow_expiration_unix: int | None = None,
@@ -788,7 +788,7 @@ class StorefrontClient(_StorefrontClientBase):
         scalar args so smoke / integration tests can keep their current
         call shape. ``chain_name`` + ``escrow_address`` pick the
         listing's accepted_escrows entry to propose against;
-        ``payment_token`` populates ``fields["payment_token"]``. Empty
+        ``token`` populates ``fields["token"]``. Empty
         values produce zero-address / placeholder strings — legal in
         environments where the seller's listing has no typed payment
         token; the seller validates against its acceptance set.
@@ -808,7 +808,7 @@ class StorefrontClient(_StorefrontClientBase):
             "escrow_proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"payment_token": payment_token or ("0x" + "0" * 40)},
+                "fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,
@@ -1620,7 +1620,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         duration_seconds: int,
         buyer_agent_url: str = "",
         ssh_public_key: str = "",
-        payment_token: str = "",
+        token: str = "",
         chain_name: str = "",
         escrow_address: str = "",
         escrow_expiration_unix: int | None = None,
@@ -1646,7 +1646,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             "escrow_proposal": {
                 "chain_name": chain_name or "anvil",
                 "escrow_address": escrow_address or ("0x" + "0" * 40),
-                "fields": {"payment_token": payment_token or ("0x" + "0" * 40)},
+                "fields": {"token": token or ("0x" + "0" * 40)},
                 "expiration_unix": exp_unix,
             },
             "buyer_agent_url": buyer_agent_url,

@@ -606,7 +606,7 @@ def register(app: typer.Typer) -> None:
         )
         # Buyer's escrow shape proposal — picks the canonical
         # ERC20 non-tierable escrow on the configured chain and fills
-        # fields["payment_token"] with the resolved token contract.
+        # fields["token"] with the resolved token contract.
         # The seller validates against its listing's accepted_escrows
         # set; today that's the same single shape per listing.
         import time as _time
@@ -619,7 +619,7 @@ def register(app: typer.Typer) -> None:
         escrow_proposal = EscrowProposal(
             chain_name=chain,
             escrow_address=_escrow_addr,
-            fields={"payment_token": tc},
+            fields={"token": tc},
             expiration_unix=int(_time.time()) + int(expiration_seconds),
         )
 

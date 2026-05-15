@@ -284,7 +284,7 @@ class EscrowProposal(BaseModel):
         default_factory=dict,
         description=(
             "Complete buyer-committable EscrowData fields (arbiter, "
-            "payment_token, …). Excludes ``amount`` and ``demand``, "
+            "token, …). Excludes ``amount`` and ``demand``, "
             "which are derived at settlement."
         ),
     )

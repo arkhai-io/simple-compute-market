@@ -679,7 +679,7 @@ class TestStage06a_NegotiateWithBob:
                 buyer_address=buyer_config["wallet_address"],
                 initial_price=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
-                payment_token=DEMAND_RESOURCE["token"]["contract_address"],
+                token=DEMAND_RESOURCE["token"]["contract_address"],
             )
         finally:
             buyer_to_bob.close()
@@ -721,7 +721,7 @@ class TestStage06b_NegotiateWithAlice:
                 buyer_address=buyer_config["wallet_address"],
                 initial_price=BUYER_INITIAL_PRICE,
                 duration_seconds=DURATION_HOURS * 3600,
-                payment_token=DEMAND_RESOURCE["token"]["contract_address"],
+                token=DEMAND_RESOURCE["token"]["contract_address"],
             )
         finally:
             buyer_to_alice.close()

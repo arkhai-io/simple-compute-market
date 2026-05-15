@@ -20,12 +20,12 @@ def test_construct_canonical_proposal():
     p = EscrowProposal(
         chain_name="base_sepolia",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "payment_token": _TOKEN},
+        fields={"arbiter": _ARBITER, "token": _TOKEN},
         expiration_unix=1_800_000_000,
     )
     assert p.chain_name == "base_sepolia"
     assert p.escrow_address == _ESCROW
-    assert p.fields["payment_token"] == _TOKEN
+    assert p.fields["token"] == _TOKEN
     assert p.expiration_unix == 1_800_000_000
 
 
@@ -33,7 +33,7 @@ def test_roundtrip_via_model_dump():
     original = EscrowProposal(
         chain_name="anvil",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "payment_token": _TOKEN},
+        fields={"arbiter": _ARBITER, "token": _TOKEN},
         expiration_unix=1_800_000_000,
     )
     restored = EscrowProposal.model_validate(original.model_dump())
@@ -46,7 +46,7 @@ def test_expiration_unix_must_be_positive():
             EscrowProposal(
                 chain_name="anvil",
                 escrow_address=_ESCROW,
-                fields={"payment_token": _TOKEN},
+                fields={"token": _TOKEN},
                 expiration_unix=bad,
             )
 
@@ -71,10 +71,10 @@ def test_accepted_escrow_with_advertisement():
     a = AcceptedEscrow(
         chain_name="anvil",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "payment_token": _TOKEN},
+        fields={"arbiter": _ARBITER, "token": _TOKEN},
         price_per_hour=1_000_000,
     )
-    assert a.fields["payment_token"] == _TOKEN
+    assert a.fields["token"] == _TOKEN
     assert a.price_per_hour == 1_000_000
 
 
@@ -82,7 +82,7 @@ def test_accepted_escrow_roundtrip():
     original = AcceptedEscrow(
         chain_name="base_sepolia",
         escrow_address=_ESCROW,
-        fields={"arbiter": _ARBITER, "payment_token": _TOKEN},
+        fields={"arbiter": _ARBITER, "token": _TOKEN},
         price_per_hour=1_500_000,
     )
     restored = AcceptedEscrow.model_validate(original.model_dump())

@@ -55,7 +55,7 @@ _OTHER_TOKEN = "0x" + "33" * 20
 
 
 def _listing_with_one_escrow(**field_overrides) -> dict:
-    fields = {"payment_token": _TOKEN}
+    fields = {"token": _TOKEN}
     fields.update(field_overrides)
     return {
         "listing_id": "L1",
@@ -77,7 +77,7 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"payment_token": _TOKEN},
+                "fields": {"token": _TOKEN},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
@@ -95,7 +95,7 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": mixed_addr,
-                "fields": {"payment_token": mixed_token},
+                "fields": {"token": mixed_token},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
@@ -111,20 +111,20 @@ class TestPassesWhenAllFieldsMatch:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"payment_token": _TOKEN},
+                "fields": {"token": _TOKEN},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
 
 
 class TestRejectsWhenFieldDiverges:
-    def test_payment_token_mismatch(self):
+    def test_token_mismatch(self):
         ctx = _ctx(
             listing=_listing_with_one_escrow(),
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"payment_token": _OTHER_TOKEN},
+                "fields": {"token": _OTHER_TOKEN},
             },
         )
         action = negotiate_guard_escrow_fields_strict_match(ctx)
@@ -132,8 +132,8 @@ class TestRejectsWhenFieldDiverges:
         assert action.action_type == DomainActionType.REJECT_OFFER
         reason = action.parameters["reason"]
         assert "escrow_field_mismatch" in reason
-        assert "'payment_token'" in reason
-        assert action.parameters["field"] == "payment_token"
+        assert "'token'" in reason
+        assert action.parameters["field"] == "token"
 
     def test_buyer_omits_a_required_field(self):
         """When the seller pinned a field but the buyer didn't include
@@ -143,7 +143,7 @@ class TestRejectsWhenFieldDiverges:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"payment_token": _TOKEN},  # no arbiter
+                "fields": {"token": _TOKEN},  # no arbiter
             },
         )
         action = negotiate_guard_escrow_fields_strict_match(ctx)
@@ -173,7 +173,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
-                "fields": {"payment_token": _TOKEN},
+                "fields": {"token": _TOKEN},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
@@ -187,7 +187,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "0" * 40,
-                "fields": {"payment_token": _TOKEN},
+                "fields": {"token": _TOKEN},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
@@ -202,7 +202,7 @@ class TestPassesThroughWithoutVetoing:
             escrow_proposal={
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "99" * 20,
-                "fields": {"payment_token": _TOKEN},
+                "fields": {"token": _TOKEN},
             },
         )
         assert negotiate_guard_escrow_fields_strict_match(ctx) is None
@@ -249,7 +249,7 @@ class TestConsultPreNegotiationGuardsWiring:
         proposal = {
             "chain_name": "anvil",
             "escrow_address": _ADDR,
-            "fields": {"payment_token": _TOKEN},
+            "fields": {"token": _TOKEN},
             "expiration_unix": 9_999_999_999,
         }
         await svc.consult_pre_negotiation_guards(

@@ -620,7 +620,7 @@ class TestStage03a_ValidatePublish:
         accepted_escrows = [{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"payment_token": DEMAND_RESOURCE["token"]["contract_address"]},
+            "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
             "price_per_hour": DEMAND_RESOURCE["amount"],
         }]
         req = ValidatePublishRequest(
@@ -837,7 +837,7 @@ class TestStage05b_NegotiationStartsAndVisible:
             buyer_address=buyer_config["wallet_address"],
             initial_price=BUYER_INITIAL_PRICE,
             duration_seconds=DURATION_HOURS * 3600,
-            payment_token=DEMAND_RESOURCE["token"]["contract_address"],
+            token=DEMAND_RESOURCE["token"]["contract_address"],
         )
         neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
         assert neg_id, (

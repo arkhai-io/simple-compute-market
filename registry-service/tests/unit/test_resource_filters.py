@@ -12,7 +12,7 @@ def test_matches_resource_filters_compute(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -28,7 +28,7 @@ def test_matches_resource_filters_region(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -44,7 +44,7 @@ def test_matches_resource_filters_gpu_model(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -60,7 +60,7 @@ def test_matches_resource_filters_sla(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west", "sla": 0.99},
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -105,7 +105,7 @@ def _make_listing(sample_agent, **offer_extras):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource=offer,
-        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )

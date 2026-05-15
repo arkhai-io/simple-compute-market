@@ -73,7 +73,7 @@ def make_buyer_payment_escrow_terms_fn(
     same one the seller's verifier calls — so both sides produce
     identical obligation_data for the same negotiated inputs. The
     proposal's ``(chain_name, escrow_address)`` identifies the escrow
-    contract via the reverse address lookup; ``fields["payment_token"]``
+    contract via the reverse address lookup; ``fields["token"]``
     supplies the token; ``fields["arbiter"]`` (when present) overrides
     the default ``recipient_arbiter``. The closure's chain config is
     purely local plumbing (how to talk to the chain), not negotiated.
@@ -91,10 +91,10 @@ def make_buyer_payment_escrow_terms_fn(
             build_payment_obligation_data,
         )
 
-        payment_token = proposal.fields.get("payment_token")
-        if not isinstance(payment_token, str):
+        token = proposal.fields.get("token")
+        if not isinstance(token, str):
             raise ValueError(
-                "EscrowProposal.fields['payment_token'] missing or "
+                "EscrowProposal.fields['token'] missing or "
                 "non-string; cannot build buyer-side obligation_data"
             )
         arbiter_kind = "recipient_arbiter"
@@ -111,7 +111,7 @@ def make_buyer_payment_escrow_terms_fn(
             seller_wallet=seller_wallet_address,
             agreed_price=agreed_price,
             duration_seconds=duration_seconds,
-            token_contract_address=payment_token,
+            token_contract_address=token,
             chain_name=chain_name,
             addr_config_path=addr_config_path,
             arbiter_kind=arbiter_kind,

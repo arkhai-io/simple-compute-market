@@ -520,7 +520,7 @@ def extract_compute_from_order(order: dict) -> dict:
 
     Listings only carry compute as the offered resource since the
     demand_resource cutover; the buyer-side token info comes from
-    ``accepted_escrows[0]`` (see ``_listing_payment_token`` in
+    ``accepted_escrows[0]`` (see ``_listing_token`` in
     ``sync_negotiation``).
     """
     offer_resource = order.get("offer_resource", {})
@@ -755,30 +755,30 @@ def _token_resource_from_accepted_escrow(
 ) -> TokenResource | None:
     """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
 
-    Looks up ERC20 metadata by the entry's ``fields.payment_token``
+    Looks up ERC20 metadata by the entry's ``fields.token``
     address in TOKEN_REGISTRY, falling back to address-only metadata
     when the registry doesn't recognise it. Returns ``None`` when the
-    entry lacks a payment_token. The token amount is the entry's
+    entry lacks a token. The token amount is the entry's
     ``price_per_hour`` (per-hour rate in base units); ``None`` becomes 0.
     """
     if not isinstance(accepted_escrow, dict):
         return None
     fields = accepted_escrow.get("fields") or {}
-    payment_token = fields.get("payment_token")
-    if not isinstance(payment_token, str) or not payment_token:
+    token = fields.get("token")
+    if not isinstance(token, str) or not token:
         return None
     try:
         from service.clients.token import TOKEN_REGISTRY, ERC20TokenMetadata
     except Exception:
         return None
-    meta = TOKEN_REGISTRY.get_by_address(payment_token)
+    meta = TOKEN_REGISTRY.get_by_address(token)
     if meta is None:
         # Fall back to a minimal metadata object so the encoder has
         # something to serialise. Decimals=0 means amounts are rendered
         # as integers; better than failing the lease entirely.
         meta = ERC20TokenMetadata(
             symbol="UNKNOWN",
-            contract_address=payment_token,
+            contract_address=token,
             decimals=0,
         )
     price_per_hour = accepted_escrow.get("price_per_hour")
@@ -951,7 +951,7 @@ async def fulfill_compute_obligation(
         if token_resource is None:
             raise ValueError(
                 f"Cannot encode compute lease for listing "
-                f"{order_id!r}: no usable accepted_escrows[0].payment_token"
+                f"{order_id!r}: no usable accepted_escrows[0].token"
             )
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,

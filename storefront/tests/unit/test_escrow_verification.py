@@ -127,7 +127,7 @@ def _good_listing() -> dict:
         "accepted_escrows": [{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"payment_token": TOKEN},
+            "fields": {"token": TOKEN},
             "price_per_hour": 100,
         }],
         "offer_resource": {"gpu_model": "H200", "gpu_count": 1},
@@ -191,7 +191,7 @@ class TestNormalizeObligationData:
 
 
 class TestExtractTokenContractFromListing:
-    def test_reads_accepted_escrows_payment_token(self):
+    def test_reads_accepted_escrows_token(self):
         assert _extract_token_contract_from_listing(_good_listing()) == TOKEN
 
     def test_serialized_json_string_accepted_escrows(self):
@@ -200,14 +200,14 @@ class TestExtractTokenContractFromListing:
             "accepted_escrows": json.dumps([{
                 "chain_name": "anvil",
                 "escrow_address": "0x" + "11" * 20,
-                "fields": {"payment_token": TOKEN},
+                "fields": {"token": TOKEN},
                 "price_per_hour": 1,
             }]),
             "offer_resource": {"gpu_model": "H200"},
         }
         assert _extract_token_contract_from_listing(listing) == TOKEN
 
-    def test_no_payment_token_raises(self):
+    def test_no_token_raises(self):
         listing = {
             "accepted_escrows": [{
                 "chain_name": "anvil",

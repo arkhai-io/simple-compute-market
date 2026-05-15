@@ -62,7 +62,7 @@ def test_synthesize_from_token_demand(stub_alkahest_address):
     assert len(result) == 1
     entry = result[0]
     assert entry["escrow_address"] == _ESCROW_ADDR.lower()
-    assert entry["fields"] == {"payment_token": _TOKEN_ADDR}
+    assert entry["fields"] == {"token": _TOKEN_ADDR}
     assert entry["price_per_hour"] == 1000000
     # chain_name comes from CONFIG; just assert presence + type.
     assert isinstance(entry["chain_name"], str) and entry["chain_name"]
@@ -78,7 +78,7 @@ def test_synthesize_from_token_demand_hidden_reserve(stub_alkahest_address):
     result = synthesize_accepted_escrows_from_demand(demand)
     assert result is not None
     assert result[0]["price_per_hour"] is None
-    assert result[0]["fields"] == {"payment_token": _TOKEN_ADDR}
+    assert result[0]["fields"] == {"token": _TOKEN_ADDR}
 
 
 def test_synthesize_accepts_json_string(stub_alkahest_address):
@@ -90,7 +90,7 @@ def test_synthesize_accepts_json_string(stub_alkahest_address):
     })
     result = synthesize_accepted_escrows_from_demand(demand_str)
     assert result is not None
-    assert result[0]["fields"]["payment_token"] == _TOKEN_ADDR
+    assert result[0]["fields"]["token"] == _TOKEN_ADDR
 
 
 def test_synthesize_returns_none_for_compute_demand(stub_alkahest_address):
@@ -135,7 +135,7 @@ def test_upsert_listing_stores_explicit_accepted_escrows(tmp_db_path):
     explicit = [{
         "chain_name": "base_sepolia",
         "escrow_address": "0x" + "11" * 20,
-        "fields": {"payment_token": "0x" + "22" * 20},
+        "fields": {"token": "0x" + "22" * 20},
         "price_per_hour": 999,
     }]
     asyncio.run(db.upsert_listing(
@@ -215,7 +215,7 @@ def test_backfill_runs_on_schema_init_and_drops_legacy_column(
     assert row is not None
     accepted = row["accepted_escrows"]
     assert isinstance(accepted, list) and accepted
-    assert accepted[0]["fields"]["payment_token"] == _TOKEN_ADDR
+    assert accepted[0]["fields"]["token"] == _TOKEN_ADDR
 
     # And the legacy column is gone.
     import sqlite3 as _sql

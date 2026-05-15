@@ -60,7 +60,7 @@ async def _seed_listing(db: SQLiteClient, listing_id: str) -> None:
         accepted_escrows=[{
             "chain_name": "anvil",
             "escrow_address": "0x" + "11" * 20,
-            "fields": {"payment_token": "0x0000000000000000000000000000000000000001"},
+            "fields": {"token": "0x0000000000000000000000000000000000000001"},
             "price_per_hour": 5000,
         }],
         fulfillment_resource=None,

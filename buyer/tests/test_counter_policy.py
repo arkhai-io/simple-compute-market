@@ -27,7 +27,7 @@ def _proposal(**overrides) -> EscrowProposal:
     base = dict(
         chain_name="anvil",
         escrow_address=_ESCROW_ADDR,
-        fields={"payment_token": _TOKEN},
+        fields={"token": _TOKEN},
         expiration_unix=1_800_000_000,
     )
     base.update(overrides)
@@ -49,9 +49,9 @@ def test_strict_echo_accepts_exact_echo():
 def test_strict_echo_accepts_when_seller_adds_a_key_buyer_did_not_pin():
     """Buyer was silent about arbiter; seller picks a default — fine."""
     policy = load_counter_policy("strict_echo")
-    sent = _proposal()  # fields = {payment_token: ...}
+    sent = _proposal()  # fields = {token: ...}
     returned = _proposal(
-        fields={"payment_token": _TOKEN, "arbiter": _ARBITER},
+        fields={"token": _TOKEN, "arbiter": _ARBITER},
     )
     decision = policy(sent, returned)
     assert decision.action == "accept"
@@ -66,8 +66,8 @@ def test_strict_echo_normalizes_hex_address_case():
     policy = load_counter_policy("strict_echo")
     checksummed = "0xABcdef" + "0" * 34
     lowered = "0xabcdef" + "0" * 34
-    sent = _proposal(fields={"payment_token": checksummed})
-    returned = _proposal(fields={"payment_token": lowered})
+    sent = _proposal(fields={"token": checksummed})
+    returned = _proposal(fields={"token": lowered})
     assert policy(sent, returned).action == "accept"
 
 
@@ -108,19 +108,19 @@ def test_strict_echo_rejects_expiration_change():
 def test_strict_echo_rejects_changed_buyer_pinned_field():
     policy = load_counter_policy("strict_echo")
     other_token = "0x" + "33" * 20
-    sent = _proposal(fields={"payment_token": _TOKEN})
-    returned = _proposal(fields={"payment_token": other_token})
+    sent = _proposal(fields={"token": _TOKEN})
+    returned = _proposal(fields={"token": other_token})
     decision = policy(sent, returned)
     assert decision.action == "reject"
     assert decision.reason is not None
-    assert "field_changed:payment_token" in decision.reason
+    assert "field_changed:token" in decision.reason
 
 
 def test_strict_echo_rejects_dropped_buyer_pinned_field():
     """Seller returns without a field the buyer set → reject."""
     policy = load_counter_policy("strict_echo")
-    sent = _proposal(fields={"payment_token": _TOKEN, "arbiter": _ARBITER})
-    returned = _proposal(fields={"payment_token": _TOKEN})  # arbiter missing
+    sent = _proposal(fields={"token": _TOKEN, "arbiter": _ARBITER})
+    returned = _proposal(fields={"token": _TOKEN})  # arbiter missing
     decision = policy(sent, returned)
     assert decision.action == "reject"
     assert decision.reason is not None
@@ -141,8 +141,8 @@ def test_always_accept_accepts_field_change():
     policy = load_counter_policy("always_accept")
     other_token = "0x" + "33" * 20
     decision = policy(
-        _proposal(fields={"payment_token": _TOKEN}),
-        _proposal(fields={"payment_token": other_token}),
+        _proposal(fields={"token": _TOKEN}),
+        _proposal(fields={"token": other_token}),
     )
     assert decision.action == "accept"
 

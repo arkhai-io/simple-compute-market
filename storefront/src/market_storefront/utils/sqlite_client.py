@@ -75,7 +75,7 @@ def synthesize_accepted_escrows_from_demand(
     return [{
         "chain_name": CONFIG.chain_name,
         "escrow_address": escrow_address.lower(),
-        "fields": {"payment_token": contract_address},
+        "fields": {"token": contract_address},
         "price_per_hour": price_per_hour,
     }]
 
@@ -355,7 +355,7 @@ class SQLiteClient:
                 pass
             # Migrate: rename pre-cutover column buyer_escrow_terms_proposal →
             # buyer_escrow_proposal. The shape of the persisted JSON also
-            # changed (drops escrow_kind / arbiter_kind / payment_token,
+            # changed (drops escrow_kind / arbiter_kind / token,
             # adds chain_name / escrow_address / fields). We copy the
             # blob unchanged — settlement that reads it back must handle
             # both old and new shapes during the rollover, then we drop
