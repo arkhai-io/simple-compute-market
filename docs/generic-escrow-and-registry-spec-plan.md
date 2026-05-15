@@ -393,9 +393,10 @@ the storefront's policy package — reuse rather than invent.
 ## Milestone (a) — Registry self-description (filter-spec + listing_shape)
 
 **Goal:** registries advertise their own listing shape (JSON Schema) and
-filter set; storefront drops its `/api/v1/listings` endpoint (sellers
-who want a local view co-locate a registry instance with a
-`seller==self` filter).
+filter set; storefront's `/api/v1/listings` sheds its discovery
+vocabulary (filter params, schema-validation duplication) and reverts
+to a plain REST collection view of the seller's own resources.
+Buyer-side discovery happens against registries.
 
 ### `/filter-spec` endpoint
 
@@ -495,18 +496,43 @@ return `400`, never silently ignored.
 
 ### Storefront-side fallout
 
-- Drop `GET /api/v1/listings` from the storefront. Drop
-  `storefront/src/market_storefront/utils/listing_filters.py` entirely.
-- Drop `storefront/src/market_storefront/models/listing_models.py`'s
+`GET /api/v1/listings` (and `GET /api/v1/listings/{id}`) **stay** on
+the storefront, but their job narrows. Today the endpoint duplicates
+the registry's discovery surface — same 22 filter params, same
+`matches_listing_filters` mirror semantics. After (a) the storefront
+collection becomes the REST-canonical "what listing resources does
+this storefront own" view, paired with the lifecycle subpaths
+(`/create`, `/{id}/close`, `/refund`, `/claim`, etc.) that operate on
+the same resources by their storefront-local `listing_id`. Buyer
+discovery moves to registries, where the federation, filter spec, and
+JSON-Schema validation actually pay rent.
+
+Concretely:
+
+- Trim `GET /api/v1/listings` to basic resource enumeration: `limit`,
+  `offset`, and an optional `status` (open / closed / paused — that's
+  resource state, not market-discovery vocabulary). No `gpu_model`,
+  `region`, `payment_token`, etc. — those belong on registries.
+- Drop `storefront/src/market_storefront/utils/listing_filters.py`
+  entirely. Drop `storefront/src/market_storefront/models/listing_models.py`'s
   `ListingFilterParams` + `listing_filter_params` factory.
-- A seller who wants a "show me my own listings" view runs a registry
-  instance pointed at their own storefront's `publications` table (or
-  similar) with a filter-spec that exposes `seller`.
-- The `storefront-client` callers that hit `/api/v1/listings` migrate
-  to hitting a registry directly.
-- `registry-service/src/api/validate_routes.py` becomes the `listing_shape`
-  validator (already mostly the right shape; just driven by the loaded
-  JSON Schema instead of hardcoded `gpu_model/region/sla` checks).
+- `storefront-client` callers split: discovery callers migrate to
+  hitting a registry directly; seller-introspection callers (the
+  storefront's owner asking "what do I have?") keep using
+  `/api/v1/listings` against the slimmed surface. The publications
+  table mediates the registry side — `publications.listing_id` is
+  storefront-local, `publications.registry_assigned_id` is what the
+  registry returned (today same UUID; tomorrow possibly different).
+- `registry-service/src/api/validate_routes.py` becomes the
+  `listing_shape` validator — already mostly the right shape, just
+  driven by the loaded JSON Schema instead of hardcoded
+  `gpu_model/region/sla` checks.
+
+The lifecycle subpaths (`/api/v1/listings/{id}/close`, `/refund`,
+`/claim`, `/reclaim`, `/arbitrate`, `/pause`, `/resume`, plus
+`POST /create`) are seller operations on local state, keyed on
+storefront-local `listing_id`. They were never part of the discovery
+question and stay untouched.
 
 ### Filter-spec authoring
 
@@ -587,7 +613,10 @@ Everything else (filter vocabulary, listing extensions like `region`,
    surface is settled before the deal-record shape changes underneath
    it; could move earlier if the multi-escrow use case becomes urgent.
 6. **PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
-   validation; storefront `/api/v1/listings` dropped.
+   validation. Storefront `/api/v1/listings` sheds its discovery filter
+   vocabulary (drop `listing_filters.py`, drop `ListingFilterParams`);
+   the endpoint stays as a REST collection view over the seller's own
+   resources with just `limit` / `offset` / `status`.
 7. **PR (a2):** Per-query `on_missing` override + `indexed: true` side
    indexes (defer until proven necessary).
 
