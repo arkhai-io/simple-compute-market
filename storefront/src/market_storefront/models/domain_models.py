@@ -437,14 +437,6 @@ class Listing(BaseModel):
             "price_per_hour * agreed_duration_seconds / 3600."
         ),
     )
-    seller_attestation: str | None = Field(
-        default=None,
-        description="The seller's fulfillment attestation UID (None until fulfillment lands).",
-    )
-    buyer_attestation: str | None = Field(
-        default=None,
-        description="The buyer's escrow attestation UID (None until escrow is locked).",
-    )
     oracle_address: str | None = Field(
         default=None,
         description="The oracle wallet address used for arbitration and escrow workflows",
@@ -461,14 +453,6 @@ class Listing(BaseModel):
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
 
         return data
-
-    def is_open(self) -> bool:
-        """Check if this is an open listing (escrow or fulfillment missing)."""
-        return self.seller_attestation is None or self.buyer_attestation is None
-
-    def is_closed(self) -> bool:
-        """Check if this listing is fully attested (both escrow and fulfillment)."""
-        return self.seller_attestation is not None and self.buyer_attestation is not None
 
 
 # =============================

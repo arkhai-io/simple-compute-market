@@ -102,7 +102,7 @@ class SettleController:
 
         buyer_auth._verify(request, "settle_status", escrow_uid, buyer_address)
 
-        job = await self._db.load_settlement_job(escrow_uid=escrow_uid)
+        job = await self._db.load_escrow(escrow_uid=escrow_uid)
         if not job:
             raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
         return SettleStatusResponse(**serialize_settlement_job(job))
@@ -212,7 +212,7 @@ class AdminSettleController:
         deadline = start + timeout
 
         while True:
-            job = await self._db.load_settlement_job(escrow_uid=escrow_uid)
+            job = await self._db.load_escrow(escrow_uid=escrow_uid)
             elapsed_ms = int((time.monotonic() - start) * 1000)
             status = (job or {}).get("status", "")
             job_id = (job or {}).get("provisioning_job_id")
@@ -231,7 +231,7 @@ class AdminSettleController:
             await asyncio.sleep(min(1.0, remaining))
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        job = await self._db.load_settlement_job(escrow_uid=escrow_uid)
+        job = await self._db.load_escrow(escrow_uid=escrow_uid)
         status = (job or {}).get("status", "unknown")
         job_id = (job or {}).get("provisioning_job_id")
         return SettleWaitResponse(

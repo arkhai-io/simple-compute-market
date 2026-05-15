@@ -154,7 +154,7 @@ class TestVerifySettle:
             agreed_duration_seconds=3600,
             listing_id="settle-verify-nowrite",
         )
-        job = await db.load_settlement_job(escrow_uid="no-write-uid")
+        job = await db.load_escrow(escrow_uid="no-write-uid")
         assert job is None, (
             "verify_settle must not write settlement_jobs rows — it is a dry-run endpoint."
         )
@@ -229,7 +229,7 @@ class TestEvaluateSettle:
         )
 
         # Settlement job must not be created
-        job = await db.load_settlement_job(escrow_uid="no-write-eval-uid")
+        job = await db.load_escrow(escrow_uid="no-write-eval-uid")
         assert job is None, "evaluate_settle must not write settlement_jobs rows"
 
         # Resource must still be available (not reserved)

@@ -669,17 +669,22 @@ class SettleStatusResponse:
 
     status: str = ""
     escrow_uid: str = ""
+    fulfillment_uid: str | None = None
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SettleStatusResponse":
-        known = {"status", "escrow_uid", "provisioning_job_id", "tenant_credentials"}
+        known = {
+            "status", "escrow_uid", "fulfillment_uid",
+            "provisioning_job_id", "tenant_credentials",
+        }
         creds = d.get("tenant_credentials")
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
+            fulfillment_uid=d.get("fulfillment_uid"),
             provisioning_job_id=d.get("provisioning_job_id"),
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,
             extra={k: v for k, v in d.items() if k not in known},

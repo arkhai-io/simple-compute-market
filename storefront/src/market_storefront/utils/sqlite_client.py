@@ -262,7 +262,10 @@ class SQLiteClient:
                 )
                 """
             )
-            # Negotiation threads table
+            # Negotiation threads table. ``buyer`` / ``matched_offer_id``
+            # capture the buyer↔seller pairing — they were previously stored
+            # on the listings row (one buyer per listing), but multi-escrow
+            # deals make the thread the natural place for that association.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_threads (
@@ -293,7 +296,10 @@ class SQLiteClient:
                   -- can run (or be retried) as a separate step without replaying rounds.
                   agreed_price INTEGER,
                   agreed_duration_seconds INTEGER,
-                  agreed_at TEXT
+                  agreed_at TEXT,
+                  -- Buyer↔listing pairing (moved off listings for multi-escrow).
+                  buyer TEXT,
+                  matched_offer_id TEXT
                 )
                 """
             )
@@ -427,14 +433,16 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # Listings table (local source of truth).
-            # Duration is buyer-driven (Slice C): the seller advertises an
-            # OPTIONAL ceiling (max_duration_seconds; NULL = unlimited).
+            # Listings table (local source of truth for the seller's own
+            # advertisements). Multi-escrow deal records live on the
+            # ``escrows`` table joined via the winning ``negotiation_id``;
+            # the buyer/match association lives on ``negotiation_threads``.
             # accepted_escrows is a JSON array of {chain_name, escrow_address,
-            # fields, price_per_hour} — the canonical pricing+escrow advertisement.
-            # The legacy demand_resource column was dropped post-cutover; any
-            # pre-cutover DB still carrying it gets backfilled then DROP COLUMN'd
-            # below.
+            # fields, price_per_hour} — the canonical pricing+escrow
+            # advertisement. The legacy ``demand_resource`` and per-deal
+            # ``escrow_uid``/``buyer``/``matched_offer_id``/
+            # ``seller_attestation``/``buyer_attestation`` columns are
+            # backfilled+dropped by ``_migrate_escrows_and_listings`` above.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -446,11 +454,6 @@ class SQLiteClient:
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
-                  buyer TEXT,
-                  matched_offer_id TEXT,
-                  seller_attestation TEXT,
-                  buyer_attestation TEXT,
-                  escrow_uid TEXT,
                   oracle_address TEXT,
                   paused INTEGER NOT NULL DEFAULT 0,
                   accepted_escrows TEXT
@@ -727,21 +730,37 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stage_events_negotiation_id ON stage_events(negotiation_id)"
             )
-            # Settlement jobs — per-escrow provisioning status row. The
-            # buyer creates an escrow on-chain then posts escrow_uid to
-            # the seller's /settle/{uid} endpoint; that inserts a row
-            # here with status='provisioning' and kicks off the async
-            # provisioning task. When done, the task updates this row
-            # with status='ready' (+ attestation/connection) or 'failed'
-            # (+ reason). Buyer polls /settle/{uid}/status which reads
-            # this row.
+            # Escrows — per-attached-escrow lifecycle record. One row per
+            # on-chain escrow lockup attached to a deal; multi-escrow deals
+            # (primary payment + bond + penalty, etc.) get one row each. The
+            # primary escrow drives provisioning (provisioning_job_id,
+            # tenant_credentials, connection_details only populated there);
+            # non-primary rows are lifecycle-tracked but don't trigger
+            # fulfillment.
+            #
+            # ``escrow_uid`` (PK) is the buyer's escrow attestation UID;
+            # ``fulfillment_uid`` is the seller's fulfillment attestation UID
+            # — the matching obligation pair on chain.
+            #
+            # Evolved from the legacy ``settlement_jobs`` table (one row per
+            # deal, single attestation_uid column). The helper below renames
+            # the old table + widens columns + backfills from the listings
+            # row when present.
+            self._migrate_escrows_and_listings(cur)
+            # ``escrow_uid`` is the EAS attestation UID of the buyer's escrow
+            # obligation — i.e. it IS the buyer's attestation; no separate
+            # column needed. ``fulfillment_uid`` is the seller's
+            # fulfillment attestation, paired with the escrow at settle time.
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS settlement_jobs (
+                CREATE TABLE IF NOT EXISTS escrows (
                   escrow_uid TEXT PRIMARY KEY,
                   negotiation_id TEXT NOT NULL,
                   status TEXT NOT NULL,
-                  attestation_uid TEXT,
+                  chain_name TEXT,
+                  escrow_address TEXT,
+                  is_primary INTEGER NOT NULL DEFAULT 1,
+                  fulfillment_uid TEXT,
                   provisioning_job_id TEXT,
                   connection_details TEXT,
                   tenant_credentials TEXT,
@@ -751,16 +770,11 @@ class SQLiteClient:
                 )
                 """
             )
-            # Idempotent migration for DBs created before provisioning_job_id existed.
-            try:
-                cur.execute("ALTER TABLE settlement_jobs ADD COLUMN provisioning_job_id TEXT")
-            except sqlite3.OperationalError:
-                pass
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_status ON settlement_jobs(status)"
+                "CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_negotiation ON settlement_jobs(negotiation_id)"
+                "CREATE INDEX IF NOT EXISTS idx_escrows_negotiation ON escrows(negotiation_id)"
             )
             # Publications — record of which registries received which
             # payload for which listing. Updates and deletes consult this
@@ -842,6 +856,155 @@ class SQLiteClient:
                 "UPDATE listings SET accepted_escrows=? WHERE listing_id=?",
                 (json.dumps(synthesized), listing_id),
             )
+
+    def _migrate_escrows_and_listings(self, cur: sqlite3.Cursor) -> None:
+        """One-shot migration: ``settlement_jobs`` → ``escrows`` (multi-escrow
+        per deal), with the per-deal columns moving off ``listings`` to either
+        ``escrows`` (attestation UIDs) or ``negotiation_threads`` (buyer
+        pairing).
+
+        Idempotent: every step is guarded on table/column existence so it's
+        safe to re-run on a partially-migrated DB.
+        """
+        def _table_exists(name: str) -> bool:
+            return cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
+        def _cols(table: str) -> set[str]:
+            return {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+
+        # 1. Rename settlement_jobs → escrows if the old name still on disk.
+        if _table_exists("settlement_jobs") and not _table_exists("escrows"):
+            cur.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
+            for old_idx in ("idx_settlement_jobs_status", "idx_settlement_jobs_negotiation"):
+                try:
+                    cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
+                except sqlite3.OperationalError:
+                    pass
+
+        # 2. Add new escrows columns (idempotent). escrow_uid (PK) is the
+        # buyer's escrow attestation UID — no separate buyer-side column.
+        if _table_exists("escrows"):
+            for col_ddl in (
+                "ALTER TABLE escrows ADD COLUMN chain_name TEXT",
+                "ALTER TABLE escrows ADD COLUMN escrow_address TEXT",
+                "ALTER TABLE escrows ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE escrows ADD COLUMN fulfillment_uid TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        # 3. Add buyer + matched_offer_id to negotiation_threads (idempotent).
+        if _table_exists("negotiation_threads"):
+            for col_ddl in (
+                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
+                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        # 4. Backfill from legacy columns. Only runs when the pre-cutover
+        # columns are still on disk; produces no-ops otherwise.
+        listing_cols = _cols("listings") if _table_exists("listings") else set()
+        escrow_cols = _cols("escrows") if _table_exists("escrows") else set()
+
+        # 4a. escrows.fulfillment_uid ← escrows.attestation_uid
+        # (legacy column stored the seller's fulfillment UID).
+        if "attestation_uid" in escrow_cols:
+            cur.execute(
+                "UPDATE escrows SET fulfillment_uid = attestation_uid "
+                "WHERE fulfillment_uid IS NULL AND attestation_uid IS NOT NULL"
+            )
+
+        # 4b. listings.buyer_attestation was always identical to escrow_uid on
+        # the storefront side (the column was a denormalized duplicate), so no
+        # backfill is needed — the escrow row's PK is the buyer's attestation.
+
+        # 4c. escrows.{chain_name,escrow_address} ← listings.accepted_escrows[0]
+        # (joined via negotiation_threads). JSON parse Python-side.
+        if (
+            "accepted_escrows" in listing_cols
+            and _table_exists("escrows")
+            and _table_exists("negotiation_threads")
+        ):
+            rows = cur.execute(
+                """
+                SELECT escrows.escrow_uid, l.accepted_escrows
+                FROM escrows
+                JOIN negotiation_threads nt
+                  ON nt.negotiation_id = escrows.negotiation_id
+                JOIN listings l
+                  ON l.listing_id = nt.our_listing_id
+                WHERE escrows.chain_name IS NULL OR escrows.escrow_address IS NULL
+                """
+            ).fetchall()
+            for escrow_uid, ae_blob in rows:
+                if not ae_blob:
+                    continue
+                try:
+                    ae_list = json.loads(ae_blob) if isinstance(ae_blob, str) else ae_blob
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(ae_list, list) or not ae_list:
+                    continue
+                first = ae_list[0]
+                if not isinstance(first, dict):
+                    continue
+                cur.execute(
+                    "UPDATE escrows SET chain_name = ?, escrow_address = ? "
+                    "WHERE escrow_uid = ?",
+                    (first.get("chain_name"), first.get("escrow_address"), escrow_uid),
+                )
+
+        # 4d. negotiation_threads.{buyer,matched_offer_id} ← listings.{buyer,matched_offer_id}
+        if "buyer" in listing_cols and _table_exists("negotiation_threads"):
+            cur.execute(
+                """
+                UPDATE negotiation_threads
+                SET buyer = (
+                    SELECT l.buyer FROM listings l
+                    WHERE l.listing_id = negotiation_threads.our_listing_id
+                    LIMIT 1
+                )
+                WHERE buyer IS NULL
+                """
+            )
+        if "matched_offer_id" in listing_cols and _table_exists("negotiation_threads"):
+            cur.execute(
+                """
+                UPDATE negotiation_threads
+                SET matched_offer_id = (
+                    SELECT l.matched_offer_id FROM listings l
+                    WHERE l.listing_id = negotiation_threads.our_listing_id
+                    LIMIT 1
+                )
+                WHERE matched_offer_id IS NULL
+                """
+            )
+
+        # 5. Drop legacy columns. SQLite 3.35+ supports DROP COLUMN; older
+        # builds silently skip — those DBs carry orphan columns forever
+        # (harmless, just bloat).
+        for table, col in (
+            ("escrows", "attestation_uid"),
+            ("listings", "escrow_uid"),
+            ("listings", "buyer_attestation"),
+            ("listings", "seller_attestation"),
+            ("listings", "buyer"),
+            ("listings", "matched_offer_id"),
+        ):
+            if not _table_exists(table):
+                continue
+            try:
+                cur.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:
@@ -1765,11 +1928,6 @@ class SQLiteClient:
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         seller: str,
-        buyer: str | None = None,
-        matched_offer_id: str | None = None,
-        seller_attestation: str | None = None,
-        buyer_attestation: str | None = None,
-        escrow_uid: str | None = None,
         oracle_address: str | None = None,
         paused: bool = False,
         accepted_escrows: Any | None = None,
@@ -1789,16 +1947,11 @@ class SQLiteClient:
                       fulfillment_resource,
                       max_duration_seconds,
                       seller,
-                      buyer,
-                      matched_offer_id,
-                      seller_attestation,
-                      buyer_attestation,
-                      escrow_uid,
                       oracle_address,
                       paused,
                       accepted_escrows
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
@@ -1806,11 +1959,6 @@ class SQLiteClient:
                       fulfillment_resource=excluded.fulfillment_resource,
                       max_duration_seconds=excluded.max_duration_seconds,
                       seller=excluded.seller,
-                      buyer=excluded.buyer,
-                      matched_offer_id=excluded.matched_offer_id,
-                      seller_attestation=excluded.seller_attestation,
-                      buyer_attestation=excluded.buyer_attestation,
-                      escrow_uid=excluded.escrow_uid,
                       oracle_address=excluded.oracle_address,
                       paused=excluded.paused,
                       accepted_escrows=excluded.accepted_escrows
@@ -1824,11 +1972,6 @@ class SQLiteClient:
                         self._serialize_resource(fulfillment_resource),
                         max_duration_seconds,
                         seller,
-                        buyer,
-                        matched_offer_id,
-                        seller_attestation,
-                        buyer_attestation,
-                        escrow_uid,
                         oracle_address,
                         1 if paused else 0,
                         self._serialize_resource(accepted_escrows),
@@ -1850,11 +1993,6 @@ class SQLiteClient:
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
         seller: str | None = None,
-        buyer: str | None = None,
-        matched_offer_id: str | None = None,
-        seller_attestation: str | None = None,
-        buyer_attestation: str | None = None,
-        escrow_uid: str | None = None,
         oracle_address: str | None = None,
         accepted_escrows: Any | None = None,
     ) -> None:
@@ -1874,11 +2012,6 @@ class SQLiteClient:
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("max_duration_seconds", max_duration_seconds)
             add("seller", seller)
-            add("buyer", buyer)
-            add("matched_offer_id", matched_offer_id)
-            add("seller_attestation", seller_attestation)
-            add("buyer_attestation", buyer_attestation)
-            add("escrow_uid", escrow_uid)
             add("oracle_address", oracle_address)
             add("accepted_escrows", accepted_escrows, serialize=True)
 
@@ -1908,9 +2041,7 @@ class SQLiteClient:
                     """
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, fulfillment_resource,
-                           max_duration_seconds, seller, buyer,
-                           matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address,
+                           max_duration_seconds, seller, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows
                     FROM listings WHERE listing_id = ?
@@ -1923,9 +2054,8 @@ class SQLiteClient:
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "fulfillment_resource",
-                    "max_duration_seconds", "seller", "buyer",
-                    "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused", "accepted_escrows",
+                    "max_duration_seconds", "seller", "oracle_address",
+                    "paused", "accepted_escrows",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
@@ -2406,7 +2536,8 @@ class SQLiteClient:
                            created_at, updated_at, terminal_state,
                            requested_duration_seconds,
                            buyer_escrow_proposal,
-                           agreed_price, agreed_duration_seconds, agreed_at
+                           agreed_price, agreed_duration_seconds, agreed_at,
+                           buyer, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
                     (negotiation_id,),
@@ -2421,6 +2552,7 @@ class SQLiteClient:
                     "requested_duration_seconds",
                     "buyer_escrow_proposal",
                     "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    "buyer", "matched_offer_id",
                 ]
                 result = dict(zip(keys, row))
                 # Deserialize the JSON blob back to a dict for the caller.
@@ -2439,19 +2571,82 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_load)
 
+    async def set_negotiation_thread_buyer_match(
+        self,
+        *,
+        negotiation_id: str,
+        buyer: str | None = None,
+        matched_offer_id: str | None = None,
+    ) -> None:
+        """Write the buyer↔offer association onto the thread.
+
+        Both fields are independent — pass only the ones you want to update.
+        Called as the deal moves from negotiation into settlement.
+        """
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+            if buyer is not None:
+                updates.append("buyer = ?")
+                values.append(buyer)
+            if matched_offer_id is not None:
+                updates.append("matched_offer_id = ?")
+                values.append(matched_offer_id)
+            if not updates:
+                return
+            updates.append("updated_at = ?")
+            values.append(datetime.now().isoformat())
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    f"UPDATE negotiation_threads SET {', '.join(updates)} "
+                    f"WHERE negotiation_id = ?",
+                    (*values, negotiation_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
     # ------------------------------------------------------------------
-    # settlement_jobs — polling-mode provisioning status per escrow.
+    # escrows — per-escrow lifecycle row. One per on-chain escrow lockup
+    # attached to a deal; primary row drives provisioning.
     # ------------------------------------------------------------------
 
-    async def insert_settlement_job(
+    _ESCROW_COLS = (
+        "escrow_uid",
+        "negotiation_id",
+        "status",
+        "chain_name",
+        "escrow_address",
+        "is_primary",
+        "fulfillment_uid",
+        "provisioning_job_id",
+        "connection_details",
+        "tenant_credentials",
+        "reason",
+        "created_at",
+        "updated_at",
+    )
+
+    def _escrow_row_to_dict(self, row: tuple) -> dict[str, Any]:
+        d = dict(zip(self._ESCROW_COLS, row))
+        d["is_primary"] = bool(d["is_primary"])
+        return d
+
+    async def insert_escrow(
         self,
         *,
         escrow_uid: str,
         negotiation_id: str,
+        chain_name: str | None,
+        escrow_address: str | None,
+        is_primary: bool = True,
         status: str = "provisioning",
     ) -> bool:
-        """Create a new settlement_jobs row. Returns True if inserted,
-        False if a row for this escrow already existed (idempotent)."""
+        """Insert a new escrows row. Returns True on insert, False on
+        PRIMARY KEY conflict (idempotent by escrow_uid)."""
         def _insert() -> bool:
             now = datetime.now().isoformat()
             conn = sqlite3.connect(self.db_path)
@@ -2459,34 +2654,39 @@ class SQLiteClient:
                 try:
                     conn.execute(
                         """
-                        INSERT INTO settlement_jobs
-                          (escrow_uid, negotiation_id, status, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO escrows
+                          (escrow_uid, negotiation_id, status,
+                           chain_name, escrow_address, is_primary,
+                           created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (escrow_uid, negotiation_id, status, now, now),
+                        (
+                            escrow_uid, negotiation_id, status,
+                            chain_name, escrow_address, 1 if is_primary else 0,
+                            now, now,
+                        ),
                     )
                     conn.commit()
                     return True
                 except sqlite3.IntegrityError:
-                    # PRIMARY KEY conflict — job already exists.
                     return False
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_insert)
 
-    async def update_settlement_job(
+    async def update_escrow(
         self,
         *,
         escrow_uid: str,
         status: str | None = None,
-        attestation_uid: str | None = None,
+        fulfillment_uid: str | None = None,
         provisioning_job_id: str | None = None,
         connection_details: str | None = None,
         tenant_credentials: str | None = None,
         reason: str | None = None,
     ) -> None:
-        """Patch a settlement_jobs row. Any None field is skipped."""
+        """Patch an escrows row. Any None field is skipped."""
         def _update() -> None:
             updates: list[str] = []
             values: list[Any] = []
@@ -2498,7 +2698,7 @@ class SQLiteClient:
                 values.append(val)
 
             add("status", status)
-            add("attestation_uid", attestation_uid)
+            add("fulfillment_uid", fulfillment_uid)
             add("provisioning_job_id", provisioning_job_id)
             add("connection_details", connection_details)
             add("tenant_credentials", tenant_credentials)
@@ -2511,7 +2711,7 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
-                    f"UPDATE settlement_jobs SET {', '.join(updates)} WHERE escrow_uid = ?",
+                    f"UPDATE escrows SET {', '.join(updates)} WHERE escrow_uid = ?",
                     (*values, escrow_uid),
                 )
                 conn.commit()
@@ -2520,34 +2720,79 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
-    async def load_settlement_job(
+    async def load_escrow(
         self,
         *,
         escrow_uid: str,
     ) -> dict[str, Any] | None:
-        """Return the settlement_jobs row as a dict, or None if absent."""
+        """Return the escrows row as a dict, or None if absent."""
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
-                    """
-                    SELECT escrow_uid, negotiation_id, status,
-                           attestation_uid, provisioning_job_id,
-                           connection_details, tenant_credentials,
-                           reason, created_at, updated_at
-                    FROM settlement_jobs WHERE escrow_uid = ?
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows WHERE escrow_uid = ?
                     """,
                     (escrow_uid,),
                 ).fetchone()
-                if not row:
-                    return None
-                keys = [
-                    "escrow_uid", "negotiation_id", "status",
-                    "attestation_uid", "provisioning_job_id",
-                    "connection_details", "tenant_credentials",
-                    "reason", "created_at", "updated_at",
-                ]
-                return dict(zip(keys, row))
+                return self._escrow_row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_primary_escrow_for_negotiation(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the primary escrow row for a negotiation, or None."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows
+                    WHERE negotiation_id = ? AND is_primary = 1
+                    ORDER BY created_at ASC LIMIT 1
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                return self._escrow_row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_primary_escrow_for_listing(
+        self,
+        *,
+        listing_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the primary escrow row for the listing's winning thread.
+
+        Joins escrows → negotiation_threads on negotiation_id. Returns the
+        oldest is_primary=1 row across all threads matching this listing;
+        in practice each listing has at most one winning negotiation, so the
+        ordering is just a tiebreaker for corner cases.
+        """
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT {', '.join('e.' + c for c in self._ESCROW_COLS)}
+                    FROM escrows e
+                    JOIN negotiation_threads nt
+                      ON nt.negotiation_id = e.negotiation_id
+                    WHERE nt.our_listing_id = ? AND e.is_primary = 1
+                    ORDER BY e.created_at ASC LIMIT 1
+                    """,
+                    (listing_id,),
+                ).fetchone()
+                return self._escrow_row_to_dict(row) if row else None
             finally:
                 conn.close()
 
@@ -3087,13 +3332,24 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
     async def get_listing_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
-        """Return the listing_id for the given escrow_uid, or None if not found."""
+        """Return the listing_id for the given escrow_uid, or None if not found.
+
+        Joins escrows → negotiation_threads to recover the seller's listing
+        from the escrow row (escrows.escrow_uid is the on-chain PK).
+        """
         def _load() -> str | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT listing_id FROM listings WHERE escrow_uid = ? LIMIT 1",
+                    """
+                    SELECT nt.our_listing_id
+                    FROM escrows e
+                    JOIN negotiation_threads nt
+                      ON nt.negotiation_id = e.negotiation_id
+                    WHERE e.escrow_uid = ?
+                    LIMIT 1
+                    """,
                     (escrow_uid,),
                 )
                 row = cur.fetchone()
@@ -3134,9 +3390,7 @@ class SQLiteClient:
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
                            offer_resource, fulfillment_resource,
-                           max_duration_seconds, seller, buyer,
-                           matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address,
+                           max_duration_seconds, seller, oracle_address,
                            COALESCE(paused, 0) AS paused,
                            accepted_escrows
                     FROM listings {where}
@@ -3148,9 +3402,8 @@ class SQLiteClient:
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
                     "offer_resource", "fulfillment_resource",
-                    "max_duration_seconds", "seller", "buyer",
-                    "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused", "accepted_escrows",
+                    "max_duration_seconds", "seller", "oracle_address",
+                    "paused", "accepted_escrows",
                 ]
                 rows = cur.fetchall()
                 result = []

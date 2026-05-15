@@ -190,7 +190,7 @@ def run_settle_from_log(
     log.end(
         final.get("status") or "unknown",
         escrow_uid=resolved_uid,
-        attestation_uid=final.get("attestation_uid"),
+        fulfillment_uid=final.get("fulfillment_uid"),
     )
 
     result = Table.grid(padding=(0, 2))
@@ -198,8 +198,8 @@ def run_settle_from_log(
     result.add_column()
     result.add_row("Status", str(final.get("status")))
     result.add_row("Escrow UID", resolved_uid)
-    if final.get("attestation_uid"):
-        result.add_row("Attestation UID", str(final["attestation_uid"]))
+    if final.get("fulfillment_uid"):
+        result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
     if final.get("connection_details"):
         result.add_row("Connection", str(final["connection_details"]))
     if final.get("reason"):

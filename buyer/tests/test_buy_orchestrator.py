@@ -209,7 +209,7 @@ def test_happy_path_drives_to_ready():
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         # 5. GET /settle/{uid}/status → ready
         {"status": "ready",
-         "attestation_uid": "0xattest",
+         "fulfillment_uid": "0xattest",
          "connection_details": "ssh alice@vm1",
          "tenant_credentials": {"password": "hunter2"}},
     ]
@@ -244,7 +244,7 @@ def test_happy_path_drives_to_ready():
 
     assert result.status == "ready"
     assert result.escrow_uid == "0xescrow"
-    assert result.attestation_uid == "0xattest"
+    assert result.fulfillment_uid == "0xattest"
     assert result.connection_details == "ssh alice@vm1"
     assert result.tenant_credentials == {"password": "hunter2"}
     assert result.agreed_price == 50
@@ -309,7 +309,7 @@ def test_first_match_exits_second_agrees():
         # POST /settle/{uid}
         {"escrow_uid": "0xescrow", "status": "provisioning"},
         # GET /settle/{uid}/status → ready
-        {"status": "ready", "attestation_uid": "0xattest"},
+        {"status": "ready", "fulfillment_uid": "0xattest"},
     ]
     with patch(
         "market_buyer.buy_orchestrator.urllib.request.urlopen",
@@ -492,7 +492,7 @@ def test_always_accept_lets_seller_swap_payment_token():
         },
         {"agent_wallet_address": _SELLER_WALLET},
         {"escrow_uid": "0xescrow", "status": "provisioning"},
-        {"status": "ready", "attestation_uid": "0xattest"},
+        {"status": "ready", "fulfillment_uid": "0xattest"},
     ]
 
     build_calls = []
@@ -596,7 +596,7 @@ def test_to_dict_omits_none_fields():
         seller_url=_SELLER_URL,
         agreed_price=50,
         escrow_uid="0xescrow",
-        attestation_uid="0xattest",
+        fulfillment_uid="0xattest",
         connection_details="ssh alice@vm",
         rounds=3,
     )

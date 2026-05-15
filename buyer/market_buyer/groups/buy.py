@@ -718,7 +718,7 @@ def register(app: typer.Typer) -> None:
             negotiation_id=result.negotiation_id,
             agreed_price=result.agreed_price,
             escrow_uid=result.escrow_uid,
-            attestation_uid=result.attestation_uid,
+            fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
 
@@ -732,7 +732,7 @@ def register(app: typer.Typer) -> None:
             ("Negotiation", result.negotiation_id),
             ("Agreed price", result.agreed_price),
             ("Escrow UID", result.escrow_uid),
-            ("Attestation", result.attestation_uid),
+            ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),
         ):
             if val:

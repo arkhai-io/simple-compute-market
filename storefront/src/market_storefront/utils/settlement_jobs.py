@@ -151,32 +151,46 @@ async def start_settlement_job(
         escrow_proposal=proposal,
     )
 
-    inserted = await sqlite_client.insert_settlement_job(
+    # Pin the (chain_name, escrow_address) the buyer's proposal selected; if
+    # absent (legacy threads), fall back to the listing's first accepted
+    # escrow. Multi-escrow deals (bond, penalty, etc.) get one row each, with
+    # is_primary=1 on the payment lockup that drives provisioning.
+    chain_name = proposal.chain_name if proposal is not None else None
+    escrow_address = proposal.escrow_address if proposal is not None else None
+    if chain_name is None or escrow_address is None:
+        accepted = our_order_dict.get("accepted_escrows") or []
+        if accepted and isinstance(accepted[0], dict):
+            chain_name = chain_name or accepted[0].get("chain_name")
+            escrow_address = escrow_address or accepted[0].get("escrow_address")
+
+    inserted = await sqlite_client.insert_escrow(
         escrow_uid=escrow_uid,
         negotiation_id=negotiation_id,
+        chain_name=chain_name,
+        escrow_address=escrow_address,
+        is_primary=True,
         status="provisioning",
     )
     if not inserted:
         # Already running or finished — return current state, idempotent.
-        existing = await sqlite_client.load_settlement_job(escrow_uid=escrow_uid)
+        existing = await sqlite_client.load_escrow(escrow_uid=escrow_uid)
         logger.info(
             "[SETTLE_JOB] Job already exists for escrow %s: status=%s",
             escrow_uid, (existing or {}).get("status"),
         )
         return existing or {}
 
-    # Link escrow_uid to the seller's local order so recovery endpoints
-    # (claim/reclaim/refund) and `market logs status` can tie fulfillment
-    # back to this deal. Idempotent update_order call.
+    # Mark the seller's listing as accepted. The buyer-attestation/escrow
+    # linkage now lives on the escrows row (joined via negotiation_id), so
+    # only the lifecycle status is patched here.
     try:
         await sqlite_client.update_listing(
             listing_id=our_listing_id,
             status="accepted",
-            escrow_uid=escrow_uid,
         )
     except Exception as exc:
         logger.warning(
-            "[SETTLE_JOB] Could not attach escrow_uid to order %s: %s",
+            "[SETTLE_JOB] Could not mark order %s as accepted: %s",
             our_listing_id, exc,
         )
 
@@ -225,7 +239,7 @@ async def _run_settlement_job_bg(
         )
     except Exception as exc:
         logger.exception("[SETTLE_JOB] fulfill_compute_obligation raised for %s", escrow_uid)
-        await sqlite_client.update_settlement_job(
+        await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="failed",
             reason=f"provisioning_error: {exc}",
@@ -234,10 +248,10 @@ async def _run_settlement_job_bg(
 
     status = (result or {}).get("status")
     if status == "fulfilled":
-        await sqlite_client.update_settlement_job(
+        await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="ready",
-            attestation_uid=result.get("fulfillment_uid") or result.get("seller_attestation"),
+            fulfillment_uid=result.get("fulfillment_uid"),
             connection_details=result.get("connection_details"),
             tenant_credentials=json.dumps(result.get("tenant_credentials"))
                 if result.get("tenant_credentials") is not None else None,
@@ -245,7 +259,7 @@ async def _run_settlement_job_bg(
         logger.info("[SETTLE_JOB] Escrow %s provisioning complete", escrow_uid)
     else:
         reason = (result or {}).get("message") or f"status={status!r}"
-        await sqlite_client.update_settlement_job(
+        await sqlite_client.update_escrow(
             escrow_uid=escrow_uid,
             status="failed",
             reason=reason,
@@ -257,7 +271,7 @@ async def _run_settlement_job_bg(
 
 
 def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
-    """Shape a raw settlement_jobs row for the HTTP response.
+    """Shape a raw escrows row for the HTTP response.
 
     Deserializes tenant_credentials (stored as JSON text) and omits None
     fields so the response body is compact.
@@ -269,10 +283,19 @@ def serialize_settlement_job(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
-    for field in ("attestation_uid", "provisioning_job_id", "connection_details", "reason"):
+    for field in (
+        "fulfillment_uid",
+        "chain_name",
+        "escrow_address",
+        "provisioning_job_id",
+        "connection_details",
+        "reason",
+    ):
         v = row.get(field)
         if v is not None:
             out[field] = v
+    if row.get("is_primary") is not None:
+        out["is_primary"] = bool(row["is_primary"])
     tc_raw = row.get("tenant_credentials")
     if tc_raw:
         try:

@@ -185,13 +185,15 @@ carries an `attestation_uid` column + provisioning state. It's the
 **per-escrow record**, just hardcoded to one row per deal. Evolution:
 
 - Rename `settlement_jobs` → `escrows`.
-- Add `chain_id INTEGER`, `escrow_address TEXT` — resolves which contract.
-  Same `(chain_id, escrow_address)` pair as the listing's
+- Add `chain_name TEXT`, `escrow_address TEXT` — resolves which contract.
+  Same `(chain_name, escrow_address)` pair as the listing's
   `accepted_escrows` and the buyer's `EscrowProposal`.
-- Split `attestation_uid` into `buyer_attestation_uid` (set when buyer
-  locks escrow) and `seller_attestation_uid` (set when seller posts
-  fulfillment against that escrow).
-- Add `is_primary INTEGER NOT NULL DEFAULT 0`. The primary escrow drives
+- Rename `attestation_uid` → `seller_attestation_uid` (the seller's
+  fulfillment attestation). No separate buyer-side column: the row's PK
+  ``escrow_uid`` IS the EAS attestation UID of the buyer's escrow
+  obligation, so the legacy ``listings.buyer_attestation`` was just a
+  denormalized duplicate.
+- Add `is_primary INTEGER NOT NULL DEFAULT 1`. The primary escrow drives
   provisioning — existing `provisioning_job_id`, `tenant_credentials`,
   `connection_details` columns are populated only on the primary row.
   Non-primary escrows are lifecycle-tracked but don't trigger fulfillment.
@@ -203,26 +205,27 @@ belong (the thread is the buyer↔seller pairing).
 
 The `Listing.is_open()` / `is_closed()` predicates become derived queries
 joining `escrows` via the winning `negotiation_id`: "any escrow row
-missing either attestation UID = open; all rows have both UIDs = closed."
+missing `seller_attestation_uid` = open; every row has it = closed."
 
 #### Migration
 
 ```python
 # pseudo-code, idempotent — guarded on column existence
 cur.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
-cur.execute("ALTER TABLE escrows ADD COLUMN buyer_attestation_uid TEXT")
 cur.execute("ALTER TABLE escrows ADD COLUMN seller_attestation_uid TEXT")
-cur.execute("ALTER TABLE escrows ADD COLUMN chain_id INTEGER")
+cur.execute("ALTER TABLE escrows ADD COLUMN chain_name TEXT")
 cur.execute("ALTER TABLE escrows ADD COLUMN escrow_address TEXT")
 cur.execute("ALTER TABLE escrows ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 1")
 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT")
 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT")
 
 # Backfill the per-escrow row from the pre-cutover listings:
-#   buyer_attestation_uid  <- listings.buyer_attestation  (joined via negotiation_id)
-#   seller_attestation_uid <- listings.seller_attestation
-#   chain_id, escrow_address <- listing.accepted_escrows[0]
+#   seller_attestation_uid <- escrows.attestation_uid (the legacy column held this)
+#   chain_name, escrow_address <- listing.accepted_escrows[0]
 #   is_primary = 1 (every existing row was the only escrow)
+# ``listings.buyer_attestation`` is not backfilled: escrow_uid (the row PK)
+# already IS the buyer's escrow attestation UID, so the legacy column was a
+# denormalized duplicate of the PK.
 # And the negotiation-side backfill:
 #   negotiation_threads.buyer            <- listings.buyer
 #   negotiation_threads.matched_offer_id <- listings.matched_offer_id

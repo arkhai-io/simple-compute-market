@@ -91,7 +91,7 @@ class BuyResult:
     seller_url: Optional[str] = None
     agreed_price: Optional[int] = None
     escrow_uid: Optional[str] = None
-    attestation_uid: Optional[str] = None
+    fulfillment_uid: Optional[str] = None
     connection_details: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     reason: Optional[str] = None
@@ -102,7 +102,7 @@ class BuyResult:
         out: dict[str, Any] = {"status": self.status, "rounds": self.rounds}
         for k in (
             "negotiation_id", "seller_url", "agreed_price", "escrow_uid",
-            "attestation_uid", "connection_details", "tenant_credentials",
+            "fulfillment_uid", "connection_details", "tenant_credentials",
             "reason",
         ):
             v = getattr(self, k)
@@ -950,7 +950,7 @@ def _settle_one(
             seller_url=seller_url,
             agreed_price=outcome.agreed_price,
             escrow_uid=escrow_uid,
-            attestation_uid=final.get("attestation_uid"),
+            fulfillment_uid=final.get("fulfillment_uid"),
             connection_details=final.get("connection_details"),
             tenant_credentials=final.get("tenant_credentials"),
             rounds=outcome.rounds,

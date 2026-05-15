@@ -163,7 +163,7 @@ def test_best_price_picks_lowest_agreed_not_lowest_advertised():
             # Wallet + settle for the winner
             {"agent_wallet_address": _SELLER_WALLET_B},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
-            {"status": "ready", "attestation_uid": "0xattest"},
+            {"status": "ready", "fulfillment_uid": "0xattest"},
         ],
     }
 
@@ -213,7 +213,7 @@ def test_cheapest_first_preserves_first_agreed_semantics():
             {"negotiation_id": "neg-a", "action": "accept", "price": 50, **_ACCEPTED_ECHO_AGG},
             {"agent_wallet_address": _SELLER_WALLET_A},
             {"escrow_uid": "0xescrow", "status": "provisioning"},
-            {"status": "ready", "attestation_uid": "0xattest"},
+            {"status": "ready", "fulfillment_uid": "0xattest"},
         ],
         # seller-b never gets queried — cheapest_first stops at first agreed.
         "seller-b": [],

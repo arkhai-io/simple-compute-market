@@ -90,15 +90,6 @@ def _resource_is_compute(resource: Any) -> bool:
     return hasattr(resource, "gpu_model")
 
 
-def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | None:
-    """Return the URL of the other party in the order (the one that is not us)."""
-    maker = order_dict.get("seller")
-    taker = order_dict.get("buyer")
-    if _agent_urls_match(maker, BASE_URL_OVERRIDE):
-        return taker
-    return maker
-
-
 async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) -> str | None:
     """Fetch an agent's on-chain wallet via its /.well-known/agent-wallet.json.
 
@@ -251,12 +242,7 @@ async def execute_action(
                         fulfillment_resource=None,
                         max_duration_seconds=order.get("max_duration_seconds"),
                         seller=order.get("seller", BASE_URL_OVERRIDE),
-                        buyer=order.get("buyer"),
-                        matched_offer_id=parameters.get("matched_offer_id"),
-                        seller_attestation=order.get("seller_attestation"),
-                        buyer_attestation=order.get("buyer_attestation"),
                         oracle_address=order.get("oracle_address"),
-                        escrow_uid=None,
                         paused=create_paused,
                     )
                 except Exception as exc:
@@ -648,12 +634,9 @@ def create_order(
     order = Listing(
         listing_id=str(uuid.uuid4()),
         seller=BASE_URL_OVERRIDE,
-        buyer=None,
         offer_resource=offer_resource,
         accepted_escrows=accepted_escrows,
         max_duration_seconds=max_duration_seconds,
-        seller_attestation=None,
-        buyer_attestation=None,
         oracle_address=None,
     )
 
@@ -767,12 +750,6 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     else:
         order_dict = order
         order_id = order_dict.get("listing_id", "unknown")
-
-    if order_dict.get("maker_attestation"):
-        logger.warning(
-            "[REGISTRY] Order %s has maker_attestation set but should be None for open orders",
-            order_id,
-        )
 
     if not CONFIG.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
@@ -1070,10 +1047,10 @@ async def fulfill_compute_obligation(
     negotiation thread's `agreed_duration_seconds`. Falls back to 1h
     only if the caller didn't provide one (recovery / legacy paths).
 
-    When the maker fulfills, this sets maker_attestation in the registry.
+    When fulfillment lands, pushes the fulfillment_uid to the registry's
+    update endpoint.
     """
     fulfillment_uid = None
-    maker_attestation = None
     connection_details: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
@@ -1124,7 +1101,6 @@ async def fulfill_compute_obligation(
                 await sqlite_client.update_listing(
                     listing_id=order_id,
                     status="accepted",
-                    escrow_uid=escrow_uid,
                 )
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
@@ -1149,7 +1125,7 @@ async def fulfill_compute_obligation(
         )
 
         async def _record_job_id(job_id: str) -> None:
-            await get_sqlite_client().update_settlement_job(
+            await get_sqlite_client().update_escrow(
                 escrow_uid=escrow_uid,
                 provisioning_job_id=job_id,
             )
@@ -1308,7 +1284,6 @@ async def fulfill_compute_obligation(
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
         logger.info("[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client.")
     else:
         try:
@@ -1316,7 +1291,6 @@ async def fulfill_compute_obligation(
                 connection_details,
                 escrow_uid
             )
-            maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
             logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; machine provisioned.")
             demand_bytes = order_bytes
             request_arbitration_result = await client.oracle.request_arbitration(
@@ -1327,16 +1301,16 @@ async def fulfill_compute_obligation(
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
             logger.error(f"[ALKAHEST] Fulfillment error: {error}")
-    
-    # Update registry with maker_attestation when maker fulfills
-    if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
+
+    # Update registry with fulfillment_uid when the seller fulfills.
+    if order and fulfillment_uid and CONFIG.enable_registry_discovery and order_id:
         try:
             async with _make_registry_client() as registry_client:
                 target_urls = await _registries_to_target(
                     order_id, registry_client.urls,
                 )
                 update_request = UpdateListingRequest(
-                    updates={"seller_attestation": maker_attestation},
+                    updates={"seller_attestation": fulfillment_uid},
                     private_key=CONFIG.agent_priv_key,
                     agent_id=_canonical_agent_id(),
                 )
@@ -1346,30 +1320,38 @@ async def fulfill_compute_obligation(
                 )
             await _record_publications(order_id, results)
             if any(r["success"] for r in results):
-                logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
+                logger.info(f"[REGISTRY] Updated order {order_id} with fulfillment_uid: {fulfillment_uid}")
             else:
-                logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
+                logger.warning(f"[REGISTRY] Failed to update order {order_id} with fulfillment_uid")
         except Exception as e:
-            logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
+            logger.warning(f"[REGISTRY] Error updating order {order_id} with fulfillment_uid: {e}")
 
     if order_id:
         try:
             sqlite_client = get_sqlite_client()
             await sqlite_client.update_listing(
                 listing_id=order_id,
-                seller_attestation=maker_attestation,
                 fulfillment_resource=connection_details,
-                escrow_uid=escrow_uid,
             )
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+        if fulfillment_uid:
+            try:
+                await get_sqlite_client().update_escrow(
+                    escrow_uid=escrow_uid,
+                    fulfillment_uid=fulfillment_uid,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[LOCAL DB] Failed to record fulfillment_uid on escrow %s: %s",
+                    escrow_uid, exc,
+                )
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
     stage_event("provision", "fulfilled",
         listing_id=order_id,
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
-        maker_attestation=maker_attestation,
         resource_id=reserved_resource_id,
         vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,
