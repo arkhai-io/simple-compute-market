@@ -26,13 +26,17 @@ from market_buyer.buyer_client import NegotiationOutcome
 
 
 def _match(listing_id: str, *, price: int | None = None, seller: str = "http://s") -> dict[str, Any]:
-    demand: dict[str, Any] = {"token": "MOCK"}
+    entry: dict[str, Any] = {
+        "chain_name": "anvil",
+        "escrow_address": "0xE",
+        "fields": {"payment_token": "0xT"},
+    }
     if price is not None:
-        demand["amount"] = price
+        entry["price_per_hour"] = price
     return {
         "listing_id": listing_id,
         "seller": seller,
-        "demand_resource": demand,
+        "accepted_escrows": [entry],
     }
 
 
@@ -50,7 +54,7 @@ def _recorder(*, agree_at: int | None = None) -> tuple[list[str], NegotiateFn]:
             return NegotiationOutcome(
                 status="agreed",
                 negotiation_id=f"neg-{match['listing_id']}",
-                agreed_price=match.get("demand_resource", {}).get("amount", 0),
+                agreed_price=(match.get("accepted_escrows") or [{}])[0].get("price_per_hour", 0),
             )
         return NegotiationOutcome(
             status="exited",
@@ -101,13 +105,15 @@ class TestCheapestFirst:
         assert seen[0] == "priced"
         assert set(seen[1:]) == {"priceless1", "priceless2"}
 
-    def test_serialised_demand_string_is_parsed(self):
-        """Registry sometimes returns demand_resource as a JSON string."""
+    def test_serialised_accepted_escrows_string_is_parsed(self):
+        """Registry sometimes returns accepted_escrows as a JSON string."""
         policy = load_aggregation_policy("cheapest_first")
         seen, neg = _recorder()
         matches = [
-            {"listing_id": "a", "demand_resource": json.dumps({"amount": 200})},
-            {"listing_id": "b", "demand_resource": json.dumps({"amount": 100})},
+            {"listing_id": "a", "accepted_escrows": json.dumps(
+                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 200}])},
+            {"listing_id": "b", "accepted_escrows": json.dumps(
+                [{"chain_name": "anvil", "escrow_address": "0xE", "price_per_hour": 100}])},
         ]
         _drive(policy, matches, neg)
         assert seen == ["b", "a"]

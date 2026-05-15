@@ -285,23 +285,24 @@ def fetch_listing_dict_multi(
 
 
 def extract_seller_min_price(listing: dict[str, Any]) -> Optional[int]:
-    """Pull the seller's per-hour floor (``demand_resource.amount``) out of
-    a registry listing dict. Returns ``None`` if absent or unparseable.
+    """Pull the seller's per-hour floor out of a registry listing dict.
 
-    The marketplace's pricing convention treats demand_resource.amount as
-    the per-hour token rate (in raw token base units); see
-    storefront/utils/action_executor.py:772 for the matching settlement
-    formula ``total = hourly_rate × duration_seconds / 3600``.
+    Reads ``accepted_escrows[0].price_per_hour`` — the per-hour token rate
+    advertised on the seller's first accepted escrow tuple. Returns ``None``
+    if absent or unparseable (hidden-reserve listings).
     """
-    demand = listing.get("demand_resource") or {}
-    if isinstance(demand, str):
+    accepted = listing.get("accepted_escrows") or []
+    if isinstance(accepted, str):
         try:
-            demand = json.loads(demand)
+            accepted = json.loads(accepted)
         except (ValueError, TypeError):
             return None
-    if not isinstance(demand, dict):
+    if not isinstance(accepted, list) or not accepted:
         return None
-    amount = demand.get("amount")
+    first = accepted[0]
+    if not isinstance(first, dict):
+        return None
+    amount = first.get("price_per_hour")
     try:
         return int(amount) if amount is not None else None
     except (ValueError, TypeError):

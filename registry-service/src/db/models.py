@@ -106,8 +106,8 @@ class Listing(Base):
     agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
     seller = Column(Text, nullable=False)  # Agent card URL of the listing seller
     buyer = Column(Text, nullable=True)    # Agent card URL of the buyer (when accepted)
-    offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
-    demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
+    offer_resource = Column(JSON, nullable=False)  # registry-specific shape (e.g. ComputeResource)
+    accepted_escrows = Column(JSON, nullable=True)  # list[AcceptedEscrow] — escrows the seller will take
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)

@@ -67,7 +67,7 @@ async def publish_listing(
         update_fields = {
             "seller": body.get("seller"),
             "offer_resource": body.get("offer_resource"),
-            "demand_resource": body.get("demand_resource"),
+            "accepted_escrows": body.get("accepted_escrows"),
             "max_duration_seconds": body.get("max_duration_seconds"),
             "oracle_address": body.get("oracle_address"),
         }
@@ -88,7 +88,7 @@ async def publish_listing(
             seller=body.get("seller", ""),
             buyer=body.get("buyer"),
             offer_resource=body.get("offer_resource", {}),
-            demand_resource=body.get("demand_resource", {}),
+            accepted_escrows=body.get("accepted_escrows", []),
             max_duration_seconds=body.get("max_duration_seconds"),
             oracle_address=body.get("oracle_address"),
             status=validate_order_status(status_str),
@@ -137,7 +137,6 @@ async def get_agent_listings(
 @router.get("/listings")
 async def query_listings(
     offer_resource_type: Optional[str] = Query(None, description="Filter by offer resource type (compute/token)"),
-    demand_resource_type: Optional[str] = Query(None, description="Filter by demand resource type (compute/token)"),
     # Equality filters
     region: Optional[str] = Query(None, description="Filter by region"),
     gpu_model: Optional[str] = Query(None, description="Filter by GPU model"),
@@ -165,12 +164,11 @@ async def query_listings(
     open_ports_count_min: Optional[int] = Query(None, ge=0, description="Minimum externally-routable open ports"),
     # Listing-level
     status: Optional[str] = Query("open", description="Filter by listing status"),
-    bidirectional: bool = Query(False, description="Enable bidirectional matching"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db),
 ):
-    """Query marketplace listings with filters (supports bidirectional matching)."""
+    """Query marketplace listings with filters."""
     query = db.query(Listing)
 
     if status:
@@ -185,7 +183,6 @@ async def query_listings(
         if matches_resource_filters(
             listing,
             offer_resource_type=offer_resource_type,
-            demand_resource_type=demand_resource_type,
             region=region,
             gpu_model=gpu_model,
             sla=sla,
@@ -208,14 +205,12 @@ async def query_listings(
             internet_download_mbps_min=internet_download_mbps_min,
             internet_upload_mbps_min=internet_upload_mbps_min,
             open_ports_count_min=open_ports_count_min,
-            bidirectional=bidirectional,
         )
     ]
 
     return {
         "items": filtered_items,
         "count": len(filtered_items),
-        "bidirectional": bidirectional,
     }
 
 

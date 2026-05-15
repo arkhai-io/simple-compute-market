@@ -95,7 +95,6 @@ class _RegistryClientBase:
     def _listings_params(
         *,
         offer_resource_type: str | None = None,
-        demand_resource_type: str | None = None,
         # Equality filters
         region: str | None = None,
         gpu_model: str | None = None,
@@ -131,7 +130,6 @@ class _RegistryClientBase:
             params["status"] = status
         filters = {
             "offer_resource_type": offer_resource_type,
-            "demand_resource_type": demand_resource_type,
             "region": region,
             "gpu_model": gpu_model,
             "sla": sla,
@@ -465,7 +463,6 @@ class RegistryClient(_RegistryClientBase):
         self,
         *,
         offer_resource_type: Optional[str] = None,
-        demand_resource_type: Optional[str] = None,
         region: Optional[str] = None,
         gpu_model: Optional[str] = None,
         sla: Optional[float] = None,
@@ -495,7 +492,6 @@ class RegistryClient(_RegistryClientBase):
         """GET /listings → ListingListResponse"""
         params = self._listings_params(
             offer_resource_type=offer_resource_type,
-            demand_resource_type=demand_resource_type,
             region=region, gpu_model=gpu_model, sla=sla,
             cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
             gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
@@ -751,7 +747,6 @@ class SyncRegistryClient(_RegistryClientBase):
         self,
         *,
         offer_resource_type: Optional[str] = None,
-        demand_resource_type: Optional[str] = None,
         region: Optional[str] = None,
         gpu_model: Optional[str] = None,
         sla: Optional[float] = None,
@@ -781,7 +776,6 @@ class SyncRegistryClient(_RegistryClientBase):
         """GET /listings → ListingListResponse"""
         params = self._listings_params(
             offer_resource_type=offer_resource_type,
-            demand_resource_type=demand_resource_type,
             region=region, gpu_model=gpu_model, sla=sla,
             cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
             gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,

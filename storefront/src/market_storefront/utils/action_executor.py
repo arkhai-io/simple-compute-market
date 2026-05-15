@@ -40,12 +40,8 @@ from market_storefront.utils.sqlite_client import (
 )
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
-from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
-from market_storefront.utils.order_matching import match_orders
-from market_policy.negotiation_thread import (
-    get_thread_store,
-    NegotiationThreadTransaction,
-)
+from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
+from market_policy.negotiation_thread import get_thread_store
 from .validation import determine_strategy_from_order
 
 BASE_URL_OVERRIDE = CONFIG.base_url_override
@@ -63,15 +59,6 @@ def _is_http_url(value: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _normalize_agent_url(url: str | None) -> str:
-    if not url:
-        return ""
-    return url.strip().rstrip("/").lower()
-
-
-def _agent_urls_match(a: str | None, b: str | None) -> bool:
-    na, nb = _normalize_agent_url(a), _normalize_agent_url(b)
-    return bool(na and na == nb)
 
 
 def _resource_is_compute(resource: Any) -> bool:
@@ -649,90 +636,6 @@ def create_order(
     return order_dict
 
 
-async def discover(
-    *,
-    order_id: str,
-    include_active_negotiations: bool = False,
-) -> list[dict[str, Any]]:
-    """Query the registry for orders matching `order_id` and return them.
-
-    Pure query — no thread writes, no outbound sends. Intended as the
-    first closed-function step of a sequential buy/sell flow.
-
-    Returns a list of match records:
-        {"their_listing_id": str,
-         "their_agent_url": str,
-         "their_order": dict}
-
-    Filters applied:
-      - only `status='open'` rows from the registry
-      - bidirectional resource compatibility (via registry_client.match_orders)
-      - our own orders removed
-      - orders already in active negotiations with us removed, unless
-        `include_active_negotiations=True` (useful for debugging / forced
-        re-propose flows)
-
-    Callers that also want to *initiate* negotiations against the result
-    should pair this with `start_negotiations(order_id, matches)`.
-    """
-    if not CONFIG.enable_registry_discovery:
-        raise RuntimeError("Registry discovery is disabled (CONFIG.enable_registry_discovery=False)")
-
-    async with _make_registry_client() as registry_client:
-        try:
-            our_order = await registry_client.get_listing(order_id)
-        except RegistryClientError as exc:
-            if exc.status_code == 404:
-                raise ValueError(f"Order {order_id} not found in registry") from exc
-            raise
-
-        candidates_resp = await registry_client.list_listings(
-            status="open",
-            limit=CONFIG.max_discovery_agents,
-        )
-        matching_orders = match_orders(our_order, candidates_resp.listings, bidirectional=True)
-    # Drop our own orders.
-    matching_orders = [
-        m for m in matching_orders
-        if str(m.id) != order_id
-        and not _agent_urls_match(m.maker_agent_id, BASE_URL_OVERRIDE)
-    ]
-
-    if not include_active_negotiations:
-        async with NegotiationThreadTransaction("DISCOVER") as txn:
-            active_order_ids = await txn.filter_active(order_id)
-            if active_order_ids:
-                matching_orders = [
-                    m for m in matching_orders
-                    if str(m.id) not in active_order_ids
-                ]
-                logger.info(
-                    "[DISCOVER] Filtered out %d orders already in active negotiations",
-                    len(active_order_ids),
-                )
-
-    matches: list[dict[str, Any]] = []
-    for m in matching_orders[:CONFIG.max_discovery_agents]:
-        their_listing_id = str(m.id)
-        their_agent_url = m.maker_agent_id
-        if not their_listing_id or not their_agent_url:
-            continue
-        matches.append({
-            "their_listing_id": their_listing_id,
-            "their_agent_url": their_agent_url,
-            "their_order": m,
-        })
-
-    stage_event(
-        "discovery", "matches_found",
-        our_listing_id=order_id,
-        match_count=len(matches),
-        matched_order_ids=[m["their_listing_id"] for m in matches],
-        counterparty_urls=[m["their_agent_url"] for m in matches],
-    )
-    return matches
-
-
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     """Publish a new order to the registry so discoverers can find it.
 
@@ -754,13 +657,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
     if not CONFIG.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
 
-    # Registry still expects a single-token ``demand`` payload (its own
-    # demand_resource cleanup is a separate milestone). Synthesize from
-    # accepted_escrows[0] so the registry sees the same pricing
-    # advertisement the storefront stores locally.
-    demand_for_registry = _synthesize_demand_for_registry(
-        order_dict.get("accepted_escrows")
-    )
+    accepted_escrows = order_dict.get("accepted_escrows") or []
 
     try:
         agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
@@ -768,7 +665,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             order_request = ListingRequest(
                 listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
-                demand=demand_for_registry,
+                accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             payloads = {url: order_request for url in registry_client.urls}
@@ -784,7 +681,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 order_id=order_id,
                 agent_url=BASE_URL_OVERRIDE,
                 offer=order_dict.get("offer_resource"),
-                demand=demand_for_registry,
+                accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
             return {"status": "published", "listing_id": order_id}
@@ -851,40 +748,6 @@ async def _record_publications(
                 "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
                 listing_id, r.get("registry_url"), exc,
             )
-
-
-def _synthesize_demand_for_registry(
-    accepted_escrows: list[dict[str, Any]] | None,
-) -> dict[str, Any]:
-    """Build a legacy ``demand`` payload (``{token, amount}``) from
-    ``accepted_escrows[0]`` for the registry's still-old API.
-
-    Returns an empty dict when there's no usable entry — the registry
-    will reject or absorb that, but at least we don't crash on a missing
-    ``accepted_escrows``.
-    """
-    if not accepted_escrows:
-        return {}
-    entry = accepted_escrows[0]
-    if not isinstance(entry, dict):
-        return {}
-    payment_token = (entry.get("fields") or {}).get("payment_token")
-    if not isinstance(payment_token, str) or not payment_token:
-        return {}
-    try:
-        from service.clients.token import TOKEN_REGISTRY
-        meta = TOKEN_REGISTRY.get_by_address(payment_token)
-    except Exception:
-        meta = None
-    if meta is not None:
-        token_payload = {
-            "symbol": meta.symbol,
-            "contract_address": meta.contract_address,
-            "decimals": meta.decimals,
-        }
-    else:
-        token_payload = {"contract_address": payment_token}
-    return {"token": token_payload, "amount": entry.get("price_per_hour")}
 
 
 def _token_resource_from_accepted_escrow(

@@ -301,7 +301,7 @@ def order_to_dict(listing: Listing) -> dict:
         "seller": listing.seller,
         "buyer": listing.buyer,
         "offer_resource": listing.offer_resource or {},
-        "demand_resource": listing.demand_resource or {},
+        "accepted_escrows": listing.accepted_escrows or [],
         "max_duration_seconds": listing.max_duration_seconds,
         "oracle_address": listing.oracle_address,
         "status": listing.status.value,
@@ -321,8 +321,7 @@ def validate_order_status(status: str) -> OrderStatusEnum:
 def matches_resource_filters(
     order: Listing,
     offer_resource_type: Optional[str] = None,
-    demand_resource_type: Optional[str] = None,
-    # Equality filters (legacy + new)
+    # Equality filters
     region: Optional[str] = None,
     gpu_model: Optional[str] = None,
     sla: Optional[float] = None,
@@ -346,49 +345,39 @@ def matches_resource_filters(
     internet_download_mbps_min: Optional[int] = None,
     internet_upload_mbps_min: Optional[int] = None,
     open_ports_count_min: Optional[int] = None,
-    bidirectional: bool = False,
 ) -> bool:
     """Check if order matches resource filters.
 
-    Match semantics:
-      - Equality filters: the named field on offer or demand must equal the
-        provided value (matches in either direction).
-      - ``_min`` filters: the offer's value must be >= provided value.
-        Demand-side numerics (which describe what the buyer needs) are not
-        treated as a sat answer for offer ">=" — only the offer is checked.
-        If the offer doesn't carry the field, the slice is rejected.
+    All filters run against ``order.offer_resource``: the listing is one-
+    sided (seller offers a compute resource; the payment side lives on
+    ``accepted_escrows`` and is not part of the resource-filter vocabulary
+    here — payment-token filtering arrives with milestone (a1b)'s
+    filter-spec endpoint).
 
-    Resource type, region, gpu_model, sla preserve their existing semantics.
+    Match semantics:
+      - Equality filters: the named field on offer must equal the value.
+      - ``_min`` filters: the offer's value must be >= provided value.
+        Missing field rejects the slice.
     """
     offer_res = order.offer_resource or {}
-    demand_res = order.demand_resource or {}
 
-    # Resource type filtering (skip if bidirectional)
-    if not bidirectional:
-        if offer_resource_type:
-            if get_resource_type(offer_res) != offer_resource_type.lower():
-                return False
-        if demand_resource_type:
-            if get_resource_type(demand_res) != demand_resource_type.lower():
-                return False
+    if offer_resource_type:
+        if get_resource_type(offer_res) != offer_resource_type.lower():
+            return False
 
-    # Region filtering - applies to both directions
     if region:
-        if offer_res.get("region") != region and demand_res.get("region") != region:
+        if offer_res.get("region") != region:
             return False
 
-    # GPU model filtering - applies to both directions
     if gpu_model:
-        if offer_res.get("gpu_model") != gpu_model and demand_res.get("gpu_model") != gpu_model:
+        if offer_res.get("gpu_model") != gpu_model:
             return False
 
-    # SLA filtering - applies to both directions (legacy exact-equality)
     if sla is not None:
-        if offer_res.get("sla") != sla and demand_res.get("sla") != sla:
+        if offer_res.get("sla") != sla:
             return False
 
-    # Bidirectional equality filters: offer OR demand must match
-    bidir_equality = {
+    equality = {
         "cpu_type": cpu_type,
         "host_disk_type": host_disk_type,
         "motherboard": motherboard,
@@ -397,10 +386,10 @@ def matches_resource_filters(
         "static_ip": static_ip,
         "datacenter_grade": datacenter_grade,
     }
-    for field, val in bidir_equality.items():
+    for field, val in equality.items():
         if val is None:
             continue
-        if offer_res.get(field) != val and demand_res.get(field) != val:
+        if offer_res.get(field) != val:
             return False
 
     # Offer ">=" filters — what the slice provides must meet the buyer's floor.

@@ -19,8 +19,9 @@ class ValidatePublishRequest(BaseModel):
     offer_resource: dict[str, Any] = Field(
         default_factory=dict, description="Offered resource dict"
     )
-    demand_resource: dict[str, Any] = Field(
-        default_factory=dict, description="Demanded resource dict"
+    accepted_escrows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of escrow tuples the seller will accept",
     )
     max_duration_seconds: int | None = Field(
         default=None, description="Optional lease duration ceiling in seconds"
@@ -39,5 +40,5 @@ class ValidatePublishResponse(BaseModel):
     valid: bool
     listing_id: str
     offer_resource_type: str | None = None   # "compute" | "token" | "unknown"
-    demand_resource_type: str | None = None  # "compute" | "token" | "unknown"
+    accepted_escrows_count: int = 0
     errors: list[str] = Field(default_factory=list)

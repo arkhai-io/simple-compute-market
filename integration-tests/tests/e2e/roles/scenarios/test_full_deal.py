@@ -614,10 +614,19 @@ class TestStage03a_ValidatePublish:
         """
         require_state(deal_state, "seller_listing_id")
         from registry_client import ValidatePublishRequest
+        # The storefront synthesizes accepted_escrows from its config + the
+        # DEMAND_RESOURCE token at create-time. For the validate-publish
+        # dry-run we mirror the post-b1 shape directly.
+        accepted_escrows = [{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"payment_token": DEMAND_RESOURCE["token"]["contract_address"]},
+            "price_per_hour": DEMAND_RESOURCE["amount"],
+        }]
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
             offer_resource=OFFER_RESOURCE,
-            demand_resource=DEMAND_RESOURCE,
+            accepted_escrows=accepted_escrows,
             max_duration_seconds=DURATION_HOURS * 3600,
         )
         result = registry_client.validate_publish_listing(req)
@@ -626,11 +635,11 @@ class TestStage03a_ValidatePublish:
             f"{deal_state.seller_listing_id}.\n"
             f"Errors: {result.errors}\n"
             f"offer_resource_type={result.offer_resource_type!r} "
-            f"demand_resource_type={result.demand_resource_type!r}"
+            f"accepted_escrows_count={result.accepted_escrows_count}"
         )
         deal_state._registry_validate_passed = True
-        log.info("[03a] Registry validate-publish: valid=%s offer=%s demand=%s",
-                 result.valid, result.offer_resource_type, result.demand_resource_type)
+        log.info("[03a] Registry validate-publish: valid=%s offer=%s escrows=%d",
+                 result.valid, result.offer_resource_type, result.accepted_escrows_count)
 
 
 class TestStage03c_SellerAgentIndexed:

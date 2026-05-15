@@ -26,7 +26,7 @@ from registry_client.models import (
 def _summary(listing_id: str, **overrides: Any) -> ListingSummary:
     base = dict(
         id=listing_id, status="open", maker_agent_id="http://seller:8001",
-        offer={}, demand={}, max_duration_seconds=3600, created_at=None,
+        offer={}, accepted_escrows=[], max_duration_seconds=3600, created_at=None,
     )
     base.update(overrides)
     return ListingSummary(**base)
@@ -322,7 +322,7 @@ class TestPublishListing:
             from registry_client.models import ListingRequest
             result = await rc.publish_listing(
                 "agent-1",
-                ListingRequest(listing_id="x", offer={}, demand={}, max_duration_seconds=None),
+                ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                 "0xkey",
             )
         assert result["ok"] is True
@@ -339,7 +339,7 @@ class TestPublishListing:
             with pytest.raises(RuntimeError, match="failed for all 2"):
                 await rc.publish_listing(
                     "agent-1",
-                    ListingRequest(listing_id="x", offer={}, demand={}, max_duration_seconds=None),
+                    ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                     "0xkey",
                 )
 
@@ -364,11 +364,11 @@ class TestPublishListingPerRegistry:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             payloads = {
                 "http://r1": ListingRequest(
-                    listing_id="x", offer={"variant": "r1"}, demand={},
+                    listing_id="x", offer={"variant": "r1"}, accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
                 "http://r2": ListingRequest(
-                    listing_id="x", offer={"variant": "r2"}, demand={},
+                    listing_id="x", offer={"variant": "r2"}, accepted_escrows=[],
                     max_duration_seconds=None,
                 ),
             }
@@ -400,7 +400,7 @@ class TestPublishListingPerRegistry:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             payloads = {
                 url: ListingRequest(
-                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
                 )
                 for url in ("http://r1", "http://r2")
             }
@@ -423,10 +423,10 @@ class TestPublishListingPerRegistry:
         async with MultiRegistryClient(["http://r1"]) as rc:
             payloads = {
                 "http://r1": ListingRequest(
-                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
                 ),
                 "http://stranger": ListingRequest(
-                    listing_id="x", offer={}, demand={}, max_duration_seconds=None,
+                    listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None,
                 ),
             }
             results = await rc.publish_listing_per_registry(
@@ -507,7 +507,7 @@ class TestBackcompatWrappersStillReturnFirstOk:
         async with MultiRegistryClient(["http://r1", "http://r2"]) as rc:
             result = await rc.publish_listing(
                 "agent-1",
-                ListingRequest(listing_id="x", offer={}, demand={}, max_duration_seconds=None),
+                ListingRequest(listing_id="x", offer={}, accepted_escrows=[], max_duration_seconds=None),
                 "0xkey",
             )
         assert result == {"ok": True}

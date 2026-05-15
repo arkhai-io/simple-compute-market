@@ -320,16 +320,24 @@ async def gather_outcomes(
 
 
 def _extract_advertised_price(match: dict[str, Any]) -> int | None:
-    """Pull the per-hour advertised price from a match's demand_resource."""
-    demand = match.get("demand_resource") or match.get("demand") or {}
-    if isinstance(demand, str):
+    """Pull the per-hour advertised price from a match's first accepted escrow.
+
+    Mirrors what the seller advertises: ``accepted_escrows[0].price_per_hour``
+    (or 0 for free / None for hidden reserve). Returns ``None`` if no usable
+    rate is published — callers fall back to their own ``initial_price``.
+    """
+    accepted = match.get("accepted_escrows") or []
+    if isinstance(accepted, str):
         try:
-            demand = json.loads(demand)
+            accepted = json.loads(accepted)
         except (ValueError, TypeError):
             return None
-    if not isinstance(demand, dict):
+    if not isinstance(accepted, list) or not accepted:
         return None
-    amount = demand.get("amount")
+    first = accepted[0]
+    if not isinstance(first, dict):
+        return None
+    amount = first.get("price_per_hour")
     try:
         parsed = int(amount) if amount is not None else None
     except (ValueError, TypeError):

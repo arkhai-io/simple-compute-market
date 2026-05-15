@@ -81,6 +81,30 @@ def _format_resource(resource: dict) -> str:
     return json.dumps(resource, separators=(",", ":"), sort_keys=True)
 
 
+def _format_accepted_escrows(entries: list) -> str:
+    if not entries:
+        return "-"
+    if not isinstance(entries, list):
+        return str(entries)
+    lines: list[str] = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            lines.append(f"[{i}] {entry}")
+            continue
+        chain = entry.get("chain_name") or "-"
+        addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
+        price = entry.get("price_per_hour")
+        fields = entry.get("fields") or {}
+        payment_token = fields.get("payment_token") if isinstance(fields, dict) else None
+        parts = [f"chain={chain}", f"escrow={addr}"]
+        if payment_token:
+            parts.append(f"token={_short_contract_address(str(payment_token))}")
+        if price is not None:
+            parts.append(f"price/hr={price}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
 def _shorten(text: str, width: int = 36) -> str:
     if len(text) <= width:
         return text
@@ -237,19 +261,19 @@ def listing_list(
     table.add_column("Seller")
     table.add_column("Buyer")
     table.add_column("Offer")
-    table.add_column("Demand")
+    table.add_column("Accepted escrows")
     table.add_column("Created", justify="right")
 
     for row in items:
         offer_display = _format_resource(row.get("offer_resource", {}))
-        demand_display = _format_resource(row.get("demand_resource", {}))
+        accepted_display = _format_accepted_escrows(row.get("accepted_escrows", []))
         table.add_row(
             str(row.get("listing_id", "-")),
             _shorten(str(row.get("agent_id", "-")), 32),
             _shorten(str(row.get("seller", "-")), 40),
             _shorten(str(row.get("buyer", "-")), 40),
             offer_display if "\n" in offer_display else _shorten(offer_display, 120),
-            demand_display if "\n" in demand_display else _shorten(demand_display, 120),
+            accepted_display if "\n" in accepted_display else _shorten(accepted_display, 120),
             _short_ts(row.get("created_at")),
         )
 
@@ -320,6 +344,6 @@ def listing_show(
     table.add_row("Created", _short_ts(found.get("created_at")))
     table.add_row("Updated", _short_ts(found.get("updated_at")))
     table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
-    table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
+    table.add_row("Accepted escrows", _format_accepted_escrows(found.get("accepted_escrows", [])))
 
     console.print(Panel(table, title="Marketplace Listing", border_style="blue"))

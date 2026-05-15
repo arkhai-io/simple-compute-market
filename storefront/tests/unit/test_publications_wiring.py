@@ -86,8 +86,6 @@ class TestPublishOrderRecordsPublications:
                   )),
             patch("market_storefront.utils.action_executor._canonical_agent_id",
                   return_value="agent-1"),
-            patch("market_storefront.utils.action_executor._synthesize_demand_for_registry",
-                  return_value={"token": {"contract_address": "0x22"}}),
         ):
             out = await action_executor.publish_order_to_registry(order)
         assert out["status"] == "published"
@@ -140,8 +138,6 @@ class TestPublishOrderRecordsPublications:
                   )),
             patch("market_storefront.utils.action_executor._canonical_agent_id",
                   return_value="agent-1"),
-            patch("market_storefront.utils.action_executor._synthesize_demand_for_registry",
-                  return_value={"token": {"contract_address": "0x22"}}),
         ):
             out = await action_executor.publish_order_to_registry(order)
         # At least one OK → overall status is 'published'.

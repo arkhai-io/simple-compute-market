@@ -12,7 +12,7 @@ def test_matches_resource_filters_compute(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        demand_resource={"token": "USDC"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -28,30 +28,13 @@ def test_matches_resource_filters_region(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        demand_resource={"token": "USDC"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
     
     assert matches_resource_filters(order, region="us-west") is True
     assert matches_resource_filters(order, region="us-east") is False
-
-
-def test_matches_resource_filters_bidirectional(db_session, sample_agent):
-    """Test bidirectional filtering skips resource type check."""
-    order = Listing(
-        listing_id="test-order-bidirectional",
-        agent_id=sample_agent.agent_id,
-        seller="http://localhost:8001/.well-known/agent-card.json",
-        offer_resource={"gpu_model": "A100", "region": "us-west"},
-        demand_resource={"token": "USDC"},
-        max_duration_seconds=12960000,
-        status=OrderStatusEnum.open,
-    )
-    
-    # With bidirectional=True, resource type filtering is skipped
-    assert matches_resource_filters(order, offer_resource_type="token", bidirectional=True) is True
-    assert matches_resource_filters(order, offer_resource_type="token", bidirectional=False) is False
 
 
 def test_matches_resource_filters_gpu_model(db_session, sample_agent):
@@ -61,7 +44,7 @@ def test_matches_resource_filters_gpu_model(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west"},
-        demand_resource={"token": "USDC"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -77,7 +60,7 @@ def test_matches_resource_filters_sla(db_session, sample_agent):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource={"gpu_model": "A100", "region": "us-west", "sla": 0.99},
-        demand_resource={"token": "USDC"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
@@ -122,7 +105,7 @@ def _make_listing(sample_agent, **offer_extras):
         agent_id=sample_agent.agent_id,
         seller="http://localhost:8001/.well-known/agent-card.json",
         offer_resource=offer,
-        demand_resource={"token": "USDC"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"payment_token": "USDC"}}],
         max_duration_seconds=12960000,
         status=OrderStatusEnum.open,
     )
