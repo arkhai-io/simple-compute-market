@@ -18,7 +18,7 @@ Three things are protocol-baked today and shouldn't be:
    amount per hour." Multi-escrow, multi-arbiter, hidden-price, and
    non-VM listings (data, models, etc.) all want a different shape.
 2. **Filter vocabulary is hardcoded — same 22 fields copy-pasted across
-   registry-service and storefront.** Adding `payment_token` as a filter
+   registry-service and storefront.** Adding `token` as a filter
    needs edits to FastAPI Query params, `ListingFilterParams`,
    `to_spec_kwargs`, and `matches_listing_filters` on both sides. The
    storefront-side `listing_filters.py` even documents that it
@@ -27,7 +27,7 @@ Three things are protocol-baked today and shouldn't be:
    filterable; specialized registries can't ship their own filter set.
 3. **Escrow shape is discriminated by a `kind` string.** `EscrowTermsProposal`
    carries `escrow_kind: "erc20_non_tierable"` + `arbiter_kind: "recipient"`
-   + `payment_token` + `expiration_unix`, validated against a hardcoded
+   + `token` + `expiration_unix`, validated against a hardcoded
    single canonical shape. Adding a new escrow contract requires a new
    `kind` string + new codec entry + new validator branch. The contract
    address is the natural identity; the discriminator is redundant.
@@ -291,7 +291,7 @@ for row in cur.execute("SELECT listing_id, demand_resource FROM listings"):
             "chain_id": <derive from config.alkahest_network>,
             "escrow_address": <get_erc20_escrow_obligation_nontierable(chain)>,
             "fields": {
-                "payment_token": dr["token"]["contract_address"],
+                "token": dr["token"]["contract_address"],
                 "amount": dr.get("amount"),                     # nullable; per-hour
             },
         }]
@@ -311,7 +311,7 @@ the test stack expects.
 ### Tests touched
 
 `buyer/tests/`, `storefront/tests/`, `policy/tests/`, `service/tests/`,
-`integration-tests/tests/e2e/`. The e2e suites pass `payment_token`
+`integration-tests/tests/e2e/`. The e2e suites pass `token`
 through `negotiate_new` today (added during the step-7 refactor) — that
 flow stays but the value gets sourced from a single-tuple
 `accepted_escrows` on the test fixture rather than `demand_resource`.
@@ -463,8 +463,8 @@ filters:
     alias_kind: lower_bound                 # URL sugar: ?ram_gb_min=16
     on_missing: fail
     indexed: false
-  - name: payment_token
-    path: $.accepted_escrows[*].fields.payment_token
+  - name: token
+    path: $.accepted_escrows[*].fields.token
     op: in
     value_type: address
     on_missing: pass                        # underreport-friendly
@@ -495,7 +495,7 @@ acceptable on the wire (`?ram_gb=range:[16,)`).
 ### Per-query `on_missing` override
 
 ```
-GET /listings?payment_token=0x...&strict.payment_token=true
+GET /listings?token=0x...&strict.token=true
 ```
 
 Overrides spec default for that filter on that query. Buyer policies
@@ -534,7 +534,7 @@ Concretely:
 - Trim `GET /api/v1/listings` to basic resource enumeration: `limit`,
   `offset`, and an optional `status` (open / closed / paused — that's
   resource state, not market-discovery vocabulary). No `gpu_model`,
-  `region`, `payment_token`, etc. — those belong on registries.
+  `region`, `token`, etc. — those belong on registries.
 - Drop `storefront/src/market_storefront/utils/listing_filters.py`
   entirely. Drop `storefront/src/market_storefront/models/listing_models.py`'s
   `ListingFilterParams` + `listing_filter_params` factory.
@@ -573,7 +573,7 @@ Two storage strategies, selected per filter via `indexed: true|false`:
 - **`indexed: true`**: registry maintains a denormalized side index
   at publish/update time (generated column + index for scalar paths,
   side table for array projections). Used for hot axes like
-  `payment_token` and `gpu_model`. Costs disk + write latency; pays
+  `token` and `gpu_model`. Costs disk + write latency; pays
   for query latency at scale.
 
 Mixed-predicate queries narrow on scalar/indexed filters first, then
@@ -618,55 +618,39 @@ Everything else (filter vocabulary, listing extensions like `region`,
 
 ## Post-(a1a) follow-ups
 
-Surfaced during the (a1a) registry catch-up review. Not blocking (a1b),
-but each belongs to an upcoming slice when it touches the relevant code.
+Surfaced during the (a1a) registry catch-up review. Items (1) and (2)
+landed before (a1b) — the registry's `/filter-spec` endpoint will
+advertise filter paths that reference these field names and types, so
+fixing them up-front avoids a public-schema break later. Item (3) is
+left for after (a1b) since the filter spec operates on addresses, not
+symbols.
 
-### `fields` should match on-chain ObligationData keys
+### ~~`fields` should match on-chain ObligationData keys~~ (done)
 
-`accepted_escrows[i].fields` and `EscrowProposal.fields` use
-`payment_token`, but the on-chain `ERC20EscrowObligation.ObligationData`
-struct's key is `token`. Both sides hardcode the translation
-(`buyer/market_buyer/escrow_client.py:94`,
-`storefront/.../escrow_verification.py:244`). The schema docstring
-claims `fields` is a "Partial<ObligationData>" — that's the right goal,
-but the implementation violates it.
+Landed: `accepted_escrows[i].fields.token` and
+`EscrowProposal.fields.token` now mirror the on-chain
+`ERC20EscrowObligation.ObligationData.token` key directly. The
+`token` → `token` translation in `escrow_client.py` and
+`escrow_verification.py` is gone — the value passes through unchanged.
 
-Principle: **DB and wire field names match the on-chain shape**. Codec
-conversion is reserved for cases where the wire shape genuinely cannot
-be the on-chain shape (e.g. per-period rates; see next item).
+Future escrow kinds (ERC721, native, bundle) will still want per-codec
+`fields_to_obligation_data(fields, agreed_price, duration_seconds)`
+methods; today's `build_payment_obligation_data` in
+`service/clients/alkahest.py` becomes the ERC20 codec's implementation
+of that method when the dispatch becomes polymorphic (alkahest.py
+docstring still flags this as "step 6").
 
-Cleanup:
-- Rename `fields["payment_token"]` → `fields["token"]` across schemas,
-  buyer escrow builder, storefront verifier, refund, and tests.
-- Drop the `payment_token` → `token` translation in
-  `escrow_client.py` and `escrow_verification.py` — the value passes
-  through unchanged.
-- For future escrow kinds (ERC721, native, bundle): each
-  `EscrowKindCodec` owns a `fields_to_obligation_data(fields,
-  agreed_price, duration_seconds)` method that maps `fields` directly
-  into the contract's ObligationData layout. Today's ERC20-specific
-  `build_payment_obligation_data` in `service/clients/alkahest.py`
-  becomes the ERC20 codec's implementation of that method (the
-  docstring at `alkahest.py:486` already flags this as "step 6 when
-  the dispatch becomes polymorphic").
+### ~~`price_per_hour` representation~~ (done)
 
-### `price_per_hour` representation
+Landed: `price_per_hour` is now a float in base units, and the codec
+amount formula is `int(price_per_hour * duration_seconds / 3600)` —
+float multiply, single int round at the wei boundary. This lets
+sub-hour leases stay precise for small-base-unit rates (`int` math
+would truncate `1 * 1800 // 3600 = 0` early), and admits sub-base-unit
+rates per hour at the cost of representation-not-cardinality precision.
 
-Today: integer in base units (token-amount × 10^decimals). For USDC at
-6 decimals, 100 USDC is `100_000_000`. This bakes token-decimals
-knowledge into the wire layer — adding/removing decimals on a forked
-token, or onboarding tokens with rare decimal values, means hunting
-for hardcoded scaling.
-
-Pick one:
-- **Float**: 100 USDC = `100.0`. Codec applies decimals at
-  obligation-build time (`int(price_per_hour * duration_seconds *
-  10^decimals / 3600)`).
-- **Raw integer token units** (no decimals scaling on the wire):
-  100 USDC = `100`. Whole tokens only.
-
-The current "integer × 10^decimals" is the worst of both — bakes
-decimals into the wire while still constraining values to integers.
+The "integer × 10^decimals" hybrid is gone. Token decimals are now
+purely a presentation concern (CLI rendering via Decimal).
 
 ### Token references: addresses, not symbols
 
