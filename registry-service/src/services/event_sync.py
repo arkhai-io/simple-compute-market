@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -19,6 +20,8 @@ class EventSyncService:
         self.is_running = False
         self.sync_task: Optional[asyncio.Task] = None
         self.last_synced_block = 0
+        self._sync_lock = asyncio.Lock()
+        self._last_on_demand_sync = 0.0
 
     async def start(self, sync_interval_ms: int = 60000):
         """Start the event sync service"""
@@ -80,20 +83,39 @@ class EventSyncService:
 
     async def sync_latest(self):
         """Sync latest events since last sync"""
-        try:
-            current_block = self.identity_registry.w3.eth.block_number
-            
-            if self.last_synced_block == 0:
-                await self.sync_from_start()
-                return
+        async with self._sync_lock:
+            try:
+                current_block = self.identity_registry.w3.eth.block_number
 
-            if current_block > self.last_synced_block:
-                await self.sync_block_range(self.last_synced_block + 1, current_block)
-                self.last_synced_block = current_block
-                logger.info(f"[EventSync] Synced up to block {current_block}")
+                if self.last_synced_block == 0:
+                    await self.sync_from_start()
+                    return
+
+                if current_block > self.last_synced_block:
+                    await self.sync_block_range(self.last_synced_block + 1, current_block)
+                    self.last_synced_block = current_block
+                    logger.info(f"[EventSync] Synced up to block {current_block}")
+            except Exception as e:
+                logger.error(f"[EventSync] Error during latest sync: {e}")
+                raise
+
+    async def sync_on_demand(self, min_interval_s: float = 2.0) -> bool:
+        """Throttled trigger for sync_latest from request handlers.
+
+        Returns True if a sync was actually attempted, False if throttled.
+        Lets endpoints like GET /agents/{id} lazily catch up the indexer when
+        a row is missing, without depending on the 60s periodic timer firing
+        between the on-chain registration and the client's lookup window.
+        """
+        now = time.monotonic()
+        if now - self._last_on_demand_sync < min_interval_s:
+            return False
+        self._last_on_demand_sync = now
+        try:
+            await self.sync_latest()
         except Exception as e:
-            logger.error(f"[EventSync] Error during latest sync: {e}")
-            raise
+            logger.warning(f"[EventSync] on-demand sync failed: {e}")
+        return True
 
     async def sync_block_range(self, from_block: int, to_block: int):
         """Sync events in a block range"""

@@ -182,7 +182,15 @@ async def wait_for_agent_indexed(
     start = _time.monotonic()
     deadline = start + timeout
 
+    # Lazy-driven sync: each poll tick tries a throttled sync_latest before
+    # checking the DB. The EventSyncService throttle (2 s by default) caps
+    # the actual RPC load; without this, this endpoint just waited for the
+    # 60 s periodic timer and routinely missed the e2e poll window.
+    import src.main as _main
+
     while True:
+        if _main.event_sync is not None:
+            await _main.event_sync.sync_on_demand()
         db.expire_all()
         agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
         if agent is not None:
