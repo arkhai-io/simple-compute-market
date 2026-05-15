@@ -13,9 +13,67 @@ from typing import Any, Literal
 
 UTC = timezone.utc
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    field_serializer,
+    field_validator,
+)
 
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# uint256 wire helpers
+# ---------------------------------------------------------------------------
+# Amounts (token amount, price-per-hour) live in the uint256 domain on chain
+# and routinely exceed 2^53 for 18-decimal tokens. JSON numbers can't carry
+# uint256 safely (most non-Python parsers treat them as IEEE-754 doubles),
+# and SQLite INTEGER is int64 — both lossy past ~9.2e18 base units.
+# Pattern: keep Python ``int`` internally (arbitrary precision) and emit
+# decimal-digit strings on serialization. Validators accept either form so
+# already-stored Python-int data round-trips without a migration.
+
+
+def _parse_uint256_str(v: Any, field_name: str) -> int | None:
+    """Coerce a wire value (int|str|None) into a Python int.
+
+    Accepts:
+      * ``None`` — passes through (used for tristate "no advertised value").
+      * ``int`` — passes through (back-compat with existing Python callers).
+      * decimal-digit ``str`` — parses to int (the canonical wire form).
+
+    Rejects floats, negative values, and anything that doesn't look like a
+    non-negative decimal integer.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):  # bool is a subclass of int — exclude explicitly
+        raise ValueError(f"{field_name}: expected non-negative decimal, got bool")
+    if isinstance(v, int):
+        if v < 0:
+            raise ValueError(f"{field_name}: must be non-negative, got {v}")
+        return v
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        if not s.isdigit():
+            raise ValueError(
+                f"{field_name}: must be a non-negative decimal-digit string, "
+                f"got {v!r}"
+            )
+        return int(s)
+    raise ValueError(
+        f"{field_name}: must be int, decimal string, or None — got "
+        f"{type(v).__name__}"
+    )
+
+
+def _serialize_uint256_str(v: int | None) -> str | None:
+    return None if v is None else str(v)
 
 
 class ActionType(str, Enum):
@@ -85,10 +143,21 @@ class TokenResource(Resource):
     amount: int | None = Field(
         default=None,
         description=(
-            "Integer amount in base units (token amount * 10**decimals). "
-            "0 = free; null = hidden reserve (negotiate); >0 = public price."
+            "Non-negative amount in base units (token amount × 10**decimals). "
+            "0 = free; null = hidden reserve (negotiate); >0 = public price. "
+            "On the wire as a decimal-digit string (uint256-safe); Python int "
+            "internally."
         ),
     )
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_amount(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "amount")
+
+    @field_serializer("amount")
+    def _serialize_amount(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
 
 
 class ProvisionTerms(BaseModel):
@@ -244,19 +313,28 @@ class AcceptedEscrow(BaseModel):
             "duration / 3600)."
         ),
     )
-    price_per_hour: float | None = Field(
+    price_per_hour: int | None = Field(
         default=None,
         description=(
             "Advertised per-hour rate in the escrow's payment token, in "
-            "base units (token-amount × 10^decimals). Float so the rate "
-            "stays precise when duration is sub-hour and the integer-base-"
-            "unit amount comes from ``int(price_per_hour × duration_seconds "
-            "/ 3600)``. ``None`` = hidden reserve (seller did not publish a "
-            "rate; negotiation must establish one via the strategy's "
-            "``default_min_price``). Drives the total amount that gets "
-            "populated into ObligationData.amount at settlement."
+            "base units (token-amount × 10^decimals). uint256-domain — on "
+            "the wire as a decimal-digit string, Python int internally. "
+            "Total settlement amount is ``price_per_hour × duration_seconds "
+            "// 3600`` (integer division; sub-hour fractions truncate). "
+            "``None`` = hidden reserve (seller did not publish a rate; "
+            "negotiation must establish one via the strategy's "
+            "``default_min_price``)."
         ),
     )
+
+    @field_validator("price_per_hour", mode="before")
+    @classmethod
+    def _parse_price_per_hour(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "price_per_hour")
+
+    @field_serializer("price_per_hour")
+    def _serialize_price_per_hour(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
 
 
 class EscrowProposal(BaseModel):

@@ -71,7 +71,19 @@ def synthesize_accepted_escrows_from_demand(
         )
         return None
     amount = normalized.get("amount")
-    price_per_hour = float(amount) if isinstance(amount, (int, float)) else None
+    # ``price_per_hour`` is uint256-domain (base units) — emit as a
+    # decimal-digit string on the stored/wire JSON to stay safe past
+    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
+    # with ``int(...)``.
+    if isinstance(amount, bool):
+        price_per_hour: str | None = None
+    elif isinstance(amount, int):
+        price_per_hour = str(amount)
+    elif isinstance(amount, str):
+        s = amount.strip()
+        price_per_hour = s if s.isdigit() else None
+    else:
+        price_per_hour = None
     return [{
         "chain_name": CONFIG.chain_name,
         "escrow_address": escrow_address.lower(),

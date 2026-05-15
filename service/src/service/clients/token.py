@@ -181,6 +181,51 @@ def init_token_registry(source_path: str | Path | None) -> TokenRegistry:
     return TOKEN_REGISTRY
 
 
+def render_token(
+    token: ERC20TokenMetadata | str | dict | None,
+    *,
+    registry: TokenRegistry | None = None,
+) -> str:
+    """Format a token for human display: "SYMBOL (0x...)" when known.
+
+    Address is always shown — strict-mode storage carries addresses as the
+    canonical identity, and surfacing both prevents the chain-ambiguity
+    confusion that bare symbols ("USDC on which chain?") cause. When the
+    symbol is unknown or the input is just an address, returns "0x...".
+    Returns "-" for None / missing.
+
+    Inputs:
+      * ``ERC20TokenMetadata`` — full metadata, render directly.
+      * ``str`` — 0x address; look up symbol via ``registry`` (defaults
+        to the module singleton) for the parenthetical.
+      * ``dict`` — partial metadata; uses keys present.
+      * ``None`` / falsy — returns "-".
+    """
+    if not token:
+        return "-"
+    reg = registry if registry is not None else TOKEN_REGISTRY
+
+    if isinstance(token, ERC20TokenMetadata):
+        sym, addr = token.symbol, token.contract_address
+    elif isinstance(token, dict):
+        addr = str(token.get("contract_address", "") or "")
+        sym = str(token.get("symbol", "") or "")
+        if not sym and addr:
+            looked = reg.get_by_address(addr)
+            if looked is not None:
+                sym = looked.symbol
+    elif isinstance(token, str):
+        addr = token
+        looked = reg.get_by_address(addr) if addr.startswith("0x") else None
+        sym = looked.symbol if looked is not None else ""
+    else:
+        return str(token)
+
+    if sym:
+        return f"{sym} ({addr})"
+    return addr or "-"
+
+
 __all__ = [
     "ERC20TokenMetadata",
     "TokenRegistry",
@@ -188,4 +233,5 @@ __all__ = [
     "TOKEN_REGISTRY",
     "init_token_registry",
     "get_wallet_token_balance",
+    "render_token",
 ]

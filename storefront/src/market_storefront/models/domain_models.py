@@ -154,17 +154,42 @@ class ComputeDomainResource(CoreResource):
 
     @staticmethod
     def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
-        """Convert token identifiers into ERC20TokenMetadata."""
+        """Materialize ``ERC20TokenMetadata`` from a wire payload.
+
+        Strict address-only on the wire: bare strings must be 0x-prefixed
+        addresses; bare symbols are rejected. The local ``TOKEN_REGISTRY``
+        enriches addresses with symbol/decimals when known; addresses not
+        in the registry yield an address-only stub (``symbol=""``,
+        ``decimals=0``) so callers can still identify the token. For
+        dicts, ``contract_address`` is required.
+        """
         if isinstance(token_value, ERC20TokenMetadata):
             return token_value
         if isinstance(token_value, dict):
+            if not token_value.get("contract_address"):
+                raise ValueError(
+                    "Token dict must include 'contract_address' (0x...)"
+                )
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
+            if not token_value.startswith("0x"):
+                raise ValueError(
+                    f"Token string must be a 0x-prefixed address, got "
+                    f"{token_value!r} — resolve symbol→address client-side"
+                )
             from service.clients.token import TOKEN_REGISTRY
 
-            return TOKEN_REGISTRY.require(token_value)
+            looked_up = TOKEN_REGISTRY.get_by_address(token_value)
+            if looked_up is not None:
+                return looked_up
+            return ERC20TokenMetadata(
+                symbol="",
+                contract_address=token_value,
+                decimals=0,
+            )
         raise ValueError(
-            "Token value must be a symbol string, ERC20TokenMetadata dict, or ERC20TokenMetadata instance"
+            "Token value must be a 0x-address string, ERC20TokenMetadata "
+            "dict (with contract_address), or ERC20TokenMetadata instance"
         )
     
     @classmethod

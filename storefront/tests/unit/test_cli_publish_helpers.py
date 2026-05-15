@@ -24,6 +24,38 @@ from market_storefront.cli_publish import (
     _open_order_resource_ids,
     _publish_round,
 )
+from service.clients.token import ERC20TokenMetadata, TOKEN_REGISTRY
+
+
+# Test tokens — injected into TOKEN_REGISTRY for the test duration so
+# the publish round's symbol→address resolution finds them.  The
+# singleton registry is otherwise empty in unit-test context (the
+# bundled JSON path only loads via agent.py startup).
+_MOCK_ADDRESS = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+_USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+
+
+@pytest.fixture(autouse=True)
+def _seed_token_registry():
+    """Inject MOCK + USDC into TOKEN_REGISTRY for the test; tear down after."""
+    injected: list[tuple[str, str]] = []
+    for sym, addr, dec in (("MOCK", _MOCK_ADDRESS, 0), ("USDC", _USDC_ADDRESS, 6)):
+        if TOKEN_REGISTRY.get_by_symbol(sym) is None:
+            TOKEN_REGISTRY.register_token(
+                ERC20TokenMetadata(
+                    symbol=sym, contract_address=addr, decimals=dec,
+                )
+            )
+            injected.append((sym, addr))
+    yield
+    with TOKEN_REGISTRY._lock:
+        for sym, addr in injected:
+            TOKEN_REGISTRY._tokens_by_symbol.pop(sym, None)
+            TOKEN_REGISTRY._tokens_by_address.pop(addr.lower(), None)
+
+
+def _mock_address() -> str:
+    return _MOCK_ADDRESS
 
 
 def _init_db(path: str) -> None:
@@ -183,7 +215,9 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     # cycles can tell which resource a given order covers.
     assert calls[0]["offer"]["resource_id"] == "compute-002"
     # And demand was assembled from the (default) pricing, not a flag.
-    assert calls[0]["demand"] == {"token": "MOCK", "amount": 100}
+    # Strict mode: token is the 0x address, amount is a decimal-digit
+    # string in base units (MOCK has 0 decimals so 100 stays 100).
+    assert calls[0]["demand"] == {"token": _mock_address(), "amount": "100"}
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
@@ -259,8 +293,10 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     )
 
     by_rid = {c["offer"]["resource_id"]: c["demand"] for c in calls}
-    assert by_rid["compute-cheap"] == {"token": "USDC", "amount": 40}
-    assert by_rid["compute-default"] == {"token": "MOCK", "amount": 100}
+    # 40 USDC × 10^6 decimals = 40_000_000 base units, on the wire as
+    # a decimal-digit string (uint256-safe).
+    assert by_rid["compute-cheap"] == {"token": _USDC_ADDRESS, "amount": "40000000"}
+    assert by_rid["compute-default"] == {"token": _mock_address(), "amount": "100"}
     assert len(published) == 2
     assert not failed
 
@@ -339,7 +375,7 @@ def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatc
     assert len(published) == 1
     assert len(failed) == 0
     assert calls[0]["demand"]["amount"] is None
-    assert calls[0]["demand"]["token"] == "MOCK"
+    assert calls[0]["demand"]["token"] == _mock_address()
 
 
 def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
@@ -375,7 +411,7 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
 
     assert len(published) == 1
     assert len(failed) == 0
-    assert calls[0]["demand"]["amount"] == 0
+    assert calls[0]["demand"]["amount"] == "0"
     # confirms the default didn't override the explicit "0"
 
 

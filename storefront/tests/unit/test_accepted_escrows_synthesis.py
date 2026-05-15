@@ -63,9 +63,36 @@ def test_synthesize_from_token_demand(stub_alkahest_address):
     entry = result[0]
     assert entry["escrow_address"] == _ESCROW_ADDR.lower()
     assert entry["fields"] == {"token": _TOKEN_ADDR}
-    assert entry["price_per_hour"] == 1000000
+    # uint256-safe: price_per_hour is a decimal-digit string on the wire,
+    # even when the caller passed a Python int.
+    assert entry["price_per_hour"] == "1000000"
     # chain_name comes from CONFIG; just assert presence + type.
     assert isinstance(entry["chain_name"], str) and entry["chain_name"]
+
+
+def test_synthesize_from_token_demand_uint256_amount(stub_alkahest_address):
+    """A 10-WETH amount (10^19 base units, overflows int64) survives the
+    round-trip because the wire form is a string, not a JSON number."""
+    big = 10 * 10**18  # 10 WETH in 18-decimal base units; > 2^63
+    demand = {
+        "token": {"symbol": "WETH", "contract_address": _TOKEN_ADDR, "decimals": 18},
+        "amount": big,
+    }
+    result = synthesize_accepted_escrows_from_demand(demand)
+    assert result is not None
+    assert result[0]["price_per_hour"] == str(big)
+
+
+def test_synthesize_accepts_string_amount(stub_alkahest_address):
+    """Caller may pass amount as a decimal string — common when forwarded
+    from inbound wire payloads that were already string-typed."""
+    demand = {
+        "token": {"symbol": "USDC", "contract_address": _TOKEN_ADDR, "decimals": 6},
+        "amount": "1500",
+    }
+    result = synthesize_accepted_escrows_from_demand(demand)
+    assert result is not None
+    assert result[0]["price_per_hour"] == "1500"
 
 
 def test_synthesize_from_token_demand_hidden_reserve(stub_alkahest_address):

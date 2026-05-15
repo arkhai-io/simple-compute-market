@@ -782,7 +782,17 @@ def _token_resource_from_accepted_escrow(
             decimals=0,
         )
     price_per_hour = accepted_escrow.get("price_per_hour")
-    amount = int(price_per_hour) if isinstance(price_per_hour, (int, float)) else 0
+    # price_per_hour is uint256-domain — decimal-digit string on the wire,
+    # int internally. Accept either form; treat anything else (None,
+    # malformed, bool) as 0.
+    if isinstance(price_per_hour, bool):
+        amount = 0
+    elif isinstance(price_per_hour, int):
+        amount = price_per_hour
+    elif isinstance(price_per_hour, str) and price_per_hour.strip().isdigit():
+        amount = int(price_per_hour.strip())
+    else:
+        amount = 0
     return TokenResource(token=meta, amount=amount)
 
 

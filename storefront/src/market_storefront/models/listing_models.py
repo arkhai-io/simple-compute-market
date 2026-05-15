@@ -34,10 +34,14 @@ class RefundRequest(BaseModel):
 
     ``buyer_address`` defaults to the listing's recorded buyer (the
     storefront DB knows it once a deal closes); pass explicitly to
-    override.
+    override. ``token`` (when given) is a 0x contract address. ``amount``
+    is a non-negative decimal-digit string in base units (uint256-safe);
+    Python int is accepted too for in-process callers. Human-decimal
+    scaling is a client concern — the storefront expects already-scaled
+    base-unit values.
     """
     buyer_address: str | None = None
-    amount: float | None = None
+    amount: str | int | None = None
     token: str | None = None
 
 

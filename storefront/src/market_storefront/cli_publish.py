@@ -24,6 +24,7 @@ import sqlite3
 import subprocess
 import time
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Optional
 
@@ -269,6 +270,21 @@ def _publish_round(
             default_min_price=default_min_price,
             default_token=default_token,
         )
+        # Strict-mode wire format: resolve symbol→address + scale human
+        # min_price → base units locally before sending. The storefront
+        # API only accepts 0x addresses and integer base-unit amounts.
+        from service.clients.token import TOKEN_REGISTRY
+        token_meta = TOKEN_REGISTRY.resolve(token)
+        if token_meta is None:
+            failed.append((
+                res,
+                f"unknown token {token!r} — not in local TOKEN_REGISTRY "
+                f"(set [seller.token_registry_path] or pass a 0x address)",
+            ))
+            continue
+        token_address = token_meta.contract_address.lower()
+        token_decimals = token_meta.decimals
+
         if min_price is None:
             if not publish_priceless:
                 failed.append((
@@ -283,15 +299,29 @@ def _publish_round(
             # cleanly with reason=no_floor_price.
             advertised_amount: Any = None
         else:
-            # min_price is "0" (free) or "N" (public price); pass through.
+            # min_price is "0" (free) or "N" (public price); scale to
+            # base units using the resolved token's decimals. The wire
+            # form is a decimal-digit string (uint256-safe).
             try:
-                advertised_amount = float(min_price)
-            except (ValueError, TypeError):
+                human = Decimal(str(min_price))
+            except (InvalidOperation, ValueError, TypeError):
                 failed.append((
                     res,
                     f"unparseable min_price={min_price!r}; expected numeric string",
                 ))
                 continue
+            scaled = human * (Decimal(10) ** token_decimals)
+            if scaled != scaled.to_integral_value():
+                failed.append((
+                    res,
+                    f"min_price={min_price!r} has more decimals than the "
+                    f"token's {token_decimals}",
+                ))
+                continue
+            if scaled < 0:
+                failed.append((res, f"min_price={min_price!r} is negative"))
+                continue
+            advertised_amount = str(int(scaled))
         max_duration_seconds = res.get("max_duration_seconds") or default_max_duration_seconds
         # Explicit resource_id pins this order to a specific DB row, so
         # multiple identical-spec resources each get a distinct order in
@@ -303,7 +333,7 @@ def _publish_round(
             "sla": res["sla"],
             "region": res["region"],
         }
-        demand = {"token": token, "amount": advertised_amount}
+        demand = {"token": token_address, "amount": advertised_amount}
         try:
             resp = _publish_offer(
                 base_url, offer, demand, max_duration_seconds, wallet_address, private_key,

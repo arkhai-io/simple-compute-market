@@ -5,14 +5,14 @@ transfer. It encodes the policy decisions (required fields, default
 amount, required token lookup) and returns a structured outcome that
 the endpoint translates into an HTTP status + body.
 
-Post the demand_resource cutover, refunds read pricing from
-``accepted_escrows[0].fields.token`` + ``price_per_hour``.
+Strict address-only contract: ``payload["token"]`` is a 0x address;
+``payload["amount"]`` is an integer in base units. Refunds read pricing
+from ``accepted_escrows[0].fields.token`` + ``price_per_hour``.
 """
 
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 
 import pytest
 
@@ -29,15 +29,13 @@ _MOCK_TOKEN = {
 
 
 def _fake_resolver(registry: dict[str, dict]):
-    def _resolve(ident: str) -> dict:
-        if ident.startswith("0x"):
-            for meta in registry.values():
-                if meta["contract_address"].lower() == ident.lower():
-                    return dict(meta)
-            raise ValueError(f"unknown address: {ident}")
-        if ident.upper() not in registry:
-            raise ValueError(f"unknown symbol: {ident}")
-        return dict(registry[ident.upper()])
+    def _resolve(address: str) -> dict:
+        if not address.startswith("0x"):
+            raise ValueError(f"expected 0x address, got {address!r}")
+        for meta in registry.values():
+            if meta["contract_address"].lower() == address.lower():
+                return dict(meta)
+        raise ValueError(f"unknown address: {address}")
     return _resolve
 
 
@@ -136,38 +134,68 @@ def test_explicit_amount_overrides_order_default(resolver):
     payload = {
         "listing_id": "ord-1",
         "buyer_address": "0x" + "b" * 40,
-        "amount": "2.5",  # human units, 18 decimals → 2.5e18 raw
+        "amount": 2_500_000_000_000_000_000,  # 2.5 MOCK in base units (18 decimals)
     }
     tag, params = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "ok"
-    assert params["amount_raw"] == int(Decimal("2.5") * 10**18)
+    assert params["amount_raw"] == 2_500_000_000_000_000_000
 
 
-def test_explicit_token_symbol_is_resolved(resolver):
+def test_explicit_token_address_is_resolved(resolver):
+    """A 0x token override drives resolve_token; symbols are rejected."""
     order = _order(
         accepted_escrows=[_accepted_escrow(price_per_hour=500)],
     )
     payload = {
         "listing_id": "ord-1",
         "buyer_address": "0x" + "c" * 40,
-        "token": "MOCK",
-        "amount": "0.001",
+        "token": _MOCK_TOKEN["contract_address"],
+        "amount": 10**15,  # 0.001 MOCK
     }
     tag, params = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
     assert tag == "ok"
     assert params["token_address"] == _MOCK_TOKEN["contract_address"]
-    assert params["amount_raw"] == 10**15  # 0.001 * 10^18
+    assert params["amount_raw"] == 10**15
 
 
-def test_amount_with_too_many_decimals_is_value_error(resolver):
+def test_symbol_token_override_is_rejected(resolver):
+    """Symbol strings on the wire are a client-side concept; reject."""
+    order = _order()
+    payload = {
+        "listing_id": "ord-1",
+        "buyer_address": "0x" + "c" * 40,
+        "token": "MOCK",
+        "amount": 1,
+    }
+    with pytest.raises(ValueError, match="0x address"):
+        derive_refund_params(order=order, payload=payload, resolve_token=resolver)
+
+
+def test_non_integer_amount_is_value_error(resolver):
+    """Human-decimal amounts get scaled client-side; server rejects."""
     order = _order()
     payload = {
         "listing_id": "ord-1",
         "buyer_address": "0x" + "d" * 40,
-        "amount": "0.0000000000000000001",  # 19 decimals > 18 → not representable
+        "amount": "2.5",
     }
-    with pytest.raises(ValueError, match="more decimals"):
+    with pytest.raises(ValueError, match="non-negative decimal-digit string"):
         derive_refund_params(order=order, payload=payload, resolve_token=resolver)
+
+
+def test_uint256_amount_round_trips_as_string(resolver):
+    """A WETH-scale amount (10^19 base units, overflows int64) passes
+    through as a decimal-digit string."""
+    big = 10 * 10**18  # > 2^63
+    order = _order()
+    payload = {
+        "listing_id": "ord-1",
+        "buyer_address": "0x" + "a" * 40,
+        "amount": str(big),
+    }
+    tag, params = derive_refund_params(order=order, payload=payload, resolve_token=resolver)
+    assert tag == "ok"
+    assert params["amount_raw"] == big
 
 
 def test_zero_amount_returns_400(resolver):

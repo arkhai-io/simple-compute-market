@@ -148,12 +148,14 @@ def refund_cmd(
     ),
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
-        help="Refund amount in human token units. Defaults to the listing's "
-             "demanded payment (demand.amount * agreed_duration_seconds/3600).",
+        help="Refund amount in base units (decimal-digit string; uint256-safe). "
+             "Defaults to the listing's accepted_escrows[0].price_per_hour × "
+             "agreed_duration_seconds // 3600.",
     ),
     token: Optional[str] = typer.Option(
         None, "--token",
-        help="Override the refund token symbol. Defaults to the token on the listing.",
+        help="Override the refund token (0x contract address). Defaults to the "
+             "token on the listing's accepted_escrows[0].",
     ),
     agent_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
@@ -205,11 +207,8 @@ def refund_cmd(
     result.add_row("Tx hash", str(resp.get("tx_hash", "-")))
     result.add_row("From", str(resp.get("from_address", "-")))
     result.add_row("To", str(resp.get("to_address", "-")))
-    tok = resp.get("token") or {}
-    result.add_row(
-        "Token",
-        f"{tok.get('symbol', '-')} ({tok.get('contract_address', '-')})",
-    )
+    from service.clients.token import render_token
+    result.add_row("Token", render_token(resp.get("token")))
     result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
     result.add_row("Block", str(resp.get("block_number", "-")))
     console.print(Panel(result, title="Refund complete", border_style="green"))
