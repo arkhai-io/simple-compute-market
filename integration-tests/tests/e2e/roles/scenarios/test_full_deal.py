@@ -51,7 +51,8 @@ Phase 6 — Negotiation settlement
   06b  Force-accept + terminal state:
          Guard: no exit events before force-accept
          POST .../force-accept → action=accept
-         GET .../negotiations/{neg_id} → terminal_state=success
+         GET .../negotiations/{neg_id} → terminal_state=success;
+                                          escrows=[] (none until phase 7)
 
 Phase 7 — On-chain escrow + provisioning gate setup
   07   Create real escrow_uid; add provisioning mock rule (pause_before_result=True)
@@ -70,6 +71,8 @@ Phase 9 — Provisioning completion
          wait_for_settlement (server-side long-poll) → ready=True, status=ready
          GET /settle/{uid}/status → status=ready, tenant_credentials present
          GET /api/v1/listings/{id} → status=accepted or closed
+         GET .../negotiations/{neg_id} → primary escrow status=ready,
+                                          fulfillment_uid populated
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
@@ -922,6 +925,10 @@ class TestStage06b_ForceAcceptAndTerminal:
             f"Expected terminal_state=success, got {detail.terminal_state!r}"
         )
         assert detail.agreed_price == agreed
+        # No escrow rows yet — settlement (phase 7+) is what writes them.
+        assert detail.escrows == [], (
+            f"Expected escrows=[] before phase 7, got {detail.escrows!r}"
+        )
 
         deal_state.agreed_price = agreed
         deal_state.negotiation_terminal_state = detail.terminal_state
@@ -1199,9 +1206,10 @@ class TestStage09b_SettlementReadyAndCredentials:
           1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
           2. GET /settle/{uid}/status → status=ready + tenant_credentials
           3. GET /api/v1/listings/{id} → status=accepted or closed
+          4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
-                      "seller_listing_id")
+                      "seller_listing_id", "negotiation_id")
 
         wait_result = storefront_admin_client.wait_for_settlement(
             deal_state.real_escrow_uid,
@@ -1232,11 +1240,37 @@ class TestStage09b_SettlementReadyAndCredentials:
             f"Expected listing status=accepted/closed, got {listing.status!r}"
         )
 
+        # The per-negotiation endpoint is the canonical home for per-deal
+        # attestation data (was previously rolled up into the registry's
+        # now-removed /system/stats/attestations). After settlement the
+        # primary escrow must surface status=ready + a fulfillment_uid.
+        detail = storefront_admin_client.get_negotiation(
+            deal_state.seller_listing_id, deal_state.negotiation_id,
+        )
+        assert detail.escrows, (
+            f"Expected escrows[] non-empty after settlement, got {detail.escrows!r}"
+        )
+        primary = next((e for e in detail.escrows if e["is_primary"]), None)
+        assert primary is not None, (
+            f"Expected a primary escrow on the negotiation, got {detail.escrows!r}"
+        )
+        assert primary["escrow_uid"] == deal_state.real_escrow_uid, (
+            f"Primary escrow_uid mismatch — endpoint={primary['escrow_uid']!r} "
+            f"deal_state={deal_state.real_escrow_uid!r}"
+        )
+        assert primary["status"] == "ready", (
+            f"Expected primary escrow status=ready, got {primary['status']!r}"
+        )
+        assert primary["fulfillment_uid"], (
+            f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
+        )
+
         deal_state.settlement_status = status_resp.status
         deal_state.tenant_credentials = status_resp.tenant_credentials
         deal_state.seller_listing_final_status = listing.status
-        log.info("[09b] Settlement ready; credentials present; listing status=%s",
-                 listing.status)
+        log.info("[09b] Settlement ready; credentials present; listing status=%s; "
+                 "primary escrow fulfillment_uid=%s",
+                 listing.status, primary["fulfillment_uid"])
 
 
 class TestStage09c_LeaseRegistered:
