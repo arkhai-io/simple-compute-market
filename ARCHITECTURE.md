@@ -1897,6 +1897,15 @@ These call the policy consultation step only — `PolicyService.evaluate_*_listi
 
 **Swagger Authorize button:** The `X-Admin-Key` security scheme is registered in the custom `openapi()` function in `server.py`. The Authorize button appears at the top of the Swagger UI, pre-filled keys persist across page reloads (`persistAuthorization: True`).
 
+**Swagger behind API gateways:** Services that are exposed behind a stripped
+path prefix configure FastAPI with the service's gateway `root_path` at app
+construction time. FastAPI uses `root_path` when rendering `/docs`, so Swagger
+UI fetches the prefixed OpenAPI URL (for example `/storefront/openapi.json`)
+instead of the domain root `/openapi.json`. The custom OpenAPI function still
+adds a matching `servers` entry so Swagger's generated curl examples and "try
+it out" requests target the gateway prefix. The two settings serve different
+parts of the Swagger flow and should remain in sync.
+
 **Buyer-facing EIP-191 auth:** Buyer endpoints (`/api/v1/negotiate/*`, `/api/v1/settle/*`) use EIP-191 signatures in `X-Signature` + `X-Timestamp` headers. This is not a standard OpenAPI security scheme; it is documented in each endpoint's OpenAPI `description`. Auth is verified by calling `buyer_auth._verify(request, operation, resource_id, claimed_address)` directly inside the handler — not via `Depends()` — to avoid `fastapi_utils @cbv` + method-level `Depends` interaction issues. Tests bypass auth via `unittest.mock.patch.object(buyer_auth, "_verify", return_value=None)`.
 
 ## Testing Strategy

@@ -283,7 +283,7 @@ define push_image
 	docker push $(DOCKER_REGISTRY)/arkhai:$(1)
 endef
 
-push-runtime-artifacts: push-images push-helm push-wheels push-cli
+push-runtime-artifacts: push-images push-charts push-wheels push-cli
 
 push-images: _require-ar-project
 	$(call push_image,registry,registry)
@@ -292,8 +292,9 @@ push-images: _require-ar-project
 	$(call push_image,test-env,test-env)
 	$(call push_image,integration-tests,integration-tests)
 
-push-helm: _require-ar-project
+push-charts: _require-ar-project dist-helm
 	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
+	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
 
 push-wheels: _require-ar-project
 	$(call publish_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)

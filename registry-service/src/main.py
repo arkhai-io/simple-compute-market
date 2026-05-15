@@ -105,6 +105,7 @@ app = FastAPI(
     title="ERC-8004 Indexer",
     version="0.1.0",
     lifespan=lifespan,
+    root_path=settings.root_path,
 )
 
 # Add CORS middleware
@@ -130,8 +131,8 @@ def _custom_openapi():
         routes=app.routes,
     )
     # Inject gateway path prefix as the OpenAPI server URL so Swagger UI
-    # generates correct curl examples when accessed through the API gateway.
-    # ROOT_PATH is set by the ops repo values overlay; empty for local dev.
+    # generates correct curl examples. The FastAPI app root_path above drives
+    # the docs page's OpenAPI URL; this servers block drives "try it out".
     if settings.root_path:
         schema["servers"] = [{"url": settings.root_path}]
     app.openapi_schema = schema
