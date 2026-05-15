@@ -2437,8 +2437,7 @@ CREATE TABLE gcp_pool_configs (
   ID for Cloud Logging cross-reference)
 - `leases`: no changes
 
-Initialization pattern for resource_pools and gcp_pool_configs should mirror host inventory
-seeding (populate on startup from file, admin enabled clobber endpoint for reconcilation)
+Initialization pattern for resource_pools and gcp_pool_configs should mirror host inventory seeding (populate on startup from file, admin enabled clobber endpoint for reconcilation). This will require an additional volume mount in the helm chart to support seeding from a file managed in the compute-market-internal-infra repo.
 
 ### New Service Classes
 
