@@ -164,80 +164,10 @@ class TestListListings:
         listing = next(o for o in result.listings if o.listing_id == "check-paused")
         assert listing.paused is False
 
-    async def test_spec_filter_gpu_count_min(self, client):
-        c, db = client
-        for lid, gpu_count in (("small", 1), ("big", 8)):
-            await db.upsert_listing(
-                listing_id=lid, status="open",
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat(),
-                offer_resource={
-                    "gpu_model": "H200", "gpu_count": gpu_count,
-                    "sla": 99.9, "region": "California, US",
-                },
-                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x"}, "price_per_hour": 100}],
-                fulfillment_resource=None,
-                max_duration_seconds=7200, seller="http://seller:8001",
-            )
-        result = await c.list_listings(gpu_count_min=4)
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"big"}
-
-    async def test_spec_filter_gpu_model_equality(self, client):
-        c, db = client
-        for lid, model in (("h200", "H200"), ("rtx4090", "RTX 4090")):
-            await db.upsert_listing(
-                listing_id=lid, status="open",
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat(),
-                offer_resource={"gpu_model": model, "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x"}, "price_per_hour": 100}],
-                fulfillment_resource=None,
-                max_duration_seconds=3600, seller="http://seller:8001",
-            )
-        result = await c.list_listings(gpu_model="H200")
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"h200"}
-
-    async def test_spec_filter_combines_multiple_constraints(self, client):
-        c, db = client
-        await db.upsert_listing(
-            listing_id="dream", status="open",
-            created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
-            offer_resource={
-                "gpu_model": "H200", "gpu_count": 8, "sla": 99.9, "region": "California, US",
-                "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000,
-                "gpu_interconnect": "nvswitch", "datacenter_grade": True,
-            },
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x"}, "price_per_hour": 1000}],
-            fulfillment_resource=None,
-            max_duration_seconds=86400, seller="http://seller:8001",
-        )
-        await db.upsert_listing(
-            listing_id="basic", status="open",
-            created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
-            offer_resource={
-                "gpu_model": "RTX 5080", "gpu_count": 1, "sla": 90.0, "region": "California, US",
-                "vcpu_count": 16, "ram_gb": 64, "disk_gb": 2000,
-                "gpu_interconnect": "pcie_only", "datacenter_grade": False,
-            },
-            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x"}, "price_per_hour": 100}],
-            fulfillment_resource=None,
-            max_duration_seconds=3600, seller="http://seller:8001",
-        )
-        result = await c.list_listings(
-            gpu_count_min=4, vcpu_count_min=64, gpu_interconnect="nvswitch", datacenter_grade=True,
-        )
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"dream"}
-
-    async def test_spec_filter_with_no_matches_returns_empty(self, client):
-        c, db = client
-        await _seed_listing(db, "exists")
-        result = await c.list_listings(gpu_model="NONEXISTENT_GPU")
-        assert result.count == 0
-        raw = await c._get("/api/v1/listings", params={"gpu_model": "NONEXISTENT_GPU"})
-        assert raw.get("total_after_filter") == 0
+    # Discovery filters (gpu_model, gpu_count_min, etc.) were dropped in
+    # milestone (a1b) — buyers query registries for that, not the
+    # storefront.  See registry-service/tests/integration/test_listings
+    # _filtering.py for the spec-driven equivalent.
 
 
 # ---------------------------------------------------------------------------

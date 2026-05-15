@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
 
 import market_storefront.container as _container
@@ -48,7 +48,6 @@ from market_storefront.models.listing_models import (
     CreateListingResponse,
     EvaluateNegotiateRequest,
     EvaluateNegotiateResponse,
-    ListingFilterParams,
     ListingListResponse,
     ListingResponse,
     PauseListingResponse,
@@ -56,9 +55,7 @@ from market_storefront.models.listing_models import (
     ReclaimResponse,
     RefundRequest,
     RefundResponse,
-    listing_filter_params,
 )
-from market_storefront.utils.listing_filters import matches_listing_filters
 
 logger = logging.getLogger(__name__)
 
@@ -82,33 +79,29 @@ class ListingsController:
         self._listing_svc = listing_svc
         self._policy_svc = policy_svc
 
-    @router.get("/listings", response_model=ListingListResponse, summary="List local listings")
+    @router.get(
+        "/listings",
+        response_model=ListingListResponse,
+        summary="List local listings (resource enumeration, not discovery)",
+        description=(
+            "Enumerates the seller's own listing resources.  Discovery vocabulary "
+            "(gpu_model, region, token, etc.) moved to registries with milestone "
+            "(a1b) — query `/filter-spec` and `/listings` on a registry for that."
+        ),
+    )
     async def list_listings(
         self,
-        params: ListingFilterParams = Depends(listing_filter_params),
+        limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+        status: str | None = Query(default=None),
+        paused: bool | None = Query(default=None),
     ) -> ListingListResponse:
-        spec_kwargs = params.to_spec_kwargs()
-        has_spec = bool(spec_kwargs)
-
-        if has_spec:
-            all_rows = await self._db.list_listings(
-                status=params.status, paused=params.paused, limit=1000, offset=0
-            )
-            filtered = [r for r in all_rows if matches_listing_filters(r, **spec_kwargs)]
-            total = len(filtered)
-            listings = filtered[params.offset: params.offset + params.limit]
-            return ListingListResponse(
-                listings=listings, count=len(listings),
-                limit=params.limit, offset=params.offset, total_after_filter=total,
-            )
-
         listings = await self._db.list_listings(
-            status=params.status, paused=params.paused,
-            limit=params.limit, offset=params.offset,
+            status=status, paused=paused, limit=limit, offset=offset,
         )
         return ListingListResponse(
             listings=listings, count=len(listings),
-            limit=params.limit, offset=params.offset,
+            limit=limit, offset=offset,
         )
 
     @router.get(
