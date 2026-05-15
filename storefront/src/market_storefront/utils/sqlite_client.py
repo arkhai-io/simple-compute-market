@@ -3588,10 +3588,34 @@ class SQLiteClient:
                         "ts": ts, "stage": stage, "event": event, "data": data,
                     })
 
+                # Per-deal escrows (primary first, then by creation order)
+                cur.execute(
+                    """
+                    SELECT escrow_uid, fulfillment_uid, chain_name,
+                           escrow_address, is_primary, status
+                    FROM escrows
+                    WHERE negotiation_id = ?
+                    ORDER BY is_primary DESC, created_at ASC
+                    """,
+                    (neg_id,),
+                )
+                escrows = [
+                    {
+                        "escrow_uid": row[0],
+                        "fulfillment_uid": row[1],
+                        "chain_name": row[2],
+                        "escrow_address": row[3],
+                        "is_primary": bool(row[4]),
+                        "status": row[5],
+                    }
+                    for row in cur.fetchall()
+                ]
+
                 return {
                     **thread,
                     "messages": messages,
                     "stage_events": stage_events,
+                    "escrows": escrows,
                     "round_count": len(messages),
                 }
             finally:

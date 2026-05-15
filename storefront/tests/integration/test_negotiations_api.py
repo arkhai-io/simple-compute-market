@@ -265,6 +265,49 @@ class TestGetNegotiation:
             await c.get_negotiation("ord-y", "neg-x")
         assert "404" in str(exc_info.value)
 
+    async def test_surfaces_escrows(self, client):
+        c, db = client
+        await _seed_order(db, "ord-esc")
+        await _seed_thread(db, "neg-esc", "ord-esc")
+        await db.insert_escrow(
+            escrow_uid="0xPrimary",
+            negotiation_id="neg-esc",
+            chain_name="anvil",
+            escrow_address="0x" + "11" * 20,
+            is_primary=True,
+            status="provisioning",
+        )
+        await db.update_escrow(
+            escrow_uid="0xPrimary",
+            fulfillment_uid="0xFulfillment",
+        )
+        await db.insert_escrow(
+            escrow_uid="0xBond",
+            negotiation_id="neg-esc",
+            chain_name="anvil",
+            escrow_address="0x" + "22" * 20,
+            is_primary=False,
+            status="provisioning",
+        )
+        detail = await c.get_negotiation("ord-esc", "neg-esc")
+        assert len(detail.escrows) == 2
+        # Primary first
+        primary, bond = detail.escrows
+        assert primary["escrow_uid"] == "0xPrimary"
+        assert primary["fulfillment_uid"] == "0xFulfillment"
+        assert primary["chain_name"] == "anvil"
+        assert primary["is_primary"] is True
+        assert primary["status"] == "provisioning"
+        assert bond["escrow_uid"] == "0xBond"
+        assert bond["is_primary"] is False
+
+    async def test_empty_escrows_when_none_recorded(self, client):
+        c, db = client
+        await _seed_order(db, "ord-noesc")
+        await _seed_thread(db, "neg-noesc", "ord-noesc")
+        detail = await c.get_negotiation("ord-noesc", "neg-noesc")
+        assert detail.escrows == []
+
 
 # ---------------------------------------------------------------------------
 # POST .../force-accept

@@ -495,6 +495,7 @@ class NegotiationDetail:
     round_count: int = 0
     messages: list[NegotiationMessage] = field(default_factory=list)
     stage_events: list[dict[str, Any]] = field(default_factory=list)
+    escrows: list[dict[str, Any]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -503,6 +504,7 @@ class NegotiationDetail:
             "negotiation_id", "our_listing_id", "their_agent_id", "status",
             "terminal_state", "agreed_price", "agreed_duration_seconds",
             "requested_duration_seconds", "round_count", "messages", "stage_events",
+            "escrows",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
@@ -516,6 +518,7 @@ class NegotiationDetail:
             round_count=d.get("round_count", 0),
             messages=[NegotiationMessage.from_dict(m) for m in d.get("messages", [])],
             stage_events=d.get("stage_events", []),
+            escrows=d.get("escrows", []),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

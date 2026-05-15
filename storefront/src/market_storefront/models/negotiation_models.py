@@ -94,6 +94,7 @@ class NegotiationDetailResponse(BaseModel):
     round_count: int = 0
     messages: list[dict[str, Any]] = Field(default_factory=list)
     stage_events: list[dict[str, Any]] = Field(default_factory=list)
+    escrows: list[dict[str, Any]] = Field(default_factory=list)
     model_config = {"extra": "allow"}
 
 
