@@ -52,7 +52,7 @@ def run_serve(
     import uvicorn
 
     resolved_port = port if port is not None else CONFIG.port
-    uvicorn.run(app, host=host, port=resolved_port)
+    uvicorn.run(app, host=host, port=resolved_port, root_path=CONFIG.root_path)
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     swagger_ui_parameters={"persistAuthorization": True},
-    root_path=CONFIG.root_path,
 )
 
 
@@ -142,6 +141,15 @@ def _custom_openapi():
             "description": "Admin API key — required for all /api/v1/admin/* endpoints.",
         }
     }
+    # Inject the gateway path prefix as the OpenAPI server URL so that
+    # Swagger UI generates correct curl examples when accessed through the
+    # API gateway. ROOT_PATH is set by the ops repo values overlay and
+    # corresponds to the path prefix Kong strips before forwarding.
+    # When ROOT_PATH is empty (local dev, direct access) the servers block
+    # is omitted and Swagger UI defaults to the current host root.
+    root_path = CONFIG.root_path
+    if root_path:
+        schema["servers"] = [{"url": root_path}]
     app.openapi_schema = schema
     return schema
 

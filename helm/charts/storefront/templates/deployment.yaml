@@ -83,15 +83,10 @@ spec:
             # Sole env var: tell the typed config loader where to find
             # the mounted TOML. service.config_loader.user_config_dir()
             # resolves to $XDG_CONFIG_HOME/arkhai, so this maps to
-            # /etc/arkhai/config.toml. Everything else (including
-            # secrets) lives inside that file.
+            # /etc/arkhai/config.toml. Everything else lives inside that file,
+            # including gateway.root_path for API gateway prefix configuration.
             - name: XDG_CONFIG_HOME
               value: /etc
-            # Gateway path prefix for this agent — used by FastAPI to generate
-            # correct OpenAPI schema URLs when behind the ops gateway.
-            # Set via the ops repo values overlay; empty for local dev.
-            - name: ROOT_PATH
-              value: {{ $agent.rootPath | default "" | quote }}
           volumeMounts:
             {{- if $.Values.zerotierEnabled }}
             - name: tun-device

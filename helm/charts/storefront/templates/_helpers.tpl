@@ -180,6 +180,14 @@ auto_register       = {{ $agent.autoRegister | default true }}
 {{- with ($root.Values.global).adminApiKey }}
 admin_api_key       = {{ . | quote }}
 {{- end }}
+{{- if $agent.rootPath }}
+
+[gateway]
+# Gateway path prefix for this agent. Used by FastAPI's custom OpenAPI
+# function to inject a servers block so Swagger UI generates correct
+# curl examples when accessed through the API gateway. Empty for local dev.
+root_path = {{ $agent.rootPath | quote }}
+{{- end }}
 
 [seller.provisioning]
 service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}

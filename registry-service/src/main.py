@@ -105,7 +105,6 @@ app = FastAPI(
     title="ERC-8004 Indexer",
     version="0.1.0",
     lifespan=lifespan,
-    root_path=settings.root_path,
 )
 
 # Add CORS middleware
@@ -119,6 +118,27 @@ app.add_middleware(
 
 # Register routes
 app.include_router(router)
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    # Inject gateway path prefix as the OpenAPI server URL so Swagger UI
+    # generates correct curl examples when accessed through the API gateway.
+    # ROOT_PATH is set by the ops repo values overlay; empty for local dev.
+    if settings.root_path:
+        schema["servers"] = [{"url": settings.root_path}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
 
 
 if __name__ == "__main__":

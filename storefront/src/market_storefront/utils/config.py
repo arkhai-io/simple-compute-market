@@ -15,7 +15,6 @@ module.
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -337,7 +336,7 @@ def load_config() -> Config:
         base_url_override_raw=base_url_override_raw,
         base_url_override=base_url_override_resolved,
         port=_resolve_int("seller.port", 8000),
-        root_path=os.environ.get("ROOT_PATH", ""),
+        root_path=_resolve("gateway.root_path", ""),
 
         # Shared with buyer via [chain].
         chain_name=str(_resolve("chain.name", "ethereum_sepolia")),

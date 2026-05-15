@@ -40,6 +40,10 @@ spec:
               value: {{ .Values.config.heartbeatTtlSecs | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            # ROOT_PATH: gateway path prefix for this service. Used by the
+            # custom OpenAPI function to inject a servers block so Swagger UI
+            # generates correct curl examples behind the API gateway.
+            # Set via ops repo values overlay; empty for local dev.
             - name: ROOT_PATH
               value: {{ .Values.config.rootPath | default "" | quote }}
             # --- sourced from global ---
