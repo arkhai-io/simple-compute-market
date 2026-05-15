@@ -174,26 +174,3 @@ app.include_router(settle_router)
 app.include_router(admin_settle_router)
 app.include_router(alerts_router)
 app.include_router(identity_router)
-
-# ---------------------------------------------------------------------------
-from fastapi import Request
-from fastapi.responses import RedirectResponse
-
-
-def _redirect_to(new_path: str):
-    async def _handler(request: Request):
-        # Preserve query string
-        qs = request.url.query
-        target = new_path + (f"?{qs}" if qs else "")
-        return RedirectResponse(url=target, status_code=307)
-    return _handler
-
-
-# Admin routes
-app.add_api_route("/admin/pause", _redirect_to("/api/v1/admin/pause"), methods=["POST"])
-app.add_api_route("/admin/resume", _redirect_to("/api/v1/admin/resume"), methods=["POST"])
-app.add_api_route("/admin/policy/seed", _redirect_to("/api/v1/admin/policy/seed"), methods=["POST"])
-# Listing lifecycle (body-param style → path-param style handled by listings_controller)
-app.add_api_route("/listings/create", _redirect_to("/api/v1/listings/create"), methods=["POST"])
-app.add_api_route("/alerts/resource", _redirect_to("/api/v1/alerts/resource"), methods=["POST"])
-app.add_api_route("/negotiate/new", _redirect_to("/api/v1/negotiate/new"), methods=["POST"])
