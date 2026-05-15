@@ -1302,30 +1302,6 @@ async def fulfill_compute_obligation(
         except Exception as error:
             logger.error(f"[ALKAHEST] Fulfillment error: {error}")
 
-    # Update registry with fulfillment_uid when the seller fulfills.
-    if order and fulfillment_uid and CONFIG.enable_registry_discovery and order_id:
-        try:
-            async with _make_registry_client() as registry_client:
-                target_urls = await _registries_to_target(
-                    order_id, registry_client.urls,
-                )
-                update_request = UpdateListingRequest(
-                    updates={"seller_attestation": fulfillment_uid},
-                    private_key=CONFIG.agent_priv_key,
-                    agent_id=_canonical_agent_id(),
-                )
-                payloads = {url: update_request for url in target_urls}
-                results = await registry_client.update_listing_per_registry(
-                    order_id, payloads,
-                )
-            await _record_publications(order_id, results)
-            if any(r["success"] for r in results):
-                logger.info(f"[REGISTRY] Updated order {order_id} with fulfillment_uid: {fulfillment_uid}")
-            else:
-                logger.warning(f"[REGISTRY] Failed to update order {order_id} with fulfillment_uid")
-        except Exception as e:
-            logger.warning(f"[REGISTRY] Error updating order {order_id} with fulfillment_uid: {e}")
-
     if order_id:
         try:
             sqlite_client = get_sqlite_client()

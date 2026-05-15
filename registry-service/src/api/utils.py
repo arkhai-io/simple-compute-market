@@ -303,8 +303,6 @@ def order_to_dict(listing: Listing) -> dict:
         "offer_resource": listing.offer_resource or {},
         "demand_resource": listing.demand_resource or {},
         "max_duration_seconds": listing.max_duration_seconds,
-        "seller_attestation": listing.seller_attestation,
-        "buyer_attestation": listing.buyer_attestation,
         "oracle_address": listing.oracle_address,
         "status": listing.status.value,
         "created_at": listing.created_at.isoformat(),
@@ -435,28 +433,3 @@ def matches_resource_filters(
     return True
 
 
-def find_symmetric_order(db: Session, listing: Listing, original_offer_resource: dict, original_demand_resource: dict) -> Optional[Listing]:
-    """Find the symmetric listing for a given listing.
-
-    A symmetric listing is one where:
-    - offer_resource == original.demand_resource
-    - demand_resource == original.offer_resource
-    - seller == original.buyer (the agent accepting)
-    """
-    if not listing.buyer:
-        return None
-
-    candidates = db.query(Listing).filter(
-        and_(
-            Listing.listing_id != listing.listing_id,
-            Listing.seller == listing.buyer,
-            Listing.status.in_([OrderStatusEnum.open, OrderStatusEnum.accepted]),
-        )
-    ).all()
-
-    for candidate in candidates:
-        if (resources_match(candidate.offer_resource, original_demand_resource) and
-            resources_match(candidate.demand_resource, original_offer_resource)):
-            return candidate
-
-    return None

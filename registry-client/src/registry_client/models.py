@@ -356,34 +356,6 @@ class HeartbeatRequest:
                 if v is not None}
 
 
-@dataclass
-class AttestationStats:
-    """Settlement activity counts from GET /api/v1/system/stats/attestations.
-
-    settled_listing_count > 0 means at least one full Alkahest deal cycle
-    has completed: buyer locked escrow (buyer_attestation) and seller
-    attested fulfillment (seller_attestation).
-    """
-
-    settled_listing_count: int = 0
-    seller_attestation_count: int = 0
-    buyer_attestation_count: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "AttestationStats":
-        return cls(
-            settled_listing_count=int(
-                d.get("settled_listing_count", d.get("settled_order_count", 0))
-            ),
-            seller_attestation_count=int(
-                d.get("seller_attestation_count", d.get("maker_attestation_count", 0))
-            ),
-            buyer_attestation_count=int(
-                d.get("buyer_attestation_count", d.get("taker_attestation_count", 0))
-            ),
-        )
-
-
 # ---------------------------------------------------------------------------
 # System diagnostics  (GET /api/v1/system/config|sync|stats)
 # ---------------------------------------------------------------------------

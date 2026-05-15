@@ -34,7 +34,6 @@ from registry_client.models import (
     AgentIndexedResponse,
     AgentListResponse,
     AgentSummary,
-    AttestationStats,
     HealthResponse,
     HeartbeatRequest,
     ListingListResponse,
@@ -230,10 +229,6 @@ class _RegistryClientBase:
         return ListingSummary.from_dict(data)
 
     @staticmethod
-    def _parse_attestation_stats(data: dict) -> AttestationStats:
-        return AttestationStats.from_dict(data)
-
-    @staticmethod
     def _parse_system_config(data: dict) -> SystemConfigResponse:
         return SystemConfigResponse.from_dict(data)
 
@@ -334,16 +329,6 @@ class RegistryClient(_RegistryClientBase):
     async def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(await self._request("GET", "/health"))
-
-    # ------------------------------------------------------------------
-    # /api/v1/system/stats/attestations
-    # ------------------------------------------------------------------
-
-    async def get_attestation_stats(self) -> AttestationStats:
-        """GET /api/v1/system/stats/attestations → AttestationStats"""
-        return self._parse_attestation_stats(
-            await self._request("GET", "/api/v1/system/stats/attestations")
-        )
 
     async def get_system_config(self) -> SystemConfigResponse:
         """GET /api/v1/system/config → SystemConfigResponse"""
@@ -627,16 +612,6 @@ class SyncRegistryClient(_RegistryClientBase):
     def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(self._request("GET", "/health"))
-
-    # ------------------------------------------------------------------
-    # /api/v1/system/stats/attestations
-    # ------------------------------------------------------------------
-
-    def get_attestation_stats(self) -> AttestationStats:
-        """GET /api/v1/system/stats/attestations → AttestationStats"""
-        return self._parse_attestation_stats(
-            self._request("GET", "/api/v1/system/stats/attestations")
-        )
 
     def get_system_config(self) -> SystemConfigResponse:
         """GET /api/v1/system/config → SystemConfigResponse"""

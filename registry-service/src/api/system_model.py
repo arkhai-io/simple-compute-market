@@ -87,23 +87,3 @@ class AgentIndexedResponse(BaseModel):
     elapsed_ms: int = Field(description="Approximate wait time in milliseconds")
 
 
-class AttestationStatsResponse(BaseModel):
-    """Settlement activity counts derived from listing attestation fields.
-
-    A 'settled' listing is one where both seller_attestation and
-    buyer_attestation are non-null — meaning the full Alkahest escrow +
-    fulfillment cycle completed on-chain and both UIDs were written back
-    to the registry. This is the most meaningful indicator of a
-    functioning market: contracts deployed + agents registered + at least
-    one deal fully settled.
-    """
-
-    settled_listing_count: int = Field(
-        description="Listings with both seller_attestation and buyer_attestation set"
-    )
-    seller_attestation_count: int = Field(
-        description="Listings with seller_attestation set (fulfillment attested by seller)"
-    )
-    buyer_attestation_count: int = Field(
-        description="Listings with buyer_attestation set (escrow locked by buyer)"
-    )

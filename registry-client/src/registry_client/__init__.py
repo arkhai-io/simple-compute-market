@@ -13,7 +13,6 @@ from registry_client.auth import sign_eip191, build_auth_headers, RegistryClient
 from registry_client.models import (
     AgentListResponse,
     AgentSummary,
-    AttestationStats,
     HealthResponse,
     HeartbeatRequest,
     ListingListResponse,
@@ -32,7 +31,6 @@ __all__ = [
     "build_auth_headers",
     "AgentListResponse",
     "AgentSummary",
-    "AttestationStats",
     "HealthResponse",
     "HeartbeatRequest",
     "ListingListResponse",

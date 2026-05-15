@@ -111,8 +111,6 @@ class Listing(Base):
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)
-    seller_attestation = Column(Text, nullable=True)  # fulfillment attestation UID posted by seller
-    buyer_attestation = Column(Text, nullable=True)   # escrow attestation UID locked by buyer
     oracle_address = Column(Text, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum, name="liststatusenum"), nullable=False, default=OrderStatusEnum.open)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
