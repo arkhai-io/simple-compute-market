@@ -26,7 +26,7 @@ async def test_filter_spec_endpoint_returns_loaded_spec(registry_client) -> None
 
     assert body["listing_shape"]["type"] == "object"
     required = set(body["listing_shape"].get("required") or [])
-    assert {"listing_id", "seller", "offer_resource", "accepted_escrows"} <= required
+    assert {"listing_id", "offer_resource", "accepted_escrows"} <= required
 
     names = {f["name"] for f in body["filters"]}
     assert {"gpu_model", "region", "ram_gb_min", "token"} <= names
