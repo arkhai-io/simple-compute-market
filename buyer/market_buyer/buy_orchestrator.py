@@ -65,6 +65,11 @@ class BuyConfig:
     # ``aggregation.load_aggregation_policy``. None = default
     # (best_price). See buyer/market_buyer/aggregation.py.
     aggregation_policy: Optional[str] = None
+    # Buyer-side response to the seller's accepted_escrow_proposal echo.
+    # Looked up via ``counter_policy.load_counter_policy``. None =
+    # default (strict_echo — reject any change to a buyer-pinned field).
+    # See buyer/market_buyer/counter_policy.py.
+    counter_policy: Optional[str] = None
 
 
 @dataclass
@@ -534,6 +539,11 @@ def run_buy(
         if on_event:
             on_event(stage, payload)
 
+    # Resolve the buyer's counter policy up-front so a bad name in config
+    # fails before any registry / negotiation traffic.
+    from .counter_policy import load_counter_policy
+    counter_policy = load_counter_policy(config.counter_policy)
+
     # --- 1. Discover ---------------------------------------------------
     if matches is None:
         kwargs: dict[str, Any] = {}
@@ -654,6 +664,31 @@ def run_buy(
 
         if outcome.negotiation_id and "negotiation_id" not in neg_ctx:
             neg_ctx["negotiation_id"] = outcome.negotiation_id
+
+        # Counter policy: did the seller modify the proposal we sent? On
+        # reject, rewrite outcome to exited so the aggregation policy
+        # treats this candidate as failed without ever reaching settle.
+        if outcome.status == "agreed":
+            decision = counter_policy(escrow_proposal, outcome.accepted_escrow_proposal)
+            if decision.action == "reject":
+                _emit_neg(
+                    "counter_rejected",
+                    sent_proposal=escrow_proposal.model_dump(),
+                    returned_proposal=(
+                        outcome.accepted_escrow_proposal.model_dump()
+                        if outcome.accepted_escrow_proposal is not None
+                        else None
+                    ),
+                    reason=decision.reason,
+                )
+                outcome = NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=outcome.negotiation_id,
+                    agreed_price=outcome.agreed_price,
+                    duration_seconds=outcome.duration_seconds,
+                    rounds=outcome.rounds,
+                    reason=f"counter_rejected:{decision.reason or 'unknown'}",
+                )
 
         _emit_neg(
             "negotiation_completed",

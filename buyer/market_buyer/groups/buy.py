@@ -580,6 +580,13 @@ def register(app: typer.Typer) -> None:
             toml_path="buyer.aggregation.policy",
         ) or None
 
+        # Counter policy is config-only — no CLI flag yet. Strict_echo
+        # default rejects any seller modification to a buyer-pinned field;
+        # operators who want to accept counters set the TOML key.
+        counter_policy = resolve_config_value(
+            toml_path="buyer.counter_policy.policy",
+        ) or None
+
         config = BuyConfig(
             registry_urls=reg_urls,
             buyer_address=addr,
@@ -587,6 +594,7 @@ def register(app: typer.Typer) -> None:
             discovery_timeout=deadline,
             indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
+            counter_policy=counter_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,

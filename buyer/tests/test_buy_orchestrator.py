@@ -395,6 +395,163 @@ def test_provisioning_failed_returns_failed_status():
 
 
 # ---------------------------------------------------------------------------
+# Counter policy
+# ---------------------------------------------------------------------------
+
+
+_OTHER_TOKEN = "0x" + "33" * 20
+
+
+def _counter_echo_with(**overrides) -> dict:
+    """Build an ACCEPTED echo block whose escrow proposal can be tweaked.
+
+    Defaults to the same shape as ``_ACCEPTED_ECHO`` but with fields
+    overridable via kwargs (e.g. swap payment_token).
+    """
+    proposal = {
+        "chain_name": "anvil",
+        "escrow_address": _ESCROW_ADDR,
+        "fields": {"payment_token": _TOKEN},
+        "expiration_unix": 1_800_000_000,
+    }
+    proposal.update(overrides)
+    return {
+        "accepted_provision_terms": _ACCEPTED_ECHO["accepted_provision_terms"],
+        "accepted_escrow_proposal": proposal,
+    }
+
+
+def test_strict_echo_default_rejects_payment_token_swap_before_settle():
+    """Seller agrees on price but counters with a different payment token;
+    the default counter policy short-circuits to exited before any
+    escrow / settle call is made.
+    """
+    responses = [
+        # Registry
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
+        # /negotiate/new — seller accepts price but swaps payment_token
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "price": 50,
+            **_counter_echo_with(fields={"payment_token": _OTHER_TOKEN}),
+        },
+        # No more responses — if the test reaches settle, urlopen raises.
+    ]
+
+    events: list[tuple[str, dict]] = []
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_urlopen_sequence(responses),
+    ):
+        result = run_buy(
+            config=_config(),
+            constraints=_constraints(),
+            provision=_provision(),
+            escrow_proposal=_escrow_proposal(),
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xnever"],
+            on_event=lambda name, body: events.append((name, body)),
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "exited"
+    assert result.reason is not None
+    assert result.reason.startswith("no_match_agreed_to_terms")
+
+    # The negotiation attempt recorded the rejection on its outcome.
+    assert len(result.attempts) == 1
+    attempt = result.attempts[0]
+    assert attempt["outcome"]["status"] == "exited"
+    assert "counter_rejected" in (attempt["outcome"].get("reason") or "")
+    assert "payment_token" in (attempt["outcome"].get("reason") or "")
+
+    # And a counter_rejected event fired with the offending field info.
+    rejected = [body for name, body in events if name == "counter_rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] is not None
+    assert "payment_token" in rejected[0]["reason"]
+
+
+def test_always_accept_lets_seller_swap_payment_token():
+    """always_accept opts out of the strict echo check; settlement proceeds."""
+    config = BuyConfig(
+        registry_urls=[_REGISTRY],
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+        counter_policy="always_accept",
+    )
+    responses = [
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
+        {
+            "negotiation_id": "neg-1",
+            "action": "accept",
+            "price": 50,
+            **_counter_echo_with(fields={"payment_token": _OTHER_TOKEN}),
+        },
+        {"agent_wallet_address": _SELLER_WALLET},
+        {"escrow_uid": "0xescrow", "status": "provisioning"},
+        {"status": "ready", "attestation_uid": "0xattest"},
+    ]
+
+    build_calls = []
+
+    def _build(proposal, seller_wallet, agreed_price, duration_seconds):
+        build_calls.append(proposal)
+        return [_stub_escrow_terms(seller_wallet, agreed_price, duration_seconds)]
+
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_urlopen_sequence(responses),
+    ):
+        result = run_buy(
+            config=config,
+            constraints=_constraints(),
+            provision=_provision(),
+            escrow_proposal=_escrow_proposal(),
+            build_escrow_terms=_build,
+            create_escrow=lambda escrows: ["0xescrow"],
+            sleep=lambda _: None,
+        )
+
+    assert result.status == "ready"
+    # build_escrow_terms ran with the seller's counter (the swapped token).
+    assert len(build_calls) == 1
+    assert build_calls[0].fields["payment_token"] == _OTHER_TOKEN
+
+
+def test_strict_echo_default_rejects_missing_seller_echo():
+    """Seller doesn't echo accepted_escrow_proposal at all → reject upstream
+    of settle, with a 'seller_did_not_echo' reason.
+    """
+    responses = [
+        {"items": [{"listing_id": "seller-1", "seller": _SELLER_URL}]},
+        # Seller "accepts" but doesn't include accepted_escrow_proposal.
+        {"negotiation_id": "neg-1", "action": "accept", "price": 50,
+         "accepted_provision_terms": _ACCEPTED_ECHO["accepted_provision_terms"]},
+    ]
+    with patch(
+        "market_buyer.buy_orchestrator.urllib.request.urlopen",
+        side_effect=_urlopen_sequence(responses),
+    ):
+        result = run_buy(
+            config=_config(),
+            constraints=_constraints(),
+            provision=_provision(),
+            escrow_proposal=_escrow_proposal(),
+            build_escrow_terms=_build_escrow_terms_ok,
+            create_escrow=lambda escrows: ["0xnever"],
+            sleep=lambda _: None,
+        )
+    assert result.status == "exited"
+    assert result.attempts and result.attempts[0]["outcome"]["status"] == "exited"
+    reason = result.attempts[0]["outcome"].get("reason") or ""
+    assert "counter_rejected" in reason
+    assert "seller_did_not_echo" in reason
+
+
+# ---------------------------------------------------------------------------
 # Settlement polling timeout
 # ---------------------------------------------------------------------------
 
