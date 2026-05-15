@@ -68,7 +68,14 @@ These hold across all three milestones:
   time. The seller's negotiation policy decides what to do with the
   buyer's proposal; the schema only describes shape.
 
-## Milestone (b) — `demand_resource` → `accepted_escrows`
+## ~~Milestone (b) — `demand_resource` → `accepted_escrows`~~ (landed)
+
+Landed across b1 (storefront-side wire format + DB migration), a1a
+(registry catch-up to the new shape), b2 (`publications` table —
+`sqlite_client.py:786`), and b3 (`settlement_jobs` → `escrows`
+migration — `sqlite_client.py:861`). Sections below describe the
+design as it landed.
+
 
 **Goal:** replace the implicit single-canonical-escrow pricing slot with
 an explicit list of accepted escrow tuples; rekey codecs on
@@ -324,7 +331,15 @@ flow stays but the value gets sourced from a single-tuple
 
 ---
 
-## Milestone (c) — Seller negotiation policy middleware
+## ~~Milestone (c) — Seller negotiation policy middleware~~ (landed)
+
+`_validate_escrow_terms_proposal` lifted into the
+`negotiate_request_default_v1` composite policy
+(`policy/src/market_policy/negotiation_strategy.py` +
+`storefront/src/market_storefront/policy/seeding.py`). Buyer-side
+counter-offer handling in `buyer/market_buyer/buyer_client.py`.
+Sections below describe the design as it landed.
+
 
 **Goal:** move acceptability decisions out of protocol infrastructure
 into a swappable seller-side policy module. Today's
@@ -709,36 +724,20 @@ addresses per chain, occasional symbol collisions), make grep harder,
 and need decimals-lookup-by-symbol for amount math. Addresses sidestep
 all of it.
 
-## Suggested PR sequence
+## What's left
 
-1. **PR (b1):** `accepted_escrows` schema + codec rekey + DB migration,
-   no behavior change beyond shape. e2e tests pass against the new
-   shape. `_validate_escrow_terms_proposal` still hardcoded but now
-   reads from `accepted_escrows[0]`.
-2. **PR (b2):** `publications` table + per-registry payload publish
-   API. Existing fan-out becomes a wrapper.
-3. **PR (c1):** Lift `_validate_escrow_terms_proposal` into a default
-   seller policy; structural checks stay in protocol layer.
-4. **PR (c2):** Buyer-side counter-offer handling (if (c1) didn't
-   already cover it).
-5. **PR (b3):** Evolve `settlement_jobs` → `escrows` (multi-escrow per
-   deal). Drop attestation/buyer/matched_offer_id from `listings`; move
-   buyer/matched to `negotiation_threads`. Registry `/listings/closed`
-   filter becomes a join. Sequenced after (c) so the negotiation-policy
-   surface is settled before the deal-record shape changes underneath
-   it; could move earlier if the multi-escrow use case becomes urgent.
-6. ~~**PR (a1):** Registry `/filter-spec` endpoint + JSON Schema-driven
-   validation. Storefront `/api/v1/listings` sheds its discovery filter
-   vocabulary (drop `listing_filters.py`, drop `ListingFilterParams`);
-   the endpoint stays as a REST collection view over the seller's own
-   resources with just `limit` / `offset` / `status`.~~ landed as a1b-1
-   through a1b-6 (out of the original PR sequence; (b)/(c) still ahead).
-7. **PR (a2):** Per-query `on_missing` override + `indexed: true` side
-   indexes (defer until proven necessary). Raw set-form URL syntax
-   (`?gpu_model=in:[H100,A100]`) — currently only the URL-sugar layer
-   (single-value `in` and `range` via `alias_kind`) is wired up; the
-   raw form needs URL parsing + the `not_in` and `exists` ops have
-   eval support but no URL surface yet.
+Milestones (a1), (b), and (c) have landed. Two items remain:
+
+1. **PR (a2):** Per-query `on_missing` override (e.g.
+   `?token=0x...&strict.token=true`) and `indexed: true` side indexes
+   (defer until query latency demands it). Also: raw set-form URL
+   syntax (`?gpu_model=in:[H100,A100]`) — today only the URL-sugar
+   layer (single-value `in` and `range` via `alias_kind`) is wired
+   up, and the `not_in` / `exists` ops have evaluator support but no
+   URL surface yet.
+2. **Post-(a1a) follow-up #3 — Token references: addresses, not
+   symbols.** See `### Token references` below. Deferred to after
+   (a1b) since the filter-spec operates on addresses.
 
 Each PR runs the full verification process documented in
 `memory/reference_full_verification_process.md`: per-package unit +
