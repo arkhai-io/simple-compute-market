@@ -463,9 +463,12 @@ Landed as commits a1b-1 through a1b-6 on `test/role-separated-stage-tests`:
   image (otherwise the runtime `FileNotFoundError`s on any /listings
   call).
 
-Deferred to **PR (a2)**: per-query `on_missing` override, `indexed: true`
-side indexes, raw set-form URL syntax (`?gpu_model=in:[H100,A100]`).
-The sections below describe the design as it landed.
+~~Deferred to **PR (a2)**: per-query `on_missing` override, `indexed: true`
+side indexes, raw set-form URL syntax (`?gpu_model=in:[H100,A100]`).~~
+PR (a2) landed the URL surface (raw set-form `in:` / `not_in:` / `range:` /
+`exists:` plus per-query `strict.<filter>=true|false` override). The
+`indexed: true` side indexes remain deferred until query latency demands
+it. The sections below describe the design as it landed.
 
 ### `/filter-spec` endpoint
 
@@ -699,45 +702,45 @@ rates per hour at the cost of representation-not-cardinality precision.
 The "integer × 10^decimals" hybrid is gone. Token decimals are now
 purely a presentation concern (CLI rendering via Decimal).
 
-### Token references: addresses, not symbols
+### ~~Token references: addresses, not symbols~~ (done)
 
-Storage carries addresses everywhere. Symbols are a presentation-layer
-convenience attached at render time via `TOKEN_REGISTRY`.
+Landed: storage and API surfaces are strict address-only end-to-end.
+Symbols are a presentation-layer convenience attached at render time
+via `render_token()` (`service/clients/token.py`), which formats as
+`"SYMBOL (0x...)"` when the registry knows the symbol and `"0x..."`
+otherwise — address always shown to disambiguate across chains.
 
-Today symbol-as-shorthand leaks into storage / API in a few places:
-- `storefront/resources.py:212-263` — CSV import accepts
-  symbol-only entries, resolves via registry.
-- `storefront/services/listing_service.py:72-75` — POST create-listing
-  accepts symbol-only token entries.
-- `storefront/data/token_registry_*.json` — symbol-indexed lookup tables.
+Bundled into the same PR: uint256-safe `amount` / `price_per_hour`
+wire format. Both fields are decimal-digit strings on the wire,
+parsed/serialized via a Pydantic V2 `field_validator(mode="before")` +
+`field_serializer` pair in `service/schemas.py`. SQLite INTEGER (int64)
+and IEEE-754 JSON numbers (max safe 2^53) both lose precision past
+~9 tokens at 18 decimals; string representation sidesteps the overflow.
 
-Cleanup principle:
-- API boundaries (listing creation, CSV import) resolve symbol →
-  address; everything downstream sees only addresses.
-- Display surfaces (CLI `market listing show`, dashboards) look up
-  symbol from address at render time.
-- `service/clients/token.py` keeps the by-symbol index but reframes
-  it as a presentation cache — not primary identity.
+Boundary-strict rejection:
+- `storefront/resources.py` `TokenErc20ResourceAdapter.from_dict` — bare
+  symbol strings rejected; requires 0x address or full metadata dict
+  with `contract_address`.
+- `storefront/services/listing_service.py` `_normalize_token_resource`
+  + refund's `_resolve_token` — 0x address only; unknown addresses get
+  address-only stubs (no symbol fabrication).
+- `storefront/utils/refund.py` `derive_refund_params` — rejects symbol
+  token overrides and non-digit-string amounts.
 
-Symbols are bug-prone across multi-chain configs (USDC has different
-addresses per chain, occasional symbol collisions), make grep harder,
-and need decimals-lookup-by-symbol for amount math. Addresses sidestep
-all of it.
+Client-side symbol resolution: `cli_publish.py` resolves the seller's
+`min_price` token symbol via `TOKEN_REGISTRY.resolve()` before
+publishing, scales the human price by `10^decimals` to base units, and
+sends `{"token": <address>, "amount": <digit-string>}` on the wire.
 
 ## What's left
 
-Milestones (a1), (b), and (c) have landed. Two items remain:
+Milestones (a1), (a2), (b), (c), and all three post-(a1a) follow-ups
+have landed. Outstanding deferred work, not currently scheduled:
 
-1. **PR (a2):** Per-query `on_missing` override (e.g.
-   `?token=0x...&strict.token=true`) and `indexed: true` side indexes
-   (defer until query latency demands it). Also: raw set-form URL
-   syntax (`?gpu_model=in:[H100,A100]`) — today only the URL-sugar
-   layer (single-value `in` and `range` via `alias_kind`) is wired
-   up, and the `not_in` / `exists` ops have evaluator support but no
-   URL surface yet.
-2. **Post-(a1a) follow-up #3 — Token references: addresses, not
-   symbols.** See `### Token references` below. Deferred to after
-   (a1b) since the filter-spec operates on addresses.
+- **`indexed: true` side indexes** (from PR (a2)'s original scope).
+  Registry-side denormalized indexes for hot filter axes (`token`,
+  `gpu_model`). Defer until query latency on `/listings` demands it;
+  the in-memory evaluator handles current row counts fine.
 
 Each PR runs the full verification process documented in
 `memory/reference_full_verification_process.md`: per-package unit +
