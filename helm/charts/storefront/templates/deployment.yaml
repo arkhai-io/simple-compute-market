@@ -29,6 +29,13 @@ metadata:
     app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
 spec:
   replicas: {{ $.Values.replicaCount }}
+  # Recreate is required when persistence.enabled — the per-agent PVC
+  # is ReadWriteOnce and rolling updates would deadlock waiting for the
+  # old pod to release the volume. Kept on emptyDir setups too: rolling
+  # updates over emptyDir would briefly run two pods writing to two
+  # different ephemeral SQLite files, which has no value here.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "storefront.selectorLabels" $ | nindent 6 }}
@@ -45,6 +52,12 @@ spec:
         checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
         checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum }}
     spec:
+      # fsGroup matches the container's appuser group so the volume's
+      # mount root is owned by gid 1000 — without it, SQLite's first
+      # write to /var/lib/arkhai fails with permission denied. Applies
+      # whether the volume is a PVC or emptyDir.
+      securityContext:
+        fsGroup: 1000
       initContainers:
         - name: wait-for-rpc
           image: busybox:1.36
@@ -114,6 +127,8 @@ spec:
               mountPath: /etc/arkhai/config.secrets.toml
               subPath: config.secrets.toml
               readOnly: true
+            - name: arkhai-data
+              mountPath: {{ $.Values.persistence.mountPath | quote }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
           # liveness/readiness probe with no outbound calls or blocking I/O.
           livenessProbe:
@@ -150,6 +165,15 @@ spec:
             items:
               - key: config.secrets.toml
                 path: config.secrets.toml
+        # SQLite agent.db storage. Backed by a per-agent PVC when
+        # persistence.enabled, emptyDir otherwise (pod-lifetime only).
+        - name: arkhai-data
+          {{- if $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "storefront.agentPvcName" (dict "root" $ "agent" $agent) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

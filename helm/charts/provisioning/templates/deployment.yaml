@@ -6,6 +6,10 @@ metadata:
     {{- include "provisioning.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.server.replicaCount }}
+  # Recreate strategy: the SQLite PVC is ReadWriteOnce; rolling
+  # updates would deadlock waiting for the old pod to release it.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "provisioning.selectorLabels" . | nindent 6 }}
@@ -18,6 +22,10 @@ spec:
         checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
+      # fsGroup matches the container's appuser (UID 1000); without it
+      # the data volume's mount root is root-owned and SQLite can't write.
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: provisioning
           image: {{ include "provisioning.image" . }}
@@ -63,8 +71,15 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        # SQLite + lease state. PVC when persistence.enabled, emptyDir
+        # fallback for kind/CI/local-only setups without a StorageClass.
         - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "provisioning.pvcName" . }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: config
           configMap:
             name: {{ include "provisioning.configMapName" . }}

@@ -56,7 +56,11 @@ agents:
         # the agent's Service DNS / global.provisioning.* — explicit
         # overrides go here only when the cluster topology demands
         # something different.
-        dbPath: "./agent.db"
+        # dbPath: location of the SQLite agent.db. Defaults to the
+        # per-agent PVC mount at /var/lib/arkhai/agent.db (see persistence
+        # block below). Override only when pointing the agent at an
+        # external volume or for local-only setups.
+        dbPath: "/var/lib/arkhai/agent.db"
         logFilePath: "./logs/bob.log"
         # Path to the bundled compute resource inventory CSV. The file is
         # included in the container image at this path. Set to "" to disable
@@ -89,6 +93,42 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ---------------------------------------------------------------------------
+# Persistence — per-agent ReadWriteOnce PVC backing the SQLite agent.db.
+#
+# Without this, the SQLite file lives on the container's writable overlay
+# and is lost on every pod restart (rolling updates, OOM kills, node
+# drains). With persistence.enabled=true, each agent gets its own PVC
+# mounted at /var/lib/arkhai and the chart pins the Deployment to a
+# Recreate strategy so the RWO volume can detach cleanly across rollouts.
+#
+# enabled: false falls back to an emptyDir mount at the same path so
+# kind/CI and local-iteration setups without a StorageClass keep working
+# (state still ephemeral). dbPath in config above should match the mount
+# point either way.
+#
+# storageClass: empty string uses the cluster's default StorageClass.
+# Set explicitly when the cluster has multiple classes or you want a
+# specific one (e.g. "standard-rwo" on GKE, "gp3" on EKS).
+#
+# accessMode: ReadWriteOnce only — multi-attach RWO would corrupt SQLite.
+# A single-replica constraint is enforced via the Recreate strategy and
+# replicaCount above.
+#
+# The PVC carries helm.sh/resource-policy: keep so `helm uninstall` does
+# not reap the volume. Reinstalling the release rebinds the existing
+# PVC and recovers prior state.
+# ---------------------------------------------------------------------------
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  # Where the PVC mounts inside the pod. dbPath above must point at a
+  # file under this directory; the chart does not enforce this — it's
+  # the operator's responsibility to keep the two aligned.
+  mountPath: /var/lib/arkhai
 
 # ---------------------------------------------------------------------------
 # zerotierEnabled: controls whether ZeroTier networking infrastructure is

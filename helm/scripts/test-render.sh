@@ -43,6 +43,12 @@ CONFIGMAP="$(extract_section 'storefront/templates/configmap\.yaml')"
 SECRET="$(extract_section 'storefront/templates/secrets\.yaml')"
 DEPLOYMENT="$(extract_section 'storefront/templates/deployment\.yaml')"
 
+STOREFRONT_PVC="$(extract_section   'storefront/templates/pvc\.yaml')"
+REGISTRY_PVC="$(extract_section     'registry/templates/pvc\.yaml')"
+PROVISIONING_PVC="$(extract_section 'provisioning/templates/pvc\.yaml')"
+REGISTRY_DEPLOY="$(extract_section     'registry/templates/deployment\.yaml')"
+PROVISIONING_DEPLOY="$(extract_section 'provisioning/templates/deployment\.yaml')"
+
 # --- Per-agent objects all render ---
 [[ -n "$CONFIGMAP"  ]] && pass "storefront ConfigMap renders"   || fail "no storefront ConfigMap"
 [[ -n "$SECRET"     ]] && pass "storefront Secret renders"      || fail "no storefront Secret"
@@ -70,6 +76,61 @@ fi
 
 # --- Sensitive presence: private_key must appear in the Secret ---
 grep -qF "private_key" <<<"$SECRET" && pass "private_key present in Secret config.secrets.toml" || fail "private_key missing from Secret"
+
+# ============================================================================
+# SQLite persistence — every SQLite-backed service has a PVC, mounts it,
+# pins Recreate strategy, and sets fsGroup so the container user can write.
+# ============================================================================
+
+# --- PVCs render for all three services ---
+[[ -n "$STOREFRONT_PVC"   ]] && pass "storefront PVC renders"   || fail "no storefront PVC"
+[[ -n "$REGISTRY_PVC"     ]] && pass "registry PVC renders"     || fail "no registry PVC"
+[[ -n "$PROVISIONING_PVC" ]] && pass "provisioning PVC renders" || fail "no provisioning PVC"
+
+# --- helm.sh/resource-policy: keep protects state across `helm uninstall` ---
+for name in STOREFRONT_PVC REGISTRY_PVC PROVISIONING_PVC; do
+    body="${!name}"
+    if grep -qF "helm.sh/resource-policy: keep" <<<"$body"; then
+        pass "${name} carries resource-policy: keep"
+    else
+        fail "${name} missing resource-policy: keep (state would be reaped on helm uninstall)"
+    fi
+done
+
+# --- Each PVC requests ReadWriteOnce ---
+for name in STOREFRONT_PVC REGISTRY_PVC PROVISIONING_PVC; do
+    body="${!name}"
+    if grep -qE 'accessModes:\s*$' <<<"$body" && grep -qE '"ReadWriteOnce"|ReadWriteOnce' <<<"$body"; then
+        pass "${name} requests ReadWriteOnce"
+    else
+        fail "${name} missing ReadWriteOnce access mode"
+    fi
+done
+
+# --- Each Deployment uses Recreate strategy (rolling + RWO = deadlock) ---
+for name in DEPLOYMENT REGISTRY_DEPLOY PROVISIONING_DEPLOY; do
+    body="${!name}"
+    if grep -qE "type:\s+Recreate" <<<"$body"; then
+        pass "${name} uses Recreate strategy"
+    else
+        fail "${name} missing Recreate strategy"
+    fi
+done
+
+# --- fsGroup: 1000 on pod spec — without it SQLite write fails on perms ---
+for name in DEPLOYMENT REGISTRY_DEPLOY PROVISIONING_DEPLOY; do
+    body="${!name}"
+    if grep -qE "fsGroup:\s+1000" <<<"$body"; then
+        pass "${name} sets fsGroup: 1000"
+    else
+        fail "${name} missing fsGroup: 1000"
+    fi
+done
+
+# --- Deployments reference their PVC by claimName ---
+grep -qE "claimName:\s+arkhai-test-storefront-bob-data"   <<<"$DEPLOYMENT"          && pass "storefront Deployment binds to its PVC"   || fail "storefront Deployment missing PVC claim"
+grep -qE "claimName:\s+arkhai-test-registry-data"         <<<"$REGISTRY_DEPLOY"     && pass "registry Deployment binds to its PVC"     || fail "registry Deployment missing PVC claim"
+grep -qE "claimName:\s+arkhai-test-provisioning-data"     <<<"$PROVISIONING_DEPLOY" && pass "provisioning Deployment binds to its PVC" || fail "provisioning Deployment missing PVC claim"
 
 if [[ $errors -gt 0 ]]; then
     echo "$errors assertion(s) failed" >&2

@@ -149,3 +149,31 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ---------------------------------------------------------------------------
+# Persistence — ReadWriteOnce PVC backing the provisioning service's
+# SQLite database (`provisioning.db` at /app/data) plus any in-flight
+# state (vm_leases, hosts, ansible inventory snapshots).
+#
+# Without persistence the SQLite DB lives on emptyDir — pod restarts
+# lose all known leases, host registrations seeded from the secret-
+# overlay reseed but anything created via the API is gone. With
+# persistence enabled, restarts are transparent.
+#
+# enabled: false keeps the existing emptyDir for kind/CI/local-only
+# setups without a StorageClass. database_url in config above should
+# match the mount path either way (defaults already do).
+#
+# storageClass: empty = cluster default. accessMode is fixed to
+# ReadWriteOnce; the chart pins server.replicaCount and Recreate
+# strategy to enforce a single writer.
+#
+# helm.sh/resource-policy: keep on the PVC so `helm uninstall` does
+# not destroy lease state.
+# ---------------------------------------------------------------------------
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /app/data

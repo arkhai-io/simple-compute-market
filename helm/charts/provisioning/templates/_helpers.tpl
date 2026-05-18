@@ -77,6 +77,14 @@ Resolve the ConfigMap name for the production config profile.
 {{- end }}
 
 {{/*
+PVC name backing the provisioning service's SQLite DB. Stable
+across releases so reinstalls rebind existing lease state.
+*/}}
+{{- define "provisioning.pvcName" -}}
+{{- printf "%s-data" (include "provisioning.fullname" .) -}}
+{{- end }}
+
+{{/*
 Compose the registry (indexer) URL from global.registry.host and global.registry.port.
 */}}
 {{- define "registry.url" -}}

@@ -112,6 +112,15 @@ auto-generates from the agent fullname.
 {{- end }}
 
 {{/*
+Per-agent PVC name. Used as the volume backing the SQLite agent.db
+mount at persistence.mountPath. Stable across releases so reinstalls
+can rebind existing state.
+*/}}
+{{- define "storefront.agentPvcName" -}}
+{{- printf "%s-data" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
 Per-agent ConfigMap name — non-sensitive runtime config lives here.
 Mirrors agentSecretName: honors agent.config.configMapName override,
 else auto-generates from the agent fullname.
