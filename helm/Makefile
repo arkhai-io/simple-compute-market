@@ -6,7 +6,7 @@ NAMESPACE    := default
 VALUES       := values.yaml
 SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 
-.PHONY: init template deploy test
+.PHONY: init template deploy test test-render
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -33,6 +33,16 @@ template:
 		--values $(VALUES) \
 		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
 		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
+
+## Verify structural invariants of the rendered chart without needing
+## a real cluster. Runs `helm template` against the umbrella chart and
+## asserts the storefront ConfigMap/Secret split layout — per-agent
+## ConfigMap holds config.toml, Secret holds config.secrets.toml,
+## Deployment mounts both at /etc/arkhai/ with independent checksums,
+## and no sensitive keys leak across the boundary. Stable across
+## cosmetic chart edits (no byte-level snapshots).
+test-render:
+	@./scripts/test-render.sh
 
 ## Render a single subchart in isolation.
 ## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=test-env

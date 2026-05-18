@@ -1,0 +1,24 @@
+{{/*
+Per-agent ConfigMap. Holds the non-sensitive rendered config.toml
+(chain, registry, gateway, seller knobs, provisioning + negotiation
+sub-tables). Mounted alongside the Secret-rendered config.secrets.toml
+at /etc/arkhai/; the runtime loader deep-merges the two files.
+
+Split from the legacy single-Secret blob so non-sensitive toggles
+(log levels, provisioning mode, RPC URLs, etc.) can be edited as a
+ConfigMap — kubectl-friendly diffs, no secret-rotation audit noise.
+*/}}
+{{- range $agent := .Values.agents }}
+{{- $component := $agent.component | default $agent.name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
+  labels:
+    {{- include "storefront.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component | quote }}
+data:
+  config.toml: |
+    {{- include "storefront.agentConfigToml" (dict "root" $ "agent" $agent) | nindent 4 }}
+---
+{{- end }}

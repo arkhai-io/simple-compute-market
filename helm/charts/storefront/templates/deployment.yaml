@@ -1,7 +1,14 @@
 {{/*
-One Deployment per agent in .Values.agents. Each pod mounts its
-per-agent Secret as a single config.toml file at /etc/arkhai/config.toml
-and points XDG_CONFIG_HOME at /etc — no env-var-based config.
+One Deployment per agent in .Values.agents. Each pod mounts two TOML
+files at /etc/arkhai/ — config.toml (ConfigMap, non-sensitive) and
+config.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
+at /etc so service.config_loader picks them up via its layered
+discovery and deep-merge. No env-var-based config.
+
+checksum/config + checksum/secrets annotations force a rollout when
+either source object changes, independently — flipping a log level
+edits the ConfigMap (no secret rotation), rotating a wallet key edits
+the Secret (no ConfigMap churn).
 
 zerotierEnabled (default: true) controls whether ZeroTier networking
 infrastructure is included in the pod spec. Set to false for environments
@@ -31,6 +38,12 @@ spec:
       labels:
         {{- include "storefront.selectorLabels" $ | nindent 8 }}
         app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
+      annotations:
+        # Force pod rollout when either config source changes. ConfigMap
+        # and Secret have independent checksums so non-sensitive edits
+        # don't appear as secret rotations and vice versa.
+        checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum }}
     spec:
       initContainers:
         - name: wait-for-rpc
@@ -81,10 +94,11 @@ spec:
           {{- end }}
           env:
             # Sole env var: tell the typed config loader where to find
-            # the mounted TOML. service.config_loader.user_config_dir()
+            # the mounted TOML files. service.config_loader.user_config_dir()
             # resolves to $XDG_CONFIG_HOME/arkhai, so this maps to
-            # /etc/arkhai/config.toml. Everything else lives inside that file,
-            # including gateway.root_path for API gateway prefix configuration.
+            # /etc/arkhai/{config.toml,config.secrets.toml}. The loader
+            # deep-merges both files at startup; the ConfigMap renders
+            # config.toml and the Secret renders config.secrets.toml.
             - name: XDG_CONFIG_HOME
               value: /etc
           volumeMounts:
@@ -93,7 +107,12 @@ spec:
               mountPath: /dev/net/tun
             {{- end }}
             - name: arkhai-config
-              mountPath: /etc/arkhai
+              mountPath: /etc/arkhai/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: arkhai-secrets
+              mountPath: /etc/arkhai/config.secrets.toml
+              subPath: config.secrets.toml
               readOnly: true
           # /health performs only a fast SQLite ping — safe as a Kubernetes
           # liveness/readiness probe with no outbound calls or blocking I/O.
@@ -120,11 +139,17 @@ spec:
             path: /dev/net/tun
         {{- end }}
         - name: arkhai-config
-          secret:
-            secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+          configMap:
+            name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
             items:
               - key: config.toml
                 path: config.toml
+        - name: arkhai-secrets
+          secret:
+            secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
+            items:
+              - key: config.secrets.toml
+                path: config.secrets.toml
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
