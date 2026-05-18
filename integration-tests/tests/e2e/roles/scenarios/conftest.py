@@ -63,15 +63,17 @@ class DealState:
     negotiation_id: Optional[str] = None
     negotiation_terminal_state: Optional[str] = None
     agreed_price: Optional[float] = None
-    # Phase 7 — mock escrow + provisioning gate
-    real_escrow_uid: Optional[str] = None
+    # Buyer-CLI run-log identity from `market negotiate`; consumed by
+    # `market settle --from <run_id>` in phase 08. Sentinel for the
+    # "negotiation produced a usable agreed outcome" precondition.
+    buyer_run_id: Optional[str] = None
+    # Phase 7 — provisioning gate (escrow now created by `market settle`)
     provisioning_gate_armed: bool = False
-    # Phase 8a — evaluate settle (doWork dry-run)
-    _evaluate_settle_vm_host: Optional[str] = None
-    _evaluate_settle_vm_target: Optional[str] = None
-    _evaluate_settle_passed: bool = False
-    # Phase 9a — provisioning job evaluate
-    _provision_job_evaluated: bool = False
+    # Phase 8 — settle subprocess + on-chain escrow uid (set by 08-initiate)
+    real_escrow_uid: Optional[str] = None
+    # Carries the background subprocess handle so 09b can wait for its
+    # clean exit and the module teardown can terminate it if leftover.
+    settle_run_handle: Optional[Any] = None
     # Phase 8 — settlement
     settlement_submitted: bool = False
     provisioning_job_id: Optional[str] = None
@@ -80,6 +82,10 @@ class DealState:
     provisioning_result_injected: bool = False
     lease_id: Optional[str] = None
     lease_status: Optional[str] = None
+    # vm_host captured from the lease in 09c; used by 10a/11b to arm
+    # the check-job mock rule (was previously sourced from the
+    # 08a evaluate-settle dry-run, now dropped from this flow).
+    vm_host: Optional[str] = None
     settlement_status: Optional[str] = None
     tenant_credentials: Optional[dict[str, Any]] = None
     seller_listing_final_status: Optional[str] = None
@@ -278,6 +284,25 @@ def ensure_storefront_resumed(storefront_admin_client):
             log.info("[teardown] Cleared residual global pause on storefront")
     except Exception as exc:
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def reap_buyer_settle_subprocess(deal_state: DealState):
+    """Stop the buyer-CLI ``market settle`` subprocess if it outlived the test.
+
+    The deal flow normally lets the subprocess exit cleanly at phase 09b
+    once settlement is ready. If an earlier assertion failed and bailed
+    out, the process is still polling the seller — terminate it so the
+    module run doesn't leak a child.
+    """
+    yield
+    run = deal_state.settle_run_handle
+    if run is None:
+        return
+    try:
+        run.terminate()
+    except Exception as exc:
+        log.warning("[teardown] could not terminate settle subprocess: %s", exc)
 
 
 @pytest.fixture(scope="module", autouse=True)
