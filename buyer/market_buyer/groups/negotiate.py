@@ -332,6 +332,20 @@ def register(app: typer.Typer) -> None:
                 expiration_unix=int(_time.time()) + 3600,
             )
 
+        # Honor an optional [buyer.negotiation].policy_mode override in
+        # config.toml, mirroring the seller's [seller.negotiation]
+        # policy_mode knob. The buyer wheel installs without torch by
+        # default — set "bisection" to avoid the RL self-register path
+        # blowing up. When unset, falls through to negotiate_with_seller's
+        # own DEFAULT_STRATEGY behavior.
+        strategy = None
+        policy_mode = resolve_config_value(
+            toml_path="buyer.negotiation.policy_mode",
+        )
+        if policy_mode:
+            from market_policy.negotiation_strategy import load_strategy
+            strategy = load_strategy(policy_mode)
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
@@ -345,6 +359,7 @@ def register(app: typer.Typer) -> None:
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,
+                strategy=strategy,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

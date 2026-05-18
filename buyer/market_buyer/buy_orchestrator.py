@@ -324,8 +324,8 @@ def submit_settlement(
     buyer_private_key: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
 ) -> dict[str, Any]:
-    """POST /settle/{escrow_uid} with signed body. Returns the initial job state."""
-    url = seller_url.rstrip("/") + f"/settle/{escrow_uid}"
+    """POST /api/v1/settle/{escrow_uid} with signed body. Returns the initial job state."""
+    url = seller_url.rstrip("/") + f"/api/v1/settle/{escrow_uid}"
     body = {
         "negotiation_id": negotiation_id,
         "ssh_public_key": ssh_public_key,
@@ -343,11 +343,11 @@ def poll_settlement_status(
     buyer_private_key: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
 ) -> dict[str, Any]:
-    """GET /settle/{escrow_uid}/status with signed query params + headers."""
+    """GET /api/v1/settle/{escrow_uid}/status with signed query params + headers."""
     sig, ts = _sign(f"settle_status:{escrow_uid}", buyer_private_key)
     url = (
         seller_url.rstrip("/")
-        + f"/settle/{escrow_uid}/status?buyer_address={buyer_address}"
+        + f"/api/v1/settle/{escrow_uid}/status?buyer_address={buyer_address}"
     )
     return _signed_json(url, body=None, signature=sig, timestamp=ts,
                         method="GET", timeout=timeout)
