@@ -86,10 +86,36 @@ def user_config_files() -> list[Path]:
     The ``--config PATH`` override (via :func:`set_user_config_path`)
     short-circuits this to a single-file load — useful for tests and ad-
     hoc invocations that want full control over what's read.
+
+    Under pytest, when neither ``set_user_config_path()`` nor
+    ``XDG_CONFIG_HOME`` has been set, the loader returns an empty list
+    instead of reading the developer's ambient
+    ``~/.config/arkhai/config.toml``. That file otherwise leaks into
+    test process state — e.g. the storefront's seller_auth dependency
+    flips from dev-bypass to enforcing mode because a populated
+    ``wallet.address`` was loaded into ``CONFIG.agent_wallet_address``
+    at module-import time. Tests that legitimately exercise the layered
+    loader monkeypatch ``XDG_CONFIG_HOME`` to a tmp dir, which preserves
+    their behaviour.
     """
     if _config_path_override is not None:
         return [_config_path_override]
     base = user_config_dir()
+    if "pytest" in sys.modules:
+        # Trust XDG only when it's been pointed somewhere other than the
+        # user's home — i.e. a test fixture explicitly set it. Bare
+        # ambient XDG ($HOME/.config) is suppressed: a populated
+        # ~/.config/arkhai/config.toml would otherwise leak into every
+        # storefront-importing test, flipping seller_auth into enforcing
+        # mode and causing surprising 403s. Tests that exercise the
+        # loader's layered behaviour monkeypatch XDG_CONFIG_HOME to
+        # tmp_path, which is not under home and so passes through.
+        try:
+            home_default = (Path.home() / ".config").resolve()
+            if base.resolve().parent == home_default:
+                return []
+        except (OSError, RuntimeError):
+            return []
     return [base / "config.toml", base / "config.secrets.toml"]
 
 
