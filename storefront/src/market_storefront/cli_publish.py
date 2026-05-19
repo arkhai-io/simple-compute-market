@@ -200,26 +200,26 @@ def _resolve_pricing(
     res: dict,
     *,
     default_min_price: Optional[str],
-    default_token: str,
-) -> tuple[Optional[str], str]:
-    """Pick the min_price/token for a resource: row > defaults > None.
+    default_token_address: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    """Pick the (min_price, token_address) for a resource: row > defaults > None.
 
-    Returns (min_price, token). ``min_price`` may be:
-      * a positive numeric string — public price.
-      * ``"0"`` — explicit free offering (per-row "0" wins; default does
-        not override an explicit "0").
-      * ``None`` — neither row nor default set; caller decides whether
-        to skip or publish as hidden-reserve depending on
-        ``publish_priceless``.
+    Returns (min_price, token_address). Both fall through to defaults
+    when the row column is empty; ``"0"`` for min_price is honored as a
+    real value (free offering) and does not trigger the fallback.
+
+    The ``token`` column on the row must be a 0x ERC-20 address — symbol
+    shorthand was removed in favour of chain-resolved metadata. The
+    address itself is the canonical token identity; symbols are derived
+    via ``service.clients.token.resolve_token``.
     """
     row_min_price = res.get("min_price")
     if row_min_price is None or row_min_price == "":
         min_price = default_min_price
     else:
-        # Honor "0" as a real value, not a falsy fallback trigger.
         min_price = row_min_price
-    token = res.get("token") or default_token
-    return min_price, token
+    token_address = (res.get("token") or default_token_address) or None
+    return min_price, token_address
 
 
 def _publish_round(
@@ -229,8 +229,10 @@ def _publish_round(
     wallet_address: str,
     private_key: Optional[str],
     default_min_price: Optional[str],
-    default_token: str,
+    default_token_address: Optional[str],
     default_max_duration_seconds: int | None,
+    rpc_url: str,
+    chain_id: int,
     publish_priceless: bool = False,
     skip_ids: set[str] | None = None,
 ) -> tuple[list[dict], list[tuple[dict, str]], list[dict]]:
@@ -265,22 +267,32 @@ def _publish_round(
         if res["resource_id"] in skip_ids:
             skipped.append(res)
             continue
-        min_price, token = _resolve_pricing(
+        min_price, token_address = _resolve_pricing(
             res,
             default_min_price=default_min_price,
-            default_token=default_token,
+            default_token_address=default_token_address,
         )
-        # Strict-mode wire format: resolve symbol→address + scale human
-        # min_price → base units locally before sending. The storefront
-        # API only accepts 0x addresses and integer base-unit amounts.
-        from service.clients.token import TOKEN_REGISTRY
-        token_meta = TOKEN_REGISTRY.resolve(token)
-        if token_meta is None:
+        if not token_address:
             failed.append((
                 res,
-                f"unknown token {token!r} — not in local TOKEN_REGISTRY "
-                f"(set [seller.token_registry_path] or pass a 0x address)",
+                "no token (set the CSV `token` column to a 0x ERC-20 address, "
+                "or [seller.pricing].default_token_address in config.toml)",
             ))
+            continue
+        if not token_address.startswith("0x") or len(token_address) != 42:
+            failed.append((
+                res,
+                f"invalid token {token_address!r} — must be a 0x ERC-20 address "
+                f"(symbol shorthand is no longer supported)",
+            ))
+            continue
+        from service.clients.token import resolve_token, TokenResolutionError
+        try:
+            token_meta = resolve_token(
+                token_address, rpc_url=rpc_url, chain_id=chain_id,
+            )
+        except TokenResolutionError as exc:
+            failed.append((res, f"chain resolve failed for {token_address}: {exc}"))
             continue
         token_address = token_meta.contract_address.lower()
         token_decimals = token_meta.decimals
@@ -358,8 +370,10 @@ def run_watch_loop(
     wallet_address: str,
     private_key: Optional[str],
     default_min_price: Optional[str],
-    default_token: str,
+    default_token_address: Optional[str],
     default_max_duration_seconds: int | None,
+    rpc_url: str,
+    chain_id: int,
     publish_priceless: bool = False,
     poll_interval: float,
     console: Optional[Console] = None,
@@ -387,8 +401,10 @@ def run_watch_loop(
                 published, failed, skipped = _publish_round(
                     db_path=db_path, base_url=base_url,
                     wallet_address=wallet_address, private_key=private_key,
-                    default_min_price=default_min_price, default_token=default_token,
+                    default_min_price=default_min_price,
+                    default_token_address=default_token_address,
                     default_max_duration_seconds=default_max_duration_seconds,
+                    rpc_url=rpc_url, chain_id=chain_id,
                     publish_priceless=publish_priceless,
                     skip_ids=covered,
                 )
@@ -520,13 +536,24 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(1)
 
         default_min_price = CONFIG.default_min_price
-        default_token = CONFIG.default_token
-        # CLI override > config default. Per-row CSV columns still beat both.
+        default_token_address = CONFIG.default_token_address
         default_max_duration_seconds = (
             max_duration_seconds
             if max_duration_seconds is not None
             else CONFIG.default_max_duration_seconds
         )
+
+        from .utils.config import _resolve_chain_id
+        rpc_url = CONFIG.chain_rpc_url
+        if not rpc_url:
+            typer.secho(
+                "chain.rpc_url is not configured — required to resolve "
+                "ERC-20 token decimals on chain. Set chain.rpc_url in "
+                "config.toml.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+        chain_id = _resolve_chain_id()
 
         # Mode: abort-all is mutually exclusive with the publish flags.
         if abort_all:
@@ -592,8 +619,10 @@ def register(app: typer.Typer) -> None:
             published, failed, _skipped = _publish_round(
                 db_path=db_path, base_url=base_url,
                 wallet_address=wallet_address, private_key=private_key,
-                default_min_price=default_min_price, default_token=default_token,
+                default_min_price=default_min_price,
+                default_token_address=default_token_address,
                 default_max_duration_seconds=default_max_duration_seconds,
+                rpc_url=rpc_url, chain_id=chain_id,
                 publish_priceless=CONFIG.publish_priceless,
             )
             if not published and not failed:
@@ -612,7 +641,7 @@ def register(app: typer.Typer) -> None:
             totals.add_row("Agent", base_url)
             totals.add_row(
                 "Default demand",
-                f"{default_min_price or '-'} {default_token}",
+                f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
             )
             console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
 
@@ -629,7 +658,7 @@ def register(app: typer.Typer) -> None:
         header.add_row("Agent", base_url)
         header.add_row(
             "Default demand",
-            f"{default_min_price or '-'} {default_token}",
+            f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
         )
         header.add_row("Poll interval", f"{poll_interval:.0f}s")
         header.add_row(
@@ -642,8 +671,10 @@ def register(app: typer.Typer) -> None:
         run_watch_loop(
             db_path=db_path, base_url=base_url,
             wallet_address=wallet_address, private_key=private_key,
-            default_min_price=default_min_price, default_token=default_token,
+            default_min_price=default_min_price,
+            default_token_address=default_token_address,
             default_max_duration_seconds=default_max_duration_seconds,
+            rpc_url=rpc_url, chain_id=chain_id,
             publish_priceless=CONFIG.publish_priceless,
             poll_interval=poll_interval, console=console,
         )

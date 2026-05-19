@@ -11,7 +11,7 @@ from market_storefront.models.domain_models import (
     TokenResource,
     VirtualizationType,
 )
-from service.clients.token import TOKEN_REGISTRY
+from service.clients.token import resolve_token_cached
 
 
 # Slice fields stored directly on the resource row's ``attributes`` JSON.
@@ -199,10 +199,10 @@ class TokenErc20ResourceAdapter:
 
         Strict mode: ``resource_subtype`` is a contract address; metadata
         is materialized from the ``attributes`` JSON column when present,
-        else looked up by address through ``TOKEN_REGISTRY`` for display
-        fields (symbol). Failing that, falls back to an "address-only"
-        metadata with ``symbol=""`` so downstream callers can still
-        identify the token by its on-chain address.
+        else looked up by address through the chain-resolved cache for
+        display fields (symbol). Failing that, falls back to an
+        "address-only" metadata with ``symbol=""`` so downstream callers
+        can still identify the token by its on-chain address.
 
         ``value`` of None means "hidden reserve" — the listing was
         published with no advertised price. Round-trips as
@@ -233,7 +233,7 @@ class TokenErc20ResourceAdapter:
                 decimals=int(attrs["decimals"]),
             )
         else:
-            looked_up = TOKEN_REGISTRY.get_by_address(address)
+            looked_up = resolve_token_cached(address)
             if looked_up is not None:
                 token_meta = looked_up
             else:
@@ -278,18 +278,17 @@ class TokenErc20ResourceAdapter:
 
         Accepted shapes for ``data["token"]``:
           * ``"0x..."`` — bare contract address; metadata enriched via
-            ``TOKEN_REGISTRY.get_by_address`` if known, otherwise the
-            address-only stub (decimals must then be supplied on the
-            wire or inferred from ``data["decimals"]``).
+            the chain-resolved cache if known, otherwise the address-only
+            stub (decimals must then be supplied on the wire or inferred
+            from ``data["decimals"]``).
           * ``{"contract_address": "0x...", "decimals": N, "symbol"?: ...}``
             — full metadata; ``decimals`` is required since amount math
             depends on it.
           * ``ERC20TokenMetadata`` instance — pass-through.
 
-        Bare symbol strings (``"USDC"``) are NOT accepted. Clients that
-        want symbol convenience resolve to an address locally before
-        calling this layer — keeps the on-the-wire format chain-agnostic
-        and the server's TokenRegistry strictly a presentation cache.
+        Bare symbol strings (``"USDC"``) are NOT accepted. Addresses are
+        the canonical token identity; symbols are derived view data
+        resolved on-chain.
         """
         token_value = data.get("token")
         if isinstance(token_value, ERC20TokenMetadata):
@@ -302,14 +301,11 @@ class TokenErc20ResourceAdapter:
                 )
             decimals = token_value.get("decimals")
             if decimals is None:
-                # Last-resort enrichment from the local registry — keeps
-                # the dict shape minimal for callers that know they're
-                # talking about a registered token.
-                looked_up = TOKEN_REGISTRY.get_by_address(address)
+                looked_up = resolve_token_cached(address)
                 if looked_up is None:
                     raise ValueError(
                         f"token dict for {address} must include 'decimals' "
-                        f"(token not in local registry)"
+                        f"(no cached chain metadata for this address)"
                     )
                 token_meta = looked_up
             else:
@@ -321,11 +317,9 @@ class TokenErc20ResourceAdapter:
         elif isinstance(token_value, str):
             if not token_value.startswith("0x"):
                 raise ValueError(
-                    f"token string must be a 0x-prefixed address, got {token_value!r} "
-                    f"(symbol-based identity is a client-side convenience; resolve "
-                    f"to an address before calling)"
+                    f"token string must be a 0x-prefixed address, got {token_value!r}"
                 )
-            looked_up = TOKEN_REGISTRY.get_by_address(token_value)
+            looked_up = resolve_token_cached(token_value)
             if looked_up is not None:
                 token_meta = looked_up
             else:

@@ -44,7 +44,6 @@ port                = 8001
 base_url            = "http://sell_agent:8001/"
 db_path             = "./src/market_storefront/data/sell-agent/agent.db"
 log_file_path       = "./logs/bob.log"
-token_registry_path = "/app/src/market_storefront/data/token_registry_docker_compose.json"
 enable_event_queue  = false
 admin_api_key       = "test-api-key"
 # Seed the resources table from this CSV on startup when the table is empty.
@@ -71,5 +70,5 @@ policy_mode = "bisection"    # was "rl" — rl requires torch which is not insta
 # min_price/token/max_duration_seconds. Per-row CSV columns override.
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".
 default_min_price            = "100"
-default_token                = "MOCK"
+default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
 default_max_duration_seconds = 0

@@ -141,7 +141,6 @@ class Config:
     agent_db_path: str
     log_file_path: str | None
     log_level: str
-    token_registry_path: str
     ssh_public_key: str
     zerotier_network: str | None
     # Chain identity
@@ -205,7 +204,11 @@ class Config:
     # min_price / token blank. None means "no default; rows must set it
     # or they're skipped at publish time."
     default_min_price: str | None
-    default_token: str
+    # 0x ERC-20 contract address used when a CSV row has no token column.
+    # Also the demand-side token used by the resource-imbalance policy's
+    # synthesized MAKE_OFFER (where there's no CSV row at all). None means
+    # no default; per-row token is required.
+    default_token_address: str | None
     # Default max-duration ceiling (seconds) advertised on listings whose
     # CSV row leaves max_duration_seconds blank. None = unlimited.
     default_max_duration_seconds: int | None
@@ -232,9 +235,6 @@ class Config:
     admin_api_key: str | None
 
 
-DEFAULT_TOKEN_REGISTRY_PATH = (
-    Path(__file__).resolve().parents[1] / "data" / "token_registry_docker_compose.json"
-)
 _DEFAULT_SSH_PUBLIC_KEY = (
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
 )
@@ -370,10 +370,6 @@ def load_config() -> Config:
         agent_db_path=str(_resolve("seller.db_path", "/tmp/agent.db")),
         log_file_path=_resolve("seller.log_file_path", None),
         log_level=str(_resolve("seller.log_level", "INFO")),
-        token_registry_path=str(_resolve(
-            "seller.token_registry_path",
-            str(DEFAULT_TOKEN_REGISTRY_PATH),
-        )),
 
         onchain_agent_id=_resolve("seller.onchain_agent_id", None),
 
@@ -463,7 +459,7 @@ def load_config() -> Config:
         # Pricing defaults — applied to resources whose CSV row leaves
         # min_price / token / max_duration_seconds blank.
         default_min_price=_resolve("seller.pricing.default_min_price", None) or None,
-        default_token=str(_resolve("seller.pricing.default_token", "MOCK")),
+        default_token_address=_resolve("seller.pricing.default_token_address", None) or None,
         default_max_duration_seconds=_resolve_int(
             "seller.pricing.default_max_duration_seconds", 0
         ) or None,

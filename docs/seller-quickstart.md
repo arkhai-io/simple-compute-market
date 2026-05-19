@@ -102,11 +102,10 @@ port                = 8001
 base_url            = "http://<PUBLIC_IP>:8001/"
 db_path             = "/app/agent.db"
 log_file_path       = "./logs/seller.log"
-token_registry_path = "/app/src/market_storefront/data/token_registry_base_sepolia.json"
 resources_csv_path  = "/app/resources.csv"
 admin_api_key       = "rehearsal-admin-key"
 enable_event_queue  = false
-# Pin AFTER your first successful registration — see §6 below.
+# Pin AFTER your first successful registration — see §5 below.
 # onchain_agent_id  = "5955"
 
 [seller.provisioning]
@@ -119,7 +118,10 @@ policy_mode = "bisection"
 
 [seller.pricing]
 default_min_price            = "2"              # raw token base units, per hour
-default_token                = "USDC"
+# 0x ERC-20 address used when a CSV row has no `token` column.
+# Decimals + symbol are resolved on chain via [chain].rpc_url and cached
+# at $XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json.
+default_token_address        = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 default_max_duration_seconds = 86400
 ```
 
@@ -141,41 +143,28 @@ This is what the seller offers. One row = one slice the storefront can
 sell:
 
 ```csv
-resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host,attribute.symbol,attribute.contract_address,attribute.decimals
-compute-bs-001,compute.gpu,H200,count,1,available,2,USDC,86400,H200,99.0,"California, US",btc1,USDC,0x036CbD53842c5426634e7929541eC2318f3dCF7e,6
+resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
+compute-bs-001,compute.gpu,H200,count,1,available,2,0x036CbD53842c5426634e7929541eC2318f3dCF7e,86400,H200,99.0,"California, US",btc1
 ```
 
 The critical column for live provisioning is **`attribute.vm_host`** — it
 must match a host alias in the provisioning service's ansible inventory
-(see §8). The bundled inventory currently has `piknik1`, `nodeinfra1`,
+(see §7). The bundled inventory currently has `piknik1`, `nodeinfra1`,
 `btc1`, `ww1`; if you're deploying on a new machine you either add an
 inventory entry or reuse one of those aliases and re-seed.
+
+The `token` column is a 0x ERC-20 contract address — symbol shorthand
+("USDC") was removed in favour of chain-resolved metadata. The storefront
+eth-calls `symbol()` and `decimals()` against your `[chain].rpc_url` the
+first time it sees a token address; results are cached at
+`$XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json`. Rows can omit the
+`token` column to fall back to `[seller.pricing].default_token_address`.
 
 `attribute.gpu_model` and `attribute.region` are free-form strings — the
 indexer's `filter-spec.yaml` is the authoritative vocabulary (v2 ships with
 ~40 common NVIDIA models).
 
-## 4. Token registry
-
-Listings advertise prices by token symbol (e.g. "USDC"); both seller and
-buyer look up symbol → contract address + decimals via a registry JSON.
-For Base Sepolia, the minimal file:
-
-```json
-[
-  {
-    "symbol": "USDC",
-    "name": "USD Coin (Base Sepolia)",
-    "contract_address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    "decimals": 6
-  }
-]
-```
-
-Save as `token_registry_base_sepolia.json`; the path goes in `[seller]
-token_registry_path`.
-
-## 5. docker-compose.yml
+## 4. docker-compose.yml
 
 A minimal seller-side compose looks like this. The full reference is
 [`deploy-base-sepolia/docker-compose.yml`](../deploy-base-sepolia/docker-compose.yml);
@@ -193,7 +182,7 @@ services:
       - RPC_URL=https://base-sepolia.infura.io/v3/<YOUR_KEY>
       - IDENTITY_REGISTRY_ADDRESS=0x8004A818BFB912233c491871b3d84c89A494BD9e
       - REPUTATION_REGISTRY_ADDRESS=0x8004B663056A597Dffe9eCcC1965A193B7388713
-      - REGISTRY_START_BLOCK=41707000      # see §6
+      - REGISTRY_START_BLOCK=41707000      # see §5
       - REGISTRY_REQUIRE_API_KEY=true
       - REGISTRY_ADMIN_API_KEY=rehearsal-admin-token
       - REGISTRY_BOOTSTRAP_API_KEY=rehearsal-shared-token
@@ -212,7 +201,6 @@ services:
     volumes:
       - ./config.seller.toml:/etc/arkhai/config.toml:ro
       - ./resources.csv:/app/resources.csv:ro
-      - ./token_registry_base_sepolia.json:/app/src/market_storefront/data/token_registry_base_sepolia.json:ro
     depends_on:
       registry:
         condition: service_healthy
@@ -234,7 +222,7 @@ services:
       - PROVISIONING_STOREFRONT_URL=http://sell_agent:8001
       - PROVISIONING_STOREFRONT_ADMIN_KEY=rehearsal-admin-key
     volumes:
-      # SSH key the container uses to reach the KVM host. See §8.
+      # SSH key the container uses to reach the KVM host. See §7.
       - ./keys/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
       - ../compute-provisioning-iac:/app/compute-provisioning-iac
     depends_on:
@@ -246,7 +234,7 @@ networks:
   market-network: { driver: bridge }
 ```
 
-## 6. Bring it up, register, publish
+## 5. Bring it up, register, publish
 
 ```bash
 docker compose up -d
@@ -283,7 +271,7 @@ to every URL in `[registry] urls`. Successful output:
 ✓ compute-bs-001 → listing f0ba3664-… (status: created)
 ```
 
-## 7. Verify
+## 6. Verify
 
 ```bash
 # Listing is in the indexer
@@ -301,7 +289,7 @@ At this point a buyer somewhere else can `market buy --gpu-model H200`
 and (in mock mode) get back simulated VM credentials. Real KVM
 provisioning is one more step.
 
-## 8. Switching to live KVM provisioning
+## 7. Switching to live KVM provisioning
 
 Mock mode validates the storefront ↔ chain ↔ registry surface without
 touching libvirt. To actually create a VM on real hardware:
@@ -369,9 +357,10 @@ to the buyer, and bill them on chain.
 - **`resources.csv` `vm_host` set to an inventory alias the indexer or
   provisioning DB doesn't know about** = your listing won't be reachable
   and settle will fail with "host not found". Match the alias exactly.
-- **Make sure `attribute.symbol` in `resources.csv` is in your
-  `token_registry_*.json`** — otherwise listings publish but with
-  unresolvable token metadata.
+- **`resources.csv` `token` column must be a 0x ERC-20 address** —
+  symbol shorthand ("USDC") is rejected at import time. Decimals are
+  resolved on chain from `[chain].rpc_url`, so make sure that's set
+  and reachable.
 - **`agent_id` with a dash** = rejected. Python identifiers only.
 - **`ARKHAI_PROVISIONING_MODE=mock` env var on the storefront overrides
   the toml's `mode = "http"`** — env wins. Make sure both agree (the
@@ -397,7 +386,7 @@ indexer rather than rely on a shared one:
 
 ### Stand-alone or co-located
 
-The compose example in §5 has the registry co-located with the seller. To
+The compose example in §4 has the registry co-located with the seller. To
 run a stand-alone indexer (sellers and buyers elsewhere on the internet
 all point at it), use the same `arkhai:registry` image with these env
 vars:

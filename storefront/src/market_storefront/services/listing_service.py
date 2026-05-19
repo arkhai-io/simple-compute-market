@@ -68,12 +68,10 @@ class ListingService:
             hidden-reserve listing.
 
         Bare symbol strings and human-decimal amounts are rejected —
-        clients resolve symbol→address and scale human→base units
-        locally before posting. This keeps the storefront's
-        ``TOKEN_REGISTRY`` strictly a presentation cache rather than a
-        load-bearing translation layer.
+        clients pass addresses + base-unit amounts. Symbol enrichment for
+        display is best-effort via the chain-resolved cache.
         """
-        from service.clients.token import TOKEN_REGISTRY
+        from service.clients.token import resolve_token_cached
         if "token" not in resource_payload:
             return resource_payload
         token_value = resource_payload.get("token")
@@ -88,11 +86,11 @@ class ListingService:
                 )
             decimals = token_value.get("decimals")
             if decimals is None:
-                looked_up = TOKEN_REGISTRY.get_by_address(address)
+                looked_up = resolve_token_cached(address)
                 if looked_up is None:
                     raise ValueError(
                         f"Token dict for {address} must include 'decimals' "
-                        f"(token not in local registry)"
+                        f"(no cached chain metadata for this address)"
                     )
                 token_dump = looked_up.model_dump()
             else:
@@ -104,10 +102,9 @@ class ListingService:
         elif isinstance(token_value, str):
             if not token_value.startswith("0x"):
                 raise ValueError(
-                    f"Token string must be a 0x address, got {token_value!r} "
-                    f"(resolve symbol→address client-side)"
+                    f"Token string must be a 0x address, got {token_value!r}"
                 )
-            looked_up = TOKEN_REGISTRY.get_by_address(token_value)
+            looked_up = resolve_token_cached(token_value)
             if looked_up is not None:
                 token_dump = looked_up.model_dump()
             else:
@@ -277,7 +274,7 @@ class ListingService:
                 "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config.",
             }
         order = await self._db.load_listing(listing_id=listing_id)
-        from service.clients.token import TOKEN_REGISTRY, ERC20TokenMetadata
+        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
         def _resolve_token(address: str) -> dict:
             """Resolve a 0x address to metadata for the refund transfer.
 
@@ -289,7 +286,7 @@ class ListingService:
                 raise ValueError(
                     f"token must be a 0x address, got {address!r}"
                 )
-            meta = TOKEN_REGISTRY.get_by_address(address)
+            meta = resolve_token_cached(address)
             if meta is None:
                 meta = ERC20TokenMetadata(
                     symbol="",

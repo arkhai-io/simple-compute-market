@@ -302,26 +302,6 @@ async def _startup_tasks():
 
     _maybe_join_zerotier_network()
 
-    # Point the service-layer TOKEN_REGISTRY singleton at the path
-    # configured in seller.token_registry_path. Without this, the
-    # registry falls back to its own bundled default (under
-    # ``service/.../core/agent/app/data/...``), which doesn't exist
-    # inside the storefront container — listing creates would then
-    # 400 with ``Unknown token: <symbol>`` from the auto-publish loop.
-    if CONFIG.token_registry_path:
-        from service.clients.token import init_token_registry
-        try:
-            init_token_registry(CONFIG.token_registry_path)
-            logger.info(
-                "[STARTUP] Token registry initialised from %s",
-                CONFIG.token_registry_path,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[STARTUP] Token registry init failed for %s: %s",
-                CONFIG.token_registry_path, exc,
-            )
-
     # Resolve agent identity first — everything else (heartbeat, registration
     # file endpoint) depends on having a valid numeric agent ID.
     # Raises RuntimeError on hard failure (missing config + auto_register=False),

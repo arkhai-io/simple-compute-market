@@ -7,7 +7,8 @@ alert that fired the policy would hit ``ValueError: MAKE_OFFER requires
 explicit 'offer' and 'demand' parameters`` on dispatch.
 
 The fix builds a complete offer/demand pair from the alerting compute
-resource plus CONFIG defaults (default_token + default_min_price).
+resource plus CONFIG defaults (default_token_address + default_min_price);
+decimals are resolved on chain via ``service.clients.token.resolve_token``.
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ from market_storefront.models.domain_models import (
     ResourceImbalanceEvent,
 )
 from market_storefront.utils.config import CONFIG
-from service.clients.token import ERC20TokenMetadata, TokenRegistry
+from service.clients.token import ERC20TokenMetadata, TokenResolutionError
 
 
 _RESOURCE = ComputeResource(
@@ -36,10 +37,12 @@ _RESOURCE = ComputeResource(
     region=Region.CALIFORNIA_US,
 )
 
+_MOCK_ADDRESS = "0x1234567890123456789012345678901234567890"
 _MOCK_TOKEN = ERC20TokenMetadata(
     symbol="MOCK",
-    contract_address="0x1234567890123456789012345678901234567890",
+    contract_address=_MOCK_ADDRESS,
     decimals=6,
+    chain_id=1,
 )
 
 
@@ -71,17 +74,21 @@ def _patched_config(**overrides):
 
 
 @pytest.fixture
-def mock_token_registry():
-    """Patch TOKEN_REGISTRY in the policy store module to resolve "MOCK"
-    without loading a real token registry file."""
-    fake_registry = TokenRegistry()
-    fake_registry.register_token(_MOCK_TOKEN)
-    with patch("domain.compute.agent.app.policy.store.TOKEN_REGISTRY", fake_registry):
+def stubbed_resolve_token():
+    """Patch the chain-RPC resolver inside policy/store.py to return the
+    canned MOCK metadata without an RPC. ``_resolve_chain_id`` is imported
+    lazily inside the function so we patch it at its source module."""
+    def fake_resolve(address, *, rpc_url, chain_id, refresh=False):
+        if address.lower() == _MOCK_ADDRESS.lower():
+            return _MOCK_TOKEN
+        raise TokenResolutionError(f"untested address: {address}")
+    with patch("domain.compute.agent.app.policy.store.resolve_token", fake_resolve), \
+         patch("market_storefront.utils.config._resolve_chain_id", lambda: 1):
         yield
 
 
 class TestRiActionMakeOfferFromResource:
-    def test_surplus_with_defaults_produces_complete_make_offer(self, mock_token_registry):
+    def test_surplus_with_defaults_produces_complete_make_offer(self, stubbed_resolve_token):
         """Action carries offer + demand so action_executor.execute_action
         does not raise ``MAKE_OFFER requires explicit 'offer' and 'demand' parameters``."""
         from domain.compute.agent.app.policy.store import (
@@ -89,9 +96,10 @@ class TestRiActionMakeOfferFromResource:
         )
 
         cfg = _patched_config(
-            default_token="MOCK",
+            default_token_address=_MOCK_ADDRESS,
             default_min_price="1000",
             default_max_duration_seconds=3600,
+            chain_rpc_url="http://rpc",
         )
         with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
             action = ri_action_make_offer_from_resource(_build_context())
@@ -108,7 +116,7 @@ class TestRiActionMakeOfferFromResource:
         assert params["max_duration_seconds"] == 3600
         assert params["paused"] is False
 
-    def test_returns_none_when_default_min_price_unset(self, mock_token_registry):
+    def test_returns_none_when_default_min_price_unset(self, stubbed_resolve_token):
         """Without a configured floor price we cannot synthesise a demand
         and so the policy falls through to no_action rather than producing
         an incomplete MAKE_OFFER."""
@@ -122,13 +130,17 @@ class TestRiActionMakeOfferFromResource:
 
         assert action is None
 
-    def test_returns_none_for_non_surplus_imbalance(self, mock_token_registry):
+    def test_returns_none_for_non_surplus_imbalance(self, stubbed_resolve_token):
         """Deficit alerts are a buy-side concern; the seller storefront skips them."""
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        cfg = _patched_config(default_min_price="1000", default_token="MOCK")
+        cfg = _patched_config(
+            default_min_price="1000",
+            default_token_address=_MOCK_ADDRESS,
+            chain_rpc_url="http://rpc",
+        )
         with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
             action = ri_action_make_offer_from_resource(
                 _build_context(imbalance_type="deficit"),
@@ -136,15 +148,38 @@ class TestRiActionMakeOfferFromResource:
 
         assert action is None
 
-    def test_returns_none_when_token_unresolvable(self):
-        """Misconfigured default_token (missing from registry) → fall through."""
+    def test_returns_none_when_token_address_unset(self):
+        """default_token_address=None → fall through cleanly."""
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        empty_registry = TokenRegistry()
-        cfg = _patched_config(default_min_price="1000", default_token="DOES_NOT_EXIST")
-        with patch("domain.compute.agent.app.policy.store.TOKEN_REGISTRY", empty_registry), \
+        cfg = _patched_config(
+            default_min_price="1000",
+            default_token_address=None,
+            chain_rpc_url="http://rpc",
+        )
+        with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
+            action = ri_action_make_offer_from_resource(_build_context())
+
+        assert action is None
+
+    def test_returns_none_when_chain_resolve_fails(self):
+        """RPC unreachable / bad address → fall through cleanly."""
+        from domain.compute.agent.app.policy.store import (
+            ri_action_make_offer_from_resource,
+        )
+
+        def always_fail(*a, **k):
+            raise TokenResolutionError("RPC down")
+
+        cfg = _patched_config(
+            default_min_price="1000",
+            default_token_address=_MOCK_ADDRESS,
+            chain_rpc_url="http://rpc",
+        )
+        with patch("domain.compute.agent.app.policy.store.resolve_token", always_fail), \
+             patch("market_storefront.utils.config._resolve_chain_id", lambda: 1), \
              patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
             action = ri_action_make_offer_from_resource(_build_context())
 

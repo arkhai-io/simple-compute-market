@@ -1,60 +1,34 @@
-"""Unit tests for service.clients.token."""
+"""Unit tests for service.clients.token (chain-resolved cache)."""
+from __future__ import annotations
+
 import json
 import pytest
-from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
-@pytest.fixture
-def registry_json(tmp_path):
-    data = [
-        {"symbol": "USDC", "name": "USD Coin", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-        {"symbol": "WETH", "name": "Wrapped Ether", "contract_address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "decimals": 18},
-    ]
-    p = tmp_path / "token_registry.json"
-    p.write_text(json.dumps(data))
-    return str(p)
+@pytest.fixture(autouse=True)
+def isolated_cache(tmp_path, monkeypatch):
+    """Point the cache at a per-test directory so tests don't pollute each
+    other or the user's real cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    import service.clients.token as token_mod
+    token_mod._MEMORY_CACHE.clear()
+    yield tmp_path
+    token_mod._MEMORY_CACHE.clear()
 
 
-def test_load_registry(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    assert len(reg) == 2
-
-
-def test_get_by_symbol(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    token = reg.get_by_symbol("usdc")
-    assert token is not None
-    assert token.symbol == "USDC"
-    assert token.decimals == 6
-
-
-def test_get_by_address(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    token = reg.get_by_address("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48")
-    assert token is not None
-    assert token.symbol == "USDC"
-
-
-def test_resolve_symbol(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    assert reg.resolve("WETH") is not None
-
-
-def test_resolve_address(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    assert reg.resolve("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2") is not None
-
-
-def test_require_missing_raises(registry_json):
-    from service.clients.token import TokenRegistry, TokenRegistryError
-    reg = TokenRegistry(registry_json)
-    with pytest.raises(TokenRegistryError):
-        reg.require("NOTEXIST")
+def _fake_web3(symbol: str, decimals: int, name: str | None = None):
+    """Build a web3.Web3 stand-in whose contract().functions return our values."""
+    contract = MagicMock()
+    contract.functions.symbol.return_value.call.return_value = symbol
+    contract.functions.decimals.return_value.call.return_value = decimals
+    if name is None:
+        contract.functions.name.return_value.call.side_effect = Exception("no name")
+    else:
+        contract.functions.name.return_value.call.return_value = name
+    w3 = MagicMock()
+    w3.eth.contract.return_value = contract
+    return w3
 
 
 def test_erc20_token_metadata_model():
@@ -69,162 +43,166 @@ def test_erc20_token_metadata_model():
     assert token.chain_id is None
 
 
+def test_resolve_token_rejects_non_address():
+    from service.clients.token import resolve_token, TokenResolutionError
+    with pytest.raises(TokenResolutionError):
+        resolve_token("USDC", rpc_url="http://x", chain_id=1)
+    with pytest.raises(TokenResolutionError):
+        resolve_token("0xabc", rpc_url="http://x", chain_id=1)
+
+
+def test_resolve_token_calls_rpc_on_miss_and_caches(isolated_cache):
+    from service.clients.token import resolve_token
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake = _fake_web3("USDC", 6, "USD Coin")
+    with patch("web3.Web3", return_value=fake), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        meta = resolve_token(address, rpc_url="http://rpc", chain_id=1)
+    assert meta.symbol == "USDC"
+    assert meta.decimals == 6
+    assert meta.name == "USD Coin"
+    assert meta.chain_id == 1
+
+    # Second call hits the in-memory cache; RPC must not be touched.
+    with patch("web3.Web3", side_effect=AssertionError("must not RPC again")):
+        meta2 = resolve_token(address, rpc_url="http://rpc", chain_id=1)
+    assert meta2.contract_address == meta.contract_address
+
+    # And the disk file exists with that entry.
+    cache_file = isolated_cache / "arkhai" / "tokens" / "1.json"
+    assert cache_file.exists()
+    payload = json.loads(cache_file.read_text())
+    assert address.lower() in payload
+
+
+def test_resolve_token_refresh_bypasses_cache():
+    from service.clients.token import resolve_token
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake1 = _fake_web3("USDC", 6)
+    with patch("web3.Web3", return_value=fake1), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        resolve_token(address, rpc_url="http://rpc", chain_id=1)
+
+    fake2 = _fake_web3("USDC2", 8)
+    with patch("web3.Web3", return_value=fake2), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        meta = resolve_token(address, rpc_url="http://rpc", chain_id=1, refresh=True)
+    assert meta.symbol == "USDC2"
+    assert meta.decimals == 8
+
+
+def test_disk_cache_survives_process_restart(isolated_cache):
+    from service.clients.token import resolve_token, resolve_token_cached
+    import service.clients.token as token_mod
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake = _fake_web3("USDC", 6)
+    with patch("web3.Web3", return_value=fake), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        resolve_token(address, rpc_url="http://rpc", chain_id=42)
+
+    # Simulate fresh process: drop the in-memory cache.
+    token_mod._MEMORY_CACHE.clear()
+
+    hit = resolve_token_cached(address, chain_id=42)
+    assert hit is not None
+    assert hit.symbol == "USDC"
+
+
+def test_resolve_token_cached_returns_none_when_uncached():
+    from service.clients.token import resolve_token_cached
+    assert resolve_token_cached("0x" + "ab" * 20, chain_id=1) is None
+    assert resolve_token_cached("not-an-address") is None
+    assert resolve_token_cached("") is None
+
+
+def test_resolve_token_cached_searches_across_chains_when_no_chain_id():
+    """When chain_id is omitted, the cache is searched across every chain
+    loaded so far. Documented as "ambiguous if same address resolved on
+    multiple chains" — first hit wins."""
+    from service.clients.token import resolve_token, resolve_token_cached
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake = _fake_web3("USDC", 6)
+    with patch("web3.Web3", return_value=fake), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        resolve_token(address, rpc_url="http://rpc", chain_id=1)
+    hit = resolve_token_cached(address)
+    assert hit is not None
+
+
+def test_render_token_with_cache_hit():
+    from service.clients.token import resolve_token, render_token
+    address = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    fake = _fake_web3("USDC", 6)
+    with patch("web3.Web3", return_value=fake), \
+         patch("web3.Web3.to_checksum_address", return_value=address):
+        resolve_token(address, rpc_url="http://rpc", chain_id=1)
+    assert render_token(address) == f"USDC ({address})"
+
+
+def test_render_token_falls_through_to_address_only():
+    from service.clients.token import render_token
+    address = "0xDeAdBeEfDeAdBeEfDeAdBeEfDeAdBeEfDeAdBeEf"
+    assert render_token(address) == address
+
+
+def test_render_token_handles_metadata_dict():
+    from service.clients.token import render_token
+    payload = {"symbol": "FOO", "contract_address": "0xfoo"}
+    assert render_token(payload) == "FOO (0xfoo)"
+
+
+def test_render_token_handles_none():
+    from service.clients.token import render_token
+    assert render_token(None) == "-"
+    assert render_token("") == "-"
+
+
+def test_resolve_token_by_symbol_in_finds_match():
+    """Stub resolve_token directly; the goal is to test the symbol-match
+    filter, not the on-chain plumbing (which is covered separately)."""
+    from service.clients import token as token_mod
+    addr_a = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    addr_b = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+    canned = {
+        addr_a.lower(): token_mod.ERC20TokenMetadata(
+            symbol="USDC", contract_address=addr_a, decimals=6, chain_id=1,
+        ),
+        addr_b.lower(): token_mod.ERC20TokenMetadata(
+            symbol="WETH", contract_address=addr_b, decimals=18, chain_id=1,
+        ),
+    }
+    with patch.object(
+        token_mod, "resolve_token",
+        lambda address, *, rpc_url, chain_id, refresh=False: canned[address.lower()],
+    ):
+        match = token_mod.resolve_token_by_symbol_in(
+            "WETH", [addr_a, addr_b], rpc_url="http://rpc", chain_id=1,
+        )
+    assert match is not None
+    assert match.symbol == "WETH"
+    assert match.contract_address == addr_b
+
+
+def test_resolve_token_by_symbol_in_returns_none_when_no_match():
+    from service.clients import token as token_mod
+    addr_a = "0xA0b86991c6218b36c1D19D4A2e9eb0Ce3606eB48"
+    canned = token_mod.ERC20TokenMetadata(
+        symbol="USDC", contract_address=addr_a, decimals=6, chain_id=1,
+    )
+    with patch.object(
+        token_mod, "resolve_token",
+        lambda address, *, rpc_url, chain_id, refresh=False: canned,
+    ):
+        match = token_mod.resolve_token_by_symbol_in(
+            "WETH", [addr_a], rpc_url="http://rpc", chain_id=1,
+        )
+    assert match is None
+
+
 @pytest.mark.asyncio
 async def test_get_wallet_token_balance_web3_not_installed():
-    """Should raise ValueError when web3 call fails."""
+    """Falls through when web3 import fails."""
     from service.clients.token import get_wallet_token_balance
-    from unittest.mock import patch, AsyncMock
-    # Patch the import to raise ImportError
     with patch.dict("sys.modules", {"web3": None}):
         with pytest.raises((ValueError, Exception)):
             await get_wallet_token_balance("0x1234", "0x5678", "http://localhost:8545")
-
-
-# ---------------------------------------------------------------------------
-# Additional tests
-# ---------------------------------------------------------------------------
-
-def test_list_tokens(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    tokens = reg.list_tokens()
-    assert len(tokens) == 2
-    symbols = {t.symbol for t in tokens}
-    assert symbols == {"USDC", "WETH"}
-
-
-def test_contains(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    assert "USDC" in reg
-    assert "usdc" in reg
-    assert "NOTEXIST" not in reg
-
-
-def test_require_by_symbol_succeeds(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    token = reg.require("USDC")
-    assert token.symbol == "USDC"
-    assert token.decimals == 6
-
-
-def test_require_by_address_succeeds(registry_json):
-    from service.clients.token import TokenRegistry
-    reg = TokenRegistry(registry_json)
-    token = reg.require("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-    assert token.symbol == "USDC"
-
-
-def test_duplicate_symbol_raises(tmp_path):
-    from service.clients.token import TokenRegistry, TokenRegistryError
-    data = [
-        {"symbol": "USDC", "name": "USD Coin", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-        {"symbol": "USDC", "name": "USD Coin 2", "contract_address": "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "decimals": 6},
-    ]
-    p = tmp_path / "dup_symbol.json"
-    p.write_text(json.dumps(data))
-    with pytest.raises(TokenRegistryError, match="Duplicate symbol"):
-        TokenRegistry(str(p))
-
-
-def test_duplicate_address_raises(tmp_path):
-    from service.clients.token import TokenRegistry, TokenRegistryError
-    data = [
-        {"symbol": "USDC", "name": "USD Coin", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-        {"symbol": "USDC2", "name": "USD Coin 2", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-    ]
-    p = tmp_path / "dup_address.json"
-    p.write_text(json.dumps(data))
-    with pytest.raises(TokenRegistryError, match="Duplicate contract address"):
-        TokenRegistry(str(p))
-
-
-def test_malformed_json_raises(tmp_path):
-    from service.clients.token import TokenRegistry, TokenRegistryError
-    p = tmp_path / "bad.json"
-    p.write_text("not valid json {{")
-    with pytest.raises(TokenRegistryError):
-        TokenRegistry(str(p))
-
-
-def test_missing_file_gives_empty_registry(tmp_path):
-    from service.clients.token import TokenRegistry
-    nonexistent = str(tmp_path / "does_not_exist.json")
-    reg = TokenRegistry(nonexistent)
-    assert len(reg) == 0
-
-
-def test_register_token_in_memory(registry_json):
-    from service.clients.token import TokenRegistry, ERC20TokenMetadata
-    reg = TokenRegistry(registry_json)
-    new_token = ERC20TokenMetadata(
-        symbol="MOCK",
-        name="Mock Token",
-        contract_address="0xMockMockMockMockMockMockMockMockMockMock1",
-        decimals=18,
-    )
-    reg.register_token(new_token)
-    assert reg.resolve("MOCK") is not None
-    assert reg.resolve("MOCK").decimals == 18
-
-
-def test_register_token_persists(tmp_path):
-    from service.clients.token import TokenRegistry, ERC20TokenMetadata
-    data = [
-        {"symbol": "USDC", "name": "USD Coin", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-    ]
-    p = tmp_path / "persist_reg.json"
-    p.write_text(json.dumps(data))
-    reg = TokenRegistry(str(p))
-    new_token = ERC20TokenMetadata(
-        symbol="WETH",
-        name="Wrapped Ether",
-        contract_address="0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-        decimals=18,
-    )
-    reg.register_token(new_token, persist=True)
-    # Re-read from disk — new token must appear
-    reg2 = TokenRegistry(str(p))
-    assert len(reg2) == 2
-    assert reg2.resolve("WETH") is not None
-
-
-def test_reload_picks_up_changes(tmp_path):
-    from service.clients.token import TokenRegistry
-    data = [
-        {"symbol": "USDC", "name": "USD Coin", "contract_address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "decimals": 6},
-    ]
-    p = tmp_path / "reload_reg.json"
-    p.write_text(json.dumps(data))
-    reg = TokenRegistry(str(p))
-    assert len(reg) == 1
-    # Mutate file on disk
-    updated = data + [
-        {"symbol": "DAI", "name": "Dai Stablecoin", "contract_address": "0x6B175474E89094C44Da98b954EedeAC495271d0F", "decimals": 18},
-    ]
-    p.write_text(json.dumps(updated))
-    reg.reload()
-    assert len(reg) == 2
-    assert reg.resolve("DAI") is not None
-
-
-def test_init_token_registry_rebinds_singleton(tmp_path):
-    """``init_token_registry`` re-points the module-level singleton at a
-    different file in place. Modules that already imported
-    ``TOKEN_REGISTRY`` keep seeing the updated data via the same object."""
-    from service.clients.token import TOKEN_REGISTRY, init_token_registry
-    data = [
-        {"symbol": "REBOUND_TOKEN", "name": "Rebound Token", "contract_address": "0xCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcC1", "decimals": 8},
-    ]
-    p = tmp_path / "rebind_registry.json"
-    p.write_text(json.dumps(data))
-    returned = init_token_registry(p)
-    assert returned is TOKEN_REGISTRY
-    assert TOKEN_REGISTRY.resolve("REBOUND_TOKEN") is not None
-
-
-def test_singleton_importable():
-    from service.clients.token import TOKEN_REGISTRY
-    assert TOKEN_REGISTRY is not None
-    assert len(TOKEN_REGISTRY) >= 0

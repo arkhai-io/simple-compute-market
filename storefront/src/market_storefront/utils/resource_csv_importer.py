@@ -113,6 +113,13 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
     state_raw = _clean_cell(row.get("state"))
     min_price_raw = _clean_cell(row.get("min_price"))
     token_raw = _clean_cell(row.get("token"))
+    if token_raw:
+        if not token_raw.startswith("0x") or len(token_raw) != 42:
+            raise ValueError(
+                f"Invalid token {token_raw!r} — the `token` column must be "
+                f"a 0x ERC-20 address. Symbol shorthand (e.g. 'USDC') is "
+                f"no longer supported."
+            )
     max_duration_seconds_raw = _clean_cell(row.get("max_duration_seconds"))
 
     value: int | float | None = None

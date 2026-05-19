@@ -323,7 +323,7 @@ class TestSeedResourcesIfEmpty:
             "attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
             "attribute.disk_gb,attribute.virtualization_type\n"
             "compute-test-001,compute.gpu,rtx5080,count,1,available,"
-            "150,MOCK,,"
+            "150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,"
             'RTX 5080,90.0,"California, US",'
             "ww1,16,256,4000,bare_metal\n"
         )
@@ -345,7 +345,7 @@ class TestSeedResourcesIfEmpty:
             "min_price,token,max_duration_seconds,"
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
-            '150,MOCK,,'
+            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
             'RTX 5080,90.0,"California, US",ww1\n'
         )
         svc = _make_service(db)
@@ -369,7 +369,7 @@ class TestSeedResourcesIfEmpty:
             "min_price,token,max_duration_seconds,"
             "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
             'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
-            '150,MOCK,,'
+            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
             'RTX 5080,90.0,"California, US",ww1\n'
         )
         svc = _make_service(db)

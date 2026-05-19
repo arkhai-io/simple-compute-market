@@ -227,21 +227,27 @@ def resolve_chain_settings(
     tc = token_contract
     decimals = token_decimals
     if not tc:
-        from ..common import resolve_default_token
-        symbol = resolve_default_token()
+        from ..common import resolve_default_token_address, resolve_chain_id
+        tc = resolve_default_token_address()
+        if not tc:
+            typer.secho(
+                "No --token-contract given and [buyer].default_token_address "
+                "is unset in config.toml.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(2)
+        from service.clients.token import resolve_token, TokenResolutionError
         try:
-            from service.clients.token import TOKEN_REGISTRY
-            meta = TOKEN_REGISTRY.require(symbol)
-            tc = meta.contract_address
-            # Only override decimals when the token registry is the
-            # source — caller-supplied flag wins over the default.
+            meta = resolve_token(
+                tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+            )
+            # Caller-supplied --token-decimals wins over the chain value.
             if token_decimals == 18:  # the typer default
                 decimals = meta.decimals
-        except Exception as exc:
+        except (TokenResolutionError, RuntimeError) as exc:
             typer.secho(
-                f"Could not resolve default token {symbol!r} — pass "
-                f"--token-contract and --token-decimals, or set "
-                f"[buyer].default_token in config.toml. ({exc})",
+                f"Could not resolve token {tc} on chain — pass "
+                f"--token-decimals or check chain.rpc_url. ({exc})",
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)

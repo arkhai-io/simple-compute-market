@@ -101,10 +101,6 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 # queries to every URL listed here.
 urls                      = ["http://<INDEXER_HOST>:8080"]
 identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
-# Required for symbol resolution — points at a JSON with [{"symbol":
-# "USDC", "contract_address": "0x…", "decimals": 6}, …]. The repo ships
-# one for Base Sepolia at deploy-base-sepolia/token_registry_base_sepolia.json.
-token_registry_path       = "/path/to/token_registry_base_sepolia.json"
 
 [registry.auth]
 # Only needed for indexers running with REGISTRY_REQUIRE_API_KEY=true.
@@ -114,11 +110,10 @@ token_registry_path       = "/path/to/token_registry_base_sepolia.json"
 "http://<INDEXER_HOST>:8080" = "shared-bootstrap-token"
 
 [buyer]
-# Symbol resolved against token_registry_path above. Lets you pass
-# `--token USDC` (or omit) without also passing --token-contract
-# / --token-decimals on every call. Set to whichever symbol you usually
-# pay with.
-default_token = "USDC"
+# 0x ERC-20 address used when `market buy` has no --token-contract.
+# Decimals + symbol are resolved on chain via [chain].rpc_url and
+# cached at $XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json.
+default_token_address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
 [buyer.negotiation]
 # "bisection" doesn't need torch installed. The default is "rl" which
@@ -126,14 +121,11 @@ default_token = "USDC"
 policy_mode   = "bisection"
 ```
 
-Three things that will bite you if you skip them:
+Two things that will bite you if you skip them:
 
 - **`ssh_public_key`** — without it, `market settle` fails before
   reaching the seller because the cloud-init injection has no key to
   send.
-- **`registry.token_registry_path`** — without it, `--token USDC` fails
-  with `Unknown token: USDC` and you have to fall back to passing
-  `--token-contract 0x… --token-decimals 6` on every call.
 - **`[registry.auth]` keys exactly matching `[registry] urls`** — case,
   scheme, port, no trailing slash. A mismatch silently sends
   unauthenticated requests and you get 401s.
@@ -207,9 +199,10 @@ You should land in a fresh Ubuntu 24.04 VM. Welcome.
 - `--settlement-timeout` (default 600s) — provisioning timeout. Fresh
   Ubuntu cloud-init + apt installs can take 5-10 min on a slow link;
   bump to 1800 if you're seeing timeouts before any progress.
-- `--token-contract` + `--token-decimals` — bypass `[buyer]
-  default_token` / `[registry] token_registry_path` if you want to pay
-  with something the registry doesn't know.
+- `--token-contract` + `--token-decimals` — override
+  `[buyer].default_token_address` and skip the chain `decimals()`
+  lookup. Useful for one-off buys against a token you haven't put in
+  config.
 
 ## 5. Resume an interrupted buy
 

@@ -139,7 +139,6 @@ _INIT_USER_TEMPLATE = """\
 # db_path = "/var/lib/arkhai/agent.db"
 # log_level = "INFO"                           # DEBUG | INFO | WARNING | ERROR
 # log_file_path = "/var/log/arkhai/agent.log"
-# token_registry_path = "/etc/arkhai/tokens.json"
 # onchain_agent_id = ""                        # populated by `market-storefront register`
 # default_vm_host = "ww1"                      # KVM host name from ansible inventory
 # zerotier_network = ""
@@ -170,7 +169,8 @@ _INIT_USER_TEMPLATE = """\
 [seller.pricing]
 # default_min_price = "1000000"                # raw token base units (per-hour rate); fallback for blank min_price.
                                                 # Also the negotiation floor for hidden-reserve listings.
-# default_token = "MOCK"                       # symbol resolved via TOKEN_REGISTRY
+# default_token_address = "0x..."              # 0x ERC-20 address used when CSV row has no token column;
+                                                # also the demand-side token for the resource-imbalance policy
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
 # publish_priceless = false                    # publish rows without a min_price as demand.amount=null
                                                 # (hidden reserve; buyer proposes; seller negotiates against

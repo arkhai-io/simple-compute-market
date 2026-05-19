@@ -756,11 +756,11 @@ def _token_resource_from_accepted_escrow(
 ) -> TokenResource | None:
     """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
 
-    Looks up ERC20 metadata by the entry's ``fields.token``
-    address in TOKEN_REGISTRY, falling back to address-only metadata
-    when the registry doesn't recognise it. Returns ``None`` when the
-    entry lacks a token. The token amount is the entry's
-    ``price_per_hour`` (per-hour rate in base units); ``None`` becomes 0.
+    Looks up ERC20 metadata by the entry's ``fields.token`` address in
+    the chain-resolved cache, falling back to address-only metadata when
+    the cache doesn't yet know it. Returns ``None`` when the entry lacks
+    a token. The token amount is the entry's ``price_per_hour`` (per-hour
+    rate in base units); ``None`` becomes 0.
     """
     if not isinstance(accepted_escrow, dict):
         return None
@@ -769,10 +769,10 @@ def _token_resource_from_accepted_escrow(
     if not isinstance(token, str) or not token:
         return None
     try:
-        from service.clients.token import TOKEN_REGISTRY, ERC20TokenMetadata
+        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
     except Exception:
         return None
-    meta = TOKEN_REGISTRY.get_by_address(token)
+    meta = resolve_token_cached(token)
     if meta is None:
         # Fall back to a minimal metadata object so the encoder has
         # something to serialise. Decimals=0 means amounts are rendered

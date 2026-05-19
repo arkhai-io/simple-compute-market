@@ -125,18 +125,44 @@ def resolve_discovery_timeout(*, override: float | None = None) -> float:
     return 5.0
 
 
-def resolve_default_token() -> str:
-    """Pick the buyer's default token symbol for `--token-contract` resolution.
+def resolve_chain_id(rpc_url: str) -> int:
+    """Pinned ``chain.chain_id`` from config, falling back to ``eth_chainId``.
 
-    Looks up `buyer.default_token` in the user config; falls back to ``"MOCK"``
-    so behavior is unchanged for unconfigured installs. The symbol is resolved
-    against ``service.clients.token.TOKEN_REGISTRY`` at the call site.
+    Raises ``RuntimeError`` when neither source yields a chain id. Used by
+    on-chain token resolution to key the per-chain metadata cache.
     """
     from service.config_loader import get_dotted, load_user_config
-    v = get_dotted(load_user_config(), "buyer.default_token")
-    if isinstance(v, str) and v.strip():
+    pinned = get_dotted(load_user_config(), "chain.chain_id")
+    if pinned:
+        try:
+            return int(pinned)
+        except (TypeError, ValueError):
+            pass
+    from web3 import Web3
+    from web3.providers import HTTPProvider
+    try:
+        w3 = Web3(HTTPProvider(rpc_url))
+        return int(w3.eth.chain_id)
+    except Exception as exc:
+        raise RuntimeError(
+            f"chain.chain_id is not pinned in config.toml and the "
+            f"eth_chainId fallback failed: {exc}"
+        ) from exc
+
+
+def resolve_default_token_address() -> str | None:
+    """Pick the buyer's default token contract address.
+
+    Reads ``buyer.default_token_address`` from the user config — a 0x ERC-20
+    address. Returns None when unset; callers must then fall back to
+    ``--token-contract``. Decimals are resolved on chain via
+    ``service.clients.token.resolve_token`` at the call site.
+    """
+    from service.config_loader import get_dotted, load_user_config
+    v = get_dotted(load_user_config(), "buyer.default_token_address")
+    if isinstance(v, str) and v.strip().startswith("0x"):
         return v.strip()
-    return "MOCK"
+    return None
 
 
 def resolve_storefront_url(

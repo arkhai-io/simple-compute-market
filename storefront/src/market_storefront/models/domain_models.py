@@ -160,11 +160,11 @@ class ComputeDomainResource(CoreResource):
         """Materialize ``ERC20TokenMetadata`` from a wire payload.
 
         Strict address-only on the wire: bare strings must be 0x-prefixed
-        addresses; bare symbols are rejected. The local ``TOKEN_REGISTRY``
-        enriches addresses with symbol/decimals when known; addresses not
-        in the registry yield an address-only stub (``symbol=""``,
-        ``decimals=0``) so callers can still identify the token. For
-        dicts, ``contract_address`` is required.
+        addresses; bare symbols are rejected. Addresses are enriched with
+        symbol/decimals from the chain-resolved cache when present;
+        addresses not yet cached yield an address-only stub
+        (``symbol=""``, ``decimals=0``). For dicts, ``contract_address``
+        is required.
         """
         if isinstance(token_value, ERC20TokenMetadata):
             return token_value
@@ -178,11 +178,11 @@ class ComputeDomainResource(CoreResource):
             if not token_value.startswith("0x"):
                 raise ValueError(
                     f"Token string must be a 0x-prefixed address, got "
-                    f"{token_value!r} — resolve symbol→address client-side"
+                    f"{token_value!r}"
                 )
-            from service.clients.token import TOKEN_REGISTRY
+            from service.clients.token import resolve_token_cached
 
-            looked_up = TOKEN_REGISTRY.get_by_address(token_value)
+            looked_up = resolve_token_cached(token_value)
             if looked_up is not None:
                 return looked_up
             return ERC20TokenMetadata(

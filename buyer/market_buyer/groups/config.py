@@ -127,8 +127,8 @@ _INIT_USER_TEMPLATE = """\
 # ---------------------------------------------------------------------------
 
 # [buyer]
-# default_token = "MOCK"                       # token symbol resolved via TOKEN_REGISTRY
-                                                # when --token-contract is not supplied
+# default_token_address = "0x..."              # 0x ERC-20 address used when --token-contract is omitted.
+                                                # Decimals + symbol are resolved on chain via [chain].rpc_url.
 
 # [buyer.aggregation]
 # policy = "best_price"                        # across-seller match policy: best_price (default) |
