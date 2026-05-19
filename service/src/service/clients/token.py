@@ -45,12 +45,19 @@ class TokenRegistry:
         self.reload()
 
     def reload(self) -> None:
-        """Reload registry data from disk."""
+        """Reload registry data from disk.
+
+        Silent when the configured path is missing — the registry stays
+        empty and lookups raise ``Unknown token: <symbol>`` at use time.
+        Callers that explicitly point the registry at a user-supplied path
+        (``init_token_registry``) are responsible for surfacing that case;
+        unconditional warning here was noisy on every CLI invocation for
+        the bundled-default fallback that no longer ships.
+        """
         with self._lock:
             self._tokens_by_symbol.clear()
             self._tokens_by_address.clear()
             if not self._path.exists():
-                logger.warning("[TOKEN_REGISTRY] Path %s does not exist; registry empty", self._path)
                 return
             try:
                 raw_tokens = json.loads(self._path.read_text())
@@ -176,8 +183,14 @@ def init_token_registry(source_path: str | Path | None) -> TokenRegistry:
     """
     if source_path is None:
         return TOKEN_REGISTRY
-    TOKEN_REGISTRY._path = Path(source_path)
+    path = Path(source_path)
+    TOKEN_REGISTRY._path = path
     TOKEN_REGISTRY.reload()
+    if not path.exists():
+        logger.warning(
+            "[TOKEN_REGISTRY] Configured path %s does not exist; registry empty",
+            path,
+        )
     return TOKEN_REGISTRY
 
 

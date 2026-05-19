@@ -39,6 +39,29 @@ def _config_path_callback(value: str | None) -> str | None:
     return value
 
 
+def _init_token_registry_from_config() -> None:
+    """Repoint the shared TOKEN_REGISTRY at the path from
+    [registry].token_registry_path. The storefront does the equivalent
+    at server startup (agent.py); without this hook, buyer subcommands
+    can't resolve token symbols by name even when the user has
+    configured a registry file, and every invocation prints a noisy
+    "registry empty" warning for the post-reorg fallback path that no
+    longer exists.
+    """
+    from .common import resolve_config_value
+    path = resolve_config_value(toml_path="registry.token_registry_path")
+    if not path:
+        return
+    from service.clients.token import init_token_registry
+    try:
+        init_token_registry(path)
+    except Exception as exc:
+        typer.secho(
+            f"[TOKEN_REGISTRY] Failed to load {path}: {exc}",
+            err=True, fg=typer.colors.YELLOW,
+        )
+
+
 @app.callback()
 def main(
     version_flag: bool = typer.Option(
@@ -67,7 +90,7 @@ def main(
     `market-storefront` package; install both if you both buy and
     sell.
     """
-    pass
+    _init_token_registry_from_config()
 
 
 # ---------------------------------------------------------------------------

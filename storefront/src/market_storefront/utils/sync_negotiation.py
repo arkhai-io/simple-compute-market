@@ -564,6 +564,17 @@ async def start_sync_negotiation(
     await _record_seller_decision(neg_id=neg_id, our_price=our_price,
                                   their_price=their_proposed_price,
                                   decision=decision)
+    if decision.action == "accept":
+        agreed_duration_seconds = (
+            requested_duration_seconds
+            or our_order_dict.get("max_duration_seconds")
+            or 3600
+        )
+        await sqlite_client.commit_agreed_terms(
+            negotiation_id=neg_id,
+            agreed_price=float(decision.price),
+            agreed_duration_seconds=int(agreed_duration_seconds),
+        )
     stage_event(
         "negotiation", "round_decided",
         negotiation_id=neg_id,
