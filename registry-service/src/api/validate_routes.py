@@ -84,6 +84,7 @@ def _derive_offer_resource_type(offer_resource: dict[str, Any]) -> str | None:
 async def validate_publish(body: ValidatePublishRequest) -> ValidatePublishResponse:
     candidate: dict[str, Any] = {
         "listing_id": body.listing_id,
+        "seller": body.seller,
         "offer_resource": body.offer_resource,
         "accepted_escrows": body.accepted_escrows,
         "max_duration_seconds": body.max_duration_seconds,

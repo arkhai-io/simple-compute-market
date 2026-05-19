@@ -7,26 +7,78 @@
 # Bump `version` on backwards-incompatible changes.  Add filters
 # without bumping (etag changes; clients re-fetch).
 
-version: 1
+version: 2
 
 listing_shape:
   $schema: "https://json-schema.org/draft/2020-12/schema"
   type: object
   additionalProperties: true
-  # `seller` (agent-card URL) is advertised but not yet `required` — the
-  # storefront's publish path currently leaves it empty (agent_id is the
-  # de-facto identity column).  Tighten to required once the publish path
-  # populates it; etag bump = buyers re-fetch.
-  required: [listing_id, offer_resource, accepted_escrows]
+  # v2: seller is now required (storefront's publish path populates it).
+  # gpu_model is gated to a vetted NVIDIA vocabulary; region stays open
+  # because city/datacenter naming has no canonical list.
+  required: [listing_id, offer_resource, accepted_escrows, seller]
   properties:
     listing_id: {type: string, minLength: 1}
-    seller: {type: string}
+    seller: {type: string, minLength: 1}
     offer_resource:
       type: object
       required: [gpu_model, region]
       additionalProperties: true
       properties:
-        gpu_model: {type: string}
+        gpu_model:
+          type: string
+          # Common NVIDIA models. Marketplace operators fork this list
+          # per indexer — a long-tail indexer can drop the enum entirely;
+          # a curated indexer can shrink it.
+          enum:
+            # Datacenter — Blackwell
+            - B200
+            - B100
+            # Datacenter — Hopper
+            - H200
+            - H100
+            # Datacenter — Ampere
+            - A100
+            - A40
+            - A10
+            # Datacenter — Ada Lovelace
+            - L40S
+            - L40
+            - L4
+            # Datacenter — Turing/Volta
+            - V100
+            - T4
+            # Workstation — Ada Lovelace
+            - RTX 6000 Ada
+            - RTX 5000 Ada
+            - RTX 4500 Ada
+            - RTX 4000 Ada
+            # Workstation — Ampere
+            - RTX A6000
+            - RTX A5500
+            - RTX A5000
+            - RTX A4500
+            - RTX A4000
+            # Consumer — Blackwell
+            - RTX 5090
+            - RTX 5080
+            - RTX 5070 Ti
+            - RTX 5070
+            # Consumer — Ada Lovelace
+            - RTX 4090
+            - RTX 4080 Super
+            - RTX 4080
+            - RTX 4070 Ti Super
+            - RTX 4070 Ti
+            - RTX 4070 Super
+            - RTX 4070
+            # Consumer — Ampere
+            - RTX 3090 Ti
+            - RTX 3090
+            - RTX 3080 Ti
+            - RTX 3080
+            - RTX 3070 Ti
+            - RTX 3070
         region: {type: string}
         sla: {type: number}
         cpu_type: {type: string}

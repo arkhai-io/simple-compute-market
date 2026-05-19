@@ -16,6 +16,10 @@ class ValidatePublishRequest(BaseModel):
     """
 
     listing_id: str = Field(description="Listing ID to validate")
+    seller: str = Field(
+        default="",
+        description="Seller agent-card URL. Required by listing_shape v2+.",
+    )
     offer_resource: dict[str, Any] = Field(
         default_factory=dict, description="Offered resource dict"
     )

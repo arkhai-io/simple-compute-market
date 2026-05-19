@@ -227,6 +227,7 @@ class ListingRequest:
     accepted_escrows: list[dict[str, Any]]
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
+    seller: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -234,6 +235,7 @@ class ListingRequest:
             "offer_resource": self.offer,
             "accepted_escrows": self.accepted_escrows,
             "max_duration_seconds": self.max_duration_seconds,
+            "seller": self.seller,
         }
 
 

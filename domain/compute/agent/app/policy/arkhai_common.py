@@ -264,7 +264,7 @@ _MODEL_CACHE: dict[str, Any] = {}
 # ---------------------------------------------------------------------------
 
 def gpu_slot(resource: ComputeResource, gpu_slot_map: dict[str, int]) -> Optional[int]:
-    return gpu_slot_map.get(resource.gpu_model.value)
+    return gpu_slot_map.get(resource.gpu_model)
 
 
 def count_nodes_by_slot(

@@ -488,6 +488,7 @@ def run_buy(
     sleep: Callable[[float], None] = time.sleep,
     derive_prices: Optional[Callable[[dict[str, Any]], tuple[int, int]]] = None,
     confirm_settlement: Optional[Callable[["AgreedTerms", dict[str, Any]], bool]] = None,
+    strategy: Optional[Any] = None,
 ) -> BuyResult:
     """Run one buy attempt end-to-end. Sequential; every dependency is explicit.
 
@@ -651,6 +652,7 @@ def run_buy(
                 escrow_proposal=escrow_proposal,
                 max_rounds=max_negotiation_rounds,
                 on_round=_on_round,
+                strategy=strategy,
             )
         except RuntimeError as exc:
             _emit_neg("negotiation_failed", error=f"http_error: {exc}")

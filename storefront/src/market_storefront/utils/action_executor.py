@@ -667,6 +667,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
                 offer=order_dict.get("offer_resource", {}),
                 accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
+                seller=order_dict.get("seller") or BASE_URL_OVERRIDE,
             )
             payloads = {url: order_request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(

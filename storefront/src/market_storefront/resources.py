@@ -155,9 +155,9 @@ class ComputeGpuResourceAdapter:
         context fields belong on the hosts table and are not written here.
         """
         attributes: dict[str, Any] = {
-            "gpu_model": resource.gpu_model.value,
+            "gpu_model": resource.gpu_model,
             "sla": resource.sla,
-            "region": resource.region.value,
+            "region": resource.region,
             "vm_host": resource.vm_host,
         }
         for field_name, _ in _COMPUTE_SLICE_FIELDS:
@@ -168,7 +168,7 @@ class ComputeGpuResourceAdapter:
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
-            "resource_subtype": resource.gpu_model.value.lower(),
+            "resource_subtype": resource.gpu_model.lower(),
             "unit": "count",
             "value": resource.gpu_count,
             "state": state,

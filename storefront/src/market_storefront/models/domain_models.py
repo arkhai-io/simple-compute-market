@@ -46,8 +46,11 @@ from service.clients.token import ERC20TokenMetadata
 #         └── .to_resource_imbalance_event() → ResourceImbalanceEvent
 #
 # Enumerations
-# ├── GPUModel          H200 | Tesla V100 | RTX 5080 | RTX A5000 | RTX 4090
-# ├── Region            California, US | New York, US | Tokyo, JP
+# ├── GPUModel          Advisory string-enum of common NVIDIA models.
+# │                       Field types are plain `str`; the indexer's
+# │                       filter-spec.yaml is the authoritative vocabulary.
+# ├── Region            Advisory string-enum. Field types are plain `str`;
+# │                       region vocabularies are indexer-local.
 # ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
 # ├── VirtualizationType bare_metal | vm | container
 # └── EventType         order_create | order_close | resource_imbalance | ...
@@ -124,7 +127,7 @@ class Host(BaseModel):
     )
     motherboard: str | None = Field(default=None, description="Motherboard model string")
     total_gpu_count: int | None = Field(default=None, description="Total GPUs on the host")
-    gpu_model: GPUModel | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
+    gpu_model: str | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
     gpu_interconnect: GpuInterconnect | None = Field(
         default=None,
         description="Host GPU-to-GPU interconnect (set by BIOS/NVSwitch domain; uniform across slices)",
@@ -137,7 +140,7 @@ class Host(BaseModel):
         default=None,
         description="Number of externally-routable TCP ports the host exposes",
     )
-    region: Region | None = Field(default=None, description="Geographic region of the host")
+    region: str | None = Field(default=None, description="Geographic region of the host")
     datacenter_grade: bool | None = Field(
         default=None,
         description="True for commercial datacenter hosting (vs home/colo)",
@@ -276,13 +279,15 @@ class ComputeResource(ComputeDomainResource):
     )
 
     # ---- Slice fields (per-listing; the seller's split of the host) ----
-    gpu_model: GPUModel = Field(
-        description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
+    gpu_model: str = Field(
+        description="GPU model identifier. The indexer's filter-spec.yaml "
+                    "is the authoritative vocabulary; the storefront accepts "
+                    "any string."
     )
     gpu_count: int = Field(description="Number of GPUs in this slice")
     sla: float = Field(description="The SLA of this slice")
-    region: Region = Field(
-        description="The region of the slice (matches host region)"
+    region: str = Field(
+        description="Geographic region of the slice (matches host region)"
     )
     vm_host: str | None = Field(
         default=None,
@@ -330,7 +335,7 @@ class ComputeResourcePortfolio(BaseModel):
 
     resources: list[ComputeResource] = Field(description="The resources in the portfolio")
 
-    def total_gpu_count(self, gpu_model: GPUModel | None = None) -> int:
+    def total_gpu_count(self, gpu_model: str | None = None) -> int:
         """Calculate total GPU gpu_count, optionally filtered by model"""
         if gpu_model:
             return sum(r.gpu_count for r in self.resources if r.gpu_model == gpu_model)
@@ -614,11 +619,13 @@ class ResourceAlertRequest(BaseModel):
         
         Maps value -> severity, extracts resource fields, stores label/threshold in data.
         """
-        # Extract and validate resource fields
-        gpu_model = GPUModel(self.resource["gpu_model"])
+        # Extract resource fields (gpu_model/region are open strings; the
+        # indexer's filter-spec.yaml gates which values are actually
+        # publishable on the marketplace).
+        gpu_model = str(self.resource["gpu_model"])
         gpu_count = int(self.resource["gpu_count"])
         sla = float(self.resource["sla"])
-        region = Region(self.resource["region"])
+        region = str(self.resource["region"])
         
         # Create ComputeResource
         compute_resource = ComputeResource(
@@ -643,9 +650,9 @@ class ResourceAlertRequest(BaseModel):
             imbalance_type=imbalance_type,
             severity=severity,
             data={
-                "gpu_model": gpu_model.value,
+                "gpu_model": gpu_model,
                 "gpu_count": gpu_count,
-                "region": region.value,
+                "region": region,
                 "sla": sla,
                 "imbalance_type": imbalance_type,
                 "severity": severity,
@@ -724,9 +731,9 @@ class ResourceImbalanceEvent(DomainEvent):
             imbalance_type=imbalance_type,
             severity=severity,
             data={
-                "gpu_model": resource.gpu_model.value,
+                "gpu_model": resource.gpu_model,
                 "gpu_count": resource.gpu_count,
-                "region": resource.region.value,
+                "region": resource.region,
                 "imbalance_type": imbalance_type,
                 "severity": severity,
             },
