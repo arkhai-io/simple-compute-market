@@ -624,6 +624,7 @@ class TestStage03a_ValidatePublish:
         }]
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
+            seller="http://sell_agent:8001/",
             offer_resource=OFFER_RESOURCE,
             accepted_escrows=accepted_escrows,
             max_duration_seconds=DURATION_HOURS * 3600,

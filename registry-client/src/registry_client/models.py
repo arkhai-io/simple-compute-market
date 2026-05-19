@@ -462,10 +462,12 @@ class ValidatePublishRequest:
     offer_resource: dict
     accepted_escrows: list[dict]
     max_duration_seconds: int | None = None
+    seller: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {
             "listing_id": self.listing_id,
+            "seller": self.seller,
             "offer_resource": self.offer_resource,
             "accepted_escrows": self.accepted_escrows,
         }
