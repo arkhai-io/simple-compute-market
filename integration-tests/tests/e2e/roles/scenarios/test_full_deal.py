@@ -137,7 +137,7 @@ PROV_RULE_ID = "e2e-create-pause"
 CHECK_RULE_ID = "e2e-check-pause"   # mock rule that pauses the lease check job
 E2E_RESOURCE_ID = "compute-e2e-deal-001"
 E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,MOCK,,RTX 5080,90.0,"California, US",ww1
+compute-e2e-deal-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",ww1
 """
 
 # Canonical callable name registered in domain/compute/agent/app/policy/store.py.

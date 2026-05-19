@@ -152,14 +152,14 @@ _BOB_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
-    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10000,MOCK,,'
+    'compute-mr-bob-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
     'RTX 5080,90.0,"California, US",ww1\n'
 )
 _ALICE_CSV = (
     "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,"
     "max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,"
     "attribute.vm_host\n"
-    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10000,MOCK,,'
+    'compute-mr-alice-001,compute.gpu,rtx5080,count,1,available,10000,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
     'RTX 5080,90.0,"New York, US",ny1\n'
 )
 
