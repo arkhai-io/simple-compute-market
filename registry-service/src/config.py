@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "info"
 
+    # First-sync start block. ``None`` keeps the legacy behaviour of
+    # walking the last 1000 blocks at boot, which silently drops any
+    # agent registered before that window (catastrophic for a fresh
+    # indexer that must pick up historical agents). Set this to the
+    # contract deployment block (or any earlier block known to predate
+    # all agents you care about) so the first sync covers them. Only
+    # consulted when no rows exist yet in the agents table — once the
+    # indexer has data, normal incremental sync takes over.
+    start_block: int | None = Field(
+        default=None, validation_alias="REGISTRY_START_BLOCK",
+    )
+
     @property
     def is_postgres(self) -> bool:
         return self.database_url.startswith("postgresql://")

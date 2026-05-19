@@ -64,18 +64,37 @@ class EventSyncService:
                 logger.error(f"[EventSync] Error during periodic sync: {e}")
 
     async def sync_from_start(self):
-        """Sync all events from contract deployment"""
-        logger.info("[EventSync] Starting full sync from contract deployment...")
-        
+        """Sync all events from a configured start block.
+
+        Operators set ``REGISTRY_START_BLOCK`` to the contract deployment
+        block (or any earlier block known to predate every agent worth
+        indexing) so a freshly-deployed indexer can backfill historical
+        registrations. When unset, falls back to ``current - 1000`` —
+        suitable only for indexers that are guaranteed to be up before
+        any agent registers.
+        """
         try:
             current_block = self.identity_registry.w3.eth.block_number
-            
-            # Start from a reasonable block (e.g., 1000 blocks before current)
-            start_block = max(0, current_block - 1000)
-            
+
+            if settings.start_block is not None:
+                start_block = max(0, settings.start_block)
+                logger.info(
+                    "[EventSync] Starting full sync from REGISTRY_START_BLOCK=%d "
+                    "(current=%d, %d blocks)",
+                    start_block, current_block, current_block - start_block,
+                )
+            else:
+                start_block = max(0, current_block - 1000)
+                logger.info(
+                    "[EventSync] Starting full sync from last 1000 blocks "
+                    "(start=%d, current=%d). Set REGISTRY_START_BLOCK to "
+                    "backfill historical agents.",
+                    start_block, current_block,
+                )
+
             await self.sync_block_range(start_block, current_block)
             self.last_synced_block = current_block
-            
+
             logger.info(f"[EventSync] Full sync completed up to block {current_block}")
         except Exception as e:
             logger.error(f"[EventSync] Error during full sync: {e}")
