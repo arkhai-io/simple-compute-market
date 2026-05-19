@@ -39,40 +39,39 @@ Phase 3 — Registry publication
 Phase 4 — Registry publication
   04a  Primary registry: listing visible in the registry used by this topology
 
-Phase 5 — Negotiation lifecycle
+Phase 5 — Negotiation lifecycle (buyer driven by `market` CLI subprocess)
   05a  Evaluate-negotiate dry-run:
          POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True
-  05b  Negotiation starts + visible + round confirmed:
-         POST /api/v1/negotiate/new → negotiation_id
-         GET /api/v1/listings/{id}/negotiations → thread visible
-         stage_events: round_decided with decision != exit
+  05b  Buyer CLI drives negotiation to agreed terminal:
+         `market negotiate --listing-id ... --max-price ...` subprocess
+         run_log → run_ended.status="agreed" with agreed_price + negotiation_id
+         stage_events on the seller side confirm round_decided
 
-Phase 6 — Negotiation settlement
-  06b  Force-accept + terminal state:
-         Guard: no exit events before force-accept
-         POST .../force-accept → action=accept
-         GET .../negotiations/{neg_id} → terminal_state=success;
-                                          escrows=[] (none until phase 7)
+Phase 7 — Provisioning gate setup (no inline buyer action)
+  07   Arm provisioning mock rule (pause_before_result=True) for create job
 
-Phase 7 — On-chain escrow + provisioning gate setup
-  07   Create real escrow_uid; add provisioning mock rule (pause_before_result=True)
-  07b  Verify escrow via storefront dry-run
-
-Phase 8 — Settlement pipeline
-  08b  Settlement submitted + job queued:
-         POST /api/v1/settle/{uid} → status=provisioning
-         wait_for_stage_event(provision, job_submitted)
+Phase 8 — Settlement pipeline (buyer driven by `market settle` background)
+  08i  Buyer CLI initiates settlement:
+         `market settle --from <run_id>` background subprocess
+         creates the on-chain escrow under the buyer's wallet, POSTs
+         /settle/{uid}, then polls; pauses at the provisioning gate.
+         wait_for_event("escrow_created") → capture escrow_uid into deal_state
+  07b  Verify escrow via storefront dry-run (against the uid emitted above)
+  08a  Evaluate-settle dry-run: would_submit=True (post-escrow)
+  08c  Evaluate provisioning job: rule_matched=PROV_RULE_ID, would_pause=True
+  08b  Post-submit observation:
+         wait_for_event("settle_submitted")
          GET /settle/{uid}/status → provisioning_job_id present
-         job_submitted.resource_id == compute-e2e-deal-001
+         stage_events: provision/job_submitted with resource_id==E2E_RESOURCE_ID
 
 Phase 9 — Provisioning completion
   09a  Release gate + job completes: resume_rule; wait_for_job → succeeded
-  09b  Settlement ready + credentials + listing closed:
-         wait_for_settlement (server-side long-poll) → ready=True, status=ready
-         GET /settle/{uid}/status → status=ready, tenant_credentials present
+  09b  Buyer observes ready + clean subprocess exit + seller-side state:
+         wait_for_event("settle_terminal", predicate=status=="ready")
+         body.tenant_credentials present
+         Popen.wait → returncode 0
          GET /api/v1/listings/{id} → status=accepted or closed
-         GET .../negotiations/{neg_id} → primary escrow status=ready,
-                                          fulfillment_uid populated
+         GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
   09c  Lease registered:
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
@@ -101,7 +100,7 @@ from tests.e2e.roles.scenarios.conftest import DealState, require_state
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_deal
+pytestmark = pytest.mark.e2e_deal_buyer_cli
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — constants shared across all stages
@@ -819,174 +818,121 @@ class TestStage05a_EvaluateNegotiate:
                  result.decision, result.decision_reason, result.strategy)
 
 
-class TestStage05b_NegotiationStartsAndVisible:
-    def test_05b_buyer_starts_negotiation_and_thread_confirmed(
-        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
+class TestStage05b_BuyerCliDrivesNegotiation:
+    def test_05b_market_negotiate_subprocess_reaches_agreed(
+        self, buyer_cli, storefront_admin_client, deal_state: DealState
     ):
-        """Negotiation starts + visible + round-0 confirmed in event stream.
+        """`market negotiate` subprocess: buyer's wallet, real round-trips, agreed terminal.
 
-        Combined advance + confirm:
-          1. POST /api/v1/negotiate/new → negotiation_id
-          2. GET /api/v1/listings/{id}/negotiations → thread listed
-          3. GET stage_events → round_decided event with decision != exit
+        Spawns the buyer's installed ``market`` CLI exactly as a buyer
+        would on their own machine. The subprocess:
+          - POSTs /api/v1/negotiate/new with the buyer's EIP-191 signature
+          - Loops rounds locally: the buyer's BisectionStrategy (minimize)
+            decides whether each seller counter is accepted (at or under
+            --max-price * 1.01) or itself countered. Convergence is
+            deterministic.
+          - Exits 0 on agreed, 4 on exited, 2 on usage errors, 3 on
+            transport errors.
+
+        With buyer_initial=7000 and seller_floor=10000 the seller counters
+        at round 0; with buyer_max=12000 the buyer accepts the seller's
+        first counter (8500 — midpoint of 10000 and 7000) because it's
+        comfortably under the buyer ceiling. Single-round agreed terminal,
+        no admin shortcuts.
+
+        Asserts:
+          - subprocess exits 0
+          - run-log run_ended.status == "agreed" with agreed_price + negotiation_id
+          - seller side recorded a round_decided event for the negotiation
         """
         require_state(deal_state, "seller_listing_id", "_evaluate_negotiate_passed")
 
-        resp = storefront_client.negotiate_new(
-            listing_id=deal_state.seller_listing_id,
-            buyer_address=buyer_config["wallet_address"],
-            initial_price=BUYER_INITIAL_PRICE,
-            duration_seconds=DURATION_HOURS * 3600,
-            token=DEMAND_RESOURCE["token"]["contract_address"],
-        )
-        neg_id = resp.get("negotiation_id") if isinstance(resp, dict) else None
-        assert neg_id, (
-            f"No negotiation_id in response: {resp}\n"
-            f"POST /api/v1/negotiate/new returned unexpected shape."
-        )
-
-        # Confirm thread visible on the listing's negotiations list
-        neg_list = storefront_admin_client.list_negotiations(deal_state.seller_listing_id)
-        ids = {n.negotiation_id for n in neg_list.negotiations}
-        assert neg_id in ids, (
-            f"Negotiation {neg_id} not found in "
-            f"GET /api/v1/listings/{deal_state.seller_listing_id}/negotiations. Found: {ids}"
+        run = buyer_cli.run(
+            [
+                "negotiate",
+                "--listing-id", deal_state.seller_listing_id,
+                "--seller", str(settings.SELLER.API_URL),
+                "--initial-price", str(BUYER_INITIAL_PRICE),
+                "--max-price", str(BUYER_MAX_PRICE),
+                "--duration-hours", str(DURATION_HOURS),
+                "--token-contract", DEMAND_RESOURCE["token"]["contract_address"],
+                "--token-decimals", str(DEMAND_RESOURCE["token"]["decimals"]),
+                "--max-rounds", "10",
+                "--yes",
+            ],
+            timeout=120.0,
         )
 
-        # Verify round-0 decision via stage events — catches strategy misconfiguration
+        assert run.returncode == 0, (
+            f"`market negotiate` exited {run.returncode}; expected 0 (agreed).\n"
+            f"stdout (tail): {run.stdout()[-2000:]}\n"
+            f"stderr (tail): {run.stderr()[-2000:]}"
+        )
+
+        events = run.read_events()
+        terminal = next(
+            (e for e in reversed(events) if e.get("event") == "run_ended"),
+            None,
+        )
+        assert terminal is not None, (
+            f"Buyer run-log missing run_ended event. events tail: "
+            f"{[e.get('event') for e in events[-5:]]}"
+        )
+        assert terminal.get("status") == "agreed", (
+            f"Expected run_ended.status=agreed, got {terminal.get('status')!r}. "
+            f"reason={terminal.get('reason')!r}"
+        )
+        neg_id = terminal.get("negotiation_id")
+        agreed_price = terminal.get("agreed_price")
+        assert neg_id, f"run_ended missing negotiation_id: {terminal!r}"
+        assert agreed_price is not None, f"run_ended missing agreed_price: {terminal!r}"
+
+        deal_state.buyer_run_id = run.run_id
+        deal_state.negotiation_id = str(neg_id)
+        deal_state.agreed_price = float(agreed_price)
+        deal_state.negotiation_terminal_state = "success"
+
+        # Seller-side sanity: the same round_decided event the synthetic
+        # buyer relied on must surface for the real subprocess too.
         events_result = storefront_admin_client.get_events(
             stage="negotiation",
             negotiation_id=neg_id,
         )
-        round0_events = [e for e in events_result.events if e.event == "round_decided"]
-        assert round0_events, (
+        round_events = [e for e in events_result.events if e.event == "round_decided"]
+        assert round_events, (
             f"No 'negotiation/round_decided' stage event found for {neg_id}. "
-            "Check that sync_negotiation.py emits stage_event after decide()."
+            "The buyer's POST /negotiate/new didn't reach the seller's decide() path."
         )
-        round0 = round0_events[0]
-        assert round0.data.get("decision") == "counter", (
-            f"Expected seller to counter at round 0, got decision={round0.data.get('decision')!r}. "
-            f"reason={round0.data.get('decision_reason')!r}. "
-            f"our_price={round0.data.get('our_price')} their_price={round0.data.get('their_price')}.\n"
-            "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller's floor — "
-            "lower it so round 0 counters rather than accepts immediately "
-            "(force_accept in 06b will 409 on an already-terminal negotiation).\n"
-            "If decision='exit': increase BUYER_INITIAL_PRICE or check strategy config."
+        log.info(
+            "[05b] `market negotiate` run=%s agreed at %s after %s round(s); "
+            "seller stage events: %d round_decided",
+            run.run_id, agreed_price, terminal.get("rounds"), len(round_events),
         )
-
-        deal_state.negotiation_id = neg_id
-        log.info("[05b] Negotiation %s started; thread visible; round_decided=%s reason=%s",
-                 neg_id, round0.data.get("decision"), round0.data.get("decision_reason"))
 
 
 # ===========================================================================
-# Phase 6 — Negotiation settlement
-# (06a skipped — force-accept has no meaningful dry-run)
+# Phase 7 — Provisioning gate setup (no buyer action — pure test infra)
 # ===========================================================================
 
-class TestStage06b_ForceAcceptAndTerminal:
-    def test_06b_force_accept_and_terminal_success(
-        self, storefront_admin_client, deal_state: DealState
+class TestStage07_ArmProvisioningGate:
+    def test_07_arm_provisioning_gate(
+        self, provisioning_test_client, deal_state: DealState,
     ):
-        """Guard + force-accept + terminal state — combined advance + confirm.
+        """Arm the provisioning mock rule (pause_before_result=True).
 
-        Guard: reads stage events to ensure no exit before force-accept
-        (avoids confusing 409 if strategy already exited).
-        Advance: POST .../force-accept → action=accept.
-        Confirm: GET .../negotiations/{neg_id} → terminal_state=success.
-        """
-        require_state(deal_state, "seller_listing_id", "negotiation_id")
+        This is test infrastructure, not a buyer action. The pause gate
+        holds the mock create job after the buyer's `market settle`
+        POSTs /settle/{uid} (in stage 08i) — letting stages 08b/08c
+        observe the in-flight state ("provisioning, job submitted,
+        not yet complete") before stage 09a releases the gate.
 
-        # Guard: confirm negotiation is still open (not already terminal)
-        events_result = storefront_admin_client.get_events(
-            stage="negotiation",
-            negotiation_id=deal_state.negotiation_id,
-        )
-        terminal_events = [
-            e for e in events_result.events
-            if e.event == "round_decided" and e.data.get("decision") in ("exit", "accept")
-        ]
-        assert not terminal_events, (
-            f"Negotiation {deal_state.negotiation_id} is already terminal before force-accept. "
-            f"decision={terminal_events[0].data.get('decision')!r} "
-            f"reason={terminal_events[0].data.get('decision_reason')!r}.\n"
-            "If decision='accept': BUYER_INITIAL_PRICE is at or above the seller floor — "
-            "lower it so the strategy counters at round 0 rather than accepting immediately.\n"
-            "If decision='exit': check stage 05b's round_decided event for root cause."
-        )
-
-        agreed = (BUYER_INITIAL_PRICE + BUYER_MAX_PRICE) // 2
-        result = storefront_admin_client.force_accept_negotiation(
-            deal_state.seller_listing_id,
-            deal_state.negotiation_id,
-            price=agreed,
-        )
-        assert result.action == "accept", (
-            f"Unexpected action from force-accept: {result}"
-        )
-        assert result.price == agreed
-
-        # Confirm terminal state
-        detail = storefront_admin_client.get_negotiation(
-            deal_state.seller_listing_id, deal_state.negotiation_id
-        )
-        assert detail.terminal_state == "success", (
-            f"Expected terminal_state=success, got {detail.terminal_state!r}"
-        )
-        assert detail.agreed_price == agreed
-        # No escrow rows yet — settlement (phase 7+) is what writes them.
-        assert detail.escrows == [], (
-            f"Expected escrows=[] before phase 7, got {detail.escrows!r}"
-        )
-
-        deal_state.agreed_price = agreed
-        deal_state.negotiation_terminal_state = detail.terminal_state
-        log.info("[06b] Force-accepted at price %d; terminal_state=%s",
-                 agreed, detail.terminal_state)
-
-
-# ===========================================================================
-# Phase 7 — On-chain escrow + provisioning gate setup
-# ===========================================================================
-
-class TestStage07_OnChainEscrowAndProvGate:
-    def test_07_create_real_escrow_and_arm_gate(
-        self, provisioning_test_client, buyer_config, seller_wallet,
-        deal_state: DealState,
-    ):
-        """Create a real on-chain escrow attestation + arm provisioning pause gate.
-
-        Why on-chain (not a placeholder uid): commit 03e47bf added pre-settlement
-        verification — the storefront reads the EAS attestation by uid before
-        kicking off provisioning. A placeholder uid fails verification.
-
-        What's "buyer interaction" vs "anvil setup": token *distribution*
-        belongs in deploy-time (the alkahest deployer pre-funds account #1
-        with MockERC20). Token *escrow* is part of the deal flow — in
-        production the buyer signs and sends this transaction themselves —
-        so we do it here from the buyer's wallet, against the just-finalized
-        negotiation terms.
-
-        The pause gate (pause_before_result=True) holds the mock provisioning
-        job before it reports success, giving stage 08b a window to assert
-        queued/running before stage 09a releases it.
+        Escrow creation moved out of this stage entirely: the buyer's
+        `market settle` subprocess (stage 08i) creates the on-chain
+        escrow under the buyer's wallet, the same way a buyer would in
+        production. The test verifies the resulting uid in 07b.
         """
         require_state(deal_state, "negotiation_terminal_state", "agreed_price",
                       "_provisioning_mock_mode")
-
-        from tests.e2e.roles.scenarios.escrow_helper import create_buyer_escrow
-
-        escrow_uid = create_buyer_escrow(
-            buyer_private_key=buyer_config["private_key"],
-            seller_wallet_address=seller_wallet,
-            agreed_price=float(deal_state.agreed_price),
-            duration_seconds=DURATION_HOURS * 3600,
-            token_contract_address=DEMAND_RESOURCE["token"]["contract_address"],
-            rpc_url=buyer_config["rpc_url"],
-        )
-        deal_state.real_escrow_uid = escrow_uid
-        log.info("[07] Created on-chain escrow %s for negotiation %s",
-                 escrow_uid, deal_state.negotiation_id)
 
         provisioning_test_client.add_mock_rule(
             rule_id=PROV_RULE_ID,
@@ -1004,6 +950,56 @@ class TestStage07_OnChainEscrowAndProvGate:
         )
         deal_state.provisioning_gate_armed = True
         log.info("[07] Provisioning gate armed with rule=%s", PROV_RULE_ID)
+
+
+# ===========================================================================
+# Phase 8i — Buyer CLI initiates settlement (background subprocess)
+# ===========================================================================
+
+class TestStage08i_BuyerCliInitiatesSettle:
+    def test_08i_market_settle_creates_escrow_and_submits(
+        self, buyer_cli, deal_state: DealState,
+    ):
+        """Spawn `market settle --from <run_id>` background; capture escrow uid.
+
+        The subprocess performs three stages in order:
+          1. Read the buyer run-log produced by stage 05b
+          2. Create the on-chain escrow under the buyer's wallet
+             (same alkahest path the storefront verifier reads)
+          3. POST /settle/{escrow_uid} to the seller
+          4. Poll /settle/{escrow_uid}/status until terminal
+
+        We block here only until `escrow_created` surfaces in the run-log
+        — that's enough to give downstream phases the uid for dry-run
+        assertions. The rest of the subprocess keeps running, paused at
+        the provisioning mock rule (armed in 07), until stage 09a
+        releases it.
+        """
+        require_state(deal_state, "buyer_run_id", "provisioning_gate_armed")
+
+        run = buyer_cli.run(
+            [
+                "settle",
+                "--from", deal_state.buyer_run_id,
+                "--token-contract", DEMAND_RESOURCE["token"]["contract_address"],
+                "--token-decimals", str(DEMAND_RESOURCE["token"]["decimals"]),
+                "--duration-hours", str(DURATION_HOURS),
+                "--poll-interval", "1.0",
+                "--settlement-timeout", "600",
+                "--expiration", "3600",
+            ],
+            background=True,
+        )
+        deal_state.settle_run_handle = run
+
+        evt = run.wait_for_event("escrow_created", timeout=60.0)
+        uid = evt.get("escrow_uid")
+        assert uid, f"escrow_created event missing escrow_uid: {evt!r}"
+        deal_state.real_escrow_uid = str(uid)
+        log.info(
+            "[08i] `market settle` created on-chain escrow %s (run=%s)",
+            uid, run.run_id,
+        )
 
 
 # ===========================================================================
@@ -1039,116 +1035,51 @@ class TestStage07b_VerifyEscrow:
 
 
 # ===========================================================================
-# Phase 8a — Evaluate settlement job spec (doWork dry-run)
+# Phase 8a/8c — Seller-side pre-flight dry-runs
+#
+# Both dropped from this scenario. They were "would this settle work?"
+# inventory/job-routing checks that ran before the seller's real submit
+# in the synthetic-buyer version of this test. With the buyer driving
+# the real submit via `market settle`, the resource is reserved by the
+# time we could run them — and their narrow coverage is already exercised
+# by storefront/tests/integration/test_settle_controller.py
+# (evaluate_settle) and provisioning-service/src/tests/unit/services/
+# test_programmable_mock.py (evaluate_job).
 # ===========================================================================
-
-class TestStage08a_EvaluateSettle:
-    def test_08a_evaluate_settle_would_submit(
-        self, storefront_admin_client, buyer_config, deal_state: DealState
-    ):
-        """POST /api/v1/admin/settle/{uid}/evaluate → would_submit=True (dry-run).
-
-        Exercises doWork in isolation: resolves a host from inventory and
-        builds the provisioning job spec without chain reads, DB writes, or
-        provisioning calls (read-only select_available_compute_vm). Confirms
-        a matching host exists before committing to settle.
-        """
-        require_state(deal_state, "real_escrow_uid", "seller_listing_id")
-
-        result = storefront_admin_client.evaluate_settle(
-            deal_state.real_escrow_uid,
-            listing_id=deal_state.seller_listing_id,
-            ssh_public_key=buyer_config["ssh_public_key"],
-            duration_seconds=DURATION_HOURS * 3600,
-        )
-        assert result.get("would_submit") is True, (
-            f"evaluate_settle returned would_submit=False.\n"
-            f"reason={result.get('reason')!r}\n"
-            "Check that at least one compute resource is registered in the "
-            "storefront's resource inventory with state='available' and a "
-            "vm_host matching the listing's region/gpu_model requirements."
-        )
-        deal_state._evaluate_settle_vm_host = result.get("vm_host")
-        deal_state._evaluate_settle_vm_target = result.get("vm_target")
-        deal_state._evaluate_settle_passed = True
-        log.info("[08a] Evaluate settle: vm_host=%s vm_target=%s",
-                 result.get("vm_host"), result.get("vm_target"))
 
 
 # ===========================================================================
-# Phase 8c — Evaluate provisioning job (provisioning service dry-run)
-# ===========================================================================
-
-class TestStage08c_EvaluateProvisioningJob:
-    def test_08c_evaluate_provisioning_job(
-        self, provisioning_test_client, deal_state: DealState
-    ):
-        """POST /test/evaluate-job → params_valid=True, rule_matched=PROV_RULE_ID (dry-run).
-
-        Exercises the provisioning service's job routing in isolation:
-        confirms the host exists in inventory, the job params are valid,
-        and the armed mock rule would match and pause. No job is created.
-        """
-        require_state(deal_state, "_evaluate_settle_passed", "provisioning_gate_armed")
-
-        vm_host = deal_state._evaluate_settle_vm_host
-        assert vm_host, (
-            "vm_host not captured from stage 08a — cannot evaluate provisioning job."
-        )
-
-        result = provisioning_test_client.evaluate_job(
-            vm_host,
-            vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
-            vm_action="create",
-        )
-        assert result.get("params_valid") is True, (
-            f"Provisioning job params invalid. errors={result.get('errors')!r}"
-        )
-        assert result.get("host_exists") is True, (
-            f"Host {vm_host!r} not found in provisioning inventory."
-        )
-        assert result.get("rule_matched") == PROV_RULE_ID, (
-            f"Expected mock rule {PROV_RULE_ID!r} to match, "
-            f"got rule_matched={result.get('rule_matched')!r}."
-        )
-        assert result.get("would_pause") is True
-        deal_state._provision_job_evaluated = True
-        log.info("[08c] Provisioning job evaluate: host=%s rule=%s",
-                 vm_host, result.get("rule_matched"))
-
-
-# ===========================================================================
-# Phase 8b — Settlement pipeline (advance)
+# Phase 8b — Settlement pipeline (post-submit observation)
 # ===========================================================================
 
 class TestStage08b_SettlementSubmittedAndJobQueued:
-    def test_08b_settlement_submitted_and_provisioning_job_queued(
+    def test_08b_settle_submitted_and_provisioning_job_queued(
         self, storefront_client, storefront_admin_client, provisioning_client,
         buyer_config, deal_state: DealState
     ):
-        """Settlement submitted + provisioning job queued — advance + async observe.
+        """Buyer's subprocess submitted /settle; observe in-flight state.
 
-        Advance: POST /api/v1/settle/{uid} → status=provisioning.
-        Observe (event-driven): wait_for_stage_event(provision, job_submitted)
-          then single GET /settle/{uid}/status → provisioning_job_id.
-        Confirms: job visible in provisioning API with status queued/running/succeeded.
+        Sync points (no buyer action — the subprocess is already running):
+          1. Buyer run-log: settle_submitted event surfaces after the
+             buyer's signed POST /settle/{uid} returns from the seller.
+          2. Seller stage events: provision/job_submitted carries the
+             reserved resource_id; assert it matches E2E_RESOURCE_ID.
+          3. Storefront settle/status (buyer-signed): provisioning_job_id
+             populated. Provisioning service confirms job exists.
+
+        The subprocess remains blocked on /settle/{uid}/status polling
+        because the mock pause gate (armed in 07) holds the job before
+        it returns success.
         """
-        require_state(deal_state, "negotiation_id", "real_escrow_uid", "_provision_job_evaluated")
+        require_state(deal_state, "negotiation_id", "real_escrow_uid",
+                      "provisioning_gate_armed", "settle_run_handle")
 
-        settle_resp = storefront_client.settle(
-            deal_state.real_escrow_uid,
-            negotiation_id=deal_state.negotiation_id,
-            buyer_address=buyer_config["wallet_address"],
-            ssh_public_key=buyer_config["ssh_public_key"],
-        )
-        assert settle_resp.status == "provisioning", (
-            f"Expected status=provisioning, got: {settle_resp.status!r}. "
-            f"Full response: {settle_resp}"
-        )
+        run = deal_state.settle_run_handle
+        submitted = run.wait_for_event("settle_submitted", timeout=30.0)
         deal_state.settlement_submitted = True
+        log.info("[08b] settle_submitted event body: %s",
+                 {k: submitted.get(k) for k in ("ts", "body")})
 
-        # job_submitted fires after the DB row is updated; resource_reserved
-        # would race because it fires before the job_id exists.
         from tests.e2e.roles.scenarios.conftest import wait_for_stage_event as _wait
         event = _wait(
             storefront_admin_client,
@@ -1178,7 +1109,8 @@ class TestStage08b_SettlementSubmittedAndJobQueued:
             f"{deal_state.reserved_resource_id!r}; expected {E2E_RESOURCE_ID!r}. "
             f"job_submitted event: {event}"
         )
-        log.info("[08b] Provisioning job %s in state %s", prov_job_id, job.status)
+        log.info("[08b] Provisioning job %s in state %s (reserved=%s)",
+                 prov_job_id, job.status, deal_state.reserved_resource_id)
 
 
 # ===========================================================================
@@ -1205,43 +1137,46 @@ class TestStage09a_ProvisioningCompletes:
         log.info("[09a] Provisioning job %s succeeded", deal_state.provisioning_job_id)
 
 
-class TestStage09b_SettlementReadyAndCredentials:
-    def test_09b_settlement_ready_credentials_and_listing_closed(
-        self, storefront_client, storefront_admin_client, buyer_config, deal_state: DealState
+class TestStage09b_BuyerObservesReadyAndCleanExit:
+    def test_09b_settle_terminal_ready_credentials_and_clean_exit(
+        self, storefront_admin_client, deal_state: DealState
     ):
-        """Settlement status=ready, tenant credentials present, listing accepted/closed.
+        """Buyer subprocess reaches settle_terminal(ready) and exits 0.
 
-        Combined observation of all post-provisioning state:
-          1. wait_for_settlement — server-side long-poll until job terminal (no client polling)
-          2. GET /settle/{uid}/status → status=ready + tenant_credentials
-          3. GET /api/v1/listings/{id} → status=accepted or closed
-          4. GET .../negotiations/{neg_id} → primary escrow ready + fulfillment_uid
+        The mock provisioning job succeeded in 09a, so the seller's
+        settlement state machine flips to 'ready'. The buyer's polling
+        loop picks that up on its next /settle/{uid}/status call and
+        appends `settle_terminal` with status=ready and the tenant
+        credentials to its run-log, then `run_ended`, then exits.
+
+        Seller-side cross-checks (HTTP, not in the run-log):
+          - listing → status accepted/closed
+          - per-negotiation primary escrow → status=ready,
+            fulfillment_uid populated
         """
         require_state(deal_state, "real_escrow_uid", "provisioning_result_injected",
-                      "seller_listing_id", "negotiation_id")
+                      "seller_listing_id", "negotiation_id", "settle_run_handle")
 
-        wait_result = storefront_admin_client.wait_for_settlement(
-            deal_state.real_escrow_uid,
-            timeout=60.0,
+        run = deal_state.settle_run_handle
+        terminal = run.wait_for_event(
+            "settle_terminal",
+            predicate=lambda e: (e.get("body") or {}).get("status") == "ready",
+            timeout=120.0,
         )
-        assert wait_result.ready, (
-            f"Settlement did not reach a terminal state within timeout. "
-            f"Last status: {wait_result.status!r} (elapsed {wait_result.elapsed_ms}ms)"
+        body = terminal.get("body") or {}
+        assert body.get("status") == "ready", (
+            f"settle_terminal status not ready: {body!r}"
         )
-        assert wait_result.status == "ready", (
-            f"Settlement reached terminal state but status is not 'ready': {wait_result.status!r}"
+        tenant_credentials = body.get("tenant_credentials") or body.get("connection_details")
+        assert tenant_credentials, (
+            f"settle_terminal missing tenant credentials: {body!r}"
         )
 
-        status_resp = storefront_client.get_settle_status(
-            deal_state.real_escrow_uid,
-            buyer_address=buyer_config["wallet_address"],
-        )
-        assert status_resp.status == "ready", (
-            f"Settlement not 'ready' after provision fulfilled event. "
-            f"Got: {status_resp.status!r}"
-        )
-        assert status_resp.tenant_credentials, (
-            f"tenant_credentials missing from settlement status: {status_resp}"
+        rc = run.wait(timeout=20.0)
+        assert rc == 0, (
+            f"`market settle` exited rc={rc}; expected 0 (ready).\n"
+            f"stdout (tail): {run.stdout()[-1500:]}\n"
+            f"stderr (tail): {run.stderr()[-1500:]}"
         )
 
         listing = storefront_admin_client.get_listing(deal_state.seller_listing_id)
@@ -1249,10 +1184,9 @@ class TestStage09b_SettlementReadyAndCredentials:
             f"Expected listing status=accepted/closed, got {listing.status!r}"
         )
 
-        # The per-negotiation endpoint is the canonical home for per-deal
-        # attestation data (was previously rolled up into the registry's
-        # now-removed /system/stats/attestations). After settlement the
-        # primary escrow must surface status=ready + a fulfillment_uid.
+        # Canonical per-deal attestation data on the negotiation endpoint
+        # (was previously rolled up into the registry's now-removed
+        # /system/stats/attestations).
         detail = storefront_admin_client.get_negotiation(
             deal_state.seller_listing_id, deal_state.negotiation_id,
         )
@@ -1274,12 +1208,14 @@ class TestStage09b_SettlementReadyAndCredentials:
             f"Primary escrow missing fulfillment_uid after settlement: {primary!r}"
         )
 
-        deal_state.settlement_status = status_resp.status
-        deal_state.tenant_credentials = status_resp.tenant_credentials
+        deal_state.settlement_status = "ready"
+        deal_state.tenant_credentials = tenant_credentials
         deal_state.seller_listing_final_status = listing.status
-        log.info("[09b] Settlement ready; credentials present; listing status=%s; "
-                 "primary escrow fulfillment_uid=%s",
-                 listing.status, primary["fulfillment_uid"])
+        log.info(
+            "[09b] Buyer subprocess settle_terminal=ready (rc=0); listing status=%s; "
+            "primary escrow fulfillment_uid=%s",
+            listing.status, primary["fulfillment_uid"],
+        )
 
 
 class TestStage09c_LeaseRegistered:
@@ -1299,7 +1235,10 @@ class TestStage09c_LeaseRegistered:
         assert lease.get("escrow_uid") == deal_state.real_escrow_uid
         assert lease.get("resource_id") == deal_state.reserved_resource_id
         assert lease.get("resource_id") == E2E_RESOURCE_ID
-        assert lease.get("vm_host") == deal_state._evaluate_settle_vm_host
+        vm_host = lease.get("vm_host")
+        assert vm_host, (
+            f"Lease missing vm_host; required for stage 10a check job: {lease!r}"
+        )
         assert lease.get("create_job_id") in (None, deal_state.provisioning_job_id)
         assert lease.get("status") in ("active", "pending"), (
             f"Expected active/pending lease after happy-path settlement, got: {lease}"
@@ -1307,6 +1246,7 @@ class TestStage09c_LeaseRegistered:
 
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")
+        deal_state.vm_host = vm_host
         log.info(
             "[09c] Lease %s registered for escrow %s (resource=%s status=%s)",
             deal_state.lease_id,
@@ -1349,8 +1289,7 @@ class TestStage10a_LeaseExpirySetup:
         — is identical regardless of the underlying Ansible action.
         """
         require_state(deal_state, "lease_id", "settlement_status",
-                      "_evaluate_settle_vm_host", "_evaluate_settle_vm_target",
-                      "_provisioning_storefront_ok")
+                      "vm_host", "_provisioning_storefront_ok")
 
         # Step 1 — pause the watchdog timer
         result = provisioning_test_client.pause_watchdog()
@@ -1367,10 +1306,13 @@ class TestStage10a_LeaseExpirySetup:
         )
         log.info("[10a] Check mock rule %r armed (pause_before_result=True)", CHECK_RULE_ID)
 
-        # Dry-run: confirm evaluate_job sees the rule before we fire a real cycle
+        # Dry-run: confirm evaluate_job sees the rule before we fire a real cycle.
+        # vm_host comes from the lease (captured in 09c) — the synthetic
+        # buyer flow used to source it from the 08a dry-run, dropped in
+        # the buyer-CLI rewrite.
         eval_result = provisioning_test_client.evaluate_job(
-            host=deal_state._evaluate_settle_vm_host,
-            vm_target=deal_state._evaluate_settle_vm_target or "eval-target",
+            host=deal_state.vm_host,
+            vm_target="eval-target",
             vm_action="check",
         )
         assert eval_result.get("params_valid") is True, (

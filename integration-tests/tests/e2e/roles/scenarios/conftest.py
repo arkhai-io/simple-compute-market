@@ -67,13 +67,24 @@ class DealState:
     # `market settle --from <run_id>` in phase 08. Sentinel for the
     # "negotiation produced a usable agreed outcome" precondition.
     buyer_run_id: Optional[str] = None
-    # Phase 7 — provisioning gate (escrow now created by `market settle`)
+    # Phase 7 — provisioning gate (escrow created by `market settle`
+    # in the buyer-CLI flow; created inline in the synthetic-buyer flow)
     provisioning_gate_armed: bool = False
-    # Phase 8 — settle subprocess + on-chain escrow uid (set by 08-initiate)
+    # Phase 8 — settle subprocess + on-chain escrow uid
     real_escrow_uid: Optional[str] = None
-    # Carries the background subprocess handle so 09b can wait for its
-    # clean exit and the module teardown can terminate it if leftover.
+    # Buyer-CLI scenarios only: carries the background `market settle`
+    # subprocess handle so phase 09b can wait for its clean exit and the
+    # module teardown can terminate it if leftover. Unused by the
+    # synthetic-buyer scenario.
     settle_run_handle: Optional[Any] = None
+    # Synthetic-buyer (test_full_deal.py) only: 08a evaluate-settle
+    # dry-run capture; the buyer-CLI scenario reads vm_host from the
+    # lease instead (see below).
+    _evaluate_settle_vm_host: Optional[str] = None
+    _evaluate_settle_vm_target: Optional[str] = None
+    _evaluate_settle_passed: bool = False
+    # Synthetic-buyer only: phase 09a evaluate-provisioning-job dry-run
+    _provision_job_evaluated: bool = False
     # Phase 8 — settlement
     settlement_submitted: bool = False
     provisioning_job_id: Optional[str] = None
