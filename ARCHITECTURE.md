@@ -419,11 +419,7 @@ threads it directly to `create_order` without synthesis. The
 startup backfill — safe to delete once pre-cutover DB snapshots are
 unreachable. `_extract_initial_price_from_order` reads exclusively from
 `accepted_escrows[0].price_per_hour`; its hidden-reserve fallback is to
-`[seller.pricing].default_min_price`, not to any legacy column. The remaining
-`demand_resource` references in `domain/compute/agent/app/policy/arkhai_common.py`
-are inside the RL feature-extraction pipeline, which is dormant code (the
-module fails to import without `gymnasium`); they're vestigial and don't
-affect any live path.
+`[seller.pricing].default_min_price`, not to any legacy column.
 
 ---
 
@@ -431,7 +427,7 @@ affect any live path.
 
 `sync_negotiation.py` does **not** use the `@policy_callable` domain policy chain for deciding what to do in a negotiation round. It uses the `market_policy.negotiation_strategy` module directly via `_load_storefront_strategy()`. The two systems are parallel and independent:
 
-- The `@policy_callable` chain (in `domain/compute/agent/app/policy/store.py`) handles listing-level decisions: whether to accept an order, what price floor to set, whether to pause. Many of these callables are currently no-ops (`if True: return None`) because the events they depended on (`NegotiationEvent`, `AcceptOfferEvent`) were removed when the rename happened.
+- The `@policy_callable` chain (in `domain/compute/agent/app/policy/store.py`) handles listing-level decisions: whether to accept an order, what price floor to set, whether to pause. It also gates the pre-thread negotiation request through guard callables (`negotiate.guard.has_matching_inventory`, `negotiate.guard.escrow_fields_strict_match`). It does **not** drive round-by-round negotiation decisions — those bypass it via `_load_storefront_strategy()`.
 - The `NegotiationStrategy` (`market_policy.negotiation_strategy`) handles round-by-round decisions during an active negotiation: accept, counter at midpoint, or exit. This is what actually fires at each `/negotiate/new` and `/negotiations/{id}/advance` call.
 
 `_load_storefront_strategy()` resolves the strategy as follows:
@@ -571,7 +567,7 @@ layer whenever wheel file contents change.
 > **TODO (tracked):** Document Alkahest escrow mechanics — what on-chain calls are made at which points in the negotiation lifecycle (escrow lock, attestation submission, release).
 > **TODO (tracked):** Document the SQLite schema — table definitions, index strategy, and known statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering).
 > **TODO (tracked):** Document `negotiation_watchdog` — what staleness threshold triggers it, what it writes to the DB, and how it interacts with in-flight `/advance` calls.
-> **TODO (next session):** Negotiation refactor — restore the `NegotiationEvent` model and rewire the `@policy_callable` domain callables so round-by-round decisions flow through the callable chain rather than bypassing it via `_load_storefront_strategy()`. Goal: testability via the existing policy dry-run infrastructure, visibility via the existing stage events stream.
+> **TODO (next session):** Negotiation refactor — restore the `NegotiationEvent` model and rewire the round-by-round decision into the `@policy_callable` chain rather than bypassing it via `_load_storefront_strategy()`. The current architecture is already per-round-testable (each round = one HTTP request; `evaluate-negotiate` admin endpoint exercises round 0 directly); the actual motivation is (a) **composability** — let operators mix-and-match guards/actions via policy composition instead of toggling a `[seller.negotiation].policy_mode` enum between bisection and RL, and (b) **uniform stage-event emission** — let the round decision land in `stage_events` through the standard policy-outcome write path instead of the special inline `stage_event("negotiation","round_decided", ...)` call.
 
 #### Storefront API Surface (`controllers/`)
 
@@ -1788,13 +1784,9 @@ See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 - **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). `accepted_escrows[i].price_per_hour` is stored in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised `price_per_hour` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes `price_per_hour` as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
 
-- **`@policy_callable` domain callables are dead code:** `domain/compute/agent/app/policy/store.py` callables for negotiation (`negotiation_guard_always_negotiate_on_price_diff`, `negotiation_action_price_interval_concession`, `negotiation_respond_to_make_offer`, etc.) all have `if True: return None` at the top because the `NegotiationEvent`, `AcceptOfferEvent`, and `MakeOfferEvent` classes they depended on were removed. The storefront's negotiation rounds are driven entirely by `NegotiationStrategy` in `market_policy.negotiation_strategy` (not the callable chain). These callables will need to be either rewired to the new event model or deleted as part of the negotiation refactor.
-
 - **`perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple:** On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal. **Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
 
 - **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `accepted_escrows[0].price_per_hour` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= accepted_escrows[0].price_per_hour` in the e2e test constants.
-
-- **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the planned negotiation refactor.
 
 - **`wait_for_registry_agent` retries past transient network states:** `"timeout"` and `"unreachable"` returned by `registry_auth_check._probe()` are transient network conditions. The wait loop retries past `"agent_not_found"`, `"timeout"`, and `"unreachable"`. Only definitive states (`"ok"`, `"owner_mismatch"`, `"unconfigured"`, `"owner_unknown"`, `"wallet_unconfigured"`, `"http_*"`) exit the loop immediately.
 
