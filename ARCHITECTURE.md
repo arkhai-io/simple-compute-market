@@ -295,6 +295,80 @@ storefront/src/market_storefront/
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+**Listing payment model — `accepted_escrows` + `ProvisionTerms` + `EscrowProposal`:**
+
+The old model put the price on the listing as a `demand_resource` of type
+`TokenResource` (i.e. a hard-coded `(token, amount)` tuple). That was retired
+across a series of refactors in May; the current model splits **what the seller
+will deliver** from **what gates the payment**, and expresses the latter as
+on-chain escrow calldata rather than as a typed `TokenResource`.
+
+**Listing-side advertisement — `accepted_escrows`:** Each listing carries a
+JSON column `accepted_escrows: list[AcceptedEscrow]`. One entry pins the
+`(chain_name, escrow_address)` tuple plus a partial advertisement of the
+on-chain `ObligationData` struct via a `fields` map. The seller is saying "I
+will accept payment via *these* escrow contracts on *these* chains, with
+*these* field values pinned." Multiple entries allow multi-chain or
+multi-contract offers (e.g. mainnet ERC20 + a Base Sepolia ERC20 alongside a
+hypothetical ERC721 escrow). Each entry also carries a `price_per_hour` —
+**this** is the price column the negotiation strategy reads as the seller's
+floor; the listing no longer carries a top-level `(token, amount)`.
+
+`fields` is **shape-only** — present keys are advertised values; absent keys
+are open for the buyer to propose. Whether an advertised value is a hard
+constraint or a negotiable default is the seller's negotiation policy's
+concern, not protocol infrastructure. `amount` is never in `fields`: the
+on-chain `ObligationData.amount` is derived at settlement from
+`price_per_hour × duration_seconds / 3600` after the negotiation agrees a rate
+and duration.
+
+**Round-0 wire shape:** `POST /api/v1/negotiate/new` carries two structured
+fields:
+
+- `provision_terms: ProvisionTerms` — `{duration_seconds, ssh_public_key,
+  compute_resource}`. What the seller will deliver off-chain. Read by the
+  seller's settlement/provisioning pipeline as the single source of truth for
+  what to provision.
+- `escrow_proposal: EscrowProposal` — `{chain_name, escrow_address, fields,
+  expiration_unix}`. The buyer picks one of the listing's `accepted_escrows`
+  by `(chain_name, escrow_address)` and supplies the buyer-committable
+  `ObligationData` keys in `fields`. `amount` is intentionally **not** on the
+  proposal — it's derived at settlement.
+
+The seller validates the proposal in `_validate_escrow_proposal`: match the
+`(chain_name, escrow_address)` against an entry in the listing's
+`accepted_escrows`, then field-equality-check every seller-advertised value
+on the matched entry. On non-rejection paths, `NegotiateNewResponse` echoes
+both as `accepted_provision_terms` and `accepted_escrow_proposal` — settlement
+code on both sides reconstructs the same on-chain `obligation_data` from
+those echoed values.
+
+**Settlement is a byte-compare, not a dispatch:** `EscrowTerms`
+(`service.schemas.EscrowTerms`) is the negotiated artifact — a flat mirror of
+the alkahest `ObligationData` struct: `{maker, escrow_contract,
+obligation_data, expiration_unix}`. The settlement verifier reads the
+on-chain obligation by UID and byte-compares against the negotiated
+`EscrowTerms.obligation_data`. New escrow kinds (ERC721, native, bundle,
+attestation) add no code: they only change which keys appear in
+`obligation_data`. The alkahest **slot lookup** (address-to-kind reverse
+map, configured per chain) replaces the old `escrow_kind` discriminator
+string — adding a new escrow contract is a config change, not a code change.
+
+A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
++ seller penalty deposit, block-by-block schedules) are expressible without
+a wrapper type. Today every list is length-1 (single buyer-made ERC20
+escrow); the rest is forward shape.
+
+**Migration / compatibility:** `sqlite_client.py::synthesize_accepted_escrows_from_demand`
+back-fills `accepted_escrows` from the legacy `demand_resource` column on
+schema init for pre-migration rows. On chains without an alkahest config
+(e.g. Anvil without an override JSON) the column stays NULL and readers
+fall back to `demand_resource` — that fallback is the only thing keeping
+old-shape listings working and will go away when the legacy column is
+dropped.
+
+---
+
 **Negotiation strategy selection — critical runtime behaviour:**
 
 `sync_negotiation.py` does **not** use the `@policy_callable` domain policy chain for deciding what to do in a negotiation round. It uses the `market_policy.negotiation_strategy` module directly via `_load_storefront_strategy()`. The two systems are parallel and independent:
@@ -308,14 +382,14 @@ storefront/src/market_storefront/
 3. Call `load_strategy(name)` from the in-process strategy registry
 4. Return the strategy instance
 
-**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. The seller offers `ComputeResource` and demands `TokenResource` (payment), so `is_offering_compute = True` → direction `"maximize"` (seller wants the highest price it can get). The buyer offers `TokenResource` → direction `"minimize"`.
+**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. Since the `demand_resource` cutover, listings carry only an `offer_resource` (the payment side moved into `accepted_escrows` — see the section above). Seller offering `ComputeResource` → direction `"maximize"` (the seller wants the highest price the buyer will pay). The buyer's CLI runs in `"minimize"` direction from the opposite side of the same protocol.
 
 **BisectionStrategy convergence (maximize direction):**
 - Accept if `their_price >= our_price * (1 - CONVERGENCE_RATIO)` (default ratio ≈ 0.01, so accept within 1%)
 - Counter at `(our_price + their_price) // 2` if `their_price >= our_price / 1.5`
 - Exit with `reason="price_unreasonable"` otherwise
 
-`our_price` is extracted from `demand.amount` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
+`our_price` is extracted from `accepted_escrows[0].price_per_hour` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately. (Pre-migration listings without `accepted_escrows` fall back to the legacy `demand_resource.amount` until that column is dropped.)
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
@@ -560,7 +634,7 @@ All negotiation events are written to `stage_events` with `stage="negotiation"` 
 | `price_unreasonable` | RL | RL policy evaluated and rejected the offer |
 
 **Key invariants:**
-- `our_price` in every `round_decided` event equals `demand.amount` from the listing (the seller's floor, already multiplied by `10**decimals`)
+- `our_price` in every `round_decided` event equals `accepted_escrows[0].price_per_hour` from the listing (the seller's floor; stored in uint256-domain base units — decimal-scaled at advertisement time, not at read time)
 - A `round_decided` with `decision=exit` means the negotiation is already in terminal `failure` state — `force-accept` will return 409
 - The `round` field in messages is 0-indexed for the buyer's initial offer; the seller's response is round 1, subsequent buyer counters are round 2, etc.
 ```
@@ -1647,13 +1721,13 @@ See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
-- **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). The policy pipeline multiplies `demand.amount` by `10**decimals` before storing it as `our_price`. Any token with 18 decimals and a human-readable amount above ~9.2 billion will overflow. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so `amount` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time, or enforce a maximum sane price check in `_extract_initial_price_from_order()`.
+- **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). `accepted_escrows[i].price_per_hour` is stored in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised `price_per_hour` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes `price_per_hour` as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
 
 - **`@policy_callable` domain callables are dead code:** `domain/compute/agent/app/policy/store.py` callables for negotiation (`negotiation_guard_always_negotiate_on_price_diff`, `negotiation_action_price_interval_concession`, `negotiation_respond_to_make_offer`, etc.) all have `if True: return None` at the top because the `NegotiationEvent`, `AcceptOfferEvent`, and `MakeOfferEvent` classes they depended on were removed. The storefront's negotiation rounds are driven entirely by `NegotiationStrategy` in `market_policy.negotiation_strategy` (not the callable chain). These callables will need to be either rewired to the new event model or deleted as part of the negotiation refactor.
 
 - **`perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple:** On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal. **Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
 
-- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `demand.amount` (in base units after decimal scaling) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= demand.amount` in the e2e test constants.
+- **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `accepted_escrows[0].price_per_hour` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= accepted_escrows[0].price_per_hour` in the e2e test constants.
 
 - **`negotiation_respond_to_make_offer` and related domain callables:** These are all no-ops until the `NegotiationEvent` model is restored. The domain callable chain currently plays no role in round-by-round negotiation decisions. Restoring it (or removing these callables) is part of the planned negotiation refactor.
 
@@ -2591,4 +2665,4 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 | Anvil | Local EVM testnet node from Foundry |
 | EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
-| Order | A published offer in the registry; has `offer_resource`, `demand_resource`, status |
+| Order | A published offer in the registry; has `offer_resource`, `accepted_escrows`, status (the legacy `demand_resource` column is being phased out) |
