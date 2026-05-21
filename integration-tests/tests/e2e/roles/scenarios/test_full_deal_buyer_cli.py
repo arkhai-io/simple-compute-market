@@ -92,9 +92,14 @@ Phase 11 — VM cleanup confirmation and resource release
 from __future__ import annotations
 
 import logging
+from importlib import resources
 
 import pytest
 
+from service.clients.alkahest import (
+    get_alkahest_network,
+    resolve_alkahest_address_config,
+)
 from src.settings import settings
 from tests.e2e.roles.scenarios.conftest import DealState, require_state
 
@@ -129,12 +134,23 @@ DEMAND_RESOURCE = {
     },
     "amount": 10_000,
 }
-# Listing-side accepted_escrows. Stub escrow_address — buyer-cli sends the
-# placeholder zero address on its EscrowProposal, which skips strict (chain,
-# address) match; field-equality on fields["token"] gates the proposal.
+# Listing-side accepted_escrows. The escrow_address is resolved from the
+# same alkahest_anvil_addresses.json that ships with market-storefront and
+# that the seller's `market publish` flow reads at listing-create time —
+# so the listing mirrors what a real seller would publish, and the buyer
+# CLI's signed EscrowProposal (which derives the same address from the
+# same file) matches under the storefront's strict (chain, address) check.
+_ALKAHEST_ADDRESSES_PATH = str(
+    resources.files("market_storefront.data").joinpath("alkahest_anvil_addresses.json")
+)
+_ALKAHEST_CFG = resolve_alkahest_address_config(
+    get_alkahest_network("anvil"), config_path=_ALKAHEST_ADDRESSES_PATH,
+)
 ACCEPTED_ESCROWS = [{
     "chain_name": "anvil",
-    "escrow_address": "0x" + "11" * 20,
+    "escrow_address": str(
+        _ALKAHEST_CFG.erc20_addresses.escrow_obligation_nontierable
+    ).lower(),
     "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
     "price_per_hour": DEMAND_RESOURCE["amount"],
 }]
