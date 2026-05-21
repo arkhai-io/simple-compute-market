@@ -208,3 +208,6 @@ provisioning-service/src/config/config-local.yml
 
 # Per-env deployment scratch dirs (carry keys + per-env configs)
 deploy-base-sepolia/
+
+# Claude Code per-project state
+.claude/
