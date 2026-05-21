@@ -359,13 +359,24 @@ A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
 a wrapper type. Today every list is length-1 (single buyer-made ERC20
 escrow); the rest is forward shape.
 
-**Migration / compatibility:** `sqlite_client.py::synthesize_accepted_escrows_from_demand`
-back-fills `accepted_escrows` from the legacy `demand_resource` column on
-schema init for pre-migration rows. On chains without an alkahest config
-(e.g. Anvil without an override JSON) the column stays NULL and readers
-fall back to `demand_resource` — that fallback is the only thing keeping
-old-shape listings working and will go away when the legacy column is
-dropped.
+**Where `demand_resource` still appears:** the legacy column itself is gone
+in any DB that's been started by current code — `sqlite_client.py` runs a
+one-shot startup migration that backfills `accepted_escrows` from
+`demand_resource` (via `synthesize_accepted_escrows_from_demand`) and then
+does `ALTER TABLE listings DROP COLUMN demand_resource`. But `demand_resource`
+survives as the **request-input shape** for creating a listing:
+`CreateListingRequest.demand` is still the field clients POST; the storefront
+parses it into a typed `TokenResource`, runs it through the policy chain
+(`evaluate_create_listing_policy_from_raw(offer_raw, demand_raw, …)`), then
+synthesizes the `accepted_escrows` row at the write boundary. So the on-disk
+model is `accepted_escrows` end-to-end, but the API still takes
+`{offer, demand}` and translates inward — a wider buyer-facing API redesign
+hasn't happened yet. The `_extract_initial_price_from_order` "fallback to
+`demand_resource`" branch in `action_executor.py` is reachable only for
+pre-migration listings whose synthesis failed at startup (e.g. anvil without
+an alkahest override JSON resolving the escrow address); after the column
+drop those rows can't read it either, so the branch is effectively dead and
+should come out when the request-input format is also migrated.
 
 ---
 
@@ -389,7 +400,7 @@ dropped.
 - Counter at `(our_price + their_price) // 2` if `their_price >= our_price / 1.5`
 - Exit with `reason="price_unreasonable"` otherwise
 
-`our_price` is extracted from `accepted_escrows[0].price_per_hour` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately. (Pre-migration listings without `accepted_escrows` fall back to the legacy `demand_resource.amount` until that column is dropped.)
+`our_price` is extracted from `accepted_escrows[0].price_per_hour` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
 
 **`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
@@ -2665,4 +2676,4 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 | Anvil | Local EVM testnet node from Foundry |
 | EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
-| Order | A published offer in the registry; has `offer_resource`, `accepted_escrows`, status (the legacy `demand_resource` column is being phased out) |
+| Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API still takes `{offer, demand}` and translates `demand` into `accepted_escrows` at the write boundary — `demand_resource` no longer exists as a stored column. |
