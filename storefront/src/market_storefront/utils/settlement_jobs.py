@@ -91,7 +91,7 @@ async def start_settlement_job(
             negotiated terms (wrong token, insufficient amount, wrong
             recipient, expired, revoked, etc).
     """
-    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.config import settings
     from market_storefront.utils.escrow_verification import (
         verify_escrow_for_settlement,
     )
@@ -141,13 +141,13 @@ async def start_settlement_job(
     # controller maps that to HTTP 400.
     await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
-        seller_wallet=CONFIG.agent_wallet_address or "",
+        seller_wallet=settings.wallet.address or "",
         agreed_price=float(thread["agreed_price"]),
         agreed_duration_seconds=provision.duration_seconds,
         listing=our_order_dict,
         alkahest_client=alkahest_client,
-        chain_name=CONFIG.chain_name,
-        alkahest_address_config_path=CONFIG.alkahest_address_config_path,
+        chain_name=settings.chain.name,
+        alkahest_address_config_path=settings.chain.alkahest_address_config_path,
         escrow_proposal=proposal,
     )
 
@@ -225,14 +225,14 @@ async def _run_settlement_job_bg(
     # Imported here so unit tests can mock fulfill_compute_obligation by
     # patching the symbol on this module.
     from market_storefront.utils.action_executor import fulfill_compute_obligation
-    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.config import settings
 
     try:
         result = await fulfill_compute_obligation(
             client=alkahest_client,
             escrow_uid=escrow_uid,
             ssh_public_key=provision.ssh_public_key,
-            oracle_address=CONFIG.agent_wallet_address,
+            oracle_address=settings.wallet.address,
             order=order_dict,
             duration_seconds=provision.duration_seconds,
             listing_id=listing_id,

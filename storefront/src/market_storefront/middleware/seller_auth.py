@@ -1,10 +1,10 @@
-"""Seller auth dependency — verifies X-Signature against CONFIG.agent_wallet_address.
+"""Seller auth dependency — verifies X-Signature against settings.wallet.address.
 
 Replaces the inline ``_check_agent_request_auth`` calls that were scattered
 across controller methods. Use as a FastAPI ``Depends()`` on any endpoint that
 should only be callable by the seller's own operator tooling.
 
-When ``CONFIG.agent_wallet_address`` is empty (local dev default), the check
+When ``settings.wallet.address`` is empty (local dev default), the check
 is skipped and all requests pass through — matching the original behaviour.
 """
 from __future__ import annotations
@@ -41,9 +41,9 @@ def verify_seller_signature(
         ) -> dict:
             ...
     """
-    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.config import settings
 
-    owner = CONFIG.agent_wallet_address
+    owner = settings.wallet.address
     if not owner:
         return  # Auth disabled in local dev
 
@@ -94,9 +94,9 @@ def make_seller_auth_dep(operation: str):
         if not resource_id:
             # No listing_id path param — this is create_listing, which the client
             # signs as "create_listing:{agent_wallet_address}:{ts}".
-            # Use CONFIG.agent_wallet_address as the resource_id to match.
-            from market_storefront.utils.config import CONFIG
-            resource_id = CONFIG.agent_wallet_address or ""
+            # Use settings.wallet.address as the resource_id to match.
+            from market_storefront.utils.config import settings
+            resource_id = settings.wallet.address or ""
         verify_seller_signature(request, operation, resource_id)
 
     return _dep

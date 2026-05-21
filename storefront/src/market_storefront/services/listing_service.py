@@ -35,25 +35,26 @@ logger = logging.getLogger(__name__)
 
 
 class ListingService:
-    def __init__(self, *, sqlite_client, alkahest_client, config) -> None:
+    def __init__(self, *, sqlite_client, alkahest_client) -> None:
+        from market_storefront.utils.config import settings
+
         self._db = sqlite_client
         self._alkahest = alkahest_client
-        self._config = config
 
-        priv_key = (config.agent_priv_key or "").strip()
-        rpc_url = (config.chain_rpc_url or "").strip()
+        priv_key = (settings.wallet.private_key or "").strip()
+        rpc_url = (settings.chain.rpc_url or "").strip()
         self._token_transfers_available: bool = bool(priv_key and rpc_url)
         self._alkahest_available: bool = alkahest_client is not None
 
         if not self._token_transfers_available:
             logger.warning(
                 "[STOREFRONT] Token transfer operations (refund) unavailable — "
-                "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."
+                "wallet.private_key and chain.rpc_url must both be set in storefront config."
             )
         if not self._alkahest_available:
             logger.warning(
                 "[STOREFRONT] On-chain escrow operations (claim, reclaim, arbitrate) unavailable — "
-                "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."
+                "wallet.private_key and chain.rpc_url must both be set in storefront config."
             )
 
     @staticmethod
@@ -304,11 +305,12 @@ class ListingService:
             _, status, body = outcome
             return status, body
         params = outcome[1]
+        from market_storefront.utils.config import settings
         from market_storefront.utils.token_transfer import transfer_erc20
         try:
             result = await transfer_erc20(
-                private_key=self._config.agent_priv_key.strip(),
-                rpc_url=self._config.chain_rpc_url.strip(),
+                private_key=settings.wallet.private_key.strip(),
+                rpc_url=settings.chain.rpc_url.strip(),
                 token_address=params["token_address"],
                 to_address=params["buyer_address"],
                 amount_raw=params["amount_raw"],

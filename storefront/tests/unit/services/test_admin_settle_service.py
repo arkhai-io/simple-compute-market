@@ -22,19 +22,25 @@ def db():
     return AsyncMock()
 
 
-@pytest.fixture
-def config():
-    cfg = MagicMock()
-    cfg.chain_rpc_url = "http://anvil:8545"
-    cfg.chain_name = "anvil"
-    cfg.alkahest_address_config_path = "/fake/alkahest.json"
-    return cfg
+@pytest.fixture(autouse=True)
+def _stub_settings():
+    """Pre-populate the storefront settings used by AdminSettleService."""
+    from tests._settings_overrides import settings_overrides
+
+    with settings_overrides(
+        **{
+            "chain.rpc_url": "http://anvil:8545",
+            "chain.name": "anvil",
+            "chain.alkahest_address_config_path": "/fake/alkahest.json",
+        }
+    ):
+        yield
 
 
 @pytest.fixture
-def svc(db, config):
+def svc(db):
     from market_storefront.services.admin_settle_service import AdminSettleService
-    return AdminSettleService(sqlite_client=db, config=config)
+    return AdminSettleService(sqlite_client=db)
 
 
 _LISTING_ID = "listing-abc"
@@ -103,7 +109,7 @@ class TestVerifyEscrowDryRun:
         assert result["escrow_uid"] == _ESCROW_UID
         assert "token mismatch" in result["reason"]
 
-    async def test_passes_correct_args_to_verify(self, svc, db, config):
+    async def test_passes_correct_args_to_verify(self, svc, db):
         """verify_escrow_for_settlement is called with the exact values from the request."""
         db.load_listing.return_value = _LISTING_ROW
         with patch(

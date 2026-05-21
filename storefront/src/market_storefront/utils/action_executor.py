@@ -31,7 +31,7 @@ from market_storefront.resources import parse_resource_from_dict
 
 import httpx
 
-from market_storefront.utils.config import CONFIG, _resolve_chain_id
+from market_storefront.utils.config import settings, chain_id, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -41,10 +41,10 @@ from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
 from market_policy.negotiation_thread import get_thread_store
 from .validation import determine_strategy_from_order
 
-BASE_URL_OVERRIDE = CONFIG.base_url_override
-PORT = CONFIG.port
-AGENT_ID = CONFIG.agent_id
-SSH_PUBLIC_KEY = CONFIG.ssh_public_key
+BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
+PORT = settings.port
+AGENT_ID = AGENT_ID
+SSH_PUBLIC_KEY = settings.wallet.ssh_public_key
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +306,7 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
 
-    if not CONFIG.enable_registry_discovery:
+    if not settings.enable_registry_discovery:
         return {
             "status": "skipped",
             "message": "Registry discovery is disabled; order not updated in registry",
@@ -318,7 +318,7 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
             target_urls = await _registries_to_target(order_id, registry_client.urls)
             update_request = UpdateListingRequest(
                 updates={"status": "closed"},
-                private_key=CONFIG.agent_priv_key,
+                private_key=settings.wallet.private_key,
                 agent_id=_canonical_agent_id(),
             )
             payloads = {url: update_request for url in target_urls}
@@ -367,18 +367,18 @@ async def _do_provision(
     """
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
-        CONFIG.provisioning_service_url,
+        settings.provisioning.service_url,
         agent_id=canonical_id,
-        timeout=float(CONFIG.provisioning_timeout),
+        timeout=float(settings.provisioning.timeout),
     )
     async with client:
         params: dict = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
-        if CONFIG.frp_server_addr:
-            params["frp_server_addr"] = CONFIG.frp_server_addr
-        if CONFIG.frp_domain:
-            params["frp_domain"] = CONFIG.frp_domain
-        if CONFIG.frp_dashboard_password:
-            params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+        if settings.provisioning.frp_server_addr:
+            params["frp_server_addr"] = settings.provisioning.frp_server_addr
+        if settings.provisioning.frp_domain:
+            params["frp_domain"] = settings.provisioning.frp_domain
+        if settings.provisioning.frp_dashboard_password:
+            params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
         submit = await client.create_vm(vm_host, CreateVmRequest(**params))
         if on_job_submitted is not None:
             try:
@@ -390,8 +390,8 @@ async def _do_provision(
                 )
         job = await client.poll_until_complete(
             submit.job_id,
-            timeout=float(CONFIG.provisioning_timeout),
-            poll_interval=float(CONFIG.provisioning_poll_interval),
+            timeout=float(settings.provisioning.timeout),
+            poll_interval=float(settings.provisioning.poll_interval),
         )
         result = job.result or {}
         if canonical_id:
@@ -420,9 +420,9 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
     """Schedule VM expiry via the provisioning service."""
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
-        CONFIG.provisioning_service_url,
+        settings.provisioning.service_url,
         agent_id=canonical_id,
-        timeout=float(CONFIG.provisioning_timeout),
+        timeout=float(settings.provisioning.timeout),
     )
     async with client:
         submit = await client.schedule_expiry(
@@ -430,8 +430,8 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
         )
         job = await client.poll_until_complete(
             submit.job_id,
-            timeout=float(CONFIG.provisioning_timeout),
-            poll_interval=float(CONFIG.provisioning_poll_interval),
+            timeout=float(settings.provisioning.timeout),
+            poll_interval=float(settings.provisioning.poll_interval),
         )
     return job.result or {}
 
@@ -445,13 +445,13 @@ def _canonical_agent_id() -> str | None:
     returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
 
     Resolution order:
-      1. CONFIG.onchain_agent_id — explicit pin in config.toml (highest priority)
+      1. settings.onchain_agent_id — explicit pin in config.toml (highest priority)
       2. agent._AGENT_ID — set at startup by perform_registration when no pin is present
-      3. None — falls back to CONFIG.agent_id in callers (last resort)
+      3. None — falls back to AGENT_ID in callers (last resort)
 
     Returns None if no agent ID is available.
     """
-    raw = CONFIG.onchain_agent_id
+    raw = settings.onchain_agent_id
     if not raw:
         # Fall back to the in-memory ID set by perform_registration at startup.
         # This covers the case where onchain_agent_id is not pinned in config.toml
@@ -467,10 +467,10 @@ def _canonical_agent_id() -> str | None:
     if isinstance(raw, str) and raw.startswith("eip155:"):
         return raw
     try:
-        chain_id = _resolve_chain_id()
+        resolved_chain_id = chain_id()
         return build_erc8004_canonical_id(
-            chain_id=chain_id,
-            identity_registry=CONFIG.identity_registry_address,
+            chain_id=resolved_chain_id,
+            identity_registry=settings.registry.identity_registry_address,
             agent_id=int(raw),
         )
     except Exception as exc:
@@ -488,11 +488,11 @@ def _make_registry_client() -> "MultiRegistryClient":
     shape; reads fan in across every URL, writes fan out best-effort.
     """
     from .multi_registry_client import MultiRegistryClient
-    urls = list(CONFIG.indexer_urls) if CONFIG.indexer_urls else ["http://localhost:8080"]
+    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
     return MultiRegistryClient(
         urls,
-        timeout=CONFIG.discovery_timeout,
-        auth=CONFIG.indexer_auth,
+        timeout=settings.registry.discovery_timeout,
+        auth=settings.registry.auth,
     )
 
 
@@ -550,8 +550,8 @@ def _extract_initial_price_from_order(order: Listing | dict) -> float:
         return float(advertised)
 
     # Hidden reserve: fall back to the seller's config default.
-    from market_storefront.utils.config import CONFIG
-    fallback = CONFIG.default_min_price
+    from market_storefront.utils.config import settings, AGENT_ID, BASE_URL_OVERRIDE
+    fallback = settings.pricing.default_min_price
     if fallback is not None and str(fallback).strip():
         try:
             parsed = float(fallback)
@@ -644,13 +644,13 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         order_dict = order
         order_id = order_dict.get("listing_id", "unknown")
 
-    if not CONFIG.enable_registry_discovery:
+    if not settings.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
 
     accepted_escrows = order_dict.get("accepted_escrows") or []
 
     try:
-        agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
+        agent_id_for_registry = _canonical_agent_id() or AGENT_ID
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
@@ -661,7 +661,7 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
             )
             payloads = {url: order_request for url in registry_client.urls}
             results = await registry_client.publish_listing_per_registry(
-                agent_id_for_registry, payloads, private_key=CONFIG.agent_priv_key,
+                agent_id_for_registry, payloads, private_key=settings.wallet.private_key,
             )
         await _record_publications(order_id, results)
         any_ok = any(r["success"] for r in results)
@@ -1106,8 +1106,8 @@ async def fulfill_compute_obligation(
                 tzinfo=timezone.utc
             )
             async with ProvisioningClient(
-                CONFIG.provisioning_service_url,
-                agent_id=str(CONFIG.onchain_agent_id or ""),
+                settings.provisioning.service_url,
+                agent_id=str(settings.onchain_agent_id or ""),
                 timeout=10,
             ) as prov_client:
                 await prov_client.register_lease(

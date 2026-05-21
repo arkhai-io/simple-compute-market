@@ -17,6 +17,7 @@ import pytest
 from market_storefront.utils import action_executor
 from market_storefront.utils.multi_registry_client import PublishResult
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import settings_overrides
 
 
 def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
@@ -78,12 +79,9 @@ class TestPublishOrderRecordsPublications:
         with (
             patch("market_storefront.utils.action_executor._make_registry_client",
                   return_value=cm),
-            patch("market_storefront.utils.action_executor.CONFIG",
-                  MagicMock(
-                      enable_registry_discovery=True,
-                      agent_id="agent-1",
-                      agent_priv_key="0xkey",
-                  )),
+            settings_overrides(enable_registry_discovery=True,
+                               **{"wallet.private_key": "0xkey"}),
+            patch("market_storefront.utils.action_executor.AGENT_ID", "agent-1"),
             patch("market_storefront.utils.action_executor._canonical_agent_id",
                   return_value="agent-1"),
         ):
@@ -130,12 +128,9 @@ class TestPublishOrderRecordsPublications:
         with (
             patch("market_storefront.utils.action_executor._make_registry_client",
                   return_value=cm),
-            patch("market_storefront.utils.action_executor.CONFIG",
-                  MagicMock(
-                      enable_registry_discovery=True,
-                      agent_id="agent-1",
-                      agent_priv_key="0xkey",
-                  )),
+            settings_overrides(enable_registry_discovery=True,
+                               **{"wallet.private_key": "0xkey"}),
+            patch("market_storefront.utils.action_executor.AGENT_ID", "agent-1"),
             patch("market_storefront.utils.action_executor._canonical_agent_id",
                   return_value="agent-1"),
         ):

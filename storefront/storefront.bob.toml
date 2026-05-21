@@ -2,8 +2,22 @@
 # Anvil default account #2; deterministic vanity contract addresses.
 # DO NOT use these keys on any public network.
 #
-# Mounted into the sell_agent container at /etc/arkhai/config.toml.
-# XDG_CONFIG_HOME=/etc tells service.config_loader to look here.
+# Mounted into the sell_agent container at /etc/arkhai/storefront.toml.
+# XDG_CONFIG_HOME=/etc tells dynaconf to look here.
+
+agent_id            = "bob"
+# onchain_agent_id    = "1"
+port                = 8001
+base_url            = "http://sell_agent:8001/"
+db_path             = "./src/market_storefront/data/sell-agent/agent.db"
+log_file_path       = "./logs/bob.log"
+admin_api_key       = "test-api-key"
+# Seed the resources table from this CSV on startup when the table is empty.
+# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
+# the container at /app/resources.csv by `make deploy-seller-agent`.
+# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
+# the CSV content is delivered through the agent Secret, not a file path.
+resources_csv_path  = "/app/resources.csv"
 
 [wallet]
 address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
@@ -31,29 +45,10 @@ identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 # Per-registry bearer token. The matching key was seeded into
 # registry-b at startup via REGISTRY_BOOTSTRAP_API_KEY in compose.
 # Public registries (no entry here) get no Authorization header.
-# NOTE: this subsection has to come AFTER all scalar [registry] keys
-# (urls, identity_registry_address) — once you open [registry.auth]
-# any key on the next line goes into the subsection's namespace.
 [registry.auth]
 "http://registry-b:8080"  = "test-buyer-token"
 
-[seller]
-agent_id            = "bob"
-# onchain_agent_id    = "1"
-port                = 8001
-base_url            = "http://sell_agent:8001/"
-db_path             = "./src/market_storefront/data/sell-agent/agent.db"
-log_file_path       = "./logs/bob.log"
-enable_event_queue  = false
-admin_api_key       = "test-api-key"
-# Seed the resources table from this CSV on startup when the table is empty.
-# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
-# the container at /app/resources.csv by `make deploy-seller-agent`.
-# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
-# the CSV content is delivered through the agent Secret, not a file path.
-resources_csv_path  = "/app/resources.csv"
-
-[seller.provisioning]
+[provisioning]
 service_url = "http://provisioning:8081"
 # Compose-stack default. Tests override via PROVISIONING_MODE shell env
 # pulled into compose with ${PROVISIONING_MODE:-http}.
@@ -62,10 +57,10 @@ mode        = "http"
 # storefront sees job completion quickly without waiting the 15s production default.
 poll_interval = 1
 
-[seller.negotiation]
-policy_mode = "bisection"    # was "rl" — rl requires torch which is not installed in test env
+[negotiation]
+policy_mode = "bisection"    # rl requires torch which is not installed in test env
 
-[seller.pricing]
+[pricing]
 # Defaults applied to inventory rows that don't carry their own
 # min_price/token/max_duration_seconds. Per-row CSV columns override.
 # default_max_duration_seconds = 0 (or omitted) means "unlimited".

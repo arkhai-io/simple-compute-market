@@ -94,7 +94,6 @@ async def client(db):
     _container.resolved_policy_service = PolicyService(
         sqlite_client=db,
         alkahest_client=None,
-        config=config,
         agent_id="test-agent",
     )
 

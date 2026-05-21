@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,8 @@ def run_serve(
     """Launch uvicorn. Called by ``market-storefront serve``."""
     import uvicorn
 
-    resolved_port = port if port is not None else CONFIG.port
-    uvicorn.run(app, host=host, port=resolved_port, root_path=CONFIG.root_path)
+    resolved_port = port if port is not None else settings.port
+    uvicorn.run(app, host=host, port=resolved_port, root_path=settings.gateway.root_path)
 
 
 # ---------------------------------------------------------------------------
@@ -69,21 +69,19 @@ async def lifespan(_: FastAPI):
     from market_storefront.services.system_service import SystemService
 
     sqlite_client = get_sqlite_client()
-    alkahest_client = alkahest_service.build_client(CONFIG)
+    alkahest_client = alkahest_service.build_client()
 
     policy_svc = PolicyService(
         sqlite_client=sqlite_client,
         alkahest_client=alkahest_client,
-        config=CONFIG,
-        agent_id=CONFIG.agent_id,
+        agent_id=AGENT_ID,
     )
     listing_svc = ListingService(
         sqlite_client=sqlite_client,
         alkahest_client=alkahest_client,
-        config=CONFIG,
     )
     negotiation_svc = NegotiationService(sqlite_client=sqlite_client)
-    system_svc = SystemService(sqlite_client=sqlite_client, agent_id=CONFIG.agent_id)
+    system_svc = SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_alkahest_client = alkahest_client
@@ -119,7 +117,7 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
-    root_path=CONFIG.root_path,
+    root_path=settings.gateway.root_path,
     swagger_ui_parameters={"persistAuthorization": True},
 )
 
@@ -145,7 +143,7 @@ def _custom_openapi():
     # Inject the gateway path prefix as the OpenAPI server URL so Swagger UI
     # generates correct curl examples. The FastAPI app root_path above drives
     # the docs page's OpenAPI URL; this servers block drives "try it out".
-    root_path = CONFIG.root_path
+    root_path = settings.gateway.root_path
     if root_path:
         schema["servers"] = [{"url": root_path}]
     app.openapi_schema = schema

@@ -126,7 +126,7 @@ class TestRequireAdminKeyEnforced:
 
 class TestRequireAdminKeyDevMode:
     async def test_admin_route_passes_without_key(self, dev_mode_client):
-        """CONFIG.admin_api_key is None in tests → require_admin_key is a no-op."""
+        """settings.admin_api_key is None in tests → require_admin_key is a no-op."""
         r = await dev_mode_client.post("/admin/test")
         assert r.status_code == 200
 

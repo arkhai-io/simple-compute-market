@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
 
 import pytest
 
 from market_storefront.negotiation_watchdog import _watchdog_tick
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import settings_overrides
 
 
 def _init_threads_table(db_path: str) -> None:
@@ -69,8 +69,7 @@ async def test_stale_active_thread_is_abandoned(tmp_path):
     _insert_thread(db_path, negotiation_id="neg-stale-001", updated_at=old_ts)
 
     client = SQLiteClient(db_path=db_path)
-    with patch("market_storefront.negotiation_watchdog.CONFIG") as cfg:
-        cfg.negotiation_timeout_seconds = 1800  # 30 min
+    with settings_overrides(negotiation_timeout_seconds=1800):
         n = await _watchdog_tick(client)
 
     assert n == 1, f"Expected 1 abandoned, got {n}"
@@ -86,8 +85,8 @@ async def test_fresh_active_thread_is_left_alone(tmp_path):
     _insert_thread(db_path, negotiation_id="neg-fresh-001", updated_at=recent_ts)
 
     client = SQLiteClient(db_path=db_path)
-    with patch("market_storefront.negotiation_watchdog.CONFIG") as cfg:
-        cfg.negotiation_timeout_seconds = 1800
+    with settings_overrides(negotiation_timeout_seconds=1800):
+
         n = await _watchdog_tick(client)
 
     assert n == 0
@@ -106,8 +105,8 @@ async def test_already_terminal_thread_is_not_re_marked(tmp_path):
     )
 
     client = SQLiteClient(db_path=db_path)
-    with patch("market_storefront.negotiation_watchdog.CONFIG") as cfg:
-        cfg.negotiation_timeout_seconds = 1800
+    with settings_overrides(negotiation_timeout_seconds=1800):
+
         n = await _watchdog_tick(client)
 
     assert n == 0
@@ -130,8 +129,8 @@ async def test_mixed_threads_only_stale_active_abandoned(tmp_path):
     )
 
     client = SQLiteClient(db_path=db_path)
-    with patch("market_storefront.negotiation_watchdog.CONFIG") as cfg:
-        cfg.negotiation_timeout_seconds = 1800
+    with settings_overrides(negotiation_timeout_seconds=1800):
+
         n = await _watchdog_tick(client)
 
     assert n == 2

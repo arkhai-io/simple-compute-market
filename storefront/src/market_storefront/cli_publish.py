@@ -346,21 +346,21 @@ def _publish_round(
             "region": res["region"],
         }
         from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
-        from .utils.config import CONFIG
+        from .utils.config import settings
         try:
             escrow_address = get_erc20_escrow_obligation_nontierable(
-                CONFIG.chain_name,
-                config_path=CONFIG.alkahest_address_config_path,
+                settings.chain.name,
+                config_path=settings.chain.alkahest_address_config_path,
             )
         except Exception as exc:
             failed.append((
                 res,
                 f"alkahest config could not resolve ERC20 escrow address on "
-                f"chain {CONFIG.chain_name!r}: {exc}",
+                f"chain {settings.chain.name!r}: {exc}",
             ))
             continue
         accepted_escrows = [{
-            "chain_name": CONFIG.chain_name,
+            "chain_name": settings.chain.name,
             "escrow_address": escrow_address.lower(),
             "fields": {"token": token_address},
             "price_per_hour": advertised_amount,
@@ -543,11 +543,11 @@ def register(app: typer.Typer) -> None:
         a row-level price or a default are skipped (reported as failed).
         """
         console = Console()
-        from .utils.config import CONFIG
+        from .utils.config import settings
 
         base_url = resolve_storefront_url(agent_url, default_port=8001)
-        private_key = CONFIG.agent_priv_key
-        wallet_address = CONFIG.agent_wallet_address or ""
+        private_key = settings.wallet.private_key
+        wallet_address = settings.wallet.address or ""
         db_path = _resolve_db_path(db)
         if not db_path:
             typer.secho(
@@ -557,16 +557,16 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(1)
 
-        default_min_price = CONFIG.default_min_price
-        default_token_address = CONFIG.default_token_address
+        default_min_price = settings.pricing.default_min_price
+        default_token_address = settings.pricing.default_token_address
         default_max_duration_seconds = (
             max_duration_seconds
             if max_duration_seconds is not None
-            else CONFIG.default_max_duration_seconds
+            else settings.pricing.default_max_duration_seconds
         )
 
-        from .utils.config import _resolve_chain_id
-        rpc_url = CONFIG.chain_rpc_url
+        from .utils.config import chain_id as _resolve_chain_id
+        rpc_url = settings.chain.rpc_url
         if not rpc_url:
             typer.secho(
                 "chain.rpc_url is not configured — required to resolve "
@@ -645,7 +645,7 @@ def register(app: typer.Typer) -> None:
                 default_token_address=default_token_address,
                 default_max_duration_seconds=default_max_duration_seconds,
                 rpc_url=rpc_url, chain_id=chain_id,
-                publish_priceless=CONFIG.publish_priceless,
+                publish_priceless=settings.pricing.publish_priceless,
             )
             if not published and not failed:
                 console.print(
@@ -697,6 +697,6 @@ def register(app: typer.Typer) -> None:
             default_token_address=default_token_address,
             default_max_duration_seconds=default_max_duration_seconds,
             rpc_url=rpc_url, chain_id=chain_id,
-            publish_priceless=CONFIG.publish_priceless,
+            publish_priceless=settings.pricing.publish_priceless,
             poll_interval=poll_interval, console=console,
         )

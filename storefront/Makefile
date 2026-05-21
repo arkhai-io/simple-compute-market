@@ -63,7 +63,7 @@ deploy-seller-agent:
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
-	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
+	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
 	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
@@ -72,7 +72,7 @@ deploy-dev:
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
-	-v $(CURDIR)/config.bob.toml:/etc/arkhai/config.toml:ro \
+	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
 	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 

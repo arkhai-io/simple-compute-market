@@ -122,12 +122,10 @@ class AdminSettleController:
         db=Depends(lambda: _container.resolved_sqlite_client),
         _key=Depends(require_admin_key),
     ) -> None:
-        from market_storefront.utils.config import CONFIG
         from market_storefront.services.admin_settle_service import AdminSettleService
         self._db = db
         self._svc = AdminSettleService(
             sqlite_client=db,
-            config=CONFIG,
             alkahest_client=_container.resolved_alkahest_client,
         )
 

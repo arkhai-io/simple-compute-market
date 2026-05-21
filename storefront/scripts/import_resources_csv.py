@@ -44,8 +44,8 @@ def _resolve_db_path(cli_db_path: str | None) -> str:
     # Fall back to the same path the server reads — ensures the CSV importer
     # and the running storefront always write/read the same database when no
     # explicit path is supplied.
-    from market_storefront.utils.config import CONFIG
-    return CONFIG.agent_db_path
+    from market_storefront.utils.config import settings
+    return settings.db_path
 
 
 async def _run(csv_path: str, db_path: str, dry_run: bool) -> int:

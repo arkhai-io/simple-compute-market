@@ -283,10 +283,10 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     config.chain_rpc_url = ""
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
+        sqlite_client=db, alkahest_client=None
     )
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -325,10 +325,10 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     config.chain_rpc_url = ""
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
+        sqlite_client=db, alkahest_client=None
     )
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -571,7 +571,7 @@ def _bisection_strategy():
 # These tests prove the EIP-191 auth contract between the client and the
 # seller_auth middleware for the create_listing endpoint:
 #   - client signs "create_listing:{agent_wallet_address}:{ts}"
-#   - server verifies the same message against CONFIG.agent_wallet_address
+#   - server verifies the same message against settings.wallet.address
 #
 # This is a pure interface test — no policy pipeline needed, so the
 # listing_svc dependency is left as None (the 403 fires before it's called).
@@ -584,30 +584,24 @@ _TEST_WALLET     = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # address for a
 
 @pytest_asyncio.fixture
 async def seller_auth_client(db):
-    """Fixture wiring listings router with seller auth enabled via CONFIG patch.
+    """Fixture wiring listings router with seller auth enabled.
 
-    Patches CONFIG.agent_wallet_address to _TEST_WALLET so the middleware
+    Sets settings.wallet.address to _TEST_WALLET so the middleware
     enforces EIP-191 verification. The StorefrontClient is constructed with
     _TEST_PRIVATE_KEY so signatures verify correctly.
     """
-    from unittest.mock import MagicMock, patch as _patch
-    import market_storefront.middleware.seller_auth as _seller_auth_mod
-    import market_storefront.utils.config as _config_mod
+    from tests._settings_overrides import settings_overrides
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # 403 fires before service is called
     _container.resolved_policy_service = None
-
-    fake_config = MagicMock()
-    fake_config.agent_wallet_address = _TEST_WALLET
 
     app = FastAPI()
     app.include_router(listings_router)
     app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
-    with _patch.object(_config_mod, "CONFIG", fake_config), \
-         _patch.object(_seller_auth_mod, "CONFIG", fake_config, create=True):
+    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
         async with StorefrontClient(
             "http://test",
             transport=transport,
@@ -626,30 +620,15 @@ async def seller_auth_full_client(db):
     """seller_auth_client variant with real ListingService + PolicyService.
 
     Used by TestCreateListing to exercise the full create round-trip:
-    auth → service → controller → response. The double-wrap bug
-    (CreateListingResponse(**result) when result is already typed) would
-    surface as a 500 in this fixture but not in seller_auth_client which
-    has listing_svc=None.
+    auth → service → controller → response.
     """
-    from unittest.mock import MagicMock, patch as _patch
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.policy_service import PolicyService
-    import market_storefront.middleware.seller_auth as _seller_auth_mod
-    import market_storefront.utils.config as _config_mod
+    from tests._settings_overrides import settings_overrides
 
-    config = MagicMock()
-    config.base_url_override = ""
-    config.base_url_override_raw = ""
-    config.agent_id = "test-agent"
-    config.agent_priv_key = ""
-    config.chain_rpc_url = ""
-    config.agent_wallet_address = _TEST_WALLET
-
-    listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
-    )
+    listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -661,8 +640,7 @@ async def seller_auth_full_client(db):
     app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
-    with _patch.object(_config_mod, "CONFIG", config), \
-         _patch.object(_seller_auth_mod, "CONFIG", config, create=True):
+    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
         async with StorefrontClient(
             "http://test",
             transport=transport,
@@ -727,7 +705,7 @@ class TestCreateListing:
     async def test_paused_listing_not_in_registry(self, seller_auth_full_client):
         """paused=True create returns a listing_id without registry error.
 
-        Full registry publish suppression requires the real CONFIG.enable_registry_discovery
+        Full registry publish suppression requires the real settings.enable_registry_discovery
         flag which is set at module level in action_executor. This test asserts the response
         is well-formed (listing_id present, no 500), which is sufficient to prove the
         paused=True path through the controller works correctly.
@@ -770,7 +748,7 @@ class TestCreateListing:
     """Proves the EIP-191 auth contract for POST /api/v1/listings/create.
 
     The client signs ``create_listing:{agent_wallet_address}:{ts}`` and the
-    server verifies against CONFIG.agent_wallet_address. These tests confirm
+    server verifies against settings.wallet.address. These tests confirm
     that the middleware correctly accepts a valid signature and rejects
     mismatched ones.
 
@@ -795,7 +773,7 @@ class TestCreateListing:
         # Auth passed — error is from missing listing_svc (500), not auth (403)
         assert "403" not in str(exc_info.value), (
             f"Auth rejected a valid signature. Error: {exc_info.value}\n"
-            "Check that seller_auth middleware uses CONFIG.agent_wallet_address "
+            "Check that seller_auth middleware uses settings.wallet.address "
             "as resource_id for create_listing (no listing_id path param)."
         )
 
@@ -821,21 +799,14 @@ class TestCreateListing:
 
     async def test_missing_auth_headers_returns_403(self, seller_auth_client):
         """Request with no X-Signature / X-Timestamp → 403 Missing auth headers."""
-        from httpx import AsyncClient, ASGITransport as _Transport
-        import market_storefront.middleware.seller_auth as _sam
-        import market_storefront.utils.config as _cm
-        from unittest.mock import MagicMock, patch as _patch
-
-        fake_config = MagicMock()
-        fake_config.agent_wallet_address = _TEST_WALLET
+        from tests._settings_overrides import settings_overrides
 
         app = FastAPI()
         app.include_router(listings_router)
         app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
         transport = httpx.ASGITransport(app=app)
-        with _patch.object(_cm, "CONFIG", fake_config), \
-             _patch.object(_sam, "CONFIG", fake_config, create=True):
+        with settings_overrides(**{"wallet.address": _TEST_WALLET}):
             async with httpx.AsyncClient(
                 base_url="http://test", transport=transport
             ) as raw:

@@ -31,14 +31,15 @@ def portfolio_import_csv(
     on a freshly provisioned seller before `provide` to seed the
     `resources` table.
     """
+    from .utils.config import settings
+
     csv_file = Path(csv_path)
     if not csv_file.exists():
         raise typer.BadParameter(f"CSV file not found: {csv_path}")
 
     if not db_path:
-        from .utils.config import CONFIG
-        if CONFIG.agent_db_path:
-            db_path = CONFIG.agent_db_path
+        if settings.db_path:
+            db_path = settings.db_path
 
     script = REPO_ROOT / "storefront" / "scripts" / "import_resources_csv.py"
     if not script.exists():

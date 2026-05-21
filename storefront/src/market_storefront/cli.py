@@ -96,11 +96,11 @@ def register_cmd(
     deployment; idempotent on subsequent runs.
     """
     from .commands.register import run_register
-    from .utils.config import CONFIG
+    from .utils.config import settings
 
     resolved_chain_id = chain_id
     if resolved_chain_id is None:
-        resolved_chain_id = _query_chain_id(CONFIG.chain_rpc_url) or 1337
+        resolved_chain_id = _query_chain_id(settings.chain.rpc_url) or 1337
         typer.echo(f"Using chain_id={resolved_chain_id} (auto-detected).")
 
     raise typer.Exit(asyncio.run(run_register(chain_id=resolved_chain_id)))

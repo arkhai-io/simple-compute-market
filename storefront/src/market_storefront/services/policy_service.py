@@ -49,6 +49,7 @@ from market_storefront.models.domain_models import (
 from service.schemas import ActionType as DomainActionType
 from market_storefront.models.system_models import PolicyEvaluateResponse
 from market_storefront.policy.seeding import ComputePolicySeeder
+from market_storefront.utils.config import BASE_URL_OVERRIDE
 from market_storefront.utils.action_executor import (
     _sender_id,
     close_order,
@@ -67,10 +68,9 @@ logger = logging.getLogger(__name__)
 class PolicyService:
     """Stateful singleton — constructed once at lifespan startup."""
 
-    def __init__(self, *, sqlite_client, alkahest_client, config, agent_id: str) -> None:
+    def __init__(self, *, sqlite_client, alkahest_client, agent_id: str) -> None:
         self._db = sqlite_client
         self._alkahest = alkahest_client
-        self._config = config
         self._agent_id = agent_id
 
         self._policy_store = PolicyStore(sqlite_client)
@@ -86,7 +86,7 @@ class PolicyService:
         )
         self._policy_manager.initialize()
 
-        base_url = config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         get_thread_store(
             sqlite_client=sqlite_client,
             identity=Identity(agent_url=base_url, agent_id=agent_id),
@@ -208,7 +208,7 @@ class PolicyService:
         """
         event = NegotiationRequestedEvent(
             event_id=f"negotiate_request_{uuid.uuid4()}",
-            source=self._config.base_url_override or "",
+            source=BASE_URL_OVERRIDE or "",
             listing_id=listing_id,
             listing=listing,
             proposed_price=proposed_price,
@@ -346,7 +346,7 @@ class PolicyService:
         max_duration_seconds: int | None,
         paused: bool,
     ) -> ListingCreatedEvent:
-        base_url = self._config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         return ListingCreatedEvent(
             event_id=f"listing_create_{uuid.uuid4()}",
             source=base_url,
@@ -357,7 +357,7 @@ class PolicyService:
         )
 
     def _build_listing_closed_event(self, listing_id: str) -> ListingClosedEvent:
-        base_url = self._config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         return ListingClosedEvent(
             event_id=f"listing_close_{uuid.uuid4()}",
             source=base_url,

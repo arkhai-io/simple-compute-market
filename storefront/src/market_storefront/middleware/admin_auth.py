@@ -21,7 +21,7 @@ from __future__ import annotations
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings
 
 _admin_key_header = APIKeyHeader(
     name="X-Admin-Key",
@@ -32,10 +32,10 @@ _admin_key_header = APIKeyHeader(
 def require_admin_key(key: str | None = Security(_admin_key_header)) -> None:
     """FastAPI dependency that enforces the X-Admin-Key header.
 
-    When ``CONFIG.admin_api_key`` is not set (local dev), all admin endpoints
+    When ``settings.admin_api_key`` is not set (local dev), all admin endpoints
     are unprotected — matching the previous middleware behaviour.
     """
-    configured = CONFIG.admin_api_key
+    configured = settings.admin_api_key
     if not configured:
         return  # dev mode — unprotected
     if not key or key != configured:

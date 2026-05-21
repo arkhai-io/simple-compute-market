@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from .config import CONFIG
+from .config import settings
 from .host_csv_importer import upsert_hosts_from_csv
 from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
@@ -61,13 +61,13 @@ def synthesize_accepted_escrows_from_demand(
             get_erc20_escrow_obligation_nontierable,
         )
         escrow_address = get_erc20_escrow_obligation_nontierable(
-            CONFIG.chain_name,
-            config_path=CONFIG.alkahest_address_config_path,
+            settings.chain.name,
+            config_path=settings.chain.alkahest_address_config_path,
         )
     except Exception as exc:
         logger.debug(
             "Skipping accepted_escrows synthesis for chain %r: %s",
-            CONFIG.chain_name, exc,
+            settings.chain.name, exc,
         )
         return None
     amount = normalized.get("amount")
@@ -85,7 +85,7 @@ def synthesize_accepted_escrows_from_demand(
     else:
         price_per_hour = None
     return [{
-        "chain_name": CONFIG.chain_name,
+        "chain_name": settings.chain.name,
         "escrow_address": escrow_address.lower(),
         "fields": {"token": contract_address},
         "price_per_hour": price_per_hour,
@@ -3717,5 +3717,5 @@ _sqlite_client: SQLiteClient | None = None
 def get_sqlite_client() -> SQLiteClient:
     global _sqlite_client
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
+        _sqlite_client = SQLiteClient(db_path=settings.db_path)
     return _sqlite_client

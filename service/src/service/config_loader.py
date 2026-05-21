@@ -119,6 +119,30 @@ def user_config_files() -> list[Path]:
     return [base / "config.toml", base / "config.secrets.toml"]
 
 
+def storefront_config_files() -> list[Path]:
+    """Return the ordered list of TOML files the storefront loader merges.
+
+    Mirrors :func:`user_config_files` but for the storefront's own files
+    (``storefront.toml`` + ``storefront.secrets.toml``) instead of the buyer's
+    shared ``config.toml``. The storefront has a separate identity and
+    role-scoped knobs, so it gets its own file pair rather than reusing the
+    buyer's. See ARCHITECTURE.md "Storefront chart layout".
+
+    Pytest guard mirrors :func:`user_config_files` — when XDG hasn't been
+    pointed at a tmp dir, returns ``[]`` so the developer's ambient
+    ``~/.config/arkhai/storefront.toml`` doesn't leak into test process state.
+    """
+    base = user_config_dir()
+    if "pytest" in sys.modules:
+        try:
+            home_default = (Path.home() / ".config").resolve()
+            if base.resolve().parent == home_default:
+                return []
+        except (OSError, RuntimeError):
+            return []
+    return [base / "storefront.toml", base / "storefront.secrets.toml"]
+
+
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so
 # every subsequent ``load_user_config()`` call resolves to the override.
 _config_path_override: Optional[Path] = None

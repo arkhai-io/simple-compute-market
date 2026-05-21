@@ -137,15 +137,11 @@ ACCEPTED_ESCROWS = [{
 def _make_policy_service(db, registry=None):
     from market_policy.registry import CALLABLE_REGISTRY
     from market_storefront.services.policy_service import PolicyService
-    from unittest.mock import MagicMock
-    config = MagicMock()
-    config.base_url_override = ""
-    config.agent_id = "test-agent"
     if registry is not None:
         CALLABLE_REGISTRY.clear()
         CALLABLE_REGISTRY.update(registry)
     return PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent",
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent",
     )
 
 

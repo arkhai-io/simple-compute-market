@@ -267,8 +267,8 @@ def _discover_file_policies(force: bool = False) -> None:
         return
     _FILE_POLICIES_DISCOVERED = True
 
-    from market_storefront.utils.config import CONFIG
-    candidates = [_default_policy_dir(), *(Path(p) for p in CONFIG.extra_policy_paths)]
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    candidates = [_default_policy_dir(), *(Path(p) for p in settings.negotiation.extra_policy_paths)]
 
     for root in candidates:
         if not root.is_dir():
@@ -297,12 +297,12 @@ def _maybe_register_rl_strategy() -> None:
 def _load_storefront_strategy():
     """Resolve the storefront's configured strategy.
 
-    Selected via ``CONFIG.negotiation_policy_mode``; defaults to the
+    Selected via ``settings.negotiation.policy_mode``; defaults to the
     registered default ("rl") if unset. Triggers the torch strategy's
     self-registration on first call.
     """
-    from market_storefront.utils.config import CONFIG
-    name = (CONFIG.negotiation_policy_mode or "").strip() or None
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    name = (settings.negotiation.policy_mode or "").strip() or None
     _discover_file_policies()
     if (name or DEFAULT_STRATEGY) == "rl":
         _maybe_register_rl_strategy()
@@ -725,8 +725,8 @@ async def continue_sync_negotiation(
             message_type="counter_proposal",
         )
 
-    from market_storefront.utils.config import CONFIG as _CONFIG
-    our_sender = _CONFIG.base_url_override or "seller"
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    our_sender = BASE_URL_OVERRIDE or "seller"
     strategy_obj = _load_storefront_strategy()
     decision = strategy_obj.decide(NegotiationRoundInput(
         direction=_direction_from_strategy_label(strategy),
@@ -771,9 +771,9 @@ async def _record_seller_decision(
 ) -> None:
     """Persist the seller's decision as a message + terminal state if applicable."""
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
 
-    sender = CONFIG.base_url_override or "seller"
+    sender = BASE_URL_OVERRIDE or "seller"
     action_taken_map = {
         "counter": "counter_offer",
         "accept": "accept_offer",

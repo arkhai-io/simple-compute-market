@@ -101,9 +101,9 @@ def claim_cmd(
     path failed or was never triggered (storefront restart, RPC outage, etc.).
     """
     console = Console()
-    from ..utils.config import CONFIG
+    from ..utils.config import settings
     base_url = resolve_storefront_url(agent_url, default_port=8001)
-    private_key = CONFIG.agent_priv_key
+    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -169,9 +169,9 @@ def refund_cmd(
     deal otherwise can't settle through the normal escrow release path.
     """
     console = Console()
-    from ..utils.config import CONFIG
+    from ..utils.config import settings
     base_url = resolve_storefront_url(agent_url, default_port=8001)
-    private_key = CONFIG.agent_priv_key
+    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -232,7 +232,7 @@ def show_cmd(
     obligation/EAS/arbiter address in one config object).
     """
     import asyncio
-    from ..utils.config import CONFIG
+    from ..utils.config import settings
     from service.clients.alkahest import (
         get_alkahest_network,
         prewarm_alkahest_address_config_cache,
@@ -240,14 +240,14 @@ def show_cmd(
     )
     from alkahest_py import AlkahestClient
 
-    rpc = CONFIG.chain_rpc_url
+    rpc = settings.chain.rpc_url
     if not rpc:
         typer.secho(
             "Missing chain.rpc_url in config.toml.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
-    if not CONFIG.agent_priv_key:
+    if not settings.wallet.private_key:
         typer.secho(
             "Missing seller.private_key in config.toml — alkahest_py "
             "requires a wallet key even for read-only inspection.",
@@ -256,17 +256,17 @@ def show_cmd(
         raise typer.Exit(2)
 
     try:
-        prewarm_alkahest_address_config_cache(CONFIG.alkahest_address_config_path)
+        prewarm_alkahest_address_config_cache(settings.chain.alkahest_address_config_path)
         address_config = resolve_alkahest_address_config(
-            get_alkahest_network(CONFIG.chain_name),
-            config_path=CONFIG.alkahest_address_config_path,
+            get_alkahest_network(settings.chain.name),
+            config_path=settings.chain.alkahest_address_config_path,
         )
     except Exception as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(2)
 
     client = AlkahestClient(
-        private_key=CONFIG.agent_priv_key,
+        private_key=settings.wallet.private_key,
         rpc_url=rpc,
         address_config=address_config,
     )

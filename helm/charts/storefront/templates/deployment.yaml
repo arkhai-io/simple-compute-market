@@ -1,9 +1,9 @@
 {{/*
 One Deployment per agent in .Values.agents. Each pod mounts two TOML
-files at /etc/arkhai/ — config.toml (ConfigMap, non-sensitive) and
-config.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
-at /etc so service.config_loader picks them up via its layered
-discovery and deep-merge. No env-var-based config.
+files at /etc/arkhai/ — storefront.toml (ConfigMap, non-sensitive) and
+storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
+at /etc so dynaconf picks them up via its layered discovery and merge.
+No env-var-based config.
 
 checksum/config + checksum/secrets annotations force a rollout when
 either source object changes, independently — flipping a log level
@@ -106,12 +106,13 @@ spec:
                 - SYS_MODULE
           {{- end }}
           env:
-            # Sole env var: tell the typed config loader where to find
-            # the mounted TOML files. service.config_loader.user_config_dir()
-            # resolves to $XDG_CONFIG_HOME/arkhai, so this maps to
-            # /etc/arkhai/{config.toml,config.secrets.toml}. The loader
-            # deep-merges both files at startup; the ConfigMap renders
-            # config.toml and the Secret renders config.secrets.toml.
+            # Sole env var: tell dynaconf where to find the mounted TOML
+            # files. service.config_loader.user_config_dir() resolves to
+            # $XDG_CONFIG_HOME/arkhai, so this maps to
+            # /etc/arkhai/{storefront.toml,storefront.secrets.toml}. The
+            # dynaconf instance merges both files at startup; the ConfigMap
+            # renders storefront.toml and the Secret renders
+            # storefront.secrets.toml.
             - name: XDG_CONFIG_HOME
               value: /etc
           volumeMounts:
@@ -120,12 +121,12 @@ spec:
               mountPath: /dev/net/tun
             {{- end }}
             - name: arkhai-config
-              mountPath: /etc/arkhai/config.toml
-              subPath: config.toml
+              mountPath: /etc/arkhai/storefront.toml
+              subPath: storefront.toml
               readOnly: true
             - name: arkhai-secrets
-              mountPath: /etc/arkhai/config.secrets.toml
-              subPath: config.secrets.toml
+              mountPath: /etc/arkhai/storefront.secrets.toml
+              subPath: storefront.secrets.toml
               readOnly: true
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
@@ -157,14 +158,14 @@ spec:
           configMap:
             name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
             items:
-              - key: config.toml
-                path: config.toml
+              - key: storefront.toml
+                path: storefront.toml
         - name: arkhai-secrets
           secret:
             secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
             items:
-              - key: config.secrets.toml
-                path: config.secrets.toml
+              - key: storefront.secrets.toml
+                path: storefront.secrets.toml
         # SQLite agent.db storage. Backed by a per-agent PVC when
         # persistence.enabled, emptyDir otherwise (pod-lifetime only).
         - name: arkhai-data

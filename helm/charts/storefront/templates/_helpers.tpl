@@ -168,7 +168,20 @@ config.toml.
 {{- $neg := $seller.negotiation | default dict -}}
 # Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
 # Source of truth lives in helm/charts/storefront/values.yaml under agents:.
-# Sensitive values come from the Secret overlay (config.secrets.toml).
+# Sensitive values come from the Secret overlay (storefront.secrets.toml).
+
+agent_id            = {{ $seller.agentId | quote }}
+port                = {{ $agent.port }}
+base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
+db_path             = {{ $seller.dbPath | quote }}
+log_file_path       = {{ $seller.logFilePath | quote }}
+{{- if $seller.resourcesCsvPath }}
+resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
+{{- end }}
+{{- if $agent.agentId }}
+onchain_agent_id    = {{ $agent.agentId | quote }}
+{{- end }}
+auto_register       = {{ $agent.autoRegister | default true }}
 
 [wallet]
 ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
@@ -184,24 +197,6 @@ alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 [registry]
 urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
 identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
-
-[seller]
-agent_id            = {{ $seller.agentId | quote }}
-port                = {{ $agent.port }}
-base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
-db_path             = {{ $seller.dbPath | quote }}
-log_file_path       = {{ $seller.logFilePath | quote }}
-{{- if $cfg.tokenRegistryPath }}
-token_registry_path = {{ $cfg.tokenRegistryPath | quote }}
-{{- end }}
-{{- if $seller.resourcesCsvPath }}
-resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
-{{- end }}
-enable_event_queue  = {{ $seller.enableEventQueue | default false }}
-{{- if $agent.agentId }}
-onchain_agent_id    = {{ $agent.agentId | quote }}
-{{- end }}
-auto_register       = {{ $agent.autoRegister | default true }}
 {{- if $agent.rootPath }}
 
 [gateway]
@@ -211,7 +206,7 @@ auto_register       = {{ $agent.autoRegister | default true }}
 root_path = {{ $agent.rootPath | quote }}
 {{- end }}
 
-[seller.provisioning]
+[provisioning]
 service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
 {{- if $prov.mode }}
 mode        = {{ $prov.mode | quote }}
@@ -220,7 +215,7 @@ mode        = {{ $prov.mode | quote }}
 poll_interval = {{ $prov.pollInterval | int }}
 {{- end }}
 
-[seller.negotiation]
+[negotiation]
 policy_mode = {{ $neg.policyMode | default "" | quote }}
 {{- end }}
 
@@ -248,26 +243,23 @@ side.
 {{- $integ := $seller.integrations | default dict -}}
 {{- $adminKey := ($root.Values.global).adminApiKey | default "" -}}
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
-# Deep-merged on top of config.toml at runtime by service.config_loader.
+# Deep-merged on top of storefront.toml at runtime by dynaconf.
 
-[wallet]
-address     = {{ $agent.secret.walletAddress | quote }}
-private_key = {{ $agent.secret.privKey | quote }}
-{{- if or $adminKey $agent.secret.resourcesCsvInline }}
-
-[seller]
 {{- if $adminKey }}
-admin_api_key        = {{ $adminKey | quote }}
+admin_api_key = {{ $adminKey | quote }}
 {{- end }}
 {{- if $agent.secret.resourcesCsvInline }}
 resources_csv_inline = """
 {{ $agent.secret.resourcesCsvInline }}
 """
 {{- end }}
-{{- end }}
+
+[wallet]
+address     = {{ $agent.secret.walletAddress | quote }}
+private_key = {{ $agent.secret.privKey | quote }}
 {{- if or $integ.geminiApiKey $integ.gemini_api_key }}
 
-[seller.integrations]
+[integrations]
 gemini_api_key = {{ default $integ.geminiApiKey $integ.gemini_api_key | quote }}
 {{- end }}
 {{- end }}

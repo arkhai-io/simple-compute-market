@@ -32,7 +32,7 @@ from market_storefront.models.domain_models import (
     ComputeResourcePortfolio,
 )
 from market_policy.registry import policy_callable
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings
 from service.clients.token import resolve_token, TokenResolutionError
 
 logger = logging.getLogger(__name__)
@@ -350,35 +350,35 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
     # Resolve the demand-side token from CONFIG defaults; same path the
     # auto-publish loop uses when synthesising listings from the seller's
     # resource portfolio.
-    if not CONFIG.default_min_price:
+    if not settings.pricing.default_min_price:
         logger.info(
             "[RI POLICY] Skipping MAKE_OFFER for surplus alert: "
             "[seller.pricing].default_min_price not configured"
         )
         return None
-    if not CONFIG.default_token_address:
+    if not settings.pricing.default_token_address:
         logger.info(
             "[RI POLICY] Skipping MAKE_OFFER: "
             "[seller.pricing].default_token_address not configured"
         )
         return None
-    if not CONFIG.chain_rpc_url:
+    if not settings.chain.rpc_url:
         logger.warning(
             "[RI POLICY] Skipping MAKE_OFFER: chain.rpc_url unset; "
             "cannot resolve token decimals on chain"
         )
         return None
-    from market_storefront.utils.config import _resolve_chain_id
+    from market_storefront.utils.config import chain_id
     try:
         token_meta = resolve_token(
-            CONFIG.default_token_address,
-            rpc_url=CONFIG.chain_rpc_url,
-            chain_id=_resolve_chain_id(),
+            settings.pricing.default_token_address,
+            rpc_url=settings.chain.rpc_url,
+            chain_id=chain_id(),
         )
     except TokenResolutionError as exc:
         logger.warning(
             "[RI POLICY] Skipping MAKE_OFFER: cannot resolve default token %s: %s",
-            CONFIG.default_token_address, exc,
+            settings.pricing.default_token_address, exc,
         )
         return None
 
@@ -389,7 +389,7 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
             "contract_address": token_meta.contract_address,
             "decimals": token_meta.decimals,
         },
-        "amount": float(CONFIG.default_min_price),
+        "amount": float(settings.pricing.default_min_price),
     }
 
     return DomainAction(
@@ -397,7 +397,7 @@ def ri_action_make_offer_from_resource(context: DecisionContext) -> DomainAction
         parameters={
             "offer": offer_payload,
             "demand": demand_payload,
-            "max_duration_seconds": CONFIG.default_max_duration_seconds or None,
+            "max_duration_seconds": settings.pricing.default_max_duration_seconds or None,
             "paused": False,
         },
     )

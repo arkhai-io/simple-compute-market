@@ -7,26 +7,25 @@ from __future__ import annotations
 
 import logging
 
+from market_storefront.utils.config import settings
+
 logger = logging.getLogger(__name__)
 
 
-def build_client(config):
+def build_client():
     """Build and return an AlkahestClient, or None if keys are not configured.
-
-    Parameters
-    ----------
-    config:
-        The storefront CONFIG singleton.
 
     Returns
     -------
     AlkahestClient | None
     """
-    priv_key = (config.agent_priv_key or "").strip()
-    rpc_url = (config.chain_rpc_url or "").strip()
+    priv_key = (settings.wallet.private_key or "").strip()
+    rpc_url = (settings.chain.rpc_url or "").strip()
     if not priv_key or not rpc_url:
-        logger.debug("[ALKAHEST] AGENT_PRIV_KEY or CHAIN_RPC_URL not set; skipping client init.")
+        logger.debug("[ALKAHEST] wallet.private_key or chain.rpc_url not set; skipping client init.")
         return None
+    alkahest_path = settings.chain.alkahest_address_config_path
+    chain_name = settings.chain.name
     try:
         from alkahest_py import AlkahestClient
         from service.clients.alkahest import (
@@ -35,10 +34,10 @@ def build_client(config):
             resolve_alkahest_address_config,
         )
 
-        prewarm_alkahest_address_config_cache(config.alkahest_address_config_path)
-        network = get_alkahest_network(config.chain_name)
+        prewarm_alkahest_address_config_cache(alkahest_path)
+        network = get_alkahest_network(chain_name)
         address_config = resolve_alkahest_address_config(
-            network, config_path=config.alkahest_address_config_path
+            network, config_path=alkahest_path
         )
         client = AlkahestClient(
             private_key=priv_key,

@@ -32,7 +32,7 @@ from market_storefront.models.system_models import (
     SeededPolicyInfo,
     SeedPoliciesResponse,
 )
-from market_storefront.utils.config import CONFIG, _resolve_chain_id
+from market_storefront.utils.config import settings, chain_id, AGENT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class SystemService:
         callable_registry: dict | None = None,
     ) -> None:
         self._db = sqlite_client
-        self._agent_id = agent_id or CONFIG.agent_id or "agent"
+        self._agent_id = agent_id or AGENT_ID or "agent"
         # Injected registry lets tests work without touching the global singleton.
         self._registry: dict = callable_registry if callable_registry is not None else CALLABLE_REGISTRY
 
@@ -285,7 +285,7 @@ class SystemService:
             # Populate top-level diagnostic fields — not checks, just facts.
             try:
                 from market_storefront.agent import _AGENT_ID as _live_agent_id
-                onchain_id = _live_agent_id or CONFIG.onchain_agent_id
+                onchain_id = _live_agent_id or settings.onchain_agent_id
                 if onchain_id:
                     from market_storefront.utils.action_executor import _canonical_agent_id
                     result["agent_id"] = _canonical_agent_id()
@@ -294,7 +294,7 @@ class SystemService:
             except Exception:
                 result["agent_id"] = None
             try:
-                result["chain_id"] = _resolve_chain_id()
+                result["chain_id"] = chain_id()
             except Exception:
                 result["chain_id"] = None
             try:
@@ -315,10 +315,10 @@ class SystemService:
         stays fast even with several configured. Only called from
         /api/v1/system/status — never from /health.
         """
-        urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
+        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
         if not urls:
             return "unconfigured"
-        auth = CONFIG.indexer_auth or {}
+        auth = settings.registry.auth or {}
 
         async def _probe(url: str) -> str:
             # /health is unauthenticated by design (so liveness probes
@@ -358,20 +358,20 @@ class SystemService:
         results win over agent_not_found because they're more
         actionable for the operator.
         """
-        urls = [u.rstrip("/") for u in (CONFIG.indexer_urls or []) if u]
+        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
         if not urls:
             return "unconfigured"
-        auth = CONFIG.indexer_auth or {}
+        auth = settings.registry.auth or {}
         # Read the live runtime ID (set by _ensure_agent_identity at startup),
         # not the config-file value (which may be stale or absent when auto_register=True).
         from market_storefront.agent import _AGENT_ID as _live_agent_id
-        onchain_id = _live_agent_id or CONFIG.onchain_agent_id
+        onchain_id = _live_agent_id or settings.onchain_agent_id
         if not onchain_id:
             return "unconfigured"
-        chain_id = _resolve_chain_id()
-        identity_addr = (CONFIG.identity_registry_address or "").lower()
-        canonical = f"eip155:{chain_id}:{identity_addr}:{onchain_id}"
-        wallet = (CONFIG.agent_wallet_address or "").lower()
+        resolved_chain_id = chain_id()
+        identity_addr = (settings.registry.identity_registry_address or "").lower()
+        canonical = f"eip155:{resolved_chain_id}:{identity_addr}:{onchain_id}"
+        wallet = (settings.wallet.address or "").lower()
 
         async def _probe(url: str) -> str:
             headers = {}

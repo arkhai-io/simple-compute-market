@@ -76,7 +76,7 @@ services:
       # api_keys. The BOOTSTRAP_API_KEY seeds a single row at startup
       # so the storefront can publish to registry-b on a fresh
       # ``compose up`` without an out-of-band mint step. Bob's
-      # config.bob.toml carries the matching token in [registry.auth].
+      # storefront.bob.toml carries the matching token in [registry.auth].
       - REGISTRY_REQUIRE_API_KEY=true
       - REGISTRY_ADMIN_API_KEY=test-admin-token
       - REGISTRY_BOOTSTRAP_API_KEY=test-buyer-token
@@ -120,7 +120,7 @@ services:
     environment:
       # Sole config-bearing env var: tell the typed config loader where
       # to find the mounted TOML. service.config_loader resolves
-      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/config.toml.
+      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
       - XDG_CONFIG_HOME=/etc
       # Provisioning-mode override stays a host-level env var because
       # tests flip it per-invocation (e.g. PROVISIONING_MODE=mock make
@@ -131,8 +131,8 @@ services:
       # so it can find domain.compute.agent.app.policy callables.
       - PYTHONPATH=/app:/app/src
     volumes:
-      - ./storefront/config.bob.toml:/etc/arkhai/config.toml:ro
-      # Compute inventory seed CSV — config.bob.toml's
+      - ./storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
+      # Compute inventory seed CSV — storefront.bob.toml's
       # seller.resources_csv_path expects this at /app/resources.csv.
       # Mirrors the deploy-seller-agent Makefile target.
       - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
@@ -179,7 +179,7 @@ services:
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
       - PYTHONPATH=/app:/app/src
     volumes:
-      - ./storefront/config.alice.toml:/etc/arkhai/config.toml:ro
+      - ./storefront/storefront.alice.toml:/etc/arkhai/storefront.toml:ro
       # Reuses Bob's seed CSV — the multi-registry test seeds inventory
       # at runtime via admin_import_resources anyway, so the on-disk CSV
       # content is irrelevant. Bind-mounted to satisfy the config's

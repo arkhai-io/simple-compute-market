@@ -55,13 +55,13 @@ PROVISIONING_DEPLOY="$(extract_section 'provisioning/templates/deployment\.yaml'
 [[ -n "$DEPLOYMENT" ]] && pass "storefront Deployment renders"  || fail "no storefront Deployment"
 
 # --- Key layout matches what the runtime loader expects ---
-grep -qF "config.toml:"         <<<"$CONFIGMAP" && pass "ConfigMap exposes config.toml key"        || fail "ConfigMap missing config.toml key"
-grep -qF "config.secrets.toml:" <<<"$SECRET"    && pass "Secret exposes config.secrets.toml key"  || fail "Secret missing config.secrets.toml key"
+grep -qF "storefront.toml:"         <<<"$CONFIGMAP" && pass "ConfigMap exposes storefront.toml key"        || fail "ConfigMap missing storefront.toml key"
+grep -qF "storefront.secrets.toml:" <<<"$SECRET"    && pass "Secret exposes storefront.secrets.toml key"  || fail "Secret missing storefront.secrets.toml key"
 grep -qE "config-[a-z]+-secret\.yml:" <<<"$SECRET" && pass "Secret retains smoke-test profile yml" || fail "Secret missing config-<component>-secret.yml (smoke-test pod depends on it)"
 
 # --- Deployment mounts both files at /etc/arkhai/ ---
-grep -qE "mountPath: +/etc/arkhai/config\.toml"         <<<"$DEPLOYMENT" && pass "Deployment mounts config.toml at /etc/arkhai/"         || fail "Deployment missing config.toml mount"
-grep -qE "mountPath: +/etc/arkhai/config\.secrets\.toml" <<<"$DEPLOYMENT" && pass "Deployment mounts config.secrets.toml at /etc/arkhai/" || fail "Deployment missing config.secrets.toml mount"
+grep -qE "mountPath: +/etc/arkhai/storefront\.toml"         <<<"$DEPLOYMENT" && pass "Deployment mounts storefront.toml at /etc/arkhai/"         || fail "Deployment missing storefront.toml mount"
+grep -qE "mountPath: +/etc/arkhai/storefront\.secrets\.toml" <<<"$DEPLOYMENT" && pass "Deployment mounts storefront.secrets.toml at /etc/arkhai/" || fail "Deployment missing storefront.secrets.toml mount"
 
 # --- Independent checksums for rollout isolation ---
 grep -qF "checksum/config:"  <<<"$DEPLOYMENT" && pass "checksum/config annotation present"  || fail "missing checksum/config"
@@ -69,13 +69,13 @@ grep -qF "checksum/secrets:" <<<"$DEPLOYMENT" && pass "checksum/secrets annotati
 
 # --- No sensitive leak: private_key must not appear in the ConfigMap ---
 if grep -qF "private_key" <<<"$CONFIGMAP"; then
-    fail "private_key leaks into ConfigMap-rendered config.toml"
+    fail "private_key leaks into ConfigMap-rendered storefront.toml"
 else
-    pass "no private_key in ConfigMap config.toml"
+    pass "no private_key in ConfigMap storefront.toml"
 fi
 
 # --- Sensitive presence: private_key must appear in the Secret ---
-grep -qF "private_key" <<<"$SECRET" && pass "private_key present in Secret config.secrets.toml" || fail "private_key missing from Secret"
+grep -qF "private_key" <<<"$SECRET" && pass "private_key present in Secret storefront.secrets.toml" || fail "private_key missing from Secret"
 
 # ============================================================================
 # SQLite persistence — every SQLite-backed service has a PVC, mounts it,
