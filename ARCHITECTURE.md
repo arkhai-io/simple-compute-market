@@ -567,8 +567,6 @@ layer whenever wheel file contents change.
 > **TODO (tracked):** Document Alkahest escrow mechanics — what on-chain calls are made at which points in the negotiation lifecycle (escrow lock, attestation submission, release).
 > **TODO (tracked):** Document the SQLite schema — table definitions, index strategy, and known statefulness/concurrency constraints (single-writer SQLite, negotiation message ordering).
 > **TODO (tracked):** Document `negotiation_watchdog` — what staleness threshold triggers it, what it writes to the DB, and how it interacts with in-flight `/advance` calls.
-> **TODO (next session):** Negotiation refactor — restore the `NegotiationEvent` model and rewire the round-by-round decision into the `@policy_callable` chain rather than bypassing it via `_load_storefront_strategy()`. The current architecture is already per-round-testable (each round = one HTTP request; `evaluate-negotiate` admin endpoint exercises round 0 directly); the actual motivation is (a) **composability** — let operators mix-and-match guards/actions via policy composition instead of toggling a `[seller.negotiation].policy_mode` enum between bisection and RL, and (b) **uniform stage-event emission** — let the round decision land in `stage_events` through the standard policy-outcome write path instead of the special inline `stage_event("negotiation","round_decided", ...)` call.
-
 #### Storefront API Surface (`controllers/`)
 
 The storefront exposes a structured REST API via a `controllers/` package,
