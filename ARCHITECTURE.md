@@ -110,25 +110,69 @@ FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered
 - `GET /agents/{agentId}` — agent detail + health status
 - `POST /agents/{agentId}/heartbeat` — agents POST signed heartbeats to stay "healthy"
 - `POST /agents/{agentId}/listings` — publish/update an order
-- `GET /listings` — global order book query (filter by resource type, region, GPU model, SLA, status)
+- `GET /listings` — global order book query; query params are **spec-driven** (resolved against `filter-spec.yaml` — see below), not a hardcoded signature
 - `PUT /listings/{listing_id}` — update order status (e.g., mark accepted/closed)
-- `POST /api/v1/listings/validate-publish` — schema-driven dry-run check of a publish candidate against `filter-spec.yaml` (used by the buyer/seller pre-publish path)
-- `GET /api/v1/filter-spec` — current filter spec for clients that want to mirror the indexer's vocabulary
+- `POST /api/v1/listings/validate-publish` — JSON Schema dry-run check of a publish candidate against `filter-spec.yaml`'s `listing_shape` (Draft 2020-12); used by the buyer/seller pre-publish path
+- `GET /api/v1/filter-spec` — current filter spec; ETag-tagged for client caching
 
-**Filter spec — schema-driven discovery vocabulary (`filter-spec.yaml`):**
+**Indexer-maintained schema — registry owns the filter vocabulary:**
 
-The registry owns the queryable field vocabulary; storefront and clients no
-longer carry their own enums. The current schema is **v2** (`cce58f0`):
+A series of refactors in May (a1b-1 through a1b-6, then `cce58f0`) moved the
+filter vocabulary from being implicit (hardcoded in routes / shared with the
+storefront and clients via enums and per-axis kwargs) to being **registry-
+maintained, schema-driven, and self-describing** via `filter-spec.yaml`. The
+practical effect: adding a new discovery filter is a YAML edit, not a route
+signature change in the registry, and not a code change in the storefront or
+any client wheel.
 
-- `gpu_model` is a string enum covering common NVIDIA models (Blackwell back
-  to Volta plus workstation and consumer cards). Storefront field types
-  dropped the closed `GPUModel`/`Region` enums in favour of plain `str` — the
-  indexer is now the single enforcement point, so sellers can list any
-  hardware string and discovery is gated centrally.
-- `seller` is **required** on every publish candidate. The storefront's
-  `publish_order_to_registry` forwards it from `BASE_URL_OVERRIDE` (or the
-  seller URL); `arkhai-registry-client` 0.7.0 carries the field on
-  `ListingRequest` and `ValidatePublishRequest`.
+What the spec carries:
+
+- `listing_shape` — JSON Schema for what a valid publish candidate looks like
+  (offer-side resource axes, escrow shape requirements, required fields).
+  This is what `validate-publish` runs Draft 2020-12 against.
+- `filters` — declarative list of supported `GET /listings` query parameters.
+  Each declaration names the parameter, the JSONPath it resolves against on
+  listing dicts, the operator (`equals`, `in`, `lower_bound`, `upper_bound`,
+  `contains`, …), and an optional `on_missing` policy.
+- Enums like `gpu_model` (Blackwell back to Volta + workstation + consumer
+  cards) live here. The storefront field types dropped the closed
+  `GPUModel`/`Region` enums in `cce58f0` (now plain `str`) — the registry is
+  the single enforcement point so sellers can list any hardware string but
+  discovery is gated centrally.
+
+What the cutover replaced:
+
+- `registry-service/src/api/utils.py::matches_resource_filters` — a
+  23-parameter signature that took every supported filter as a kwarg —
+  along with `get_resource_type` and `resources_match` were deleted in a1b-3.
+  Replaced by the generic evaluator in `src/api/filter_eval.py`: `build_criteria(spec, params)`
+  compiles the spec + request params into parsed JSONPath criteria;
+  `evaluate_all(criteria, listing)` returns the matching listings. Array-
+  projection paths (`accepted_escrows[*]...`) are supported via jsonpath-ng.
+- The storefront's `GET /api/v1/listings` (a1b-4) shed all discovery
+  filters — it's now a slim local-enumeration view (`status`, `paused`,
+  `limit`, `offset`). Discovery goes through the registry; the storefront
+  is the seller's local state surface.
+- `arkhai-registry-client` 0.6.0 and `arkhai-storefront-client` 0.9.0 (a1b-5)
+  dropped the per-axis kwargs from their `list_listings()` signatures —
+  callers compose the filter param dict themselves now.
+
+**ETag protocol for spec-vs-query consistency:** `GET /filter-spec` returns
+an `ETag` header that's a sha256 over the canonical JSON of the loaded YAML.
+Buyers cache the spec by URL+ETag and pass `If-Match: <etag>` on
+`GET /listings`. On ETag mismatch the registry returns **412 Precondition
+Failed** rather than silently honouring a query built against a stale spec.
+`If-Match` is optional — clients that don't care about spec drift can omit
+it.
+
+**Where the YAML lives and how it ships:** `registry-service/filter-spec.yaml`
+in source, copied into both build stages of the registry Docker image
+(`a1b-6` fix — the original add only had it in the source tree, causing
+`FileNotFoundError` on the first `/listings` call in compose). Loaded once
+at import via `lru_cache`; path overridable via `REGISTRY_FILTER_SPEC_PATH`
+env var. To rotate the spec without rebuilding the image, mount the new
+YAML over the baked one and restart the registry; buyers detect the change
+via the ETag on the next `/filter-spec` fetch.
 
 **Agent identity format (ERC-8004 canonical):**
 ```
@@ -560,11 +604,18 @@ SSE format: `id: <row_id>\ndata: <json>\n\n`. Reconnect with `Last-Event-ID` hea
 
 **Listings controller** (`controllers/listings_controller.py`):
 ```
-GET  /api/v1/listings                      List local listings (filter: status, paused, limit, offset)
+GET  /api/v1/listings                      List the seller's own local listings (status, paused, limit, offset)
 GET  /api/v1/listings/{listing_id}         Single listing detail (includes paused flag)
 POST /api/v1/listings/{listing_id}/pause   Take listing off market — admin key required
 POST /api/v1/listings/{listing_id}/resume  Unpause + publish to registry — admin key required
 ```
+
+Note: this is a **local enumeration view**, not a discovery API. Since a1b-4
+the storefront no longer carries discovery filters (`gpu_model`, `region`,
+`ram_gb_min`, `token`, etc.) — those moved to the registry's spec-driven
+filter evaluator. Buyer-side discovery queries `GET /listings` on a registry
+with `filter-spec.yaml`-declared parameters; the storefront's listings
+endpoint is for the seller looking at their own state.
 
 `resume_listing` calls `publish_order_to_registry(row)` after clearing the paused flag. This is idempotent if the listing was already published, and is the **required step** to push a listing that was created with `paused=True`. The response includes `registry_status`: `"published"` on success, `"error"` if the registry call failed, `"disabled"` if `enable_registry_discovery=false`. Stage 04 of the e2e test asserts `registry_status == "published"` — a failure here is always a registry connectivity or configuration issue, not a storefront bug. Run `GET /api/v1/system/status` and check `checks.registry` to diagnose.
 
@@ -2282,15 +2333,21 @@ registry-service/tests/
 │   ├── test_agent_id_lookup.py  # find_agent_by_id — canonical ID parsing, case folding
 │   ├── test_event_sync.py       # EventSyncService — chain event processing, error handling
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
-│   ├── test_resource_filters.py # matches_resource_filters — compute/token/region/GPU/SLA
-│   └── test_symmetric_orders.py # find_symmetric_order — bidirectional order matching
+│   ├── test_filter_eval.py      # build_criteria + evaluate_all — spec-driven listing
+│   │                            # filter semantics (replaces the deleted matches_resource_filters)
+│   └── test_filter_spec.py      # YAML loader, FilterDecl validation, ETag stability + sensitivity
 └── integration/
-    ├── conftest.py              # RegistryClient wired to in-process app via httpx WSGITransport;
+    ├── conftest.py              # RegistryClient wired to in-process app via httpx ASGITransport;
     │                            # shared agent/order fixtures; Hardhat key constants
     ├── test_agents.py           # GET /agents, GET /agents/{id}, GET /agents/search,
     │                            # POST /agents/register, POST /agents/{id}/heartbeat
-    ├── test_listings.py           # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
+    ├── test_api_keys.py         # REQUIRE_API_KEY mode auth flow
+    ├── test_filter_spec.py      # GET /filter-spec full HTTP path + ETag header
+    ├── test_listings.py         # GET /listings, GET /listings/{id}, POST /agents/{id}/listings,
     │                            # GET /agents/{id}/listings, DELETE /listings/{id}, full lifecycle
+    ├── test_listings_filtering.py # spec-driven query params (gpu_model, ram_gb_min lower-bound
+    │                            # alias, token array projection, If-Match 412, unknown filter 400)
+    ├── test_validate_publish.py # JSON Schema dry-run cases (happy + each rejection class)
     └── test_system.py           # GET /health (including 503 on DB failure),
                                  # GET /api/v1/system/config, /sync, /stats
 ```
