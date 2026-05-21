@@ -49,7 +49,7 @@ Docker works.
 
 ```bash
 git clone <this repo>
-cd simple-market-service
+cd simple-compute-market
 make build-runtime-images
 ```
 
@@ -468,5 +468,5 @@ including scheme and any trailing slash.
 
 That's the full registry deployment story. Once it's up, multiple sellers
 can publish into it and any buyer with credentials can discover their
-listings — `simple-market-service` itself doesn't run a global indexer,
+listings — `simple-compute-market` itself doesn't run a global indexer,
 operators run their own.

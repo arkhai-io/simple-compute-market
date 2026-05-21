@@ -55,7 +55,7 @@ binary in `~/.local/bin` (or `/usr/local/bin` with `sudo`).
 
 ```bash
 git clone <this repo>
-cd simple-market-service
+cd simple-compute-market
 make build-buyer
 # the wrapper at ./buyer/.venv/bin/market is what `make install-buyer` symlinks
 ```

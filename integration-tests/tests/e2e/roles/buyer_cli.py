@@ -37,7 +37,7 @@ from src.settings import settings
 log = logging.getLogger(__name__)
 
 # buyer_cli.py lives at integration-tests/tests/e2e/roles/buyer_cli.py
-# Four parents = simple-market-service (the repo root).
+# Four parents = simple-compute-market (the repo root).
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 

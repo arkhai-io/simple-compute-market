@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-REPO="arkhai-io/simple-market-service"
+REPO="arkhai-io/simple-compute-market"
 VERSION="${1:-latest}"
 DEST_DIR="${2:-../../domain/compute/agent/app/policy/models}"
 
