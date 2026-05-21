@@ -510,8 +510,14 @@ class ListingCreatedEvent(DomainEvent):
     offer: Union[ComputeResource, TokenResource] = Field(
         description="Offered resource (compute or token)"
     )
-    demand: Union[ComputeResource, TokenResource] = Field(
-        description="Demanded resource (compute or token)"
+    accepted_escrows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Escrow shapes the seller will accept for this listing — each "
+            "entry pins (chain_name, escrow_address) plus a partial "
+            "ObligationData advertisement via the fields map, with the "
+            "per-hour rate in price_per_hour."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
@@ -528,8 +534,6 @@ class ListingCreatedEvent(DomainEvent):
             return data
         if "offer" in data:
             data["offer"] = ComputeDomainResource.parse_from_dict(data["offer"])
-        if "demand" in data:
-            data["demand"] = ComputeDomainResource.parse_from_dict(data["demand"])
         return data
 
 

@@ -16,7 +16,7 @@ for close_listing it is the listing_id string.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -37,95 +37,11 @@ from storefront_client.models import (  # noqa: F401 — re-exported for backwar
 )
 
 
-# ---------------------------------------------------------------------------
-# (Remaining classes below are request builders — not yet migrated.)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Listing create  (POST /listings/create)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ComputeResourcePayload:
-    gpu_model: str
-    gpu_count: int
-    sla: float
-    region: str
-
-    def to_dict(self) -> dict:
-        return {
-            "gpu_model": self.gpu_model,
-            "gpu_count": self.gpu_count,
-            "sla": self.sla,
-            "region": self.region,
-        }
-
-
-@dataclass
-class TokenResourcePayload:
-    token: str
-    amount: float
-
-    def to_dict(self) -> dict:
-        return {"token": self.token, "amount": self.amount}
-
-
-@dataclass
-class AgentOrderCreateRequest:
-    """
-    Request body for POST /listings/create.
-
-    One of offer/demand must be a ComputeResourcePayload; the other a
-    TokenResourcePayload.  The storefront will reject if both are the same type.
-    """
-    offer: dict[str, Any]
-    demand: dict[str, Any]
-    duration_hours: int = 1
-
-    def to_dict(self) -> dict:
-        return {
-            "offer": self.offer,
-            "demand": self.demand,
-            "duration_hours": self.duration_hours,
-        }
-
-    @classmethod
-    def compute_offer(
-        cls,
-        *,
-        gpu_model: str,
-        gpu_count: int,
-        sla: float,
-        region: str,
-        token: str,
-        amount: float,
-        duration_hours: int = 1,
-    ) -> "AgentOrderCreateRequest":
-        """Seller-side convenience: offering compute, demanding tokens."""
-        return cls(
-            offer=ComputeResourcePayload(gpu_model, gpu_count, sla, region).to_dict(),
-            demand=TokenResourcePayload(token, amount).to_dict(),
-            duration_hours=duration_hours,
-        )
-
-    @classmethod
-    def token_offer(
-        cls,
-        *,
-        token: str,
-        amount: float,
-        gpu_model: str,
-        gpu_count: int,
-        sla: float,
-        region: str,
-        duration_hours: int = 1,
-    ) -> "AgentOrderCreateRequest":
-        """Buyer-side convenience: offering tokens, demanding compute."""
-        return cls(
-            offer=TokenResourcePayload(token, amount).to_dict(),
-            demand=ComputeResourcePayload(gpu_model, gpu_count, sla, region).to_dict(),
-            duration_hours=duration_hours,
-        )
+# Listing-create / -close request builders previously lived here. They were
+# tied to the legacy ``{offer, demand}`` shape and had no remaining callers
+# inside integration-tests/ after the cutover. The canonical client method
+# ``SyncStorefrontClient.create_listing(offer=..., accepted_escrows=...)`` is
+# the supported path — see e.g. ``test_full_deal.py:02b``.
 
 
 # ---------------------------------------------------------------------------

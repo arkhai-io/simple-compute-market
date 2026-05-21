@@ -18,7 +18,7 @@ class HealthResponse(BaseModel):
 class PolicyEvaluateRequest(BaseModel):
     event_type: str = "order_create"
     offer: dict[str, Any] | None = None
-    demand: dict[str, Any] | None = None
+    accepted_escrows: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
     policy_components: list[str] = Field(
         description=(

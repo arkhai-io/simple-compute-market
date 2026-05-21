@@ -283,7 +283,7 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
         return None
 
     offer = context.event.offer
-    demand = context.event.demand
+    accepted_escrows = context.event.accepted_escrows
     max_duration_seconds = context.event.max_duration_seconds
 
     # Enrich a bare ComputeResource offer (no resource_id) with the actual registered
@@ -302,13 +302,12 @@ def oc_action_make_offer_from_order_create(context: DecisionContext) -> DomainAc
                     break
 
     offer_payload = offer.model_dump(mode="json") if hasattr(offer, "model_dump") else offer
-    demand_payload = demand.model_dump(mode="json") if hasattr(demand, "model_dump") else demand
 
     return DomainAction(
         action_type=DomainActionType.MAKE_OFFER,
         parameters={
             "offer": offer_payload,
-            "demand": demand_payload,
+            "accepted_escrows": list(accepted_escrows),
             "max_duration_seconds": max_duration_seconds,
             # Propagate paused flag so action_executor skips the registry publish.
             "paused": bool(context.event.data.get("paused", False)) if isinstance(context.event.data, dict) else False,

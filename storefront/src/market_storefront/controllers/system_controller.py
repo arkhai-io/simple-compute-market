@@ -155,12 +155,15 @@ class SystemController:
                 status_code=400,
                 detail=f"Unsupported event_type: {body.event_type!r}. Only 'order_create' is supported.",
             )
-        if not body.offer or not body.demand:
-            raise HTTPException(status_code=400,
-                                detail="Request body must include 'offer' and 'demand'.")
+        if not body.offer or not body.accepted_escrows:
+            raise HTTPException(
+                status_code=400,
+                detail="Request body must include 'offer' and 'accepted_escrows'.",
+            )
         try:
             result = await self._policy_svc.evaluate_listing_create_policy_from_raw(
-                offer_raw=body.offer, demand_raw=body.demand,
+                offer_raw=body.offer,
+                accepted_escrows=body.accepted_escrows,
                 max_duration_seconds=body.max_duration_seconds,
                 policy_components=body.policy_components,
             )

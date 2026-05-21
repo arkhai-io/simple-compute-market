@@ -259,16 +259,16 @@ class TestPolicyEvaluate:
     """
 
     async def test_evaluate_rejects_bad_event_type(self, client):
-        """Empty offer/demand rejected with 400 by the controller."""
+        """Empty offer/accepted_escrows rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
-                offer={}, demand={},
+                offer={}, accepted_escrows=[],
                 max_duration_seconds=None,
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         # policy_evaluate hardcodes event_type="order_create" in the client,
-        # so we test the missing offer/demand validation instead.
+        # so we test the missing offer/accepted_escrows validation instead.
         assert "400" in str(exc_info.value) or "422" in str(exc_info.value)
 
     async def test_evaluate_rejects_missing_offer(self, client):
@@ -276,18 +276,23 @@ class TestPolicyEvaluate:
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
-                offer={}, demand={"token": "MOCK", "amount": 1000},
+                offer={}, accepted_escrows=[{
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+                    "price_per_hour": 1000,
+                }],
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         assert any(code in str(exc_info.value) for code in ("400", "422"))
 
-    async def test_evaluate_rejects_missing_demand(self, client):
-        """Empty demand dict is rejected with 400 by the controller."""
+    async def test_evaluate_rejects_missing_accepted_escrows(self, client):
+        """Empty accepted_escrows list is rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
                 offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                demand={},
+                accepted_escrows=[],
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         assert any(code in str(exc_info.value) for code in ("400", "422"))

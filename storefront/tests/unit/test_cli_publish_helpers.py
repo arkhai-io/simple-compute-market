@@ -210,8 +210,8 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
 
     calls: list[dict] = []
 
-    def fake_publish(agent_url, offer, demand, max_duration_seconds, wallet_address, private_key):
-        calls.append({"offer": offer, "demand": demand})
+    def fake_publish(agent_url, offer, accepted_escrows, max_duration_seconds, wallet_address, private_key):
+        calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
         rid = offer["resource_id"]
         return {"status": "created", "listing_id": f"listing-for-{rid}"}
 
@@ -227,7 +227,9 @@ def test_publish_round_skips_covered_resources(tmp_path, monkeypatch):
     assert published[0]["resource"]["resource_id"] == "compute-002"
     assert not failed
     assert calls[0]["offer"]["resource_id"] == "compute-002"
-    assert calls[0]["demand"] == {"token": _MOCK_ADDRESS, "amount": "100"}
+    entry = calls[0]["accepted_escrows"][0]
+    assert entry["fields"]["token"] == _MOCK_ADDRESS
+    assert entry["price_per_hour"] == "100"
 
 
 def test_publish_round_publishes_all_when_skip_ids_empty(tmp_path, monkeypatch):
@@ -279,17 +281,19 @@ def test_publish_round_per_row_pricing_overrides_default(tmp_path, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, demand, *a, **k: (
-            calls.append({"offer": offer, "demand": demand})
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
             or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
         ),
     )
 
     published, failed, _ = _publish_round(db_path=db, **_round_kwargs())
 
-    by_rid = {c["offer"]["resource_id"]: c["demand"] for c in calls}
-    assert by_rid["compute-cheap"] == {"token": _USDC_ADDRESS, "amount": "40000000"}
-    assert by_rid["compute-default"] == {"token": _MOCK_ADDRESS, "amount": "100"}
+    by_rid = {c["offer"]["resource_id"]: c["accepted_escrows"][0] for c in calls}
+    assert by_rid["compute-cheap"]["fields"]["token"] == _USDC_ADDRESS
+    assert by_rid["compute-cheap"]["price_per_hour"] == "40000000"
+    assert by_rid["compute-default"]["fields"]["token"] == _MOCK_ADDRESS
+    assert by_rid["compute-default"]["price_per_hour"] == "100"
     assert len(published) == 2
     assert not failed
 
@@ -312,8 +316,8 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, demand, *a, **k: (
-            calls.append({"offer": offer, "demand": demand})
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
             or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
         ),
     )
@@ -331,7 +335,8 @@ def test_publish_round_skips_resources_without_pricing(tmp_path, monkeypatch):
 
 def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatch):
     """publish_priceless=True publishes rows without a min_price as
-    demand.amount=None (hidden reserve) — distinct from amount=0 (free)."""
+    price_per_hour=None (hidden reserve) — distinct from price_per_hour=0
+    (free)."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
     _insert_resource(
@@ -342,8 +347,8 @@ def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatc
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, demand, *a, **k: (
-            calls.append({"offer": offer, "demand": demand})
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
             or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
         ),
     )
@@ -356,13 +361,14 @@ def test_publish_round_priceless_publishes_with_amount_none(tmp_path, monkeypatc
 
     assert len(published) == 1
     assert len(failed) == 0
-    assert calls[0]["demand"]["amount"] is None
-    assert calls[0]["demand"]["token"] == _MOCK_ADDRESS
+    entry = calls[0]["accepted_escrows"][0]
+    assert entry["price_per_hour"] is None
+    assert entry["fields"]["token"] == _MOCK_ADDRESS
 
 
 def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
-    """A row with min_price="0" publishes with demand.amount=0 (explicit
-    free offering) — distinct semantically from amount=None (hidden
+    """A row with min_price="0" publishes with price_per_hour="0" (explicit
+    free offering) — distinct semantically from price_per_hour=None (hidden
     reserve). The default_min_price does NOT override an explicit 0."""
     db = str(tmp_path / "agent.db")
     _init_db(db)
@@ -375,8 +381,8 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
     calls: list[dict] = []
     monkeypatch.setattr(
         "market_storefront.cli_publish._publish_offer",
-        lambda agent_url, offer, demand, *a, **k: (
-            calls.append({"offer": offer, "demand": demand})
+        lambda agent_url, offer, accepted_escrows, *a, **k: (
+            calls.append({"offer": offer, "accepted_escrows": accepted_escrows})
             or {"status": "created", "listing_id": f"l-{offer['resource_id']}"}
         ),
     )
@@ -387,7 +393,7 @@ def test_publish_round_explicit_zero_publishes_as_free(tmp_path, monkeypatch):
 
     assert len(published) == 1
     assert len(failed) == 0
-    assert calls[0]["demand"]["amount"] == "0"
+    assert calls[0]["accepted_escrows"][0]["price_per_hour"] == "0"
 
 
 def test_publish_round_priceless_off_still_skips(tmp_path, monkeypatch):

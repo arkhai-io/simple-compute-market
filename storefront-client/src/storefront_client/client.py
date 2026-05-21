@@ -21,7 +21,8 @@ Usage (async)::
         resp = await client.create_listing(
             agent_wallet_address="0xSellerWallet",
             offer={...},
-            demand={...},
+            accepted_escrows=[{"chain_name": ..., "escrow_address": ...,
+                               "fields": {...}, "price_per_hour": ...}],
         )
 
 Usage (sync, e.g. smoke tests)::
@@ -553,7 +554,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict,
-        demand: dict,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         policy_components: list[str],
     ) -> dict:
@@ -567,7 +568,7 @@ class StorefrontClient(_StorefrontClientBase):
             {
                 "event_type": "order_create",
                 "offer": offer,
-                "demand": demand,
+                "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": max_duration_seconds,
                 "policy_components": policy_components,
             },
@@ -577,14 +578,14 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> dict:
         """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -635,23 +636,28 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
         """POST /listings/create.
 
+        ``accepted_escrows`` lists the escrow shapes the seller will accept
+        for this listing. Each entry pins ``(chain_name, escrow_address)``
+        plus a partial ``ObligationData`` advertisement via the ``fields``
+        map, with the per-hour rate in ``price_per_hour``.
+
         ``max_duration_seconds`` is the optional ceiling on lease duration
         (None = unlimited). Buyers supply the actual duration at
-        negotiation init time; total payment is computed at agreement
-        as demand.amount × agreed_duration_seconds / 3600. Pass
+        negotiation init time; total payment is computed at agreement as
+        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
         ``paused=True`` to create the listing in local SQLite without
         publishing to the registry; call ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1365,7 +1371,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict,
-        demand: dict,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         policy_components: list[str],
     ) -> dict:
@@ -1379,7 +1385,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             {
                 "event_type": "order_create",
                 "offer": offer,
-                "demand": demand,
+                "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": max_duration_seconds,
                 "policy_components": policy_components,
             },
@@ -1389,14 +1395,14 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> dict:
         """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1447,22 +1453,28 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
         """POST /listings/create.
 
+        ``accepted_escrows`` lists the escrow shapes the seller will accept
+        for this listing. Each entry pins ``(chain_name, escrow_address)``
+        plus a partial ``ObligationData`` advertisement via the ``fields``
+        map, with the per-hour rate in ``price_per_hour``.
+
         ``max_duration_seconds`` is the optional ceiling on lease duration
         (None = unlimited). Buyers supply the actual duration at
-        negotiation init time. Pass ``paused=True`` to create the listing
-        in local SQLite without publishing to the registry; call
-        ``resume_listing`` to publish.
+        negotiation init time; total payment is computed at agreement as
+        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
+        ``paused=True`` to create the listing in local SQLite without
+        publishing to the registry; call ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }

@@ -129,6 +129,12 @@ DEMAND_RESOURCE = {
     },
     "amount": 10_000,
 }
+ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "price_per_hour": DEMAND_RESOURCE["amount"],
+}]
 
 BOB_OFFER = {
     "resource_id": "compute-mr-bob-001",
@@ -475,7 +481,7 @@ class TestStage03c_BobPublishes:
         # before we commit a DB write.
         evaluate = storefront_admin_client.evaluate_create_listing(
             offer=BOB_OFFER,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -486,7 +492,7 @@ class TestStage03c_BobPublishes:
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
             offer=BOB_OFFER,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -513,7 +519,7 @@ class TestStage03d_AlicePublishes:
         )
         evaluate = alice_admin_client.evaluate_create_listing(
             offer=ALICE_OFFER,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -524,7 +530,7 @@ class TestStage03d_AlicePublishes:
         resp = alice_admin_client.create_listing(
             agent_wallet_address=alice_wallet,
             offer=ALICE_OFFER,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )

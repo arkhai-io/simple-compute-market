@@ -16,8 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class CreateListingRequest(BaseModel):
     """Body for POST /api/v1/listings/create."""
-    offer: dict[str, Any] = Field(description="Offered resource (compute or token dict)")
-    demand: dict[str, Any] = Field(description="Demanded resource (compute or token dict)")
+    offer: dict[str, Any] = Field(description="Offered compute resource dict")
+    accepted_escrows: list[dict[str, Any]] = Field(
+        description=(
+            "List of escrow shapes the seller will accept for this listing. "
+            "Each entry: {chain_name, escrow_address, fields, price_per_hour}. "
+            "Must be non-empty."
+        ),
+    )
     max_duration_seconds: int | None = None
     paused: bool = Field(
         default=False,

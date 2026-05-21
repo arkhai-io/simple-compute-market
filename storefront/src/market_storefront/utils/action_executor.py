@@ -34,10 +34,7 @@ import httpx
 from market_storefront.utils.config import CONFIG, _resolve_chain_id
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
-from market_storefront.utils.sqlite_client import (
-    get_sqlite_client,
-    synthesize_accepted_escrows_from_demand,
-)
+from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
 from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
 from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
@@ -169,15 +166,13 @@ async def execute_action(
     match action_type_str:
         case ActionType.MAKE_OFFER.value:
             offer_param = parameters.get("offer")
-            demand_param = parameters.get("demand")
             accepted_escrows_param = parameters.get("accepted_escrows")
             if offer_param is None:
                 raise ValueError("MAKE_OFFER requires an 'offer' parameter")
-            if accepted_escrows_param is None and demand_param is None:
+            if not accepted_escrows_param:
                 raise ValueError(
-                    "MAKE_OFFER requires either 'accepted_escrows' or "
-                    "'demand' (legacy single-token shape, synthesized into "
-                    "accepted_escrows at this boundary)"
+                    "MAKE_OFFER requires a non-empty 'accepted_escrows' "
+                    "list (chain_name, escrow_address, fields, price_per_hour)"
                 )
 
             try:
@@ -194,11 +189,6 @@ async def execute_action(
                 raise ValueError(
                     "MAKE_OFFER offer must be a compute resource; "
                     f"got {type(offer_resource).__name__}"
-                )
-
-            if accepted_escrows_param is None:
-                accepted_escrows_param = synthesize_accepted_escrows_from_demand(
-                    demand_param
                 )
 
             order = create_order(

@@ -356,14 +356,15 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 _OFFER = {
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
 }
-_DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 0,
-    },
-    "amount": 5000,
-}
+# Stub accepted_escrows for API-contract tests. Address-correctness is the
+# storefront's concern at negotiate time; at listing-create time the
+# storefront just stores what it's told.
+_ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "price_per_hour": 5000,
+}]
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +378,7 @@ class TestEvaluateCreate:
         """Endpoint returns a structured response with would_create field."""
         c, _ = admin_client
         result = await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
         assert "would_create" in result, f"Missing 'would_create' in response: {result}"
@@ -387,7 +388,7 @@ class TestEvaluateCreate:
         """Response includes action string (make_offer or no_action)."""
         c, _ = admin_client
         result = await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         assert "action" in result, f"Missing 'action' in response: {result}"
         assert isinstance(result["action"], str)
@@ -397,7 +398,7 @@ class TestEvaluateCreate:
         c, db = admin_client
         before = await db.list_listings()
         await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         after = await db.list_listings()
         assert len(before) == len(after), (
@@ -408,7 +409,7 @@ class TestEvaluateCreate:
         """Admin key required — missing key returns 403."""
         with pytest.raises(StorefrontClientError) as exc_info:
             await admin_no_key_client.evaluate_create_listing(
-                offer=_OFFER, demand=_DEMAND,
+                offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS,
             )
         assert "403" in str(exc_info.value)
 
@@ -416,7 +417,7 @@ class TestEvaluateCreate:
         """Malformed offer dict handled gracefully — no 500 from unhandled exception."""
         c, _ = admin_client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_create_listing(offer={}, demand=_DEMAND)
+            await c.evaluate_create_listing(offer={}, accepted_escrows=_ACCEPTED_ESCROWS)
         # 400 from the service ValueError or 500 if parse_resource_from_dict raises
         assert any(code in str(exc_info.value) for code in ("400", "500"))
 
@@ -512,7 +513,7 @@ class TestEvaluateNegotiate:
     async def test_price_at_floor_does_not_exit(self, admin_client):
         """Buyer price at or above the seller's floor should not produce exit."""
         c, db = admin_client
-        await _seed_listing(db, "neg-eval-floor")  # default demand amount=9000
+        await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
             "market_storefront.utils.sync_negotiation._load_storefront_strategy",
             return_value=_bisection_strategy(),
@@ -691,7 +692,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         assert hasattr(result, "listing_id") or (
@@ -713,7 +714,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
@@ -735,7 +736,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
@@ -755,7 +756,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         # StorefrontListingCreateResponse from the client — has listing_id
@@ -789,10 +790,7 @@ class TestCreateListing:
                 agent_wallet_address=_TEST_WALLET,
                 offer={"gpu_model": "H200", "gpu_count": 1,
                        "sla": 99.0, "region": "California, US"},
-                demand={"token": {"symbol": "MOCK",
-                                  "contract_address": "0x0000000000000000000000000000000000000001",
-                                  "decimals": 0},
-                        "amount": 5000},
+                accepted_escrows=_ACCEPTED_ESCROWS,
             )
         # Auth passed — error is from missing listing_svc (500), not auth (403)
         assert "403" not in str(exc_info.value), (
@@ -815,10 +813,7 @@ class TestCreateListing:
                 agent_wallet_address=wrong_wallet,  # client signs this, server checks _TEST_WALLET
                 offer={"gpu_model": "H200", "gpu_count": 1,
                        "sla": 99.0, "region": "California, US"},
-                demand={"token": {"symbol": "MOCK",
-                                  "contract_address": "0x0000000000000000000000000000000000000001",
-                                  "decimals": 0},
-                        "amount": 5000},
+                accepted_escrows=_ACCEPTED_ESCROWS,
             )
         assert "403" in str(exc_info.value), (
             f"Expected 403 for wrong wallet address, got: {exc_info.value}"
@@ -846,7 +841,7 @@ class TestCreateListing:
             ) as raw:
                 resp = await raw.post(
                     "/api/v1/listings/create",
-                    json={"offer": {}, "demand": {}, "paused": False},
+                    json={"offer": {}, "accepted_escrows": [], "paused": False},
                     headers={"X-Admin-Key": ADMIN_KEY},
                     # No X-Signature or X-Timestamp
                 )

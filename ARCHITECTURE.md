@@ -403,24 +403,27 @@ A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
 a wrapper type. Today every list is length-1 (single buyer-made ERC20
 escrow); the rest is forward shape.
 
-**Where `demand_resource` still appears:** the legacy column itself is gone
-in any DB that's been started by current code — `sqlite_client.py` runs a
-one-shot startup migration that backfills `accepted_escrows` from
-`demand_resource` (via `synthesize_accepted_escrows_from_demand`) and then
-does `ALTER TABLE listings DROP COLUMN demand_resource`. But `demand_resource`
-survives as the **request-input shape** for creating a listing:
-`CreateListingRequest.demand` is still the field clients POST; the storefront
-parses it into a typed `TokenResource`, runs it through the policy chain
-(`evaluate_create_listing_policy_from_raw(offer_raw, demand_raw, …)`), then
-synthesizes the `accepted_escrows` row at the write boundary. So the on-disk
-model is `accepted_escrows` end-to-end, but the API still takes
-`{offer, demand}` and translates inward — a wider buyer-facing API redesign
-hasn't happened yet. The `_extract_initial_price_from_order` "fallback to
-`demand_resource`" branch in `action_executor.py` is reachable only for
-pre-migration listings whose synthesis failed at startup (e.g. anvil without
-an alkahest override JSON resolving the escrow address); after the column
-drop those rows can't read it either, so the branch is effectively dead and
-should come out when the request-input format is also migrated.
+**`demand_resource` is gone end-to-end.** The legacy column is dropped on
+first startup of current code (`sqlite_client.py` runs a one-shot backfill
+into `accepted_escrows`, then `ALTER TABLE listings DROP COLUMN demand_resource`).
+The API surface no longer accepts a `demand` field either:
+`CreateListingRequest` requires `accepted_escrows: list[dict]`; service
+signatures (`PolicyService.evaluate_create_listing_policy`,
+`execute_create_listing`, `evaluate_listing_create_policy_from_raw`) take
+`accepted_escrows`; `ListingCreatedEvent.demand` is gone; the
+`oc.action.make_offer_from_order_create` domain callable emits
+`parameters["accepted_escrows"]`; and `action_executor`'s MAKE_OFFER handler
+threads it directly to `create_order` without synthesis. The
+`synthesize_accepted_escrows_from_demand` helper survives in
+`sqlite_client.py` only as a no-op fallback path for the (no-longer-fireable)
+startup backfill — safe to delete once pre-cutover DB snapshots are
+unreachable. `_extract_initial_price_from_order` reads exclusively from
+`accepted_escrows[0].price_per_hour`; its hidden-reserve fallback is to
+`[seller.pricing].default_min_price`, not to any legacy column. The remaining
+`demand_resource` references in `domain/compute/agent/app/policy/arkhai_common.py`
+are inside the RL feature-extraction pipeline, which is dormant code (the
+module fails to import without `gymnasium`); they're vestigial and don't
+affect any live path.
 
 ---
 
@@ -2733,4 +2736,4 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 | Anvil | Local EVM testnet node from Foundry |
 | EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
-| Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API still takes `{offer, demand}` and translates `demand` into `accepted_escrows` at the write boundary — `demand_resource` no longer exists as a stored column. |
+| Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API requires `accepted_escrows` directly; the legacy `demand_resource` field/column no longer exists. |

@@ -130,6 +130,18 @@ DEMAND_RESOURCE = {
     },
     "amount": 10_000,
 }
+# Listing-side accepted_escrows advertisement. The escrow_address here is a
+# stub — the buyer sends the placeholder zero address on its EscrowProposal
+# (see negotiate_new's defaults), which skips the (chain, address) strict
+# match in _match_accepted_escrow; field-level equality on fields["token"]
+# is what gates the proposal. The real escrow_address used on-chain is what
+# the buyer's CLI resolves through alkahest at settle time.
+ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
+    "price_per_hour": DEMAND_RESOURCE["amount"],
+}]
 DURATION_HOURS = 1
 BUYER_INITIAL_PRICE = 7_000    # below seller floor (10_000) — forces counter at round 0
 BUYER_MAX_PRICE = 12_000
@@ -436,7 +448,7 @@ class TestStage01a_PolicyDryRun:
         require_state(deal_state, "_negotiation_strategy_viable")
         result = storefront_admin_client.policy_evaluate(
             offer=OFFER_RESOURCE,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             policy_components=[ORDER_CREATE_CALLABLE],
         )
@@ -530,7 +542,7 @@ class TestStage02a_EvaluateCreate:
         require_state(deal_state, "_policies_seeded", "_resources_seeded")
         result = storefront_admin_client.evaluate_create_listing(
             offer=OFFER_RESOURCE,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -561,7 +573,7 @@ class TestStage02b_CreateListingPaused:
         resp = storefront_admin_client.create_listing(
             agent_wallet_address=seller_wallet,
             offer=OFFER_RESOURCE,
-            demand=DEMAND_RESOURCE,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )
@@ -607,27 +619,18 @@ class TestStage03a_ValidatePublish:
     ):
         """POST registry /api/v1/listings/validate-publish → valid=True (dry-run).
 
-        Structural pre-flight: confirms the listing's offer/demand payload is
-        recognisable to the registry before resume triggers the actual publish.
-        Uses the test's known offer/demand spec directly — no need to fetch
-        the listing back from the storefront.
+        Structural pre-flight: confirms the listing's offer/escrows payload
+        is recognisable to the registry before resume triggers the actual
+        publish. Uses the same ``ACCEPTED_ESCROWS`` constant the create_listing
+        call advertised so the dry-run matches the to-be-published shape.
         """
         require_state(deal_state, "seller_listing_id")
         from registry_client import ValidatePublishRequest
-        # The storefront synthesizes accepted_escrows from its config + the
-        # DEMAND_RESOURCE token at create-time. For the validate-publish
-        # dry-run we mirror the post-b1 shape directly.
-        accepted_escrows = [{
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": DEMAND_RESOURCE["token"]["contract_address"]},
-            "price_per_hour": DEMAND_RESOURCE["amount"],
-        }]
         req = ValidatePublishRequest(
             listing_id=deal_state.seller_listing_id,
             seller="http://sell_agent:8001/",
             offer_resource=OFFER_RESOURCE,
-            accepted_escrows=accepted_escrows,
+            accepted_escrows=ACCEPTED_ESCROWS,
             max_duration_seconds=DURATION_HOURS * 3600,
         )
         result = registry_client.validate_publish_listing(req)

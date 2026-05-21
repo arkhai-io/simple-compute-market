@@ -151,35 +151,34 @@ class ListingService:
             f"{type(amount_value).__name__}"
         )
 
-    def _parse_offer_demand(self, request: CreateListingRequest) -> tuple[Any, Any]:
+    def _parse_offer_and_escrows(
+        self, request: CreateListingRequest
+    ) -> tuple[Any, list[dict[str, Any]]]:
         from market_storefront.models.domain_models import ComputeResource
-        from market_storefront.resources import TokenResource as _TR
         try:
             offer_resource = parse_resource_from_dict(
                 self._normalize_token_resource(request.offer)
             )
-            demand_resource = parse_resource_from_dict(
-                self._normalize_token_resource(request.demand)
-            )
         except Exception as exc:
-            raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
-        if not (
-            isinstance(offer_resource, ComputeResource)
-            and isinstance(demand_resource, _TR)
-        ):
+            raise ValueError(f"Invalid offer resource: {exc}") from exc
+        if not isinstance(offer_resource, ComputeResource):
             raise ValueError(
-                "Listing must offer a compute resource and demand a token "
-                "resource (the buyer-as-maker shape was removed with the "
-                "demand_resource cutover)."
+                "Listing offer must be a compute resource (the buyer-as-maker "
+                "token-offer shape was removed with the demand_resource cutover)."
             )
-        return offer_resource, demand_resource
+        if not request.accepted_escrows:
+            raise ValueError(
+                "accepted_escrows must be a non-empty list "
+                "of {chain_name, escrow_address, fields, price_per_hour} entries."
+            )
+        return offer_resource, list(request.accepted_escrows)
 
     async def create_listing(
         self, request: CreateListingRequest, policy_svc: "PolicyService"
     ) -> CreateListingResponse:
-        offer, demand = self._parse_offer_demand(request)
+        offer, accepted_escrows = self._parse_offer_and_escrows(request)
         action = await policy_svc.evaluate_create_listing_policy(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         if action != "make_offer":
             return CreateListingResponse(
@@ -187,7 +186,7 @@ class ListingService:
                 root_agent_response=f"Policy returned: {action}",
             )
         listing_id = await policy_svc.execute_create_listing(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         return CreateListingResponse(
             status="created" if listing_id else "no_action",
@@ -197,9 +196,9 @@ class ListingService:
     async def evaluate_create(
         self, request: CreateListingRequest, policy_svc: "PolicyService"
     ) -> AdminEvaluateCreateResponse:
-        offer, demand = self._parse_offer_demand(request)
+        offer, accepted_escrows = self._parse_offer_and_escrows(request)
         action = await policy_svc.evaluate_create_listing_policy(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         return AdminEvaluateCreateResponse(
             would_create=(action == "make_offer"),

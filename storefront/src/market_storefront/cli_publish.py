@@ -135,7 +135,7 @@ def _open_order_resource_ids(db_path: str) -> set[str]:
 def _publish_offer(
     agent_url: str,
     offer: dict,
-    demand: dict,
+    accepted_escrows: list[dict],
     max_duration_seconds: int | None,
     wallet_address: str,
     private_key: Optional[str],
@@ -151,7 +151,7 @@ def _publish_offer(
             resp = client.create_listing(
                 agent_wallet_address=wallet_address,
                 offer=offer,
-                demand=demand,
+                accepted_escrows=accepted_escrows,
                 max_duration_seconds=max_duration_seconds,
             )
         except StorefrontClientError as exc:
@@ -241,14 +241,14 @@ def _publish_round(
     Pricing is per-row: ``resources.min_price`` / ``resources.token`` win
     over the [seller.pricing] defaults. Tristate publish behaviour:
 
-      * Row ``min_price > 0``  → publish with ``demand.amount = min_price``
+      * Row ``min_price > 0``  → publish with ``price_per_hour = min_price``
         (public price).
-      * Row ``min_price = "0"`` → publish with ``demand.amount = 0``
+      * Row ``min_price = "0"`` → publish with ``price_per_hour = 0``
         (free / public-test offering; explicit per-row, defaults don't
         override).
       * Row ``min_price`` unset and no default → controlled by
         ``publish_priceless``:
-          - True  → publish with ``demand.amount = None`` (hidden reserve;
+          - True  → publish with ``price_per_hour = None`` (hidden reserve;
             buyer proposes; seller's strategy uses
             ``[seller.pricing].default_min_price`` as the negotiation floor).
           - False → skip the row, surfaced in ``failed``.
@@ -345,15 +345,35 @@ def _publish_round(
             "sla": res["sla"],
             "region": res["region"],
         }
-        demand = {"token": token_address, "amount": advertised_amount}
+        from service.clients.alkahest import get_erc20_escrow_obligation_nontierable
+        from .utils.config import CONFIG
+        try:
+            escrow_address = get_erc20_escrow_obligation_nontierable(
+                CONFIG.chain_name,
+                config_path=CONFIG.alkahest_address_config_path,
+            )
+        except Exception as exc:
+            failed.append((
+                res,
+                f"alkahest config could not resolve ERC20 escrow address on "
+                f"chain {CONFIG.chain_name!r}: {exc}",
+            ))
+            continue
+        accepted_escrows = [{
+            "chain_name": CONFIG.chain_name,
+            "escrow_address": escrow_address.lower(),
+            "fields": {"token": token_address},
+            "price_per_hour": advertised_amount,
+        }]
         try:
             resp = _publish_offer(
-                base_url, offer, demand, max_duration_seconds, wallet_address, private_key,
+                base_url, offer, accepted_escrows, max_duration_seconds,
+                wallet_address, private_key,
             )
             published.append({
                 "resource": res,
                 "response": resp,
-                "demand": demand,
+                "accepted_escrows": accepted_escrows,
             })
         except typer.Exit:
             failed.append((res, "HTTP error (see above)"))
@@ -449,18 +469,20 @@ def _print_publish_table(console: Console, published: list[dict], failed: list[t
     summary.add_column("Resource", style="bold")
     summary.add_column("GPU")
     summary.add_column("Region")
-    summary.add_column("Demand")
+    summary.add_column("Price/hr × Token")
     summary.add_column("Listing ID", overflow="fold")
     summary.add_column("Status")
     for entry in published:
         res = entry["resource"]
         resp = entry["response"]
-        demand = entry["demand"]
+        first_escrow = (entry["accepted_escrows"] or [{}])[0]
+        price = first_escrow.get("price_per_hour")
+        token = (first_escrow.get("fields") or {}).get("token", "-")
         summary.add_row(
             res["resource_id"],
             f"{res['gpu_model']} x{res['gpu_count']}",
             res["region"] or "-",
-            f"{demand['amount']} {demand['token']}",
+            f"{price if price is not None else 'hidden'} {token}",
             str(resp.get("listing_id", "-")),
             str(resp.get("status", "-")),
         )
@@ -640,7 +662,7 @@ def register(app: typer.Typer) -> None:
             totals.add_row("Failed", str(len(failed)))
             totals.add_row("Agent", base_url)
             totals.add_row(
-                "Default demand",
+                "Default price",
                 f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
             )
             console.print(Panel(totals, title="Summary", border_style="green" if not failed else "yellow"))
@@ -657,7 +679,7 @@ def register(app: typer.Typer) -> None:
         header.add_column()
         header.add_row("Agent", base_url)
         header.add_row(
-            "Default demand",
+            "Default price",
             f"{default_min_price or '-'} {default_token_address or '(per-row required)'}",
         )
         header.add_row("Poll interval", f"{poll_interval:.0f}s")

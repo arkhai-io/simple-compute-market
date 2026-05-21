@@ -99,7 +99,7 @@ class PolicyService:
     async def evaluate_create_listing_policy(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> str:
@@ -107,7 +107,9 @@ class PolicyService:
 
         Returns the action_type string e.g. "make_offer" | "no_action".
         """
-        event = self._build_listing_created_event(offer, demand, max_duration_seconds, paused)
+        event = self._build_listing_created_event(
+            offer, accepted_escrows, max_duration_seconds, paused
+        )
         action = await self._consult_policy(event)
         if not action:
             return "no_action"
@@ -120,7 +122,7 @@ class PolicyService:
     async def execute_create_listing(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> str | None:
@@ -129,7 +131,9 @@ class PolicyService:
         Returns the listing_id on success, or None if creation failed.
         Records the decision for experience learning.
         """
-        event = self._build_listing_created_event(offer, demand, max_duration_seconds, paused)
+        event = self._build_listing_created_event(
+            offer, accepted_escrows, max_duration_seconds, paused
+        )
         action = await self._consult_policy(event)
         if not action:
             logger.warning("[POLICY] No action for create listing event %s", event.event_id)
@@ -228,14 +232,14 @@ class PolicyService:
     async def evaluate_listing_create_policy_from_raw(
         self,
         offer_raw: dict,
-        demand_raw: dict,
+        accepted_escrows: list[dict[str, Any]] | None,
         max_duration_seconds: int | None = None,
         policy_components: list[str] | None = None,
     ) -> PolicyEvaluateResponse:
-        """Dry-run a listing creation policy evaluation from raw offer/demand dicts.
+        """Dry-run a listing creation policy evaluation from raw offer + escrows.
 
-        Parses resources, builds the event, checks that every component in
-        ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
+        Parses the offer resource, builds the event, checks that every component
+        in ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
         the callable pipeline.  No DB lookup is performed — this is a pure
         data operation.  The caller is responsible for supplying the component
         names (e.g. read from ``GET /api/v1/system/policy`` after seeding).
@@ -253,12 +257,14 @@ class PolicyService:
 
         try:
             offer_resource = parse_resource_from_dict(offer_raw)
-            demand_resource = parse_resource_from_dict(demand_raw)
         except Exception as exc:
-            raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+            raise ValueError(f"Invalid offer resource: {exc}") from exc
 
         event = self._build_listing_created_event(
-            offer_resource, demand_resource, max_duration_seconds, paused=False
+            offer_resource,
+            list(accepted_escrows or []),
+            max_duration_seconds,
+            paused=False,
         )
 
         unresolvable = [c for c in policy_components if c not in CALLABLE_REGISTRY]
@@ -336,7 +342,7 @@ class PolicyService:
     def _build_listing_created_event(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> ListingCreatedEvent:
@@ -345,7 +351,7 @@ class PolicyService:
             event_id=f"listing_create_{uuid.uuid4()}",
             source=base_url,
             offer=offer,
-            demand=demand,
+            accepted_escrows=accepted_escrows,
             max_duration_seconds=max_duration_seconds,
             data={"paused": paused},
         )

@@ -39,14 +39,6 @@ def _make_service(db: SQLiteClient, registry: dict | None = None) -> SystemServi
 
 
 OFFER = {"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"}
-DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 18,
-    },
-    "amount": 10_000,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -134,14 +126,12 @@ class TestGetPolicyStatus:
 OFFER = {
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US",
 }
-DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 0,
-    },
-    "amount": 5000,
-}
+ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "price_per_hour": 5000,
+}]
 
 
 def _make_policy_service(db, registry=None):
@@ -165,7 +155,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         from market_storefront.models.system_models import PolicyEvaluateResponse
         svc = _make_policy_service(db)
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND, policy_components=[],
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS, policy_components=[],
         )
         assert isinstance(result, PolicyEvaluateResponse)
         assert result.action == "no_action"
@@ -177,7 +167,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         from market_storefront.models.system_models import PolicyEvaluateResponse
         svc = _make_policy_service(db, {})  # empty registry
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND,
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS,
             policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)
@@ -190,7 +180,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         svc = _make_policy_service(db)
         with pytest.raises((ValueError, Exception)):
             await svc.evaluate_listing_create_policy_from_raw(
-                offer_raw={"not_a_valid_resource": True}, demand_raw=DEMAND,
+                offer_raw={"not_a_valid_resource": True}, accepted_escrows=ACCEPTED_ESCROWS,
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
 
@@ -206,14 +196,14 @@ class TestEvaluateListingCreatePolicyFromRaw:
             if isinstance(context.event, ListingCreatedEvent):
                 return DomainAction(
                     action_type=ActionType.MAKE_OFFER,
-                    parameters={"offer": OFFER, "demand": DEMAND,
+                    parameters={"offer": OFFER, "accepted_escrows": ACCEPTED_ESCROWS,
                                 "max_duration_seconds": None, "paused": False},
                 )
             return None
         registry = {"oc.action.make_offer_from_order_create": _fake_make_offer}
         svc = _make_policy_service(db, registry)
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND,
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS,
             policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)

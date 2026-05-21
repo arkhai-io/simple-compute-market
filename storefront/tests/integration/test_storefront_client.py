@@ -33,10 +33,12 @@ _COMPUTE_OFFER = {
     "region": "California, US",
 }
 
-_TOKEN_DEMAND = {
-    "token": "MOCK",
-    "amount": 10.0,
-}
+_ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "price_per_hour": 10,
+}]
 
 _ALERT_BODY = {
     "event_type": "resource_imbalance",
@@ -154,7 +156,7 @@ class TestCreateOrderEndpoint:
     async def test_valid_create_returns_200(self, orders_client):
         body = {
             "offer": _COMPUTE_OFFER,
-            "demand": _TOKEN_DEMAND,
+            "accepted_escrows": _ACCEPTED_ESCROWS,
         }
         resp = await orders_client.post("/api/v1/listings/create", json=body)
         assert resp.status_code == 200
@@ -164,11 +166,14 @@ class TestCreateOrderEndpoint:
 
     async def test_missing_offer_returns_422(self, orders_client):
         """CreateListingRequest Pydantic model requires offer; FastAPI returns 422."""
-        resp = await orders_client.post("/api/v1/listings/create", json={"demand": _TOKEN_DEMAND})
+        resp = await orders_client.post(
+            "/api/v1/listings/create",
+            json={"accepted_escrows": _ACCEPTED_ESCROWS},
+        )
         assert resp.status_code == 422
 
-    async def test_missing_demand_returns_422(self, orders_client):
-        """CreateListingRequest Pydantic model requires demand; FastAPI returns 422."""
+    async def test_missing_accepted_escrows_returns_422(self, orders_client):
+        """CreateListingRequest Pydantic model requires accepted_escrows; FastAPI returns 422."""
         resp = await orders_client.post("/api/v1/listings/create", json={"offer": _COMPUTE_OFFER})
         assert resp.status_code == 422
 
