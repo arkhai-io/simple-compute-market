@@ -104,7 +104,6 @@ db_path             = "/app/agent.db"
 log_file_path       = "./logs/seller.log"
 resources_csv_path  = "/app/resources.csv"
 admin_api_key       = "rehearsal-admin-key"
-enable_event_queue  = false
 # Pin AFTER your first successful registration — see §5 below.
 # onchain_agent_id  = "5955"
 

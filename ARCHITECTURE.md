@@ -6,7 +6,7 @@
 
 ## Repository Overview
 
-**Simple Market Service (SMS)** is a reference implementation of an agent-driven compute marketplace. Autonomous buyer and seller agents discover each other, negotiate prices, and settle agreements on-chain using Alkahest smart contracts. Physical compute (VMs) is provisioned post-settlement via Ansible.
+**Simple Compute Market** is a reference implementation of an agent-driven compute marketplace. Autonomous buyer and seller agents discover each other, negotiate prices, and settle agreements on-chain using Alkahest smart contracts. Physical compute (VMs) is provisioned post-settlement via Ansible.
 
 The stack is designed so that in production, multiple independent seller nodes each run their own agent + provisioning stack, while buyers can be ephemeral (a CLI invocation or a long-running agent). The `test-env` component exists only for local development.
 
@@ -117,13 +117,10 @@ FastAPI service that watches the EVM chain for ERC-8004 events (`AgentRegistered
 
 **Indexer-maintained schema — registry owns the filter vocabulary:**
 
-A series of refactors in May (a1b-1 through a1b-6, then `cce58f0`) moved the
-filter vocabulary from being implicit (hardcoded in routes / shared with the
-storefront and clients via enums and per-axis kwargs) to being **registry-
-maintained, schema-driven, and self-describing** via `filter-spec.yaml`. The
-practical effect: adding a new discovery filter is a YAML edit, not a route
-signature change in the registry, and not a code change in the storefront or
-any client wheel.
+The filter vocabulary is registry-maintained, schema-driven, and
+self-describing via `filter-spec.yaml`. Adding a new discovery filter is a
+YAML edit, not a route signature change in the registry, and not a code
+change in the storefront or any client wheel.
 
 What the spec carries:
 
@@ -135,27 +132,20 @@ What the spec carries:
   listing dicts, the operator (`equals`, `in`, `lower_bound`, `upper_bound`,
   `contains`, …), and an optional `on_missing` policy.
 - Enums like `gpu_model` (Blackwell back to Volta + workstation + consumer
-  cards) live here. The storefront field types dropped the closed
-  `GPUModel`/`Region` enums in `cce58f0` (now plain `str`) — the registry is
-  the single enforcement point so sellers can list any hardware string but
-  discovery is gated centrally.
+  cards) live here. The storefront treats hardware fields as plain `str`;
+  the registry is the single enforcement point so sellers can list any
+  hardware string but discovery is gated centrally.
 
-What the cutover replaced:
-
-- `registry-service/src/api/utils.py::matches_resource_filters` — a
-  23-parameter signature that took every supported filter as a kwarg —
-  along with `get_resource_type` and `resources_match` were deleted in a1b-3.
-  Replaced by the generic evaluator in `src/api/filter_eval.py`: `build_criteria(spec, params)`
-  compiles the spec + request params into parsed JSONPath criteria;
-  `evaluate_all(criteria, listing)` returns the matching listings. Array-
-  projection paths (`accepted_escrows[*]...`) are supported via jsonpath-ng.
-- The storefront's `GET /api/v1/listings` (a1b-4) shed all discovery
-  filters — it's now a slim local-enumeration view (`status`, `paused`,
-  `limit`, `offset`). Discovery goes through the registry; the storefront
-  is the seller's local state surface.
-- `arkhai-registry-client` 0.6.0 and `arkhai-storefront-client` 0.9.0 (a1b-5)
-  dropped the per-axis kwargs from their `list_listings()` signatures —
-  callers compose the filter param dict themselves now.
+Filter evaluation lives in `registry-service/src/api/filter_eval.py`:
+`build_criteria(spec, params)` compiles the spec + request params into
+parsed JSONPath criteria; `evaluate_all(criteria, listing)` returns the
+matching listings. Array-projection paths (`accepted_escrows[*]...`) are
+supported via jsonpath-ng. The storefront's `GET /api/v1/listings` is a
+slim local-enumeration view (`status`, `paused`, `limit`, `offset`) —
+discovery goes through the registry; the storefront is the seller's local
+state surface. `arkhai-registry-client.list_listings()` and the
+storefront-client equivalent take a filter param dict that the caller
+composes from the active spec.
 
 **ETag protocol for spec-vs-query consistency:** `GET /filter-spec` returns
 an `ETag` header that's a sha256 over the canonical JSON of the loaded YAML.
@@ -166,13 +156,11 @@ Failed** rather than silently honouring a query built against a stale spec.
 it.
 
 **Where the YAML lives and how it ships:** `registry-service/filter-spec.yaml`
-in source, copied into both build stages of the registry Docker image
-(`a1b-6` fix — the original add only had it in the source tree, causing
-`FileNotFoundError` on the first `/listings` call in compose). Loaded once
-at import via `lru_cache`; path overridable via `REGISTRY_FILTER_SPEC_PATH`
-env var. To rotate the spec without rebuilding the image, mount the new
-YAML over the baked one and restart the registry; buyers detect the change
-via the ETag on the next `/filter-spec` fetch.
+in source, copied into both build stages of the registry Docker image.
+Loaded once at import via `lru_cache`; path overridable via
+`REGISTRY_FILTER_SPEC_PATH` env var. To rotate the spec without rebuilding
+the image, mount the new YAML over the baked one and restart the registry;
+buyers detect the change via the ETag on the next `/filter-spec` fetch.
 
 **Agent identity format (ERC-8004 canonical):**
 ```
@@ -228,23 +216,22 @@ server joins the configured ZeroTier network if any, then runs
 After identity is resolved, the heartbeat sender, resource poller, and
 negotiation watchdog are started as background tasks.
 
-The `market-storefront register` console verb still exists and works
-identically to before — operators can run it manually to inspect or
-update registration. It now delegates to the shared `perform_registration()`
-helper extracted from the same module.
+The `market-storefront register` console verb delegates to the same
+`perform_registration()` helper used at startup. Operators can run it
+manually to inspect or update registration.
 
 **Key source layout:**
 ```
 storefront/src/market_storefront/
 ├── cli.py                  # `market-storefront` console-script entry
 ├── commands/
-│   └── register.py         # in-process port of the legacy register_onchain.py
-├── server.py               # FastAPI app, lifespan, run_serve() (publish loop removed)
+│   └── register.py         # In-process registration helper
+├── server.py               # FastAPI app, lifespan, run_serve()
 ├── container.py            # Resolved service singletons (populated in lifespan)
-├── agent.py                # Startup/background-task helpers only:
+├── agent.py                # Startup/background-task helpers:
 │                           #   _startup_tasks, _ensure_agent_identity, _start_heartbeat,
-│                           #   _preflight_provisioning, process_queued_events
-│                           #   TraderAgent class (kept for _RootAgentShim; see planned rework)
+│                           #   _preflight_provisioning, _probe_chain_addresses,
+│                           #   _maybe_join_zerotier_network
 ├── controllers/
 │   ├── listings_controller.py     # GET/POST /api/v1/listings/* + /listings/create|close|refund|…
 │   ├── negotiations_controller.py # GET/POST /api/v1/listings/*/negotiations/*
@@ -327,7 +314,7 @@ storefront/src/market_storefront/
 │  │ negotiation_watchdog│  │agent_heartbeat│                        │
 │  └─────────────────────┘  └───────────────┘                        │
 │                                                                     │
-│  Resource lifecycle now owned by provisioning service LeaseWatchdog │
+│  Resource lifecycle owned by provisioning service LeaseWatchdog,    │
 │  which calls PATCH /api/v1/admin/portfolio/resources/{id} on expiry │
 │                                                                     │
 │  Outbound                                                           │
@@ -355,8 +342,8 @@ will accept payment via *these* escrow contracts on *these* chains, with
 *these* field values pinned." Multiple entries allow multi-chain or
 multi-contract offers (e.g. mainnet ERC20 + a Base Sepolia ERC20 alongside a
 hypothetical ERC721 escrow). Each entry also carries a `price_per_hour` —
-**this** is the price column the negotiation strategy reads as the seller's
-floor; the listing no longer carries a top-level `(token, amount)`.
+this is the price column the negotiation strategy reads as the seller's
+floor.
 
 `fields` is **shape-only** — present keys are advertised values; absent keys
 are open for the buyer to propose. Whether an advertised value is a hard
@@ -395,31 +382,23 @@ on-chain obligation by UID and byte-compares against the negotiated
 `EscrowTerms.obligation_data`. New escrow kinds (ERC721, native, bundle,
 attestation) add no code: they only change which keys appear in
 `obligation_data`. The alkahest **slot lookup** (address-to-kind reverse
-map, configured per chain) replaces the old `escrow_kind` discriminator
-string — adding a new escrow contract is a config change, not a code change.
+map, configured per chain) resolves escrow contract addresses to their kind
+— adding a new escrow contract is a config change, not a code change.
 
 A negotiation produces `list[EscrowTerms]` so multi-escrow designs (payment
 + seller penalty deposit, block-by-block schedules) are expressible without
 a wrapper type. Today every list is length-1 (single buyer-made ERC20
 escrow); the rest is forward shape.
 
-**`demand_resource` is gone end-to-end.** The legacy column is dropped on
-first startup of current code (`sqlite_client.py` runs a one-shot backfill
-into `accepted_escrows`, then `ALTER TABLE listings DROP COLUMN demand_resource`).
-The API surface no longer accepts a `demand` field either:
-`CreateListingRequest` requires `accepted_escrows: list[dict]`; service
+`CreateListingRequest` requires `accepted_escrows: list[dict]`. Service
 signatures (`PolicyService.evaluate_create_listing_policy`,
 `execute_create_listing`, `evaluate_listing_create_policy_from_raw`) take
-`accepted_escrows`; `ListingCreatedEvent.demand` is gone; the
+`accepted_escrows`; `ListingCreatedEvent` carries it as a field; the
 `oc.action.make_offer_from_order_create` domain callable emits
-`parameters["accepted_escrows"]`; and `action_executor`'s MAKE_OFFER handler
-threads it directly to `create_order` without synthesis. The
-`synthesize_accepted_escrows_from_demand` helper survives in
-`sqlite_client.py` only as a no-op fallback path for the (no-longer-fireable)
-startup backfill — safe to delete once pre-cutover DB snapshots are
-unreachable. `_extract_initial_price_from_order` reads exclusively from
-`accepted_escrows[0].price_per_hour`; its hidden-reserve fallback is to
-`[seller.pricing].default_min_price`, not to any legacy column.
+`parameters["accepted_escrows"]`; `action_executor`'s MAKE_OFFER handler
+threads it directly to `create_order`. `_extract_initial_price_from_order`
+reads from `accepted_escrows[0].price_per_hour`; its hidden-reserve
+fallback is `[seller.pricing].default_min_price`.
 
 ---
 
@@ -436,7 +415,7 @@ unreachable. `_extract_initial_price_from_order` reads exclusively from
 3. Call `load_strategy(name)` from the in-process strategy registry
 4. Return the strategy instance
 
-**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. Since the `demand_resource` cutover, listings carry only an `offer_resource` (the payment side moved into `accepted_escrows` — see the section above). Seller offering `ComputeResource` → direction `"maximize"` (the seller wants the highest price the buyer will pay). The buyer's CLI runs in `"minimize"` direction from the opposite side of the same protocol.
+**Negotiation direction:** determined by `determine_strategy_from_resources()` in `utils/validation.py`. Listings carry only an `offer_resource`; the payment side lives in `accepted_escrows` (see the section above). Seller offering `ComputeResource` → direction `"maximize"` (the seller wants the highest price the buyer will pay). The buyer's CLI runs in `"minimize"` direction from the opposite side of the same protocol.
 
 **BisectionStrategy convergence (maximize direction):**
 - Accept if `their_price >= our_price * (1 - CONVERGENCE_RATIO)` (default ratio ≈ 0.01, so accept within 1%)
@@ -445,15 +424,15 @@ unreachable. `_extract_initial_price_from_order` reads exclusively from
 
 `our_price` is extracted from `accepted_escrows[0].price_per_hour` via `_extract_initial_price_from_order()` in `action_executor.py`. This is the seller's price floor — the buyer's opening offer must be at or above this value for the seller to counter rather than exit immediately.
 
-**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` now includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
+**`checks.negotiation_strategy` in system status:** `GET /api/v1/system/status` includes a `negotiation_strategy` check that instantiates the configured strategy and runs a synthetic maximize probe. If the strategy would exit on the probe (e.g. `"TorchArkhaiStrategy (exit_on_probe: torch_unavailable)"`), the check surfaces this before any negotiation is attempted. The smoke test (`test_negotiation_strategy_viable`) and e2e stage 00d both assert on this field.
 
 **`checks` degraded-status evaluation:** Each check value is evaluated by `_check_is_healthy(key, value)` in `system_service.py` rather than against a fixed set of `"ok"` literals. This is because `negotiation_strategy` returns a human-readable strategy name (e.g. `"bisection"`) on success rather than the literal `"ok"`. The `_check_is_healthy` function treats the `negotiation_strategy` key specially: healthy unless the value contains `"exit_on_probe"` or starts with `"unknown:"` / `"error:"`. All other check keys use the literal set `{"ok", "unconfigured", "agent_not_found", "indexing"}`. When adding a new check to `get_status()` whose success value is not `"ok"`, either: (a) return `"ok"` on success and put the diagnostic name in a separate top-level fact field, or (b) add a key-specific rule to `_check_is_healthy`.
 
-The legacy `core/agent/app/` tree is gone. Files that lived there
-either moved into `storefront/src/market_storefront/` (server,
-resource poller, watchdog, action executor) or into the standalone
-`market-policy` package (policy store, manager, registry, evaluator,
-composite, negotiation thread, action builders).
+Storefront-side runtime (server, resource poller, watchdog, action
+executor) lives in `storefront/src/market_storefront/`. Policy engine
+infrastructure (policy store, manager, registry, evaluator, composite,
+negotiation thread, action builders) is the standalone `market-policy`
+package.
 
 **Policy system:** lives in `market-policy` (package: `policy/`,
 import: `market_policy`). Policies are named callables registered
@@ -468,9 +447,13 @@ server.
 
 **Critical policy wiring detail:** `PolicyStore.__init__` creates an **empty** `self._registry = {}`. The `@policy_callable` decorators populate the module-level `CALLABLE_REGISTRY` dict in `market_policy.registry`. These two are only connected by an explicit call to `policy_store.register_callables(CALLABLE_REGISTRY)`. `PolicyManager.initialize()` does this wiring at startup. Any code that creates a fresh `PolicyStore` instance (controllers, tests, seed endpoints) **must** call `register_callables` before evaluating policies, or `evaluate_policy` will always return `None` despite callables being registered in `CALLABLE_REGISTRY`.
 
-**Orchestration over Event-Driven for Request-Path Operations:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline. This decision was made after examining the existing code and the e2e test requirements.
+**Orchestration over Event-Driven for Request-Path Operations:** The storefront request path uses a **synchronous orchestrator pattern**, not an event-driven pipeline.
 
-**What "event-driven" meant in the original code:** The policy dispatch layer required domain events as its input format — `PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event` field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). This was preserved. What was removed was the awkward choreography that surrounded it: `process_event()` returning a human-readable string while storing structured results as side effects in `_last_action_outcomes`, and callers doing `pop_outcome()` to retrieve them.
+The policy dispatch layer takes domain events as its input format —
+`PolicyStore.evaluate_policy` receives a `DecisionContext` whose `event`
+field is a typed `DomainEvent` subclass (e.g. `ListingCreatedEvent`). The
+service layer constructs these events privately around each public method
+call.
 
 **What "orchestration" means here:** Each public service method is a named sequence of private steps:
 
@@ -490,7 +473,7 @@ async def create_listing(self, request: CreateListingRequest, policy_svc) -> Cre
 
 Each step is independently callable from an admin endpoint for diagnosis — see the `evaluate-create` and `evaluate-close` admin endpoints.
 
-**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process. `is_event_queue_enabled()` always returns `False` in normal operation (the redis path is a dead branch). The event-flavoured naming added indirection without adding capability.
+**Why not pure event-driven:** The buyer CLI and e2e test expect `listing_id` synchronously in the create-listing response. There is no queue consumer process.
 
 **The thin untested wrapper:** A future pure event-driven architecture would look like:
 
@@ -503,9 +486,7 @@ def create_listing(request: CreateListingRequest) -> CreateListingResponse:
 
 The synchronous orchestrator tests everything except this two-line wrapper, which is correct by inspection.
 
-**The in-memory event queue** (`enable_event_queue`, `enable_redis_ingest`, `is_event_queue_enabled()`) is dead code. See `## Storefront — Planned Rework` item 2 for the removal plan.
-
-`PolicyService` class exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves. The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
+`PolicyService` exposes only named domain-language methods. Domain event construction is fully private. Callers (`ListingService`, `AlertsController`) never construct domain events themselves. The word "event" does not appear in any public method name. Event construction (`_build_listing_created_event`, `_build_listing_closed_event`) is private.
 
 **`domain/` package — not installed, on sys.path:** `domain/compute/agent/app/policy/store.py` contains the actual `@policy_callable` decorated functions the storefront uses. The `domain/` tree is not a pip-installable package — it is copied into the Docker image at `/app/domain/` and requires `/app` to be on `sys.path`. The Dockerfile sets `ENV PYTHONPATH="/app"` to ensure this. The `POST /admin/policy/seed` endpoint also does a defensive `sys.path` check as a fallback. `domain.compute.agent.app.policy.arkhai_common` always fails to import (requires `gymnasium`) — this is expected and non-fatal; the module we actually need is `store.py`, which has no ML dependencies.
 
@@ -570,8 +551,8 @@ layer whenever wheel file contents change.
 #### Storefront API Surface (`controllers/`)
 
 The storefront exposes a structured REST API via a `controllers/` package,
-mirroring the provisioning service's controller pattern. All controllers are
-mounted in `server.py` alongside the legacy `a2a_app` routes.
+mirroring the provisioning service's controller pattern. All controllers
+are mounted in `server.py` alongside the `a2a_app` routes.
 
 **System controller** (`controllers/system_controller.py`) — HTTP layer only; all logic in `services/system_service.py`:
 ```
@@ -607,12 +588,12 @@ POST /api/v1/listings/{listing_id}/pause   Take listing off market — admin key
 POST /api/v1/listings/{listing_id}/resume  Unpause + publish to registry — admin key required
 ```
 
-Note: this is a **local enumeration view**, not a discovery API. Since a1b-4
-the storefront no longer carries discovery filters (`gpu_model`, `region`,
-`ram_gb_min`, `token`, etc.) — those moved to the registry's spec-driven
-filter evaluator. Buyer-side discovery queries `GET /listings` on a registry
-with `filter-spec.yaml`-declared parameters; the storefront's listings
-endpoint is for the seller looking at their own state.
+Note: this is a **local enumeration view**, not a discovery API. Discovery
+filters (`gpu_model`, `region`, `ram_gb_min`, `token`, etc.) live on the
+registry's spec-driven filter evaluator. Buyer-side discovery queries
+`GET /listings` on a registry with `filter-spec.yaml`-declared parameters;
+the storefront's listings endpoint is for the seller looking at their own
+state.
 
 `resume_listing` calls `publish_order_to_registry(row)` after clearing the paused flag. This is idempotent if the listing was already published, and is the **required step** to push a listing that was created with `paused=True`. The response includes `registry_status`: `"published"` on success, `"error"` if the registry call failed, `"disabled"` if `enable_registry_discovery=false`. Stage 04 of the e2e test asserts `registry_status == "published"` — a failure here is always a registry connectivity or configuration issue, not a storefront bug. Run `GET /api/v1/system/status` and check `checks.registry` to diagnose.
 
@@ -715,8 +696,6 @@ POST  /api/v1/admin/portfolio/release-reservations
       Bulk-release all held (reserved or leased) resources — admin key required.
       Sledgehammer; prefer PATCH above for targeted single-row release.
 ```
-
-Note: legacy redirect aliases `/admin/pause` and `/admin/resume` (without `/api/v1` prefix) are registered in `server.py` for backwards compatibility with existing scripts.
 
 #### Admin API Key
 
@@ -826,8 +805,7 @@ buyer/market_buyer/
 `market settle --from <run_id>` is the post-agreement half of the flow: it
 reads the agreed terms from the run-log JSONL, creates the on-chain escrow
 under the buyer's wallet via `make_create_escrow_fn`, then POSTs
-`/api/v1/settle/{uid}` (note the `/api/v1` prefix — earlier releases POSTed
-to bare `/settle/{uid}` and 404'd) and polls for fulfillment. The buyer's
+`/api/v1/settle/{uid}` and polls for fulfillment. The buyer's
 negotiation strategy is selected via `[buyer.negotiation].policy_mode` in the
 TOML, mirroring the seller's `[seller.negotiation].policy_mode` — default
 `bisection`; `rl` requires torch + a checkpoint.
@@ -960,7 +938,7 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 
 #### Lease Lifecycle — DB-driven watchdog
 
-The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM, it registers a lease with the provisioning service via `POST /api/v1/leases` after the create-VM job succeeds. The legacy `lease_end` scheduling job is best-effort and must not block settlement readiness; the `LeaseWatchdog` is the authoritative release path and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
+The provisioning service owns lease lifecycle via the `vm_leases` table and the `LeaseWatchdog` background task. When the storefront provisions a VM, it registers a lease with the provisioning service via `POST /api/v1/leases` after the create-VM job succeeds. The host-side `lease_end` `at` job is best-effort and must not block settlement readiness; the `LeaseWatchdog` is the authoritative release path and calls back to the storefront's `PATCH /api/v1/admin/portfolio/resources/{resource_id}` when leases expire.
 
 **`vm_leases` table:**
 
@@ -1082,7 +1060,7 @@ Useful for pre-flight capacity checking before a `create` job.
 
 #### Ansible Diagnostic Endpoints (unified API, port `8081`)
 
-Previously a separate worker admin API on port 8082; now folded into the main API under `/api/v1/ansible/`.
+Mounted on the main API under `/api/v1/ansible/`.
 
 - `GET /health` — checks API, database, and job processing loop liveness
 - `GET /inventory` — parses the Ansible INI inventory file and returns all hosts with their `ansible_host` values and inline vars; supports `?search=<substring>` for hostname filtering
@@ -1434,7 +1412,7 @@ The following items represent known architectural deficiencies in `provisioning-
 
 #### `escrow_uid` on jobs — deal linkage and recovery
 
-The `ansible_jobs` table now carries an `escrow_uid` column (nullable, indexed). The storefront passes this when submitting a provisioning job for a settled deal. It enables the storefront to recover the provisioning job_id after a crash by querying `GET /api/v1/jobs?escrow_uid=<uid>` rather than losing the mapping.
+The `ansible_jobs` table carries an `escrow_uid` column (nullable, indexed). The storefront passes this when submitting a provisioning job for a settled deal. It enables the storefront to recover the provisioning job_id after a crash by querying `GET /api/v1/jobs?escrow_uid=<uid>` rather than losing the mapping.
 
 `escrow_uid` is surfaced in:
 - `AnsibleJobParams.escrow_uid` (internal DTO)
@@ -1478,13 +1456,12 @@ Deployment shells just compose CLI verbs:
   same image, two CLI verbs.
 
 `market-storefront serve` only forwards `host` and `port` into
-`server.run_serve()`. The old inline publish-loop flags were removed
-with the storefront publish loop; the CLI/server argument contract is
-covered by a storefront unit test because a mismatch crashes the
-container before any integration or e2e test can run.
+`server.run_serve()`. The CLI/server argument contract is covered by a
+storefront unit test because a mismatch crashes the container before any
+integration or e2e test can run.
 
-See `docs/cli-redesign-plan.md` for the rationale and migration
-table behind the current 4-CLI surface.
+See `docs/cli-redesign-plan.md` for the rationale behind the current
+4-CLI surface.
 
 ---
 
@@ -1499,7 +1476,7 @@ compose/market.yml   — registry-service
 compose/seller.yml   — storefront server + provisioning service (unified)
 ```
 
-There is no `compose/buyer.yml` anymore — the buyer is the `market`
+There is no `compose/buyer.yml` — the buyer is the `market`
 CLI invoked from the host or another container, not a long-running
 service. The seller container reads its config from a TOML file
 mounted at `/etc/arkhai/config.toml` (set via `XDG_CONFIG_HOME=/etc`);
@@ -1579,8 +1556,54 @@ localhost:8081  → provisioning API (also handles ansible inventory + connectiv
 - All tests share a ConfigMap (`{release}-test-config`) injected as `config-helm.yml`, containing resolved RPC URLs, contract addresses, and agent URLs
 
 **Persistence:**
-- Storefront agents, registry, and provisioning each back their SQLite onto a per-service ReadWriteOnce PVC: `/var/lib/arkhai` (storefront, per-agent), `/var/lib/arkhai-registry` (registry), `/app/data` (provisioning). Pod restarts no longer wipe negotiation history, registry index, or lease state. Each chart pins `strategy: Recreate` (RWO can't have two pods attached), sets `securityContext.fsGroup: 1000` so `appuser` can write the freshly-mounted volume, and annotates the PVC with `helm.sh/resource-policy: keep` so `helm uninstall` doesn't reap the disk. A `persistence.enabled` toggle in each subchart's `values.yaml` falls back to `emptyDir` for kind/CI/local-iteration without a StorageClass.
-- Agent ID persistence across pod restarts is handled by `seller.onchain_agent_id` in config (a Helm value). On first deploy with `agentId: ""` and `autoRegister: true`, the service registers and logs the assigned ID. Operators pin that ID in `values.yaml` and flip `autoRegister: false` to prevent accidental re-registration. The compose flow (which used `ONCHAIN_AGENT_ID=` env var clearing to force re-registration on fresh Anvil) is unchanged.
+- Storefront agents, registry, and provisioning each back their SQLite onto a per-service ReadWriteOnce PVC: `/var/lib/arkhai` (storefront, per-agent), `/var/lib/arkhai-registry` (registry), `/app/data` (provisioning). This preserves negotiation history, registry index, and lease state across pod restarts. Each chart pins `strategy: Recreate` (RWO can't have two pods attached), sets `securityContext.fsGroup: 1000` so `appuser` can write the freshly-mounted volume, and annotates the PVC with `helm.sh/resource-policy: keep` so `helm uninstall` doesn't reap the disk. A `persistence.enabled` toggle in each subchart's `values.yaml` falls back to `emptyDir` for kind/CI/local-iteration without a StorageClass.
+- Agent ID persistence across pod restarts is handled by `seller.onchain_agent_id` in config (a Helm value). On first deploy with `agentId: ""` and `autoRegister: true`, the service registers and logs the assigned ID. Operators pin that ID in `values.yaml` and flip `autoRegister: false` to prevent accidental re-registration. In the compose flow, clearing `ONCHAIN_AGENT_ID=` in the env forces re-registration on a fresh Anvil.
+
+**Storefront chart layout — ConfigMap + Secret split:** `helm/charts/storefront/`
+emits two artifacts per agent:
+
+- a **ConfigMap** carrying non-sensitive runtime knobs (chain URLs, log paths,
+  mode flags, top-level identity scalars, `[provisioning]` + `[negotiation]`
+  sub-tables) rendered as `storefront.toml`
+- a **Secret** carrying only sensitive values (`[wallet]` `address` +
+  `private_key`, top-level `admin_api_key`, `[integrations]` `gemini_api_key`,
+  top-level `resources_csv_inline`) rendered as `storefront.secrets.toml`
+
+The runtime config tree is assembled by `dynaconf` in
+`storefront/src/market_storefront/utils/config.py`, which layers (highest
+priority last): the committed defaults in
+`storefront/src/market_storefront/settings.toml`, the ConfigMap
+`/etc/arkhai/storefront.toml`, the Secret
+`/etc/arkhai/storefront.secrets.toml`, and `STOREFRONT_*` environment
+variables. `settings.toml` documents every supported key and its default;
+overlay files supply only what differs from defaults. Callers access values
+via direct attribute traversal on the module-level `settings` singleton —
+e.g. `settings.port`, `settings.wallet.private_key`,
+`settings.provisioning.service_url`, `settings.registry.urls`. Three
+composites computed once at import are exported as module constants:
+`AGENT_ID` (validated identifier), `AGENT_NAME` (falls back to `AGENT_ID`),
+and `BASE_URL_OVERRIDE` (ZeroTier placeholder resolution applied to
+`settings.base_url`). One composite `chain_id()` is a function call because
+it falls back to a live `eth_chainId` RPC when `[chain] chain_id` is unset.
+
+The storefront's TOML file pair is **role-scoped** — buyer and seller no
+longer share `~/.config/arkhai/config.toml`. The buyer CLI continues to
+read `config.toml`; the storefront reads `storefront.toml` +
+`storefront.secrets.toml` only. When the same operator runs both buyer and
+seller on one machine (e.g. a seller-also-buyer setup), each process has
+its own wallet and own file pair.
+
+Independent `checksum/config` and `checksum/secrets` annotations on the
+Deployment isolate rollouts to whichever source changed — flipping a log
+level does not churn the Secret. Local-dev callers reading
+`~/.config/arkhai/storefront.toml` go through the same loader; the overlay
+step is a no-op when only the base file exists. A `make test-render` target
+in `helm/` runs `helm template` and asserts the structural invariants
+(mount paths, key layout, no `private_key` leak into the ConfigMap,
+independent checksums) without needing a cluster.
+
+Wallet key, admin key, and inline resources CSV are in the Secret object;
+they rotate independently of non-sensitive config.
 
 **Notable gaps / fitness questions to investigate:**
 - `test-env.enabled: true` in the default values — in production this needs to be `false` and `global.rpc.*` overridden to point at a live chain
@@ -1790,143 +1813,17 @@ See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 - **Global pause state persists across e2e test runs:** The storefront's `_GLOBALLY_PAUSED` flag (toggled by `POST /admin/pause` — distinct from per-listing `paused=True`) is in-process memory, not reset between `pytest` sessions. Neither full-deal scenario currently calls global `admin_pause` (storefront integration tests do, but those have their own teardown). The risk is a developer or external script having toggled it manually; the next `/negotiate/new` then 503s with `{"reason": "global"}` regardless of any per-listing state. The `ensure_storefront_resumed` autouse fixture in `integration-tests/tests/e2e/roles/scenarios/conftest.py` mitigates this by calling `admin_resume()` in module teardown. If running against a live environment that may have been left paused, execute `curl -X POST http://localhost:8001/admin/resume -H "X-Admin-Key: <key>"` before running.
 
-- **Resource CSV importer DB path mismatch:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `AGENT_DB_PATH` env var → `CONFIG.agent_db_path` (in that order). Before this was fixed, the fallback was `/tmp/agent.db`, which differs from the server's `CONFIG.agent_db_path` (`./src/market_storefront/data/sell-agent/agent.db` in the compose stack). The importer silently seeded the wrong database; the server had zero resources and rejected all `/negotiate/new` calls with `409 no_matching_inventory`. **Fix:** `compose/seller.yml` now passes `--db-path src/market_storefront/data/sell-agent/agent.db` explicitly; the script fallback now reads `CONFIG.agent_db_path`. **Detection:** `GET /api/v1/system/status` now exposes `resource_count` as a top-level field; a value of `0` immediately signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command if not.
+- **Resource CSV importer DB path:** `scripts/import_resources_csv.py` resolves the target SQLite path via `--db-path` CLI arg → `AGENT_DB_PATH` env var → `CONFIG.agent_db_path`, in that order. If the importer writes to a different path than the server reads (e.g. via an unset `AGENT_DB_PATH` falling through to a wrong default), the server starts with zero resources and rejects all `/negotiate/new` calls with `409 no_matching_inventory`. `compose/seller.yml` pins `--db-path src/market_storefront/data/sell-agent/agent.db` explicitly. **Detection:** `GET /api/v1/system/status` exposes `resource_count` as a top-level field; a value of `0` signals this misconfiguration. The smoke test `test_resource_portfolio_seeded` in `test_storefront_smoke.py` asserts `resource_count > 0` and fails with a remediation command.
 
- The `EventSyncService` in the registry polls on-chain events every 60 s. On a fresh stack the initial sync (`sync_from_start`) may not complete before the e2e test reaches stage 03b (resume + publish). `publish_order_to_registry` issues `POST /agents/{canonical_id}/listings` against the registry; if the agent is not yet indexed, the registry returns 404 and the publish silently fails (`registry_status="error"` in the response). Stage 03b then fails its `registry_status == "published"` assertion, causing all negotiation stages to cascade-skip. Stage 03c (`TestStage03c_SellerAgentIndexed`) was added to gate on indexing completion via the new `GET /api/v1/system/sync/wait-for-agent` long-poll endpoint before any negotiation stage runs. **The `wait-for-agent` endpoint is the canonical pattern for this class of problem**: when a test needs to gate on an async background service completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This avoids client-side polling loops (fragile, sleep-based) and makes the wait observable (the endpoint logs the elapsed time).
+- **Registry indexer lag at startup:** The `EventSyncService` in the registry polls on-chain events every 60 s. On a fresh stack the initial sync (`sync_from_start`) may not complete before the e2e test reaches stage 03b (resume + publish). `publish_order_to_registry` issues `POST /agents/{canonical_id}/listings` against the registry; if the agent is not yet indexed, the registry returns 404 and the publish silently fails (`registry_status="error"` in the response). Stage 03c (`TestStage03c_SellerAgentIndexed`) gates on indexing completion via `GET /api/v1/system/sync/wait-for-agent` (long-poll) before any negotiation stage runs. **The `wait-for-agent` endpoint is the canonical pattern for this class of problem**: when a test needs to gate on an async background service completing a unit of work, add an admin/system endpoint that blocks server-side until the condition is met, then call it once from the test. This avoids client-side polling loops (fragile, sleep-based) and makes the wait observable (the endpoint logs the elapsed time).
 
-- **`settings.SELLER.AGENT_ID` discrepancy in config files:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) have `seller.agent_id: "eip155:31337:...:2"`. On a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, making `:2` stale. Stage 03c no longer uses this value — it calls `storefront.wait_for_registry_agent_ready()` which uses the storefront's live runtime agent ID. The `SELLER.AGENT_ID` value is still used by `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
+- **`settings.SELLER.AGENT_ID` in e2e config files can drift:** The e2e config files (`config/config-local.yml`, `config/config-docker.yml`) hard-code `seller.agent_id` to e.g. `"eip155:31337:...:2"`. The numeric suffix depends on chain state — on a fresh Anvil the sentinel agent registers as ID 0 and the seller as ID 1, so `:2` is stale. Stage 03c uses `storefront.wait_for_registry_agent_ready()` (live runtime agent ID), but `SyncProvisioningClient` (as the `X-Agent-ID` header) and smoke tests still consume `SELLER.AGENT_ID`. Update it to match `curl http://localhost:8080/agents` output for the seller's wallet when rebuilding the Anvil state.
 
 - **E2e test dependency graph is not mechanically verified:** The `require_state(deal_state, "field")` chain between stages is enforced by convention only. A field set by one stage but not consumed by `require_state` in any downstream stage is a silent gap — the first failure cascades to a skip rather than a fail in the stage that actually needed it. A field name typo in a `require_state` call produces the same symptom: `getattr(deal_state, "nonexistent_field", None)` silently returns `None` and the test skips regardless of pipeline state. **Rule:** when adding a new `DealState` field, always verify that at least one downstream `require_state` call consumes it, and that the field name in `require_state` exactly matches the attribute name on `DealState`. This gap class cannot be caught by unit or integration tests — it is a property of the test's own dependency graph.
 
 ---
 
 # Planned Rework
-
-## Storefront
-
-### 1. Remove event queue infrastructure in storefront
-
-**Status:** Planned.
-
-**Problem:** The event queue path (`is_event_queue_enabled()`, `queue_event()`,
-`configure_default_ingestion()`, `enable_event_queue` and `enable_redis_ingest`
-config fields) is dead code in the request path. `ListingService` was refactored
-to a synchronous orchestrator model, eliminating all `is_event_queue_enabled()`
-branches from the service layer. The redis ingest path (`start_redis_subscriber`,
- `stop_redis_subscriber`) in `agent.py` is the only remaining consumer and has no tests.
-
-**Planned fix:**
-1. Remove `enable_event_queue` and `enable_redis_ingest` from `Config` and `config.toml`.
-2. Remove `configure_default_ingestion()` call from `agent.py`.
-3. Remove `start_redis_subscriber` / `stop_redis_subscriber` calls from `_startup_tasks`.
-4. Delete `utils/event_ingestion.py` (or retain only the `stage_event()` audit-log
-   helper if it is used elsewhere — confirm before deleting).
-5. Remove redis dependency from `pyproject.toml` if no other code requires it.
-
----
-
-### 2. Remove TraderAgent class and root_agent shim from agent.py in storefront
-
-**Status:** Planned.
-
-**Problem:** `agent.py` still contains the `TraderAgent` class and a `_RootAgentShim`
-instance named `root_agent`. The shim was introduced as a transitional adapter: it
-forwards `._sqlite_client`, `._alkahest_client`, and `._process_event_with_pipeline`
-attribute accesses to the `PolicyPipelineService` singleton in the container. This
-exists because several functions in `agent.py` were not yet migrated to the service
-layer when the FastAPI conversion landed, but all callers have since been removed.
-
-**Planned fix:**
-1. Verify no remaining code references `root_agent` or `TraderAgent` outside of `agent.py`.
-2. Delete `TraderAgent`, `_RootAgentShim`, and `root_agent = _RootAgentShim()` from `agent.py`.
-3. Move any remaining utilities still in `agent.py` (`_serialize_context_for_storage`,
-   `_serialize_outcome_for_storage`, `_parse_domain_event`) to appropriate utils modules.
-4. Rename `agent.py` to `startup.py` to reflect its actual remaining responsibility:
-   background task management (`_startup_tasks`, `_ensure_agent_identity`,
-   `_start_heartbeat`, `_preflight_provisioning`, `process_queued_events`).
-
----
-
-### 3. Storefront config unification (TOML singleton → dynaconf profiles)
-
-**Status:** Planned.
-
-**Problem:** The storefront uses a bespoke TOML singleton (`CONFIG` in
-`market_storefront.utils.config`) loaded once at import time via a custom
-`load_user_config()` / `get_dotted()` chain. This is a different system
-from the profile-based dynaconf loader used by the provisioning service
-and the integration test suite. The inconsistency creates friction:
-- Secrets and environment-specific overrides require a separate `config.toml`
-  mount rather than profile files; there is no equivalent of the
-  `provisioning-secrets` profile pattern for the storefront.
-- The test suite cannot inject per-test config overrides cleanly — tests
-  monkeypatch `_USER_CFG` directly, which is fragile.
-- Adding a new config key requires touching the `Config` dataclass, the
-  `load_config()` function, and every Helm template that renders the TOML —
-  three places instead of one.
-
-**Planned fix:** Migrate the storefront config to dynaconf profiles
-following the provisioning service pattern:
-- Replace `load_user_config()` / `get_dotted()` with `dynaconf.Dynaconf`
-  with profile resolution via `ACTIVE_PROFILES` and `CONFIG_DIRECTORY`.
-- The rendered `config.toml` becomes one profile file (`config-seller.yml`
-  or similar) mounted from a Kubernetes Secret.
-- The `Config` dataclass and `load_config()` are replaced by a thin
-  validated wrapper over `settings.*` keys, or removed in favour of direct
-  `settings` attribute access.
-- Helm test pods consume the same profile files as the service pods,
-  eliminating the separate `config-{component}-secret.yml` key that the
-  storefront Secret currently emits for the test pod.
-
-This is a prerequisite for clean secret injection (wallet keys, API keys)
-via the standard Helm Secret + profile pattern.
-
----
-
-### 4. Storefront GKE secret injection — chart-side split landed
-
-**Status:** Helm chart split implemented (`a8db7d4`). Ops-repo bootstrap may
-still need follow-up; full dynaconf migration (item 3) remains.
-
-**What landed at the chart layer:** `helm/charts/storefront/` now emits two
-artifacts per agent:
-
-- a **ConfigMap** carrying non-sensitive runtime knobs (chain URLs, log paths,
-  mode flags, seller agent identity, provisioning + negotiation sub-tables)
-  rendered as `config.toml`
-- a **Secret** carrying only sensitive values (wallet `address` + `private_key`,
-  `admin_api_key`, `gemini_key`, inline `resources_csv`) rendered as
-  `config.secrets.toml`
-
-The runtime loader (`service/src/service/config_loader.py`) deep-merges the
-two files under `/etc/arkhai/` so the Python config tree keeps its existing
-shape — only the on-disk layering changed. Independent `checksum/config` and
-`checksum/secrets` annotations on the Deployment isolate rollouts to whichever
-source changed; flipping a log level no longer churns the Secret. Local-dev
-callers reading a single `~/.config/arkhai/config.toml` are unaffected (the
-overlay step is a no-op when only the base file exists). A `make test-render`
-target in `helm/` runs `helm template` and asserts the structural invariants
-(mount paths, key layout, no `private_key` leak into the ConfigMap, independent
-checksums) without needing a cluster.
-
-**What this means for rotation:** wallet key, admin key, and inline resources
-CSV are now in a separate Secret object from the ConfigMap; they can be
-rotated/edited independently of non-sensitive config without re-bundling.
-
-**Still outstanding:**
-
-1. Full dynaconf-profile migration (item 3 above) — the layered loader is a
-   precursor; the storefront still uses the bespoke TOML singleton at
-   `market_storefront.utils.config`.
-2. Ops-repo (`compute-market-1-ops`) follow-ups: whether the
-   `bootstrap-storefront-secret` flow has been simplified to write
-   `config.secrets.toml` directly rather than rendering a full `config.toml`,
-   and whether the duplicate `simple-market-service-admin-api-key` Secret
-   Manager entry is still needed, depends on what the ops repo has done since
-   this chart split landed. Cross-reference `compute-market-1-ops`
-   `ARCHITECTURE.md § OPS-REWORK-1` before assuming.
-
----
 
 ## Registry Service
 
@@ -1942,20 +1839,18 @@ rotated/edited independently of non-sensitive config without re-bundling.
 
 ### 2. Event sync full-history gap
 
-**Status:** Workaround landed (`4ae2bbf`); planned fix still pending.
+**Status:** Planned.
 
 **Problem:** `EventSyncService.sync_from_start()` only scans the last 1000
 blocks for `Registered`, `MetadataSet`, and `URIUpdated` events. On a live
 chain with registrations months ago this window misses all historical agents.
 The registry's agent count is therefore a function of how recently agents
-registered, not how many are actually on-chain.
-
-**Workaround in place:** `REGISTRY_START_BLOCK` env (read in
-`registry-service/src/config.py`) lets a fresh indexer backfill from a known
-earlier block — typically the IdentityRegistry's deployment block — instead of
-"last 1000 blocks". Unset behaviour is unchanged. This is enough to bring a
-new indexer up to date on a known chain but still leaves the 1000-block sliding
-window in place for steady-state polling.
+registered, not how many are actually on-chain. `REGISTRY_START_BLOCK` env
+(read in `registry-service/src/config.py`) is the current escape hatch: a
+fresh indexer can backfill from a known earlier block — typically the
+IdentityRegistry's deployment block. This brings a new indexer up to date on
+a known chain but leaves the 1000-block sliding window in place for
+steady-state polling.
 
 **Planned fix:** Replace the sliding window with a full enumeration using view
 functions: call `totalSupply()` on the IdentityRegistry to get the count of
@@ -1989,9 +1884,7 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 
 ### 2. Lease expiry watchdog
 
-**Status:** Implemented.
-
-**What was implemented:**
+**Architecture in place:**
 - `vm_leases` table tracks active leases; `LeaseStatus`: `pending`→`active`→`releasing`→`released`/`forced`/`cancelled`
 - `LeaseService` — CRUD + lifecycle transitions
 - `LeaseLifecycleService.check_leases()` — per-cycle logic:
@@ -2003,13 +1896,12 @@ Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, 
 - `POST /api/v1/leases` — storefront calls this after provisioning to register a lease
 - Full CRUD leases API: `GET /api/v1/leases`, `PATCH /api/v1/leases/{id}`, `by-escrow`, `cancel`
 - Storefront `PATCH /api/v1/admin/portfolio/resources/{resource_id}` — general-purpose partial resource update
-- Storefront `resource_poller.py` removed (tombstoned). Storefront `_spawn_publish_loop()` removed.
 - `storefront_url` / `storefront_admin_key` are global provisioning service settings. Helm renders `storefront_url` into the provisioning production config profile and `storefront_admin_key` into the `provisioning-secrets` profile. The default chart topology points the watchdog at the release's `storefront-bob` Service; non-standard topologies override `provisioning.storefront.url`.
 
 **Remaining gap — check job result interpretation:**
-`LeaseLifecycleService._process_releasing_lease` currently polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
+`LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
 
-The `at`-based scheduling on the KVM host still runs as before — the check job is a verification step, not a replacement for the `at` cleanup.
+The `at`-based scheduling on the KVM host runs in parallel — the check job is a verification step, not a replacement for the `at` cleanup.
 
 ---
 
@@ -2239,7 +2131,15 @@ POST /api/v1/settle/{uid}
   └── submitJob           asyncio.create_task(_run_settlement_job_bg())
 ```
 
-`evaluate_settle` calls `_build_provisioning_job_spec(reserve=False)`. The real flow calls it with `reserve=True` (atomically marks resource reserved). `select_available_compute_vm(reserve=False)` is the read-only inventory lookup used by the evaluate path; `select_available_compute_vm(reserve=True)` is the write path used by the real flow. `reserve_available_compute_vm` is a deprecated alias for `select_available_compute_vm(reserve=True)`. The dry-run service passes its request-scoped/injected SQLite client into `_build_provisioning_job_spec`; the helper only falls back to the process-global client when no client is supplied. This keeps in-process integration tests on the same database for listing lookup and inventory selection.
+`evaluate_settle` calls `_build_provisioning_job_spec`, which uses the
+read-only `select_available_compute_vm` (no state change, no reservation).
+The real flow (`fulfill_compute_obligation`) calls
+`reserve_available_compute_vm` directly to atomically mark the resource
+reserved. The dry-run service passes its request-scoped/injected SQLite
+client into `_build_provisioning_job_spec`; the helper only falls back to
+the process-global client when no client is supplied. This keeps in-process
+integration tests on the same database for listing lookup and inventory
+selection.
 
 **Provisioning evaluate-job endpoint (test controller):**
 
@@ -2327,7 +2227,7 @@ registry-service/tests/
 │   ├── test_event_sync.py       # EventSyncService — chain event processing, error handling
 │   ├── test_order_auth_utils.py # EIP-191 signature verification helpers (exhaustive)
 │   ├── test_filter_eval.py      # build_criteria + evaluate_all — spec-driven listing
-│   │                            # filter semantics (replaces the deleted matches_resource_filters)
+│   │                            # filter semantics
 │   └── test_filter_spec.py      # YAML loader, FilterDecl validation, ETag stability + sensitivity
 └── integration/
     ├── conftest.py              # RegistryClient wired to in-process app via httpx ASGITransport;
@@ -2349,7 +2249,7 @@ registry-service/tests/
 
 All integration tests import `RegistryClient` from the `arkhai-registry-client` wheel and exercise the API exclusively through it.  The transport is `httpx.ASGITransport(app=app)` — real HTTP through the full FastAPI stack, no network socket.  If the API renames a field or changes a response shape, the client's `from_dict` parser will either raise or silently drop the field, and the assertion will fail immediately.  The `get_db` dependency is overridden per-test to yield the fixture's isolated in-memory SQLite session.
 
-The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. All previously-raw calls to `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, and `PUT /listings/{id}` have been replaced with typed client methods in `arkhai-registry-client` 0.2.0. Version 0.3.0 added `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) on both `RegistryClient` and `SyncRegistryClient`, plus `ValidatePublishRequest` and `ValidatePublishResponse` models. **Current version: 0.7.0.** The 0.7.0 line added `ListingRequest.seller` and `ValidatePublishRequest.seller` (`""` default) to align with filter-spec v2, which makes `seller` a required publish-candidate field — the storefront populates it from `BASE_URL_OVERRIDE`/seller URL.
+The two legitimate raw-call exceptions (rejection-path tests and `db_session` state setup) apply here exactly as documented in the provisioning-service section above. `RegistryClient` and `SyncRegistryClient` expose typed methods covering `/api/v1/system/config`, `/api/v1/system/sync`, `/api/v1/system/stats`, `PUT /listings/{id}`, and `validate_publish_listing()` (`POST /api/v1/listings/validate-publish`) with `ValidatePublishRequest`/`ValidatePublishResponse` models. `ListingRequest` and `ValidatePublishRequest` carry a `seller` field (`""` default) to satisfy the filter-spec's required-publish-candidate constraint; the storefront populates it from `BASE_URL_OVERRIDE`/seller URL.
 
 **service package (`market-service`)**:
 ```
@@ -2368,7 +2268,7 @@ service/tests/
 
 **ABI alignment test pattern (`service/tests/integration/test_abi_alignment.py`):**
 
-The `service.clients.erc8004.registration` module constructs Python dicts that are passed to web3's ABI codec as `MetadataEntry` struct arguments. If the dict field names don't match the ABI component names, web3 raises `KeyError` during `encode_abi()` before any transaction is broadcast. This is the failure mode that caused the `'metadataKey'` registration crash when the vendored ABI was updated from a hand-pasted version.
+The `service.clients.erc8004.registration` module constructs Python dicts that are passed to web3's ABI codec as `MetadataEntry` struct arguments. If the dict field names do not match the ABI component names, web3 raises `KeyError` during `encode_abi()` before any transaction is broadcast — a silent registration crash whenever the vendored ABI drifts from the constructor.
 
 The integration tests guard this invariant by calling `contract.encode_abi()` against the real vendored ABI using a provider-less `Web3()` instance — no Anvil, no deployment, no network:
 
@@ -2450,7 +2350,7 @@ Setting `find-links` in `pyproject.toml` bakes one of these paths into the lockf
 
 **Rule:** `pyproject.toml` and `uv.lock` files must never contain `find-links` entries or `[tool.uv.sources]` path references for `market-service`, `provisioning-service`, `arkhai-storefront-client`, or `arkhai-registry-client`. These packages are resolved exclusively from wheels in `.dist/`.
 
-**Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker the relative path no longer exists, causing resolution failures. The wheel approach avoids this by making both the path and the mechanism context-specific (CLI flag, not lockfile entry).
+**Why not `uv.sources` editable installs:** Editable path references (`{ path = "../service", editable = true }`) are resolved relative to the project root at lockfile generation time, then embedded in `uv.lock`. Inside Docker that relative path does not exist, causing resolution failures. The wheel approach makes both the path and the mechanism context-specific (CLI flag, not lockfile entry).
 
 ### Internal wheel packages
 
@@ -2583,7 +2483,20 @@ cd registry-service && make reinit && make test-integration
 | `registry-client/` | `arkhai_registry_client-*.whl` | `RegistryClient` | `SyncRegistryClient` | `integration-tests`, `registry-service` tests |
 | `provisioning-service/src/client/` | `provisioning_service-*.whl` | `ProvisioningClient` | `SyncProvisioningClient` | `storefront`, `integration-tests`, `service` shim |
 
-`arkhai-storefront-client` is currently at **version 0.9.0**. The 0.8.0 bump was a breaking rename: `negotiate_new()` and `negotiate_counter()` now take `token` (was `payment_token`) and populate `fields["token"]` to match the on-chain `ERC20EscrowObligation.ObligationData` key. Earlier 0.7.0 bumps added: EIP-191 signing built into `negotiate_new()` on both `StorefrontClient` and `SyncStorefrontClient` (callers no longer build auth headers manually); structured negotiation terms built from scalar helper args; `settle()` method (`POST /api/v1/settle/{uid}`) with EIP-191 auth; `get_settle_status()` method (`GET /api/v1/settle/{uid}/status`) with EIP-191 auth; `evaluate_create_listing()` method (`POST /api/v1/admin/listings/evaluate-create`); `evaluate_negotiate()` method (`POST /api/v1/admin/listings/{id}/evaluate-negotiate`); `EvaluateNegotiateResponse`, `SettleResponse`, `SettleStatusResponse` models.
+`arkhai-storefront-client` exposes EIP-191-signed methods on both
+`StorefrontClient` (async) and `SyncStorefrontClient` (sync):
+
+- `negotiate_new()` / `negotiate_counter()` — take `token` and populate
+  `fields["token"]` to match the on-chain `ERC20EscrowObligation.ObligationData`
+  key; signing headers are added internally.
+- `settle()` — `POST /api/v1/settle/{uid}` with EIP-191 auth.
+- `get_settle_status()` — `GET /api/v1/settle/{uid}/status` with EIP-191
+  auth.
+- `evaluate_create_listing()` — `POST /api/v1/admin/listings/evaluate-create`.
+- `evaluate_negotiate()` — `POST /api/v1/admin/listings/{id}/evaluate-negotiate`.
+
+The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
+`SettleStatusResponse` typed models alongside these methods.
 
 `provisioning-service` bundles its client inside the service wheel (under `src/client/`) because the request/response models (`CreateVmRequest`, `JobStatusResponse`, etc.) are shared between the server and client. Consumers import as `from client.provisioning_client import ProvisioningClient`.
 
@@ -2726,4 +2639,4 @@ creates real VMs, and that teardown is Compute-API-based (no SSH key required on
 | Anvil | Local EVM testnet node from Foundry |
 | EIP-191 | Personal-message signature scheme used to authenticate buyer→seller HTTP request bodies |
 | Policy callable | A registered function that evaluates a negotiation event and may return an action |
-| Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API requires `accepted_escrows` directly; the legacy `demand_resource` field/column no longer exists. |
+| Order | A published offer in the registry; carries `offer_resource`, `accepted_escrows`, status. The listing-create API requires `accepted_escrows` directly. |
