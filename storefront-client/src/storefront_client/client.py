@@ -21,7 +21,8 @@ Usage (async)::
         resp = await client.create_listing(
             agent_wallet_address="0xSellerWallet",
             offer={...},
-            demand={...},
+            accepted_escrows=[{"chain_name": ..., "escrow_address": ...,
+                               "fields": {...}, "price_per_hour": ...}],
         )
 
 Usage (sync, e.g. smoke tests)::
@@ -42,12 +43,10 @@ from typing import Any, Optional
 import httpx
 
 from storefront_client.models import (
-    DiscoverMatch,
     EvaluateNegotiateResponse,
     StorefrontListingClaimResponse,
     StorefrontListingCloseResponse,
     StorefrontListingCreateResponse,
-    StorefrontListingDiscoverResponse,
     StorefrontListingRefundResponse,
     ERC8004RegistrationFile,
     HealthResponse,
@@ -58,10 +57,12 @@ from storefront_client.models import (
     NegotiationDetail,
     NegotiationActionResponse,
     AdminPauseResponse,
-    AdminStatusResponse,
+    ReleaseReservationsResponse,
     RegistryAgentReadyResponse,
     SettleResponse,
     SettleStatusResponse,
+    SettleWaitResponse,
+    ImportResourcesResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -71,6 +72,10 @@ logger = logging.getLogger(__name__)
 
 class StorefrontClientError(Exception):
     """HTTP or protocol error from the storefront API."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +152,10 @@ class _StorefrontClientBase:
     @staticmethod
     def _raise_for_status(method: str, url: str, status: int, text: str) -> None:
         if status >= 400:
-            raise StorefrontClientError(f"{method} {url} returned {status}: {text[:200]}")
+            raise StorefrontClientError(
+                f"{method} {url} returned {status}: {text[:200]}",
+                status_code=status,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -299,16 +307,22 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        since_id: int = 0,
         timeout: float = 30.0,
         poll_interval: float = 0.5,
     ) -> StageEvent:
         """Poll GET /api/v1/system/events until a matching event appears.
 
+        Pass ``since_id`` to ignore events older than that id — useful
+        when waiting for the *next* matching event after triggering an
+        action. Snapshot ``max(e.id for e in get_events().events)``
+        before the trigger, then pass it here.
+
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
         deadline = _time.monotonic() + timeout
-        cursor = 0
+        cursor = since_id
         while _time.monotonic() < deadline:
             result = await self.get_events(
                 since_id=cursor,
@@ -325,7 +339,8 @@ class StorefrontClient(_StorefrontClientBase):
             await _asyncio.sleep(poll_interval)
         raise TimeoutError(
             f"Stage event stage={stage!r} event={event!r} "
-            f"listing_id={listing_id!r} not seen within {timeout}s"
+            f"listing_id={listing_id!r} not seen within {timeout}s "
+            f"(since_id={since_id})"
         )
 
     # ------------------------------------------------------------------
@@ -337,49 +352,17 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         status: str | None = None,
         paused: bool | None = None,
-        # Spec filters — equality
-        region: str | None = None,
-        gpu_model: str | None = None,
-        sla: float | None = None,
-        cpu_type: str | None = None,
-        host_disk_type: str | None = None,
-        motherboard: str | None = None,
-        gpu_interconnect: str | None = None,
-        virtualization_type: str | None = None,
-        static_ip: bool | None = None,
-        datacenter_grade: bool | None = None,
-        # Spec filters — numeric ">="
-        gpu_count_min: int | None = None,
-        vcpu_count_min: int | None = None,
-        ram_gb_min: int | None = None,
-        disk_gb_min: int | None = None,
-        host_cpu_cores_min: int | None = None,
-        host_ram_gb_min: int | None = None,
-        host_disk_gb_min: int | None = None,
-        total_gpu_count_min: int | None = None,
-        nic_speed_gbps_min: int | None = None,
-        internet_download_mbps_min: int | None = None,
-        internet_upload_mbps_min: int | None = None,
-        open_ports_count_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> ListingListResponse:
-        """GET /api/v1/listings"""
+        """GET /api/v1/listings — local resource enumeration.
+
+        Discovery filters (gpu_model, region, token, etc.) moved to
+        registries with milestone (a1b); query a registry's
+        ``/filter-spec`` and ``/listings`` for those.
+        """
         params = _build_listings_params(
-            status=status, paused=paused,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            limit=limit, offset=offset,
+            status=status, paused=paused, limit=limit, offset=offset,
         )
         return ListingListResponse.from_dict(
             await self._get("/api/v1/listings", params=params)
@@ -446,7 +429,7 @@ class StorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/advance  (admin key)"""
@@ -468,7 +451,7 @@ class StorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: int,
+        price: float,
     ) -> "NegotiationActionResponse":
         """POST /api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept  (admin key)"""
         return NegotiationActionResponse.from_dict(
@@ -495,20 +478,73 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
-    async def admin_status(self) -> AdminStatusResponse:
-        """GET /admin/status  (admin key required)"""
-        url = self._url("/api/v1/admin/status")
-        resp = await self._client.get(
-            "/api/v1/admin/status",
+    async def admin_import_resources(
+        self, csv_content: bytes, filename: str = "resources.csv"
+    ) -> ImportResourcesResponse:
+        """POST /admin/portfolio/resources/import  (admin key required).
+
+        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
+        upserts regardless of current table state — use to force a clobber
+        of the current inventory without restarting the pod.
+
+        ``csv_content`` is the raw bytes of the CSV file. Typically read
+        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
+        """
+        url = self._url("/api/v1/admin/portfolio/resources/import")
+        resp = await self._client.post(
+            "/api/v1/admin/portfolio/resources/import",
+            files={"file": (filename, csv_content, "text/csv")},
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
-        self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return AdminStatusResponse.from_dict(resp.json())
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return ImportResourcesResponse.from_dict(resp.json())
 
     async def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
         return await self._post("/api/v1/admin/policy/seed", {}, extra_headers=self._admin_headers())
+
+    async def get_resource(self, resource_id: str) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Returns the current state of the resource row — same shape as patch_resource.
+        404 if the resource_id does not exist.
+        """
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
+        resp = await self._client.get(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def patch_resource(
+        self,
+        resource_id: str,
+        *,
+        state: "str | None" = None,
+        attributes: "dict | None" = None,
+    ) -> dict:
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Partial update of a resource row. Only supplied (non-None) fields are
+        written. Returns the full resource row after the patch.
+        """
+        body: dict = {}
+        if state is not None:
+            body["state"] = state
+        if attributes is not None:
+            body["attributes"] = attributes
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
+        resp = await self._client.patch(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            json=body,
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
+        return resp.json()
 
     async def policy_status(self) -> dict:
         """GET /api/v1/system/policy — callable registry + seeded policy diagnostic."""
@@ -518,7 +554,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict,
-        demand: dict,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         policy_components: list[str],
     ) -> dict:
@@ -532,7 +568,7 @@ class StorefrontClient(_StorefrontClientBase):
             {
                 "event_type": "order_create",
                 "offer": offer,
-                "demand": demand,
+                "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": max_duration_seconds,
                 "policy_components": policy_components,
             },
@@ -542,14 +578,14 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> dict:
         """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -569,7 +605,7 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        their_proposed_price: int,
+        their_proposed_price: float,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
@@ -600,23 +636,28 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
         """POST /listings/create.
 
+        ``accepted_escrows`` lists the escrow shapes the seller will accept
+        for this listing. Each entry pins ``(chain_name, escrow_address)``
+        plus a partial ``ObligationData`` advertisement via the ``fields``
+        map, with the per-hour rate in ``price_per_hour``.
+
         ``max_duration_seconds`` is the optional ceiling on lease duration
         (None = unlimited). Buyers supply the actual duration at
-        negotiation init time; total payment is computed at agreement
-        as demand.amount × agreed_duration_seconds / 3600. Pass
+        negotiation init time; total payment is computed at agreement as
+        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
         ``paused=True`` to create the listing in local SQLite without
         publishing to the registry; call ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -674,18 +715,6 @@ class StorefrontClient(_StorefrontClientBase):
             await self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    async def discover_listings(
-        self,
-        *,
-        listing_id: str,
-        include_active: bool = False,
-    ) -> StorefrontListingDiscoverResponse:
-        """POST /listings/discover"""
-        headers = self._auth_headers("discover_listings", listing_id)
-        body = {"listing_id": listing_id, "include_active": include_active}
-        return StorefrontListingDiscoverResponse.from_dict(
-            await self._post("/listings/discover", body, extra_headers=headers)
-        )
 
     async def send_resource_alert(
         self,
@@ -717,18 +746,45 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: int,
+        initial_price: float,
         duration_seconds: int,
         buyer_agent_url: str = "",
+        ssh_public_key: str = "",
+        token: str = "",
+        chain_name: str = "",
+        escrow_address: str = "",
+        escrow_expiration_unix: int | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+
+        ``provision_terms`` and ``escrow_proposal`` are required by the
+        wire protocol; this helper builds canonical defaults from the
+        scalar args so smoke / integration tests can keep their current
+        call shape. ``chain_name`` + ``escrow_address`` pick the
+        listing's accepted_escrows entry to propose against;
+        ``token`` populates ``fields["token"]``. Empty
+        values produce zero-address / placeholder strings — legal in
+        environments where the seller's listing has no typed payment
+        token; the seller validates against its acceptance set.
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
             "initial_price": initial_price,
-            "duration_seconds": duration_seconds,
+            "provision_terms": {
+                "duration_seconds": duration_seconds,
+                "ssh_public_key": ssh_public_key,
+                "compute_resource": None,
+            },
+            "escrow_proposal": {
+                "chain_name": chain_name or "anvil",
+                "escrow_address": escrow_address or ("0x" + "0" * 40),
+                "fields": {"token": token or ("0x" + "0" * 40)},
+                "expiration_unix": exp_unix,
+            },
             "buyer_agent_url": buyer_agent_url,
         }
         return await self._post(
@@ -742,7 +798,7 @@ class StorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}"""
@@ -796,12 +852,41 @@ class StorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
 
+    async def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        *,
+        timeout: float = 60.0,
+    ) -> SettleWaitResponse:
+        """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until the
+        settlement job reaches ``ready`` or ``failed``, or until *timeout* seconds
+        elapse. Returns immediately if the job is already terminal.
+
+        Callers must check ``result.ready`` and ``result.status``:
+        - ``ready=True, status="ready"`` — provisioning complete, credentials available
+        - ``ready=True, status="failed"`` — provisioning failed
+        - ``ready=False`` — timed out before reaching a terminal state
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
+        resp = await self._client.get(
+            f"/api/v1/admin/settle/{escrow_uid}/wait",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleWaitResponse.from_dict(resp.json())
+
     async def verify_settle(
         self,
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
     ) -> dict:
@@ -902,6 +987,14 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("POST", url, resp.status_code, resp.text)
         return resp.json()
 
+    def _patch(self, path: str, body: dict, *, extra_headers: dict | None = None) -> dict:
+        url = self._url(path)
+        resp = self._client.patch(
+            path, json=body, headers=extra_headers or {}, timeout=self._timeout
+        )
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
+        return resp.json()
+
     def _get(self, path: str, *, params: dict | None = None) -> dict:
         url = self._url(path)
         resp = self._client.get(path, params=params or {}, timeout=self._timeout)
@@ -996,16 +1089,22 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str | None = None,
         negotiation_id: str | None = None,
+        since_id: int = 0,
         timeout: float = 30.0,
         poll_interval: float = 0.5,
     ) -> StageEvent:
         """Poll GET /api/v1/system/events until a matching event appears.
 
+        Pass ``since_id`` to ignore events older than that id — useful
+        when waiting for the *next* matching event after triggering an
+        action. Snapshot ``max(e.id for e in get_events().events)``
+        before the trigger, then pass it here.
+
         Raises TimeoutError if the event is not seen within *timeout* seconds.
         """
         import time as _time
         deadline = _time.monotonic() + timeout
-        cursor = 0
+        cursor = since_id
         while _time.monotonic() < deadline:
             result = self.get_events(
                 since_id=cursor,
@@ -1021,7 +1120,8 @@ class SyncStorefrontClient(_StorefrontClientBase):
             _time.sleep(poll_interval)
         raise TimeoutError(
             f"Stage event stage={stage!r} event={event!r} "
-            f"listing_id={listing_id!r} not seen within {timeout}s"
+            f"listing_id={listing_id!r} not seen within {timeout}s "
+            f"(since_id={since_id})"
         )
 
     # ------------------------------------------------------------------
@@ -1033,47 +1133,12 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         status: str | None = None,
         paused: bool | None = None,
-        region: str | None = None,
-        gpu_model: str | None = None,
-        sla: float | None = None,
-        cpu_type: str | None = None,
-        host_disk_type: str | None = None,
-        motherboard: str | None = None,
-        gpu_interconnect: str | None = None,
-        virtualization_type: str | None = None,
-        static_ip: bool | None = None,
-        datacenter_grade: bool | None = None,
-        gpu_count_min: int | None = None,
-        vcpu_count_min: int | None = None,
-        ram_gb_min: int | None = None,
-        disk_gb_min: int | None = None,
-        host_cpu_cores_min: int | None = None,
-        host_ram_gb_min: int | None = None,
-        host_disk_gb_min: int | None = None,
-        total_gpu_count_min: int | None = None,
-        nic_speed_gbps_min: int | None = None,
-        internet_download_mbps_min: int | None = None,
-        internet_upload_mbps_min: int | None = None,
-        open_ports_count_min: int | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> ListingListResponse:
-        """GET /api/v1/listings"""
+        """GET /api/v1/listings — see :meth:`StorefrontClient.list_listings`."""
         params = _build_listings_params(
-            status=status, paused=paused,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            limit=limit, offset=offset,
+            status=status, paused=paused, limit=limit, offset=offset,
         )
         return ListingListResponse.from_dict(
             self._get("/api/v1/listings", params=params)
@@ -1138,7 +1203,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         neg_id: str,
         *,
         action: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> NegotiationActionResponse:
         """POST .../advance  (admin key required)"""
@@ -1160,7 +1225,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         listing_id: str,
         neg_id: str,
         *,
-        price: int,
+        price: float,
     ) -> NegotiationActionResponse:
         """POST .../force-accept  (admin key required)"""
         return NegotiationActionResponse.from_dict(
@@ -1187,16 +1252,112 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/api/v1/admin/resume", {}, extra_headers=self._admin_headers())
         )
 
-    def admin_status(self) -> AdminStatusResponse:
-        """GET /admin/status  (admin key required)"""
-        url = self._url("/api/v1/admin/status")
+    def admin_import_resources(
+        self, csv_content: bytes, filename: str = "resources.csv"
+    ) -> ImportResourcesResponse:
+        """POST /admin/portfolio/resources/import  (admin key required).
+
+        Upload a compute resource CSV to bulk-upsert portfolio rows. Always
+        upserts regardless of current table state — use to force a clobber
+        of the current inventory without restarting the pod.
+
+        ``csv_content`` is the raw bytes of the CSV file. Typically read
+        with ``Path(...).read_bytes()`` or ``open(..., "rb").read()``.
+        """
+        url = self._url("/api/v1/admin/portfolio/resources/import")
+        resp = self._client.post(
+            "/api/v1/admin/portfolio/resources/import",
+            files={"file": (filename, csv_content, "text/csv")},
+            headers=self._admin_headers(),
+            timeout=self._timeout,
+        )
+        self._raise_for_status("POST", url, resp.status_code, resp.text)
+        return ImportResourcesResponse.from_dict(resp.json())
+
+    def admin_release_reservations(self) -> "ReleaseReservationsResponse":
+        """POST /admin/portfolio/release-reservations  (admin key required).
+
+        Forces every ``reserved`` compute resource back to ``available``.
+        Sledgehammer — prefer ``admin_release_one_reservation(resource_id)``
+        for production operator workflows. This bulk variant is mainly for
+        e2e teardown between back-to-back runs against the same stack
+        (mocked provisioning never expires leases).
+        """
+        return ReleaseReservationsResponse.from_dict(
+            self._post(
+                "/api/v1/admin/portfolio/release-reservations",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    def admin_release_one_reservation(
+        self, resource_id: str
+    ) -> "ReleaseReservationsResponse":
+        """POST /admin/portfolio/resources/{resource_id}/release-reservation
+        (admin key required).
+
+        Surgical: releases exactly the named reserved resource. Idempotent
+        on already-available rows (returns released_count=0 instead of
+        erroring). 404 if the row doesn't exist.
+
+        For an actually-stuck VM, pair this with provisioning's
+        ``POST /api/v1/hosts/{host}/vms/{vm_name}/destroy`` — that operation
+        runs real Ansible against the host, while this endpoint only clears
+        the storefront's own bookkeeping.
+        """
+        return ReleaseReservationsResponse.from_dict(
+            self._post(
+                f"/api/v1/admin/portfolio/resources/{resource_id}/release-reservation",
+                {},
+                extra_headers=self._admin_headers(),
+            )
+        )
+
+    def get_resource(self, resource_id: str) -> dict:
+        """GET /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Returns the current state of the resource row — same shape as patch_resource.
+        404 if the resource_id does not exist.
+        """
+        url = self._url(f"/api/v1/admin/portfolio/resources/{resource_id}")
         resp = self._client.get(
-            "/api/v1/admin/status",
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
             headers=self._admin_headers(),
             timeout=self._timeout,
         )
         self._raise_for_status("GET", url, resp.status_code, resp.text)
-        return AdminStatusResponse.from_dict(resp.json())
+        return resp.json()
+
+    def patch_resource(
+        self,
+        resource_id: str,
+        *,
+        state: "str | None" = None,
+        attributes: "dict | None" = None,
+    ) -> dict:
+        """PATCH /api/v1/admin/portfolio/resources/{resource_id}  (admin key required).
+
+        Partial update of a resource row. Only supplied (non-None) fields are
+        written; unspecified fields are left unchanged. Returns the full
+        resource row after the patch.
+
+        Primary use cases:
+          - Release a lease: ``patch_resource(id, state='available', attributes={'lease_end_utc': None})``
+          - Force a state transition for testing or operator recovery.
+
+        Returns the raw response dict from the endpoint.
+        """
+        body: dict = {}
+        if state is not None:
+            body["state"] = state
+        if attributes is not None:
+            body["attributes"] = attributes
+        return self._patch(
+            f"/api/v1/admin/portfolio/resources/{resource_id}",
+            body,
+            extra_headers=self._admin_headers(),
+        )
 
     def policy_seed(self) -> dict:
         """POST /admin/policy/seed — discover callables + seed default policies (admin key)."""
@@ -1210,7 +1371,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict,
-        demand: dict,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         policy_components: list[str],
     ) -> dict:
@@ -1224,7 +1385,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
             {
                 "event_type": "order_create",
                 "offer": offer,
-                "demand": demand,
+                "accepted_escrows": accepted_escrows,
                 "max_duration_seconds": max_duration_seconds,
                 "policy_components": policy_components,
             },
@@ -1234,14 +1395,14 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         *,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> dict:
         """POST /api/v1/admin/listings/evaluate-create — dry-run, no DB writes (admin key)."""
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1261,7 +1422,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         listing_id: str,
         *,
-        their_proposed_price: int,
+        their_proposed_price: float,
         buyer_address: str = "",
     ) -> EvaluateNegotiateResponse:
         """POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate — dry-run (admin key).
@@ -1292,22 +1453,28 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         agent_wallet_address: str,
         offer: dict[str, Any],
-        demand: dict[str, Any],
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None = None,
         paused: bool = False,
     ) -> StorefrontListingCreateResponse:
         """POST /listings/create.
 
+        ``accepted_escrows`` lists the escrow shapes the seller will accept
+        for this listing. Each entry pins ``(chain_name, escrow_address)``
+        plus a partial ``ObligationData`` advertisement via the ``fields``
+        map, with the per-hour rate in ``price_per_hour``.
+
         ``max_duration_seconds`` is the optional ceiling on lease duration
         (None = unlimited). Buyers supply the actual duration at
-        negotiation init time. Pass ``paused=True`` to create the listing
-        in local SQLite without publishing to the registry; call
-        ``resume_listing`` to publish.
+        negotiation init time; total payment is computed at agreement as
+        ``price_per_hour × agreed_duration_seconds / 3600``. Pass
+        ``paused=True`` to create the listing in local SQLite without
+        publishing to the registry; call ``resume_listing`` to publish.
         """
         headers = self._auth_headers("create_listing", agent_wallet_address)
         body = {
             "offer": offer,
-            "demand": demand,
+            "accepted_escrows": accepted_escrows,
             "max_duration_seconds": max_duration_seconds,
             "paused": paused,
         }
@@ -1365,19 +1532,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             self._post("/listings/claim", body, extra_headers=headers)
         )
 
-    def discover_listings(
-        self,
-        *,
-        listing_id: str,
-        include_active: bool = False,
-    ) -> StorefrontListingDiscoverResponse:
-        """POST /listings/discover"""
-        headers = self._auth_headers("discover_listings", listing_id)
-        body = {"listing_id": listing_id, "include_active": include_active}
-        return StorefrontListingDiscoverResponse.from_dict(
-            self._post("/listings/discover", body, extra_headers=headers)
-        )
-
     def send_resource_alert(
         self,
         *,
@@ -1407,18 +1561,39 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         listing_id: str,
         buyer_address: str,
-        initial_price: int,
+        initial_price: float,
         duration_seconds: int,
         buyer_agent_url: str = "",
+        ssh_public_key: str = "",
+        token: str = "",
+        chain_name: str = "",
+        escrow_address: str = "",
+        escrow_expiration_unix: int | None = None,
     ) -> dict:
-        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically."""
+        """POST /api/v1/negotiate/new — adds EIP-191 auth headers automatically.
+
+        ``provision_terms`` and ``escrow_proposal`` are required by the
+        wire protocol; this helper builds canonical defaults from the
+        scalar args. See the async variant for the field semantics.
+        """
         ts = str(int(time.time()))
         sig = _sign_eip191(self._private_key, f"negotiate_new:{listing_id}:{ts}")
+        exp_unix = escrow_expiration_unix or (int(time.time()) + 3600)
         body = {
             "listing_id": listing_id,
             "buyer_address": buyer_address,
             "initial_price": initial_price,
-            "duration_seconds": duration_seconds,
+            "provision_terms": {
+                "duration_seconds": duration_seconds,
+                "ssh_public_key": ssh_public_key,
+                "compute_resource": None,
+            },
+            "escrow_proposal": {
+                "chain_name": chain_name or "anvil",
+                "escrow_address": escrow_address or ("0x" + "0" * 40),
+                "fields": {"token": token or ("0x" + "0" * 40)},
+                "expiration_unix": exp_unix,
+            },
             "buyer_agent_url": buyer_agent_url,
         }
         return self._post(
@@ -1432,7 +1607,7 @@ class SyncStorefrontClient(_StorefrontClientBase):
         *,
         action: str,
         buyer_address: str,
-        price: int | None = None,
+        price: float | None = None,
         reason: str | None = None,
     ) -> dict:
         """POST /api/v1/negotiate/{neg_id}"""
@@ -1486,12 +1661,41 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self._raise_for_status("GET", url, resp.status_code, resp.text)
         return SettleStatusResponse.from_dict(resp.json())
 
+    def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        *,
+        timeout: float = 60.0,
+    ) -> SettleWaitResponse:
+        """GET /api/v1/admin/settle/{escrow_uid}/wait — long-poll (admin).
+
+        Single server-side long-poll: the storefront blocks internally until the
+        settlement job reaches ``ready`` or ``failed``, or until *timeout* seconds
+        elapse. Returns immediately if the job is already terminal.
+
+        Callers must check ``result.ready`` and ``result.status``:
+        - ``ready=True, status="ready"`` — provisioning complete, credentials available
+        - ``ready=True, status="failed"`` — provisioning failed
+        - ``ready=False`` — timed out before reaching a terminal state
+
+        Raises ``StorefrontClientError`` on non-2xx responses.
+        """
+        url = self._url(f"/api/v1/admin/settle/{escrow_uid}/wait")
+        resp = self._client.get(
+            f"/api/v1/admin/settle/{escrow_uid}/wait",
+            params={"timeout": timeout},
+            headers=self._admin_headers(),
+            timeout=timeout + 10.0,  # client timeout slightly longer than server cap
+        )
+        self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return SettleWaitResponse.from_dict(resp.json())
+
     def verify_settle(
         self,
         escrow_uid: str,
         *,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
         listing_id: str,
     ) -> dict:

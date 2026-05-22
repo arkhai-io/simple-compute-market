@@ -81,6 +81,30 @@ def _format_resource(resource: dict) -> str:
     return json.dumps(resource, separators=(",", ":"), sort_keys=True)
 
 
+def _format_accepted_escrows(entries: list) -> str:
+    if not entries:
+        return "-"
+    if not isinstance(entries, list):
+        return str(entries)
+    lines: list[str] = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            lines.append(f"[{i}] {entry}")
+            continue
+        chain = entry.get("chain_name") or "-"
+        addr = _short_contract_address(str(entry.get("escrow_address") or "-"))
+        price = entry.get("price_per_hour")
+        fields = entry.get("fields") or {}
+        token = fields.get("token") if isinstance(fields, dict) else None
+        parts = [f"chain={chain}", f"escrow={addr}"]
+        if token:
+            parts.append(f"token={_short_contract_address(str(token))}")
+        if price is not None:
+            parts.append(f"price/hr={price}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
+
+
 def _shorten(text: str, width: int = 36) -> str:
     if len(text) <= width:
         return text
@@ -115,9 +139,16 @@ def _fetch_json(url: str) -> dict:
 
 @listing_app.command("list")
 def listing_list(
-    registry_url: str = typer.Option(
-        None, "--registry-url", "-r",
-        help="Registry indexer base URL (config.toml: registry.url).",
+    registry_urls: str = typer.Option(
+        None, "--registry-urls", "-r",
+        help="Comma-separated registry indexer base URLs "
+             "(config.toml: registry.urls). The result is the union "
+             "across all registries, deduped by listing_id.",
+    ),
+    discovery_timeout: float | None = typer.Option(
+        None, "--discovery-timeout",
+        help="Per-registry deadline in seconds (default: "
+             "registry.discovery_timeout from config.toml, fallback 5).",
     ),
     listing_id: str | None = typer.Option(None, "--listing-id", help="Filter by listing ID."),
     # Spec filters — slice fields
@@ -153,12 +184,12 @@ def listing_list(
     `_min` semantics for numerics. Without any filters, returns all open
     listings up to ``--limit``.
     """
-    base_url = (
-        registry_url
-        or resolve_config_value(toml_path="registry.url")
-        or "http://localhost:8080"
+    from ..common import (
+        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
     )
-    base_url = _normalize_registry_url(base_url)
+    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    deadline = resolve_discovery_timeout(override=discovery_timeout)
+    auth = resolve_indexer_auth()
     if limit < 1 or limit > 200:
         raise typer.BadParameter("limit must be between 1 and 200")
     if offset < 0:
@@ -188,11 +219,41 @@ def listing_list(
             continue
         query_params[key] = str(val).lower() if isinstance(val, bool) else val
     params = urllib.parse.urlencode(query_params)
-    url = f"{base_url}/listings?{params}"
 
-    payload = _fetch_json(url)
-
-    items = payload.get("items", [])
+    # Fan-in across every configured registry; dedupe by listing_id.
+    # First-seen wins so the operator's preferred registry (listed
+    # first in registry.urls) takes precedence on collisions.
+    merged: dict[str, dict] = {}
+    successes = 0
+    last_error: Exception | None = None
+    for base in urls:
+        url = f"{base}/listings?{params}"
+        try:
+            req_headers = {"Accept": "application/json"}
+            if auth.get(base):
+                req_headers["Authorization"] = f"Bearer {auth[base]}"
+            req = urllib.request.Request(url, headers=req_headers)
+            with urllib.request.urlopen(req, timeout=deadline) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            typer.secho(
+                f"[registry] {base}: {exc}", err=True, fg=typer.colors.YELLOW,
+            )
+            last_error = exc
+            continue
+        successes += 1
+        for row in payload.get("items", []):
+            lid = row.get("listing_id") or row.get("id")
+            if lid is None:
+                continue
+            merged.setdefault(str(lid), row)
+    if successes == 0:
+        typer.secho(
+            f"All {len(urls)} configured registries failed; last error: {last_error}",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+    items = list(merged.values())
     console = Console()
     table = Table(title="Open Listings", box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("Listing ID", style="bold", overflow="fold")
@@ -200,19 +261,19 @@ def listing_list(
     table.add_column("Seller")
     table.add_column("Buyer")
     table.add_column("Offer")
-    table.add_column("Demand")
+    table.add_column("Accepted escrows")
     table.add_column("Created", justify="right")
 
     for row in items:
         offer_display = _format_resource(row.get("offer_resource", {}))
-        demand_display = _format_resource(row.get("demand_resource", {}))
+        accepted_display = _format_accepted_escrows(row.get("accepted_escrows", []))
         table.add_row(
             str(row.get("listing_id", "-")),
             _shorten(str(row.get("agent_id", "-")), 32),
             _shorten(str(row.get("seller", "-")), 40),
             _shorten(str(row.get("buyer", "-")), 40),
             offer_display if "\n" in offer_display else _shorten(offer_display, 120),
-            demand_display if "\n" in demand_display else _shorten(demand_display, 120),
+            accepted_display if "\n" in accepted_display else _shorten(accepted_display, 120),
             _short_ts(row.get("created_at")),
         )
 
@@ -231,23 +292,40 @@ def listing_list(
 @listing_app.command("show")
 def listing_show(
     listing_id: str = typer.Argument(..., help="Listing ID"),
-    registry_url: str = typer.Option(
+    registry_urls: str = typer.Option(
         None,
-        "--registry-url",
+        "--registry-urls",
         "-r",
-        help="Registry indexer base URL (config.toml: registry.url).",
+        help="Comma-separated registry indexer base URLs "
+             "(config.toml: registry.urls). The first registry that "
+             "knows the listing wins; others are skipped.",
+    ),
+    discovery_timeout: float | None = typer.Option(
+        None, "--discovery-timeout",
+        help="Per-registry deadline in seconds (default: "
+             "registry.discovery_timeout from config.toml, fallback 5).",
     ),
 ) -> None:
-    """Show a single listing by ID, fetched from the registry indexer."""
-    base_url = (
-        registry_url
-        or resolve_config_value(toml_path="registry.url")
-        or "http://localhost:8080"
+    """Show a single listing by ID, fetched from the configured
+    registry indexers — the first one that knows the listing wins."""
+    from ..common import (
+        resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
     )
-    base_url = _normalize_registry_url(base_url)
-    url = f"{base_url}/listings/{listing_id}"
-    payload = _fetch_json(url)
-    found = payload.get("listing", payload)
+    from ..buy_orchestrator import fetch_listing_dict_multi
+    urls = [_normalize_registry_url(u) for u in resolve_indexer_urls(override=registry_urls)]
+    deadline = resolve_discovery_timeout(override=discovery_timeout)
+    auth = resolve_indexer_auth()
+    try:
+        found = fetch_listing_dict_multi(urls, listing_id, timeout=deadline, auth=auth)
+    except RuntimeError as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    if found is None:
+        typer.secho(
+            f"Listing {listing_id!r} not found in any of {len(urls)} registries.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
 
     console = Console()
     table = Table.grid(padding=(0, 2))
@@ -266,6 +344,6 @@ def listing_show(
     table.add_row("Created", _short_ts(found.get("created_at")))
     table.add_row("Updated", _short_ts(found.get("updated_at")))
     table.add_row("Offer", _format_resource(found.get("offer_resource", {})))
-    table.add_row("Demand", _format_resource(found.get("demand_resource", {})))
+    table.add_row("Accepted escrows", _format_accepted_escrows(found.get("accepted_escrows", [])))
 
     console.print(Panel(table, title="Marketplace Listing", border_style="blue"))

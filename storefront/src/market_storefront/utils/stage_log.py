@@ -40,8 +40,8 @@ def _get_db_path() -> str | None:
     if _db_path is not None:
         return _db_path
     try:
-        from market_storefront.utils.config import CONFIG
-        _db_path = CONFIG.agent_db_path
+        from market_storefront.utils.config import settings
+        _db_path = settings.db_path
     except Exception:
         _db_path = ""  # mark as "tried and failed" so we don't retry
     return _db_path or None

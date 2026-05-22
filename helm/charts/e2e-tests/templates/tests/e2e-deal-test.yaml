@@ -1,0 +1,59 @@
+{{/*
+Helm test pod: full buyer-seller deal lifecycle (e2e_deal marker).
+
+Config is assembled from two dynaconf profiles:
+  1. "helm"       — config-helm.yml from the shared test-config ConfigMap
+                    (non-secret topology: URLs, chain ID, registry addresses,
+                     seller API URL, buyer wallet address, buyer chain_rpc_url)
+  2. "e2e-secret" — config-e2e-secret.yml from this subchart's Secret
+                    (seller + buyer private keys, admin API key)
+
+ACTIVE_PROFILES: "helm,e2e-secret"
+CONFIG_DIRECTORY: /app/config
+
+The test-config ConfigMap is created by the umbrella chart's
+helm/templates/tests/test-config.yaml and is always present when the
+umbrella chart is deployed, regardless of which subcharts are enabled.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "e2e-tests.fullname" . }}-e2e-deal-test
+  labels:
+    {{- include "e2e-tests.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: e2e-deal-test
+      image: {{ include "e2e-tests.image" . }}
+      imagePullPolicy: {{ .Values.integrationTests.pullPolicy }}
+      command:
+        - .venv/bin/pytest
+        - -m
+        - e2e_deal
+        - -v
+        - --tb=short
+      env:
+        - name: ACTIVE_PROFILES
+          value: "helm,e2e-secret"
+        - name: CONFIG_DIRECTORY
+          value: /app/config
+      volumeMounts:
+        - name: test-config
+          mountPath: /app/config/config-helm.yml
+          subPath: config-helm.yml
+          readOnly: true
+        - name: e2e-secret
+          mountPath: /app/config/config-e2e-secret.yml
+          subPath: config-e2e-secret.yml
+          readOnly: true
+  volumes:
+    - name: test-config
+      configMap:
+        name: {{ .Release.Name }}-test-config
+    - name: e2e-secret
+      secret:
+        secretName: {{ include "e2e-tests.secretName" . }}

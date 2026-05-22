@@ -29,10 +29,10 @@ through `services/policy_service.py` directly.
 import asyncio
 import logging
 
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings, AGENT_NAME, BASE_URL_OVERRIDE
 from market_storefront.utils.logging_config import setup_file_logging
 
-setup_file_logging(CONFIG.log_file_path, CONFIG.log_level)
+setup_file_logging(settings.log_file_path or None, settings.log_level)
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +43,9 @@ ALERTS_USER_ID = "resource-monitor"
 # Build the agent card once at import — identity_controller reads this.
 from market_storefront.utils.agent_card import build_agent_card_data
 agent_card_data = build_agent_card_data(
-    agent_name=CONFIG.agent_name,
-    base_url=CONFIG.base_url_override,
-    agent_wallet_address=CONFIG.agent_wallet_address,
+    agent_name=AGENT_NAME,
+    base_url=BASE_URL_OVERRIDE,
+    agent_wallet_address=settings.wallet.address,
 )
 
 
@@ -57,7 +57,7 @@ async def _ensure_agent_identity() -> int:
     """Resolve the numeric on-chain agent ID, registering if necessary.
 
     Resolution order:
-      1. CONFIG.onchain_agent_id (pinned in TOML / helm values) — fast path,
+      1. settings.onchain_agent_id (pinned in TOML / helm values) — fast path,
          no chain interaction.
       2. auto_register=True → call perform_registration() and hold the result
          in memory for this process lifetime.
@@ -69,21 +69,21 @@ async def _ensure_agent_identity() -> int:
     """
     global _AGENT_ID
 
-    if CONFIG.onchain_agent_id:
+    if settings.onchain_agent_id:
         try:
-            _AGENT_ID = int(CONFIG.onchain_agent_id)
+            _AGENT_ID = int(settings.onchain_agent_id)
             logger.info(
                 "[IDENTITY] Using pinned agent ID %d from config", _AGENT_ID
             )
         except ValueError:
             raise RuntimeError(
-                f"[IDENTITY] seller.onchain_agent_id '{CONFIG.onchain_agent_id}' "
+                f"[IDENTITY] seller.onchain_agent_id '{settings.onchain_agent_id}' "
                 "is not a valid integer."
             )
 
         # Validate that this wallet actually owns the pinned ID on-chain.
         # Skipped when chain config is absent (local dev without a node).
-        if CONFIG.chain_rpc_url and CONFIG.identity_registry_address and CONFIG.agent_wallet_address:
+        if settings.chain.rpc_url and settings.registry.identity_registry_address and settings.wallet.address:
             try:
                 from service.clients.erc8004.blockchain import (
                     get_identity_registry_contract,
@@ -91,7 +91,7 @@ async def _ensure_agent_identity() -> int:
                 from web3 import Web3
                 from web3.providers import HTTPProvider
 
-                rpc = CONFIG.chain_rpc_url
+                rpc = settings.chain.rpc_url
                 if rpc.startswith("ws"):
                     # Use HTTP fallback for the ownership check — websocket is
                     # only needed for event subscriptions, not one-shot calls.
@@ -100,9 +100,9 @@ async def _ensure_agent_identity() -> int:
                 else:
                     w3 = Web3(HTTPProvider(rpc, request_kwargs={"timeout": 5}))
 
-                contract = get_identity_registry_contract(w3, CONFIG.identity_registry_address)
+                contract = get_identity_registry_contract(w3, settings.registry.identity_registry_address)
                 owner = contract.functions.ownerOf(_AGENT_ID).call()
-                expected = CONFIG.agent_wallet_address
+                expected = settings.wallet.address
 
                 if owner.lower() != expected.lower():
                     raise RuntimeError(
@@ -131,7 +131,7 @@ async def _ensure_agent_identity() -> int:
 
         return _AGENT_ID
 
-    if not CONFIG.auto_register:
+    if not settings.auto_register:
         raise RuntimeError(
             "[IDENTITY] seller.onchain_agent_id is not set and "
             "seller.auto_register is false. "
@@ -141,7 +141,7 @@ async def _ensure_agent_identity() -> int:
 
     logger.info("[IDENTITY] No agent ID pinned — performing on-chain registration.")
     from market_storefront.commands.register import perform_registration
-    _AGENT_ID = await perform_registration(chain_id=CONFIG.chain_id)
+    _AGENT_ID = await perform_registration(chain_id=settings.chain.chain_id)
     logger.info("[IDENTITY] Registered with agent ID %d", _AGENT_ID)
     return _AGENT_ID
 
@@ -150,12 +150,12 @@ async def _start_heartbeat():
     """Start heartbeat loop after server is ready."""
     from service.clients.erc8004.heartbeat import start_agent_heartbeat
     await start_agent_heartbeat({
-        "indexer_url": CONFIG.indexer_url,
-        "identity_registry_address": CONFIG.identity_registry_address,
-        "agent_wallet_address": CONFIG.agent_wallet_address,
+        "indexer_urls": settings.registry.urls,
+        "identity_registry_address": settings.registry.identity_registry_address,
+        "agent_wallet_address": settings.wallet.address,
         "onchain_agent_id": str(_AGENT_ID) if _AGENT_ID is not None else None,
-        "chain_rpc_url": CONFIG.chain_rpc_url,
-        "agent_priv_key": CONFIG.agent_priv_key,
+        "chain_rpc_url": settings.chain.rpc_url,
+        "agent_priv_key": settings.wallet.private_key,
     })
 
 
@@ -177,8 +177,8 @@ async def _preflight_provisioning() -> None:
     """
     import httpx
 
-    url = CONFIG.provisioning_service_url.rstrip("/") + "/health"
-    timeout_s = max(int(CONFIG.provisioning_preflight_timeout), 1)
+    url = settings.provisioning.service_url.rstrip("/") + "/health"
+    timeout_s = max(int(settings.provisioning.preflight_timeout), 1)
     deadline = asyncio.get_event_loop().time() + timeout_s
     last_error: str | None = None
     attempt = 0
@@ -191,7 +191,7 @@ async def _preflight_provisioning() -> None:
             if resp.status_code == 200:
                 logger.info(
                     "[STARTUP] Provisioning service reachable at %s (attempt %d)",
-                    CONFIG.provisioning_service_url, attempt,
+                    settings.provisioning.service_url, attempt,
                 )
                 return
             last_error = f"HTTP {resp.status_code}"
@@ -204,12 +204,12 @@ async def _preflight_provisioning() -> None:
         await asyncio.sleep(min(2.0, remaining))
 
     msg = (
-        f"[STARTUP] Provisioning service at {CONFIG.provisioning_service_url} "
+        f"[STARTUP] Provisioning service at {settings.provisioning.service_url} "
         f"unreachable after {timeout_s}s ({last_error}). "
         "For e2e tests without hardware, set ACTIVE_PROFILES=mock on the "
         "provisioning-service container."
     )
-    if CONFIG.provisioning_fail_on_unreachable:
+    if settings.provisioning.fail_on_unreachable:
         raise RuntimeError(
             msg + " Set [seller.provisioning].fail_on_unreachable = false "
             "to start the storefront anyway (fulfillment will fail until the "
@@ -228,18 +228,18 @@ async def _probe_chain_addresses() -> None:
     fail-close because the storefront can serve unrelated endpoints
     while the operator fixes the config.
     """
-    if not CONFIG.chain_rpc_url:
+    if not settings.chain.rpc_url:
         return
     from service.clients.alkahest import resolve_alkahest_address_config
     from service.clients.chain_probe import probe_addresses
 
     addresses: dict[str, str] = {}
-    if CONFIG.identity_registry_address:
-        addresses["identity_registry"] = CONFIG.identity_registry_address
+    if settings.registry.identity_registry_address:
+        addresses["identity_registry"] = settings.registry.identity_registry_address
     try:
         cfg = resolve_alkahest_address_config(
-            CONFIG.chain_name,
-            config_path=CONFIG.alkahest_address_config_path,
+            settings.chain.name,
+            config_path=settings.chain.alkahest_address_config_path,
         )
     except Exception as exc:
         logger.warning(
@@ -266,7 +266,7 @@ async def _probe_chain_addresses() -> None:
 
     if not addresses:
         return
-    await probe_addresses(CONFIG.chain_rpc_url, addresses)
+    await probe_addresses(settings.chain.rpc_url, addresses)
 
 
 def _maybe_join_zerotier_network() -> None:
@@ -278,7 +278,7 @@ def _maybe_join_zerotier_network() -> None:
     Errors are logged and swallowed: a misconfigured ZeroTier setup
     should not block the agent from serving on its host network.
     """
-    network = CONFIG.zerotier_network
+    network = settings.zerotier_network
     if not network:
         return
     import subprocess
@@ -298,7 +298,6 @@ def _maybe_join_zerotier_network() -> None:
 
 async def _startup_tasks():
     """Initialize background tasks. Called from server.py lifespan."""
-    from market_storefront.resource_poller import resource_poller_loop
     from market_storefront.negotiation_watchdog import watchdog_loop as _neg_watchdog_loop
 
     _maybe_join_zerotier_network()
@@ -309,19 +308,21 @@ async def _startup_tasks():
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
 
-    # Seed the resources table from CSV if configured and the table is empty.
+    # Seed the resources table on startup if it is empty.
+    # Source priority: inline CSV content (Helm Secret injection) > file path (compose/local).
     # Must run before the resource poller so the poller has rows to query.
-    if CONFIG.default_resources_csv_path:
+    if settings.resources_csv_inline or settings.resources_csv_path:
         import market_storefront.container as _container
         try:
             result = await _container.resolved_system_service.seed_resources_if_empty(
-                CONFIG.default_resources_csv_path
+                csv_inline=settings.resources_csv_inline,
+                csv_path=settings.resources_csv_path,
             )
             if result["seeded"]:
                 logger.info(
                     "[STARTUP] Seeded %d resource(s) from %s",
                     result["imported_count"],
-                    result["csv_path"],
+                    result["source"],
                 )
             else:
                 logger.info(
@@ -329,10 +330,7 @@ async def _startup_tasks():
                     result["imported_count"],
                 )
         except Exception as exc:
-            logger.error(
-                "[STARTUP] Resource seeding failed for %s: %s",
-                CONFIG.default_resources_csv_path, exc,
-            )
+            logger.error("[STARTUP] Resource seeding failed: %s", exc)
             raise
 
     # Probe configured contract addresses for bytecode. Logs a warning
@@ -344,17 +342,16 @@ async def _startup_tasks():
     # Start heartbeat after server is ready
     asyncio.create_task(_start_heartbeat())
 
-    # Start resource availability poller
-    asyncio.create_task(resource_poller_loop())
-    logger.info("[STARTUP] Resource poller started (interval=%ds)",
-            CONFIG.resource_check_interval)
+    # Resource availability poller removed — lease lifecycle is now owned by
+    # the provisioning service's LeaseWatchdog, which calls back to
+    # PATCH /api/v1/admin/portfolio/resources/{id} when leases expire.
 
     # Start negotiation watchdog (marks stale threads as abandoned)
     asyncio.create_task(_neg_watchdog_loop())
     logger.info(
         "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
-        CONFIG.negotiation_watchdog_interval,
-        CONFIG.negotiation_timeout_seconds,
+        settings.negotiation_watchdog_interval,
+        settings.negotiation_timeout_seconds,
     )
 
     # Preflight: block startup until the provisioning service is reachable.

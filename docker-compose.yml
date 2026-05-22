@@ -55,6 +55,47 @@ services:
       retries: 3
       start_period: 10s
 
+  # 3b. Second Registry/Indexer — a "private" registry alongside the
+  # public one, exercising the multi-registry code paths permanently
+  # in CI. Same image, same chain, independent SQLite. Both EventSync
+  # the same anvil so the seller's on-chain agent registration is
+  # picked up by both; publish/discover fan-out and fan-in against
+  # the union (storefront/utils/multi_registry_client.py).
+  registry-b:
+    image: arkhai:registry
+    depends_on:
+      contracts-deploy:
+        condition: service_completed_successfully
+    ports:
+      - "8082:8080"
+    env_file:
+      - ./registry-service/.env.docker-compose
+    environment:
+      # Private-registry config: every non-admin request must carry
+      # ``Authorization: Bearer <key>`` matching a non-revoked row in
+      # api_keys. The BOOTSTRAP_API_KEY seeds a single row at startup
+      # so the storefront can publish to registry-b on a fresh
+      # ``compose up`` without an out-of-band mint step. Bob's
+      # storefront.bob.toml carries the matching token in [registry.auth].
+      - REGISTRY_REQUIRE_API_KEY=true
+      - REGISTRY_ADMIN_API_KEY=test-admin-token
+      - REGISTRY_BOOTSTRAP_API_KEY=test-buyer-token
+    volumes:
+      - ./shared-env:/app/shared-env
+    networks:
+      - market-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # 4. Seller agent (Bob).
   # Buyers are pure HTTP clients (the `market` CLI / market_buyer
   # library) — no buyer container in this stack. To exercise a buy
@@ -67,6 +108,8 @@ services:
     depends_on:
       registry:
         condition: service_healthy
+      registry-b:
+        condition: service_healthy
     ports:
       - "8001:8001"
     cap_add:
@@ -77,7 +120,7 @@ services:
     environment:
       # Sole config-bearing env var: tell the typed config loader where
       # to find the mounted TOML. service.config_loader resolves
-      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/config.toml.
+      # $XDG_CONFIG_HOME/arkhai/config.toml → /etc/arkhai/storefront.toml.
       - XDG_CONFIG_HOME=/etc
       # Provisioning-mode override stays a host-level env var because
       # tests flip it per-invocation (e.g. PROVISIONING_MODE=mock make
@@ -88,24 +131,68 @@ services:
       # so it can find domain.compute.agent.app.policy callables.
       - PYTHONPATH=/app:/app/src
     volumes:
-      - ./storefront/config.bob.toml:/etc/arkhai/config.toml:ro
+      - ./storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
+      # Compute inventory seed CSV — storefront.bob.toml's
+      # seller.resources_csv_path expects this at /app/resources.csv.
+      # Mirrors the deploy-seller-agent Makefile target.
+      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
       - zerotier-sell:/var/lib/zerotier-one
-      - ./storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
+      # Named volume so `docker compose down -v` actually wipes seller state
+      # (resources, listings, negotiations, settlement jobs). Replaced the
+      # earlier host bind mount under storefront/src/.../data/sell-agent —
+      # that path was inside the source tree and survived `down -v`, leaving
+      # reserved resources from prior runs that broke 05b on the next run.
+      # Resource seeding now happens in storefront startup (40b1b9b).
+      - sell-agent-data:/app/src/market_storefront/data/sell-agent
     networks:
       - market-network
     deploy:
       resources:
         limits:
           memory: 512m
-    command:
-      - sh
-      - -c
-      - |
-        echo "Importing seller resources..."
-        PYTHONPATH="/:/app:/app/src" /app/.venv/bin/python scripts/import_resources_csv.py \
-          --db-path /app/src/market_storefront/data/sell-agent/agent.db \
-          --csv src/market_storefront/data/ww1-machine.csv
-        exec ./entrypoint.sh
+
+  # 5b. Second seller agent (Alice) — exercises heterogeneous
+  # registry topology in the multi-registry e2e scenario. Alice's
+  # config.toml lists only the public registry, so her listings
+  # appear only there, while Bob's fan out to both. This is the
+  # only thing that makes the multi-registry scenario non-trivial:
+  # without an Alice, every listing has the same registry footprint
+  # and the test can't distinguish per-provider config from per-
+  # listing config.
+  alice_agent:
+    image: arkhai:storefront
+    platform: linux/amd64
+    container_name: market-agent-alice
+    depends_on:
+      registry:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - XDG_CONFIG_HOME=/etc
+      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
+      - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
+      - PYTHONPATH=/app:/app/src
+    volumes:
+      - ./storefront/storefront.alice.toml:/etc/arkhai/storefront.toml:ro
+      # Reuses Bob's seed CSV — the multi-registry test seeds inventory
+      # at runtime via admin_import_resources anyway, so the on-disk CSV
+      # content is irrelevant. Bind-mounted to satisfy the config's
+      # resources_csv_path requirement.
+      - ./storefront/src/market_storefront/data/ww1-machine.csv:/app/resources.csv:ro
+      - zerotier-alice:/var/lib/zerotier-one
+      - alice-agent-data:/app/src/market_storefront/data/alice-agent
+    networks:
+      - market-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   # 6. Redis (job queue for provisioning service)
   redis:
@@ -142,6 +229,12 @@ services:
       # Mounts /test/* router used by integration tests' provisioning_test_client
       # (TestStage07 mock-rules). Should never be set in staging/prod.
       - ACTIVE_PROFILES=mock
+      # Storefront callback target for the lease watchdog.
+      # When the watchdog releases a lease, it PATCHes this URL to mark the
+      # storefront resource available. Must match the sell_agent service name
+      # and port defined in this compose file.
+      - PROVISIONING_STOREFRONT_URL=http://sell_agent:8001
+      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:-test-api-key}
     volumes:
       - ./compute-provisioning-iac:/app/compute-provisioning-iac
       - ${HOME}/.ssh/id_ed25519:/home/appuser/.ssh/id_ed25519:ro
@@ -159,3 +252,6 @@ networks:
 
 volumes:
   zerotier-sell:
+  zerotier-alice:
+  sell-agent-data:
+  alice-agent-data:

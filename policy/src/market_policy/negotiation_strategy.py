@@ -47,7 +47,7 @@ class NegotiationRound:
     round_number: int
     sender: Literal["us", "them"]
     action: Literal["initial", "counter", "accept", "exit", "reject"]
-    price: int | None = None  # set for initial / counter / accept
+    price: float | None = None  # set for initial / counter / accept; base units per hour
 
 
 @dataclass(frozen=True)
@@ -66,13 +66,13 @@ class NegotiationRoundInput:
     """
 
     direction: Literal["minimize", "maximize"]
-    our_reference_price: int
-    their_proposed_price: int | None  # None on the very first call (we open)
+    our_reference_price: float
+    their_proposed_price: float | None  # None on the very first call (we open)
     history: list[NegotiationRound] = field(default_factory=list)
     max_rounds: int = 10
 
     @property
-    def our_previous_counters(self) -> list[int]:
+    def our_previous_counters(self) -> list[float]:
         """Prices we've counter-proposed in earlier rounds, oldest first."""
         return [
             h.price for h in self.history
@@ -85,7 +85,7 @@ class NegotiationDecision:
     """One round's resulting decision. Symmetric for both sides."""
 
     action: Literal["accept", "counter", "exit", "reject"]
-    price: int | None = None  # required for counter / accept
+    price: float | None = None  # required for counter / accept; base units per hour
     reason: str | None = None  # required for exit / reject; optional otherwise
 
     def to_dict(self) -> dict[str, Any]:
@@ -174,7 +174,7 @@ class BisectionStrategy:
                     action="accept", price=their_price, reason="convergence",
                 )
             if their_price <= our_price * self._reasonable:
-                proposed = (our_price + their_price) // 2
+                proposed = (our_price + their_price) / 2
                 if proposed > our_price:
                     proposed = our_price  # never counter above our ceiling
                 return NegotiationDecision(action="counter", price=proposed)
@@ -186,7 +186,7 @@ class BisectionStrategy:
                     action="accept", price=their_price, reason="convergence",
                 )
             if their_price >= our_price / self._reasonable:
-                proposed = (our_price + their_price) // 2
+                proposed = (our_price + their_price) / 2
                 return NegotiationDecision(action="counter", price=proposed)
             return NegotiationDecision(action="exit", reason="price_unreasonable")
 

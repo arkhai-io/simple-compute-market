@@ -105,7 +105,7 @@ class NegotiationService:
         listing_id: str,
         neg_id: str,
         action: str,
-        price: int | None,
+        price: float | None,
         reason: str | None,
     ) -> dict[str, Any]:
         """Drive one negotiation round as the admin (no buyer signature required).
@@ -125,7 +125,7 @@ class NegotiationService:
             )
         if action == "counter" and price is None:
             raise NegotiationServiceError(
-                "'price' required as int for counter", status_code=400
+                "'price' required as number for counter", status_code=400
             )
 
         thread = await self._load_and_validate_thread(
@@ -157,7 +157,7 @@ class NegotiationService:
         *,
         listing_id: str,
         neg_id: str,
-        price: int,
+        price: float,
     ) -> dict[str, Any]:
         """Commit a negotiation as terminal-success at the given price.
 

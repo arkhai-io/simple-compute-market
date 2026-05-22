@@ -11,7 +11,7 @@ from market_storefront.models.domain_models import (
     TokenResource,
     VirtualizationType,
 )
-from service.clients.token import TOKEN_REGISTRY
+from service.clients.token import resolve_token_cached
 
 
 # Slice fields stored directly on the resource row's ``attributes`` JSON.
@@ -155,9 +155,9 @@ class ComputeGpuResourceAdapter:
         context fields belong on the hosts table and are not written here.
         """
         attributes: dict[str, Any] = {
-            "gpu_model": resource.gpu_model.value,
+            "gpu_model": resource.gpu_model,
             "sla": resource.sla,
-            "region": resource.region.value,
+            "region": resource.region,
             "vm_host": resource.vm_host,
         }
         for field_name, _ in _COMPUTE_SLICE_FIELDS:
@@ -168,7 +168,7 @@ class ComputeGpuResourceAdapter:
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
-            "resource_subtype": resource.gpu_model.value.lower(),
+            "resource_subtype": resource.gpu_model.lower(),
             "unit": "count",
             "value": resource.gpu_count,
             "state": state,
@@ -195,32 +195,53 @@ class TokenErc20ResourceAdapter:
     discriminator_key: str = "token"
 
     def to_domain_resource(self, db_resource: dict[str, Any]) -> TokenResource:
-        """
-        Convert a DB resource dict to a TokenResource domain instance.
+        """Convert a DB resource dict to a TokenResource domain instance.
 
-        ``value`` of None means "hidden reserve" — the listing was published
-        with no advertised price. Round-trips as ``amount=None``.
+        Strict mode: ``resource_subtype`` is a contract address; metadata
+        is materialized from the ``attributes`` JSON column when present,
+        else looked up by address through the chain-resolved cache for
+        display fields (symbol). Failing that, falls back to an
+        "address-only" metadata with ``symbol=""`` so downstream callers
+        can still identify the token by its on-chain address.
+
+        ``value`` of None means "hidden reserve" — the listing was
+        published with no advertised price. Round-trips as
+        ``amount=None``.
         """
         attrs = _ensure_dict(db_resource.get("attributes"))
         subtype = db_resource.get("resource_subtype")
         value = db_resource.get("value")
         if value is None:
-            # Distinguish "DB column NULL → preserve" from "attrs has amount".
             value = attrs.get("amount") if "amount" in attrs else None
 
-        token_meta: ERC20TokenMetadata
-        if all(k in attrs for k in ("symbol", "contract_address", "decimals")):
+        # Canonical identity is the address. Attributes carry it when the
+        # row was written through from_domain_resource; legacy rows may
+        # have only ``resource_subtype`` set, in which case we treat that
+        # as the address (post-cutover; symbol-keyed legacy rows would
+        # need a migration which is intentionally not in scope here).
+        address = attrs.get("contract_address") or subtype
+        if not address or not isinstance(address, str):
+            raise ValueError(
+                "token.erc20 db_resource needs an address in attributes.contract_address "
+                "or resource_subtype"
+            )
+
+        if all(k in attrs for k in ("contract_address", "decimals")):
             token_meta = ERC20TokenMetadata(
-                symbol=str(attrs["symbol"]),
+                symbol=str(attrs.get("symbol", "")),
                 contract_address=str(attrs["contract_address"]),
                 decimals=int(attrs["decimals"]),
             )
-        elif subtype:
-            token_meta = TOKEN_REGISTRY.require(str(subtype))
         else:
-            raise ValueError(
-                "token.erc20 db_resource requires token metadata in attributes or resource_subtype resolvable by token registry"
-            )
+            looked_up = resolve_token_cached(address)
+            if looked_up is not None:
+                token_meta = looked_up
+            else:
+                token_meta = ERC20TokenMetadata(
+                    symbol="",
+                    contract_address=address,
+                    decimals=int(attrs.get("decimals", 0) or 0),
+                )
 
         amount = None if value is None else int(value)
         return TokenResource(token=token_meta, amount=amount)
@@ -232,13 +253,16 @@ class TokenErc20ResourceAdapter:
         resource_id: str,
         state: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Convert a TokenResource domain instance to a DB resource dict.
+        """Convert a TokenResource domain instance to a DB resource dict.
+
+        ``resource_subtype`` carries the lowercase contract address — the
+        canonical identity. Symbol stays in ``attributes`` for display
+        rendering but is never load-bearing.
         """
         return {
             "resource_id": resource_id,
             "resource_type": self.resource_type,
-            "resource_subtype": resource.token.symbol.lower(),
+            "resource_subtype": resource.token.contract_address.lower(),
             "unit": "base_units",
             "value": resource.amount,
             "state": state,
@@ -250,23 +274,60 @@ class TokenErc20ResourceAdapter:
         }
 
     def from_dict(self, data: dict[str, Any]) -> TokenResource:
-        """
-        Convert a network dict (A2A payload) to a TokenResource domain instance.
+        """Convert a network dict to a TokenResource — strict address-only.
+
+        Accepted shapes for ``data["token"]``:
+          * ``"0x..."`` — bare contract address; metadata enriched via
+            the chain-resolved cache if known, otherwise the address-only
+            stub (decimals must then be supplied on the wire or inferred
+            from ``data["decimals"]``).
+          * ``{"contract_address": "0x...", "decimals": N, "symbol"?: ...}``
+            — full metadata; ``decimals`` is required since amount math
+            depends on it.
+          * ``ERC20TokenMetadata`` instance — pass-through.
+
+        Bare symbol strings (``"USDC"``) are NOT accepted. Addresses are
+        the canonical token identity; symbols are derived view data
+        resolved on-chain.
         """
         token_value = data.get("token")
         if isinstance(token_value, ERC20TokenMetadata):
             token_meta = token_value
         elif isinstance(token_value, dict):
-            if all(k in token_value for k in ("symbol", "contract_address", "decimals")):
-                token_meta = ERC20TokenMetadata(**token_value)
-            elif "symbol" in token_value:
-                token_meta = TOKEN_REGISTRY.require(token_value["symbol"])
-            elif "contract_address" in token_value:
-                token_meta = TOKEN_REGISTRY.require(token_value["contract_address"])
+            address = token_value.get("contract_address")
+            if not address or not isinstance(address, str):
+                raise ValueError(
+                    "token dict must include 'contract_address' (0x...)"
+                )
+            decimals = token_value.get("decimals")
+            if decimals is None:
+                looked_up = resolve_token_cached(address)
+                if looked_up is None:
+                    raise ValueError(
+                        f"token dict for {address} must include 'decimals' "
+                        f"(no cached chain metadata for this address)"
+                    )
+                token_meta = looked_up
             else:
-                raise ValueError("Token dict must include symbol, contract_address, or decimals")
+                token_meta = ERC20TokenMetadata(
+                    symbol=str(token_value.get("symbol", "")),
+                    contract_address=str(address),
+                    decimals=int(decimals),
+                )
         elif isinstance(token_value, str):
-            token_meta = TOKEN_REGISTRY.require(token_value)
+            if not token_value.startswith("0x"):
+                raise ValueError(
+                    f"token string must be a 0x-prefixed address, got {token_value!r}"
+                )
+            looked_up = resolve_token_cached(token_value)
+            if looked_up is not None:
+                token_meta = looked_up
+            else:
+                token_meta = ERC20TokenMetadata(
+                    symbol="",
+                    contract_address=token_value,
+                    decimals=0,
+                )
         else:
             raise ValueError(f"Unsupported token value type: {type(token_value).__name__}")
         amount_raw = data.get("amount")

@@ -1,0 +1,24 @@
+{{/*
+Per-agent ConfigMap. Holds the non-sensitive rendered storefront.toml
+(top-level scalars, chain, registry, gateway, provisioning, negotiation
+sub-tables). Mounted alongside the Secret-rendered storefront.secrets.toml
+at /etc/arkhai/; dynaconf merges the two files at startup.
+
+Split from a single-Secret blob so non-sensitive toggles (log levels,
+provisioning mode, RPC URLs, etc.) can be edited as a ConfigMap —
+kubectl-friendly diffs, no secret-rotation audit noise.
+*/}}
+{{- range $agent := .Values.agents }}
+{{- $component := $agent.component | default $agent.name }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
+  labels:
+    {{- include "storefront.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $component | quote }}
+data:
+  storefront.toml: |
+    {{- include "storefront.agentConfigToml" (dict "root" $ "agent" $agent) | nindent 4 }}
+---
+{{- end }}

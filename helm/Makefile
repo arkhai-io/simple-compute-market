@@ -6,17 +6,43 @@ NAMESPACE    := default
 VALUES       := values.yaml
 SSH_KEY_FILE ?= $(HOME)/.ssh/id_ed25519
 
-.PHONY: init template deploy test
+.PHONY: init template deploy test test-render
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
 	helm dependency update $(CHART_DIR)
 
+## Install or upgrade the release in the target namespace
+## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
+##   make deploy SSH_KEY_FILE=/path/to/other_key
+## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
+## inject --set-file provisioning.inventory.hostsIni=<path>.
+EXTRA_SET_FILE_ARGS ?=
+
+## RESOURCES_CSV_FILE: path to the compute resource inventory CSV to seed
+## into the storefront agent on first deploy. Left empty by default — the
+## storefront starts with no inventory and the operator seeds via the API.
+## Example:
+##   make deploy RESOURCES_CSV_FILE=./storefront/src/market_storefront/data/ww1-machine.csv
+RESOURCES_CSV_FILE ?=../storefront/src/market_storefront/data/ww1-machine.csv
+
 ## Render the full parent chart (and all enabled subcharts) to stdout
 template:
 	helm template $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
-		--values $(VALUES)
+		--values $(VALUES) \
+		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
+		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
+
+## Verify structural invariants of the rendered chart without needing
+## a real cluster. Runs `helm template` against the umbrella chart and
+## asserts the storefront ConfigMap/Secret split layout — per-agent
+## ConfigMap holds config.toml, Secret holds config.secrets.toml,
+## Deployment mounts both at /etc/arkhai/ with independent checksums,
+## and no sensitive keys leak across the boundary. Stable across
+## cosmetic chart edits (no byte-level snapshots).
+test-render:
+	@./scripts/test-render.sh
 
 ## Render a single subchart in isolation.
 ## Requires MODULE=<subchart-name>, e.g. make template-module MODULE=test-env
@@ -28,18 +54,13 @@ endif
 		--namespace $(NAMESPACE) \
 		--values $(CHART_DIR)/charts/$(MODULE)/values.yaml
 
-## Install or upgrade the release in the target namespace
-## SSH_KEY_FILE defaults to ~/.ssh/id_ed25519. Override with:
-##   make deploy SSH_KEY_FILE=/path/to/other_key
-## EXTRA_SET_FILE_ARGS is appended verbatim — used by the root Makefile to
-## inject --set-file provisioning.inventory.hostsIni=<path>.
-EXTRA_SET_FILE_ARGS ?=
 deploy: init
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) \
 		--create-namespace \
 		--values $(VALUES) \
 		--set-file provisioning.sshKey.sshPrivateKey=$(SSH_KEY_FILE) \
+		$(if $(RESOURCES_CSV_FILE),--set-file storefront.agents[0].secret.resourcesCsvInline=$(RESOURCES_CSV_FILE),) \
 		$(EXTRA_SET_FILE_ARGS) \
 		--wait
 
@@ -49,19 +70,23 @@ test:
 		--namespace $(NAMESPACE) \
 		--logs
 
+stop:
+	helm uninstall $(RELEASE)
 ## Run helm tests for a single subchart.
 ## Requires MODULE=<subchart-name>, e.g. make test-module MODULE=validate-contracts
-## Valid values: validate-contracts, registry, storefront, provisioning
+## Valid values: validate-contracts, registry, storefront, provisioning, e2e-tests
 ##
 ## Test pod names per module:
 ##   validate-contracts → $(RELEASE)-validate-contracts-chain-environment-test
 ##   registry           → $(RELEASE)-registry-smoke-test
 ##   storefront         → $(RELEASE)-storefront-smoke-test
 ##   provisioning       → $(RELEASE)-provisioning-smoke-test
+##   e2e-tests          → $(RELEASE)-e2e-tests-e2e-deal-test
 TEST_POD_SUFFIX_validate-contracts := chain-environment-test
 TEST_POD_SUFFIX_registry           := smoke-test
 TEST_POD_SUFFIX_storefront         := smoke-test
 TEST_POD_SUFFIX_provisioning       := smoke-test
+TEST_POD_SUFFIX_e2e-tests          := e2e-deal-test
  
 test-module:
 ifndef MODULE

@@ -22,6 +22,29 @@ class CredentialRole(str, enum.Enum):
     tenant = "tenant"
 
 
+class LeaseStatus(str, enum.Enum):
+    """Lifecycle states for a VM lease tracked in the vm_leases table.
+
+    pending   — lease_start_utc is in the future; VM may not yet be running.
+    active    — lease is running; lease_end_utc is in the future.
+    releasing — lease_end_utc has passed; watchdog submitted a check job to
+                confirm VM cleanup and is waiting for it to complete before
+                releasing the storefront resource.
+    released  — storefront PATCH /resources/{id} called successfully; resource
+                is available again.
+    forced    — grace period elapsed without VM confirmation; storefront
+                patched regardless. Resource is available; VM state unknown.
+    cancelled — lease cancelled before expiry (e.g. early termination by deal).
+    """
+
+    pending   = "pending"
+    active    = "active"
+    releasing = "releasing"
+    released  = "released"
+    forced    = "forced"
+    cancelled = "cancelled"
+
+
 class AnsibleJob(Base):
     __tablename__ = "ansible_jobs"
 
@@ -94,4 +117,71 @@ class Host(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class VmLease(Base):
+    """Tracks active VM leases so the LeaseWatchdog can release storefront
+    resources when leases expire — replacing the storefront's polling pattern.
+
+    resource_id:
+        The storefront-assigned resource identifier (e.g. 'compute-ww1-001').
+        Stored as unvalidated TEXT; the provisioning service has no resources
+        table, so no FK constraint is possible. Application-level FK enforced
+        by the storefront (caller).
+
+    escrow_uid:
+        On-chain escrow UID from the deal. Unique per lease — one deal produces
+        exactly one lease. Used for recovery queries and idempotency.
+
+    vm_host / vm_target:
+        KVM host alias and libvirt domain name. Used when submitting check jobs.
+
+    lease_start_utc / lease_end_utc:
+        Lease window boundaries in UTC. lease_start_utc is nullable (None means
+        "starts immediately on creation"). The watchdog acts when
+        lease_end_utc < now AND status IN (active, pending).
+
+    status:
+        LeaseStatus enum value. Transitions:
+          pending  → active    (when lease_start_utc passes or is None at creation)
+          active   → releasing (when lease_end_utc passes, watchdog submits check job)
+          releasing→ released  (check job confirms VM gone, storefront patched)
+          releasing→ forced    (grace period elapsed, storefront patched anyway)
+          *        → cancelled (explicit cancellation before expiry)
+
+    create_job_id:
+        Provisioning job_id of the VM creation job. Allows tracing from lease
+        back to the original job that produced the VM.
+
+    check_job_id:
+        Provisioning job_id for the most recent check Ansible job submitted by
+        the watchdog. Nullable — only set during the 'releasing' phase. Allows
+        operators to query ``GET /api/v1/jobs/{check_job_id}`` for details.
+    """
+
+    __tablename__ = "vm_leases"
+
+    id = Column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    resource_id = Column(String, nullable=False, index=True)
+    escrow_uid = Column(String, nullable=False, unique=True, index=True)
+    vm_host = Column(String, nullable=False)
+    vm_target = Column(String, nullable=False)
+    lease_start_utc = Column(DateTime(timezone=True), nullable=True)
+    lease_end_utc = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(
+        String, nullable=False, default=LeaseStatus.pending.value, index=True
+    )
+    create_job_id = Column(String, nullable=True)
+    check_job_id = Column(String, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

@@ -229,6 +229,7 @@ class SystemService:
 
         return AnsibleReadinessResponse(
             ansible_version=ansible_version(),
+            ansible_mode=("mock" if "mock" in os.environ.get("ACTIVE_PROFILES", "") else "real"),
             inventory=inventory_info,
             playbook=FileInfo(
                 path=str(playbook_path),
@@ -237,3 +238,111 @@ class SystemService:
             ),
             ssh_keys=ssh_keys,
         )
+
+
+    async def get_status(self) -> dict:
+        """Return a full diagnostic status dict for the system status endpoint.
+
+        Heavier than ``ansible_readiness`` — includes outbound HTTP calls against
+        the storefront via ``StorefrontClient``. Not suitable for Kubernetes
+        liveness/readiness probes; use ``GET /health`` for those.
+
+        Returns::
+
+            {
+                "status": "ok" | "degraded",
+                "checks": {
+                    "storefront":      "ok" | "unreachable" | "timeout" | "unconfigured" | "http_N",
+                    "storefront_auth": "ok" | "unauthorized" | "unconfigured" | "http_N" | <error>,
+                    "lease_watchdog":  "running" | "paused" | "disabled",
+                }
+            }
+
+        Status rollup rules (what counts as healthy per check):
+          - storefront:      "ok" or "unconfigured"
+          - storefront_auth: "ok" or "unconfigured"
+          - lease_watchdog:  "running", "paused", or "disabled"
+        """
+        from storefront_client import StorefrontClient, StorefrontClientError
+        import container as _container_module
+
+        checks: dict[str, str] = {}
+
+        storefront_url = str(
+            getattr(self._settings, "storefront_url", "") or ""
+        ).rstrip("/")
+        storefront_admin_key = str(
+            getattr(self._settings, "storefront_admin_key", "") or ""
+        )
+
+        if not storefront_url:
+            checks["storefront"] = "unconfigured"
+            checks["storefront_auth"] = "unconfigured"
+        else:
+            # Reachability — GET /health via StorefrontClient (no admin key needed)
+            try:
+                async with StorefrontClient(base_url=storefront_url) as sf:
+                    health = await sf.get_health()
+                # Any structured response (ok or degraded) means the storefront is reachable
+                checks["storefront"] = "ok"
+            except StorefrontClientError as exc:
+                checks["storefront"] = f"http_{exc.status_code}" if exc.status_code else "error"
+            except Exception as exc:
+                name = type(exc).__name__
+                if "Connect" in name or "connection" in str(exc).lower():
+                    checks["storefront"] = "unreachable"
+                elif "Timeout" in name or "timeout" in str(exc).lower():
+                    checks["storefront"] = "timeout"
+                else:
+                    checks["storefront"] = f"error: {name}"
+
+            # Auth — GET /api/v1/system/status with admin key
+            if not storefront_admin_key:
+                checks["storefront_auth"] = "unconfigured"
+            elif checks["storefront"] != "ok":
+                # Storefront not reachable — auth check is meaningless
+                checks["storefront_auth"] = checks["storefront"]
+            else:
+                try:
+                    async with StorefrontClient(
+                        base_url=storefront_url,
+                        admin_key=storefront_admin_key,
+                    ) as sf:
+                        await sf.get_system_status()
+                    checks["storefront_auth"] = "ok"
+                except StorefrontClientError as exc:
+                    if exc.status_code in (401, 403):
+                        checks["storefront_auth"] = "unauthorized"
+                    else:
+                        checks["storefront_auth"] = f"http_{exc.status_code}" if exc.status_code else "error"
+                except Exception as exc:
+                    checks["storefront_auth"] = f"error: {type(exc).__name__}"
+
+        # Lease watchdog state
+        svc = getattr(_container_module, "resolved_lease_lifecycle_service", None)
+        if svc is None:
+            checks["lease_watchdog"] = "disabled"
+        elif not getattr(self._settings, "lease_watchdog_enabled", True):
+            checks["lease_watchdog"] = "disabled"
+        elif not svc._resume_event.is_set():
+            checks["lease_watchdog"] = "paused"
+        else:
+            checks["lease_watchdog"] = "running"
+
+        def _is_healthy(key: str, value: str) -> bool:
+            """True when a check value is not a service degradation.
+
+            - storefront / storefront_auth: "ok" and "unconfigured" are healthy.
+              "unconfigured" means not yet pointed at a storefront — not a failure.
+            - lease_watchdog: "running", "paused", and "disabled" are all healthy.
+              "paused" is an intentional operator/test action; "disabled" means
+              the watchdog was not started (e.g. in test environments).
+            """
+            if key in ("storefront", "storefront_auth"):
+                return value in ("ok", "unconfigured")
+            if key == "lease_watchdog":
+                return value in ("running", "paused", "disabled")
+            return value == "ok"
+
+        all_ok = all(_is_healthy(k, v) for k, v in checks.items())
+        return {"status": "ok" if all_ok else "degraded", "checks": checks}

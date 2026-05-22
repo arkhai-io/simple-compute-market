@@ -26,6 +26,10 @@ init: init-venv
 
 reinit: init-venv
 	uv sync --find-links $(DIST_DIR) \
+	--upgrade-package arkhai-registry-client \
+	--upgrade-package arkhai-storefront-client \
+	--upgrade-package provisioning-service \
+	--upgrade-package market-storefront \
 	--reinstall-package arkhai-registry-client \
 	--reinstall-package arkhai-storefront-client \
 	--reinstall-package provisioning-service \
@@ -93,3 +97,7 @@ test-ci:
 # (TODO) a future e2e target that drives `market buy` against a
 # compose-launched seller.
 # -----------------------------------------------------------------------
+test-e2e: reinit
+	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
+	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
+	.venv/bin/pytest -m e2e_deal $(PYTEST_ARGS)

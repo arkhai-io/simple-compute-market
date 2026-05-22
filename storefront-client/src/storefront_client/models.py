@@ -200,56 +200,9 @@ class StorefrontListingClaimResponse:
             extra={k: v for k, v in d.items() if k not in known},
         )
 
-
-# ---------------------------------------------------------------------------
-# Listing discover response  (POST /listings/discover)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class DiscoverMatch:
-    """A single match returned by /listings/discover."""
-
-    their_listing_id: str | None = None
-    their_agent_url: str | None = None
-    their_price: int | None = None
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "DiscoverMatch":
-        known = {"their_listing_id", "their_agent_url", "their_price"}
-        return cls(
-            their_listing_id=d.get("their_listing_id"),
-            their_agent_url=d.get("their_agent_url"),
-            their_price=d.get("their_price"),
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
-@dataclass
-class StorefrontListingDiscoverResponse:
-    """Response from POST /listings/discover."""
-
-    listing_id: str | None = None
-    match_count: int | None = None
-    matches: list[DiscoverMatch] = field(default_factory=list)
-    extra: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "StorefrontListingDiscoverResponse":
-        known = {"listing_id", "match_count", "matches"}
-        return cls(
-            listing_id=d.get("listing_id"),
-            match_count=d.get("match_count"),
-            matches=[DiscoverMatch.from_dict(m) for m in d.get("matches", [])],
-            extra={k: v for k, v in d.items() if k not in known},
-        )
-
-
 # ---------------------------------------------------------------------------
 # Health / system  (GET /health, GET /api/v1/system/status)
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class HealthResponse:
@@ -441,9 +394,9 @@ class NegotiationMessage:
     round: int = 0
     sender: str = ""
     action_taken: str = ""
-    proposed_price: int | None = None
-    our_price: int | None = None
-    their_price: int | None = None
+    proposed_price: float | None = None
+    our_price: float | None = None
+    their_price: float | None = None
     message_type: str = ""
     timestamp: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
@@ -476,7 +429,7 @@ class NegotiationSummary:
     buyer_address: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: int | None = None
+    agreed_price: float | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     created_at: str = ""
@@ -536,12 +489,13 @@ class NegotiationDetail:
     their_agent_id: str = ""
     status: str = ""
     terminal_state: str | None = None
-    agreed_price: int | None = None
+    agreed_price: float | None = None
     agreed_duration_seconds: int | None = None
     requested_duration_seconds: int | None = None
     round_count: int = 0
     messages: list[NegotiationMessage] = field(default_factory=list)
     stage_events: list[dict[str, Any]] = field(default_factory=list)
+    escrows: list[dict[str, Any]] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -550,6 +504,7 @@ class NegotiationDetail:
             "negotiation_id", "our_listing_id", "their_agent_id", "status",
             "terminal_state", "agreed_price", "agreed_duration_seconds",
             "requested_duration_seconds", "round_count", "messages", "stage_events",
+            "escrows",
         }
         return cls(
             negotiation_id=d.get("negotiation_id", ""),
@@ -563,6 +518,7 @@ class NegotiationDetail:
             round_count=d.get("round_count", 0),
             messages=[NegotiationMessage.from_dict(m) for m in d.get("messages", [])],
             stage_events=d.get("stage_events", []),
+            escrows=d.get("escrows", []),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -574,7 +530,7 @@ class NegotiationActionResponse:
     neg_id: str = ""
     listing_id: str = ""
     action: str = ""
-    price: int | None = None
+    price: float | None = None
     reason: str | None = None
     source: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -617,23 +573,19 @@ class AdminPauseResponse:
 
 
 @dataclass
-class AdminStatusResponse:
-    """Response from GET /admin/status."""
+class ReleaseReservationsResponse:
+    """Response from POST /api/v1/admin/portfolio/release-reservations."""
 
-    paused: bool = False
-    active_negotiations: int = 0
-    open_listings: int = 0
-    paused_listings: int = 0
+    released_count: int = 0
+    resource_ids: list[str] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AdminStatusResponse":
-        known = {"paused", "active_negotiations", "open_listings", "paused_listings"}
+    def from_dict(cls, d: dict) -> "ReleaseReservationsResponse":
+        known = {"released_count", "resource_ids"}
         return cls(
-            paused=bool(d.get("paused", False)),
-            active_negotiations=int(d.get("active_negotiations", 0)),
-            open_listings=int(d.get("open_listings", 0)),
-            paused_listings=int(d.get("paused_listings", 0)),
+            released_count=int(d.get("released_count", 0)),
+            resource_ids=list(d.get("resource_ids", []) or []),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -643,12 +595,12 @@ class EvaluateNegotiateResponse:
     """Response from POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
 
     listing_id: str = ""
-    our_reference_price: int = 0
-    their_proposed_price: int = 0
+    our_reference_price: float = 0
+    their_proposed_price: float = 0
     direction: str = ""
     strategy: str = ""
     decision: str = ""
-    decision_price: int | None = None
+    decision_price: float | None = None
     decision_reason: str | None = None
     would_negotiate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
@@ -662,8 +614,8 @@ class EvaluateNegotiateResponse:
         }
         return cls(
             listing_id=d.get("listing_id", ""),
-            our_reference_price=int(d.get("our_reference_price", 0)),
-            their_proposed_price=int(d.get("their_proposed_price", 0)),
+            our_reference_price=float(d.get("our_reference_price", 0)),
+            their_proposed_price=float(d.get("their_proposed_price", 0)),
             direction=d.get("direction", ""),
             strategy=d.get("strategy", ""),
             decision=d.get("decision", ""),
@@ -720,18 +672,59 @@ class SettleStatusResponse:
 
     status: str = ""
     escrow_uid: str = ""
+    fulfillment_uid: str | None = None
     provisioning_job_id: str | None = None
     tenant_credentials: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SettleStatusResponse":
-        known = {"status", "escrow_uid", "provisioning_job_id", "tenant_credentials"}
+        known = {
+            "status", "escrow_uid", "fulfillment_uid",
+            "provisioning_job_id", "tenant_credentials",
+        }
         creds = d.get("tenant_credentials")
         return cls(
             status=d.get("status", ""),
             escrow_uid=d.get("escrow_uid", ""),
+            fulfillment_uid=d.get("fulfillment_uid"),
             provisioning_job_id=d.get("provisioning_job_id"),
             tenant_credentials=dict(creds) if isinstance(creds, dict) else None,
             extra={k: v for k, v in d.items() if k not in known},
+        )
+
+
+@dataclass
+class SettleWaitResponse:
+    """Response from GET /api/v1/admin/settle/{escrow_uid}/wait."""
+
+    ready: bool = False
+    status: str = ""
+    provisioning_job_id: str | None = None
+    elapsed_ms: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SettleWaitResponse":
+        return cls(
+            ready=bool(d.get("ready", False)),
+            status=str(d.get("status", "")),
+            provisioning_job_id=d.get("provisioning_job_id"),
+            elapsed_ms=int(d.get("elapsed_ms", 0)),
+        )
+
+
+@dataclass
+class ImportResourcesResponse:
+    """Response from POST /api/v1/admin/portfolio/resources/import."""
+
+    imported_count: int = 0
+    failed_count: int = 0
+    total_rows: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ImportResourcesResponse":
+        return cls(
+            imported_count=int(d.get("imported_count", 0)),
+            failed_count=int(d.get("failed_count", 0)),
+            total_rows=int(d.get("total_rows", 0)),
         )

@@ -101,9 +101,9 @@ def claim_cmd(
     path failed or was never triggered (storefront restart, RPC outage, etc.).
     """
     console = Console()
-    from ..utils.config import CONFIG
+    from ..utils.config import settings
     base_url = resolve_storefront_url(agent_url, default_port=8001)
-    private_key = CONFIG.agent_priv_key
+    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -148,12 +148,14 @@ def refund_cmd(
     ),
     amount: Optional[str] = typer.Option(
         None, "--amount", "-n",
-        help="Refund amount in human token units. Defaults to the listing's "
-             "demanded payment (demand.amount * agreed_duration_seconds/3600).",
+        help="Refund amount in base units (decimal-digit string; uint256-safe). "
+             "Defaults to the listing's accepted_escrows[0].price_per_hour × "
+             "agreed_duration_seconds // 3600.",
     ),
     token: Optional[str] = typer.Option(
         None, "--token",
-        help="Override the refund token symbol. Defaults to the token on the listing.",
+        help="Override the refund token (0x contract address). Defaults to the "
+             "token on the listing's accepted_escrows[0].",
     ),
     agent_url: Optional[str] = typer.Option(
         None, "--storefront-url", "-a",
@@ -167,9 +169,9 @@ def refund_cmd(
     deal otherwise can't settle through the normal escrow release path.
     """
     console = Console()
-    from ..utils.config import CONFIG
+    from ..utils.config import settings
     base_url = resolve_storefront_url(agent_url, default_port=8001)
-    private_key = CONFIG.agent_priv_key
+    private_key = settings.wallet.private_key
 
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
@@ -205,11 +207,8 @@ def refund_cmd(
     result.add_row("Tx hash", str(resp.get("tx_hash", "-")))
     result.add_row("From", str(resp.get("from_address", "-")))
     result.add_row("To", str(resp.get("to_address", "-")))
-    tok = resp.get("token") or {}
-    result.add_row(
-        "Token",
-        f"{tok.get('symbol', '-')} ({tok.get('contract_address', '-')})",
-    )
+    from service.clients.token import render_token
+    result.add_row("Token", render_token(resp.get("token")))
     result.add_row("Amount (raw)", str(resp.get("amount_raw", "-")))
     result.add_row("Block", str(resp.get("block_number", "-")))
     console.print(Panel(result, title="Refund complete", border_style="green"))
@@ -221,48 +220,72 @@ def show_cmd(
         ..., "--escrow-uid", "-u",
         help="0x-prefixed escrow UID to inspect.",
     ),
-    eas_address: Optional[str] = typer.Option(
-        None, "--eas-address",
-        help="Override EAS contract address (default: resolve from "
-             "chain.alkahest_address_config_path).",
-    ),
 ) -> None:
     """Read an escrow attestation from chain state.
 
     Inputs come from CONFIG (chain.rpc_url, chain.name,
     chain.alkahest_address_config_path) — same TOML the seller uses
     at runtime. Symmetric with `market escrow show` on the buyer side.
-    """
-    from ..utils.config import CONFIG
-    from service.clients.eas import read_attestation_sync, resolve_eas_address
 
-    rpc = CONFIG.chain_rpc_url
+    The EAS contract address is read from the alkahest address config
+    (no longer overridable from the CLI — the alkahest SDK keeps every
+    obligation/EAS/arbiter address in one config object).
+    """
+    import asyncio
+    from ..utils.config import settings
+    from service.clients.alkahest import (
+        get_alkahest_network,
+        prewarm_alkahest_address_config_cache,
+        resolve_alkahest_address_config,
+    )
+    from alkahest_py import AlkahestClient
+
+    rpc = settings.chain.rpc_url
     if not rpc:
         typer.secho(
             "Missing chain.rpc_url in config.toml.",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(2)
-
-    eas = eas_address
-    if not eas:
-        try:
-            eas = resolve_eas_address(
-                CONFIG.chain_name,
-                config_path=CONFIG.alkahest_address_config_path,
-            )
-        except ValueError as exc:
-            typer.secho(str(exc), err=True, fg=typer.colors.RED)
-            raise typer.Exit(2)
+    if not settings.wallet.private_key:
+        typer.secho(
+            "Missing seller.private_key in config.toml — alkahest_py "
+            "requires a wallet key even for read-only inspection.",
+            err=True, fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
 
     try:
-        att = read_attestation_sync(rpc, eas, escrow_uid)
+        prewarm_alkahest_address_config_cache(settings.chain.alkahest_address_config_path)
+        address_config = resolve_alkahest_address_config(
+            get_alkahest_network(settings.chain.name),
+            config_path=settings.chain.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        typer.secho(str(exc), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
+
+    client = AlkahestClient(
+        private_key=settings.wallet.private_key,
+        rpc_url=rpc,
+        address_config=address_config,
+    )
+
+    try:
+        decoded = asyncio.run(
+            client.erc20.escrow.non_tierable.get_obligation(escrow_uid)
+        )
     except Exception as exc:
         typer.secho(
-            f"IEAS.getAttestation failed: {exc}",
+            f"alkahest get_obligation failed: {exc}",
             err=True, fg=typer.colors.RED,
         )
         raise typer.Exit(4) from exc
+
+    att = decoded["attestation"]
+    obligation = decoded["data"]
+    is_revoked = bool(att.revocation_time)
+    demand_bytes = bytes(obligation.demand) if obligation.demand is not None else None
 
     console = Console()
     head = Table.grid(padding=(0, 2))
@@ -277,18 +300,17 @@ def show_cmd(
     head.add_row("Revoked at (unix)", str(att.revocation_time) or "(not revoked)")
     head.add_row("Ref UID", att.ref_uid)
     head.add_row("Revocable", "yes" if att.revocable else "no")
-    border = "red" if att.is_revoked else "green"
+    border = "red" if is_revoked else "green"
     console.print(Panel(head, title="Escrow attestation", border_style=border))
-
-    if att.decode_error:
-        typer.secho(att.decode_error, fg=typer.colors.YELLOW)
-        return
 
     body = Table.grid(padding=(0, 2))
     body.add_column(style="bold")
     body.add_column()
-    body.add_row("Arbiter", att.arbiter or "-")
-    body.add_row("Token", att.token or "-")
-    body.add_row("Amount (raw)", str(att.amount) if att.amount is not None else "-")
-    body.add_row("Demand", ("0x" + att.demand.hex()) if att.demand else "-")
+    body.add_row("Arbiter", obligation.arbiter or "-")
+    body.add_row("Token", obligation.token or "-")
+    body.add_row(
+        "Amount (raw)",
+        str(int(obligation.amount)) if obligation.amount is not None else "-",
+    )
+    body.add_row("Demand", ("0x" + demand_bytes.hex()) if demand_bytes else "-")
     console.print(Panel(body, title="ERC-20 escrow obligation data", border_style="cyan"))

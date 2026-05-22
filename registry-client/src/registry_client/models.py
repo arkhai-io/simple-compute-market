@@ -224,16 +224,18 @@ class ListingRequest:
     """Request body for POST /agents/{agent_id}/listings."""
 
     offer: dict[str, Any]
-    demand: dict[str, Any]
+    accepted_escrows: list[dict[str, Any]]
     max_duration_seconds: int | None = None
     listing_id: str = field(default_factory=lambda: __import__("uuid").uuid4().hex)
+    seller: str = ""
 
     def to_dict(self) -> dict:
         return {
             "listing_id": self.listing_id,
             "offer_resource": self.offer,
-            "demand_resource": self.demand,
+            "accepted_escrows": self.accepted_escrows,
             "max_duration_seconds": self.max_duration_seconds,
+            "seller": self.seller,
         }
 
 
@@ -249,7 +251,7 @@ class ListingSummary:
     status: str | None = None
     maker_agent_id: str | None = None
     offer: dict[str, Any] = field(default_factory=dict)
-    demand: dict[str, Any] = field(default_factory=dict)
+    accepted_escrows: list[dict[str, Any]] = field(default_factory=list)
     max_duration_seconds: int | None = None
     created_at: str | int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -257,35 +259,29 @@ class ListingSummary:
     @classmethod
     def from_dict(cls, d: dict) -> "ListingSummary":
         known = {
-            # Listings vocabulary (current registry wire)
             "listing_id", "agent_id", "seller", "buyer",
-            "offer_resource", "demand_resource", "max_duration_seconds",
+            "offer_resource", "accepted_escrows", "max_duration_seconds",
             "created_at", "updated_at", "status",
-            "seller_attestation", "buyer_attestation",
             # camelCase alternatives
-            "id", "makerAgentId", "offer", "demand", "maxDurationSeconds", "createdAt",
+            "id", "makerAgentId", "offer", "maxDurationSeconds", "createdAt",
             "maker_agent_id",
         }
         # Registry uses "listing_id" as the primary key; fall back to "id"
         listing_id = d.get("listing_id") or d.get("id")
-        # "agent_id" is the canonical agent who owns the listing in registry
-        # responses; camelCase APIs use "makerAgentId"; "seller" is the
-        # agent's base URL.
         maker = (
             d.get("agent_id")
             or d.get("makerAgentId")
             or d.get("maker_agent_id")
             or d.get("seller")
         )
-        # offer/demand may be nested as offer_resource/demand_resource
         offer = d.get("offer") or d.get("offer_resource") or {}
-        demand = d.get("demand") or d.get("demand_resource") or {}
+        accepted_escrows = d.get("accepted_escrows") or []
         return cls(
             id=listing_id,
             status=d.get("status"),
             maker_agent_id=maker,
             offer=offer,
-            demand=demand,
+            accepted_escrows=accepted_escrows,
             max_duration_seconds=d.get("max_duration_seconds") or d.get("maxDurationSeconds"),
             created_at=d.get("created_at") or d.get("createdAt"),
             extra={k: v for k, v in d.items() if k not in known},
@@ -354,34 +350,6 @@ class HeartbeatRequest:
     def to_dict(self) -> dict:
         return {k: v for k, v in {"signature": self.signature, "timestamp": self.timestamp}.items()
                 if v is not None}
-
-
-@dataclass
-class AttestationStats:
-    """Settlement activity counts from GET /api/v1/system/stats/attestations.
-
-    settled_listing_count > 0 means at least one full Alkahest deal cycle
-    has completed: buyer locked escrow (buyer_attestation) and seller
-    attested fulfillment (seller_attestation).
-    """
-
-    settled_listing_count: int = 0
-    seller_attestation_count: int = 0
-    buyer_attestation_count: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "AttestationStats":
-        return cls(
-            settled_listing_count=int(
-                d.get("settled_listing_count", d.get("settled_order_count", 0))
-            ),
-            seller_attestation_count=int(
-                d.get("seller_attestation_count", d.get("maker_attestation_count", 0))
-            ),
-            buyer_attestation_count=int(
-                d.get("buyer_attestation_count", d.get("taker_attestation_count", 0))
-            ),
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -492,18 +460,45 @@ class ValidatePublishRequest:
 
     listing_id: str
     offer_resource: dict
-    demand_resource: dict
+    accepted_escrows: list[dict]
     max_duration_seconds: int | None = None
+    seller: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {
             "listing_id": self.listing_id,
+            "seller": self.seller,
             "offer_resource": self.offer_resource,
-            "demand_resource": self.demand_resource,
+            "accepted_escrows": self.accepted_escrows,
         }
         if self.max_duration_seconds is not None:
             d["max_duration_seconds"] = self.max_duration_seconds
         return d
+
+
+@dataclass
+class FilterSpecResponse:
+    """Response from GET /filter-spec — what the registry advertises.
+
+    ``etag`` is a stable hash over ``{version, listing_shape, filters}``.
+    Buyers should cache by URL+etag and send ``If-Match: <etag>`` on
+    every ``list_listings`` call so a spec rotation surfaces as a 412
+    instead of a silent shape change.
+    """
+
+    version: int
+    etag: str
+    listing_shape: dict
+    filters: list[dict]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FilterSpecResponse":
+        return cls(
+            version=int(d.get("version", 0)),
+            etag=str(d.get("etag", "")),
+            listing_shape=dict(d.get("listing_shape") or {}),
+            filters=list(d.get("filters") or []),
+        )
 
 
 @dataclass
@@ -513,18 +508,19 @@ class ValidatePublishResponse:
     valid: bool
     listing_id: str
     offer_resource_type: str | None = None
-    demand_resource_type: str | None = None
+    accepted_escrows_count: int = 0
     errors: list = field(default_factory=list)
     extra: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ValidatePublishResponse":
-        known = {"valid", "listing_id", "offer_resource_type", "demand_resource_type", "errors"}
+        known = {"valid", "listing_id", "offer_resource_type",
+                 "accepted_escrows_count", "errors"}
         return cls(
             valid=bool(d.get("valid", False)),
             listing_id=d.get("listing_id", ""),
             offer_resource_type=d.get("offer_resource_type"),
-            demand_resource_type=d.get("demand_resource_type"),
+            accepted_escrows_count=int(d.get("accepted_escrows_count", 0)),
             errors=list(d.get("errors", [])),
             extra={k: v for k, v in d.items() if k not in known},
         )

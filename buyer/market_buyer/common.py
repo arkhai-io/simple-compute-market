@@ -58,18 +58,111 @@ def resolve_ssh_public_key(*, override: str | None = None) -> str:
     return ""
 
 
-def resolve_default_token() -> str:
-    """Pick the buyer's default token symbol for `--token-contract` resolution.
+def resolve_indexer_urls(*, override: str | None = None) -> list[str]:
+    """Resolve the buyer's configured registry URLs as a list.
 
-    Looks up `buyer.default_token` in the user config; falls back to ``"MOCK"``
-    so behavior is unchanged for unconfigured installs. The symbol is resolved
-    against ``service.clients.token.TOKEN_REGISTRY`` at the call site.
+    Precedence: CLI override (comma-separated) > ``registry.urls`` (list)
+    > ``http://localhost:8080`` default. Mirrors the storefront's
+    ``_resolve_indexer_urls`` shape — only the plural list form is
+    recognised, so a stray scalar ``registry.url`` falls through to
+    the default.
+
+    The override is comma-separated rather than a repeatable typer
+    option because every command that takes it already declares a
+    single string flag; comma-splitting keeps the change to those
+    declarations a one-liner.
+    """
+    if override:
+        parts = [p.strip() for p in override.split(",") if p.strip()]
+        if parts:
+            return parts
+    from service.config_loader import get_dotted, load_user_config
+    raw = get_dotted(load_user_config(), "registry.urls")
+    if isinstance(raw, list) and raw:
+        cleaned = [str(u).strip() for u in raw if str(u).strip()]
+        if cleaned:
+            return cleaned
+    return ["http://localhost:8080"]
+
+
+def resolve_indexer_auth() -> dict[str, str]:
+    """Resolve per-registry bearer tokens from the buyer's TOML config.
+
+    Reads ``[registry.auth]``, a flat ``url → token`` table. URLs not
+    listed are queried unauthenticated. There is no CLI override —
+    credentials are config-only by design (avoids accidental shell-
+    history exposure on a multi-user box).
     """
     from service.config_loader import get_dotted, load_user_config
-    v = get_dotted(load_user_config(), "buyer.default_token")
-    if isinstance(v, str) and v.strip():
+    raw = get_dotted(load_user_config(), "registry.auth")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for url, token in raw.items():
+        if isinstance(url, str) and isinstance(token, str) and url.strip() and token.strip():
+            out[url.strip()] = token.strip()
+    return out
+
+
+def resolve_discovery_timeout(*, override: float | None = None) -> float:
+    """Resolve the buyer's per-registry discovery deadline (seconds).
+
+    Precedence: CLI override > ``registry.discovery_timeout`` from
+    config.toml > ``5.0``. The orchestrator's multi-URL helpers cap
+    each per-registry request at this value so a slow registry can't
+    extend the wall time of a discovery pass.
+    """
+    if override is not None and override > 0:
+        return float(override)
+    from service.config_loader import get_dotted, load_user_config
+    raw = get_dotted(load_user_config(), "registry.discovery_timeout")
+    try:
+        v = float(raw)
+        if v > 0:
+            return v
+    except (TypeError, ValueError):
+        pass
+    return 5.0
+
+
+def resolve_chain_id(rpc_url: str) -> int:
+    """Pinned ``chain.chain_id`` from config, falling back to ``eth_chainId``.
+
+    Raises ``RuntimeError`` when neither source yields a chain id. Used by
+    on-chain token resolution to key the per-chain metadata cache.
+    """
+    from service.config_loader import get_dotted, load_user_config
+    pinned = get_dotted(load_user_config(), "chain.chain_id")
+    if pinned:
+        try:
+            return int(pinned)
+        except (TypeError, ValueError):
+            pass
+    from web3 import Web3
+    from web3.providers import HTTPProvider
+    try:
+        w3 = Web3(HTTPProvider(rpc_url))
+        return int(w3.eth.chain_id)
+    except Exception as exc:
+        raise RuntimeError(
+            f"chain.chain_id is not pinned in config.toml and the "
+            f"eth_chainId fallback failed: {exc}"
+        ) from exc
+
+
+def resolve_default_token_address() -> str | None:
+    """Pick the buyer's default token contract address.
+
+    Reads ``buyer.default_token_address`` from the user config — a 0x ERC-20
+    address. Returns None when unset; callers must then fall back to
+    ``--token-contract``. Decimals are resolved on chain via
+    ``service.clients.token.resolve_token`` at the call site.
+    """
+    from service.config_loader import get_dotted, load_user_config
+    v = get_dotted(load_user_config(), "buyer.default_token_address")
+    if isinstance(v, str) and v.strip().startswith("0x"):
         return v.strip()
-    return "MOCK"
+    return None
 
 
 def resolve_storefront_url(

@@ -50,18 +50,3 @@ def test_obs_dim_calculation():
     assert obs_dim(5) == 27  # 12 + 3*5
 
 
-def test_build_action_parameters():
-    """Test action parameter builder includes expected keys."""
-    from domain.compute.agent.app.policy.arkhai_common import build_action_parameters
-
-    params = build_action_parameters(
-        order_id="test-order-123",
-        price_idx=4,
-        sell_flag=1,
-    )
-
-    assert params["order_id"] == "test-order-123"
-    assert params["price_idx"] == 4
-    assert params["price_multiplier"] == 1.0  # idx 4 = 1.0x multiplier
-    assert params["sell_flag"] == 1
-    assert params["energy_sell_action"] == "sell_50_percent"

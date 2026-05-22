@@ -1,0 +1,39 @@
+{{/*
+Per-agent PVC backing the SQLite agent.db (and any other persistent
+state under persistence.mountPath). Only rendered when
+persistence.enabled is true — when false, the Deployment falls back
+to an emptyDir mount at the same path (pod-lifetime state only).
+
+The `helm.sh/resource-policy: keep` annotation prevents `helm
+uninstall` from reaping the volume; a subsequent reinstall rebinds
+the existing PVC and recovers prior state. Operators who genuinely
+want to discard state delete the PVC manually before reinstalling.
+
+storageClass: empty string lets the cluster default decide. accessMode
+is fixed to ReadWriteOnce — SQLite cannot tolerate multi-attach and
+the chart pins replicaCount + strategy: Recreate to enforce a single
+writer.
+*/}}
+{{- if .Values.persistence.enabled }}
+{{- range $agent := .Values.agents }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "storefront.agentPvcName" (dict "root" $ "agent" $agent) }}
+  labels:
+    {{- include "storefront.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ $.Values.persistence.accessMode | quote }}
+  resources:
+    requests:
+      storage: {{ $.Values.persistence.size | quote }}
+  {{- if $.Values.persistence.storageClass }}
+  storageClassName: {{ $.Values.persistence.storageClass | quote }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}

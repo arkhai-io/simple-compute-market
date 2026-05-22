@@ -29,23 +29,22 @@ from market_storefront.models.domain_models import (
 )
 from market_storefront.resources import parse_resource_from_dict
 
-from market_storefront.utils.config import CONFIG, _resolve_chain_id
+import httpx
+
+from market_storefront.utils.config import settings, chain_id, AGENT_ID, BASE_URL_OVERRIDE
 from service.clients.alkahest import encode_recipient_demand, get_recipient_arbiter
 from service.clients.erc8004.blockchain import build_erc8004_canonical_id  # type: ignore[import-not-found]
 from market_storefront.utils.sqlite_client import get_sqlite_client
 from client.provisioning_client import ProvisioningClient, ProvisioningError
-from registry_client import RegistryClient, RegistryClientError, ListingRequest, UpdateListingRequest
-from market_storefront.utils.order_matching import match_orders
-from market_policy.negotiation_thread import (
-    get_thread_store,
-    NegotiationThreadTransaction,
-)
+from models.vm_request_model import CreateVmRequest, ScheduleVmExpiryRequest
+from registry_client import RegistryClient, ListingRequest, UpdateListingRequest
+from market_policy.negotiation_thread import get_thread_store
 from .validation import determine_strategy_from_order
 
-BASE_URL_OVERRIDE = CONFIG.base_url_override
-PORT = CONFIG.port
-AGENT_ID = CONFIG.agent_id
-SSH_PUBLIC_KEY = CONFIG.ssh_public_key
+BASE_URL_OVERRIDE = BASE_URL_OVERRIDE
+PORT = settings.port
+AGENT_ID = AGENT_ID
+SSH_PUBLIC_KEY = settings.wallet.ssh_public_key
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +56,6 @@ def _is_http_url(value: str | None) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _normalize_agent_url(url: str | None) -> str:
-    if not url:
-        return ""
-    return url.strip().rstrip("/").lower()
-
-
-def _agent_urls_match(a: str | None, b: str | None) -> bool:
-    na, nb = _normalize_agent_url(a), _normalize_agent_url(b)
-    return bool(na and na == nb)
 
 
 def _resource_is_compute(resource: Any) -> bool:
@@ -84,27 +74,6 @@ def _resource_is_compute(resource: Any) -> bool:
     return hasattr(resource, "gpu_model")
 
 
-def _we_are_compute_buyer(order_dict: dict[str, Any]) -> bool:
-    """True when we are the compute-buying (token-paying) side of this order.
-
-    Two cases:
-    - Seller-as-maker: maker offers compute, we are the taker → we buy compute.
-    - Buyer-as-maker: maker offers tokens (us), we are the maker → we buy compute.
-    """
-    maker_offers_compute = _resource_is_compute(order_dict.get("offer_resource"))
-    we_are_maker = _agent_urls_match(order_dict.get("seller"), BASE_URL_OVERRIDE)
-    return (maker_offers_compute and not we_are_maker) or (not maker_offers_compute and we_are_maker)
-
-
-def _resolve_counterparty_url_from_order(order_dict: dict[str, Any]) -> str | None:
-    """Return the URL of the other party in the order (the one that is not us)."""
-    maker = order_dict.get("seller")
-    taker = order_dict.get("buyer")
-    if _agent_urls_match(maker, BASE_URL_OVERRIDE):
-        return taker
-    return maker
-
-
 async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) -> str | None:
     """Fetch an agent's on-chain wallet via its /.well-known/agent-wallet.json.
 
@@ -112,8 +81,6 @@ async def fetch_agent_wallet_address(agent_url: str, *, timeout: float = 5.0) ->
     buyer calls before escrow creation to name the seller as the demanded
     recipient under RecipientArbiter.
     """
-    import httpx
-
     url = agent_url.rstrip("/") + "/.well-known/agent-wallet.json"
     try:
         async with httpx.AsyncClient(timeout=timeout) as http:
@@ -199,26 +166,34 @@ async def execute_action(
     match action_type_str:
         case ActionType.MAKE_OFFER.value:
             offer_param = parameters.get("offer")
-            demand_param = parameters.get("demand")
-            if offer_param is None or demand_param is None:
-                raise ValueError("MAKE_OFFER requires explicit 'offer' and 'demand' parameters")
+            accepted_escrows_param = parameters.get("accepted_escrows")
+            if offer_param is None:
+                raise ValueError("MAKE_OFFER requires an 'offer' parameter")
+            if not accepted_escrows_param:
+                raise ValueError(
+                    "MAKE_OFFER requires a non-empty 'accepted_escrows' "
+                    "list (chain_name, escrow_address, fields, price_per_hour)"
+                )
 
             try:
                 offer_resource = parse_resource_from_dict(offer_param)
-                demand_resource = parse_resource_from_dict(demand_param)
             except Exception as exc:
-                raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+                raise ValueError(f"Invalid offer resource: {exc}") from exc
 
-            offer_is_compute = isinstance(offer_resource, ComputeResource)
-            offer_is_token = isinstance(offer_resource, TokenResource)
-            demand_is_compute = isinstance(demand_resource, ComputeResource)
-            demand_is_token = isinstance(demand_resource, TokenResource)
-            if not ((offer_is_compute and demand_is_token) or (offer_is_token and demand_is_compute)):
-                raise ValueError("Offer and demand must be one compute and one token resource")
+            if not isinstance(offer_resource, ComputeResource):
+                # Only seller-side compute listings are supported. The
+                # token-offer / compute-demand "buyer-as-maker" path was
+                # deleted with the demand_resource cutover — buyers
+                # propose escrows against seller listings, they don't
+                # publish their own listings.
+                raise ValueError(
+                    "MAKE_OFFER offer must be a compute resource; "
+                    f"got {type(offer_resource).__name__}"
+                )
 
             order = create_order(
                 offer_resource=offer_resource,
-                demand_resource=demand_resource,
+                accepted_escrows=accepted_escrows_param,
                 max_duration_seconds=parameters.get("max_duration_seconds"),
             )
             created_listing_id = order.get("listing_id") if isinstance(order, dict) else None
@@ -240,16 +215,11 @@ async def execute_action(
                         created_at=now_iso,
                         updated_at=now_iso,
                         offer_resource=order.get("offer_resource"),
-                        demand_resource=order.get("demand_resource"),
+                        accepted_escrows=order.get("accepted_escrows"),
                         fulfillment_resource=None,
                         max_duration_seconds=order.get("max_duration_seconds"),
                         seller=order.get("seller", BASE_URL_OVERRIDE),
-                        buyer=order.get("buyer"),
-                        matched_offer_id=parameters.get("matched_offer_id"),
-                        seller_attestation=order.get("seller_attestation"),
-                        buyer_attestation=order.get("buyer_attestation"),
                         oracle_address=order.get("oracle_address"),
-                        escrow_uid=None,
                         paused=create_paused,
                     )
                 except Exception as exc:
@@ -336,7 +306,7 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
     except Exception as exc:
         logger.warning("[LOCAL DB] Failed to update order %s as closed: %s", order_id, exc)
 
-    if not CONFIG.enable_registry_discovery:
+    if not settings.enable_registry_discovery:
         return {
             "status": "skipped",
             "message": "Registry discovery is disabled; order not updated in registry",
@@ -345,20 +315,27 @@ async def close_order(parameters: dict[str, Any] | None = None) -> dict[str, Any
 
     try:
         async with _make_registry_client() as registry_client:
-            result = await registry_client.update_listing(
-                order_id,
-                UpdateListingRequest(
-                    updates={"status": "closed"},
-                    private_key=CONFIG.agent_priv_key,
-                    agent_id=_canonical_agent_id(),
-                ),
+            target_urls = await _registries_to_target(order_id, registry_client.urls)
+            update_request = UpdateListingRequest(
+                updates={"status": "closed"},
+                private_key=settings.wallet.private_key,
+                agent_id=_canonical_agent_id(),
             )
-        if result:
+            payloads = {url: update_request for url in target_urls}
+            results = await registry_client.update_listing_per_registry(
+                order_id, payloads,
+            )
+        await _record_publications(order_id, results)
+        first_ok = next(
+            (r["response"] for r in results if r["success"] and r["response"]),
+            None,
+        )
+        if first_ok:
             return {
                 "status": "closed",
                 "message": f"Order {order_id} marked closed in registry",
                 "listing_id": order_id,
-                "registry_result": result,
+                "registry_result": first_ok,
             }
         return {
             "status": "error",
@@ -388,21 +365,20 @@ async def _do_provision(
     in the settlement_jobs row so the buyer's GET /settle/{uid}/status can
     surface it while the job is still queued/running.
     """
-    from models.vm_request_model import CreateVmRequest
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
-        CONFIG.provisioning_service_url,
+        settings.provisioning.service_url,
         agent_id=canonical_id,
-        timeout=float(CONFIG.provisioning_timeout),
+        timeout=float(settings.provisioning.timeout),
     )
     async with client:
         params: dict = {"vm_target": vm_target, "ssh_pubkey": ssh_public_key}
-        if CONFIG.frp_server_addr:
-            params["frp_server_addr"] = CONFIG.frp_server_addr
-        if CONFIG.frp_domain:
-            params["frp_domain"] = CONFIG.frp_domain
-        if CONFIG.frp_dashboard_password:
-            params["frp_dashboard_password"] = CONFIG.frp_dashboard_password
+        if settings.provisioning.frp_server_addr:
+            params["frp_server_addr"] = settings.provisioning.frp_server_addr
+        if settings.provisioning.frp_domain:
+            params["frp_domain"] = settings.provisioning.frp_domain
+        if settings.provisioning.frp_dashboard_password:
+            params["frp_dashboard_password"] = settings.provisioning.frp_dashboard_password
         submit = await client.create_vm(vm_host, CreateVmRequest(**params))
         if on_job_submitted is not None:
             try:
@@ -414,8 +390,8 @@ async def _do_provision(
                 )
         job = await client.poll_until_complete(
             submit.job_id,
-            timeout=float(CONFIG.provisioning_timeout),
-            poll_interval=float(CONFIG.provisioning_poll_interval),
+            timeout=float(settings.provisioning.timeout),
+            poll_interval=float(settings.provisioning.poll_interval),
         )
         result = job.result or {}
         if canonical_id:
@@ -442,12 +418,11 @@ async def _do_provision(
 
 async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> dict:
     """Schedule VM expiry via the provisioning service."""
-    from models.vm_request_model import ScheduleVmExpiryRequest
     canonical_id = _canonical_agent_id()
     client = ProvisioningClient(
-        CONFIG.provisioning_service_url,
+        settings.provisioning.service_url,
         agent_id=canonical_id,
-        timeout=float(CONFIG.provisioning_timeout),
+        timeout=float(settings.provisioning.timeout),
     )
     async with client:
         submit = await client.schedule_expiry(
@@ -455,8 +430,8 @@ async def _do_shutdown(lease_end_utc: str, *, vm_host: str, vm_target: str) -> d
         )
         job = await client.poll_until_complete(
             submit.job_id,
-            timeout=float(CONFIG.provisioning_timeout),
-            poll_interval=float(CONFIG.provisioning_poll_interval),
+            timeout=float(settings.provisioning.timeout),
+            poll_interval=float(settings.provisioning.poll_interval),
         )
     return job.result or {}
 
@@ -470,13 +445,13 @@ def _canonical_agent_id() -> str | None:
     returned as-is; otherwise it is built from IDENTITY_REGISTRY_ADDRESS + ONCHAIN_AGENT_ID.
 
     Resolution order:
-      1. CONFIG.onchain_agent_id — explicit pin in config.toml (highest priority)
+      1. settings.onchain_agent_id — explicit pin in config.toml (highest priority)
       2. agent._AGENT_ID — set at startup by perform_registration when no pin is present
-      3. None — falls back to CONFIG.agent_id in callers (last resort)
+      3. None — falls back to AGENT_ID in callers (last resort)
 
     Returns None if no agent ID is available.
     """
-    raw = CONFIG.onchain_agent_id
+    raw = settings.onchain_agent_id
     if not raw:
         # Fall back to the in-memory ID set by perform_registration at startup.
         # This covers the case where onchain_agent_id is not pinned in config.toml
@@ -492,10 +467,10 @@ def _canonical_agent_id() -> str | None:
     if isinstance(raw, str) and raw.startswith("eip155:"):
         return raw
     try:
-        chain_id = _resolve_chain_id()
+        resolved_chain_id = chain_id()
         return build_erc8004_canonical_id(
-            chain_id=chain_id,
-            identity_registry=CONFIG.identity_registry_address,
+            chain_id=resolved_chain_id,
+            identity_registry=settings.registry.identity_registry_address,
             agent_id=int(raw),
         )
     except Exception as exc:
@@ -503,16 +478,21 @@ def _canonical_agent_id() -> str | None:
         return str(raw)
 
 
-def _make_registry_client() -> RegistryClient:
-    """Construct a RegistryClient from environment/CONFIG.
+def _make_registry_client() -> "MultiRegistryClient":
+    """Construct a multi-registry client wrapping every configured URL.
 
-    Each call returns a new client instance — callers should use it as a
-    context manager or call close() when done.  Singletons are avoided here
-    because the private_key and agent_id config values can theoretically
-    change between calls during testing.
+    Each call returns a fresh wrapper — callers use it as an async
+    context manager (``async with _make_registry_client() as rc:``).
+    The wrapper exposes the same surface as ``RegistryClient`` so call
+    sites (and the test mocks that patch this function) don't change
+    shape; reads fan in across every URL, writes fan out best-effort.
     """
-    return RegistryClient(
-        CONFIG.indexer_url or "http://localhost:8080",
+    from .multi_registry_client import MultiRegistryClient
+    urls = list(settings.registry.urls) if settings.registry.urls else ["http://localhost:8080"]
+    return MultiRegistryClient(
+        urls,
+        timeout=settings.registry.discovery_timeout,
+        auth=settings.registry.auth,
     )
 
 
@@ -525,43 +505,34 @@ def _sender_id() -> str:
     return _canonical_agent_id() or AGENT_ID
 
 
-def extract_compute_and_token_from_order_dict(order: dict) -> tuple[dict, dict]:
-    """Given an order, take the demand and offer and extract which is compute and which is tokens.
+def extract_compute_from_order(order: dict) -> dict:
+    """Return the compute dict from an order's ``offer_resource``.
 
-    SQLite stores offer/demand_resource as JSON strings; downstream encoders
-    (encode_compute_lease, ComputeResource.model_validate) expect dicts, so
-    json-decode here rather than push that responsibility to every caller.
+    Listings only carry compute as the offered resource since the
+    demand_resource cutover; the buyer-side token info comes from
+    ``accepted_escrows[0]`` (see ``_listing_token`` in
+    ``sync_negotiation``).
     """
     offer_resource = order.get("offer_resource", {})
-    demand_resource = order.get("demand_resource", {})
     if isinstance(offer_resource, str):
         offer_resource = json.loads(offer_resource)
-    if isinstance(demand_resource, str):
-        demand_resource = json.loads(demand_resource)
-
-    offer_is_compute = _resource_is_compute(offer_resource)
-    demand_is_compute = _resource_is_compute(demand_resource)
-
-    if offer_is_compute:
-        compute_resource = offer_resource
-        token_resource = demand_resource
-    elif demand_is_compute:
-        compute_resource = demand_resource
-        token_resource = offer_resource
-    else:
-        raise ValueError("Neither offer nor demand resource is compute in the provided order.")
-
-    return compute_resource, token_resource
+    if not _resource_is_compute(offer_resource):
+        raise ValueError(
+            f"Order offer_resource is not compute: "
+            f"listing_id={order.get('listing_id')}"
+        )
+    return offer_resource
 
 
-def _extract_initial_price_from_order(order: Listing | dict) -> int:
-    """Extract the initial negotiation floor from an order's token resource.
+def _extract_initial_price_from_order(order: Listing | dict) -> float:
+    """Extract the initial negotiation floor from a listing's
+    ``accepted_escrows[0].price_per_hour``.
 
-    Tristate semantics on ``demand.amount``:
-      * ``> 0`` — public price; returned directly (current behavior).
+    Tristate semantics on the advertised price:
+      * ``> 0`` — public price; returned directly.
       * ``0``  — free / public-test offering; returned as 0. The seller's
         strategy accepts any non-negative offer.
-      * ``None`` — hidden reserve; falls back to
+      * ``None`` or missing entry — hidden reserve; falls back to
         ``[seller.pricing].default_min_price`` so the strategy has a real
         floor. If that's also unset, raises ``ValueError`` — the caller
         (sync_negotiation) translates that to a 409 refusal.
@@ -569,36 +540,34 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised: int | None
-    if isinstance(order.offer_resource, TokenResource):
-        advertised = order.offer_resource.amount
-    elif isinstance(order.demand_resource, TokenResource):
-        advertised = order.demand_resource.amount
-    else:
-        raise ValueError(f"Order has no token resource: {order.listing_id}")
+    advertised: float | None = None
+    if order.accepted_escrows:
+        first = order.accepted_escrows[0]
+        advertised = first.price_per_hour
 
     # 0 is a meaningful value (free); only None falls through to the fallback.
     if advertised is not None:
-        return int(advertised)
+        return float(advertised)
 
     # Hidden reserve: fall back to the seller's config default.
-    from market_storefront.utils.config import CONFIG
-    fallback = CONFIG.default_min_price
+    from market_storefront.utils.config import settings, AGENT_ID, BASE_URL_OVERRIDE
+    fallback = settings.pricing.default_min_price
     if fallback is not None and str(fallback).strip():
         try:
-            parsed = int(fallback)
+            parsed = float(fallback)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"[seller.pricing].default_min_price={fallback!r} is not a "
-                f"valid integer; hidden-reserve listing {order.listing_id} has "
+                f"valid number; hidden-reserve listing {order.listing_id} has "
                 "no usable floor."
             ) from exc
         if parsed > 0:
             return parsed
 
     raise ValueError(
-        f"Listing {order.listing_id} has hidden reserve (demand.amount=None) "
-        "and [seller.pricing].default_min_price is not configured. The seller "
+        f"Listing {order.listing_id} has hidden reserve "
+        "(accepted_escrows[0].price_per_hour=None) and "
+        "[seller.pricing].default_min_price is not configured. The seller "
         "has no floor to negotiate against; refusing the negotiation."
     )
 
@@ -607,7 +576,7 @@ def _extract_initial_price_from_order(order: Listing | dict) -> int:
 def create_order(
     publish_to_registry: bool = True,
     offer_resource: ComputeResource | TokenResource = None,
-    demand_resource: ComputeResource | TokenResource = None,
+    accepted_escrows: list[dict[str, Any]] | None = None,
     max_duration_seconds: int | None = None,
 ) -> dict | None:
     """Create an order in the market.
@@ -620,7 +589,11 @@ def create_order(
     Args:
         publish_to_registry: Whether to publish order to registry (default: True)
         offer_resource: Offer resource (required)
-        demand_resource: Demand resource (required)
+        accepted_escrows: List of accepted escrow shapes the seller will
+            honour for this listing. May be ``None`` when the chain
+            config can't resolve an escrow address (synthesis falls
+            through); the listing still gets created but has no
+            pricing/escrow advertisement until callers populate one.
         max_duration_seconds: Optional ceiling on lease duration in seconds.
             None = unlimited. Buyer specifies the actual duration at
             negotiation init time.
@@ -634,119 +607,23 @@ def create_order(
     if not offer_resource:
         logger.error("[TOOL] offer_resource is required")
         return None
-    if not demand_resource:
-        logger.error("[TOOL] demand_resource is required")
-        return None
-
-    # The token-offering side is always the oracle/buyer.
-    offering_tokens = isinstance(offer_resource, TokenResource) or (
-        isinstance(offer_resource, dict) and "token" in offer_resource
-    )
-    oracle_address = CONFIG.agent_wallet_address if offering_tokens else None
 
     order = Listing(
         listing_id=str(uuid.uuid4()),
         seller=BASE_URL_OVERRIDE,
-        buyer=None,
         offer_resource=offer_resource,
-        demand_resource=demand_resource,
+        accepted_escrows=accepted_escrows,
         max_duration_seconds=max_duration_seconds,
-        seller_attestation=None,
-        buyer_attestation=None,
-        oracle_address=oracle_address,
+        oracle_address=None,
     )
 
     order_dict = order.model_dump(mode='json')
-    
+
     # Note: Order publishing to registry happens in make_offer() to ensure
     # it's done in an async context. This keeps create_order() synchronous
     # for compatibility with existing callers.
-    
+
     return order_dict
-
-
-async def discover(
-    *,
-    order_id: str,
-    include_active_negotiations: bool = False,
-) -> list[dict[str, Any]]:
-    """Query the registry for orders matching `order_id` and return them.
-
-    Pure query — no thread writes, no outbound sends. Intended as the
-    first closed-function step of a sequential buy/sell flow.
-
-    Returns a list of match records:
-        {"their_listing_id": str,
-         "their_agent_url": str,
-         "their_order": dict}
-
-    Filters applied:
-      - only `status='open'` rows from the registry
-      - bidirectional resource compatibility (via registry_client.match_orders)
-      - our own orders removed
-      - orders already in active negotiations with us removed, unless
-        `include_active_negotiations=True` (useful for debugging / forced
-        re-propose flows)
-
-    Callers that also want to *initiate* negotiations against the result
-    should pair this with `start_negotiations(order_id, matches)`.
-    """
-    if not CONFIG.enable_registry_discovery:
-        raise RuntimeError("Registry discovery is disabled (CONFIG.enable_registry_discovery=False)")
-
-    async with _make_registry_client() as registry_client:
-        try:
-            our_order = await registry_client.get_listing(order_id)
-        except RegistryClientError as exc:
-            if exc.status_code == 404:
-                raise ValueError(f"Order {order_id} not found in registry") from exc
-            raise
-
-        candidates_resp = await registry_client.list_listings(
-            status="open",
-            limit=CONFIG.max_discovery_agents,
-        )
-        matching_orders = match_orders(our_order, candidates_resp.listings, bidirectional=True)
-    # Drop our own orders.
-    matching_orders = [
-        m for m in matching_orders
-        if str(m.id) != order_id
-        and not _agent_urls_match(m.maker_agent_id, BASE_URL_OVERRIDE)
-    ]
-
-    if not include_active_negotiations:
-        async with NegotiationThreadTransaction("DISCOVER") as txn:
-            active_order_ids = await txn.filter_active(order_id)
-            if active_order_ids:
-                matching_orders = [
-                    m for m in matching_orders
-                    if str(m.id) not in active_order_ids
-                ]
-                logger.info(
-                    "[DISCOVER] Filtered out %d orders already in active negotiations",
-                    len(active_order_ids),
-                )
-
-    matches: list[dict[str, Any]] = []
-    for m in matching_orders[:CONFIG.max_discovery_agents]:
-        their_listing_id = str(m.id)
-        their_agent_url = m.maker_agent_id
-        if not their_listing_id or not their_agent_url:
-            continue
-        matches.append({
-            "their_listing_id": their_listing_id,
-            "their_agent_url": their_agent_url,
-            "their_order": m,
-        })
-
-    stage_event(
-        "discovery", "matches_found",
-        our_listing_id=order_id,
-        match_count=len(matches),
-        matched_order_ids=[m["their_listing_id"] for m in matches],
-        counterparty_urls=[m["their_agent_url"] for m in matches],
-    )
-    return matches
 
 
 async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
@@ -767,40 +644,147 @@ async def publish_order_to_registry(order: Listing | dict) -> dict[str, Any]:
         order_dict = order
         order_id = order_dict.get("listing_id", "unknown")
 
-    if order_dict.get("maker_attestation"):
-        logger.warning(
-            "[REGISTRY] Order %s has maker_attestation set but should be None for open orders",
-            order_id,
-        )
-
-    if not CONFIG.enable_registry_discovery:
+    if not settings.enable_registry_discovery:
         return {"status": "disabled", "listing_id": order_id}
 
+    accepted_escrows = order_dict.get("accepted_escrows") or []
+
     try:
-        agent_id_for_registry = _canonical_agent_id() or CONFIG.agent_id
+        agent_id_for_registry = _canonical_agent_id() or AGENT_ID
         async with _make_registry_client() as registry_client:
             order_request = ListingRequest(
                 listing_id=order_id,
                 offer=order_dict.get("offer_resource", {}),
-                demand=order_dict.get("demand_resource", {}),
+                accepted_escrows=accepted_escrows,
+                max_duration_seconds=order_dict.get("max_duration_seconds"),
+                seller=order_dict.get("seller") or BASE_URL_OVERRIDE,
+            )
+            payloads = {url: order_request for url in registry_client.urls}
+            results = await registry_client.publish_listing_per_registry(
+                agent_id_for_registry, payloads, private_key=settings.wallet.private_key,
+            )
+        await _record_publications(order_id, results)
+        any_ok = any(r["success"] for r in results)
+        if any_ok:
+            logger.info("[REGISTRY] Published order %s", order_id)
+            stage_event(
+                "discovery", "order_published",
+                order_id=order_id,
+                agent_url=BASE_URL_OVERRIDE,
+                offer=order_dict.get("offer_resource"),
+                accepted_escrows=accepted_escrows,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
-            await registry_client.publish_listing(
-                agent_id_for_registry, order_request, private_key=CONFIG.agent_priv_key
-            )
-        logger.info("[REGISTRY] Published order %s", order_id)
-        stage_event(
-            "discovery", "order_published",
-            order_id=order_id,
-            agent_url=BASE_URL_OVERRIDE,
-            offer=order_dict.get("offer_resource"),
-            demand=order_dict.get("demand_resource"),
-            max_duration_seconds=order_dict.get("max_duration_seconds"),
-        )
-        return {"status": "published", "listing_id": order_id}
+            return {"status": "published", "listing_id": order_id}
+        # No registry accepted the publish — surface the first error.
+        first_err = next((r["error"] for r in results if r["error"]), "unknown")
+        logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, first_err)
+        return {"status": "error", "listing_id": order_id, "message": first_err}
     except Exception as exc:
         logger.warning("[REGISTRY] Failed to publish order %s: %s", order_id, exc)
         return {"status": "error", "listing_id": order_id, "message": str(exc)}
+
+
+async def _registries_to_target(
+    listing_id: str, fallback_urls: list[str],
+) -> list[str]:
+    """Return the set of registry URLs to target for an update/delete on
+    ``listing_id``.
+
+    Consults the ``publications`` table — only registries that previously
+    received this listing get the update. Falls back to ``fallback_urls``
+    (typically ``registry_client.urls``) when no publications row exists
+    yet, which keeps update-before-publish flows (e.g. close_order on a
+    listing the storefront never published) functioning.
+
+    'unpublished' rows are skipped so a previously deleted listing doesn't
+    receive an update.
+    """
+    try:
+        sqlite_client = get_sqlite_client()
+        pubs = await sqlite_client.load_publications(listing_id=listing_id)
+    except Exception:
+        return list(fallback_urls)
+    active = [p["registry_url"] for p in pubs if p.get("status") != "unpublished"]
+    return active if active else list(fallback_urls)
+
+
+async def _record_publications(
+    listing_id: str, results: list[dict[str, Any]],
+) -> None:
+    """Persist one ``publications`` row per per-registry result.
+
+    Called after every fan-out write (publish / update / delete). Logged
+    rather than raised on persistence errors — the registry-side write
+    has already happened (or failed); the local audit row is best-effort.
+    """
+    try:
+        sqlite_client = get_sqlite_client()
+    except Exception:
+        return
+    for r in results:
+        payload = r.get("payload") or {}
+        status = "published" if r.get("success") else "failed"
+        try:
+            await sqlite_client.upsert_publication(
+                listing_id=listing_id,
+                registry_url=r["registry_url"],
+                payload=payload,
+                status=status,
+                registry_assigned_id=r.get("registry_assigned_id"),
+                last_error=r.get("error"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[PUBLICATIONS] Failed to record publication for %s @ %s: %s",
+                listing_id, r.get("registry_url"), exc,
+            )
+
+
+def _token_resource_from_accepted_escrow(
+    accepted_escrow: dict[str, Any] | Any,
+) -> TokenResource | None:
+    """Build a ``TokenResource`` from an ``accepted_escrows[i]`` entry.
+
+    Looks up ERC20 metadata by the entry's ``fields.token`` address in
+    the chain-resolved cache, falling back to address-only metadata when
+    the cache doesn't yet know it. Returns ``None`` when the entry lacks
+    a token. The token amount is the entry's ``price_per_hour`` (per-hour
+    rate in base units); ``None`` becomes 0.
+    """
+    if not isinstance(accepted_escrow, dict):
+        return None
+    fields = accepted_escrow.get("fields") or {}
+    token = fields.get("token")
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
+    except Exception:
+        return None
+    meta = resolve_token_cached(token)
+    if meta is None:
+        # Fall back to a minimal metadata object so the encoder has
+        # something to serialise. Decimals=0 means amounts are rendered
+        # as integers; better than failing the lease entirely.
+        meta = ERC20TokenMetadata(
+            symbol="UNKNOWN",
+            contract_address=token,
+            decimals=0,
+        )
+    price_per_hour = accepted_escrow.get("price_per_hour")
+    # price_per_hour is uint256-domain — decimal-digit string on the wire,
+    # int internally. Accept either form; treat anything else (None,
+    # malformed, bool) as 0.
+    if isinstance(price_per_hour, bool):
+        amount = 0
+    elif isinstance(price_per_hour, int):
+        amount = price_per_hour
+    elif isinstance(price_per_hour, str) and price_per_hour.strip().isdigit():
+        amount = int(price_per_hour.strip())
+    else:
+        amount = 0
+    return TokenResource(token=meta, amount=amount)
 
 
 def encode_compute_lease(
@@ -886,9 +870,9 @@ async def _build_provisioning_job_spec(
     """
     required_attributes: dict[str, Any] = {}
     if order_dict:
-        compute_resource, _token = extract_compute_and_token_from_order_dict(order_dict)
+        compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource[key]
 
@@ -927,10 +911,10 @@ async def fulfill_compute_obligation(
     negotiation thread's `agreed_duration_seconds`. Falls back to 1h
     only if the caller didn't provide one (recovery / legacy paths).
 
-    When the maker fulfills, this sets maker_attestation in the registry.
+    When fulfillment lands, pushes the fulfillment_uid to the registry's
+    update endpoint.
     """
     fulfillment_uid = None
-    maker_attestation = None
     connection_details: str | None = None
     reserved_resource_id: str | None = None
     reserved_vm_host: str | None = None
@@ -957,11 +941,19 @@ async def fulfill_compute_obligation(
         # still pass order_id. Prefer listing_id since that's what the rest
         # of the system (sqlite, stage events, registry) keys off of.
         order_id = order_dict.get("listing_id") or order_dict.get("order_id")
-        compute_resource, token_resource = extract_compute_and_token_from_order_dict(order_dict)
+        compute_resource = extract_compute_from_order(order_dict)
         if isinstance(compute_resource, dict):
-            for key in ("region", "gpu_model"):
+            for key in ("resource_id", "region", "gpu_model"):
                 if compute_resource.get(key) is not None:
                     required_attributes[key] = compute_resource.get(key)
+        accepted_escrows = order_dict.get("accepted_escrows") or []
+        first_escrow = accepted_escrows[0] if accepted_escrows else None
+        token_resource = _token_resource_from_accepted_escrow(first_escrow)
+        if token_resource is None:
+            raise ValueError(
+                f"Cannot encode compute lease for listing "
+                f"{order_id!r}: no usable accepted_escrows[0].token"
+            )
         order_bytes = encode_compute_lease(
             compute_resource=compute_resource,
             token_resource=token_resource,
@@ -973,7 +965,6 @@ async def fulfill_compute_obligation(
                 await sqlite_client.update_listing(
                     listing_id=order_id,
                     status="accepted",
-                    escrow_uid=escrow_uid,
                 )
             except Exception as exc:
                 logger.warning("[LOCAL DB] Failed to mark order %s accepted at fulfillment start: %s", order_id, exc)
@@ -998,8 +989,18 @@ async def fulfill_compute_obligation(
         )
 
         async def _record_job_id(job_id: str) -> None:
-            await get_sqlite_client().update_settlement_job(
+            await get_sqlite_client().update_escrow(
                 escrow_uid=escrow_uid,
+                provisioning_job_id=job_id,
+            )
+            # Emitted after the DB write so a consumer waking on this event
+            # is guaranteed to see provisioning_job_id populated.
+            stage_event(
+                "provision", "job_submitted",
+                listing_id=order_id,
+                escrow_uid=escrow_uid,
+                resource_id=reserved_resource_id,
+                vm_host=reserved_vm_host,
                 provisioning_job_id=job_id,
             )
 
@@ -1092,12 +1093,61 @@ async def fulfill_compute_obligation(
                 )
         except Exception as cred_err:
             logger.warning("[LOCAL DB] Failed to store credentials for order %s: %s", cred_order_id, cred_err)
-    await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
+    # Register the lease with the provisioning service so the LeaseWatchdog
+    # can call back to patch this resource to 'available' when the lease expires.
+    # storefront_url and storefront_admin_key are global settings on the
+    # provisioning service — not passed per-lease.
+    # Non-fatal: a failure here is logged but does not abort settlement.
+    if reserved_resource_id and reserved_vm_host and vm_target and escrow_uid:
+        try:
+            from client.provisioning_client import ProvisioningClient
+            from datetime import datetime as _dt
+            lease_end_dt = _dt.strptime(lease_end_utc, "%Y-%m-%d %H:%M").replace(
+                tzinfo=timezone.utc
+            )
+            async with ProvisioningClient(
+                settings.provisioning.service_url,
+                agent_id=str(settings.onchain_agent_id or ""),
+                timeout=10,
+            ) as prov_client:
+                await prov_client.register_lease(
+                    resource_id=reserved_resource_id,
+                    escrow_uid=escrow_uid,
+                    vm_host=reserved_vm_host,
+                    vm_target=vm_target,
+                    lease_end_utc=lease_end_dt,
+                )
+            logger.info(
+                "[LEASE] Registered lease with provisioning service "
+                "(resource=%s escrow=%s expires=%s)",
+                reserved_resource_id, escrow_uid, lease_end_utc,
+            )
+        except Exception as lease_err:
+            logger.warning(
+                "[LEASE] Failed to register lease with provisioning service "
+                "(resource=%s escrow=%s): %s — watchdog will not auto-release this resource",
+                reserved_resource_id, escrow_uid, lease_err,
+            )
+
+    async def _schedule_shutdown_best_effort() -> None:
+        try:
+            await _do_shutdown(lease_end_utc, vm_host=reserved_vm_host, vm_target=vm_target)
+        except Exception as shutdown_err:
+            logger.warning(
+                "[LEASE] Failed to schedule VM expiry with provisioning service "
+                "(resource=%s escrow=%s vm=%s/%s): %s",
+                reserved_resource_id,
+                escrow_uid,
+                reserved_vm_host,
+                vm_target,
+                shutdown_err,
+            )
+
+    asyncio.create_task(_schedule_shutdown_best_effort())
 
     if not client or not oracle_address:
         # Demo fallback: skip on-chain, return simulated fulfillment uid
         fulfillment_uid = f"fulfill_{uuid.uuid4()}"
-        maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
         logger.info("[ALKAHEST] (Simulated) Fulfilled compute obligation without on-chain client.")
     else:
         try:
@@ -1105,7 +1155,6 @@ async def fulfill_compute_obligation(
                 connection_details,
                 escrow_uid
             )
-            maker_attestation = fulfillment_uid  # Use fulfillment_uid as maker_attestation
             logger.info("[ALKAHEST] Fulfilled compute obligation with on-chain client; machine provisioned.")
             demand_bytes = order_bytes
             request_arbitration_result = await client.oracle.request_arbitration(
@@ -1116,44 +1165,33 @@ async def fulfill_compute_obligation(
             logger.info(f"[ALKAHEST] Arbitration requested: {request_arbitration_result}")
         except Exception as error:
             logger.error(f"[ALKAHEST] Fulfillment error: {error}")
-    
-    # Update registry with maker_attestation when maker fulfills
-    if order and maker_attestation and CONFIG.enable_registry_discovery and order_id:
-        try:
-            async with _make_registry_client() as registry_client:
-                result = await registry_client.update_listing(
-                    order_id,
-                    UpdateListingRequest(
-                        updates={"seller_attestation": maker_attestation},
-                        private_key=CONFIG.agent_priv_key,
-                        agent_id=_canonical_agent_id(),
-                    ),
-                )
-                if result:
-                    logger.info(f"[REGISTRY] Updated order {order_id} with maker_attestation: {maker_attestation}")
-                else:
-                    logger.warning(f"[REGISTRY] Failed to update order {order_id} with maker_attestation")
-        except Exception as e:
-            logger.warning(f"[REGISTRY] Error updating order {order_id} with maker_attestation: {e}")
 
     if order_id:
         try:
             sqlite_client = get_sqlite_client()
             await sqlite_client.update_listing(
                 listing_id=order_id,
-                seller_attestation=maker_attestation,
                 fulfillment_resource=connection_details,
-                escrow_uid=escrow_uid,
             )
         except Exception as exc:
             logger.warning("[LOCAL DB] Failed to update fulfillment for order %s: %s", order_id, exc)
+        if fulfillment_uid:
+            try:
+                await get_sqlite_client().update_escrow(
+                    escrow_uid=escrow_uid,
+                    fulfillment_uid=fulfillment_uid,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[LOCAL DB] Failed to record fulfillment_uid on escrow %s: %s",
+                    escrow_uid, exc,
+                )
 
     tenant_auth = (authentication or {}).get("tenant", {}) or {}
     stage_event("provision", "fulfilled",
         listing_id=order_id,
         escrow_uid=escrow_uid,
         fulfillment_uid=fulfillment_uid,
-        maker_attestation=maker_attestation,
         resource_id=reserved_resource_id,
         vm_host=reserved_vm_host,
         lease_end_utc=lease_end_utc,

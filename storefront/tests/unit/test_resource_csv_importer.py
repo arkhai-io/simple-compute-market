@@ -87,12 +87,13 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
     csv_path = tmp_path / "resources_priced.csv"
     sqlite_client = SQLiteClient(db_path=db_path)
 
+    usdc = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
     _write_csv(
         csv_path,
         "\n".join(
             [
                 "resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host",
-                "compute-priced,compute.gpu,h200,count,1,available,150,USDC,H200,99.0,\"California, US\",vm1",
+                f"compute-priced,compute.gpu,h200,count,1,available,150,{usdc},H200,99.0,\"California, US\",vm1",
                 "compute-default,compute.gpu,h200,count,1,available,,,H200,99.0,\"California, US\",vm2",
             ]
         ),
@@ -104,7 +105,7 @@ async def test_upsert_resources_from_csv_persists_per_row_pricing(tmp_path: Path
     assert report["imported_count"] == 2
     by_id = {r["resource_id"]: r for r in resources}
     assert by_id["compute-priced"]["min_price"] == "150"
-    assert by_id["compute-priced"]["token"] == "USDC"
+    assert by_id["compute-priced"]["token"] == usdc
     # Empty cells become NULL, signaling "fall back to [seller.pricing] defaults".
     assert by_id["compute-default"]["min_price"] is None
     assert by_id["compute-default"]["token"] is None

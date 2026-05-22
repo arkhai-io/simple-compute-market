@@ -58,7 +58,7 @@ async def _seed_order(db: SQLiteClient, order_id: str) -> None:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x0000000000000000000000000000000000000001"}, "price_per_hour": 9000}],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -71,7 +71,7 @@ async def _seed_thread(
     order_id: str,
     *,
     terminal_state: str | None = None,
-    agreed_price: int | None = None,
+    agreed_price: float | None = None,
 ) -> None:
     """Insert a minimal negotiation thread and two messages directly into SQLite."""
     now = datetime.now().isoformat()
@@ -264,6 +264,49 @@ class TestGetNegotiation:
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.get_negotiation("ord-y", "neg-x")
         assert "404" in str(exc_info.value)
+
+    async def test_surfaces_escrows(self, client):
+        c, db = client
+        await _seed_order(db, "ord-esc")
+        await _seed_thread(db, "neg-esc", "ord-esc")
+        await db.insert_escrow(
+            escrow_uid="0xPrimary",
+            negotiation_id="neg-esc",
+            chain_name="anvil",
+            escrow_address="0x" + "11" * 20,
+            is_primary=True,
+            status="provisioning",
+        )
+        await db.update_escrow(
+            escrow_uid="0xPrimary",
+            fulfillment_uid="0xFulfillment",
+        )
+        await db.insert_escrow(
+            escrow_uid="0xBond",
+            negotiation_id="neg-esc",
+            chain_name="anvil",
+            escrow_address="0x" + "22" * 20,
+            is_primary=False,
+            status="provisioning",
+        )
+        detail = await c.get_negotiation("ord-esc", "neg-esc")
+        assert len(detail.escrows) == 2
+        # Primary first
+        primary, bond = detail.escrows
+        assert primary["escrow_uid"] == "0xPrimary"
+        assert primary["fulfillment_uid"] == "0xFulfillment"
+        assert primary["chain_name"] == "anvil"
+        assert primary["is_primary"] is True
+        assert primary["status"] == "provisioning"
+        assert bond["escrow_uid"] == "0xBond"
+        assert bond["is_primary"] is False
+
+    async def test_empty_escrows_when_none_recorded(self, client):
+        c, db = client
+        await _seed_order(db, "ord-noesc")
+        await _seed_thread(db, "neg-noesc", "ord-noesc")
+        detail = await c.get_negotiation("ord-noesc", "neg-noesc")
+        assert detail.escrows == []
 
 
 # ---------------------------------------------------------------------------

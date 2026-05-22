@@ -331,6 +331,10 @@ async def client_and_queue(
         resolved_inventory_path=Path("/fake/hosts"),
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
+        lease_watchdog_grace_period_seconds=300,
+        lease_watchdog_enabled=False,  # Don't start background timer in tests
+        storefront_url="http://test-storefront:8001",
+        storefront_admin_key="test-admin-key",
     )
 
     host_service = HostService(
@@ -351,12 +355,23 @@ async def client_and_queue(
         host_service=host_service,
     )
 
+    from services.lease_service import LeaseService
+    from services.lease_lifecycle_service import LeaseLifecycleService
+    lease_service = LeaseService(session_factory=session_factory)
+    lease_lifecycle_service = LeaseLifecycleService(
+        lease_service=lease_service,
+        settings=mock_settings,
+        job_service=None,  # tests use direct-patch path; no real Ansible jobs
+    )
+
     # Override container providers
     app.container.ansible_service.override(fake_ansible)
     app.container.job_service.override(job_service)
     app.container.system_service.override(system_service)
     app.container.session_factory.override(session_factory)
     app.container.host_service.override(host_service)
+    app.container.lease_service.override(lease_service)
+    app.container.lease_lifecycle_service.override(lease_lifecycle_service)
 
     # Wire resolved module-level variables
     _container_module.resolved_job_service = job_service
@@ -364,6 +379,8 @@ async def client_and_queue(
     _container_module.resolved_ansible_service = fake_ansible
     _container_module.resolved_system_service = system_service
     _container_module.resolved_host_service = host_service
+    _container_module.resolved_lease_service = lease_service
+    _container_module.resolved_lease_lifecycle_service = lease_lifecycle_service
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)
@@ -405,6 +422,8 @@ async def client_and_queue(
     app.container.system_service.reset_override()
     app.container.session_factory.reset_override()
     app.container.host_service.reset_override()
+    app.container.lease_service.reset_override()
+    app.container.lease_lifecycle_service.reset_override()
 
 
 @pytest_asyncio.fixture

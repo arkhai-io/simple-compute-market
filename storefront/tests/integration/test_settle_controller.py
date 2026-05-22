@@ -57,14 +57,12 @@ async def _seed_listing(db: SQLiteClient, listing_id: str) -> None:
             "gpu_model": "H200", "gpu_count": 1, "sla": 99.0,
             "region": "California, US",
         },
-        demand_resource={
-            "token": {
-                "symbol": "MOCK",
-                "contract_address": "0x0000000000000000000000000000000000000001",
-                "decimals": 0,
-            },
-            "amount": 5000,
-        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "price_per_hour": 5000,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=3600,
         seller="http://seller:8001",
@@ -156,7 +154,7 @@ class TestVerifySettle:
             agreed_duration_seconds=3600,
             listing_id="settle-verify-nowrite",
         )
-        job = await db.load_settlement_job(escrow_uid="no-write-uid")
+        job = await db.load_escrow(escrow_uid="no-write-uid")
         assert job is None, (
             "verify_settle must not write settlement_jobs rows — it is a dry-run endpoint."
         )
@@ -231,7 +229,7 @@ class TestEvaluateSettle:
         )
 
         # Settlement job must not be created
-        job = await db.load_settlement_job(escrow_uid="no-write-eval-uid")
+        job = await db.load_escrow(escrow_uid="no-write-eval-uid")
         assert job is None, "evaluate_settle must not write settlement_jobs rows"
 
         # Resource must still be available (not reserved)

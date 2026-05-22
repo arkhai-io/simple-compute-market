@@ -1,0 +1,28 @@
+{{/*
+PVC backing the provisioning service's SQLite DB at
+persistence.mountPath. Rendered only when persistence.enabled —
+otherwise the Deployment keeps its pre-existing emptyDir mount and
+lease state evaporates on every pod restart.
+
+helm.sh/resource-policy: keep so `helm uninstall` does not destroy
+the in-flight leases / hosts / provisioning state.
+*/}}
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "provisioning.pvcName" . }}
+  labels:
+    {{- include "provisioning.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

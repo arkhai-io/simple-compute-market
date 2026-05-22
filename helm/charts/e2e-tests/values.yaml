@@ -1,0 +1,50 @@
+# Default values for the e2e-tests subchart.
+# This subchart is disabled by default — it is dev/CI infrastructure only
+# and should never be enabled in a production deployment.
+#
+# All credentials here are the deterministic Anvil test keys for the local
+# dev chain. Override in values.yaml or via --set for other environments.
+
+# ---------------------------------------------------------------------------
+# Integration test image — same image used by all helm test pods.
+# ---------------------------------------------------------------------------
+integrationTests:
+  repository: ""    # falls back to global.imageRepository
+  name: arkhai
+  tag: integration-tests
+  pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# createSecret: controls whether the chart creates the e2e credentials Secret.
+#
+# true  (default) — chart renders the Secret from the values below.
+#                   Use for local dev and CI runs against a local cluster.
+# false           — chart skips Secret creation; a pre-existing Secret with
+#                   the correct name must exist (e.g. created by ESO).
+#                   Use for GKE environments where secrets come from
+#                   Secret Manager via External Secrets Operator.
+# ---------------------------------------------------------------------------
+createSecret: true
+
+# ---------------------------------------------------------------------------
+# Seller credentials — must match the storefront agent that the e2e test
+# targets. Duplicated from storefront.agents[*].secret deliberately: the
+# e2e subchart is self-contained and mounts nothing from the storefront
+# subchart's Secrets.
+#
+# Anvil Hardhat account #2 (same key as storefront bob agent default).
+# ---------------------------------------------------------------------------
+seller:
+  privateKey:    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+  walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+  # adminApiKey is read from global.adminApiKey — no override needed here
+  # unless the storefront was deployed with a non-global key.
+  adminApiKey:   ""  # leave empty to inherit global.adminApiKey
+
+# ---------------------------------------------------------------------------
+# Buyer credentials — used only by the e2e test pod for on-chain escrow
+# creation (stage 07). Anvil Hardhat account #1.
+# ---------------------------------------------------------------------------
+buyer:
+  privateKey:    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"

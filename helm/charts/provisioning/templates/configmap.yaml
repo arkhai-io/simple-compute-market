@@ -6,4 +6,8 @@ metadata:
     {{- include "provisioning.labels" . | nindent 4 }}
 data:
   config-production.yml: |
-    {{- .Values.config | toYaml | nindent 4 }}
+    {{- $config := deepCopy .Values.config -}}
+    {{- if not $config.storefront_url -}}
+      {{- $_ := set $config "storefront_url" (default (printf "http://%s-storefront-%s:%d" .Release.Name .Values.storefront.agentName (int .Values.storefront.port)) .Values.storefront.url) -}}
+    {{- end -}}
+    {{- $config | toYaml | nindent 4 }}

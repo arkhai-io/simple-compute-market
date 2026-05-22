@@ -15,6 +15,9 @@ dependencies = [
     "eth-account>=0.9.0",
     "python-dotenv>=1.0.0",
     "aiohttp>=3.9.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "jsonpath-ng>=1.6",
 ]
 
 [tool.setuptools]
@@ -32,7 +35,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "httpx>=0.27.0",
-    "arkhai-registry-client>=0.3.0",
+    "arkhai-registry-client>=0.6.0",
     "black>=23.11.0",
     "ruff>=0.1.6",
 ]

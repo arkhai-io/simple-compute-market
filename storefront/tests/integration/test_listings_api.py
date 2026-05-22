@@ -56,7 +56,12 @@ async def _seed_listing(db: SQLiteClient, listing_id: str, status: str = "open")
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x0000000000000000000000000000000000000001", "decimals": 18}, "amount": 9000},
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"token": "0x0000000000000000000000000000000000000001"},
+            "price_per_hour": 9000,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
@@ -159,80 +164,10 @@ class TestListListings:
         listing = next(o for o in result.listings if o.listing_id == "check-paused")
         assert listing.paused is False
 
-    async def test_spec_filter_gpu_count_min(self, client):
-        c, db = client
-        for lid, gpu_count in (("small", 1), ("big", 8)):
-            await db.upsert_listing(
-                listing_id=lid, status="open",
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat(),
-                offer_resource={
-                    "gpu_model": "H200", "gpu_count": gpu_count,
-                    "sla": 99.9, "region": "California, US",
-                },
-                demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
-                fulfillment_resource=None,
-                max_duration_seconds=7200, seller="http://seller:8001",
-            )
-        result = await c.list_listings(gpu_count_min=4)
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"big"}
-
-    async def test_spec_filter_gpu_model_equality(self, client):
-        c, db = client
-        for lid, model in (("h200", "H200"), ("rtx4090", "RTX 4090")):
-            await db.upsert_listing(
-                listing_id=lid, status="open",
-                created_at=datetime.now().isoformat(),
-                updated_at=datetime.now().isoformat(),
-                offer_resource={"gpu_model": model, "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
-                fulfillment_resource=None,
-                max_duration_seconds=3600, seller="http://seller:8001",
-            )
-        result = await c.list_listings(gpu_model="H200")
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"h200"}
-
-    async def test_spec_filter_combines_multiple_constraints(self, client):
-        c, db = client
-        await db.upsert_listing(
-            listing_id="dream", status="open",
-            created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
-            offer_resource={
-                "gpu_model": "H200", "gpu_count": 8, "sla": 99.9, "region": "California, US",
-                "vcpu_count": 192, "ram_gb": 2048, "disk_gb": 20000,
-                "gpu_interconnect": "nvswitch", "datacenter_grade": True,
-            },
-            demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 1000},
-            fulfillment_resource=None,
-            max_duration_seconds=86400, seller="http://seller:8001",
-        )
-        await db.upsert_listing(
-            listing_id="basic", status="open",
-            created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat(),
-            offer_resource={
-                "gpu_model": "RTX 5080", "gpu_count": 1, "sla": 90.0, "region": "California, US",
-                "vcpu_count": 16, "ram_gb": 64, "disk_gb": 2000,
-                "gpu_interconnect": "pcie_only", "datacenter_grade": False,
-            },
-            demand_resource={"token": {"symbol": "MOCK", "contract_address": "0x" + "0" * 40, "decimals": 18}, "amount": 100},
-            fulfillment_resource=None,
-            max_duration_seconds=3600, seller="http://seller:8001",
-        )
-        result = await c.list_listings(
-            gpu_count_min=4, vcpu_count_min=64, gpu_interconnect="nvswitch", datacenter_grade=True,
-        )
-        ids = {o.listing_id for o in result.listings}
-        assert ids == {"dream"}
-
-    async def test_spec_filter_with_no_matches_returns_empty(self, client):
-        c, db = client
-        await _seed_listing(db, "exists")
-        result = await c.list_listings(gpu_model="NONEXISTENT_GPU")
-        assert result.count == 0
-        raw = await c._get("/api/v1/listings", params={"gpu_model": "NONEXISTENT_GPU"})
-        assert raw.get("total_after_filter") == 0
+    # Discovery filters (gpu_model, gpu_count_min, etc.) were dropped in
+    # milestone (a1b) — buyers query registries for that, not the
+    # storefront.  See registry-service/tests/integration/test_listings
+    # _filtering.py for the spec-driven equivalent.
 
 
 # ---------------------------------------------------------------------------
@@ -348,10 +283,10 @@ async def admin_client(db) -> AsyncIterator[tuple[StorefrontClient, SQLiteClient
     config.chain_rpc_url = ""
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
+        sqlite_client=db, alkahest_client=None
     )
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -390,10 +325,10 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
     config.chain_rpc_url = ""
 
     listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
+        sqlite_client=db, alkahest_client=None
     )
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -421,14 +356,15 @@ async def admin_no_key_client(db) -> AsyncIterator[StorefrontClient]:
 _OFFER = {
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"
 }
-_DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 0,
-    },
-    "amount": 5000,
-}
+# Stub accepted_escrows for API-contract tests. Address-correctness is the
+# storefront's concern at negotiate time; at listing-create time the
+# storefront just stores what it's told.
+_ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "price_per_hour": 5000,
+}]
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +378,7 @@ class TestEvaluateCreate:
         """Endpoint returns a structured response with would_create field."""
         c, _ = admin_client
         result = await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
         assert "would_create" in result, f"Missing 'would_create' in response: {result}"
@@ -452,7 +388,7 @@ class TestEvaluateCreate:
         """Response includes action string (make_offer or no_action)."""
         c, _ = admin_client
         result = await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         assert "action" in result, f"Missing 'action' in response: {result}"
         assert isinstance(result["action"], str)
@@ -462,7 +398,7 @@ class TestEvaluateCreate:
         c, db = admin_client
         before = await db.list_listings()
         await c.evaluate_create_listing(
-            offer=_OFFER, demand=_DEMAND, max_duration_seconds=3600, paused=False,
+            offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS, max_duration_seconds=3600, paused=False,
         )
         after = await db.list_listings()
         assert len(before) == len(after), (
@@ -473,7 +409,7 @@ class TestEvaluateCreate:
         """Admin key required — missing key returns 403."""
         with pytest.raises(StorefrontClientError) as exc_info:
             await admin_no_key_client.evaluate_create_listing(
-                offer=_OFFER, demand=_DEMAND,
+                offer=_OFFER, accepted_escrows=_ACCEPTED_ESCROWS,
             )
         assert "403" in str(exc_info.value)
 
@@ -481,7 +417,7 @@ class TestEvaluateCreate:
         """Malformed offer dict handled gracefully — no 500 from unhandled exception."""
         c, _ = admin_client
         with pytest.raises(StorefrontClientError) as exc_info:
-            await c.evaluate_create_listing(offer={}, demand=_DEMAND)
+            await c.evaluate_create_listing(offer={}, accepted_escrows=_ACCEPTED_ESCROWS)
         # 400 from the service ValueError or 500 if parse_resource_from_dict raises
         assert any(code in str(exc_info.value) for code in ("400", "500"))
 
@@ -577,7 +513,7 @@ class TestEvaluateNegotiate:
     async def test_price_at_floor_does_not_exit(self, admin_client):
         """Buyer price at or above the seller's floor should not produce exit."""
         c, db = admin_client
-        await _seed_listing(db, "neg-eval-floor")  # default demand amount=9000
+        await _seed_listing(db, "neg-eval-floor")  # default price_per_hour=9000
         with patch(
             "market_storefront.utils.sync_negotiation._load_storefront_strategy",
             return_value=_bisection_strategy(),
@@ -635,7 +571,7 @@ def _bisection_strategy():
 # These tests prove the EIP-191 auth contract between the client and the
 # seller_auth middleware for the create_listing endpoint:
 #   - client signs "create_listing:{agent_wallet_address}:{ts}"
-#   - server verifies the same message against CONFIG.agent_wallet_address
+#   - server verifies the same message against settings.wallet.address
 #
 # This is a pure interface test — no policy pipeline needed, so the
 # listing_svc dependency is left as None (the 403 fires before it's called).
@@ -648,30 +584,24 @@ _TEST_WALLET     = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"  # address for a
 
 @pytest_asyncio.fixture
 async def seller_auth_client(db):
-    """Fixture wiring listings router with seller auth enabled via CONFIG patch.
+    """Fixture wiring listings router with seller auth enabled.
 
-    Patches CONFIG.agent_wallet_address to _TEST_WALLET so the middleware
+    Sets settings.wallet.address to _TEST_WALLET so the middleware
     enforces EIP-191 verification. The StorefrontClient is constructed with
     _TEST_PRIVATE_KEY so signatures verify correctly.
     """
-    from unittest.mock import MagicMock, patch as _patch
-    import market_storefront.middleware.seller_auth as _seller_auth_mod
-    import market_storefront.utils.config as _config_mod
+    from tests._settings_overrides import settings_overrides
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # 403 fires before service is called
     _container.resolved_policy_service = None
-
-    fake_config = MagicMock()
-    fake_config.agent_wallet_address = _TEST_WALLET
 
     app = FastAPI()
     app.include_router(listings_router)
     app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
-    with _patch.object(_config_mod, "CONFIG", fake_config), \
-         _patch.object(_seller_auth_mod, "CONFIG", fake_config, create=True):
+    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
         async with StorefrontClient(
             "http://test",
             transport=transport,
@@ -690,30 +620,15 @@ async def seller_auth_full_client(db):
     """seller_auth_client variant with real ListingService + PolicyService.
 
     Used by TestCreateListing to exercise the full create round-trip:
-    auth → service → controller → response. The double-wrap bug
-    (CreateListingResponse(**result) when result is already typed) would
-    surface as a 500 in this fixture but not in seller_auth_client which
-    has listing_svc=None.
+    auth → service → controller → response.
     """
-    from unittest.mock import MagicMock, patch as _patch
     from market_storefront.services.listing_service import ListingService
     from market_storefront.services.policy_service import PolicyService
-    import market_storefront.middleware.seller_auth as _seller_auth_mod
-    import market_storefront.utils.config as _config_mod
+    from tests._settings_overrides import settings_overrides
 
-    config = MagicMock()
-    config.base_url_override = ""
-    config.base_url_override_raw = ""
-    config.agent_id = "test-agent"
-    config.agent_priv_key = ""
-    config.chain_rpc_url = ""
-    config.agent_wallet_address = _TEST_WALLET
-
-    listing_svc = ListingService(
-        sqlite_client=db, alkahest_client=None, config=config
-    )
+    listing_svc = ListingService(sqlite_client=db, alkahest_client=None)
     policy_svc = PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent"
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent"
     )
 
     _container.resolved_sqlite_client = db
@@ -725,8 +640,7 @@ async def seller_auth_full_client(db):
     app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
     transport = httpx.ASGITransport(app=app)
-    with _patch.object(_config_mod, "CONFIG", config), \
-         _patch.object(_seller_auth_mod, "CONFIG", config, create=True):
+    with settings_overrides(**{"wallet.address": _TEST_WALLET}):
         async with StorefrontClient(
             "http://test",
             transport=transport,
@@ -756,7 +670,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         assert hasattr(result, "listing_id") or (
@@ -778,7 +692,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
@@ -791,7 +705,7 @@ class TestCreateListing:
     async def test_paused_listing_not_in_registry(self, seller_auth_full_client):
         """paused=True create returns a listing_id without registry error.
 
-        Full registry publish suppression requires the real CONFIG.enable_registry_discovery
+        Full registry publish suppression requires the real settings.enable_registry_discovery
         flag which is set at module level in action_executor. This test asserts the response
         is well-formed (listing_id present, no 500), which is sufficient to prove the
         paused=True path through the controller works correctly.
@@ -800,7 +714,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         listing_id = result.listing_id if hasattr(result, "listing_id") else result.get("listing_id")
@@ -820,7 +734,7 @@ class TestCreateListing:
         result = await c.create_listing(
             agent_wallet_address=_TEST_WALLET,
             offer=_OFFER,
-            demand=_DEMAND,
+            accepted_escrows=_ACCEPTED_ESCROWS,
             paused=True,
         )
         # StorefrontListingCreateResponse from the client — has listing_id
@@ -834,7 +748,7 @@ class TestCreateListing:
     """Proves the EIP-191 auth contract for POST /api/v1/listings/create.
 
     The client signs ``create_listing:{agent_wallet_address}:{ts}`` and the
-    server verifies against CONFIG.agent_wallet_address. These tests confirm
+    server verifies against settings.wallet.address. These tests confirm
     that the middleware correctly accepts a valid signature and rejects
     mismatched ones.
 
@@ -854,15 +768,12 @@ class TestCreateListing:
                 agent_wallet_address=_TEST_WALLET,
                 offer={"gpu_model": "H200", "gpu_count": 1,
                        "sla": 99.0, "region": "California, US"},
-                demand={"token": {"symbol": "MOCK",
-                                  "contract_address": "0x0000000000000000000000000000000000000001",
-                                  "decimals": 0},
-                        "amount": 5000},
+                accepted_escrows=_ACCEPTED_ESCROWS,
             )
         # Auth passed — error is from missing listing_svc (500), not auth (403)
         assert "403" not in str(exc_info.value), (
             f"Auth rejected a valid signature. Error: {exc_info.value}\n"
-            "Check that seller_auth middleware uses CONFIG.agent_wallet_address "
+            "Check that seller_auth middleware uses settings.wallet.address "
             "as resource_id for create_listing (no listing_id path param)."
         )
 
@@ -880,10 +791,7 @@ class TestCreateListing:
                 agent_wallet_address=wrong_wallet,  # client signs this, server checks _TEST_WALLET
                 offer={"gpu_model": "H200", "gpu_count": 1,
                        "sla": 99.0, "region": "California, US"},
-                demand={"token": {"symbol": "MOCK",
-                                  "contract_address": "0x0000000000000000000000000000000000000001",
-                                  "decimals": 0},
-                        "amount": 5000},
+                accepted_escrows=_ACCEPTED_ESCROWS,
             )
         assert "403" in str(exc_info.value), (
             f"Expected 403 for wrong wallet address, got: {exc_info.value}"
@@ -891,27 +799,20 @@ class TestCreateListing:
 
     async def test_missing_auth_headers_returns_403(self, seller_auth_client):
         """Request with no X-Signature / X-Timestamp → 403 Missing auth headers."""
-        from httpx import AsyncClient, ASGITransport as _Transport
-        import market_storefront.middleware.seller_auth as _sam
-        import market_storefront.utils.config as _cm
-        from unittest.mock import MagicMock, patch as _patch
-
-        fake_config = MagicMock()
-        fake_config.agent_wallet_address = _TEST_WALLET
+        from tests._settings_overrides import settings_overrides
 
         app = FastAPI()
         app.include_router(listings_router)
         app.dependency_overrides[require_admin_key] = _key_enforcer(ADMIN_KEY)
 
         transport = httpx.ASGITransport(app=app)
-        with _patch.object(_cm, "CONFIG", fake_config), \
-             _patch.object(_sam, "CONFIG", fake_config, create=True):
+        with settings_overrides(**{"wallet.address": _TEST_WALLET}):
             async with httpx.AsyncClient(
                 base_url="http://test", transport=transport
             ) as raw:
                 resp = await raw.post(
                     "/api/v1/listings/create",
-                    json={"offer": {}, "demand": {}, "paused": False},
+                    json={"offer": {}, "accepted_escrows": [], "paused": False},
                     headers={"X-Admin-Key": ADMIN_KEY},
                     # No X-Signature or X-Timestamp
                 )

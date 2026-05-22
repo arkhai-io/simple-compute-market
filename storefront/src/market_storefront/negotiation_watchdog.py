@@ -26,7 +26,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.stage_log import stage_event
 
@@ -76,7 +76,7 @@ def _stale_threads(db_path: str, cutoff: datetime) -> list[dict]:
 
 async def _watchdog_tick(sqlite_client: SQLiteClient) -> int:
     """Run one watchdog pass. Returns the number of threads abandoned."""
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=CONFIG.negotiation_timeout_seconds)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=settings.negotiation_timeout_seconds)
     stale = _stale_threads(sqlite_client.db_path, cutoff)
     if not stale:
         return 0
@@ -119,15 +119,15 @@ async def watchdog_loop() -> None:
     caught up).
     """
     await asyncio.sleep(15)
-    sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
+    sqlite_client = SQLiteClient(db_path=settings.db_path)
     logger.info(
         "negotiation_watchdog_loop: started (interval=%ds, timeout=%ds)",
-        CONFIG.negotiation_watchdog_interval,
-        CONFIG.negotiation_timeout_seconds,
+        settings.negotiation_watchdog_interval,
+        settings.negotiation_timeout_seconds,
     )
     while True:
         try:
-            await asyncio.sleep(CONFIG.negotiation_watchdog_interval)
+            await asyncio.sleep(settings.negotiation_watchdog_interval)
             n = await _watchdog_tick(sqlite_client)
             if n:
                 logger.info("negotiation_watchdog_loop: abandoned %d stale thread(s)", n)

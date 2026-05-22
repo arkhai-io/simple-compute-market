@@ -33,6 +33,14 @@ global:
   provisioning:
     host: "arkhai-node-operator-provisioning"
     port: 8081
+  # ---------------------------------------------------------------------------
+  # Admin API key — gates all /admin/* endpoints on the storefront.
+  # Rendered into each agent's config.toml as [seller].admin_api_key.
+  # Also injected into the per-agent secret profile consumed by test pods
+  # so the e2e suite can authenticate to admin-gated endpoints.
+  # In production, override with a strong random value.
+  # ---------------------------------------------------------------------------
+  adminApiKey: "test-api-key"
 
 # ---------------------------------------------------------------------------
 # test-env subchart
@@ -105,7 +113,6 @@ storefront:
         secretName: ""
         privKey: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
         walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-      autoRegister: true
       config:
         seller:
           agentId: bob
@@ -116,17 +123,22 @@ storefront:
           provisioning:
             mode: "mock"
           negotiation:
-            policyMode: "rl"
+            policyMode: "bisection"
           integrations:
             geminiApiKey: ""
         chain:
           name: "anvil"
+          alkahestAddressConfigPath: "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
 # ---------------------------------------------------------------------------
 provisioning:
   enabled: true
+  # Activate MockAnsibleService for dev/CI clusters — no real Ansible or KVM needed.
+  # Set to false (and configure sshKey, inventory, ansible paths) for production.
+  mockMode: true
 
   server:
     image:
@@ -144,6 +156,12 @@ provisioning:
     secretName: ""
     sshPrivateKey: ""
 
+  storefront:
+    url: ""          # empty -> http://{release}-storefront-bob:8001
+    agentName: "bob"
+    port: 8001
+    adminKey: ""     # empty -> inherits global.adminApiKey
+
   config:
     log_level: "info"
     database_url: "sqlite:////app/data/provisioning.db"
@@ -152,6 +170,9 @@ provisioning:
     enable_auth: false
     registry_cache_ttl_seconds: 300
     registry_cache_max_size: 256
+    lease_watchdog_enabled: true
+    lease_watchdog_poll_interval_seconds: 60
+    lease_watchdog_grace_period_seconds: 300
     enable_rate_limiting: false
     rate_limit_requests_per_minute: 30
 
@@ -178,3 +199,33 @@ integrationTests:
     name: arkhai
     tag: integration-tests
     pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------
+# e2e-tests subchart
+# Full buyer-seller deal lifecycle test suite. Dev / CI only — disabled by
+# default. Enable with --set e2e-tests.enabled=true or in a CI values overlay.
+# Credentials default to the deterministic Anvil test keys; override for other
+# environments.
+# ---------------------------------------------------------------------------
+e2e-tests:
+  enabled: true
+
+  integrationTests:
+    repository: ""
+    name: arkhai
+    tag: integration-tests
+    pullPolicy: IfNotPresent
+
+  # Seller credentials for the agent this e2e run targets.
+  # Must match the deployed storefront agent's wallet.
+  # Defaults to the Anvil Hardhat account #2 (bob agent default).
+  seller:
+    privateKey:    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+    walletAddress: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+    adminApiKey:   ""  # empty → inherits global.adminApiKey
+
+  # Buyer credentials for on-chain escrow creation (stage 07).
+  # Defaults to the Anvil Hardhat account #1.
+  buyer:
+    privateKey:    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+    walletAddress: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"

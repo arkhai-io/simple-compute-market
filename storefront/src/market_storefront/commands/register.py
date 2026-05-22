@@ -11,7 +11,7 @@ from __future__ import annotations
 import traceback
 from urllib.parse import urlparse
 
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings, AGENT_ID, AGENT_NAME
 from market_storefront.utils.zerotier import (
     BaseUrlResolutionError,
     await_base_url_resolution,
@@ -85,13 +85,13 @@ async def perform_registration(chain_id: int) -> int:
 
     Returns the numeric agent ID (always a positive int on success).
     """
-    base_url_raw = CONFIG.base_url_override_raw
-    zerotier_network = CONFIG.zerotier_network
-    port = CONFIG.port
-    identity_registry_address = CONFIG.identity_registry_address
-    agent_wallet_address = CONFIG.agent_wallet_address
-    chain_rpc_url = CONFIG.chain_rpc_url
-    onchain_agent_id = CONFIG.onchain_agent_id
+    base_url_raw = settings.base_url
+    zerotier_network = settings.zerotier_network
+    port = settings.port
+    identity_registry_address = settings.registry.identity_registry_address
+    agent_wallet_address = settings.wallet.address
+    chain_rpc_url = settings.chain.rpc_url
+    onchain_agent_id = settings.onchain_agent_id
 
     resolved_base_url = await _resolve_base_url(port, base_url_raw, zerotier_network)
     if resolved_base_url is None:
@@ -114,8 +114,8 @@ async def perform_registration(chain_id: int) -> int:
     print("=" * 70)
     print()
 
-    agent_priv_key = CONFIG.agent_priv_key
-    agent_name = CONFIG.agent_name or CONFIG.agent_id or "root_agent"
+    agent_priv_key = settings.wallet.private_key
+    agent_name = AGENT_NAME or AGENT_ID or "root_agent"
     missing = [
         k for k, v in {
             "wallet.private_key": agent_priv_key,

@@ -1,7 +1,9 @@
 """Settle controller — post-negotiation escrow and provisioning status."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,6 +19,7 @@ from market_storefront.models.settle_models import (
     SettleRequest,
     SettleResponse,
     SettleStatusResponse,
+    SettleWaitResponse,
     VerifyEscrowRequest,
     VerifyEscrowResponse,
 )
@@ -99,7 +102,7 @@ class SettleController:
 
         buyer_auth._verify(request, "settle_status", escrow_uid, buyer_address)
 
-        job = await self._db.load_settlement_job(escrow_uid=escrow_uid)
+        job = await self._db.load_escrow(escrow_uid=escrow_uid)
         if not job:
             raise HTTPException(status_code=404, detail=f"No settlement job for escrow {escrow_uid}")
         return SettleStatusResponse(**serialize_settlement_job(job))
@@ -119,9 +122,12 @@ class AdminSettleController:
         db=Depends(lambda: _container.resolved_sqlite_client),
         _key=Depends(require_admin_key),
     ) -> None:
-        from market_storefront.utils.config import CONFIG
         from market_storefront.services.admin_settle_service import AdminSettleService
-        self._svc = AdminSettleService(sqlite_client=db, config=CONFIG)
+        self._db = db
+        self._svc = AdminSettleService(
+            sqlite_client=db,
+            alkahest_client=_container.resolved_alkahest_client,
+        )
 
     @admin_settle_router.post(
         "/{escrow_uid}/verify",
@@ -175,3 +181,60 @@ class AdminSettleController:
             logger.error("[ADMIN SETTLE] evaluate_settle failed: %s", exc, exc_info=True)
             raise HTTPException(status_code=500, detail=str(exc))
         return EvaluateSettleResponse(**result)
+
+    @admin_settle_router.get(
+        "/{escrow_uid}/wait",
+        response_model=SettleWaitResponse,
+        summary="Long-poll until settlement reaches a terminal state (admin)",
+        description=(
+            "Blocks server-side until the settlement job for *escrow_uid* reaches "
+            "``ready`` or ``failed``, or until *timeout* seconds elapse. "
+            "Polls the settlement job row every second internally — no client-side "
+            "polling loop needed. Returns immediately if the job is already terminal. "
+            "Intended for the e2e test suite's stage 09b gate."
+        ),
+    )
+    async def wait_for_settlement(
+        self,
+        escrow_uid: str,
+        timeout: float = Query(default=60.0, gt=0, le=120,
+                               description="Maximum seconds to wait (server-enforced, max 120)"),
+    ) -> SettleWaitResponse:
+        """Server-side long-poll: block until settlement is terminal or timeout elapses.
+
+        Mirrors the registry-agent wait pattern from
+        GET /api/v1/system/wait-for-registry-agent.
+        """
+        _terminal = {"ready", "failed"}
+        start = time.monotonic()
+        deadline = start + timeout
+
+        while True:
+            job = await self._db.load_escrow(escrow_uid=escrow_uid)
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            status = (job or {}).get("status", "")
+            job_id = (job or {}).get("provisioning_job_id")
+
+            if status in _terminal:
+                return SettleWaitResponse(
+                    ready=True,
+                    status=status,
+                    provisioning_job_id=job_id,
+                    elapsed_ms=elapsed_ms,
+                )
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(1.0, remaining))
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        job = await self._db.load_escrow(escrow_uid=escrow_uid)
+        status = (job or {}).get("status", "unknown")
+        job_id = (job or {}).get("provisioning_job_id")
+        return SettleWaitResponse(
+            ready=False,
+            status=status,
+            provisioning_job_id=job_id,
+            elapsed_ms=elapsed_ms,
+        )

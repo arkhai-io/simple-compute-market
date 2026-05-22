@@ -6,6 +6,10 @@ metadata:
     {{- include "registry.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  # Recreate strategy: the indexer.db PVC is ReadWriteOnce; rolling
+  # updates would deadlock waiting for the old pod to release it.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "registry.selectorLabels" . | nindent 6 }}
@@ -14,6 +18,10 @@ spec:
       labels:
         {{- include "registry.selectorLabels" . | nindent 8 }}
     spec:
+      # fsGroup matches the container's appuser (UID 1000); without it
+      # the PVC's mount root is root-owned and SQLite can't write.
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: registry
           image: {{ include "registry.image" . }}
@@ -40,6 +48,12 @@ spec:
               value: {{ .Values.config.heartbeatTtlSecs | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            # ROOT_PATH: gateway path prefix for this service. Used by the
+            # custom OpenAPI function to inject a servers block so Swagger UI
+            # generates correct curl examples behind the API gateway.
+            # Set via ops repo values overlay; empty for local dev.
+            - name: ROOT_PATH
+              value: {{ .Values.config.rootPath | default "" | quote }}
             # --- sourced from global ---
             - name: CHAIN_ID
               value: {{ .Values.global.rpc.chainId | quote }}
@@ -51,6 +65,9 @@ spec:
               value: {{ .Values.global.registry.validation_address | quote }}
             - name: IDENTITY_REGISTRY_ADDRESS
               value: {{ .Values.global.registry.identity_address | quote }}
+          volumeMounts:
+            - name: arkhai-data
+              mountPath: {{ .Values.persistence.mountPath | quote }}
           livenessProbe:
             httpGet:
               path: /health
@@ -67,6 +84,16 @@ spec:
             timeoutSeconds: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        # SQLite indexer.db storage. PVC when persistence.enabled,
+        # emptyDir otherwise (pod-lifetime — index rebuilds on restart).
+        - name: arkhai-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "registry.pvcName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

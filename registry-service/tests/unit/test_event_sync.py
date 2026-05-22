@@ -1,7 +1,8 @@
 """Unit tests for event sync functionality."""
 
+import asyncio
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, MagicMock, patch
 from web3 import Web3
 from src.services.event_sync import EventSyncService
 from src.types import NetworkConfig
@@ -109,4 +110,34 @@ def test_error_handling_malformed_events(MockIdentityRegistryClient, mock_networ
     # These should be handled gracefully without raising exceptions
     # The actual processing would skip these events
     assert True  # Test passes if no exception is raised
+
+
+@patch('src.services.event_sync.IdentityRegistryClient')
+def test_sync_on_demand_invokes_sync_latest(MockIdentityRegistryClient, mock_network_config):
+    """First sync_on_demand call triggers sync_latest; back-to-back is throttled."""
+    MockIdentityRegistryClient.return_value = Mock()
+    event_sync = EventSyncService(mock_network_config)
+    event_sync.sync_latest = AsyncMock()
+
+    async def _run():
+        first = await event_sync.sync_on_demand(min_interval_s=2.0)
+        second = await event_sync.sync_on_demand(min_interval_s=2.0)
+        return first, second
+
+    first, second = asyncio.run(_run())
+    assert first is True
+    assert second is False
+    event_sync.sync_latest.assert_awaited_once()
+
+
+@patch('src.services.event_sync.IdentityRegistryClient')
+def test_sync_on_demand_swallows_sync_errors(MockIdentityRegistryClient, mock_network_config):
+    """sync_on_demand must not propagate RPC failures to its caller (request handler)."""
+    MockIdentityRegistryClient.return_value = Mock()
+    event_sync = EventSyncService(mock_network_config)
+    event_sync.sync_latest = AsyncMock(side_effect=RuntimeError("rpc down"))
+
+    # Should return True (attempted) without raising
+    assert asyncio.run(event_sync.sync_on_demand(min_interval_s=0.0)) is True
+    event_sync.sync_latest.assert_awaited_once()
 

@@ -1,9 +1,18 @@
-"""ERC-20 token registry and on-chain balance queries."""
+"""ERC-20 token metadata, resolved from chain with on-disk caching.
+
+Tokens are identified canonically by ``(chain_id, contract_address)``.
+Symbol and decimals are sourced via ``symbol()`` / ``decimals()`` eth_call
+against the configured RPC and cached at
+``$XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json`` keyed by lowercased
+address. ERC-20 metadata is immutable on chain, so the cache never goes
+stale.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from threading import RLock
 from typing import Optional
@@ -12,11 +21,8 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REGISTRY_PATH = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry_docker_compose.json"
-
 
 class ERC20TokenMetadata(BaseModel):
-    """Metadata for an ERC-20 token."""
     symbol: str
     name: Optional[str] = None
     contract_address: str
@@ -24,97 +30,181 @@ class ERC20TokenMetadata(BaseModel):
     chain_id: Optional[int] = None
 
 
-class TokenRegistryError(RuntimeError):
-    """Raised when the registry encounters unrecoverable issues."""
+class TokenResolutionError(RuntimeError):
+    """Raised when on-chain resolution fails (bad address, RPC down, etc.)."""
 
 
-class TokenRegistry:
-    """Handles token metadata lookups backed by a JSON file."""
+def _cache_root() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "arkhai" / "tokens"
 
-    def __init__(self, source_path: str | Path | None = None):
-        if source_path:
-            self._path = Path(source_path)
-        else:
-            # Falls back to a bundled default JSON if it exists; callers
-            # that want a specific registry pass `source_path` explicitly.
-            core_data = Path(__file__).resolve().parents[4] / "core" / "agent" / "app" / "data" / "token_registry.json"
-            self._path = core_data if core_data.exists() else _DEFAULT_REGISTRY_PATH
-        self._lock = RLock()
-        self._tokens_by_symbol: dict[str, ERC20TokenMetadata] = {}
-        self._tokens_by_address: dict[str, ERC20TokenMetadata] = {}
-        self.reload()
 
-    def reload(self) -> None:
-        """Reload registry data from disk."""
-        with self._lock:
-            self._tokens_by_symbol.clear()
-            self._tokens_by_address.clear()
-            if not self._path.exists():
-                logger.warning("[TOKEN_REGISTRY] Path %s does not exist; registry empty", self._path)
-                return
+def _cache_path_for(chain_id: int) -> Path:
+    return _cache_root() / f"{chain_id}.json"
+
+
+_MEMORY_CACHE: dict[int, dict[str, ERC20TokenMetadata]] = {}
+_LOCK = RLock()
+
+
+def _load_chain_cache(chain_id: int) -> dict[str, ERC20TokenMetadata]:
+    with _LOCK:
+        cached = _MEMORY_CACHE.get(chain_id)
+        if cached is not None:
+            return cached
+        cached = {}
+        path = _cache_path_for(chain_id)
+        if path.exists():
             try:
-                raw_tokens = json.loads(self._path.read_text())
-            except json.JSONDecodeError as exc:
-                raise TokenRegistryError(f"Invalid registry file: {exc}") from exc
-            if not isinstance(raw_tokens, list):
-                raise TokenRegistryError("Registry payload must be a list of token entries")
-            for entry in raw_tokens:
-                try:
-                    token = ERC20TokenMetadata(**entry)
-                except Exception as exc:
-                    raise TokenRegistryError(f"Invalid token entry: {entry}") from exc
-                self._store(token)
+                raw = json.loads(path.read_text())
+                for addr_key, entry in raw.items():
+                    cached[addr_key.lower()] = ERC20TokenMetadata(**entry)
+            except Exception as exc:
+                logger.warning(
+                    "[TOKEN_CACHE] Ignoring unreadable cache %s: %s", path, exc
+                )
+        _MEMORY_CACHE[chain_id] = cached
+        return cached
 
-    def _store(self, token: ERC20TokenMetadata) -> None:
-        symbol_key = token.symbol.upper()
-        address_key = token.contract_address.lower()
-        if symbol_key in self._tokens_by_symbol:
-            raise TokenRegistryError(f"Duplicate symbol detected: {token.symbol}")
-        if address_key in self._tokens_by_address:
-            raise TokenRegistryError(f"Duplicate contract address detected: {token.contract_address}")
-        self._tokens_by_symbol[symbol_key] = token
-        self._tokens_by_address[address_key] = token
 
-    def list_tokens(self) -> list[ERC20TokenMetadata]:
-        with self._lock:
-            return list(self._tokens_by_symbol.values())
+def _persist_chain_cache(chain_id: int) -> None:
+    with _LOCK:
+        cached = _MEMORY_CACHE.get(chain_id, {})
+        path = _cache_path_for(chain_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {addr: meta.model_dump() for addr, meta in cached.items()}
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        tmp.replace(path)
 
-    def get_by_symbol(self, symbol: str) -> ERC20TokenMetadata | None:
-        with self._lock:
-            return self._tokens_by_symbol.get(symbol.upper())
 
-    def get_by_address(self, address: str) -> ERC20TokenMetadata | None:
-        with self._lock:
-            return self._tokens_by_address.get(address.lower())
+def resolve_token_cached(
+    address: str,
+    *,
+    chain_id: int | None = None,
+) -> ERC20TokenMetadata | None:
+    """Return cached metadata for ``address`` without RPC.
 
-    def resolve(self, identifier: str) -> ERC20TokenMetadata | None:
-        """Resolve either a symbol (USDC) or contract address."""
-        if identifier.startswith("0x"):
-            return self.get_by_address(identifier)
-        return self.get_by_symbol(identifier)
+    When ``chain_id`` is provided, looks up only that chain's cache. When
+    omitted, scans every loaded chain — convenient for display paths that
+    don't carry chain context, but ambiguous if the same address has been
+    resolved on multiple chains (returns first hit).
+    """
+    if not address or not address.startswith("0x"):
+        return None
+    key = address.lower()
+    with _LOCK:
+        if chain_id is not None:
+            return _load_chain_cache(chain_id).get(key)
+        for cache in _MEMORY_CACHE.values():
+            hit = cache.get(key)
+            if hit is not None:
+                return hit
+        return None
 
-    def register_token(self, token: ERC20TokenMetadata, persist: bool = False) -> None:
-        with self._lock:
-            self._store(token)
-            if persist:
-                self._persist()
 
-    def require(self, identifier: str) -> ERC20TokenMetadata:
-        token = self.resolve(identifier)
-        if token is None:
-            raise TokenRegistryError(f"Unknown token: {identifier}")
-        return token
+def resolve_token(
+    address: str,
+    *,
+    rpc_url: str,
+    chain_id: int,
+    refresh: bool = False,
+) -> ERC20TokenMetadata:
+    """Resolve an ERC-20 contract to metadata. RPC + cache.
 
-    def _persist(self) -> None:
-        payload = [token.model_dump() for token in self._tokens_by_symbol.values()]
-        payload.sort(key=lambda entry: entry["symbol"].upper())
-        self._path.write_text(json.dumps(payload, indent=2))
+    Cached hits return immediately. Misses eth_call ``symbol()`` and
+    ``decimals()``, store the result, and persist to disk. Set ``refresh``
+    to bypass the cache and re-RPC.
 
-    def __len__(self) -> int:
-        return len(self._tokens_by_symbol)
+    Raises ``TokenResolutionError`` when the contract doesn't respond to
+    the standard ERC-20 view methods or RPC is unreachable.
+    """
+    if not address or not address.startswith("0x") or len(address) != 42:
+        raise TokenResolutionError(
+            f"Not an ERC-20 contract address: {address!r}"
+        )
+    key = address.lower()
+    cache = _load_chain_cache(chain_id)
+    if not refresh:
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
 
-    def __contains__(self, symbol: str) -> bool:
-        return self.get_by_symbol(symbol) is not None
+    try:
+        from web3 import Web3
+        from web3.providers import HTTPProvider
+    except ImportError as exc:
+        raise TokenResolutionError("web3 package not installed") from exc
+
+    abi = [
+        {"inputs": [], "name": "symbol",
+         "outputs": [{"type": "string"}],
+         "stateMutability": "view", "type": "function"},
+        {"inputs": [], "name": "decimals",
+         "outputs": [{"type": "uint8"}],
+         "stateMutability": "view", "type": "function"},
+        {"inputs": [], "name": "name",
+         "outputs": [{"type": "string"}],
+         "stateMutability": "view", "type": "function"},
+    ]
+
+    try:
+        w3 = Web3(HTTPProvider(rpc_url))
+        checksum = Web3.to_checksum_address(address)
+        contract = w3.eth.contract(address=checksum, abi=abi)
+        symbol = contract.functions.symbol().call()
+        decimals = int(contract.functions.decimals().call())
+        try:
+            name = contract.functions.name().call()
+        except Exception:
+            name = None
+    except Exception as exc:
+        raise TokenResolutionError(
+            f"Failed to resolve {address} on chain {chain_id}: {exc}"
+        ) from exc
+
+    meta = ERC20TokenMetadata(
+        symbol=str(symbol),
+        name=str(name) if name else None,
+        contract_address=checksum,
+        decimals=decimals,
+        chain_id=chain_id,
+    )
+    with _LOCK:
+        cache[key] = meta
+        _persist_chain_cache(chain_id)
+    return meta
+
+
+def resolve_token_by_symbol_in(
+    symbol: str,
+    addresses: list[str],
+    *,
+    rpc_url: str,
+    chain_id: int,
+) -> ERC20TokenMetadata | None:
+    """Find the first address whose on-chain symbol matches ``symbol``.
+
+    Used by buyer-side filters: given a set of candidate token addresses
+    (e.g. from discovered listings), find the one(s) matching a
+    user-supplied symbol. Returns ``None`` when no candidate resolves to
+    a matching symbol; raises ``TokenResolutionError`` if RPC fails on
+    every candidate (resolve_token errors are swallowed per-address so
+    one bad contract doesn't poison the whole filter).
+    """
+    target = symbol.upper()
+    last_exc: Exception | None = None
+    for addr in addresses:
+        try:
+            meta = resolve_token(addr, rpc_url=rpc_url, chain_id=chain_id)
+        except TokenResolutionError as exc:
+            last_exc = exc
+            continue
+        if meta.symbol.upper() == target:
+            return meta
+    if last_exc is not None and not addresses:
+        raise last_exc
+    return None
 
 
 async def get_wallet_token_balance(
@@ -127,14 +217,10 @@ async def get_wallet_token_balance(
     Returns raw integer balance (not scaled by decimals).
     Raises ValueError on RPC connection failure or invalid addresses.
     """
-    _BALANCE_OF_ABI = [
-        {
-            "inputs": [{"type": "address"}],
-            "name": "balanceOf",
-            "outputs": [{"type": "uint256"}],
-            "stateMutability": "view",
-            "type": "function",
-        }
+    abi = [
+        {"inputs": [{"type": "address"}], "name": "balanceOf",
+         "outputs": [{"type": "uint256"}],
+         "stateMutability": "view", "type": "function"}
     ]
     try:
         from web3 import AsyncWeb3
@@ -143,7 +229,7 @@ async def get_wallet_token_balance(
         w3 = AsyncWeb3(AsyncHTTPProvider(rpc_url))
         contract = w3.eth.contract(
             address=AsyncWeb3.to_checksum_address(token_address),
-            abi=_BALANCE_OF_ABI,
+            abi=abi,
         )
         balance = await contract.functions.balanceOf(
             AsyncWeb3.to_checksum_address(wallet_address)
@@ -155,37 +241,50 @@ async def get_wallet_token_balance(
         raise ValueError(f"Failed to query token balance: {exc}") from exc
 
 
-# Module-level singleton — bound to the bundled default registry on
-# import. Callers that need a specific registry path call
-# ``init_token_registry(path)`` once at startup; the singleton is
-# mutated in place so any module that already did
-# ``from service.clients.token import TOKEN_REGISTRY`` keeps seeing the
-# updated data through the same object.
-TOKEN_REGISTRY = TokenRegistry()
+def render_token(
+    token: ERC20TokenMetadata | str | dict | None,
+    *,
+    chain_id: int | None = None,
+) -> str:
+    """Format a token for human display: "SYMBOL (0x...)" when symbol is
+    cached, otherwise just the address. Returns "-" for empty input.
 
-
-def init_token_registry(source_path: str | Path | None) -> TokenRegistry:
-    """Re-point the module-level ``TOKEN_REGISTRY`` at a registry file.
-
-    Mutates the existing singleton in place rather than returning a new
-    object — this preserves references that other modules captured via
-    ``from service.clients.token import TOKEN_REGISTRY`` at their own
-    import time.
-
-    No env reads — callers pass the path resolved from their own config.
+    Symbol lookup is cache-only — never triggers RPC. Callers that want
+    the symbol guaranteed populated should call ``resolve_token`` first.
     """
-    if source_path is None:
-        return TOKEN_REGISTRY
-    TOKEN_REGISTRY._path = Path(source_path)
-    TOKEN_REGISTRY.reload()
-    return TOKEN_REGISTRY
+    if not token:
+        return "-"
+
+    if isinstance(token, ERC20TokenMetadata):
+        sym, addr = token.symbol, token.contract_address
+    elif isinstance(token, dict):
+        addr = str(token.get("contract_address", "") or "")
+        sym = str(token.get("symbol", "") or "")
+        if not sym and addr:
+            looked = resolve_token_cached(addr, chain_id=chain_id)
+            if looked is not None:
+                sym = looked.symbol
+    elif isinstance(token, str):
+        addr = token
+        looked = (
+            resolve_token_cached(addr, chain_id=chain_id)
+            if addr.startswith("0x") else None
+        )
+        sym = looked.symbol if looked is not None else ""
+    else:
+        return str(token)
+
+    if sym:
+        return f"{sym} ({addr})"
+    return addr or "-"
 
 
 __all__ = [
     "ERC20TokenMetadata",
-    "TokenRegistry",
-    "TokenRegistryError",
-    "TOKEN_REGISTRY",
-    "init_token_registry",
+    "TokenResolutionError",
+    "resolve_token",
+    "resolve_token_cached",
+    "resolve_token_by_symbol_in",
     "get_wallet_token_balance",
+    "render_token",
 ]

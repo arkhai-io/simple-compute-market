@@ -1,7 +1,23 @@
 {{/*
-One Deployment per agent in .Values.agents. Each pod mounts its
-per-agent Secret as a single config.toml file at /etc/arkhai/config.toml
-and points XDG_CONFIG_HOME at /etc — no env-var-based config.
+One Deployment per agent in .Values.agents. Each pod mounts two TOML
+files at /etc/arkhai/ — storefront.toml (ConfigMap, non-sensitive) and
+storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
+at /etc so dynaconf picks them up via its layered discovery and merge.
+No env-var-based config.
+
+checksum/config + checksum/secrets annotations force a rollout when
+either source object changes, independently — flipping a log level
+edits the ConfigMap (no secret rotation), rotating a wallet key edits
+the Secret (no ConfigMap churn).
+
+zerotierEnabled (default: true) controls whether ZeroTier networking
+infrastructure is included in the pod spec. Set to false for environments
+where ZeroTier is unnecessary (e.g. GKE Autopilot, API-gateway-fronted
+deployments) or where the required Linux capabilities (NET_ADMIN, SYS_MODULE)
+and hostPath volumes are not permitted. The application runtime is unaffected
+when zerotier_network is unset in config.toml — entrypoint.sh is already
+fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
+when seller.zerotier_network is absent.
 */}}
 {{- range $agent := .Values.agents }}
 apiVersion: apps/v1
@@ -13,6 +29,13 @@ metadata:
     app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
 spec:
   replicas: {{ $.Values.replicaCount }}
+  # Recreate is required when persistence.enabled — the per-agent PVC
+  # is ReadWriteOnce and rolling updates would deadlock waiting for the
+  # old pod to release the volume. Kept on emptyDir setups too: rolling
+  # updates over emptyDir would briefly run two pods writing to two
+  # different ephemeral SQLite files, which has no value here.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "storefront.selectorLabels" $ | nindent 6 }}
@@ -22,7 +45,19 @@ spec:
       labels:
         {{- include "storefront.selectorLabels" $ | nindent 8 }}
         app.kubernetes.io/component: {{ $agent.component | default $agent.name | quote }}
+      annotations:
+        # Force pod rollout when either config source changes. ConfigMap
+        # and Secret have independent checksums so non-sensitive edits
+        # don't appear as secret rotations and vice versa.
+        checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum }}
     spec:
+      # fsGroup matches the container's appuser group so the volume's
+      # mount root is owned by gid 1000 — without it, SQLite's first
+      # write to /var/lib/arkhai fails with permission denied. Applies
+      # whether the volume is a PVC or emptyDir.
+      securityContext:
+        fsGroup: 1000
       initContainers:
         - name: wait-for-rpc
           image: busybox:1.36
@@ -63,38 +98,83 @@ spec:
             - name: http
               containerPort: {{ $agent.port }}
               protocol: TCP
+          {{- if $.Values.zerotierEnabled }}
           securityContext:
             capabilities:
               add:
                 - NET_ADMIN
                 - SYS_MODULE
+          {{- end }}
           env:
-            # Sole env var: tell the typed config loader where to find
-            # the mounted TOML. service.config_loader.user_config_dir()
-            # resolves to $XDG_CONFIG_HOME/arkhai, so this maps to
-            # /etc/arkhai/config.toml. Everything else (including
-            # secrets) lives inside that file.
+            # Sole env var: tell dynaconf where to find the mounted TOML
+            # files. service.config_loader.user_config_dir() resolves to
+            # $XDG_CONFIG_HOME/arkhai, so this maps to
+            # /etc/arkhai/{storefront.toml,storefront.secrets.toml}. The
+            # dynaconf instance merges both files at startup; the ConfigMap
+            # renders storefront.toml and the Secret renders
+            # storefront.secrets.toml.
             - name: XDG_CONFIG_HOME
               value: /etc
           volumeMounts:
+            {{- if $.Values.zerotierEnabled }}
             - name: tun-device
               mountPath: /dev/net/tun
+            {{- end }}
             - name: arkhai-config
-              mountPath: /etc/arkhai
+              mountPath: /etc/arkhai/storefront.toml
+              subPath: storefront.toml
               readOnly: true
-          # TODO: add liveness/readiness probes once agent health endpoint is defined.
+            - name: arkhai-secrets
+              mountPath: /etc/arkhai/storefront.secrets.toml
+              subPath: storefront.secrets.toml
+              readOnly: true
+            - name: arkhai-data
+              mountPath: {{ $.Values.persistence.mountPath | quote }}
+          # /health performs only a fast SQLite ping — safe as a Kubernetes
+          # liveness/readiness probe with no outbound calls or blocking I/O.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $agent.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ $agent.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             {{- toYaml $.Values.resources | nindent 12 }}
       volumes:
+        {{- if $.Values.zerotierEnabled }}
         - name: tun-device
           hostPath:
             path: /dev/net/tun
+        {{- end }}
         - name: arkhai-config
+          configMap:
+            name: {{ include "storefront.agentConfigMapName" (dict "root" $ "agent" $agent) }}
+            items:
+              - key: storefront.toml
+                path: storefront.toml
+        - name: arkhai-secrets
           secret:
             secretName: {{ include "storefront.agentSecretName" (dict "root" $ "agent" $agent) }}
             items:
-              - key: config.toml
-                path: config.toml
+              - key: storefront.secrets.toml
+                path: storefront.secrets.toml
+        # SQLite agent.db storage. Backed by a per-agent PVC when
+        # persistence.enabled, emptyDir otherwise (pod-lifetime only).
+        - name: arkhai-data
+          {{- if $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "storefront.agentPvcName" (dict "root" $ "agent" $agent) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

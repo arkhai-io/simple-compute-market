@@ -19,13 +19,19 @@ service:
 # injected in the deployment template and do not appear here.
 # ---------------------------------------------------------------------------
 config:
-  databaseUrl: "sqlite:///./indexer.db"
+  # SQLite path resolves against the persistence mount below by default.
+  # Override with an external DSN (e.g. Postgres) when moving off SQLite.
+  databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
   host: "0.0.0.0"
   enableHealthChecks: true
   healthCheckInterval: 60
   endpointCheckTimeout: 10
   heartbeatTtlSecs: 60
   logLevel: "info"
+  # rootPath: set to the gateway path prefix for this service.
+  # In cloud deployments this is set via the ops repo values overlay.
+  # Leave empty for local dev (direct access, no gateway prefix stripping).
+  rootPath: ""
 
 # Number of replicas.
 replicaCount: 1
@@ -42,3 +48,26 @@ resources: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ---------------------------------------------------------------------------
+# Persistence — ReadWriteOnce PVC backing the registry's SQLite indexer.db.
+#
+# Without persistence, the index sits on the container's writable overlay
+# and is rebuilt from scratch on every pod restart — costly on chains with
+# any history, and causes transient unavailability while it catches up.
+#
+# enabled: false falls back to emptyDir (pod-lifetime). databaseUrl in
+# config above should match the mount path either way.
+#
+# storageClass: empty = cluster default. accessMode is fixed to
+# ReadWriteOnce; the chart pins replicaCount and Recreate strategy.
+#
+# helm.sh/resource-policy: keep is set on the PVC so `helm uninstall`
+# does not destroy the indexed state.
+# ---------------------------------------------------------------------------
+persistence:
+  enabled: true
+  storageClass: ""
+  size: 2Gi
+  accessMode: ReadWriteOnce
+  mountPath: /var/lib/arkhai-registry

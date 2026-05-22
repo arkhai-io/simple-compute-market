@@ -194,9 +194,21 @@ class ProvisioningClient(_ProvisioningClientBase):
 
     async def _delete(self, path: str, body: Any = None) -> dict:
         url = self._url(path)
+        import json as _json
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
-        resp = await self._client.delete(path, json=payload, headers=self._headers())
+        resp = await self._client.request(
+            "DELETE", path,
+            content=_json.dumps(payload).encode() if payload else None,
+            headers={**self._headers(), "Content-Type": "application/json"},
+        )
         self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
+
+    async def _patch(self, path: str, body: Any) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = await self._client.patch(path, json=payload, headers=self._headers())
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
 
     async def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
@@ -325,6 +337,28 @@ class ProvisioningClient(_ProvisioningClientBase):
     # System / readiness
     # ------------------------------------------------------------------
 
+    async def get_health(self) -> dict:
+        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        """
+        return await self._get("/health")
+
+    async def get_system_status(self) -> dict:
+        """GET /api/v1/system/status — full diagnostic status.
+
+        Includes outbound HTTP probes against the storefront and lease watchdog
+        state. Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+
+        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
+        responses — 503 indicates a degraded but reachable service, not an error.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = await self._client.get("/api/v1/system/status", headers=self._headers())
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
     async def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
 
@@ -406,10 +440,67 @@ class ProvisioningClient(_ProvisioningClientBase):
                 )
             await asyncio.sleep(poll_interval)
 
+    # ------------------------------------------------------------------
+    # Leases
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Sync client
-# ---------------------------------------------------------------------------
+    async def register_lease(
+        self,
+        *,
+        resource_id: str,
+        escrow_uid: str,
+        vm_host: str,
+        vm_target: str,
+        lease_end_utc,
+        lease_start_utc=None,
+        create_job_id: Optional[str] = None,
+    ) -> dict:
+        """POST /api/v1/leases — register a new VM lease."""
+        body: dict = {
+            "resource_id": resource_id,
+            "escrow_uid": escrow_uid,
+            "vm_host": vm_host,
+            "vm_target": vm_target,
+            "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
+        }
+        if lease_start_utc is not None:
+            body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
+        if create_job_id is not None:
+            body["create_job_id"] = create_job_id
+        return await self._post("/api/v1/leases/", body)
+
+    async def list_leases(
+        self,
+        *,
+        status: Optional[str] = None,
+        vm_host: Optional[str] = None,
+        escrow_uid: Optional[str] = None,
+    ) -> dict:
+        """GET /api/v1/leases — list leases with optional filters."""
+        params: dict = {}
+        if status is not None:
+            params["status"] = status
+        if vm_host is not None:
+            params["vm_host"] = vm_host
+        if escrow_uid is not None:
+            params["escrow_uid"] = escrow_uid
+        return await self._get("/api/v1/leases/", params=params)
+
+    async def get_lease(self, lease_id: str) -> dict:
+        """GET /api/v1/leases/{lease_id} — fetch one lease by internal ID."""
+        return await self._get(f"/api/v1/leases/{lease_id}")
+
+    async def get_lease_by_escrow(self, escrow_uid: str) -> dict:
+        """GET /api/v1/leases/by-escrow/{escrow_uid} — fetch lease by escrow UID."""
+        return await self._get(f"/api/v1/leases/by-escrow/{escrow_uid}")
+
+    async def update_lease(self, lease_id: str, **kwargs) -> dict:
+        """PATCH /api/v1/leases/{lease_id} — partial update."""
+        return await self._patch(f"/api/v1/leases/{lease_id}", kwargs)
+
+    async def cancel_lease(self, lease_id: str) -> dict:
+        """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
+        return await self._delete(f"/api/v1/leases/{lease_id}/cancel")
 
 
 class SyncProvisioningClient(_ProvisioningClientBase):
@@ -480,6 +571,13 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else {}
         resp = self._client.delete(path, json=payload, headers=self._headers())
         self._raise_for_status("DELETE", url, resp.status_code, resp.text)
+        return resp.json()
+
+    def _patch(self, path: str, body: Any) -> dict:
+        url = self._url(path)
+        payload = body.model_dump(exclude_none=True) if hasattr(body, "model_dump") else (body or {})
+        resp = self._client.patch(path, json=payload, headers=self._headers())
+        self._raise_for_status("PATCH", url, resp.status_code, resp.text)
         return resp.json()
 
     def _post_multipart(self, path: str, files: dict, data: dict) -> dict:
@@ -557,6 +655,33 @@ class SyncProvisioningClient(_ProvisioningClientBase):
         )))
 
     # System / readiness (sync mirrors)
+    def get_health(self) -> dict:
+        """GET /health — fast liveness probe (local checks only, no outbound HTTP).
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        Use ``get_system_status()`` for the full diagnostic status including
+        storefront connectivity and watchdog state.
+        """
+        return self._get("/health")
+
+    def get_system_status(self) -> dict:
+        """GET /api/v1/system/status — full diagnostic status.
+
+        Includes outbound HTTP probes against the storefront (storefront,
+        storefront_auth checks) and lease watchdog state. Suitable for
+        operator diagnostics and e2e pre-flight checks.
+
+        Accepts both 200 (all checks ok) and 503 (some checks degraded) as valid
+        responses — 503 indicates a degraded but reachable service, not an error.
+
+        Returns ``{"status": "ok"|"degraded", "checks": {...}}``.
+        """
+        url = self._url("/api/v1/system/status")
+        resp = self._client.get("/api/v1/system/status", headers=self._headers())
+        if resp.status_code not in (200, 503):
+            self._raise_for_status("GET", url, resp.status_code, resp.text)
+        return resp.json()
+
     def get_ansible_readiness(self) -> dict:
         """GET /api/v1/system/ansible/readiness — Ansible config readiness check.
 
@@ -617,3 +742,85 @@ class SyncProvisioningClient(_ProvisioningClientBase):
                     f"(current status: {job.status})"
                 )
             time.sleep(poll_interval)
+
+    # ------------------------------------------------------------------
+    # Leases
+    # ------------------------------------------------------------------
+
+    def register_lease(
+        self,
+        *,
+        resource_id: str,
+        escrow_uid: str,
+        vm_host: str,
+        vm_target: str,
+        lease_end_utc,
+        lease_start_utc=None,
+        create_job_id: Optional[str] = None,
+    ) -> dict:
+        """POST /api/v1/leases — register a new VM lease."""
+        body: dict = {
+            "resource_id": resource_id,
+            "escrow_uid": escrow_uid,
+            "vm_host": vm_host,
+            "vm_target": vm_target,
+            "lease_end_utc": lease_end_utc.isoformat() if hasattr(lease_end_utc, "isoformat") else str(lease_end_utc),
+        }
+        if lease_start_utc is not None:
+            body["lease_start_utc"] = lease_start_utc.isoformat() if hasattr(lease_start_utc, "isoformat") else str(lease_start_utc)
+        if create_job_id is not None:
+            body["create_job_id"] = create_job_id
+        return self._post("/api/v1/leases/", body)
+
+    def list_leases(
+        self,
+        *,
+        status: Optional[str] = None,
+        vm_host: Optional[str] = None,
+        escrow_uid: Optional[str] = None,
+    ) -> dict:
+        """GET /api/v1/leases — list leases with optional filters."""
+        params: dict = {}
+        if status is not None:
+            params["status"] = status
+        if vm_host is not None:
+            params["vm_host"] = vm_host
+        if escrow_uid is not None:
+            params["escrow_uid"] = escrow_uid
+        return self._get("/api/v1/leases/", params=params)
+
+    def get_lease(self, lease_id: str) -> dict:
+        """GET /api/v1/leases/{lease_id} — fetch one lease by internal ID."""
+        return self._get(f"/api/v1/leases/{lease_id}")
+
+    def get_lease_by_escrow(self, escrow_uid: str) -> dict:
+        """GET /api/v1/leases/by-escrow/{escrow_uid} — fetch lease by escrow UID."""
+        return self._get(f"/api/v1/leases/by-escrow/{escrow_uid}")
+
+    def update_lease(self, lease_id: str, **kwargs) -> dict:
+        """PATCH /api/v1/leases/{lease_id} — partial update."""
+        return self._patch(f"/api/v1/leases/{lease_id}", kwargs)
+
+    def cancel_lease(self, lease_id: str) -> dict:
+        """DELETE /api/v1/leases/{lease_id}/cancel — cancel before expiry."""
+        return self._delete(f"/api/v1/leases/{lease_id}/cancel")
+
+    # ------------------------------------------------------------------
+    # Lease watchdog control
+    # ------------------------------------------------------------------
+
+    def check_leases(self) -> dict:
+        """POST /api/v1/system/check-leases — run one lifecycle cycle immediately.
+
+        Bypasses the watchdog pause flag. Returns summary dict with
+        activated, checked, released, forced, skipped counts.
+        """
+        return self._post("/api/v1/system/check-leases", {})
+
+    def pause_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/pause — pause timer-driven cycles."""
+        return self._post("/api/v1/system/lease-watchdog/pause", {})
+
+    def resume_lease_watchdog(self) -> dict:
+        """POST /api/v1/system/lease-watchdog/resume — resume timer-driven cycles."""
+        return self._post("/api/v1/system/lease-watchdog/resume", {})

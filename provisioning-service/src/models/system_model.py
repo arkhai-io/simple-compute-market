@@ -80,6 +80,13 @@ class AnsibleReadinessResponse(BaseModel):
         default=None,
         description="ansible --version first line (None if ansible not on PATH)",
     )
+    ansible_mode: str = Field(
+        default="real",
+        description=(
+            "'mock' when ACTIVE_PROFILES includes 'mock' (ProgrammableMockAnsibleService); "
+            "'real' otherwise (AnsibleService). Used by e2e tests to gate on mock mode."
+        ),
+    )
     inventory: InventoryInfo
     playbook: FileInfo
     ssh_keys: list[SshKeyInfo] = Field(

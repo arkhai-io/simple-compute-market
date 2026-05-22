@@ -96,11 +96,11 @@ def register_cmd(
     deployment; idempotent on subsequent runs.
     """
     from .commands.register import run_register
-    from .utils.config import CONFIG
+    from .utils.config import settings
 
     resolved_chain_id = chain_id
     if resolved_chain_id is None:
-        resolved_chain_id = _query_chain_id(CONFIG.chain_rpc_url) or 1337
+        resolved_chain_id = _query_chain_id(settings.chain.rpc_url) or 1337
         typer.echo(f"Using chain_id={resolved_chain_id} (auto-detected).")
 
     raise typer.Exit(asyncio.run(run_register(chain_id=resolved_chain_id)))
@@ -162,30 +162,16 @@ def serve_cmd(
         None, "--port",
         help="Override seller.port from config.toml.",
     ),
-    no_publish: bool = typer.Option(
-        False, "--no-publish",
-        help="Don't auto-run the publish watch loop alongside the server. "
-             "Use for read-only deployments or when running publish in a separate process.",
-    ),
-    poll_interval: float = typer.Option(
-        30.0, "--publish-poll-interval",
-        help="Seconds between publish cycles (when auto-publish is enabled).",
-    ),
 ) -> None:
     """Run the storefront HTTP server (uvicorn, foreground).
 
-    Auto-publishes available compute inventory in a background thread by
-    default. Pass --no-publish to disable. Listings advertise an optional
-    max_duration_seconds ceiling (per-row CSV / [seller.pricing] default);
-    buyers supply the actual duration at negotiation init.
+    Listings advertise an optional max_duration_seconds ceiling
+    (per-row CSV / [seller.pricing] default); buyers supply the actual
+    duration at negotiation init.
     """
     from market_storefront.server import run_serve
 
-    run_serve(
-        host=host, port=port,
-        no_publish=no_publish,
-        poll_interval=poll_interval,
-    )
+    run_serve(host=host, port=port)
 
 
 # ---------------------------------------------------------------------------

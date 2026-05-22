@@ -1,0 +1,105 @@
+# ---------------------------------------------------------------------------
+# Storefront base defaults.
+# This file documents every supported key and its default. Do NOT put
+# environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. STOREFRONT_* environment variables (separator __)
+#   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.toml          (ConfigMap base)
+#   4. This file
+# ---------------------------------------------------------------------------
+
+# Identity
+agent_id        = ""        # must be a Python identifier; empty → "root_agent"
+agent_name      = ""        # display name; falls back to agent_id
+onchain_agent_id = ""       # pin after first successful registration
+auto_register   = true      # if onchain_agent_id is empty, register at startup
+
+# HTTP server
+port            = 8000
+base_url        = "http://localhost:8000"  # advertised on-chain; may contain ${zerotier} placeholder
+mcp_server_url  = "http://localhost:8080/mcp"
+zerotier_network = ""
+
+# Storage / logging
+db_path         = "/tmp/agent.db"
+log_file_path   = ""
+log_level       = "INFO"
+
+# Resource auto-seeding — inline content wins over path
+resources_csv_inline = ""
+resources_csv_path   = ""
+
+# Admin API key — protects /admin/* routes. Empty means unprotected (local dev).
+admin_api_key   = ""
+
+# Registry discovery (seller-side)
+enable_registry_discovery = true
+registry_order_timeout    = 30
+max_discovery_agents      = 10
+enable_order_retry        = true
+order_retry_interval      = 300
+
+# Resource poller
+resource_check_interval      = 300
+resource_lease_grace_seconds = 1800
+
+# Negotiation watchdog
+negotiation_timeout_seconds   = 1800
+negotiation_watchdog_interval = 60
+default_vm_host               = "ww1"
+
+[wallet]
+# Sensitive — populated by Secret overlay in k8s, by local file otherwise.
+address        = ""
+private_key    = ""
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess demo@example"
+
+[chain]
+name     = "ethereum_sepolia"  # ethereum_sepolia | base_sepolia | anvil
+rpc_url  = ""
+chain_id = 0                    # 0 means unset — chain_id() falls back to live eth_chainId
+alkahest_address_config_path = ""
+
+[registry]
+urls                      = ["http://localhost:8080"]
+discovery_timeout         = 5.0
+identity_registry_address = ""
+
+[registry.auth]
+# Free-form table of {url = "bearer-token"} pairs for private registries.
+# Empty by default; populate via storefront.secrets.toml.
+
+[gateway]
+# Path prefix when behind a reverse proxy (e.g. "/storefront"). Empty for direct.
+root_path = ""
+
+[provisioning]
+service_url            = "http://localhost:8085"
+mode                   = ""        # "mock" | "" — selects mock vs real ansible/kvm path
+timeout                = 3600
+poll_interval          = 15
+preflight_timeout      = 30
+fail_on_unreachable    = true
+frp_server_addr        = ""
+frp_domain             = ""
+frp_dashboard_password = ""
+
+[negotiation]
+# "bisection" is the safe default — no ML deps required. Set "rl" to use the
+# trained pufferlib checkpoint (requires torch).
+policy_mode        = "bisection"
+seller_model_path  = "domain/compute/agent/app/policy/models/arkhai_negotiator_seller.pt"
+buyer_model_path   = "domain/compute/agent/app/policy/models/arkhai_negotiator_buyer.pt"
+extra_policy_paths = []
+
+[pricing]
+default_min_price            = ""
+default_token_address        = ""
+default_max_duration_seconds = 0   # 0 means unlimited
+publish_priceless            = false
+
+[integrations]
+# Sensitive — populated by Secret overlay.
+gemini_api_key = ""

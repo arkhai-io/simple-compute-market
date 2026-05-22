@@ -106,13 +106,11 @@ class Listing(Base):
     agent_id = Column(String, ForeignKey("agents.agent_id", ondelete="CASCADE"), nullable=False)
     seller = Column(Text, nullable=False)  # Agent card URL of the listing seller
     buyer = Column(Text, nullable=True)    # Agent card URL of the buyer (when accepted)
-    offer_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
-    demand_resource = Column(JSON, nullable=False)  # JSON representation of ComputeResource or TokenResource
+    offer_resource = Column(JSON, nullable=False)  # registry-specific shape (e.g. ComputeResource)
+    accepted_escrows = Column(JSON, nullable=True)  # list[AcceptedEscrow] — escrows the seller will take
     # Optional ceiling on lease duration (seconds). NULL = unlimited.
     # Buyers supply the actual duration at negotiation init.
     max_duration_seconds = Column(Integer, nullable=True)
-    seller_attestation = Column(Text, nullable=True)  # fulfillment attestation UID posted by seller
-    buyer_attestation = Column(Text, nullable=True)   # escrow attestation UID locked by buyer
     oracle_address = Column(Text, nullable=True)
     status = Column(SQLEnum(OrderStatusEnum, name="liststatusenum"), nullable=False, default=OrderStatusEnum.open)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -125,5 +123,34 @@ class Listing(Base):
         Index("idx_listings_agent_id", "agent_id"),
         Index("idx_listings_status", "status"),
         Index("idx_listings_created_at", "created_at"),
+    )
+
+
+class ApiKey(Base):
+    """Bearer-token credential for read/write access to a private registry.
+
+    Operators mint a key via ``POST /admin/api-keys`` (gated by the
+    ``REGISTRY_ADMIN_API_KEY`` env var). The raw secret is shown to
+    the operator exactly once at creation time; only its sha256 hash
+    is stored, so a DB leak does not expose live tokens. Revocation
+    sets ``revoked_at`` rather than deleting the row, preserving the
+    audit trail.
+
+    Auth gating is opt-in: when ``settings.require_api_key`` is False
+    (the default for backward compat) the table is unused and every
+    request is allowed through. When True, the auth dependency on
+    every non-admin / non-health route requires
+    ``Authorization: Bearer <raw-key>`` and verifies via hash lookup.
+    """
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)  # human label e.g. "alice-buyer"
+    key_hash = Column(String, nullable=False, unique=True)  # sha256(raw_key)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_api_keys_revoked_at", "revoked_at"),
     )
 

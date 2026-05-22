@@ -52,10 +52,10 @@ class TestGetOrder:
             await registry_client.get_listing("nonexistent-order-id")
         assert exc_info.value.status_code == 404
 
-    async def test_offer_and_demand_populated(self, registry_client, open_order):
+    async def test_offer_and_accepted_escrows_populated(self, registry_client, open_order):
         order = await registry_client.get_listing(open_order.listing_id)
         assert order.offer
-        assert order.demand
+        assert order.accepted_escrows
 
 
 class TestPublishOrder:
@@ -64,7 +64,7 @@ class TestPublishOrder:
             agent_no_owner.agent_id,
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
-                demand={"token": "USDC", "amount": 100.0},
+                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
                 ),
             private_key=MAKER_PRIVATE_KEY,
         )
@@ -75,7 +75,7 @@ class TestPublishOrder:
             maker_agent.agent_id,
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
-                demand={"token": "USDC", "amount": 100.0},
+                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
                 ),
             private_key=MAKER_PRIVATE_KEY,
         )
@@ -85,8 +85,7 @@ class TestPublishOrder:
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.publish_listing(
                 maker_agent.agent_id,
-                ListingRequest(offer={"gpu_model": "A100"}, demand={"token": "USDC"},
-                             ),
+                ListingRequest(offer={"gpu_model": "A100"}, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}]),
                 private_key=TAKER_PRIVATE_KEY,
             )
         assert exc_info.value.status_code == 401
@@ -95,7 +94,7 @@ class TestPublishOrder:
         with pytest.raises(RegistryClientError) as exc_info:
             await registry_client.publish_listing(
                 "nonexistent-agent",
-                ListingRequest(offer={}, demand={}, ),
+                ListingRequest(offer={}, accepted_escrows=[]),
                 private_key=MAKER_PRIVATE_KEY,
             )
         assert exc_info.value.status_code == 404
@@ -117,7 +116,7 @@ class TestGetAgentOrders:
             agent_id=agent_no_owner.agent_id,
             seller=agent_no_owner.token_uri,
             offer_resource={"gpu_model": "A100"},
-            demand_resource={"token": "USDC"},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}}],
             max_duration_seconds=3600,
             status=OrderStatusEnum.closed,
         ))
@@ -193,7 +192,7 @@ class TestOrderLifecycle:
             agent_a.agent_id,
             ListingRequest(
                 offer={"gpu_model": "A100", "region": "us-west"},
-                demand={"token": "USDC", "amount": 100.0},
+                accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
                 ),
             private_key=MAKER_PRIVATE_KEY,
         )

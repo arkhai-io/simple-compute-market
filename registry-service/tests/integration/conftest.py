@@ -142,7 +142,7 @@ def open_order(db_session, agent_no_owner):
         agent_id=agent_no_owner.agent_id,
         seller=agent_no_owner.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
-        demand_resource={"token": "USDC", "amount": 100.0},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )
@@ -160,7 +160,7 @@ def authenticated_open_order(db_session, maker_agent):
         agent_id=maker_agent.agent_id,
         seller=maker_agent.token_uri,
         offer_resource={"gpu_model": "A100", "region": "us-west", "quantity": 1, "sla": 99.0},
-        demand_resource={"token": "USDC", "amount": 100.0},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "USDC"}, "price_per_hour": 100}],
         max_duration_seconds=3600,
         status=OrderStatusEnum.open,
     )

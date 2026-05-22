@@ -125,18 +125,51 @@ def run_settle_from_log(
         log.event("escrow_create_start", terms=terms.__dict__)
         console.print("[dim]escrow.create[/dim]  approve + create on-chain…")
 
-        from ..escrow_client import make_create_escrow_fn
+        # Synthesize the EscrowProposal that `market negotiate` would have
+        # sent (and the seller echoed back). The run-log doesn't currently
+        # carry the seller-confirmed proposal, so we rebuild it from chain
+        # config — matches what the storefront's accepted_escrows uses for
+        # the default ERC20 non-tierable contract.
+        import time as _time
+        from service.schemas import EscrowProposal
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
+        from ..escrow_client import (
+            make_buyer_payment_escrow_terms_fn,
+            make_create_escrow_fn,
+        )
+
+        escrow_address = get_erc20_escrow_obligation_nontierable(
+            chain.chain_name,
+            config_path=chain.alkahest_addr_config or None,
+        )
+        proposal = EscrowProposal(
+            chain_name=chain.chain_name,
+            escrow_address=escrow_address,
+            fields={"token": chain.token_contract},
+            expiration_unix=int(_time.time()) + expiration_seconds,
+        )
+
+        build_terms = make_buyer_payment_escrow_terms_fn(
+            chain_name=chain.chain_name,
+            addr_config_path=chain.alkahest_addr_config,
+        )
+        escrow_terms_list = build_terms(
+            proposal,
+            seller_wallet,
+            float(deal.agreed_price),
+            int(effective_duration),
+        )
+
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,
             rpc_url=chain.rpc_url,
             chain_name=chain.chain_name,
             addr_config_path=chain.alkahest_addr_config,
-            token_contract_address=chain.token_contract,
-            token_decimals=chain.token_decimals,
-            expiration_seconds=expiration_seconds,
         )
         try:
-            resolved_uid = create_escrow(terms)
+            uids = create_escrow(escrow_terms_list)
         except Exception as exc:
             log.event("escrow_create_failed", error=str(exc))
             log.end("error", error=f"escrow_create: {exc}")
@@ -145,6 +178,15 @@ def run_settle_from_log(
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(4) from exc
+        if not uids:
+            log.event("escrow_create_failed", error="no uid returned")
+            log.end("error", error="escrow_create: no uid returned")
+            typer.secho(
+                "escrow.create returned no uid — buyer terms list was empty.",
+                err=True, fg=typer.colors.RED,
+            )
+            raise typer.Exit(4)
+        resolved_uid = uids[0]
         log.event("escrow_created", escrow_uid=resolved_uid)
         console.print(f"[green]escrow created[/green]  {resolved_uid}")
 
@@ -190,7 +232,7 @@ def run_settle_from_log(
     log.end(
         final.get("status") or "unknown",
         escrow_uid=resolved_uid,
-        attestation_uid=final.get("attestation_uid"),
+        fulfillment_uid=final.get("fulfillment_uid"),
     )
 
     result = Table.grid(padding=(0, 2))
@@ -198,8 +240,8 @@ def run_settle_from_log(
     result.add_column()
     result.add_row("Status", str(final.get("status")))
     result.add_row("Escrow UID", resolved_uid)
-    if final.get("attestation_uid"):
-        result.add_row("Attestation UID", str(final["attestation_uid"]))
+    if final.get("fulfillment_uid"):
+        result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
     if final.get("connection_details"):
         result.add_row("Connection", str(final["connection_details"]))
     if final.get("reason"):

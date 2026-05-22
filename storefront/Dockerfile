@@ -47,7 +47,7 @@ FROM --platform=linux/amd64 ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS run
 USER root
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo && \
+    apt-get install -y --no-install-recommends curl gnupg iproute2 kmod sudo git && \
     curl -s https://install.zerotier.com | bash && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/lib/zerotier-one && \
@@ -76,11 +76,11 @@ ENV PYTHONPATH="/app"
 # /app/src/market_storefront so it's importable via the venv-installed
 # package; the domain/ tree is copied in for compute-domain policy
 # callables that the storefront's PolicyManager discovers at startup.
-COPY storefront/src ./src
-COPY storefront/scripts ./scripts
-COPY domain/ ./domain/
-COPY service/ ../service/
-COPY policy/ ../policy/
+COPY --chown=appuser:appuser storefront/src ./src
+COPY --chown=appuser:appuser storefront/scripts ./scripts
+COPY --chown=appuser:appuser domain/ ./domain/
+COPY --chown=appuser:appuser service/ ../service/
+COPY --chown=appuser:appuser policy/ ../policy/
 
 # Complete the two-phase uv install: deps were installed with
 # --no-install-project in the builder stage (for layer caching);

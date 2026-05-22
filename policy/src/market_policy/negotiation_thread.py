@@ -16,9 +16,9 @@ class NegotiationMessage:
     """A single message in a negotiation thread."""
     round: int
     sender: str
-    our_price: int | None
-    their_price: int | None
-    proposed_price: int | None
+    our_price: float | None
+    their_price: float | None
+    proposed_price: float | None
     action_taken: str  # ACCEPT_OFFER, REJECT_OFFER, COUNTER_OFFER, EXIT_NEGOTIATION
     timestamp: str
     message_type: str  # initial_proposal, counter_proposal, etc.
@@ -193,9 +193,10 @@ class NegotiationThreadTransaction:
         their_listing_id: str,
         our_agent_id: str,
         their_agent_id: str,
-        our_initial_price: int | None = None,
+        our_initial_price: float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        buyer_escrow_proposal: dict | None = None,
     ) -> None:
         """Get or create negotiation thread
 
@@ -208,6 +209,10 @@ class NegotiationThreadTransaction:
             our_initial_price: Our initial price (floor for maximizer, ceiling for minimizer)
             our_strategy: Our strategy ('minimize' or 'maximize')
             requested_duration_seconds: Buyer's lease ask, recorded on thread creation.
+            buyer_escrow_proposal: Buyer's accepted escrow shape
+                proposal (opaque dict; persisted as JSON). Settlement
+                reads this back to reconstruct the expected on-chain
+                obligation_data. None for legacy clients.
         """
         if not self.thread_store:
             logger.warning(f"[{self.component}] No thread store available")
@@ -230,6 +235,7 @@ class NegotiationThreadTransaction:
                 our_initial_price=our_initial_price,
                 our_strategy=our_strategy,
                 requested_duration_seconds=requested_duration_seconds,
+                buyer_escrow_proposal=buyer_escrow_proposal,
             )
             logger.debug(f"[{self.component}] Created thread {negotiation_id}")
 
@@ -237,9 +243,9 @@ class NegotiationThreadTransaction:
         self,
         negotiation_id: str,
         sender: str,
-        our_price: int | None = None,
-        their_price: int | None = None,
-        proposed_price: int | None = None,
+        our_price: float | None = None,
+        their_price: float | None = None,
+        proposed_price: float | None = None,
         action_taken: str = "",
         message_type: str = "",
     ) -> None:
@@ -303,9 +309,10 @@ class NegotiationThreadStore:
         our_agent_id: str,
         their_agent_id: str,
         owner_id: str,
-        our_initial_price: int | None = None,
+        our_initial_price: float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        buyer_escrow_proposal: dict | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
 
@@ -319,6 +326,8 @@ class NegotiationThreadStore:
             our_initial_price: Private initial price
             our_strategy: Private strategy
             requested_duration_seconds: Buyer's lease ask from /negotiate/new.
+            buyer_escrow_proposal: Opaque dict; persisted as JSON
+                so settlement can read it back.
         """
         await self._sqlite.create_negotiation_thread(
             negotiation_id=negotiation_id,
@@ -330,6 +339,7 @@ class NegotiationThreadStore:
             our_initial_price=our_initial_price,
             our_strategy=our_strategy,
             requested_duration_seconds=requested_duration_seconds,
+            buyer_escrow_proposal=buyer_escrow_proposal,
         )
         logger.debug(
             f"[NEGOTIATION THREAD] Created thread {negotiation_id} "
@@ -372,9 +382,9 @@ class NegotiationThreadStore:
         self,
         negotiation_id: str,
         sender: str,
-        our_price: int | None,
-        their_price: int | None,
-        proposed_price: int | None,
+        our_price: float | None,
+        their_price: float | None,
+        proposed_price: float | None,
         action_taken: str,
         message_type: str = "proposal",
     ) -> int:

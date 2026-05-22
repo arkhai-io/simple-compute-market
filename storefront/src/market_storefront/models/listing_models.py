@@ -6,110 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-# ---------------------------------------------------------------------------
-# Filter params — Depends() factory for GET /api/v1/listings
-# ---------------------------------------------------------------------------
-
-class ListingFilterParams(BaseModel):
-    """Query parameters for GET /api/v1/listings.
-
-    Instantiated via ``Depends(listing_filter_params)`` so FastAPI validates
-    all filters through Pydantic rather than as individual method parameters,
-    which mangled the @cbv route signature.
-    """
-    model_config = ConfigDict(extra="ignore")
-
-    limit: int = Field(default=50, ge=1, le=200)
-    offset: int = Field(default=0, ge=0)
-    status: str | None = None
-    paused: bool | None = None
-    region: str | None = None
-    gpu_model: str | None = None
-    cpu_type: str | None = None
-    host_disk_type: str | None = None
-    motherboard: str | None = None
-    gpu_interconnect: str | None = None
-    virtualization_type: str | None = None
-    static_ip: bool | None = None
-    datacenter_grade: bool | None = None
-    sla: float | None = None
-    gpu_count_min: int | None = None
-    vcpu_count_min: int | None = None
-    ram_gb_min: int | None = None
-    disk_gb_min: int | None = None
-    host_cpu_cores_min: int | None = None
-    host_ram_gb_min: int | None = None
-    host_disk_gb_min: int | None = None
-    total_gpu_count_min: int | None = None
-    nic_speed_gbps_min: int | None = None
-    internet_download_mbps_min: int | None = None
-    internet_upload_mbps_min: int | None = None
-    open_ports_count_min: int | None = None
-
-    def to_spec_kwargs(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for field_name in (
-            "region", "gpu_model", "cpu_type", "host_disk_type", "motherboard",
-            "gpu_interconnect", "virtualization_type", "static_ip", "datacenter_grade",
-            "sla", "gpu_count_min", "vcpu_count_min", "ram_gb_min", "disk_gb_min",
-            "host_cpu_cores_min", "host_ram_gb_min", "host_disk_gb_min",
-            "total_gpu_count_min", "nic_speed_gbps_min",
-            "internet_download_mbps_min", "internet_upload_mbps_min",
-            "open_ports_count_min",
-        ):
-            v = getattr(self, field_name)
-            if v is not None:
-                result[field_name] = v
-        return result
-
-
-async def listing_filter_params(
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-    status: str | None = Query(default=None),
-    paused: bool | None = Query(default=None),
-    region: str | None = Query(default=None),
-    gpu_model: str | None = Query(default=None),
-    cpu_type: str | None = Query(default=None),
-    host_disk_type: str | None = Query(default=None),
-    motherboard: str | None = Query(default=None),
-    gpu_interconnect: str | None = Query(default=None),
-    virtualization_type: str | None = Query(default=None),
-    static_ip: bool | None = Query(default=None),
-    datacenter_grade: bool | None = Query(default=None),
-    sla: float | None = Query(default=None),
-    gpu_count_min: int | None = Query(default=None),
-    vcpu_count_min: int | None = Query(default=None),
-    ram_gb_min: int | None = Query(default=None),
-    disk_gb_min: int | None = Query(default=None),
-    host_cpu_cores_min: int | None = Query(default=None),
-    host_ram_gb_min: int | None = Query(default=None),
-    host_disk_gb_min: int | None = Query(default=None),
-    total_gpu_count_min: int | None = Query(default=None),
-    nic_speed_gbps_min: int | None = Query(default=None),
-    internet_download_mbps_min: int | None = Query(default=None),
-    internet_upload_mbps_min: int | None = Query(default=None),
-    open_ports_count_min: int | None = Query(default=None),
-) -> ListingFilterParams:
-    return ListingFilterParams(
-        limit=limit, offset=offset, status=status, paused=paused,
-        region=region, gpu_model=gpu_model, cpu_type=cpu_type,
-        host_disk_type=host_disk_type, motherboard=motherboard,
-        gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-        static_ip=static_ip, datacenter_grade=datacenter_grade, sla=sla,
-        gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-        ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-        host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-        host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-        nic_speed_gbps_min=nic_speed_gbps_min,
-        internet_download_mbps_min=internet_download_mbps_min,
-        internet_upload_mbps_min=internet_upload_mbps_min,
-        open_ports_count_min=open_ports_count_min,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +16,14 @@ async def listing_filter_params(
 
 class CreateListingRequest(BaseModel):
     """Body for POST /api/v1/listings/create."""
-    offer: dict[str, Any] = Field(description="Offered resource (compute or token dict)")
-    demand: dict[str, Any] = Field(description="Demanded resource (compute or token dict)")
+    offer: dict[str, Any] = Field(description="Offered compute resource dict")
+    accepted_escrows: list[dict[str, Any]] = Field(
+        description=(
+            "List of escrow shapes the seller will accept for this listing. "
+            "Each entry: {chain_name, escrow_address, fields, price_per_hour}. "
+            "Must be non-empty."
+        ),
+    )
     max_duration_seconds: int | None = None
     paused: bool = Field(
         default=False,
@@ -137,10 +40,14 @@ class RefundRequest(BaseModel):
 
     ``buyer_address`` defaults to the listing's recorded buyer (the
     storefront DB knows it once a deal closes); pass explicitly to
-    override.
+    override. ``token`` (when given) is a 0x contract address. ``amount``
+    is a non-negative decimal-digit string in base units (uint256-safe);
+    Python int is accepted too for in-process callers. Human-decimal
+    scaling is a client concern — the storefront expects already-scaled
+    base-unit values.
     """
     buyer_address: str | None = None
-    amount: float | None = None
+    amount: str | int | None = None
     token: str | None = None
 
 
@@ -172,7 +79,7 @@ class ListingResponse(BaseModel):
     status: str
     paused: bool = False
     offer_resource: Any = None    # dict or JSON string from SQLite
-    demand_resource: Any = None   # dict or JSON string from SQLite
+    accepted_escrows: list[dict[str, Any]] | None = None
     max_duration_seconds: int | None = None
     seller: str | None = None
     model_config = ConfigDict(extra="allow")
@@ -275,7 +182,7 @@ class AdminEvaluateCloseResponse(BaseModel):
 
 class EvaluateNegotiateRequest(BaseModel):
     """Body for POST /api/v1/admin/listings/{listing_id}/evaluate-negotiate."""
-    their_proposed_price: int = Field(
+    their_proposed_price: float = Field(
         description="The buyer's proposed price (in base token units) to evaluate"
     )
     buyer_address: str = Field(
@@ -292,11 +199,11 @@ class EvaluateNegotiateResponse(BaseModel):
     thread or writing to the database.
     """
     listing_id: str
-    our_reference_price: int    # Seller's floor extracted from the listing's demand resource
-    their_proposed_price: int   # Echoed back from the request
+    our_reference_price: float    # Seller's floor extracted from the listing's demand resource
+    their_proposed_price: float   # Echoed back from the request
     direction: str              # "maximize" (seller always maximises price)
     strategy: str               # e.g. "bisection" or "rl"
     decision: str               # "accept" | "counter" | "exit"
-    decision_price: int | None = None
+    decision_price: float | None = None
     decision_reason: str | None = None
     would_negotiate: bool       # True when decision != "exit"

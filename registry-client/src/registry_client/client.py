@@ -34,7 +34,7 @@ from registry_client.models import (
     AgentIndexedResponse,
     AgentListResponse,
     AgentSummary,
-    AttestationStats,
+    FilterSpecResponse,
     HealthResponse,
     HeartbeatRequest,
     ListingListResponse,
@@ -95,73 +95,34 @@ class _RegistryClientBase:
     @staticmethod
     def _listings_params(
         *,
-        offer_resource_type: str | None = None,
-        demand_resource_type: str | None = None,
-        # Equality filters
-        region: str | None = None,
-        gpu_model: str | None = None,
-        sla: float | None = None,
-        cpu_type: str | None = None,
-        host_disk_type: str | None = None,
-        motherboard: str | None = None,
-        gpu_interconnect: str | None = None,
-        virtualization_type: str | None = None,
-        static_ip: bool | None = None,
-        datacenter_grade: bool | None = None,
-        # Slice ">=" filters
-        gpu_count_min: int | None = None,
-        vcpu_count_min: int | None = None,
-        ram_gb_min: int | None = None,
-        disk_gb_min: int | None = None,
-        # Host-context ">=" filters
-        host_cpu_cores_min: int | None = None,
-        host_ram_gb_min: int | None = None,
-        host_disk_gb_min: int | None = None,
-        total_gpu_count_min: int | None = None,
-        nic_speed_gbps_min: int | None = None,
-        internet_download_mbps_min: int | None = None,
-        internet_upload_mbps_min: int | None = None,
-        open_ports_count_min: int | None = None,
-        # Listing-level
-        status: str | None = "open",
-        limit: int = 50,
-        offset: int = 0,
+        status: str | None,
+        limit: int,
+        offset: int,
+        filters: dict[str, Any],
     ) -> dict[str, Any]:
+        """Build query params for GET /listings.
+
+        ``filters`` is an opaque dict keyed on the registry's filter-spec
+        names — the client doesn't enumerate them.  Buyers can fetch
+        ``/filter-spec`` to discover what's available.  Bool values are
+        stringified ("true"/"false") since FastAPI parses query bools from
+        those literals.
+        """
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if status is not None:
             params["status"] = status
-        filters = {
-            "offer_resource_type": offer_resource_type,
-            "demand_resource_type": demand_resource_type,
-            "region": region,
-            "gpu_model": gpu_model,
-            "sla": sla,
-            "cpu_type": cpu_type,
-            "host_disk_type": host_disk_type,
-            "motherboard": motherboard,
-            "gpu_interconnect": gpu_interconnect,
-            "virtualization_type": virtualization_type,
-            "static_ip": static_ip,
-            "datacenter_grade": datacenter_grade,
-            "gpu_count_min": gpu_count_min,
-            "vcpu_count_min": vcpu_count_min,
-            "ram_gb_min": ram_gb_min,
-            "disk_gb_min": disk_gb_min,
-            "host_cpu_cores_min": host_cpu_cores_min,
-            "host_ram_gb_min": host_ram_gb_min,
-            "host_disk_gb_min": host_disk_gb_min,
-            "total_gpu_count_min": total_gpu_count_min,
-            "nic_speed_gbps_min": nic_speed_gbps_min,
-            "internet_download_mbps_min": internet_download_mbps_min,
-            "internet_upload_mbps_min": internet_upload_mbps_min,
-            "open_ports_count_min": open_ports_count_min,
-        }
         for key, val in filters.items():
             if val is None:
                 continue
-            # FastAPI parses bool query params from "true"/"false" strings.
             params[key] = str(val).lower() if isinstance(val, bool) else val
         return params
+
+    @staticmethod
+    def _if_match_headers(etag: str | None) -> dict[str, str] | None:
+        if etag is None:
+            return None
+        normalized = etag if etag.startswith('"') else f'"{etag}"'
+        return {"If-Match": normalized}
 
     @staticmethod
     def _heartbeat_body(agent_id: str, private_key: str) -> tuple[dict, dict]:
@@ -230,10 +191,6 @@ class _RegistryClientBase:
         return ListingSummary.from_dict(data)
 
     @staticmethod
-    def _parse_attestation_stats(data: dict) -> AttestationStats:
-        return AttestationStats.from_dict(data)
-
-    @staticmethod
     def _parse_system_config(data: dict) -> SystemConfigResponse:
         return SystemConfigResponse.from_dict(data)
 
@@ -275,15 +232,28 @@ class RegistryClient(_RegistryClientBase):
         *,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        api_key: str | None = None,
     ) -> None:
+        """``api_key`` — optional bearer token sent on every request as
+        ``Authorization: Bearer <key>``. Private registries that gate
+        access behind an API key set this; public registries leave it
+        ``None``. The key is layered on top of any per-call EIP-191
+        signing (publish/delete/heartbeat) — both can be required in
+        parallel by stricter deployments."""
         super().__init__(base_url, timeout)
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
             base_url=self._base,
             timeout=timeout,
             transport=transport,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
-        log.info("RegistryClient (async) initialised — base_url=%s", self._base)
+        log.info(
+            "RegistryClient (async) initialised — base_url=%s api_key=%s",
+            self._base, "set" if api_key else "none",
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -321,16 +291,6 @@ class RegistryClient(_RegistryClientBase):
     async def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(await self._request("GET", "/health"))
-
-    # ------------------------------------------------------------------
-    # /api/v1/system/stats/attestations
-    # ------------------------------------------------------------------
-
-    async def get_attestation_stats(self) -> AttestationStats:
-        """GET /api/v1/system/stats/attestations → AttestationStats"""
-        return self._parse_attestation_stats(
-            await self._request("GET", "/api/v1/system/stats/attestations")
-        )
 
     async def get_system_config(self) -> SystemConfigResponse:
         """GET /api/v1/system/config → SystemConfigResponse"""
@@ -463,56 +423,42 @@ class RegistryClient(_RegistryClientBase):
     # /listings
     # ------------------------------------------------------------------
 
+    async def get_filter_spec(self) -> FilterSpecResponse:
+        """GET /filter-spec — what the registry advertises.
+
+        Cache by URL+etag and pass ``etag=...`` to :meth:`list_listings`
+        to gate the query on the cached spec.
+        """
+        data = await self._request("GET", "/filter-spec")
+        return FilterSpecResponse.from_dict(data)
+
     async def list_listings(
         self,
         *,
-        offer_resource_type: Optional[str] = None,
-        demand_resource_type: Optional[str] = None,
-        region: Optional[str] = None,
-        gpu_model: Optional[str] = None,
-        sla: Optional[float] = None,
-        cpu_type: Optional[str] = None,
-        host_disk_type: Optional[str] = None,
-        motherboard: Optional[str] = None,
-        gpu_interconnect: Optional[str] = None,
-        virtualization_type: Optional[str] = None,
-        static_ip: Optional[bool] = None,
-        datacenter_grade: Optional[bool] = None,
-        gpu_count_min: Optional[int] = None,
-        vcpu_count_min: Optional[int] = None,
-        ram_gb_min: Optional[int] = None,
-        disk_gb_min: Optional[int] = None,
-        host_cpu_cores_min: Optional[int] = None,
-        host_ram_gb_min: Optional[int] = None,
-        host_disk_gb_min: Optional[int] = None,
-        total_gpu_count_min: Optional[int] = None,
-        nic_speed_gbps_min: Optional[int] = None,
-        internet_download_mbps_min: Optional[int] = None,
-        internet_upload_mbps_min: Optional[int] = None,
-        open_ports_count_min: Optional[int] = None,
         status: Optional[str] = "open",
         limit: int = 50,
         offset: int = 0,
+        etag: str | None = None,
+        **filters: Any,
     ) -> ListingListResponse:
-        """GET /listings → ListingListResponse"""
+        """GET /listings → ListingListResponse.
+
+        ``**filters`` are passthrough query params keyed on filter-spec
+        filter names (``gpu_model``, ``ram_gb_min``, ``token``, ...).  Use
+        :meth:`get_filter_spec` to discover what's available.  ``etag``
+        becomes an ``If-Match`` header; mismatch → ``RegistryClientError``
+        with status 412 so the caller can refresh and retry.
+        """
         params = self._listings_params(
-            offer_resource_type=offer_resource_type,
-            demand_resource_type=demand_resource_type,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            status=status, limit=limit, offset=offset,
+            status=status, limit=limit, offset=offset, filters=filters,
         )
-        return self._parse_listing_list(await self._request("GET", "/listings", params=params))
+        return self._parse_listing_list(
+            await self._request(
+                "GET", "/listings",
+                params=params,
+                headers=self._if_match_headers(etag),
+            )
+        )
 
     async def get_listing(self, listing_id: str) -> ListingSummary:
         """GET /listings/{listing_id} → ListingSummary"""
@@ -560,15 +506,23 @@ class SyncRegistryClient(_RegistryClientBase):
         *,
         timeout: float = 30.0,
         transport: httpx.BaseTransport | None = None,
+        api_key: str | None = None,
     ) -> None:
+        """See ``RegistryClient.__init__`` for ``api_key`` semantics."""
         super().__init__(base_url, timeout)
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.Client(
             base_url=self._base,
             timeout=timeout,
             transport=transport,
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
-        log.info("SyncRegistryClient initialised — base_url=%s", self._base)
+        log.info(
+            "SyncRegistryClient initialised — base_url=%s api_key=%s",
+            self._base, "set" if api_key else "none",
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -606,16 +560,6 @@ class SyncRegistryClient(_RegistryClientBase):
     def get_health(self) -> HealthResponse:
         """GET /health → HealthResponse"""
         return self._parse_health(self._request("GET", "/health"))
-
-    # ------------------------------------------------------------------
-    # /api/v1/system/stats/attestations
-    # ------------------------------------------------------------------
-
-    def get_attestation_stats(self) -> AttestationStats:
-        """GET /api/v1/system/stats/attestations → AttestationStats"""
-        return self._parse_attestation_stats(
-            self._request("GET", "/api/v1/system/stats/attestations")
-        )
 
     def get_system_config(self) -> SystemConfigResponse:
         """GET /api/v1/system/config → SystemConfigResponse"""
@@ -751,56 +695,31 @@ class SyncRegistryClient(_RegistryClientBase):
     # /listings
     # ------------------------------------------------------------------
 
+    def get_filter_spec(self) -> FilterSpecResponse:
+        """GET /filter-spec — see :meth:`RegistryClient.get_filter_spec`."""
+        data = self._request("GET", "/filter-spec")
+        return FilterSpecResponse.from_dict(data)
+
     def list_listings(
         self,
         *,
-        offer_resource_type: Optional[str] = None,
-        demand_resource_type: Optional[str] = None,
-        region: Optional[str] = None,
-        gpu_model: Optional[str] = None,
-        sla: Optional[float] = None,
-        cpu_type: Optional[str] = None,
-        host_disk_type: Optional[str] = None,
-        motherboard: Optional[str] = None,
-        gpu_interconnect: Optional[str] = None,
-        virtualization_type: Optional[str] = None,
-        static_ip: Optional[bool] = None,
-        datacenter_grade: Optional[bool] = None,
-        gpu_count_min: Optional[int] = None,
-        vcpu_count_min: Optional[int] = None,
-        ram_gb_min: Optional[int] = None,
-        disk_gb_min: Optional[int] = None,
-        host_cpu_cores_min: Optional[int] = None,
-        host_ram_gb_min: Optional[int] = None,
-        host_disk_gb_min: Optional[int] = None,
-        total_gpu_count_min: Optional[int] = None,
-        nic_speed_gbps_min: Optional[int] = None,
-        internet_download_mbps_min: Optional[int] = None,
-        internet_upload_mbps_min: Optional[int] = None,
-        open_ports_count_min: Optional[int] = None,
         status: Optional[str] = "open",
         limit: int = 50,
         offset: int = 0,
+        etag: str | None = None,
+        **filters: Any,
     ) -> ListingListResponse:
-        """GET /listings → ListingListResponse"""
+        """GET /listings — see :meth:`RegistryClient.list_listings`."""
         params = self._listings_params(
-            offer_resource_type=offer_resource_type,
-            demand_resource_type=demand_resource_type,
-            region=region, gpu_model=gpu_model, sla=sla,
-            cpu_type=cpu_type, host_disk_type=host_disk_type, motherboard=motherboard,
-            gpu_interconnect=gpu_interconnect, virtualization_type=virtualization_type,
-            static_ip=static_ip, datacenter_grade=datacenter_grade,
-            gpu_count_min=gpu_count_min, vcpu_count_min=vcpu_count_min,
-            ram_gb_min=ram_gb_min, disk_gb_min=disk_gb_min,
-            host_cpu_cores_min=host_cpu_cores_min, host_ram_gb_min=host_ram_gb_min,
-            host_disk_gb_min=host_disk_gb_min, total_gpu_count_min=total_gpu_count_min,
-            nic_speed_gbps_min=nic_speed_gbps_min,
-            internet_download_mbps_min=internet_download_mbps_min,
-            internet_upload_mbps_min=internet_upload_mbps_min,
-            open_ports_count_min=open_ports_count_min,
-            status=status, limit=limit, offset=offset,
+            status=status, limit=limit, offset=offset, filters=filters,
         )
-        return self._parse_listing_list(self._request("GET", "/listings", params=params))
+        return self._parse_listing_list(
+            self._request(
+                "GET", "/listings",
+                params=params,
+                headers=self._if_match_headers(etag),
+            )
+        )
 
     def get_listing(self, listing_id: str) -> ListingSummary:
         """GET /listings/{listing_id} → ListingSummary"""

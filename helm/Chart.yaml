@@ -26,3 +26,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/validate-contracts"
     condition: validate-contracts.enabled
+  - name: e2e-tests
+    version: "0.1.0"
+    repository: "file://charts/e2e-tests"
+    condition: e2e-tests.enabled

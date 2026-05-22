@@ -30,5 +30,5 @@ dev = [
     # lazily imports it inside _sdk_addresses_for_chain. The service
     # package itself doesn't ship alkahest-py — consumers (storefront,
     # buyer) carry it as a runtime dep.
-    "alkahest-py>=0.3.0",
+    "alkahest-py>=0.4.0",
 ]

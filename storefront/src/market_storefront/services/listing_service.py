@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from market_storefront.models.listing_models import (
@@ -36,100 +35,151 @@ logger = logging.getLogger(__name__)
 
 
 class ListingService:
-    def __init__(self, *, sqlite_client, alkahest_client, config) -> None:
+    def __init__(self, *, sqlite_client, alkahest_client) -> None:
+        from market_storefront.utils.config import settings
+
         self._db = sqlite_client
         self._alkahest = alkahest_client
-        self._config = config
 
-        priv_key = (config.agent_priv_key or "").strip()
-        rpc_url = (config.chain_rpc_url or "").strip()
+        priv_key = (settings.wallet.private_key or "").strip()
+        rpc_url = (settings.chain.rpc_url or "").strip()
         self._token_transfers_available: bool = bool(priv_key and rpc_url)
         self._alkahest_available: bool = alkahest_client is not None
 
         if not self._token_transfers_available:
             logger.warning(
                 "[STOREFRONT] Token transfer operations (refund) unavailable — "
-                "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."
+                "wallet.private_key and chain.rpc_url must both be set in storefront config."
             )
         if not self._alkahest_available:
             logger.warning(
                 "[STOREFRONT] On-chain escrow operations (claim, reclaim, arbitrate) unavailable — "
-                "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config."
+                "wallet.private_key and chain.rpc_url must both be set in storefront config."
             )
 
     @staticmethod
     def _normalize_token_resource(resource_payload: dict) -> dict:
-        from service.clients.token import TOKEN_REGISTRY
+        """Validate + enrich an inbound token payload — strict address-only.
+
+        Wire format expectations:
+          * ``token``: a 0x-prefixed contract address string, or a full
+            metadata dict with ``contract_address`` (decimals optional;
+            looked up locally if omitted).
+          * ``amount``: an integer in base units, or ``None`` for a
+            hidden-reserve listing.
+
+        Bare symbol strings and human-decimal amounts are rejected —
+        clients pass addresses + base-unit amounts. Symbol enrichment for
+        display is best-effort via the chain-resolved cache.
+        """
+        from service.clients.token import resolve_token_cached
         if "token" not in resource_payload:
             return resource_payload
         token_value = resource_payload.get("token")
         if token_value is None:
-            raise ValueError("Token must be a symbol or contract address")
-        try:
-            if isinstance(token_value, str):
-                token_meta = TOKEN_REGISTRY.require(token_value)
-            elif isinstance(token_value, dict):
-                if all(k in token_value for k in ("symbol", "contract_address", "decimals")):
-                    token_meta = token_value
-                elif "symbol" in token_value:
-                    token_meta = TOKEN_REGISTRY.require(token_value["symbol"])
-                elif "contract_address" in token_value:
-                    token_meta = TOKEN_REGISTRY.require(token_value["contract_address"])
-                else:
-                    raise ValueError("Token dict must include symbol/contract_address/decimals")
+            raise ValueError("Token must be a 0x address or metadata dict")
+
+        if isinstance(token_value, dict):
+            address = token_value.get("contract_address")
+            if not isinstance(address, str) or not address.startswith("0x"):
+                raise ValueError(
+                    "Token dict must include 'contract_address' as a 0x address"
+                )
+            decimals = token_value.get("decimals")
+            if decimals is None:
+                looked_up = resolve_token_cached(address)
+                if looked_up is None:
+                    raise ValueError(
+                        f"Token dict for {address} must include 'decimals' "
+                        f"(no cached chain metadata for this address)"
+                    )
+                token_dump = looked_up.model_dump()
             else:
-                raise ValueError("Token must be a symbol string or metadata dict")
-        except Exception as exc:
-            raise ValueError(f"Unknown token: {token_value}") from exc
-        amount_value = resource_payload.get("amount")
-        if isinstance(token_meta, dict):
-            decimals = int(token_meta["decimals"])
-            token_dump = token_meta
+                token_dump = {
+                    "symbol": str(token_value.get("symbol", "")),
+                    "contract_address": address,
+                    "decimals": int(decimals),
+                }
+        elif isinstance(token_value, str):
+            if not token_value.startswith("0x"):
+                raise ValueError(
+                    f"Token string must be a 0x address, got {token_value!r}"
+                )
+            looked_up = resolve_token_cached(token_value)
+            if looked_up is not None:
+                token_dump = looked_up.model_dump()
+            else:
+                token_dump = {
+                    "symbol": "",
+                    "contract_address": token_value,
+                    "decimals": 0,
+                }
         else:
-            decimals = token_meta.decimals
-            token_dump = token_meta.model_dump()
+            raise ValueError(
+                f"Unsupported token value type: {type(token_value).__name__}"
+            )
+
         normalized = dict(resource_payload)
         normalized["token"] = token_dump
+
+        amount_value = resource_payload.get("amount")
         if amount_value is None:
-            # Hidden-reserve listing: amount stays None and round-trips
-            # through the schema. Buyer must propose an initial price;
-            # seller's strategy uses [seller.pricing].default_min_price
-            # for the floor.
             normalized["amount"] = None
             return normalized
-        raw = Decimal(str(amount_value)) * (Decimal(10) ** decimals)
-        if raw != raw.to_integral_value():
-            raise ValueError("Amount has too many decimal places for this token")
-        normalized["amount"] = int(raw)
-        return normalized
+        # uint256-safe wire: amount is a non-negative decimal-digit string
+        # (or int for in-process Python callers). No float, no scaling.
+        # Stored as Python int internally; the TokenResource serializer
+        # emits it back as a string on outbound JSON.
+        if isinstance(amount_value, bool):
+            raise ValueError("Amount must be a non-negative decimal, not bool")
+        if isinstance(amount_value, int):
+            if amount_value < 0:
+                raise ValueError(f"Amount must be non-negative, got {amount_value}")
+            normalized["amount"] = amount_value
+            return normalized
+        if isinstance(amount_value, str):
+            s = amount_value.strip()
+            if not s.isdigit():
+                raise ValueError(
+                    f"Amount must be a non-negative decimal-digit string "
+                    f"in base units, got {amount_value!r} (scale "
+                    f"human→base units client-side)"
+                )
+            normalized["amount"] = int(s)
+            return normalized
+        raise ValueError(
+            f"Amount must be int, decimal string, or None — got "
+            f"{type(amount_value).__name__}"
+        )
 
-    def _parse_offer_demand(self, request: CreateListingRequest) -> tuple[Any, Any]:
+    def _parse_offer_and_escrows(
+        self, request: CreateListingRequest
+    ) -> tuple[Any, list[dict[str, Any]]]:
         from market_storefront.models.domain_models import ComputeResource
-        from market_storefront.resources import TokenResource as _TR
         try:
             offer_resource = parse_resource_from_dict(
                 self._normalize_token_resource(request.offer)
             )
-            demand_resource = parse_resource_from_dict(
-                self._normalize_token_resource(request.demand)
-            )
         except Exception as exc:
-            raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
-        if not (
-            (isinstance(offer_resource, ComputeResource) and isinstance(demand_resource, _TR))
-            or (isinstance(offer_resource, _TR) and isinstance(demand_resource, ComputeResource))
-        ):
+            raise ValueError(f"Invalid offer resource: {exc}") from exc
+        if not isinstance(offer_resource, ComputeResource):
             raise ValueError(
-                "Offer and demand must be one compute resource and one token resource"
+                "Listing offer must be a compute resource (the buyer-as-maker "
+                "token-offer shape was removed with the demand_resource cutover)."
             )
-        return offer_resource, demand_resource
+        if not request.accepted_escrows:
+            raise ValueError(
+                "accepted_escrows must be a non-empty list "
+                "of {chain_name, escrow_address, fields, price_per_hour} entries."
+            )
+        return offer_resource, list(request.accepted_escrows)
 
     async def create_listing(
         self, request: CreateListingRequest, policy_svc: "PolicyService"
     ) -> CreateListingResponse:
-        offer, demand = self._parse_offer_demand(request)
+        offer, accepted_escrows = self._parse_offer_and_escrows(request)
         action = await policy_svc.evaluate_create_listing_policy(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         if action != "make_offer":
             return CreateListingResponse(
@@ -137,7 +187,7 @@ class ListingService:
                 root_agent_response=f"Policy returned: {action}",
             )
         listing_id = await policy_svc.execute_create_listing(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         return CreateListingResponse(
             status="created" if listing_id else "no_action",
@@ -147,9 +197,9 @@ class ListingService:
     async def evaluate_create(
         self, request: CreateListingRequest, policy_svc: "PolicyService"
     ) -> AdminEvaluateCreateResponse:
-        offer, demand = self._parse_offer_demand(request)
+        offer, accepted_escrows = self._parse_offer_and_escrows(request)
         action = await policy_svc.evaluate_create_listing_policy(
-            offer, demand, request.max_duration_seconds, request.paused
+            offer, accepted_escrows, request.max_duration_seconds, request.paused
         )
         return AdminEvaluateCreateResponse(
             would_create=(action == "make_offer"),
@@ -180,7 +230,7 @@ class ListingService:
         )
 
     async def evaluate_negotiate(
-        self, listing_id: str, their_proposed_price: int
+        self, listing_id: str, their_proposed_price: float
     ) -> EvaluateNegotiateResponse:
         """Dry-run the round-0 negotiation decision without creating a thread.
 
@@ -224,13 +274,26 @@ class ListingService:
                 "detail": "AGENT_PRIV_KEY and CHAIN_RPC_URL must both be set in storefront config.",
             }
         order = await self._db.load_listing(listing_id=listing_id)
-        from service.clients.token import TOKEN_REGISTRY
-        def _resolve_token(ident: str) -> dict:
-            try:
-                meta = TOKEN_REGISTRY.require(ident)
-            except Exception as exc:
-                raise ValueError(f"Unknown token: {ident}") from exc
-            return meta.model_dump() if hasattr(meta, "model_dump") else dict(meta)
+        from service.clients.token import resolve_token_cached, ERC20TokenMetadata
+        def _resolve_token(address: str) -> dict:
+            """Resolve a 0x address to metadata for the refund transfer.
+
+            Strict address-only — symbols rejected upstream by RefundRequest
+            validation. Unknown addresses get an address-only stub so
+            transfer_erc20 can still execute (it only needs the address).
+            """
+            if not isinstance(address, str) or not address.startswith("0x"):
+                raise ValueError(
+                    f"token must be a 0x address, got {address!r}"
+                )
+            meta = resolve_token_cached(address)
+            if meta is None:
+                meta = ERC20TokenMetadata(
+                    symbol="",
+                    contract_address=address,
+                    decimals=0,
+                )
+            return meta.model_dump()
         from market_storefront.utils.refund import derive_refund_params
         outcome = derive_refund_params(
             order=order,
@@ -242,11 +305,12 @@ class ListingService:
             _, status, body = outcome
             return status, body
         params = outcome[1]
+        from market_storefront.utils.config import settings
         from market_storefront.utils.token_transfer import transfer_erc20
         try:
             result = await transfer_erc20(
-                private_key=self._config.agent_priv_key.strip(),
-                rpc_url=self._config.chain_rpc_url.strip(),
+                private_key=settings.wallet.private_key.strip(),
+                rpc_url=settings.chain.rpc_url.strip(),
                 token_address=params["token_address"],
                 to_address=params["buyer_address"],
                 amount_raw=params["amount_raw"],

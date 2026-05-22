@@ -5,15 +5,111 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from typing import Any
 
-from .config import CONFIG
+from .config import settings
 from .host_csv_importer import upsert_hosts_from_csv
-from .resource_csv_importer import upsert_resources_from_csv
+from .resource_csv_importer import upsert_resources_from_csv, upsert_resources_from_csv_content
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_to_dict(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+    return None
+
+
+def synthesize_accepted_escrows_from_demand(
+    demand_resource: Any,
+) -> list[dict[str, Any]] | None:
+    """Build a single-entry ``accepted_escrows`` list from a legacy
+    ``demand_resource`` payload (``{token: {contract_address, ...}, amount}``).
+
+    Used by:
+      * the one-shot schema-init backfill (pre-cutover rows still carrying
+        ``demand_resource`` in SQLite),
+      * action_executor's MAKE_OFFER entry point (policy layer still emits
+        ``demand``; storefront converts at the boundary before persisting).
+
+    Returns ``None`` when the demand can't be mapped (no token, missing
+    contract_address, or alkahest config can't resolve the erc20 escrow
+    obligation address for the configured chain).
+    """
+    normalized = _normalize_to_dict(demand_resource)
+    if not normalized:
+        return None
+    token = normalized.get("token")
+    if not isinstance(token, dict):
+        return None
+    contract_address = token.get("contract_address")
+    if not isinstance(contract_address, str) or not contract_address:
+        return None
+    try:
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
+        escrow_address = get_erc20_escrow_obligation_nontierable(
+            settings.chain.name,
+            config_path=settings.chain.alkahest_address_config_path,
+        )
+    except Exception as exc:
+        logger.debug(
+            "Skipping accepted_escrows synthesis for chain %r: %s",
+            settings.chain.name, exc,
+        )
+        return None
+    amount = normalized.get("amount")
+    # ``price_per_hour`` is uint256-domain (base units) — emit as a
+    # decimal-digit string on the stored/wire JSON to stay safe past
+    # JS's 2^53 and SQLite int64 ceilings. Python callers parse it back
+    # with ``int(...)``.
+    if isinstance(amount, bool):
+        price_per_hour: str | None = None
+    elif isinstance(amount, int):
+        price_per_hour = str(amount)
+    elif isinstance(amount, str):
+        s = amount.strip()
+        price_per_hour = s if s.isdigit() else None
+    else:
+        price_per_hour = None
+    return [{
+        "chain_name": settings.chain.name,
+        "escrow_address": escrow_address.lower(),
+        "fields": {"token": contract_address},
+        "price_per_hour": price_per_hour,
+    }]
+
+
+def _publication_row_to_dict(row: tuple) -> dict[str, Any]:
+    """Decode a publications row tuple into a dict, parsing payload_json."""
+    listing_id, registry_url, payload_json, published_at, \
+        registry_assigned_id, status, last_error = row
+    try:
+        payload = json.loads(payload_json) if payload_json else None
+    except Exception:
+        payload = None
+    return {
+        "listing_id": listing_id,
+        "registry_url": registry_url,
+        "payload": payload,
+        "payload_json": payload_json,
+        "published_at": published_at,
+        "registry_assigned_id": registry_assigned_id,
+        "status": status,
+        "last_error": last_error,
+    }
 
 
 class SQLiteClient:
@@ -178,7 +274,10 @@ class SQLiteClient:
                 )
                 """
             )
-            # Negotiation threads table
+            # Negotiation threads table. ``buyer`` / ``matched_offer_id``
+            # capture the buyer↔seller pairing — they were previously stored
+            # on the listings row (one buyer per listing), but multi-escrow
+            # deals make the thread the natural place for that association.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS negotiation_threads (
@@ -196,12 +295,23 @@ class SQLiteClient:
                   -- unlimited). Stays for the lifetime of the thread; the agreed
                   -- value below is just an echo when the negotiation succeeds.
                   requested_duration_seconds INTEGER,
+                  -- Buyer's escrow shape proposal — opaque JSON blob captured at
+                  -- /negotiate/new (validated against the listing's acceptance
+                  -- set). Persisted because settlement-time verification
+                  -- reconstructs the expected on-chain obligation_data from
+                  -- this; reading from the thread instead of re-deriving from
+                  -- the listing means the negotiated artifact is the literal
+                  -- source of truth.
+                  buyer_escrow_proposal TEXT,
                   -- Committed agreement artifact: populated when terminal_state='success'.
                   -- Captures the negotiation's output as queryable state so settlement
                   -- can run (or be retried) as a separate step without replaying rounds.
                   agreed_price INTEGER,
                   agreed_duration_seconds INTEGER,
-                  agreed_at TEXT
+                  agreed_at TEXT,
+                  -- Buyer↔listing pairing (moved off listings for multi-escrow).
+                  buyer TEXT,
+                  matched_offer_id TEXT
                 )
                 """
             )
@@ -251,6 +361,35 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN requested_duration_seconds INTEGER")
             except sqlite3.OperationalError:
                 pass
+            try:
+                cur.execute("ALTER TABLE negotiation_threads ADD COLUMN buyer_escrow_proposal TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate: rename pre-cutover column buyer_escrow_terms_proposal →
+            # buyer_escrow_proposal. The shape of the persisted JSON also
+            # changed (drops escrow_kind / arbiter_kind / token,
+            # adds chain_name / escrow_address / fields). We copy the
+            # blob unchanged — settlement that reads it back must handle
+            # both old and new shapes during the rollover, then we drop
+            # the old column. Safe to re-run.
+            existing_neg_cols = {
+                r[1] for r in cur.execute("PRAGMA table_info(negotiation_threads)")
+            }
+            if (
+                "buyer_escrow_terms_proposal" in existing_neg_cols
+                and "buyer_escrow_proposal" in existing_neg_cols
+            ):
+                cur.execute(
+                    "UPDATE negotiation_threads SET buyer_escrow_proposal = "
+                    "buyer_escrow_terms_proposal "
+                    "WHERE buyer_escrow_proposal IS NULL"
+                )
+                try:
+                    cur.execute(
+                        "ALTER TABLE negotiation_threads DROP COLUMN buyer_escrow_terms_proposal"
+                    )
+                except sqlite3.OperationalError:
+                    pass
             try:
                 cur.execute("ALTER TABLE negotiation_threads ADD COLUMN agreed_at TEXT")
             except sqlite3.OperationalError:
@@ -306,11 +445,16 @@ class SQLiteClient:
                 cur.execute("ALTER TABLE listings ADD COLUMN oracle_address TEXT")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            # Listings table (local source of truth).
-            # Duration is buyer-driven (Slice C): the seller advertises an
-            # OPTIONAL ceiling (max_duration_seconds; NULL = unlimited).
-            # demand.amount is per-hour; total payment at agreement time
-            # is amount × agreed_duration_seconds / 3600.
+            # Listings table (local source of truth for the seller's own
+            # advertisements). Multi-escrow deal records live on the
+            # ``escrows`` table joined via the winning ``negotiation_id``;
+            # the buyer/match association lives on ``negotiation_threads``.
+            # accepted_escrows is a JSON array of {chain_name, escrow_address,
+            # fields, price_per_hour} — the canonical pricing+escrow
+            # advertisement. The legacy ``demand_resource`` and per-deal
+            # ``escrow_uid``/``buyer``/``matched_offer_id``/
+            # ``seller_attestation``/``buyer_attestation`` columns are
+            # backfilled+dropped by ``_migrate_escrows_and_listings`` above.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS listings (
@@ -319,20 +463,37 @@ class SQLiteClient:
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL,
                   offer_resource TEXT NOT NULL,
-                  demand_resource TEXT NOT NULL,
                   fulfillment_resource TEXT,
                   max_duration_seconds INTEGER,
                   seller TEXT NOT NULL,
-                  buyer TEXT,
-                  matched_offer_id TEXT,
-                  seller_attestation TEXT,
-                  buyer_attestation TEXT,
-                  escrow_uid TEXT,
                   oracle_address TEXT,
-                  paused INTEGER NOT NULL DEFAULT 0
+                  paused INTEGER NOT NULL DEFAULT 0,
+                  accepted_escrows TEXT
                 )
                 """
             )
+            # Migrate: add accepted_escrows column if missing (existing
+            # databases). Backfill in a separate pass so we don't fail when
+            # the column has already been added by an earlier process.
+            try:
+                cur.execute("ALTER TABLE listings ADD COLUMN accepted_escrows TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            # One-shot backfill: synthesize accepted_escrows from the legacy
+            # demand_resource column for any pre-cutover rows. No-op when the
+            # column has already been dropped. Skips rows the synthesis can't
+            # resolve (e.g. anvil without an override JSON).
+            existing_listing_cols = {
+                r[1] for r in cur.execute("PRAGMA table_info(listings)")
+            }
+            if "demand_resource" in existing_listing_cols:
+                self._backfill_accepted_escrows(cur)
+                # Post-backfill, drop the demand_resource column. Requires
+                # SQLite 3.35+ (Mar 2021); silently skipped on older builds.
+                try:
+                    cur.execute("ALTER TABLE listings DROP COLUMN demand_resource")
+                except sqlite3.OperationalError:
+                    pass
             # Migrate: add paused column if missing (existing databases).
             try:
                 cur.execute("ALTER TABLE listings ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
@@ -581,21 +742,37 @@ class SQLiteClient:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stage_events_negotiation_id ON stage_events(negotiation_id)"
             )
-            # Settlement jobs — per-escrow provisioning status row. The
-            # buyer creates an escrow on-chain then posts escrow_uid to
-            # the seller's /settle/{uid} endpoint; that inserts a row
-            # here with status='provisioning' and kicks off the async
-            # provisioning task. When done, the task updates this row
-            # with status='ready' (+ attestation/connection) or 'failed'
-            # (+ reason). Buyer polls /settle/{uid}/status which reads
-            # this row.
+            # Escrows — per-attached-escrow lifecycle record. One row per
+            # on-chain escrow lockup attached to a deal; multi-escrow deals
+            # (primary payment + bond + penalty, etc.) get one row each. The
+            # primary escrow drives provisioning (provisioning_job_id,
+            # tenant_credentials, connection_details only populated there);
+            # non-primary rows are lifecycle-tracked but don't trigger
+            # fulfillment.
+            #
+            # ``escrow_uid`` (PK) is the buyer's escrow attestation UID;
+            # ``fulfillment_uid`` is the seller's fulfillment attestation UID
+            # — the matching obligation pair on chain.
+            #
+            # Evolved from the legacy ``settlement_jobs`` table (one row per
+            # deal, single attestation_uid column). The helper below renames
+            # the old table + widens columns + backfills from the listings
+            # row when present.
+            self._migrate_escrows_and_listings(cur)
+            # ``escrow_uid`` is the EAS attestation UID of the buyer's escrow
+            # obligation — i.e. it IS the buyer's attestation; no separate
+            # column needed. ``fulfillment_uid`` is the seller's
+            # fulfillment attestation, paired with the escrow at settle time.
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS settlement_jobs (
+                CREATE TABLE IF NOT EXISTS escrows (
                   escrow_uid TEXT PRIMARY KEY,
                   negotiation_id TEXT NOT NULL,
                   status TEXT NOT NULL,
-                  attestation_uid TEXT,
+                  chain_name TEXT,
+                  escrow_address TEXT,
+                  is_primary INTEGER NOT NULL DEFAULT 1,
+                  fulfillment_uid TEXT,
                   provisioning_job_id TEXT,
                   connection_details TEXT,
                   tenant_credentials TEXT,
@@ -605,16 +782,36 @@ class SQLiteClient:
                 )
                 """
             )
-            # Idempotent migration for DBs created before provisioning_job_id existed.
-            try:
-                cur.execute("ALTER TABLE settlement_jobs ADD COLUMN provisioning_job_id TEXT")
-            except sqlite3.OperationalError:
-                pass
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_status ON settlement_jobs(status)"
+                "CREATE INDEX IF NOT EXISTS idx_escrows_status ON escrows(status)"
             )
             cur.execute(
-                "CREATE INDEX IF NOT EXISTS idx_settlement_jobs_negotiation ON settlement_jobs(negotiation_id)"
+                "CREATE INDEX IF NOT EXISTS idx_escrows_negotiation ON escrows(negotiation_id)"
+            )
+            # Publications — record of which registries received which
+            # payload for which listing. Updates and deletes consult this
+            # to know what's where; per-registry payload mode (milestone b)
+            # uses this as the durable record of fan-out shape divergence.
+            # status: 'published' | 'failed' | 'unpublished'.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS publications (
+                  listing_id TEXT NOT NULL,
+                  registry_url TEXT NOT NULL,
+                  payload_json TEXT NOT NULL,
+                  published_at INTEGER NOT NULL,
+                  registry_assigned_id TEXT,
+                  status TEXT NOT NULL,
+                  last_error TEXT,
+                  PRIMARY KEY (listing_id, registry_url)
+                )
+                """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publications_registry ON publications(registry_url)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status)"
             )
             conn.commit()
         finally:
@@ -629,6 +826,197 @@ class SQLiteClient:
             return json.dumps(value)
         except Exception:
             return str(value)
+
+    def _deserialize_accepted_escrows(self, value: Any) -> list[dict[str, Any]] | None:
+        """Return the ``accepted_escrows`` column as a Python list.
+
+        The column is a JSON-serialised list of AcceptedEscrow entries
+        (``{chain_name, escrow_address, fields, price_per_hour}``).
+        Returns ``None`` when the column is NULL — callers that need to
+        synthesise an entry from the legacy ``demand_resource`` field
+        do so themselves.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else None
+            except Exception:
+                return None
+        return None
+
+    def _backfill_accepted_escrows(self, cur: sqlite3.Cursor) -> None:
+        """One-shot in-place backfill of ``accepted_escrows`` from the
+        legacy ``demand_resource`` column. Runs during schema init; only
+        touches rows where ``accepted_escrows`` is NULL so it's safe to
+        re-run. Skips rows whose demand_resource can't be mapped (no
+        token, missing chain config, etc.) — those rows lose their
+        pricing advertisement after the column is dropped.
+        """
+        rows = cur.execute(
+            "SELECT listing_id, demand_resource FROM listings "
+            "WHERE accepted_escrows IS NULL AND demand_resource IS NOT NULL"
+        ).fetchall()
+        for listing_id, demand_resource in rows:
+            synthesized = synthesize_accepted_escrows_from_demand(demand_resource)
+            if not synthesized:
+                continue
+            cur.execute(
+                "UPDATE listings SET accepted_escrows=? WHERE listing_id=?",
+                (json.dumps(synthesized), listing_id),
+            )
+
+    def _migrate_escrows_and_listings(self, cur: sqlite3.Cursor) -> None:
+        """One-shot migration: ``settlement_jobs`` → ``escrows`` (multi-escrow
+        per deal), with the per-deal columns moving off ``listings`` to either
+        ``escrows`` (attestation UIDs) or ``negotiation_threads`` (buyer
+        pairing).
+
+        Idempotent: every step is guarded on table/column existence so it's
+        safe to re-run on a partially-migrated DB.
+        """
+        def _table_exists(name: str) -> bool:
+            return cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
+        def _cols(table: str) -> set[str]:
+            return {r[1] for r in cur.execute(f"PRAGMA table_info({table})")}
+
+        # 1. Rename settlement_jobs → escrows if the old name still on disk.
+        if _table_exists("settlement_jobs") and not _table_exists("escrows"):
+            cur.execute("ALTER TABLE settlement_jobs RENAME TO escrows")
+            for old_idx in ("idx_settlement_jobs_status", "idx_settlement_jobs_negotiation"):
+                try:
+                    cur.execute(f"DROP INDEX IF EXISTS {old_idx}")
+                except sqlite3.OperationalError:
+                    pass
+
+        # 2. Add new escrows columns (idempotent). escrow_uid (PK) is the
+        # buyer's escrow attestation UID — no separate buyer-side column.
+        if _table_exists("escrows"):
+            for col_ddl in (
+                "ALTER TABLE escrows ADD COLUMN chain_name TEXT",
+                "ALTER TABLE escrows ADD COLUMN escrow_address TEXT",
+                "ALTER TABLE escrows ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE escrows ADD COLUMN fulfillment_uid TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        # 3. Add buyer + matched_offer_id to negotiation_threads (idempotent).
+        if _table_exists("negotiation_threads"):
+            for col_ddl in (
+                "ALTER TABLE negotiation_threads ADD COLUMN buyer TEXT",
+                "ALTER TABLE negotiation_threads ADD COLUMN matched_offer_id TEXT",
+            ):
+                try:
+                    cur.execute(col_ddl)
+                except sqlite3.OperationalError:
+                    pass
+
+        # 4. Backfill from legacy columns. Only runs when the pre-cutover
+        # columns are still on disk; produces no-ops otherwise.
+        listing_cols = _cols("listings") if _table_exists("listings") else set()
+        escrow_cols = _cols("escrows") if _table_exists("escrows") else set()
+
+        # 4a. escrows.fulfillment_uid ← escrows.attestation_uid
+        # (legacy column stored the seller's fulfillment UID).
+        if "attestation_uid" in escrow_cols:
+            cur.execute(
+                "UPDATE escrows SET fulfillment_uid = attestation_uid "
+                "WHERE fulfillment_uid IS NULL AND attestation_uid IS NOT NULL"
+            )
+
+        # 4b. listings.buyer_attestation was always identical to escrow_uid on
+        # the storefront side (the column was a denormalized duplicate), so no
+        # backfill is needed — the escrow row's PK is the buyer's attestation.
+
+        # 4c. escrows.{chain_name,escrow_address} ← listings.accepted_escrows[0]
+        # (joined via negotiation_threads). JSON parse Python-side.
+        if (
+            "accepted_escrows" in listing_cols
+            and _table_exists("escrows")
+            and _table_exists("negotiation_threads")
+        ):
+            rows = cur.execute(
+                """
+                SELECT escrows.escrow_uid, l.accepted_escrows
+                FROM escrows
+                JOIN negotiation_threads nt
+                  ON nt.negotiation_id = escrows.negotiation_id
+                JOIN listings l
+                  ON l.listing_id = nt.our_listing_id
+                WHERE escrows.chain_name IS NULL OR escrows.escrow_address IS NULL
+                """
+            ).fetchall()
+            for escrow_uid, ae_blob in rows:
+                if not ae_blob:
+                    continue
+                try:
+                    ae_list = json.loads(ae_blob) if isinstance(ae_blob, str) else ae_blob
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(ae_list, list) or not ae_list:
+                    continue
+                first = ae_list[0]
+                if not isinstance(first, dict):
+                    continue
+                cur.execute(
+                    "UPDATE escrows SET chain_name = ?, escrow_address = ? "
+                    "WHERE escrow_uid = ?",
+                    (first.get("chain_name"), first.get("escrow_address"), escrow_uid),
+                )
+
+        # 4d. negotiation_threads.{buyer,matched_offer_id} ← listings.{buyer,matched_offer_id}
+        if "buyer" in listing_cols and _table_exists("negotiation_threads"):
+            cur.execute(
+                """
+                UPDATE negotiation_threads
+                SET buyer = (
+                    SELECT l.buyer FROM listings l
+                    WHERE l.listing_id = negotiation_threads.our_listing_id
+                    LIMIT 1
+                )
+                WHERE buyer IS NULL
+                """
+            )
+        if "matched_offer_id" in listing_cols and _table_exists("negotiation_threads"):
+            cur.execute(
+                """
+                UPDATE negotiation_threads
+                SET matched_offer_id = (
+                    SELECT l.matched_offer_id FROM listings l
+                    WHERE l.listing_id = negotiation_threads.our_listing_id
+                    LIMIT 1
+                )
+                WHERE matched_offer_id IS NULL
+                """
+            )
+
+        # 5. Drop legacy columns. SQLite 3.35+ supports DROP COLUMN; older
+        # builds silently skip — those DBs carry orphan columns forever
+        # (harmless, just bloat).
+        for table, col in (
+            ("escrows", "attestation_uid"),
+            ("listings", "escrow_uid"),
+            ("listings", "buyer_attestation"),
+            ("listings", "seller_attestation"),
+            ("listings", "buyer"),
+            ("listings", "matched_offer_id"),
+        ):
+            if not _table_exists(table):
+                continue
+            try:
+                cur.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
 
     def _normalize_resource(self, value: Any) -> dict[str, Any] | None:
         if value is None:
@@ -911,9 +1299,30 @@ class SQLiteClient:
         csv_path: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Import resources from CSV and upsert rows into the resources table."""
+        """Import resources from CSV file and upsert rows into the resources table."""
         report = await upsert_resources_from_csv(
             csv_path=csv_path,
+            sqlite_client=self,
+            dry_run=dry_run,
+        )
+        return report.to_dict()
+
+    async def upsert_resources_from_csv_content(
+        self,
+        *,
+        csv_content: str,
+        source_label: str = "<inline>",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Import resources from a CSV string and upsert rows into the resources table.
+
+        Used when CSV content is delivered via config injection (e.g. the Helm
+        ``resources_csv_inline`` value in the per-agent Secret) rather than a
+        file path baked into the container image.
+        """
+        report = await upsert_resources_from_csv_content(
+            csv_content=csv_content,
+            source_label=source_label,
             sqlite_client=self,
             dry_run=dry_run,
         )
@@ -1372,6 +1781,7 @@ class SQLiteClient:
 
                     if required_attributes:
                         top_level = {
+                            "resource_id": resource_id,
                             "resource_type": "compute.gpu",
                             "resource_subtype": resource_subtype,
                             "unit": unit,
@@ -1483,6 +1893,7 @@ class SQLiteClient:
 
                     if required_attributes:
                         top_level = {
+                            "resource_id": resource_id,
                             "resource_type": "compute.gpu",
                             "resource_subtype": resource_subtype,
                             "unit": unit,
@@ -1526,17 +1937,12 @@ class SQLiteClient:
         created_at: str,
         updated_at: str,
         offer_resource: Any,
-        demand_resource: Any,
         fulfillment_resource: Any | None,
         max_duration_seconds: int | None,
         seller: str,
-        buyer: str | None = None,
-        matched_offer_id: str | None = None,
-        seller_attestation: str | None = None,
-        buyer_attestation: str | None = None,
-        escrow_uid: str | None = None,
         oracle_address: str | None = None,
         paused: bool = False,
+        accepted_escrows: Any | None = None,
     ) -> None:
         def _save() -> None:
             conn = sqlite3.connect(self.db_path)
@@ -1550,34 +1956,24 @@ class SQLiteClient:
                       created_at,
                       updated_at,
                       offer_resource,
-                      demand_resource,
                       fulfillment_resource,
                       max_duration_seconds,
                       seller,
-                      buyer,
-                      matched_offer_id,
-                      seller_attestation,
-                      buyer_attestation,
-                      escrow_uid,
                       oracle_address,
-                      paused
+                      paused,
+                      accepted_escrows
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(listing_id) DO UPDATE SET
                       status=excluded.status,
                       updated_at=excluded.updated_at,
                       offer_resource=excluded.offer_resource,
-                      demand_resource=excluded.demand_resource,
                       fulfillment_resource=excluded.fulfillment_resource,
                       max_duration_seconds=excluded.max_duration_seconds,
                       seller=excluded.seller,
-                      buyer=excluded.buyer,
-                      matched_offer_id=excluded.matched_offer_id,
-                      seller_attestation=excluded.seller_attestation,
-                      buyer_attestation=excluded.buyer_attestation,
-                      escrow_uid=excluded.escrow_uid,
                       oracle_address=excluded.oracle_address,
-                      paused=excluded.paused
+                      paused=excluded.paused,
+                      accepted_escrows=excluded.accepted_escrows
                     """,
                     (
                         listing_id,
@@ -1585,17 +1981,12 @@ class SQLiteClient:
                         created_at,
                         updated_at,
                         self._serialize_resource(offer_resource),
-                        self._serialize_resource(demand_resource),
                         self._serialize_resource(fulfillment_resource),
                         max_duration_seconds,
                         seller,
-                        buyer,
-                        matched_offer_id,
-                        seller_attestation,
-                        buyer_attestation,
-                        escrow_uid,
                         oracle_address,
                         1 if paused else 0,
+                        self._serialize_resource(accepted_escrows),
                     ),
                 )
                 conn.commit()
@@ -1611,16 +2002,11 @@ class SQLiteClient:
         status: str | None = None,
         updated_at: str | None = None,
         offer_resource: Any | None = None,
-        demand_resource: Any | None = None,
         fulfillment_resource: Any | None = None,
         max_duration_seconds: int | None = None,
         seller: str | None = None,
-        buyer: str | None = None,
-        matched_offer_id: str | None = None,
-        seller_attestation: str | None = None,
-        buyer_attestation: str | None = None,
-        escrow_uid: str | None = None,
         oracle_address: str | None = None,
+        accepted_escrows: Any | None = None,
     ) -> None:
         def _save() -> None:
             updates: list[str] = []
@@ -1635,16 +2021,11 @@ class SQLiteClient:
             add("status", status)
             add("updated_at", updated_at or datetime.now().isoformat())
             add("offer_resource", offer_resource, serialize=True)
-            add("demand_resource", demand_resource, serialize=True)
             add("fulfillment_resource", fulfillment_resource, serialize=True)
             add("max_duration_seconds", max_duration_seconds)
             add("seller", seller)
-            add("buyer", buyer)
-            add("matched_offer_id", matched_offer_id)
-            add("seller_attestation", seller_attestation)
-            add("buyer_attestation", buyer_attestation)
-            add("escrow_uid", escrow_uid)
             add("oracle_address", oracle_address)
+            add("accepted_escrows", accepted_escrows, serialize=True)
 
             if not updates:
                 return
@@ -1671,11 +2052,10 @@ class SQLiteClient:
                 cur.execute(
                     """
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, demand_resource, fulfillment_resource,
-                           max_duration_seconds, seller, buyer,
-                           matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address,
-                           COALESCE(paused, 0) AS paused
+                           offer_resource, fulfillment_resource,
+                           max_duration_seconds, seller, oracle_address,
+                           COALESCE(paused, 0) AS paused,
+                           accepted_escrows
                     FROM listings WHERE listing_id = ?
                     """,
                     (listing_id,),
@@ -1685,13 +2065,15 @@ class SQLiteClient:
                     return None
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
-                    "offer_resource", "demand_resource", "fulfillment_resource",
-                    "max_duration_seconds", "seller", "buyer",
-                    "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused",
+                    "offer_resource", "fulfillment_resource",
+                    "max_duration_seconds", "seller", "oracle_address",
+                    "paused", "accepted_escrows",
                 ]
                 d = dict(zip(keys, row))
                 d["paused"] = bool(d["paused"])
+                d["accepted_escrows"] = self._deserialize_accepted_escrows(
+                    d.get("accepted_escrows"),
+                )
                 return d
             finally:
                 conn.close()
@@ -1950,9 +2332,9 @@ class SQLiteClient:
         negotiation_id: str,
         round: int | None = None,
         sender: str,
-        our_price: int | None,
-        their_price: int | None,
-        proposed_price: int | None,
+        our_price: float | None,
+        their_price: float | None,
+        proposed_price: float | None,
         action_taken: str,
         message_type: str,
         timestamp: str,
@@ -2104,7 +2486,7 @@ class SQLiteClient:
         self,
         *,
         negotiation_id: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
     ) -> None:
         """Record the agreement artifact that comes out of a successful negotiation.
@@ -2131,7 +2513,7 @@ class SQLiteClient:
                     WHERE negotiation_id = ?
                     """,
                     (
-                        int(agreed_price),
+                        float(agreed_price),
                         int(agreed_duration_seconds),
                         now,
                         now,
@@ -2149,7 +2531,12 @@ class SQLiteClient:
         *,
         negotiation_id: str,
     ) -> dict[str, Any] | None:
-        """Return the negotiation_threads row as a dict, or None if absent."""
+        """Return the negotiation_threads row as a dict, or None if absent.
+
+        ``buyer_escrow_proposal`` is the persisted JSON blob captured at
+        /negotiate/new; deserialized back to a dict for the caller. The
+        caller (settlement) re-types it via service.schemas.EscrowProposal.
+        """
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
@@ -2160,7 +2547,9 @@ class SQLiteClient:
                            our_agent_id, their_agent_id, status,
                            created_at, updated_at, terminal_state,
                            requested_duration_seconds,
-                           agreed_price, agreed_duration_seconds, agreed_at
+                           buyer_escrow_proposal,
+                           agreed_price, agreed_duration_seconds, agreed_at,
+                           buyer, matched_offer_id
                     FROM negotiation_threads WHERE negotiation_id = ?
                     """,
                     (negotiation_id,),
@@ -2173,27 +2562,103 @@ class SQLiteClient:
                     "our_agent_id", "their_agent_id", "status",
                     "created_at", "updated_at", "terminal_state",
                     "requested_duration_seconds",
+                    "buyer_escrow_proposal",
                     "agreed_price", "agreed_duration_seconds", "agreed_at",
+                    "buyer", "matched_offer_id",
                 ]
-                return dict(zip(keys, row))
+                result = dict(zip(keys, row))
+                # Deserialize the JSON blob back to a dict for the caller.
+                raw_proposal = result.get("buyer_escrow_proposal")
+                if isinstance(raw_proposal, str) and raw_proposal:
+                    try:
+                        result["buyer_escrow_proposal"] = json.loads(raw_proposal)
+                    except (ValueError, TypeError):
+                        # Preserve as the raw string if it doesn't parse;
+                        # the caller can decide whether to error or proceed
+                        # without the proposal.
+                        pass
+                return result
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_load)
 
+    async def set_negotiation_thread_buyer_match(
+        self,
+        *,
+        negotiation_id: str,
+        buyer: str | None = None,
+        matched_offer_id: str | None = None,
+    ) -> None:
+        """Write the buyer↔offer association onto the thread.
+
+        Both fields are independent — pass only the ones you want to update.
+        Called as the deal moves from negotiation into settlement.
+        """
+        def _save() -> None:
+            updates: list[str] = []
+            values: list[Any] = []
+            if buyer is not None:
+                updates.append("buyer = ?")
+                values.append(buyer)
+            if matched_offer_id is not None:
+                updates.append("matched_offer_id = ?")
+                values.append(matched_offer_id)
+            if not updates:
+                return
+            updates.append("updated_at = ?")
+            values.append(datetime.now().isoformat())
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    f"UPDATE negotiation_threads SET {', '.join(updates)} "
+                    f"WHERE negotiation_id = ?",
+                    (*values, negotiation_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
     # ------------------------------------------------------------------
-    # settlement_jobs — polling-mode provisioning status per escrow.
+    # escrows — per-escrow lifecycle row. One per on-chain escrow lockup
+    # attached to a deal; primary row drives provisioning.
     # ------------------------------------------------------------------
 
-    async def insert_settlement_job(
+    _ESCROW_COLS = (
+        "escrow_uid",
+        "negotiation_id",
+        "status",
+        "chain_name",
+        "escrow_address",
+        "is_primary",
+        "fulfillment_uid",
+        "provisioning_job_id",
+        "connection_details",
+        "tenant_credentials",
+        "reason",
+        "created_at",
+        "updated_at",
+    )
+
+    def _escrow_row_to_dict(self, row: tuple) -> dict[str, Any]:
+        d = dict(zip(self._ESCROW_COLS, row))
+        d["is_primary"] = bool(d["is_primary"])
+        return d
+
+    async def insert_escrow(
         self,
         *,
         escrow_uid: str,
         negotiation_id: str,
+        chain_name: str | None,
+        escrow_address: str | None,
+        is_primary: bool = True,
         status: str = "provisioning",
     ) -> bool:
-        """Create a new settlement_jobs row. Returns True if inserted,
-        False if a row for this escrow already existed (idempotent)."""
+        """Insert a new escrows row. Returns True on insert, False on
+        PRIMARY KEY conflict (idempotent by escrow_uid)."""
         def _insert() -> bool:
             now = datetime.now().isoformat()
             conn = sqlite3.connect(self.db_path)
@@ -2201,34 +2666,39 @@ class SQLiteClient:
                 try:
                     conn.execute(
                         """
-                        INSERT INTO settlement_jobs
-                          (escrow_uid, negotiation_id, status, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO escrows
+                          (escrow_uid, negotiation_id, status,
+                           chain_name, escrow_address, is_primary,
+                           created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (escrow_uid, negotiation_id, status, now, now),
+                        (
+                            escrow_uid, negotiation_id, status,
+                            chain_name, escrow_address, 1 if is_primary else 0,
+                            now, now,
+                        ),
                     )
                     conn.commit()
                     return True
                 except sqlite3.IntegrityError:
-                    # PRIMARY KEY conflict — job already exists.
                     return False
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_insert)
 
-    async def update_settlement_job(
+    async def update_escrow(
         self,
         *,
         escrow_uid: str,
         status: str | None = None,
-        attestation_uid: str | None = None,
+        fulfillment_uid: str | None = None,
         provisioning_job_id: str | None = None,
         connection_details: str | None = None,
         tenant_credentials: str | None = None,
         reason: str | None = None,
     ) -> None:
-        """Patch a settlement_jobs row. Any None field is skipped."""
+        """Patch an escrows row. Any None field is skipped."""
         def _update() -> None:
             updates: list[str] = []
             values: list[Any] = []
@@ -2240,7 +2710,7 @@ class SQLiteClient:
                 values.append(val)
 
             add("status", status)
-            add("attestation_uid", attestation_uid)
+            add("fulfillment_uid", fulfillment_uid)
             add("provisioning_job_id", provisioning_job_id)
             add("connection_details", connection_details)
             add("tenant_credentials", tenant_credentials)
@@ -2253,7 +2723,7 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute(
-                    f"UPDATE settlement_jobs SET {', '.join(updates)} WHERE escrow_uid = ?",
+                    f"UPDATE escrows SET {', '.join(updates)} WHERE escrow_uid = ?",
                     (*values, escrow_uid),
                 )
                 conn.commit()
@@ -2262,38 +2732,230 @@ class SQLiteClient:
 
         await asyncio.to_thread(_update)
 
-    async def load_settlement_job(
+    async def load_escrow(
         self,
         *,
         escrow_uid: str,
     ) -> dict[str, Any] | None:
-        """Return the settlement_jobs row as a dict, or None if absent."""
+        """Return the escrows row as a dict, or None if absent."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows WHERE escrow_uid = ?
+                    """,
+                    (escrow_uid,),
+                ).fetchone()
+                return self._escrow_row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_primary_escrow_for_negotiation(
+        self,
+        *,
+        negotiation_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the primary escrow row for a negotiation, or None."""
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT {', '.join(self._ESCROW_COLS)}
+                    FROM escrows
+                    WHERE negotiation_id = ? AND is_primary = 1
+                    ORDER BY created_at ASC LIMIT 1
+                    """,
+                    (negotiation_id,),
+                ).fetchone()
+                return self._escrow_row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def load_primary_escrow_for_listing(
+        self,
+        *,
+        listing_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the primary escrow row for the listing's winning thread.
+
+        Joins escrows → negotiation_threads on negotiation_id. Returns the
+        oldest is_primary=1 row across all threads matching this listing;
+        in practice each listing has at most one winning negotiation, so the
+        ordering is just a tiebreaker for corner cases.
+        """
+        def _load() -> dict[str, Any] | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    f"""
+                    SELECT {', '.join('e.' + c for c in self._ESCROW_COLS)}
+                    FROM escrows e
+                    JOIN negotiation_threads nt
+                      ON nt.negotiation_id = e.negotiation_id
+                    WHERE nt.our_listing_id = ? AND e.is_primary = 1
+                    ORDER BY e.created_at ASC LIMIT 1
+                    """,
+                    (listing_id,),
+                ).fetchone()
+                return self._escrow_row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def upsert_publication(
+        self,
+        *,
+        listing_id: str,
+        registry_url: str,
+        payload: dict[str, Any] | str,
+        status: str,
+        registry_assigned_id: str | None = None,
+        last_error: str | None = None,
+        published_at: int | None = None,
+    ) -> None:
+        """Record (or refresh) a publish attempt for one (listing, registry)
+        pair. The row carries the exact payload sent — the registry may have
+        a different listing_shape than another registry in the fan-out — so
+        the caller can read it back later for updates/deletes.
+
+        ``payload`` accepts a dict (json.dumps'd) or a pre-serialised string.
+        ``published_at`` defaults to the current epoch second.
+        """
+        def _upsert() -> None:
+            if isinstance(payload, str):
+                payload_str = payload
+            else:
+                payload_str = json.dumps(payload)
+            now = published_at if published_at is not None else int(time.time())
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO publications
+                      (listing_id, registry_url, payload_json, published_at,
+                       registry_assigned_id, status, last_error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(listing_id, registry_url) DO UPDATE SET
+                      payload_json = excluded.payload_json,
+                      published_at = excluded.published_at,
+                      registry_assigned_id = excluded.registry_assigned_id,
+                      status = excluded.status,
+                      last_error = excluded.last_error
+                    """,
+                    (
+                        listing_id, registry_url, payload_str, now,
+                        registry_assigned_id, status, last_error,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_upsert)
+
+    async def load_publication(
+        self, *, listing_id: str, registry_url: str,
+    ) -> dict[str, Any] | None:
+        """Return a single publications row as a dict, or None."""
         def _load() -> dict[str, Any] | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 row = conn.execute(
                     """
-                    SELECT escrow_uid, negotiation_id, status,
-                           attestation_uid, provisioning_job_id,
-                           connection_details, tenant_credentials,
-                           reason, created_at, updated_at
-                    FROM settlement_jobs WHERE escrow_uid = ?
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications
+                    WHERE listing_id = ? AND registry_url = ?
                     """,
-                    (escrow_uid,),
+                    (listing_id, registry_url),
                 ).fetchone()
                 if not row:
                     return None
-                keys = [
-                    "escrow_uid", "negotiation_id", "status",
-                    "attestation_uid", "provisioning_job_id",
-                    "connection_details", "tenant_credentials",
-                    "reason", "created_at", "updated_at",
-                ]
-                return dict(zip(keys, row))
+                return _publication_row_to_dict(row)
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_load)
+
+    async def load_publications(
+        self, *, listing_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return all publications for one listing (one row per registry)."""
+        def _load() -> list[dict[str, Any]]:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications WHERE listing_id = ?
+                    ORDER BY registry_url
+                    """,
+                    (listing_id,),
+                ).fetchall()
+                return [_publication_row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_load)
+
+    async def list_publications(
+        self, *, registry_url: str | None = None, status: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return publications optionally filtered by registry and/or status."""
+        def _list() -> list[dict[str, Any]]:
+            clauses: list[str] = []
+            params: list[Any] = []
+            if registry_url is not None:
+                clauses.append("registry_url = ?")
+                params.append(registry_url)
+            if status is not None:
+                clauses.append("status = ?")
+                params.append(status)
+            where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+            conn = sqlite3.connect(self.db_path)
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT listing_id, registry_url, payload_json, published_at,
+                           registry_assigned_id, status, last_error
+                    FROM publications {where}
+                    ORDER BY listing_id, registry_url
+                    """,
+                    tuple(params),
+                ).fetchall()
+                return [_publication_row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+        return await asyncio.to_thread(_list)
+
+    async def delete_publication(
+        self, *, listing_id: str, registry_url: str,
+    ) -> None:
+        """Hard-delete a publications row (used when a registry-side listing
+        is gone for good — distinct from status='unpublished' which keeps
+        the row as a tombstone)."""
+        def _delete() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "DELETE FROM publications WHERE listing_id = ? AND registry_url = ?",
+                    (listing_id, registry_url),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_delete)
 
     async def delete_negotiation_thread(
         self,
@@ -2336,9 +2998,10 @@ class SQLiteClient:
         their_agent_id: str,
         owner_id: str,  # The agent creating this record
         status: str = "active",
-        our_initial_price: int | None = None,
+        our_initial_price: float | None = None,
         our_strategy: str | None = None,
         requested_duration_seconds: int | None = None,
+        buyer_escrow_proposal: dict[str, Any] | None = None,
     ) -> None:
         """Create a new negotiation thread with private local state.
 
@@ -2354,12 +3017,21 @@ class SQLiteClient:
             our_strategy: Private strategy
             requested_duration_seconds: Buyer's duration ask from /negotiate/new.
                 Validated against the listing's max_duration_seconds upstream.
+            buyer_escrow_proposal: The buyer's accepted escrow proposal,
+                persisted as a JSON blob. Settlement reads this back to
+                reconstruct the expected on-chain obligation_data. None
+                for legacy clients that didn't send a proposal.
         """
         def _create() -> None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 timestamp = datetime.now().isoformat()
+                proposal_blob = (
+                    json.dumps(buyer_escrow_proposal)
+                    if buyer_escrow_proposal is not None
+                    else None
+                )
 
                 # Insert public thread info (ignore if exists, it's shared)
                 cur.execute(
@@ -2368,14 +3040,16 @@ class SQLiteClient:
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        buyer_escrow_proposal,
                         created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         negotiation_id, our_listing_id, their_listing_id,
                         our_agent_id, their_agent_id, status,
                         requested_duration_seconds,
+                        proposal_blob,
                         timestamp, timestamp,
                     ),
                 )
@@ -2670,13 +3344,24 @@ class SQLiteClient:
         return await asyncio.to_thread(_load)
 
     async def get_listing_id_by_escrow_uid(self, *, escrow_uid: str) -> str | None:
-        """Return the listing_id for the given escrow_uid, or None if not found."""
+        """Return the listing_id for the given escrow_uid, or None if not found.
+
+        Joins escrows → negotiation_threads to recover the seller's listing
+        from the escrow row (escrows.escrow_uid is the on-chain PK).
+        """
         def _load() -> str | None:
             conn = sqlite3.connect(self.db_path)
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT listing_id FROM listings WHERE escrow_uid = ? LIMIT 1",
+                    """
+                    SELECT nt.our_listing_id
+                    FROM escrows e
+                    JOIN negotiation_threads nt
+                      ON nt.negotiation_id = e.negotiation_id
+                    WHERE e.escrow_uid = ?
+                    LIMIT 1
+                    """,
                     (escrow_uid,),
                 )
                 row = cur.fetchone()
@@ -2716,11 +3401,10 @@ class SQLiteClient:
                 cur.execute(
                     f"""
                     SELECT listing_id, status, created_at, updated_at,
-                           offer_resource, demand_resource, fulfillment_resource,
-                           max_duration_seconds, seller, buyer,
-                           matched_offer_id, seller_attestation, buyer_attestation,
-                           escrow_uid, oracle_address,
-                           COALESCE(paused, 0) AS paused
+                           offer_resource, fulfillment_resource,
+                           max_duration_seconds, seller, oracle_address,
+                           COALESCE(paused, 0) AS paused,
+                           accepted_escrows
                     FROM listings {where}
                     ORDER BY created_at DESC
                     LIMIT ? OFFSET ?
@@ -2729,16 +3413,18 @@ class SQLiteClient:
                 )
                 keys = [
                     "listing_id", "status", "created_at", "updated_at",
-                    "offer_resource", "demand_resource", "fulfillment_resource",
-                    "max_duration_seconds", "seller", "buyer",
-                    "matched_offer_id", "seller_attestation", "buyer_attestation",
-                    "escrow_uid", "oracle_address", "paused",
+                    "offer_resource", "fulfillment_resource",
+                    "max_duration_seconds", "seller", "oracle_address",
+                    "paused", "accepted_escrows",
                 ]
                 rows = cur.fetchall()
                 result = []
                 for row in rows:
                     d = dict(zip(keys, row))
                     d["paused"] = bool(d["paused"])
+                    d["accepted_escrows"] = self._deserialize_accepted_escrows(
+                        d.get("accepted_escrows"),
+                    )
                     result.append(d)
                 return result
             finally:
@@ -2914,10 +3600,34 @@ class SQLiteClient:
                         "ts": ts, "stage": stage, "event": event, "data": data,
                     })
 
+                # Per-deal escrows (primary first, then by creation order)
+                cur.execute(
+                    """
+                    SELECT escrow_uid, fulfillment_uid, chain_name,
+                           escrow_address, is_primary, status
+                    FROM escrows
+                    WHERE negotiation_id = ?
+                    ORDER BY is_primary DESC, created_at ASC
+                    """,
+                    (neg_id,),
+                )
+                escrows = [
+                    {
+                        "escrow_uid": row[0],
+                        "fulfillment_uid": row[1],
+                        "chain_name": row[2],
+                        "escrow_address": row[3],
+                        "is_primary": bool(row[4]),
+                        "status": row[5],
+                    }
+                    for row in cur.fetchall()
+                ]
+
                 return {
                     **thread,
                     "messages": messages,
                     "stage_events": stage_events,
+                    "escrows": escrows,
                     "round_count": len(messages),
                 }
             finally:
@@ -3001,48 +3711,11 @@ class SQLiteClient:
 
         return await asyncio.to_thread(_query)
 
-    # ------------------------------------------------------------------
-    # Admin status counts
-    # ------------------------------------------------------------------
-
-    async def get_admin_status_counts(self) -> dict[str, int]:
-        """Return live counts for the admin /status endpoint."""
-        def _counts() -> dict[str, int]:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                cur = conn.cursor()
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM negotiation_threads WHERE terminal_state IS NULL AND status = 'active'"
-                )
-                active_negotiations = int(cur.fetchone()[0] or 0)
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM listings WHERE status = 'open' AND COALESCE(paused, 0) = 0"
-                )
-                open_orders = int(cur.fetchone()[0] or 0)
-
-                cur.execute(
-                    "SELECT COUNT(*) FROM listings WHERE COALESCE(paused, 0) = 1"
-                )
-                paused_orders = int(cur.fetchone()[0] or 0)
-
-                return {
-                    "active_negotiations": active_negotiations,
-                    "open_orders": open_orders,
-                    "paused_orders": paused_orders,
-                }
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_counts)
-
-
 _sqlite_client: SQLiteClient | None = None
 
 
 def get_sqlite_client() -> SQLiteClient:
     global _sqlite_client
     if _sqlite_client is None:
-        _sqlite_client = SQLiteClient(db_path=CONFIG.agent_db_path)
+        _sqlite_client = SQLiteClient(db_path=settings.db_path)
     return _sqlite_client

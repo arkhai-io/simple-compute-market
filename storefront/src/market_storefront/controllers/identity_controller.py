@@ -30,13 +30,13 @@ class IdentityController:
             agent_card_data,
         )
         from market_storefront.utils.agent_card import build_erc8004_registration_file
-        from market_storefront.utils.config import CONFIG
+        from market_storefront.utils.config import settings
 
         registration_file = build_erc8004_registration_file(
             agent_card_data=agent_card_data,
             agent_id=_AGENT_ID,
-            chain_id=CONFIG.chain_id,
-            identity_registry=CONFIG.identity_registry_address,
+            chain_id=settings.chain.chain_id,
+            identity_registry=settings.registry.identity_registry_address,
             supported_trust=[],
         )
         return registration_file
@@ -46,6 +46,6 @@ class IdentityController:
         summary="Agent on-chain wallet address",
     )
     async def agent_wallet(self) -> dict[str, Any]:
-        from market_storefront.utils.config import CONFIG
+        from market_storefront.utils.config import settings
 
-        return {"agent_wallet_address": CONFIG.agent_wallet_address or ""}
+        return {"agent_wallet_address": settings.wallet.address or ""}

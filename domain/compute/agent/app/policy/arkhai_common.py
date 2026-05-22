@@ -17,12 +17,9 @@ import gymnasium as gym
 from domain.compute.agent.app.policy.store import get_compute_resource_portfolio
 
 from market_storefront.models.domain_models import (
-    Action as DomainAction,
-    ActionType,
     ComputeResource,
     DecisionContext,
     GPUModel,
-    TokenResource,
 )
 
 try:  # Torch is optional at runtime; fail gracefully if unavailable.
@@ -264,7 +261,7 @@ _MODEL_CACHE: dict[str, Any] = {}
 # ---------------------------------------------------------------------------
 
 def gpu_slot(resource: ComputeResource, gpu_slot_map: dict[str, int]) -> Optional[int]:
-    return gpu_slot_map.get(resource.gpu_model.value)
+    return gpu_slot_map.get(resource.gpu_model)
 
 
 def count_nodes_by_slot(
@@ -284,103 +281,6 @@ def count_nodes_by_slot(
         # Local portfolio has no direct free-capacity metric; use conservative estimate.
         free[slot] += float(resource.gpu_count) * 0.5
     return total, free
-
-
-def extract_token_amount(offer_resource: Any, demand_resource: Any) -> float:
-    if isinstance(offer_resource, TokenResource):
-        return float(offer_resource.amount)
-    if isinstance(demand_resource, TokenResource):
-        return float(demand_resource.amount)
-    return 0.0
-
-
-def build_arkhai_observation(
-    context: DecisionContext,
-    offer_resource: Optional[Any] = None,
-    demand_resource: Optional[Any] = None,
-    order: Optional[Any] = None,
-) -> Optional[Any]:
-    """Build upstream-aligned Arkhai observation vector.
-
-    Layout follows upstream compute_observations:
-    [time] + [cluster nodes total/free * N] + [tb_usage, tb_capacity, kwh_storage, kwh_capacity, kw_generation]
-    + [request nodes * N] + [request tb, start, duration, negotiations, price, prev_reward]
-    """
-    if torch is None:
-        return None
-
-    node_types = parse_node_types()
-    obs = torch.zeros((1, obs_dim(node_types)), dtype=torch.float32)
-    job_nodes = parse_job_nodes(node_types)
-    gpu_slot_map = parse_gpu_slot_map(node_types)
-    idx = 0
-
-    try:
-        # Time of day
-        obs[0, idx] = (time.localtime().tm_hour % 24) / 24.0
-        idx += 1
-
-        # Portfolio extraction
-        totals = [0.0] * node_types
-        frees = [0.0] * node_types
-        portfolio = get_compute_resource_portfolio(context)
-        if portfolio is not None:
-            totals, frees = count_nodes_by_slot(portfolio, node_types, gpu_slot_map)
-
-        # Cluster node totals and free amounts
-        for slot in range(node_types):
-            denom = job_nodes[slot] + 1.0
-            obs[0, idx] = min(1.0, totals[slot] / denom)
-            idx += 1
-            obs[0, idx] = min(1.0, frees[slot] / denom)
-            idx += 1
-
-        # TB and energy states (placeholders until local state tracking is added)
-        obs[0, idx] = 0.0  # tb_usage
-        idx += 1
-        obs[0, idx] = 0.5  # tb_capacity normalized
-        idx += 1
-        obs[0, idx] = 0.0  # kwh_storage normalized
-        idx += 1
-        obs[0, idx] = 0.5  # kwh_capacity normalized
-        idx += 1
-        obs[0, idx] = 0.1  # kw_generation normalized
-        idx += 1
-
-        # Request node quantities by slot
-        request_nodes = [0.0] * node_types
-        if isinstance(demand_resource, ComputeResource):
-            slot = gpu_slot(demand_resource, gpu_slot_map)
-            if slot is not None:
-                request_nodes[slot] = float(demand_resource.gpu_count)
-        for slot in range(node_types):
-            denom = job_nodes[slot] + 1.0
-            obs[0, idx] = min(1.0, request_nodes[slot] / denom)
-            idx += 1
-
-        # Request metadata
-        obs[0, idx] = 0.0  # request tb usage
-        idx += 1
-        obs[0, idx] = 0.0  # request start
-        idx += 1
-
-        duration_hours = float(getattr(order, "duration_hours", 0) or 0)
-        job_duration = float(os.getenv("ARKHAI_JOB_DURATION", "10") or 10)
-        obs[0, idx] = min(1.0, duration_hours / (job_duration + 1.0))
-        idx += 1
-
-        obs[0, idx] = 0.0  # negotiations/request timeout ratio
-        idx += 1
-
-        token_amount = extract_token_amount(offer_resource, demand_resource)
-        obs[0, idx] = token_amount / (token_amount + 1.0) if token_amount > 0 else 0.0
-        idx += 1
-
-        obs[0, idx] = 0.0  # previous reward
-        return obs
-    except Exception as exc:
-        logger.error("[ARKHAI COMMON] Failed to build observation: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -546,80 +446,3 @@ def extract_actions_from_logits(output: Any) -> tuple[int, int]:
         return 4, 0
 
 
-# ---------------------------------------------------------------------------
-# Domain action parameter builder
-# ---------------------------------------------------------------------------
-
-def build_action_parameters(
-    order_id: str | None = None,
-    offer_resource: Any = None,
-    demand_resource: Any = None,
-    price_idx: int | None = None,
-    sell_flag: int | None = None,
-    order: Any = None,
-) -> dict[str, Any]:
-    parameters: dict[str, Any] = {}
-
-    if order is not None:
-        if hasattr(order, "model_dump"):
-            parameters["order"] = order.model_dump(mode="json")
-        elif isinstance(order, dict):
-            parameters["order"] = order
-
-    if order_id:
-        parameters["order_id"] = order_id
-    if offer_resource:
-        parameters["offer_resource"] = (
-            offer_resource.model_dump(mode="json")
-            if hasattr(offer_resource, "model_dump")
-            else offer_resource
-        )
-    if demand_resource:
-        parameters["demand_resource"] = (
-            demand_resource.model_dump(mode="json")
-            if hasattr(demand_resource, "model_dump")
-            else demand_resource
-        )
-
-    if price_idx is not None:
-        parameters["price_idx"] = price_idx
-        multipliers = [0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2]
-        if 0 <= price_idx < len(multipliers):
-            parameters["price_multiplier"] = multipliers[price_idx]
-    if sell_flag is not None:
-        parameters["sell_flag"] = sell_flag
-        parameters["energy_sell_action"] = "sell_50_percent" if sell_flag == 1 else "hold"
-
-    return parameters
-
-
-# ---------------------------------------------------------------------------
-# Role detection helper
-# ---------------------------------------------------------------------------
-
-def detect_agent_role(
-    offer_resource: Any,
-    demand_resource: Any,
-    order: Any,
-    current_url: str,
-) -> str:
-    """Determine if the current agent acts as 'seller' or 'buyer'."""
-    maker_offers_compute = isinstance(offer_resource, ComputeResource) and isinstance(
-        demand_resource, TokenResource
-    )
-    maker_offers_tokens = isinstance(offer_resource, TokenResource) and isinstance(
-        demand_resource, ComputeResource
-    )
-    maker_url = order.order_maker.rstrip("/")
-    current = current_url.rstrip("/")
-    is_maker = maker_url == current or maker_url.endswith(current) or current.endswith(maker_url)
-
-    if is_maker:
-        agent_role = "seller" if maker_offers_compute else "buyer"
-    else:
-        agent_role = "buyer" if maker_offers_compute else "seller"
-
-    if not maker_offers_compute and not maker_offers_tokens:
-        agent_role = "seller"
-
-    return agent_role

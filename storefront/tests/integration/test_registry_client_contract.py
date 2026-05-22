@@ -121,7 +121,7 @@ class TestListingRequestConstructor:
             ListingRequest(
                 listing_id=order_id,
                 offer=...,
-                demand=...,
+                accepted_escrows=...,
                 max_duration_seconds=order_dict.get("max_duration_seconds"),
             )
         If this raises TypeError the installed registry_client wheel is stale.
@@ -130,7 +130,7 @@ class TestListingRequestConstructor:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            demand={"token": {"symbol": "MOCK"}, "amount": 10_000},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
             max_duration_seconds=3600,
         )
         assert req.max_duration_seconds == 3600
@@ -140,14 +140,14 @@ class TestListingRequestConstructor:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200"},
-            demand={"amount": 1},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
             max_duration_seconds=None,
         )
         assert req.max_duration_seconds is None
 
     def test_listing_id_is_optional(self):
         """listing_id has a default — publish_order_to_registry always provides it."""
-        req = ListingRequest(offer={}, demand={})
+        req = ListingRequest(offer={}, accepted_escrows=[])
         assert req.listing_id  # auto-generated uuid
 
     def test_to_dict_emits_max_duration_seconds(self):
@@ -160,7 +160,7 @@ class TestListingRequestConstructor:
         req = ListingRequest(
             listing_id="test-lid",
             offer={"gpu_model": "A100"},
-            demand={"amount": 1},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
             max_duration_seconds=7200,
         )
         d = req.to_dict()
@@ -172,26 +172,28 @@ class TestListingRequestConstructor:
 
     def test_to_dict_emits_listing_id(self):
         """to_dict() must include listing_id — the registry requires it."""
-        req = ListingRequest(offer={}, demand={}, listing_id="specific-id")
+        req = ListingRequest(offer={}, accepted_escrows=[], listing_id="specific-id")
         assert req.to_dict()["listing_id"] == "specific-id"
 
     def test_to_dict_emits_offer_resource_key(self):
         """to_dict() must use 'offer_resource' not 'offer' as the wire key."""
-        req = ListingRequest(offer={"gpu_model": "H200"}, demand={})
+        req = ListingRequest(offer={"gpu_model": "H200"}, accepted_escrows=[])
         d = req.to_dict()
         assert "offer_resource" in d, (
             "to_dict() must emit 'offer_resource', not 'offer'. "
             "The registry listing_routes.py reads body.get('offer_resource')."
         )
 
-    def test_to_dict_emits_demand_resource_key(self):
-        """to_dict() must use 'demand_resource' not 'demand' as the wire key."""
-        req = ListingRequest(offer={}, demand={"amount": 1})
+    def test_to_dict_emits_accepted_escrows_key(self):
+        """to_dict() must use 'accepted_escrows' as the wire key."""
+        entries = [{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}]
+        req = ListingRequest(offer={}, accepted_escrows=entries)
         d = req.to_dict()
-        assert "demand_resource" in d, (
-            "to_dict() must emit 'demand_resource', not 'demand'. "
-            "The registry listing_routes.py reads body.get('demand_resource')."
+        assert "accepted_escrows" in d, (
+            "to_dict() must emit 'accepted_escrows'. "
+            "The registry listing_routes.py reads body.get('accepted_escrows')."
         )
+        assert d["accepted_escrows"] == entries
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +222,7 @@ class TestPublishListingWireFormat:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "CA"},
-            demand={"token": {"symbol": "MOCK"}, "amount": 10_000},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20, "fields": {"token": "0x" + "22" * 20}, "price_per_hour": 10_000}],
             max_duration_seconds=3600,
         )
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
@@ -236,7 +238,7 @@ class TestPublishListingWireFormat:
         """Request body must include listing_id."""
         client, transport = capturing_client
         listing_id = uuid.uuid4().hex
-        req = ListingRequest(listing_id=listing_id, offer={}, demand={"amount": 1})
+        req = ListingRequest(listing_id=listing_id, offer={}, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
         assert transport.last_request_body.get("listing_id") == listing_id
 
@@ -244,7 +246,7 @@ class TestPublishListingWireFormat:
         """Request body must include offer_resource with the offer dict."""
         client, transport = capturing_client
         offer = {"gpu_model": "RTX4090", "gpu_count": 2, "sla": 95.0, "region": "NY"}
-        req = ListingRequest(listing_id=uuid.uuid4().hex, offer=offer, demand={"amount": 1})
+        req = ListingRequest(listing_id=uuid.uuid4().hex, offer=offer, accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}])
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "offer_resource" in body, (
@@ -252,17 +254,22 @@ class TestPublishListingWireFormat:
         )
         assert body["offer_resource"] == offer
 
-    async def test_body_contains_demand_resource(self, capturing_client):
-        """Request body must include demand_resource with the demand dict."""
+    async def test_body_contains_accepted_escrows(self, capturing_client):
+        """Request body must include accepted_escrows with the entries list."""
         client, transport = capturing_client
-        demand = {"token": {"symbol": "MOCK"}, "amount": 8_000}
-        req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, demand=demand)
+        entries = [{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"token": "0x" + "22" * 20},
+            "price_per_hour": 8_000,
+        }]
+        req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=entries)
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
-        assert "demand_resource" in body, (
-            f"'demand_resource' absent from request body. Keys present: {list(body)}"
+        assert "accepted_escrows" in body, (
+            f"'accepted_escrows' absent from request body. Keys present: {list(body)}"
         )
-        assert body["demand_resource"] == demand
+        assert body["accepted_escrows"] == entries
 
     async def test_body_contains_max_duration_seconds(self, capturing_client):
         """Request body must include max_duration_seconds."""
@@ -270,7 +277,7 @@ class TestPublishListingWireFormat:
         req = ListingRequest(
             listing_id=uuid.uuid4().hex,
             offer={"gpu_model": "H200"},
-            demand={"amount": 1},
+            accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "11" * 20}],
             max_duration_seconds=7200,
         )
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
@@ -287,7 +294,7 @@ class TestPublishListingWireFormat:
         (not in HTTP headers).  Both fields must be present and non-empty.
         """
         client, transport = capturing_client
-        req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, demand={})
+        req = ListingRequest(listing_id=uuid.uuid4().hex, offer={}, accepted_escrows=[])
         await client.publish_listing(AGENT_CANONICAL_ID, req, private_key=AGENT_PRIVATE_KEY)
         body = transport.last_request_body
         assert "signature" in body, (

@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 from service.schemas import (
+    AcceptedEscrow,
     ActionType,
-    Attestation as CoreAttestation,
     Decision as CoreDecision,
     DecisionContext as CoreDecisionContext,
     DomainAction as CoreDomainAction,
@@ -39,15 +39,18 @@ from service.clients.token import ERC20TokenMetadata
 # Marketplace-layer types (defined here)
 # ├── Listing                       A published marketplace listing
 # │   ├── offer_resource: ComputeResource | TokenResource
-# │   └── demand_resource: ComputeResource | TokenResource
+# │   └── accepted_escrows: list[AcceptedEscrow] | None
 # ├── Host                          Physical host metadata (capacity, hardware)
 # ├── ComputeResourcePortfolio      Collection of ComputeResource slices
 # └── ResourceAlertRequest          HTTP input for POST /alerts/resource
 #         └── .to_resource_imbalance_event() → ResourceImbalanceEvent
 #
 # Enumerations
-# ├── GPUModel          H200 | Tesla V100 | RTX 5080 | RTX A5000 | RTX 4090
-# ├── Region            California, US | New York, US | Tokyo, JP
+# ├── GPUModel          Advisory string-enum of common NVIDIA models.
+# │                       Field types are plain `str`; the indexer's
+# │                       filter-spec.yaml is the authoritative vocabulary.
+# ├── Region            Advisory string-enum. Field types are plain `str`;
+# │                       region vocabularies are indexer-local.
 # ├── GpuInterconnect   nvlink | nvswitch | pcie_only | infiniband
 # ├── VirtualizationType bare_metal | vm | container
 # └── EventType         order_create | order_close | resource_imbalance | ...
@@ -124,7 +127,7 @@ class Host(BaseModel):
     )
     motherboard: str | None = Field(default=None, description="Motherboard model string")
     total_gpu_count: int | None = Field(default=None, description="Total GPUs on the host")
-    gpu_model: GPUModel | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
+    gpu_model: str | None = Field(default=None, description="GPU model (assumes homogeneous GPUs per host in v1)")
     gpu_interconnect: GpuInterconnect | None = Field(
         default=None,
         description="Host GPU-to-GPU interconnect (set by BIOS/NVSwitch domain; uniform across slices)",
@@ -137,7 +140,7 @@ class Host(BaseModel):
         default=None,
         description="Number of externally-routable TCP ports the host exposes",
     )
-    region: Region | None = Field(default=None, description="Geographic region of the host")
+    region: str | None = Field(default=None, description="Geographic region of the host")
     datacenter_grade: bool | None = Field(
         default=None,
         description="True for commercial datacenter hosting (vs home/colo)",
@@ -149,25 +152,47 @@ class Host(BaseModel):
     enabled: bool = Field(default=True, description="Whether the host is active")
 
 
-Attestation = CoreAttestation
-
-
 class ComputeDomainResource(CoreResource):
     """Compute-domain resource parser extension on top of core Resource."""
 
     @staticmethod
     def _resolve_token_metadata(token_value: Any) -> ERC20TokenMetadata:
-        """Convert token identifiers into ERC20TokenMetadata."""
+        """Materialize ``ERC20TokenMetadata`` from a wire payload.
+
+        Strict address-only on the wire: bare strings must be 0x-prefixed
+        addresses; bare symbols are rejected. Addresses are enriched with
+        symbol/decimals from the chain-resolved cache when present;
+        addresses not yet cached yield an address-only stub
+        (``symbol=""``, ``decimals=0``). For dicts, ``contract_address``
+        is required.
+        """
         if isinstance(token_value, ERC20TokenMetadata):
             return token_value
         if isinstance(token_value, dict):
+            if not token_value.get("contract_address"):
+                raise ValueError(
+                    "Token dict must include 'contract_address' (0x...)"
+                )
             return ERC20TokenMetadata(**token_value)
         if isinstance(token_value, str):
-            from service.clients.token import TOKEN_REGISTRY
+            if not token_value.startswith("0x"):
+                raise ValueError(
+                    f"Token string must be a 0x-prefixed address, got "
+                    f"{token_value!r}"
+                )
+            from service.clients.token import resolve_token_cached
 
-            return TOKEN_REGISTRY.require(token_value)
+            looked_up = resolve_token_cached(token_value)
+            if looked_up is not None:
+                return looked_up
+            return ERC20TokenMetadata(
+                symbol="",
+                contract_address=token_value,
+                decimals=0,
+            )
         raise ValueError(
-            "Token value must be a symbol string, ERC20TokenMetadata dict, or ERC20TokenMetadata instance"
+            "Token value must be a 0x-address string, ERC20TokenMetadata "
+            "dict (with contract_address), or ERC20TokenMetadata instance"
         )
     
     @classmethod
@@ -254,13 +279,15 @@ class ComputeResource(ComputeDomainResource):
     )
 
     # ---- Slice fields (per-listing; the seller's split of the host) ----
-    gpu_model: GPUModel = Field(
-        description="The model of the GPU (H200, Tesla V100, RTX 5080, RTX A5000, RTX 4090)"
+    gpu_model: str = Field(
+        description="GPU model identifier. The indexer's filter-spec.yaml "
+                    "is the authoritative vocabulary; the storefront accepts "
+                    "any string."
     )
     gpu_count: int = Field(description="Number of GPUs in this slice")
     sla: float = Field(description="The SLA of this slice")
-    region: Region = Field(
-        description="The region of the slice (matches host region)"
+    region: str = Field(
+        description="Geographic region of the slice (matches host region)"
     )
     vm_host: str | None = Field(
         default=None,
@@ -308,7 +335,7 @@ class ComputeResourcePortfolio(BaseModel):
 
     resources: list[ComputeResource] = Field(description="The resources in the portfolio")
 
-    def total_gpu_count(self, gpu_model: GPUModel | None = None) -> int:
+    def total_gpu_count(self, gpu_model: str | None = None) -> int:
         """Calculate total GPU gpu_count, optionally filtered by model"""
         if gpu_model:
             return sum(r.gpu_count for r in self.resources if r.gpu_model == gpu_model)
@@ -417,24 +444,24 @@ class Listing(BaseModel):
     offer_resource: Union[ComputeResource, TokenResource] = Field(
         description="The resource being offered, which may be a token or compute resource."
     )
-    demand_resource: Union[ComputeResource, TokenResource] = Field(
-        description="The resource being demanded, which may be a token or compute resource."
+    accepted_escrows: list[AcceptedEscrow] | None = Field(
+        default=None,
+        description=(
+            "Per-listing list of accepted on-chain escrow shapes (chain + "
+            "escrow address + advertised partial fields + per-hour price). "
+            "Canonical pricing+escrow advertisement; the buyer's escrow "
+            "proposal must pick one of these entries by (chain_name, "
+            "escrow_address)."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
         description=(
             "Optional ceiling on lease duration in seconds. None = unlimited. "
-            "demand_resource.amount is per-hour; total payment is computed at "
-            "agreement time as amount * agreed_duration_seconds / 3600."
+            "accepted_escrows[i].price_per_hour is the advertised per-hour "
+            "rate; total payment is computed at agreement time as "
+            "price_per_hour * agreed_duration_seconds / 3600."
         ),
-    )
-    seller_attestation: str | None = Field(
-        default=None,
-        description="The seller's fulfillment attestation UID (None until fulfillment lands).",
-    )
-    buyer_attestation: str | None = Field(
-        default=None,
-        description="The buyer's escrow attestation UID (None until escrow is locked).",
     )
     oracle_address: str | None = Field(
         default=None,
@@ -451,18 +478,7 @@ class Listing(BaseModel):
         if "offer_resource" in data:
             data["offer_resource"] = ComputeDomainResource.parse_from_dict(data["offer_resource"])
 
-        if "demand_resource" in data:
-            data["demand_resource"] = ComputeDomainResource.parse_from_dict(data["demand_resource"])
-
         return data
-
-    def is_open(self) -> bool:
-        """Check if this is an open listing (escrow or fulfillment missing)."""
-        return self.seller_attestation is None or self.buyer_attestation is None
-
-    def is_closed(self) -> bool:
-        """Check if this listing is fully attested (both escrow and fulfillment)."""
-        return self.seller_attestation is not None and self.buyer_attestation is not None
 
 
 # =============================
@@ -476,6 +492,14 @@ class EventType(str, Enum):
     ORDER_CREATE = "order_create"
     ORDER_CLOSE = "order_close"
     RESOURCE_IMBALANCE = "resource_imbalance"
+    # Pre-thread guard hook: fires from /negotiate/new before any state
+    # mutation. The seeded policy composite runs guards (e.g. inventory
+    # match) and emits REJECT_OFFER with a reason on veto, mapped to
+    # HTTP 409 (OfferUnfulfillableError) by the negotiate flow. Operators
+    # who want to support non-immediate deals (futures, off-chain matched)
+    # swap the composite's components for an empty list or an alternative
+    # guard set.
+    NEGOTIATION_REQUESTED = "negotiation_requested"
 DomainEvent = CoreDomainEvent
 
 
@@ -486,8 +510,14 @@ class ListingCreatedEvent(DomainEvent):
     offer: Union[ComputeResource, TokenResource] = Field(
         description="Offered resource (compute or token)"
     )
-    demand: Union[ComputeResource, TokenResource] = Field(
-        description="Demanded resource (compute or token)"
+    accepted_escrows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Escrow shapes the seller will accept for this listing — each "
+            "entry pins (chain_name, escrow_address) plus a partial "
+            "ObligationData advertisement via the fields map, with the "
+            "per-hour rate in price_per_hour."
+        ),
     )
     max_duration_seconds: int | None = Field(
         default=None,
@@ -504,8 +534,6 @@ class ListingCreatedEvent(DomainEvent):
             return data
         if "offer" in data:
             data["offer"] = ComputeDomainResource.parse_from_dict(data["offer"])
-        if "demand" in data:
-            data["demand"] = ComputeDomainResource.parse_from_dict(data["demand"])
         return data
 
 
@@ -514,6 +542,45 @@ class ListingClosedEvent(DomainEvent):
 
     event_type: EventType = Field(default=EventType.ORDER_CLOSE)
     listing_id: str = Field(description="Listing ID to close")
+
+
+class NegotiationRequestedEvent(DomainEvent):
+    """Event triggered when a buyer asks to start a negotiation thread.
+
+    Fires from ``sync_negotiation.start_negotiation_for_remote_request``
+    before any thread state is written. The seeded guard composite runs
+    against this event; if any guard returns ``REJECT_OFFER``, the flow
+    short-circuits with HTTP 409 and the reason in the action's
+    ``parameters["reason"]``.
+
+    Carries the listing dict (so guards can read ``offer_resource``,
+    ``accepted_escrows``, ``status``, etc.) plus the buyer's proposed
+    price, duration, and escrow proposal so escrow- and price-aware
+    guards can run against the request before any thread state is
+    written.
+    """
+
+    event_type: EventType = Field(default=EventType.NEGOTIATION_REQUESTED)
+    listing_id: str = Field(description="Listing the buyer wants to negotiate against")
+    listing: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Full listing row from sqlite (offer_resource, accepted_escrows, status, ...)",
+    )
+    proposed_price: float | None = Field(
+        default=None,
+        description="Buyer's initial price proposal (None if not provided)",
+    )
+    requested_duration_seconds: int | None = Field(
+        default=None,
+        description="Buyer's requested lease duration in seconds (None if not provided)",
+    )
+    escrow_proposal: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Buyer's EscrowProposal as a dict (chain_name, escrow_address, "
+            "fields, expiration_unix). None for legacy clients."
+        ),
+    )
 
 
 class ResourceAlertRequest(BaseModel):
@@ -556,11 +623,13 @@ class ResourceAlertRequest(BaseModel):
         
         Maps value -> severity, extracts resource fields, stores label/threshold in data.
         """
-        # Extract and validate resource fields
-        gpu_model = GPUModel(self.resource["gpu_model"])
+        # Extract resource fields (gpu_model/region are open strings; the
+        # indexer's filter-spec.yaml gates which values are actually
+        # publishable on the marketplace).
+        gpu_model = str(self.resource["gpu_model"])
         gpu_count = int(self.resource["gpu_count"])
         sla = float(self.resource["sla"])
-        region = Region(self.resource["region"])
+        region = str(self.resource["region"])
         
         # Create ComputeResource
         compute_resource = ComputeResource(
@@ -585,9 +654,9 @@ class ResourceAlertRequest(BaseModel):
             imbalance_type=imbalance_type,
             severity=severity,
             data={
-                "gpu_model": gpu_model.value,
+                "gpu_model": gpu_model,
                 "gpu_count": gpu_count,
-                "region": region.value,
+                "region": region,
                 "sla": sla,
                 "imbalance_type": imbalance_type,
                 "severity": severity,
@@ -666,9 +735,9 @@ class ResourceImbalanceEvent(DomainEvent):
             imbalance_type=imbalance_type,
             severity=severity,
             data={
-                "gpu_model": resource.gpu_model.value,
+                "gpu_model": resource.gpu_model,
                 "gpu_count": resource.gpu_count,
-                "region": resource.region.value,
+                "region": resource.region,
                 "imbalance_type": imbalance_type,
                 "severity": severity,
             },

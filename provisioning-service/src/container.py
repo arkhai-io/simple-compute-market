@@ -8,6 +8,9 @@ from services.ansible_service import AnsibleService
 from services.async_job_queue import AsyncJobQueue
 from services.host_service import HostService
 from services.job_service import AnsibleJobService
+from services.lease_lifecycle_service import LeaseLifecycleService
+from services.lease_service import LeaseService
+from services.lease_watchdog import LeaseWatchdog
 from services.system_service import SystemService
 
 
@@ -83,6 +86,24 @@ class Container(containers.DeclarativeContainer):
         host_service=host_service,
     )
 
+    lease_service = providers.Singleton(
+        LeaseService,
+        session_factory=session_factory,
+    )
+
+    lease_lifecycle_service = providers.Singleton(
+        LeaseLifecycleService,
+        lease_service=lease_service,
+        settings=config,
+        job_service=job_service,
+    )
+
+    lease_watchdog = providers.Singleton(
+        LeaseWatchdog,
+        lease_lifecycle_service=lease_lifecycle_service,
+        settings=config,
+    )
+
 
 # Shared container instance — imported by main.py and all controllers.
 container = Container()
@@ -102,3 +123,6 @@ resolved_ansible_service: "AnsibleService | None" = None
 resolved_job_queue: "AsyncJobQueue | None" = None
 resolved_system_service: "SystemService | None" = None
 resolved_host_service: "HostService | None" = None
+resolved_lease_service: "LeaseService | None" = None
+resolved_lease_lifecycle_service: "LeaseLifecycleService | None" = None
+resolved_lease_watchdog: "LeaseWatchdog | None" = None

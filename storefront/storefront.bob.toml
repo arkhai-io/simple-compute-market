@@ -1,0 +1,69 @@
+# Bob (seller) — local docker-compose stack.
+# Anvil default account #2; deterministic vanity contract addresses.
+# DO NOT use these keys on any public network.
+#
+# Mounted into the sell_agent container at /etc/arkhai/storefront.toml.
+# XDG_CONFIG_HOME=/etc tells dynaconf to look here.
+
+agent_id            = "bob"
+# onchain_agent_id    = "1"
+port                = 8001
+base_url            = "http://sell_agent:8001/"
+db_path             = "./src/market_storefront/data/sell-agent/agent.db"
+log_file_path       = "./logs/bob.log"
+admin_api_key       = "test-api-key"
+# Seed the resources table from this CSV on startup when the table is empty.
+# The bundled ww1-machine.csv is the local dev inventory. Bind-mounted into
+# the container at /app/resources.csv by `make deploy-seller-agent`.
+# For helm deployments, inject via --set-file (RESOURCES_CSV_FILE) instead —
+# the CSV content is delivered through the agent Secret, not a file path.
+resources_csv_path  = "/app/resources.csv"
+
+[wallet]
+address     = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+private_key = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com"
+
+[chain]
+name    = "anvil"
+rpc_url = "ws://anvil:8545"
+chain_id = 31337
+alkahest_address_config_path = "/app/src/market_storefront/data/alkahest_anvil_addresses.json"
+
+[registry]
+# Two registry instances: ``registry`` is the public one,
+# ``registry-b`` simulates a private/secondary registry that gates
+# access via Authorization: Bearer (REGISTRY_REQUIRE_API_KEY=true on
+# its container). The seller fans publishes/heartbeats out to both;
+# buyers discover the union. Drop registry-b from urls + auth to
+# fall back to single-public-registry behaviour.
+urls                      = ["http://registry:8080", "http://registry-b:8080"]
+# Deterministic CREATE2 vanity address — same value every time the
+# contract-deployer runs (see market-contract-deployer/deploy-local.sh).
+identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+
+# Per-registry bearer token. The matching key was seeded into
+# registry-b at startup via REGISTRY_BOOTSTRAP_API_KEY in compose.
+# Public registries (no entry here) get no Authorization header.
+[registry.auth]
+"http://registry-b:8080"  = "test-buyer-token"
+
+[provisioning]
+service_url = "http://provisioning:8081"
+# Compose-stack default. Tests override via PROVISIONING_MODE shell env
+# pulled into compose with ${PROVISIONING_MODE:-http}.
+mode        = "http"
+# Mock provisioning responds in milliseconds; poll frequently so the
+# storefront sees job completion quickly without waiting the 15s production default.
+poll_interval = 1
+
+[negotiation]
+policy_mode = "bisection"    # rl requires torch which is not installed in test env
+
+[pricing]
+# Defaults applied to inventory rows that don't carry their own
+# min_price/token/max_duration_seconds. Per-row CSV columns override.
+# default_max_duration_seconds = 0 (or omitted) means "unlimited".
+default_min_price            = "100"
+default_token_address        = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+default_max_duration_seconds = 0

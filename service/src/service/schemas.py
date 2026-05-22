@@ -9,13 +9,71 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Literal
 
 UTC = timezone.utc
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    field_serializer,
+    field_validator,
+)
 
 from service.clients.token import ERC20TokenMetadata  # noqa: F401
+
+
+# ---------------------------------------------------------------------------
+# uint256 wire helpers
+# ---------------------------------------------------------------------------
+# Amounts (token amount, price-per-hour) live in the uint256 domain on chain
+# and routinely exceed 2^53 for 18-decimal tokens. JSON numbers can't carry
+# uint256 safely (most non-Python parsers treat them as IEEE-754 doubles),
+# and SQLite INTEGER is int64 — both lossy past ~9.2e18 base units.
+# Pattern: keep Python ``int`` internally (arbitrary precision) and emit
+# decimal-digit strings on serialization. Validators accept either form so
+# already-stored Python-int data round-trips without a migration.
+
+
+def _parse_uint256_str(v: Any, field_name: str) -> int | None:
+    """Coerce a wire value (int|str|None) into a Python int.
+
+    Accepts:
+      * ``None`` — passes through (used for tristate "no advertised value").
+      * ``int`` — passes through (back-compat with existing Python callers).
+      * decimal-digit ``str`` — parses to int (the canonical wire form).
+
+    Rejects floats, negative values, and anything that doesn't look like a
+    non-negative decimal integer.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):  # bool is a subclass of int — exclude explicitly
+        raise ValueError(f"{field_name}: expected non-negative decimal, got bool")
+    if isinstance(v, int):
+        if v < 0:
+            raise ValueError(f"{field_name}: must be non-negative, got {v}")
+        return v
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None
+        if not s.isdigit():
+            raise ValueError(
+                f"{field_name}: must be a non-negative decimal-digit string, "
+                f"got {v!r}"
+            )
+        return int(s)
+    raise ValueError(
+        f"{field_name}: must be int, decimal string, or None — got "
+        f"{type(v).__name__}"
+    )
+
+
+def _serialize_uint256_str(v: int | None) -> str | None:
+    return None if v is None else str(v)
 
 
 class ActionType(str, Enum):
@@ -85,17 +143,239 @@ class TokenResource(Resource):
     amount: int | None = Field(
         default=None,
         description=(
-            "Integer amount in base units (token amount * 10**decimals). "
-            "0 = free; null = hidden reserve (negotiate); >0 = public price."
+            "Non-negative amount in base units (token amount × 10**decimals). "
+            "0 = free; null = hidden reserve (negotiate); >0 = public price. "
+            "On the wire as a decimal-digit string (uint256-safe); Python int "
+            "internally."
+        ),
+    )
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _parse_amount(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "amount")
+
+    @field_serializer("amount")
+    def _serialize_amount(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
+
+
+class ProvisionTerms(BaseModel):
+    """What the seller commits to provision off-chain.
+
+    Distinct from on-chain escrow terms (payment + arbiter): those gate
+    payment release; these describe the actual resource the seller
+    delivers. The two are independent — an escrow's arbiter may enforce
+    none, some, or all of the provision fields depending on its design
+    (a ``RecipientArbiter`` enforces none; a ``TrustedOracleArbiter``
+    could attest delivery against a hash of these terms).
+
+    Materialized at negotiation agreement and read by the seller's
+    settlement / provisioning pipeline as the single source of truth
+    for what to deliver. The compute_resource field is opaque at this
+    layer (carried as a dict) because the typed marketplace model
+    (``ComputeResource``) lives in the storefront package; the seller
+    parses it back into typed form when needed.
+    """
+
+    duration_seconds: int = Field(
+        gt=0,
+        description=(
+            "Buyer's lease window. The seller commits to provisioning "
+            "for at least this long once escrow is verified on-chain."
+        ),
+    )
+    ssh_public_key: str = Field(
+        description=(
+            "Public key to inject into the provisioned VM/container "
+            "for buyer access. Empty string allowed for non-VM modes."
+        ),
+    )
+    compute_resource: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Snapshot of the listing's offer_resource at agreement "
+            "time. None on the buyer's side before a specific match "
+            "is selected; populated by the seller (or buyer post-match) "
+            "and persisted on the negotiation thread."
         ),
     )
 
 
-class Attestation(BaseModel):
-    """Mutual attestations exchanged between maker and taker."""
+class EscrowTerms(BaseModel):
+    """One on-chain escrow obligation in flat, self-describing form.
 
-    maker_attestation: str = Field(description="The attestation of the maker")
-    taker_attestation: str = Field(description="The attestation of the taker")
+    Mirrors the call shape of any alkahest escrow contract's
+    ``doObligation(data, expirationTime)`` entry point. The
+    ``obligation_data`` dict is literally the ``ObligationData`` struct
+    for whichever contract ``escrow_contract`` points to — different
+    contracts have different shapes, but every one begins with
+    ``(address arbiter, bytes demand, …)`` followed by payment fields
+    specific to that contract (token+amount for ERC20, tokenId for
+    ERC721, native amount, bundle arrays, attestation refs, etc.).
+
+    Readers extract universal fields by key: ``obligation_data["arbiter"]``
+    and ``obligation_data["demand"]`` are present on every escrow kind.
+    The rest is contract-specific; consumers that need typed access
+    parse the dict against whichever ``ObligationData`` shape goes with
+    ``escrow_contract``.
+
+    Stored flat (not wrapped in a kind+params discriminator) so that:
+      * settlement verification is a byte-compare against the chain-read
+        obligation, with no codec dispatch needed on the read path.
+      * adding new escrow kinds (ERC721, native, bundle, attestation)
+        does not change this type — only the keys present in
+        ``obligation_data`` differ.
+
+    A negotiation outcome carries ``list[EscrowTerms]`` so multi-escrow
+    designs (e.g. payment + seller penalty deposit) are expressible
+    without a separate plan wrapper. ``maker`` distinguishes who calls
+    ``doObligation`` for each entry.
+    """
+
+    maker: Literal["buyer", "seller"] = Field(
+        description=(
+            "Which side calls ``doObligation`` for this escrow. ``buyer`` "
+            "for the standard payment escrow; ``seller`` for cases like "
+            "penalty deposits the seller posts as bond."
+        ),
+    )
+    escrow_contract: str = Field(
+        description=(
+            "Address of the on-chain escrow obligation contract — e.g. "
+            "ERC20EscrowObligation, ERC721EscrowObligation, "
+            "NativeTokenEscrowObligation, TokenBundleEscrowObligation, "
+            "AttestationEscrowObligation. The address determines the "
+            "expected shape of ``obligation_data``."
+        ),
+    )
+    obligation_data: dict[str, Any] = Field(
+        description=(
+            "The literal ``ObligationData`` struct passed to "
+            "``escrow_contract.doObligation``. Always contains at least "
+            "``arbiter`` (address) and ``demand`` (bytes, hex-encoded for "
+            "transport); the remaining keys are payment fields specific "
+            "to the escrow kind."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time at which the escrow expires on-chain. "
+            "Buyer commits to creating the escrow before this moment; "
+            "seller verifies the on-chain attestation's ``expirationTime`` "
+            "equals this value. Absolute (not relative-to-creation) so "
+            "both sides have a single agreed timestamp with no clock-drift "
+            "tolerance window."
+        ),
+    )
+
+
+class AcceptedEscrow(BaseModel):
+    """One escrow shape the seller will accept for this listing.
+
+    Each entry pins the (chain, escrow contract) tuple plus a partial
+    EscrowData advertisement. The buyer's proposal must reference one
+    of the listing's accepted entries by (chain_name, escrow_address)
+    and supply the buyer-committable EscrowData keys in ``fields``.
+
+    ``fields`` is shape-only: keys present advertise a seller-preferred
+    value; keys absent are open. Whether a set field is a hard constraint
+    or a negotiable default is the seller's negotiation policy's concern,
+    not protocol infrastructure.
+
+    ``amount`` is intentionally never present in ``fields`` — the
+    on-chain ObligationData.amount is a per-deal total derived at
+    settlement from ``price_per_hour * duration_seconds / 3600``. The
+    advertised per-hour rate lives in the sibling ``price_per_hour``
+    field so ``fields`` stays a pure Partial<ObligationData>.
+    """
+
+    chain_name: str = Field(
+        description=(
+            "Alkahest chain identifier (e.g. ``base_sepolia``, ``anvil``). "
+            "Combined with ``escrow_address`` to look up the SDK codec via "
+            "``service.clients.alkahest.address_to_slot``."
+        ),
+    )
+    escrow_address: str = Field(
+        description=(
+            "Deployed escrow obligation contract address on ``chain_name``. "
+            "The (chain, address) pair determines the EscrowData ABI."
+        ),
+    )
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Partial EscrowData advertised by the seller. Keys present = "
+            "seller-preferred values; keys absent = open. Never includes "
+            "``amount`` (derived at settlement from ``price_per_hour`` × "
+            "duration / 3600)."
+        ),
+    )
+    price_per_hour: int | None = Field(
+        default=None,
+        description=(
+            "Advertised per-hour rate in the escrow's payment token, in "
+            "base units (token-amount × 10^decimals). uint256-domain — on "
+            "the wire as a decimal-digit string, Python int internally. "
+            "Total settlement amount is ``price_per_hour × duration_seconds "
+            "// 3600`` (integer division; sub-hour fractions truncate). "
+            "``None`` = hidden reserve (seller did not publish a rate; "
+            "negotiation must establish one via the strategy's "
+            "``default_min_price``)."
+        ),
+    )
+
+    @field_validator("price_per_hour", mode="before")
+    @classmethod
+    def _parse_price_per_hour(cls, v: Any) -> int | None:
+        return _parse_uint256_str(v, "price_per_hour")
+
+    @field_serializer("price_per_hour")
+    def _serialize_price_per_hour(self, v: int | None) -> str | None:
+        return _serialize_uint256_str(v)
+
+
+class EscrowProposal(BaseModel):
+    """Buyer's escrow proposal at negotiation round 0.
+
+    References one of the listing's ``accepted_escrows`` entries by
+    ``(chain_name, escrow_address)`` and supplies the buyer-committable
+    EscrowData fields. ``amount`` is intentionally not on the proposal —
+    it's derived at settlement from the agreed price + duration. The
+    seller echoes back the accepted proposal verbatim on the negotiation
+    outcome so settlement code reconstructs the same on-chain
+    obligation_data on both sides.
+    """
+
+    chain_name: str = Field(
+        description=(
+            "Chain identifier; must match the picked accepted_escrows entry."
+        ),
+    )
+    escrow_address: str = Field(
+        description=(
+            "Escrow contract address; must match the picked "
+            "accepted_escrows entry."
+        ),
+    )
+    fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Complete buyer-committable EscrowData fields (arbiter, "
+            "token, …). Excludes ``amount`` and ``demand``, "
+            "which are derived at settlement."
+        ),
+    )
+    expiration_unix: int = Field(
+        gt=0,
+        description=(
+            "Absolute UTC unix-time the on-chain escrow attestation "
+            "expires. Both sides commit to this single timestamp; no "
+            "clock-drift tolerance window."
+        ),
+    )
 
 
 class DomainEvent(BaseModel):

@@ -96,15 +96,13 @@ def chain_check(
         addresses["identity_registry"] = identity_registry
 
     # Default token contract — buyer transfers it during settle.
-    from ..common import resolve_default_token
-    try:
-        from service.clients.token import TOKEN_REGISTRY
-        default_token_meta = TOKEN_REGISTRY.require(resolve_default_token())
-        if default_token_meta.contract_address:
-            addresses[f"token.{default_token_meta.symbol}"] = default_token_meta.contract_address
-    except Exception:
-        # Token registry resolution is best-effort here.
-        pass
+    from ..common import resolve_default_token_address
+    default_address = resolve_default_token_address()
+    if default_address:
+        from service.clients.token import resolve_token_cached
+        cached = resolve_token_cached(default_address)
+        label = f"token.{cached.symbol}" if cached and cached.symbol else f"token.{default_address[:10]}"
+        addresses[label] = default_address
 
     if not addresses:
         typer.secho(

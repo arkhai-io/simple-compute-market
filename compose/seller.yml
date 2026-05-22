@@ -35,7 +35,7 @@ services:
       - PROVISIONING_MODE=${PROVISIONING_MODE:-http}
       - MOCK_PROVISIONING_SUCCESS=${MOCK_PROVISIONING_SUCCESS:-true}
     volumes:
-      - ../storefront/config.bob.toml:/etc/arkhai/config.toml:ro
+      - ../storefront/storefront.bob.toml:/etc/arkhai/storefront.toml:ro
       - zerotier-sell:/var/lib/zerotier-one
       - ../storefront/src/market_storefront/data/sell-agent:/app/src/market_storefront/data/sell-agent
     networks:

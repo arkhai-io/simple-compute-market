@@ -25,8 +25,11 @@ rounds through the same engine.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 from market_policy.negotiation_strategy import (
@@ -35,9 +38,120 @@ from market_policy.negotiation_strategy import (
     NegotiationRound,
     NegotiationRoundInput,
     load_strategy,
+    register_strategy,
 )
 
+from service.schemas import EscrowProposal
+
 logger = logging.getLogger(__name__)
+
+
+def _validate_escrow_proposal(
+    *,
+    proposal: EscrowProposal | None,
+    listing: dict[str, Any],
+) -> EscrowProposal | None:
+    """Structural validation of the buyer's escrow proposal.
+
+    Confirms the proposal's ``(chain_name, escrow_address)`` resolves to
+    an entry in the listing's ``accepted_escrows``. Listings without an
+    advertised set pass through unchecked (publish-time synthesis
+    couldn't resolve a chain; the buyer's strategy is on its own).
+
+    Field-by-field equality against the matched entry's ``fields`` map
+    is *seller policy*, not protocol — it lives in the
+    ``negotiate.guard.escrow_fields_strict_match`` policy callable so
+    operators can swap it for softer matching without code changes.
+
+    Returns the validated proposal unchanged so the caller can echo it
+    back. Returns ``None`` when the buyer didn't include a proposal
+    (legacy clients) — in that case the seller assumes the canonical
+    shape.
+    """
+    if proposal is None:
+        return None
+    _match_accepted_escrow(listing, proposal)
+    return proposal
+
+
+_ZERO_ADDRESS = "0x" + "0" * 40
+
+
+def _match_accepted_escrow(
+    listing: dict[str, Any], proposal: "EscrowProposal",
+) -> dict[str, Any] | None:
+    """Find the listing's ``accepted_escrows`` entry matching the
+    proposal's ``(chain_name, escrow_address)``.
+
+    Returns the entry dict on hit. Returns ``None`` to skip the strict
+    match when the listing has no ``accepted_escrows`` advertised (the
+    seller couldn't synthesise one at publish time) or when the buyer
+    sent the placeholder zero address (legacy clients). Raises
+    ``OfferUnfulfillableError`` when both sides advertised real
+    addresses and they don't match.
+    """
+    import json as _json
+
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        try:
+            accepted = _json.loads(accepted)
+        except (ValueError, TypeError):
+            return None
+    if not isinstance(accepted, list) or not accepted:
+        return None
+
+    proposal_addr = proposal.escrow_address.lower()
+    if proposal_addr == _ZERO_ADDRESS:
+        # Legacy buyer client sends the placeholder address. Skip the
+        # strict (chain, address) match.
+        return None
+
+    proposal_chain = proposal.chain_name
+    for entry in accepted:
+        if not isinstance(entry, dict):
+            continue
+        entry_chain = entry.get("chain_name")
+        entry_addr = entry.get("escrow_address")
+        if (
+            entry_chain == proposal_chain
+            and isinstance(entry_addr, str)
+            and entry_addr.lower() == proposal_addr
+        ):
+            return entry
+    raise OfferUnfulfillableError(
+        f"escrow_not_in_accepted_set: (chain={proposal_chain!r}, "
+        f"address={proposal.escrow_address!r}) not in listing's "
+        f"accepted_escrows",
+        listing_id=listing.get("listing_id"),
+    )
+
+
+def _extract_listing_token(listing: dict[str, Any]) -> str | None:
+    """Pull the payment-token contract address from a listing's
+    ``accepted_escrows[0].fields.token`` advertisement.
+
+    Returns ``None`` when no entry is advertised (compute-for-compute
+    listings, or rows where synthesis at publish time couldn't resolve
+    an escrow address).
+    """
+    import json as _json
+
+    accepted = listing.get("accepted_escrows")
+    if isinstance(accepted, str):
+        try:
+            accepted = _json.loads(accepted)
+        except (ValueError, TypeError):
+            return None
+    if isinstance(accepted, list) and accepted:
+        first = accepted[0]
+        if isinstance(first, dict):
+            fields = first.get("fields")
+            if isinstance(fields, dict):
+                addr = fields.get("token")
+                if isinstance(addr, str) and addr:
+                    return addr
+    return None
 
 
 class StorefrontPausedError(Exception):
@@ -84,52 +198,86 @@ terminal and accepting a new negotiation would race with whatever owns
 the listing (settlement, refund, etc.)."""
 
 
-def _coerce_resource_dict(value: Any) -> dict[str, Any]:
-    """Normalise listing offer/demand_resource — DB stores as JSON text."""
-    import json
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except (ValueError, TypeError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
+_FILE_POLICIES_DISCOVERED = False
 
 
-async def _has_matching_available_inventory(
-    sqlite_client: Any, listing_dict: dict[str, Any],
-) -> bool:
-    """Return True if at least one available compute resource matches the
-    listing's offer attributes (gpu_model + region).
+def _default_policy_dir() -> Path:
+    """Resolve the XDG-flavoured default policy directory.
 
-    Read-only — does not reserve. Mirrors the matching logic
-    ``reserve_available_compute_vm`` uses at fulfillment time, but
-    short-circuits as soon as one match is found and never mutates state.
-
-    Listings whose offer isn't compute (e.g. token-for-token swaps) are
-    treated as always-fulfillable here; capacity for those is enforced
-    by the chain side, not by local inventory.
+    Honours ``$XDG_CONFIG_HOME`` so it lines up with the existing TOML
+    config loader; falls back to ``~/.config/arkhai/policies/`` on hosts
+    that don't set it. In the docker-compose stack the storefront runs
+    with ``XDG_CONFIG_HOME=/etc``, so this resolves to
+    ``/etc/arkhai/policies/`` — bind-mount a host directory there to
+    drop in custom policies.
     """
-    offer = _coerce_resource_dict(listing_dict.get("offer_resource"))
-    if "gpu_model" not in offer:
-        return True
-    required: dict[str, Any] = {}
-    for key in ("region", "gpu_model"):
-        v = offer.get(key)
-        if v is not None:
-            required[key] = v
-    rows = await sqlite_client.list_resources(
-        resource_type="compute.gpu", state="available",
-    )
-    for row in rows:
-        attrs = row.get("attributes") or {}
-        if not isinstance(attrs, dict):
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "arkhai" / "policies"
+
+
+def _register_file_policy(folder: Path) -> bool:
+    """Load ``folder/policy.py`` and register its ``factory`` under the
+    folder name. Returns True on success, False if the folder doesn't
+    look like a policy (missing ``policy.py`` or ``factory``)."""
+    policy_file = folder / "policy.py"
+    if not policy_file.is_file():
+        return False
+
+    name = folder.name
+    module_id = f"market_storefront._file_policies.{name}"
+    try:
+        spec = importlib.util.spec_from_file_location(module_id, policy_file)
+        if spec is None or spec.loader is None:
+            logger.warning("[POLICY] couldn't build spec for %s", policy_file)
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        logger.warning(
+            "[POLICY] failed to import file policy %s from %s: %s",
+            name, policy_file, exc,
+        )
+        return False
+
+    factory = getattr(module, "factory", None)
+    if not callable(factory):
+        logger.warning(
+            "[POLICY] %s has no callable 'factory' — skipping",
+            policy_file,
+        )
+        return False
+
+    register_strategy(name, factory)
+    logger.info("[POLICY] registered file policy %r from %s", name, policy_file)
+    return True
+
+
+def _discover_file_policies(force: bool = False) -> None:
+    """Scan the default + configured policy directories and register
+    each subdirectory as a policy named after the folder.
+
+    Runs at most once per process unless ``force=True`` (used by tests).
+    Failures in individual folders are logged but don't block other
+    folders. Built-in registrations win on cold start; a file policy
+    with the same name overwrites them by design — that's the override
+    UX for ad-hoc tuning.
+    """
+    global _FILE_POLICIES_DISCOVERED
+    if _FILE_POLICIES_DISCOVERED and not force:
+        return
+    _FILE_POLICIES_DISCOVERED = True
+
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    candidates = [_default_policy_dir(), *(Path(p) for p in settings.negotiation.extra_policy_paths)]
+
+    for root in candidates:
+        if not root.is_dir():
+            logger.debug("[POLICY] skipping non-existent policy dir %s", root)
             continue
-        if all(attrs.get(k) == v for k, v in required.items()):
-            return True
-    return False
+        for entry in sorted(root.iterdir()):
+            if not entry.is_dir() or entry.name.startswith((".", "_")):
+                continue
+            _register_file_policy(entry)
 
 
 def _maybe_register_rl_strategy() -> None:
@@ -149,12 +297,13 @@ def _maybe_register_rl_strategy() -> None:
 def _load_storefront_strategy():
     """Resolve the storefront's configured strategy.
 
-    Selected via ``CONFIG.negotiation_policy_mode``; defaults to the
+    Selected via ``settings.negotiation.policy_mode``; defaults to the
     registered default ("rl") if unset. Triggers the torch strategy's
     self-registration on first call.
     """
-    from market_storefront.utils.config import CONFIG
-    name = (CONFIG.negotiation_policy_mode or "").strip() or None
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    name = (settings.negotiation.policy_mode or "").strip() or None
+    _discover_file_policies()
     if (name or DEFAULT_STRATEGY) == "rl":
         _maybe_register_rl_strategy()
     return load_strategy(name)
@@ -191,7 +340,7 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
             round_number=i,
             sender=sender,
             action=action,
-            price=int(price) if price is not None else None,
+            price=float(price) if price is not None else None,
         ))
     return out
 
@@ -205,7 +354,7 @@ def _history_from_messages(messages: list[dict[str, Any]], our_sender: str) -> l
 def _compute_round_zero_decision(
     *,
     listing: Any,
-    their_proposed_price: int,
+    their_proposed_price: float,
 ) -> tuple[int, str, str, NegotiationDecision]:
     """Determine the seller's round-0 decision for a given buyer price.
 
@@ -256,10 +405,12 @@ async def start_sync_negotiation(
     sqlite_client: Any,
     our_listing_id: str,
     buyer_address: str,
-    their_proposed_price: int,
-    requested_duration_seconds: int | None = None,
+    their_proposed_price: float,
+    provision_terms: Any = None,
+    escrow_proposal: Any = None,
     our_base_url: str,
     their_agent_url: str,
+    policy_service: Any = None,
 ) -> dict[str, Any]:
     """Create a new negotiation thread and return the seller's first response.
 
@@ -268,16 +419,23 @@ async def start_sync_negotiation(
     uses it for all subsequent ``/negotiate/{neg_id}`` rounds — the
     canonical id is server-assigned, not client-derived.
 
-    ``requested_duration_seconds`` is the buyer's lease ask, validated
-    against the listing's ``max_duration_seconds`` ceiling (NULL there
-    means unlimited). Stored on the thread so settlement reads it back
-    without re-querying the buyer.
+    ``provision_terms`` carries the buyer's lease duration, ssh key, and
+    eventually compute spec. ``escrow_proposal`` is the buyer's on-chain
+    escrow shape proposal — picks a ``(chain_name, escrow_address)``
+    entry from the listing's ``accepted_escrows`` and supplies the
+    buyer-committable EscrowData fields. Both are validated against the
+    listing's acceptance set; the seller-confirmed values are persisted
+    on the negotiation thread and echoed back so settlement-time escrow
+    construction can use them.
 
     Raises ``ValueError`` if ``our_listing_id`` isn't in the local DB
     (seller must have published; no ad-hoc negotiations without a
-    listing) or if ``requested_duration_seconds`` exceeds the listing's
-    advertised max.
+    listing) or if the buyer's duration / proposal doesn't match what
+    the listing accepts.
     """
+    requested_duration_seconds = (
+        provision_terms.duration_seconds if provision_terms is not None else None
+    )
     # Imports deferred so unit tests can patch the registry / thread store
     # without paying for the whole import graph.
     from market_policy.negotiation_thread import NegotiationThreadTransaction
@@ -296,20 +454,39 @@ async def start_sync_negotiation(
     if not our_order_dict:
         raise ValueError(f"Order {our_listing_id} not found locally; seller has no matching listing")
 
-    # Refuse offers we can't fulfill — checked before any thread state is
-    # written so the buyer gets a clean error and can try a different
-    # listing without the seller carrying an orphan thread.
+    # Listing-state-machine invariant — kept as infrastructure rather
+    # than policy. Accepting a negotiation against a closed/in-flight
+    # listing breaks consistency with whatever flow already owns it
+    # (settlement, refund, etc.); operators don't get to opt out.
     listing_status = (our_order_dict.get("status") or "").strip()
     if listing_status not in _LIVE_LISTING_STATUSES:
         raise OfferUnfulfillableError(
             f"listing_not_open (status={listing_status!r})",
             listing_id=our_listing_id,
         )
-    if not await _has_matching_available_inventory(sqlite_client, our_order_dict):
-        raise OfferUnfulfillableError(
-            "no_matching_inventory",
+
+    # Run the seeded pre-thread guard composite. The default for an
+    # immediate-deal seller checks that available portfolio inventory
+    # matches the listing's offer; operators running futures or
+    # off-chain-matched flows swap the composite's components and the
+    # same code path lets non-immediate negotiations through.
+    if policy_service is not None:
+        rejection_reason = await policy_service.consult_pre_negotiation_guards(
             listing_id=our_listing_id,
+            listing=our_order_dict,
+            proposed_price=their_proposed_price,
+            requested_duration_seconds=requested_duration_seconds,
+            escrow_proposal=(
+                escrow_proposal.model_dump()
+                if escrow_proposal is not None
+                and hasattr(escrow_proposal, "model_dump")
+                else escrow_proposal
+            ),
         )
+        if rejection_reason:
+            raise OfferUnfulfillableError(
+                rejection_reason, listing_id=our_listing_id,
+            )
 
     # Validate the buyer's duration ask against the listing's advertised
     # ceiling. NULL on the listing means "unlimited" — accept any positive
@@ -325,6 +502,15 @@ async def start_sync_negotiation(
             f"Requested duration {requested_duration_seconds}s exceeds "
             f"listing's max_duration_seconds={listing_max_seconds}s"
         )
+
+    # Validate the buyer's escrow proposal against the listing's
+    # accepted_escrows set: the proposal must reference one of the
+    # advertised (chain, escrow_address) tuples and every seller-set
+    # field on that entry must equal the buyer's value.
+    _accepted_escrow_proposal = _validate_escrow_proposal(
+        proposal=escrow_proposal,
+        listing=our_order_dict,
+    )
 
     our_order = Listing.model_validate(our_order_dict)
 
@@ -358,6 +544,11 @@ async def start_sync_negotiation(
             our_initial_price=our_price,
             our_strategy=strategy,
             requested_duration_seconds=requested_duration_seconds,
+            buyer_escrow_proposal=(
+                _accepted_escrow_proposal.model_dump()
+                if _accepted_escrow_proposal is not None
+                else None
+            ),
         )
         # Round-0 record of the buyer's opening proposal.
         await txn.add_message(
@@ -373,6 +564,17 @@ async def start_sync_negotiation(
     await _record_seller_decision(neg_id=neg_id, our_price=our_price,
                                   their_price=their_proposed_price,
                                   decision=decision)
+    if decision.action == "accept":
+        agreed_duration_seconds = (
+            requested_duration_seconds
+            or our_order_dict.get("max_duration_seconds")
+            or 3600
+        )
+        await sqlite_client.commit_agreed_terms(
+            negotiation_id=neg_id,
+            agreed_price=float(decision.price),
+            agreed_duration_seconds=int(agreed_duration_seconds),
+        )
     stage_event(
         "negotiation", "round_decided",
         negotiation_id=neg_id,
@@ -383,7 +585,15 @@ async def start_sync_negotiation(
         decision_price=decision.price,
         decision_reason=decision.reason,
     )
-    return {"negotiation_id": neg_id, **decision.to_dict()}
+    response: dict[str, Any] = {"negotiation_id": neg_id, **decision.to_dict()}
+    # Echo back what the seller validated so settlement-time escrow
+    # construction can use the seller-confirmed values. Skipped on
+    # rejection paths (which raise before reaching here).
+    if provision_terms is not None:
+        response["accepted_provision_terms"] = provision_terms.model_dump()
+    if _accepted_escrow_proposal is not None:
+        response["accepted_escrow_proposal"] = _accepted_escrow_proposal.model_dump()
+    return response
 
 
 async def continue_sync_negotiation(
@@ -391,7 +601,7 @@ async def continue_sync_negotiation(
     sqlite_client: Any,
     neg_id: str,
     buyer_action: str,
-    buyer_price: int | None,
+    buyer_price: float | None,
     buyer_reason: str | None,
     buyer_address: str,
 ) -> dict[str, Any]:
@@ -430,7 +640,7 @@ async def continue_sync_negotiation(
 
     messages = await sqlite_client.load_negotiation_thread(negotiation_id=neg_id)
     our_previous_counters = [
-        int(m["proposed_price"])
+        float(m["proposed_price"])
         for m in messages
         if m.get("action_taken") == "counter_offer"
         and m.get("proposed_price") is not None
@@ -440,7 +650,7 @@ async def continue_sync_negotiation(
     if buyer_action == "accept":
         # The buyer is accepting our last offered price. Commit terms.
         last_seller_price = next(
-            (int(m["proposed_price"]) for m in reversed(messages)
+            (float(m["proposed_price"]) for m in reversed(messages)
              if m.get("action_taken") == "counter_offer" and m.get("sender") != buyer_address),
             our_price,
         )
@@ -509,24 +719,24 @@ async def continue_sync_negotiation(
             negotiation_id=neg_id,
             sender=buyer_address,
             our_price=our_price,
-            their_price=int(buyer_price),
-            proposed_price=int(buyer_price),
+            their_price=float(buyer_price),
+            proposed_price=float(buyer_price),
             action_taken="counter_offer",
             message_type="counter_proposal",
         )
 
-    from market_storefront.utils.config import CONFIG as _CONFIG
-    our_sender = _CONFIG.base_url_override or "seller"
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
+    our_sender = BASE_URL_OVERRIDE or "seller"
     strategy_obj = _load_storefront_strategy()
     decision = strategy_obj.decide(NegotiationRoundInput(
         direction=_direction_from_strategy_label(strategy),
         our_reference_price=our_price,
-        their_proposed_price=int(buyer_price),
+        their_proposed_price=float(buyer_price),
         history=_history_from_messages(messages, our_sender),
     ))
     await _record_seller_decision(
         neg_id=neg_id, our_price=our_price,
-        their_price=int(buyer_price), decision=decision,
+        their_price=float(buyer_price), decision=decision,
     )
     if decision.action == "accept":
         agreed_duration_seconds = (
@@ -536,7 +746,7 @@ async def continue_sync_negotiation(
         )
         await sqlite_client.commit_agreed_terms(
             negotiation_id=neg_id,
-            agreed_price=int(decision.price),
+            agreed_price=float(decision.price),
             agreed_duration_seconds=int(agreed_duration_seconds),
         )
     stage_event(
@@ -544,7 +754,7 @@ async def continue_sync_negotiation(
         negotiation_id=neg_id,
         round=len(our_previous_counters) + 1,
         our_price=our_price,
-        their_price=int(buyer_price),
+        their_price=float(buyer_price),
         decision=decision.action,
         decision_price=decision.price,
         decision_reason=decision.reason,
@@ -555,15 +765,15 @@ async def continue_sync_negotiation(
 async def _record_seller_decision(
     *,
     neg_id: str,
-    our_price: int,
-    their_price: int,
+    our_price: float,
+    their_price: float,
     decision: NegotiationDecision,
 ) -> None:
     """Persist the seller's decision as a message + terminal state if applicable."""
     from market_policy.negotiation_thread import NegotiationThreadTransaction
-    from market_storefront.utils.config import CONFIG
+    from market_storefront.utils.config import settings, BASE_URL_OVERRIDE
 
-    sender = CONFIG.base_url_override or "seller"
+    sender = BASE_URL_OVERRIDE or "seller"
     action_taken_map = {
         "counter": "counter_offer",
         "accept": "accept_offer",

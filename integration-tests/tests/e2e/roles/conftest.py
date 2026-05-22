@@ -6,11 +6,11 @@ consume them:
   - external_world : EVM chain + deployed contracts
   - market_registry: marketplace operator's registry service
   - seller_node   : one seller's machine (agent + provisioning)
+  - buyer_cli     : a buyer's `market` CLI invoked as a subprocess
 
-There is no buyer_node fixture: the buyer is a pure HTTP client (the
-`market` CLI / market_buyer library) invoked as a one-shot subprocess
-in roles/cli/test_market_buy.py — it has no long-running node to
-fixture out.
+There is no buyer_node fixture because the buyer doesn't run a server.
+Instead ``buyer_cli`` spawns the same ``market`` binary they would run
+on their own machine, against a hermetic XDG state/config dir.
 """
 
 from __future__ import annotations
@@ -18,3 +18,4 @@ from __future__ import annotations
 from tests.e2e.roles.layers.test_external import external_world  # noqa: F401
 from tests.e2e.roles.layers.test_market import market_registry  # noqa: F401
 from tests.e2e.roles.layers.test_seller import seller_node  # noqa: F401
+from tests.e2e.roles.buyer_cli import buyer_cli, buyer_cli_binary  # noqa: F401

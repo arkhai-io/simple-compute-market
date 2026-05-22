@@ -163,11 +163,24 @@ def _derive_stage(
             (thread["our_listing_id"],),
         ).fetchone()
 
+    # 2b. Load the primary escrow row for this negotiation (post-b3 the
+    # escrow_uid and fulfillment_uid live on the escrows table, joined by
+    # negotiation_id).
+    primary_escrow = conn.execute(
+        """
+        SELECT escrow_uid, fulfillment_uid
+        FROM escrows
+        WHERE negotiation_id = ? AND is_primary = 1
+        ORDER BY created_at ASC LIMIT 1
+        """,
+        (negotiation_id,),
+    ).fetchone()
+
     if our_order:
         result["order_status"] = our_order["status"]
-        result["escrow_uid"] = our_order["escrow_uid"]
-        result["seller_attestation"] = our_order["seller_attestation"]
-        result["buyer_attestation"] = our_order["buyer_attestation"]
+    if primary_escrow:
+        result["escrow_uid"] = primary_escrow["escrow_uid"]
+        result["fulfillment_uid"] = primary_escrow["fulfillment_uid"]
 
     # 3. Derive stage
     if not thread["terminal_state"]:
@@ -186,18 +199,15 @@ def _derive_stage(
         if not our_order:
             result["stage"] = "negotiation"
             result["detail"] = "agreed (no local order found)"
-        elif not our_order["escrow_uid"]:
+        elif not primary_escrow:
             result["stage"] = "settlement"
             result["detail"] = "awaiting escrow"
         elif our_order["status"] == "closed":
             result["stage"] = "closed"
             result["detail"] = "deal complete"
-        elif our_order["buyer_attestation"]:
-            result["stage"] = "post_settlement"
-            result["detail"] = "fulfillment received, awaiting close"
-        elif our_order["seller_attestation"]:
+        elif primary_escrow["fulfillment_uid"]:
             result["stage"] = "provision"
-            result["detail"] = "fulfilled, awaiting buyer confirmation"
+            result["detail"] = "fulfilled, awaiting buyer claim"
         else:
             result["stage"] = "settlement"
             result["detail"] = "escrow created, awaiting fulfillment"
@@ -257,7 +267,7 @@ def deal_status(
             if info.get("detail"):
                 panel_lines.append(f"[bold]Detail:[/bold] {info['detail']}")
             for key in ("our_listing_id", "their_listing_id", "order_status",
-                        "escrow_uid", "seller_attestation", "buyer_attestation",
+                        "escrow_uid", "fulfillment_uid",
                         "rounds", "terminal_state"):
                 val = info.get(key)
                 if val is not None:

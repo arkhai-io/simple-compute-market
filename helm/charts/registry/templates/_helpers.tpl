@@ -57,3 +57,11 @@ Mirrors the definition in the root chart's _helpers.tpl.
 {{- printf "http://%s:%d" .Values.global.rpc.host (int .Values.global.rpc.port) -}}
 {{- end }}
 
+{{/*
+PVC name backing the registry's SQLite indexer.db. Stable across
+releases so reinstalls rebind existing indexed state.
+*/}}
+{{- define "registry.pvcName" -}}
+{{- printf "%s-data" (include "registry.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+

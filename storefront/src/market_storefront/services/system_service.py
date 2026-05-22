@@ -13,6 +13,7 @@ None of these methods write to the registry or produce side-effects beyond SQLit
 from __future__ import annotations
 
 import asyncio
+import httpx
 import importlib
 import logging
 import os
@@ -31,7 +32,7 @@ from market_storefront.models.system_models import (
     SeededPolicyInfo,
     SeedPoliciesResponse,
 )
-from market_storefront.utils.config import CONFIG, _resolve_chain_id
+from market_storefront.utils.config import settings, chain_id, AGENT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class SystemService:
         callable_registry: dict | None = None,
     ) -> None:
         self._db = sqlite_client
-        self._agent_id = agent_id or CONFIG.agent_id or "agent"
+        self._agent_id = agent_id or AGENT_ID or "agent"
         # Injected registry lets tests work without touching the global singleton.
         self._registry: dict = callable_registry if callable_registry is not None else CALLABLE_REGISTRY
 
@@ -259,8 +260,24 @@ class SystemService:
         # alkahest configured?
         checks["alkahest"] = "ok" if _container.resolved_alkahest_configured else "unconfigured"
 
-        _non_degrading = {"ok", "unconfigured", "agent_not_found", "indexing"}
-        all_ok = all(v in _non_degrading for v in checks.values())
+        def _check_is_healthy(key: str, value: str) -> bool:
+            """Return True if this check value does not indicate a service degradation.
+
+            The ``negotiation_strategy`` check returns a human-readable strategy
+            name (e.g. ``"bisection"``) on success rather than the literal ``"ok"``,
+            so it gets its own rule: healthy unless the value contains the
+            ``exit_on_probe`` marker or starts with a known error prefix.
+            """
+            _ok_literals = {"ok", "unconfigured", "agent_not_found", "indexing"}
+            if value in _ok_literals:
+                return True
+            if key == "negotiation_strategy":
+                return "exit_on_probe" not in value and not value.startswith(
+                    ("unknown:", "error:")
+                )
+            return False
+
+        all_ok = all(_check_is_healthy(k, v) for k, v in checks.items())
 
         result: dict = {"status": "ok" if all_ok else "degraded", "checks": checks}
 
@@ -268,7 +285,7 @@ class SystemService:
             # Populate top-level diagnostic fields — not checks, just facts.
             try:
                 from market_storefront.agent import _AGENT_ID as _live_agent_id
-                onchain_id = _live_agent_id or CONFIG.onchain_agent_id
+                onchain_id = _live_agent_id or settings.onchain_agent_id
                 if onchain_id:
                     from market_storefront.utils.action_executor import _canonical_agent_id
                     result["agent_id"] = _canonical_agent_id()
@@ -277,7 +294,7 @@ class SystemService:
             except Exception:
                 result["agent_id"] = None
             try:
-                result["chain_id"] = _resolve_chain_id()
+                result["chain_id"] = chain_id()
             except Exception:
                 result["chain_id"] = None
             try:
@@ -289,68 +306,112 @@ class SystemService:
         return result
 
     async def registry_check(self) -> str:
-        """Probe the configured registry URL. Returns 'ok' or an error string.
+        """Probe every configured registry URL concurrently. Returns
+        'ok' if at least one responded successfully; otherwise returns
+        the last error string (so the operator at least gets *some*
+        signal about what's wrong).
 
-        Uses a 2-second timeout so the status endpoint stays fast.
-        Only called from /api/v1/system/status — never from /health.
+        Uses a 2-second timeout per registry so the status endpoint
+        stays fast even with several configured. Only called from
+        /api/v1/system/status — never from /health.
         """
-        import httpx
-
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        if not url:
+        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
+        if not urls:
             return "unconfigured"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{url}/health")
-            return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
-        except httpx.ConnectError:
-            return "unreachable"
-        except httpx.TimeoutException:
-            return "timeout"
-        except Exception as exc:
-            return f"error: {exc}"
+        auth = settings.registry.auth or {}
+
+        async def _probe(url: str) -> str:
+            # /health is unauthenticated by design (so liveness probes
+            # don't need credentials), so the auth header is optional
+            # here; we attach it anyway to be consistent with
+            # registry_auth_check and so private registries that ever
+            # gate /health treat us identically to non-health requests.
+            headers = {}
+            token = auth.get(url) or auth.get(url + "/")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(f"{url}/health", headers=headers)
+                return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
+            except httpx.ConnectError:
+                return "unreachable"
+            except httpx.TimeoutException:
+                return "timeout"
+            except Exception as exc:
+                return f"error: {exc}"
+
+        import asyncio
+        results = await asyncio.gather(*[_probe(u) for u in urls])
+        if any(r == "ok" for r in results):
+            return "ok"
+        # Surface the most recent non-ok result (all are non-ok here).
+        return results[-1]
 
     async def registry_auth_check(self) -> str:
         """Verify this agent's wallet owns its configured on-chain agent ID.
 
-        Returns 'ok', 'unconfigured', 'agent_not_found', 'owner_mismatch',
-        or an error string.
+        Probes every configured registry concurrently. Returns 'ok' if
+        at least one registry confirms the agent's owner matches our
+        wallet. ``agent_not_found`` only when *every* registry reports
+        404 (none have indexed us yet). Other definitive non-ok
+        results win over agent_not_found because they're more
+        actionable for the operator.
         """
-        import httpx
-
-        url = (CONFIG.indexer_url or "").rstrip("/")
-        if not url:
+        urls = [u.rstrip("/") for u in (settings.registry.urls or []) if u]
+        if not urls:
             return "unconfigured"
+        auth = settings.registry.auth or {}
         # Read the live runtime ID (set by _ensure_agent_identity at startup),
         # not the config-file value (which may be stale or absent when auto_register=True).
         from market_storefront.agent import _AGENT_ID as _live_agent_id
-        onchain_id = _live_agent_id or CONFIG.onchain_agent_id
+        onchain_id = _live_agent_id or settings.onchain_agent_id
         if not onchain_id:
             return "unconfigured"
-        chain_id = _resolve_chain_id()
-        identity_addr = (CONFIG.identity_registry_address or "").lower()
-        canonical = f"eip155:{chain_id}:{identity_addr}:{onchain_id}"
-        try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                resp = await client.get(f"{url}/agents/{canonical}")
-            if resp.status_code == 404:
-                return "agent_not_found"
-            if resp.status_code >= 400:
-                return f"http_{resp.status_code}"
-            data = resp.json()
-            owner = (data.get("owner") or "").lower()
-            wallet = (CONFIG.agent_wallet_address or "").lower()
-            if not owner:
-                return "owner_unknown"
-            if not wallet:
-                return "wallet_unconfigured"
-            return "ok" if owner == wallet else "owner_mismatch"
-        except httpx.ConnectError:
-            return "unreachable"
-        except httpx.TimeoutException:
-            return "timeout"
-        except Exception as exc:
-            return f"error: {exc}"
+        resolved_chain_id = chain_id()
+        identity_addr = (settings.registry.identity_registry_address or "").lower()
+        canonical = f"eip155:{resolved_chain_id}:{identity_addr}:{onchain_id}"
+        wallet = (settings.wallet.address or "").lower()
+
+        async def _probe(url: str) -> str:
+            headers = {}
+            token = auth.get(url) or auth.get(url + "/")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    resp = await client.get(
+                        f"{url}/agents/{canonical}", headers=headers,
+                    )
+                if resp.status_code == 404:
+                    return "agent_not_found"
+                if resp.status_code >= 400:
+                    return f"http_{resp.status_code}"
+                data = resp.json()
+                owner = (data.get("owner") or "").lower()
+                if not owner:
+                    return "owner_unknown"
+                if not wallet:
+                    return "wallet_unconfigured"
+                return "ok" if owner == wallet else "owner_mismatch"
+            except httpx.ConnectError:
+                return "unreachable"
+            except httpx.TimeoutException:
+                return "timeout"
+            except Exception as exc:
+                return f"error: {exc}"
+
+        import asyncio
+        results = await asyncio.gather(*[_probe(u) for u in urls])
+        if "ok" in results:
+            return "ok"
+        # Prefer a definitive non-ok result over agent_not_found, since
+        # the latter is the transient "registry hasn't EventSynced yet"
+        # state that wait_for_registry_agent retries past.
+        for r in results:
+            if r not in ("agent_not_found",):
+                return r
+        return "agent_not_found"
 
     async def wait_for_registry_agent(self, timeout: float) -> dict:
         """Block until registry_auth_check() returns a definitive result.
@@ -374,7 +435,7 @@ class SystemService:
           - Storefront startup sequence (agent.py) — wait before starting the
             heartbeat loop so the first heartbeat is not guaranteed to 404.
         """
-        _pending = {"agent_not_found"}
+        _pending = {"agent_not_found", "timeout", "unreachable"}
         poll_interval = 1.0
         start = time.monotonic()
         deadline = start + timeout
@@ -401,47 +462,60 @@ class SystemService:
             "elapsed_ms": elapsed_ms,
         }
 
-    async def seed_resources_if_empty(self, csv_path: str) -> dict:
-        """Upsert resources from *csv_path* only when the resources table is empty.
+    async def seed_resources_if_empty(
+        self,
+        *,
+        csv_inline: str | None = None,
+        csv_path: str | None = None,
+    ) -> dict:
+        """Seed the resources table on startup if it is empty.
 
-        This is the idempotent startup seeding path: if a previous run already
-        populated the table (e.g. via the portfolio import CLI or a prior
-        startup), this method returns immediately without touching the DB.
+        Source priority (matches provisioning service pattern):
+          1. ``csv_inline`` — raw CSV content delivered via config injection
+             (Helm Secret ``resources_csv_inline``). Used when the CSV must not
+             be baked into the container image.
+          2. ``csv_path`` — path to a CSV file on disk (compose / local dev).
+
+        Seeding is skipped when the resources table already has rows, so that
+        operator changes made via the import API are not overwritten on pod
+        restart. To force a clobber regardless of table state, use
+        ``POST /api/v1/admin/portfolio/resources/import``.
 
         Returns a dict with keys:
-          seeded       — True if the CSV was imported, False if the table was
-                         already non-empty (skipped) or if csv_path is empty.
+          seeded         — True if the CSV was imported, False if skipped.
           imported_count — number of rows written (0 when seeded=False).
-          csv_path     — the path that was (or would have been) imported.
-
-        Raises ``FileNotFoundError`` if *csv_path* is set but does not exist on
-        disk — better to crash loudly at startup than to silently have zero
-        inventory.
+          source         — human-readable description of the data source used.
         """
-        if not csv_path:
-            return {"seeded": False, "imported_count": 0, "csv_path": csv_path}
-
         existing = await self._db.list_resources()
         if existing:
             logger.info(
                 "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
                 len(existing),
             )
-            return {"seeded": False, "imported_count": len(existing), "csv_path": csv_path}
+            return {"seeded": False, "imported_count": len(existing), "source": "already_populated"}
 
-        report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+        if csv_inline:
+            report = await self._db.upsert_resources_from_csv_content(
+                csv_content=csv_inline,
+                source_label="resources_csv_inline (config)",
+            )
+            source = "resources_csv_inline (config)"
+        elif csv_path:
+            report = await self._db.upsert_resources_from_csv(csv_path=csv_path)
+            source = csv_path
+        else:
+            logger.info("[RESOURCE SEED] No resource source configured — starting with empty inventory")
+            return {"seeded": False, "imported_count": 0, "source": None}
+
         imported = report.get("imported_count", 0)
         failed = report.get("failed_count", 0)
         if failed:
             logger.warning(
                 "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed, csv_path,
+                failed, source,
             )
-        logger.info(
-            "[RESOURCE SEED] Imported %d resource(s) from %s",
-            imported, csv_path,
-        )
-        return {"seeded": True, "imported_count": imported, "csv_path": csv_path}
+        logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
+        return {"seeded": True, "imported_count": imported, "source": source}
 
     def negotiation_strategy_check(self) -> str:
         """Probe the configured negotiation strategy. Returns a viability string.

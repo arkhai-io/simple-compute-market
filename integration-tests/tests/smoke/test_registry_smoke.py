@@ -7,19 +7,16 @@ These tests validate *deployment* concerns only:
   - The service is reachable and healthy
   - The service can connect to its dependencies (health_checks_enabled)
   - The service has been seeded with at least one agent
-  - The attestation stats endpoint is reachable and returns a valid shape
-  - (Production only) The registry contains at least one settled order
 """
 
 from __future__ import annotations
 
 import logging
-import warnings
 
 import pytest
 
 from registry_client import SyncRegistryClient as RegistryClient
-from registry_client import RegistryClientError, AttestationStats
+from registry_client import RegistryClientError
 from registry_client.models import AgentListResponse
 
 log = logging.getLogger(__name__)
@@ -157,88 +154,3 @@ class TestRegistryAgents:
         )
 
 
-# ---------------------------------------------------------------------------
-# Test suite 3 — Attestation stats endpoint
-# ---------------------------------------------------------------------------
-
-@pytest.mark.registry
-class TestAttestationStats:
-    """Verify the attestation stats endpoint is reachable and returns valid data."""
-
-    def test_attestation_endpoint_reachable(self, registry_client: RegistryClient) -> None:
-        """
-        GET /api/v1/system/stats/attestations must respond with HTTP 200
-        and return a parseable AttestationStats response.
-
-        This test always passes in any healthy deployment — it validates
-        only that the endpoint exists and returns a valid shape, not that
-        settled orders are present (see test_settled_orders_exist).
-        """
-        try:
-            stats = registry_client.get_attestation_stats()
-        except RegistryClientError as exc:
-            pytest.fail(
-                f"GET /api/v1/system/stats/attestations failed.\n"
-                f"The endpoint may be missing from this deployment.\n{exc}"
-            )
-
-        assert isinstance(stats, AttestationStats), (
-            f"Expected AttestationStats, got {type(stats)}"
-        )
-        assert stats.settled_listing_count >= 0
-        assert stats.seller_attestation_count >= 0
-        assert stats.buyer_attestation_count >= 0
-
-        log.info(
-            "Attestation stats — settled=%d maker=%d taker=%d",
-            stats.settled_listing_count,
-            stats.seller_attestation_count,
-            stats.buyer_attestation_count,
-        )
-
-    def test_settled_orders_exist(self, registry_client: RegistryClient) -> None:
-        """
-        The registry should contain at least one fully settled order
-        (both maker_attestation and taker_attestation set).
-
-        A non-zero settled_order_count is the strongest available
-        smoke-test signal: it confirms that contracts are deployed,
-        agents are registered, negotiations completed, Alkahest escrow
-        was locked, and compute obligation was fulfilled and attested.
-
-        WARNING behaviour (not failure): A fresh test-env deployment will
-        always have zero settled orders because no agent negotiations have
-        run yet — seeding a full deal cycle at build time is not feasible.
-        This test emits a warning rather than failing hard in that case, so
-        the test suite still passes for new deployments while the assertion
-        is meaningful in long-running production/staging environments.
-        """
-        try:
-            stats = registry_client.get_attestation_stats()
-        except RegistryClientError as exc:
-            pytest.fail(
-                f"GET /api/v1/system/stats/attestations failed — cannot check settlement.\n{exc}"
-            )
-
-        log.info(
-            "Settlement check — settled_order_count=%d",
-            stats.settled_listing_count,
-        )
-
-        if stats.settled_listing_count == 0:
-            warnings.warn(
-                "No settled orders found in the registry "
-                f"(seller_attestation_count={stats.seller_attestation_count}, "
-                f"buyer_attestation_count={stats.buyer_attestation_count}).\n"
-                "This is expected in a fresh test-env deployment where no agent "
-                "negotiations have completed yet. In a long-running production or "
-                "staging environment this indicates no deals have fully settled.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return
-
-        log.info(
-            "✓ Registry contains %d settled order(s) — market is functioning end-to-end",
-            stats.settled_listing_count,
-        )

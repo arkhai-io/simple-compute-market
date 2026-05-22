@@ -336,7 +336,19 @@ async def get_agent(
 ):
     """Get agent by ID (expects canonical eip155:... format)"""
     agent = find_agent_by_id(db, agent_id)
-    
+
+    if not agent:
+        # Lazy-sync: a fresh on-chain registration may not have been picked up
+        # by the periodic event sync yet. Trigger a throttled catch-up and
+        # re-query before giving up. Throttling (in EventSyncService) prevents
+        # repeated 404 polling from hammering the RPC.
+        import src.main as _main
+        if _main.event_sync is not None:
+            attempted = await _main.event_sync.sync_on_demand()
+            if attempted:
+                db.expire_all()
+                agent = find_agent_by_id(db, agent_id)
+
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
@@ -458,9 +470,19 @@ async def heartbeat(
     """
     # FastAPI should automatically URL-decode path parameters, but ensure it's decoded
     agent_id = urllib.parse.unquote(agent_id)
-    
+
     agent = find_agent_by_id(db, agent_id)
-    
+
+    if not agent:
+        # Lazy-sync (mirrors GET /agents/{id}): the agent may have registered
+        # on-chain since the last periodic sync. Throttled inside the service.
+        import src.main as _main
+        if _main.event_sync is not None:
+            attempted = await _main.event_sync.sync_on_demand()
+            if attempted:
+                db.expire_all()
+                agent = find_agent_by_id(db, agent_id)
+
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
     

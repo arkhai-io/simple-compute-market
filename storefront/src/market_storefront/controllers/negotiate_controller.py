@@ -48,7 +48,7 @@ class NegotiateController:
         body: NegotiateNewRequest,
         request: Request,
     ) -> NegotiateNewResponse:
-        from market_storefront.utils.config import CONFIG
+        from market_storefront.utils.config import BASE_URL_OVERRIDE
         from market_storefront.utils.sync_negotiation import (
             OfferUnfulfillableError,
             StorefrontPausedError,
@@ -57,16 +57,18 @@ class NegotiateController:
 
         buyer_auth._verify(request, "negotiate_new", body.listing_id, body.buyer_address)
 
-        base_url = CONFIG.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         try:
             result = await start_sync_negotiation(
                 sqlite_client=self._db,
                 our_listing_id=body.listing_id,
                 buyer_address=body.buyer_address,
                 their_proposed_price=body.initial_price,
-                requested_duration_seconds=body.duration_seconds,
+                provision_terms=body.provision_terms,
+                escrow_proposal=body.escrow_proposal,
                 our_base_url=base_url,
                 their_agent_url=body.buyer_agent_url or body.buyer_address,
+                policy_service=_container.resolved_policy_service,
             )
         except StorefrontPausedError as exc:
             raise HTTPException(status_code=503, detail={
@@ -111,7 +113,7 @@ class NegotiateController:
         buyer_auth._verify(request, "negotiate_continue", neg_id, body.buyer_address)
 
         if body.action == "counter" and body.price is None:
-            raise HTTPException(status_code=400, detail="'price' required as int for counter")
+            raise HTTPException(status_code=400, detail="'price' required as number for counter")
 
         try:
             result = await continue_sync_negotiation(

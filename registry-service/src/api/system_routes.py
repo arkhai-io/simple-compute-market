@@ -31,7 +31,6 @@ from sqlalchemy.orm import Session
 
 from src.api.system_model import (
     AgentIndexedResponse,
-    AttestationStatsResponse,
     ConfigResponse,
     EventSyncStatus,
     HealthCheckServiceStatus,
@@ -183,7 +182,15 @@ async def wait_for_agent_indexed(
     start = _time.monotonic()
     deadline = start + timeout
 
+    # Lazy-driven sync: each poll tick tries a throttled sync_latest before
+    # checking the DB. The EventSyncService throttle (2 s by default) caps
+    # the actual RPC load; without this, this endpoint just waited for the
+    # 60 s periodic timer and routinely missed the e2e poll window.
+    import src.main as _main
+
     while True:
+        if _main.event_sync is not None:
+            await _main.event_sync.sync_on_demand()
         db.expire_all()
         agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
         if agent is not None:
@@ -235,53 +242,6 @@ def system_stats(db: Session = Depends(get_db)) -> StatsResponse:
         agent_count=agent_count,
         order_count=total_orders,
         orders_by_status=OrderStatusCounts(**order_counts),
-    )
-
-
-# ---------------------------------------------------------------------------
-# /api/v1/system/stats/attestations  — settlement activity counts
-# ---------------------------------------------------------------------------
-
-
-@_system_router.get(
-    "/stats/attestations",
-    response_model=AttestationStatsResponse,
-    summary="Settlement activity counts",
-    description=(
-        "Returns counts of listings with Alkahest attestation UIDs written back "
-        "by agents after on-chain settlement. A non-zero settled_listing_count "
-        "confirms that at least one full deal cycle has completed: escrow locked "
-        "by the buyer (buyer_attestation) and compute obligation fulfilled by the "
-        "seller (seller_attestation). Intended as a smoke-test signal that the "
-        "market is functioning end-to-end, not just deployed."
-    ),
-)
-def attestation_stats(db: Session = Depends(get_db)) -> AttestationStatsResponse:
-    seller_count: int = (
-        db.query(func.count(Listing.listing_id))
-        .filter(Listing.seller_attestation.isnot(None))
-        .scalar()
-        or 0
-    )
-    buyer_count: int = (
-        db.query(func.count(Listing.listing_id))
-        .filter(Listing.buyer_attestation.isnot(None))
-        .scalar()
-        or 0
-    )
-    settled_count: int = (
-        db.query(func.count(Listing.listing_id))
-        .filter(
-            Listing.seller_attestation.isnot(None),
-            Listing.buyer_attestation.isnot(None),
-        )
-        .scalar()
-        or 0
-    )
-    return AttestationStatsResponse(
-        settled_listing_count=settled_count,
-        seller_attestation_count=seller_count,
-        buyer_attestation_count=buyer_count,
     )
 
 

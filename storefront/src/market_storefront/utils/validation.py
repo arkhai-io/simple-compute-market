@@ -48,18 +48,16 @@ def extract_token_resource(resource: ComputeDomainResource) -> TokenResource | N
 
 def determine_strategy_from_resources(
     offer_resource: ComputeDomainResource | None,
-    demand_resource: ComputeDomainResource | None,
 ) -> str | None:
-    """Determine negotiation strategy from resource types."""
-    if not offer_resource or not demand_resource:
+    """Determine negotiation strategy from the listing's offer side.
+
+    Listings only carry an ``offer_resource`` since the demand_resource
+    cutover. Seller offering compute → "maximize" (the seller wants the
+    highest price the buyer will pay).
+    """
+    if not offer_resource:
         return None
-
-    is_offering_compute = isinstance(offer_resource, ComputeResource)
-    is_demanding_compute = isinstance(demand_resource, ComputeResource)
-
-    if is_demanding_compute:
-        return "minimize"
-    if is_offering_compute:
+    if isinstance(offer_resource, ComputeResource):
         return "maximize"
     return None
 
@@ -69,4 +67,4 @@ def determine_strategy_from_order(order: Listing | None) -> str | None:
     if not order:
         return None
 
-    return determine_strategy_from_resources(order.offer_resource, order.demand_resource)
+    return determine_strategy_from_resources(order.offer_resource)

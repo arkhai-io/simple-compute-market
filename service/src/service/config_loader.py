@@ -61,11 +61,86 @@ def user_config_dir() -> Path:
 
 
 def user_config_file() -> Path:
-    """Return the path to the user's config.toml (may not exist)."""
+    """Return the path to the user's primary config.toml (may not exist).
+
+    Other files in the layered set (e.g. ``config.secrets.toml``) are
+    discovered by :func:`user_config_files`; this function still returns
+    the base file path for callers that need a single canonical location
+    (e.g. ``write_user_config`` defaults).
+    """
     override = _config_path_override
     if override is not None:
         return override
     return user_config_dir() / "config.toml"
+
+
+def user_config_files() -> list[Path]:
+    """Return the ordered list of TOML files the loader merges.
+
+    Base first, overlays later — files listed later win on key conflicts.
+    Today: ``config.toml`` (ConfigMap-rendered base) then
+    ``config.secrets.toml`` (Secret-rendered sensitive overlay). Missing
+    files are skipped silently at load time, so local-dev with a single
+    ``config.toml`` keeps working.
+
+    The ``--config PATH`` override (via :func:`set_user_config_path`)
+    short-circuits this to a single-file load — useful for tests and ad-
+    hoc invocations that want full control over what's read.
+
+    Under pytest, when neither ``set_user_config_path()`` nor
+    ``XDG_CONFIG_HOME`` has been set, the loader returns an empty list
+    instead of reading the developer's ambient
+    ``~/.config/arkhai/config.toml``. That file otherwise leaks into
+    test process state — e.g. the storefront's seller_auth dependency
+    flips from dev-bypass to enforcing mode because a populated
+    ``wallet.address`` was loaded into ``CONFIG.agent_wallet_address``
+    at module-import time. Tests that legitimately exercise the layered
+    loader monkeypatch ``XDG_CONFIG_HOME`` to a tmp dir, which preserves
+    their behaviour.
+    """
+    if _config_path_override is not None:
+        return [_config_path_override]
+    base = user_config_dir()
+    if "pytest" in sys.modules:
+        # Trust XDG only when it's been pointed somewhere other than the
+        # user's home — i.e. a test fixture explicitly set it. Bare
+        # ambient XDG ($HOME/.config) is suppressed: a populated
+        # ~/.config/arkhai/config.toml would otherwise leak into every
+        # storefront-importing test, flipping seller_auth into enforcing
+        # mode and causing surprising 403s. Tests that exercise the
+        # loader's layered behaviour monkeypatch XDG_CONFIG_HOME to
+        # tmp_path, which is not under home and so passes through.
+        try:
+            home_default = (Path.home() / ".config").resolve()
+            if base.resolve().parent == home_default:
+                return []
+        except (OSError, RuntimeError):
+            return []
+    return [base / "config.toml", base / "config.secrets.toml"]
+
+
+def storefront_config_files() -> list[Path]:
+    """Return the ordered list of TOML files the storefront loader merges.
+
+    Mirrors :func:`user_config_files` but for the storefront's own files
+    (``storefront.toml`` + ``storefront.secrets.toml``) instead of the buyer's
+    shared ``config.toml``. The storefront has a separate identity and
+    role-scoped knobs, so it gets its own file pair rather than reusing the
+    buyer's. See ARCHITECTURE.md "Storefront chart layout".
+
+    Pytest guard mirrors :func:`user_config_files` — when XDG hasn't been
+    pointed at a tmp dir, returns ``[]`` so the developer's ambient
+    ``~/.config/arkhai/storefront.toml`` doesn't leak into test process state.
+    """
+    base = user_config_dir()
+    if "pytest" in sys.modules:
+        try:
+            home_default = (Path.home() / ".config").resolve()
+            if base.resolve().parent == home_default:
+                return []
+        except (OSError, RuntimeError):
+            return []
+    return [base / "storefront.toml", base / "storefront.secrets.toml"]
 
 
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so
@@ -80,29 +155,60 @@ def set_user_config_path(path: Path | str | None) -> None:
     any subcommand body runs. ``None`` clears the override (back to the
     XDG default). Called once per process — there's no expectation of
     re-entrancy.
+
+    When set, the override replaces the entire layered file stack — only
+    the single specified file is read. Tests rely on this to stay
+    isolated from any ambient ``config.secrets.toml`` in the user's
+    XDG dir.
     """
     global _config_path_override
     _config_path_override = Path(path) if path is not None else None
 
 
-def load_user_config(path: Optional[Path] = None) -> dict[str, Any]:
-    """Read the user's TOML config as a plain dict.
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning ``base``.
 
-    Lookup order: explicit ``path`` arg > ``set_user_config_path`` override >
-    ``$XDG_CONFIG_HOME/arkhai/config.toml`` (or ``~/.config/arkhai/config.toml``).
-
-    Missing file → empty dict. Unreadable / malformed → empty dict with
-    a warning on stderr, so a typo never prevents the CLI from running.
+    Nested tables compose (so the ConfigMap's ``[wallet] ssh_public_key``
+    and the Secret's ``[wallet] private_key`` end up as siblings in the
+    merged ``wallet`` table). Scalar conflicts resolve overlay-wins.
     """
-    p = path or user_config_file()
+    for key, val in overlay.items():
+        existing = base.get(key)
+        if isinstance(existing, dict) and isinstance(val, dict):
+            _deep_merge(existing, val)
+        else:
+            base[key] = val
+    return base
+
+
+def _read_one(path: Path) -> dict[str, Any]:
+    """Read a single TOML file. Missing/malformed → empty dict + warn."""
     try:
-        with open(p, "rb") as f:
+        with open(path, "rb") as f:
             return tomllib.load(f)
     except FileNotFoundError:
         return {}
     except (tomllib.TOMLDecodeError, OSError) as exc:
-        print(f"[config] could not read {p}: {exc}", file=sys.stderr)
+        print(f"[config] could not read {path}: {exc}", file=sys.stderr)
         return {}
+
+
+def load_user_config(path: Optional[Path] = None) -> dict[str, Any]:
+    """Read the user's layered TOML config as a single merged dict.
+
+    Explicit ``path`` arg → load that one file only (used in tests).
+    Otherwise walk :func:`user_config_files` and deep-merge each layer
+    in order. Missing files in the stack are silently skipped.
+
+    Missing/malformed files don't raise — empty dict, warning on stderr,
+    so a typo never prevents the CLI from running.
+    """
+    if path is not None:
+        return _read_one(path)
+    merged: dict[str, Any] = {}
+    for p in user_config_files():
+        _deep_merge(merged, _read_one(p))
+    return merged
 
 
 def get_dotted(doc: dict[str, Any], dotted: str) -> Any | None:
@@ -233,14 +339,21 @@ def alkahest_address_config_path(flag: Optional[str] = None,
     )
 
 
-def registry_url(flag: Optional[str] = None,
-                 config: Optional[dict[str, Any]] = None) -> Optional[str]:
-    return resolve_value(
-        flag=flag,
-        env_name="INDEXER_URL",
-        toml_path="registry.url",
-        config=config,
-    )
+def registry_urls(
+    config: Optional[dict[str, Any]] = None,
+) -> list[str]:
+    """Resolve the configured registry URL(s) as a list. Reads
+    ``registry.urls`` from the TOML config; falls back to a localhost
+    default. Mirrors the storefront's resolver — only the plural list
+    form is recognised.
+    """
+    cfg = config if config is not None else load_user_config()
+    raw = get_dotted(cfg, "registry.urls")
+    if isinstance(raw, list) and raw:
+        cleaned = [str(u).strip() for u in raw if str(u).strip()]
+        if cleaned:
+            return cleaned
+    return ["http://localhost:8080"]
 
 
 # ---------------------------------------------------------------------------

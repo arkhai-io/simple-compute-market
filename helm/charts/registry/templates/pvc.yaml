@@ -1,0 +1,28 @@
+{{/*
+PVC backing the registry's SQLite indexer.db. Rendered only when
+persistence.enabled — otherwise the Deployment falls back to emptyDir
+and the index rebuilds from scratch on every pod restart.
+
+helm.sh/resource-policy: keep so `helm uninstall` does not destroy
+indexed state. Reinstalls rebind the existing PVC and pick up where
+they left off.
+*/}}
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "registry.pvcName" . }}
+  labels:
+    {{- include "registry.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

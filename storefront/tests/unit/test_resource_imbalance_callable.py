@@ -1,17 +1,12 @@
 """Unit tests for ri.action.make_offer_from_resource.
 
-The callable was previously broken — it produced a ``MAKE_OFFER`` action
-without the ``offer``/``demand`` parameters that
-``action_executor.execute_action`` requires (line 199-203). Any resource
-alert that fired the policy would hit ``ValueError: MAKE_OFFER requires
-explicit 'offer' and 'demand' parameters`` on dispatch.
-
 The fix builds a complete offer/demand pair from the alerting compute
-resource plus CONFIG defaults (default_token + default_min_price).
+resource plus pricing defaults (``pricing.default_token_address`` +
+``pricing.default_min_price``); decimals are resolved on chain via
+``service.clients.token.resolve_token``.
 """
 from __future__ import annotations
 
-import dataclasses
 from unittest.mock import patch
 
 import pytest
@@ -25,8 +20,8 @@ from market_storefront.models.domain_models import (
     Region,
     ResourceImbalanceEvent,
 )
-from market_storefront.utils.config import CONFIG
-from service.clients.token import ERC20TokenMetadata, TokenRegistry
+from service.clients.token import ERC20TokenMetadata, TokenResolutionError
+from tests._settings_overrides import settings_overrides
 
 
 _RESOURCE = ComputeResource(
@@ -36,10 +31,12 @@ _RESOURCE = ComputeResource(
     region=Region.CALIFORNIA_US,
 )
 
+_MOCK_ADDRESS = "0x1234567890123456789012345678901234567890"
 _MOCK_TOKEN = ERC20TokenMetadata(
     symbol="MOCK",
-    contract_address="0x1234567890123456789012345678901234567890",
+    contract_address=_MOCK_ADDRESS,
     decimals=6,
+    chain_id=1,
 )
 
 
@@ -61,39 +58,30 @@ def _build_context(*, imbalance_type: str = "surplus") -> DecisionContext:
     )
 
 
-def _patched_config(**overrides):
-    """Build a CONFIG-shaped clone with the requested overrides.
-
-    CONFIG is a frozen dataclass — `dataclasses.replace` is the only
-    supported way to flip a field for a test.
-    """
-    return dataclasses.replace(CONFIG, **overrides)
-
-
 @pytest.fixture
-def mock_token_registry():
-    """Patch TOKEN_REGISTRY in the policy store module to resolve "MOCK"
-    without loading a real token registry file."""
-    fake_registry = TokenRegistry()
-    fake_registry.register_token(_MOCK_TOKEN)
-    with patch("domain.compute.agent.app.policy.store.TOKEN_REGISTRY", fake_registry):
+def stubbed_resolve_token():
+    """Patch the chain-RPC resolver to return canned MOCK metadata."""
+    def fake_resolve(address, *, rpc_url, chain_id, refresh=False):
+        if address.lower() == _MOCK_ADDRESS.lower():
+            return _MOCK_TOKEN
+        raise TokenResolutionError(f"untested address: {address}")
+    with patch("domain.compute.agent.app.policy.store.resolve_token", fake_resolve), \
+         patch("market_storefront.utils.config.chain_id", lambda: 1):
         yield
 
 
 class TestRiActionMakeOfferFromResource:
-    def test_surplus_with_defaults_produces_complete_make_offer(self, mock_token_registry):
-        """Action carries offer + demand so action_executor.execute_action
-        does not raise ``MAKE_OFFER requires explicit 'offer' and 'demand' parameters``."""
+    def test_surplus_with_defaults_produces_complete_make_offer(self, stubbed_resolve_token):
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        cfg = _patched_config(
-            default_token="MOCK",
-            default_min_price="1000",
-            default_max_duration_seconds=3600,
-        )
-        with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
+        with settings_overrides(**{
+            "pricing.default_token_address": _MOCK_ADDRESS,
+            "pricing.default_min_price": "1000",
+            "pricing.default_max_duration_seconds": 3600,
+            "chain.rpc_url": "http://rpc",
+        }):
             action = ri_action_make_offer_from_resource(_build_context())
 
         assert isinstance(action, DomainAction)
@@ -108,44 +96,65 @@ class TestRiActionMakeOfferFromResource:
         assert params["max_duration_seconds"] == 3600
         assert params["paused"] is False
 
-    def test_returns_none_when_default_min_price_unset(self, mock_token_registry):
+    def test_returns_none_when_default_min_price_unset(self, stubbed_resolve_token):
         """Without a configured floor price we cannot synthesise a demand
-        and so the policy falls through to no_action rather than producing
-        an incomplete MAKE_OFFER."""
+        and so the policy falls through to no_action."""
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        cfg = _patched_config(default_min_price=None)
-        with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
+        with settings_overrides(**{"pricing.default_min_price": ""}):
             action = ri_action_make_offer_from_resource(_build_context())
 
         assert action is None
 
-    def test_returns_none_for_non_surplus_imbalance(self, mock_token_registry):
-        """Deficit alerts are a buy-side concern; the seller storefront skips them."""
+    def test_returns_none_for_non_surplus_imbalance(self, stubbed_resolve_token):
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        cfg = _patched_config(default_min_price="1000", default_token="MOCK")
-        with patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
+        with settings_overrides(**{
+            "pricing.default_min_price": "1000",
+            "pricing.default_token_address": _MOCK_ADDRESS,
+            "chain.rpc_url": "http://rpc",
+        }):
             action = ri_action_make_offer_from_resource(
                 _build_context(imbalance_type="deficit"),
             )
 
         assert action is None
 
-    def test_returns_none_when_token_unresolvable(self):
-        """Misconfigured default_token (missing from registry) → fall through."""
+    def test_returns_none_when_token_address_unset(self):
+        """default_token_address="" → fall through cleanly."""
         from domain.compute.agent.app.policy.store import (
             ri_action_make_offer_from_resource,
         )
 
-        empty_registry = TokenRegistry()
-        cfg = _patched_config(default_min_price="1000", default_token="DOES_NOT_EXIST")
-        with patch("domain.compute.agent.app.policy.store.TOKEN_REGISTRY", empty_registry), \
-             patch("domain.compute.agent.app.policy.store.CONFIG", cfg):
+        with settings_overrides(**{
+            "pricing.default_min_price": "1000",
+            "pricing.default_token_address": "",
+            "chain.rpc_url": "http://rpc",
+        }):
             action = ri_action_make_offer_from_resource(_build_context())
+
+        assert action is None
+
+    def test_returns_none_when_chain_resolve_fails(self):
+        """RPC unreachable / bad address → fall through cleanly."""
+        from domain.compute.agent.app.policy.store import (
+            ri_action_make_offer_from_resource,
+        )
+
+        def always_fail(*a, **k):
+            raise TokenResolutionError("RPC down")
+
+        with patch("domain.compute.agent.app.policy.store.resolve_token", always_fail), \
+             patch("market_storefront.utils.config.chain_id", lambda: 1):
+            with settings_overrides(**{
+                "pricing.default_min_price": "1000",
+                "pricing.default_token_address": _MOCK_ADDRESS,
+                "chain.rpc_url": "http://rpc",
+            }):
+                action = ri_action_make_offer_from_resource(_build_context())
 
         assert action is None

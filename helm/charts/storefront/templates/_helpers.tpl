@@ -112,12 +112,44 @@ auto-generates from the agent fullname.
 {{- end }}
 
 {{/*
-Render the per-agent config.toml from values + globals. The output is a
-single string the Secret template embeds under `config.toml`.
+Per-agent PVC name. Used as the volume backing the SQLite agent.db
+mount at persistence.mountPath. Stable across releases so reinstalls
+can rebind existing state.
+*/}}
+{{- define "storefront.agentPvcName" -}}
+{{- printf "%s-data" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end }}
 
-Argument: dict with `root` (chart root, for global access) and `agent`.
+{{/*
+Per-agent ConfigMap name — non-sensitive runtime config lives here.
+Mirrors agentSecretName: honors agent.config.configMapName override,
+else auto-generates from the agent fullname.
+*/}}
+{{- define "storefront.agentConfigMapName" -}}
+{{- $cfgName := "" -}}
+{{- if .agent.config -}}
+{{- $cfgName = .agent.config.configMapName | default "" -}}
+{{- end -}}
+{{- if $cfgName -}}
+{{- $cfgName -}}
+{{- else -}}
+{{- printf "%s-config" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end }}
 
-Keys map directly to market_storefront.utils.config.Config field names.
+{{/*
+Render the per-agent non-sensitive config.toml. The output is a single
+string the ConfigMap template embeds under `config.toml`.
+
+Argument: dict with `root` (chart root) and `agent`.
+
+Pairs with `storefront.agentSecretsToml` — together they form the
+complete config the runtime loader (`service.config_loader`) merges
+at startup. Sensitive values (wallet.address, wallet.private_key,
+seller.admin_api_key, seller.resources_csv_inline,
+seller.integrations.gemini_api_key) live in the Secret-rendered
+overlay and are not duplicated here.
+
 Topology-derived values (base_url, registry.url, chain.rpc_url,
 seller.provisioning.service_url) are composed from the chart's view of
 the cluster — never authored as hardcoded strings in values.yaml.
@@ -134,13 +166,24 @@ config.toml.
 {{- $chain := $cfg.chain | default dict -}}
 {{- $prov := $seller.provisioning | default dict -}}
 {{- $neg := $seller.negotiation | default dict -}}
-{{- $integ := $seller.integrations | default dict -}}
-# Rendered by the storefront helm chart. Source of truth lives in
-# helm/charts/storefront/values.yaml under agents:.
+# Rendered by the storefront helm chart (ConfigMap layer — non-sensitive).
+# Source of truth lives in helm/charts/storefront/values.yaml under agents:.
+# Sensitive values come from the Secret overlay (storefront.secrets.toml).
+
+agent_id            = {{ $seller.agentId | quote }}
+port                = {{ $agent.port }}
+base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
+db_path             = {{ $seller.dbPath | quote }}
+log_file_path       = {{ $seller.logFilePath | quote }}
+{{- if $seller.resourcesCsvPath }}
+resources_csv_path  = {{ $seller.resourcesCsvPath | quote }}
+{{- end }}
+{{- if $agent.agentId }}
+onchain_agent_id    = {{ $agent.agentId | quote }}
+{{- end }}
+auto_register       = {{ $agent.autoRegister | default true }}
 
 [wallet]
-address     = {{ $agent.secret.walletAddress | quote }}
-private_key = {{ $agent.secret.privKey | quote }}
 ssh_public_key = {{ $seller.sshPublicKey | default "" | quote }}
 
 [chain]
@@ -152,35 +195,71 @@ alkahest_address_config_path = {{ $chain.alkahestAddressConfigPath | quote }}
 {{- end }}
 
 [registry]
-url = {{ default (include "registry.url" $root) $cfg.registryUrl | quote }}
+urls = [{{ default (include "registry.url" $root) $cfg.registryUrl | quote }}]
 identity_registry_address = {{ $root.Values.global.registry.identity_address | quote }}
+{{- if $agent.rootPath }}
 
-[seller]
-agent_id            = {{ $seller.agentId | quote }}
-port                = {{ $agent.port }}
-base_url            = {{ default (include "storefront.agentBaseUrl" .) $seller.baseUrl | quote }}
-db_path             = {{ $seller.dbPath | quote }}
-log_file_path       = {{ $seller.logFilePath | quote }}
-{{- if $cfg.tokenRegistryPath }}
-token_registry_path = {{ $cfg.tokenRegistryPath | quote }}
+[gateway]
+# Gateway path prefix for this agent. Used by FastAPI's custom OpenAPI
+# function to inject a servers block so Swagger UI generates correct
+# curl examples when accessed through the API gateway. Empty for local dev.
+root_path = {{ $agent.rootPath | quote }}
 {{- end }}
-enable_event_queue  = {{ $seller.enableEventQueue | default false }}
-{{- if $agent.agentId }}
-onchain_agent_id    = {{ $agent.agentId | quote }}
-{{- end }}
-auto_register       = {{ $agent.autoRegister | default true }}
 
-[seller.provisioning]
+[provisioning]
 service_url = {{ default (include "provisioning.url" $root) $prov.serviceUrl | quote }}
 {{- if $prov.mode }}
 mode        = {{ $prov.mode | quote }}
 {{- end }}
+{{- if $prov.pollInterval }}
+poll_interval = {{ $prov.pollInterval | int }}
+{{- end }}
 
-[seller.negotiation]
+[negotiation]
 policy_mode = {{ $neg.policyMode | default "" | quote }}
+{{- end }}
+
+{{/*
+Render the per-agent sensitive config.secrets.toml. The output is a
+single string the Secret template embeds under `config.secrets.toml`.
+
+Argument: dict with `root` (chart root) and `agent`.
+
+Pairs with `storefront.agentConfigToml`. The runtime loader
+deep-merges the two files, so emitting only the sensitive subset here
+(rather than the full config) is what keeps non-secret toggles in the
+ConfigMap and out of secret-rotation tooling.
+
+Sections rendered here intentionally include only the sensitive keys
+of their parent tables (e.g. [wallet] address + private_key, not
+ssh_public_key) — the rest of those tables comes from the ConfigMap
+side.
+*/}}
+{{- define "storefront.agentSecretsToml" -}}
+{{- $root := .root -}}
+{{- $agent := .agent -}}
+{{- $cfg := $agent.config -}}
+{{- $seller := $cfg.seller | default dict -}}
+{{- $integ := $seller.integrations | default dict -}}
+{{- $adminKey := ($root.Values.global).adminApiKey | default "" -}}
+# Rendered by the storefront helm chart (Secret overlay — sensitive only).
+# Deep-merged on top of storefront.toml at runtime by dynaconf.
+
+{{- if $adminKey }}
+admin_api_key = {{ $adminKey | quote }}
+{{- end }}
+{{- if $agent.secret.resourcesCsvInline }}
+resources_csv_inline = """
+{{ $agent.secret.resourcesCsvInline }}
+"""
+{{- end }}
+
+[wallet]
+address     = {{ $agent.secret.walletAddress | quote }}
+private_key = {{ $agent.secret.privKey | quote }}
 {{- if or $integ.geminiApiKey $integ.gemini_api_key }}
 
-[seller.integrations]
+[integrations]
 gemini_api_key = {{ default $integ.geminiApiKey $integ.gemini_api_key | quote }}
 {{- end }}
 {{- end }}

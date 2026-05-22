@@ -12,7 +12,6 @@ directly (same as production).
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import AsyncIterator
 
 import httpx
@@ -191,62 +190,6 @@ class TestAdminResume:
         status = await c.get_system_status()
         assert status.paused is False
 
-
-# ---------------------------------------------------------------------------
-# GET /admin/status
-# ---------------------------------------------------------------------------
-
-class TestAdminStatus:
-    async def test_requires_admin_key(self, client_no_key):
-        with pytest.raises(StorefrontClientError) as exc_info:
-            await client_no_key.admin_status()
-        assert "403" in str(exc_info.value)
-
-    async def test_status_counts_when_empty(self, client):
-        c, _ = client
-        result = await c.admin_status()
-        assert result.paused is False
-        assert result.active_negotiations == 0
-        assert result.open_listings == 0
-        assert result.paused_listings == 0
-
-    async def test_status_counts_open_orders(self, client):
-        c, db = client
-        now = datetime.now().isoformat()
-        await db.upsert_listing(
-            listing_id="count-1",
-            status="open",
-            created_at=now,
-            updated_at=now,
-            offer_resource={},
-            demand_resource={},
-            fulfillment_resource=None,
-            max_duration_seconds=3600,
-            seller="http://seller:8001",
-        )
-        result = await c.admin_status()
-        assert result.open_listings == 1
-
-    async def test_status_counts_paused_orders(self, client):
-        c, db = client
-        now = datetime.now().isoformat()
-        await db.upsert_listing(
-            listing_id="pause-count",
-            status="open",
-            created_at=now,
-            updated_at=now,
-            offer_resource={},
-            demand_resource={},
-            fulfillment_resource=None,
-            max_duration_seconds=3600,
-            seller="http://seller:8001",
-        )
-        await db.set_listing_paused(listing_id="pause-count", paused=True)
-        result = await c.admin_status()
-        assert result.open_listings == 0
-        assert result.paused_listings == 1
-
-
 # ---------------------------------------------------------------------------
 # Policy seed, status, and evaluate
 # ---------------------------------------------------------------------------
@@ -316,16 +259,16 @@ class TestPolicyEvaluate:
     """
 
     async def test_evaluate_rejects_bad_event_type(self, client):
-        """Empty offer/demand rejected with 400 by the controller."""
+        """Empty offer/accepted_escrows rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
-                offer={}, demand={},
+                offer={}, accepted_escrows=[],
                 max_duration_seconds=None,
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         # policy_evaluate hardcodes event_type="order_create" in the client,
-        # so we test the missing offer/demand validation instead.
+        # so we test the missing offer/accepted_escrows validation instead.
         assert "400" in str(exc_info.value) or "422" in str(exc_info.value)
 
     async def test_evaluate_rejects_missing_offer(self, client):
@@ -333,21 +276,95 @@ class TestPolicyEvaluate:
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
-                offer={}, demand={"token": "MOCK", "amount": 1000},
+                offer={}, accepted_escrows=[{
+                    "chain_name": "anvil",
+                    "escrow_address": "0x" + "11" * 20,
+                    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+                    "price_per_hour": 1000,
+                }],
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         assert any(code in str(exc_info.value) for code in ("400", "422"))
 
-    async def test_evaluate_rejects_missing_demand(self, client):
-        """Empty demand dict is rejected with 400 by the controller."""
+    async def test_evaluate_rejects_missing_accepted_escrows(self, client):
+        """Empty accepted_escrows list is rejected with 400 by the controller."""
         c, _ = client
         with pytest.raises(StorefrontClientError) as exc_info:
             await c.policy_evaluate(
                 offer={"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"},
-                demand={},
+                accepted_escrows=[],
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
         assert any(code in str(exc_info.value) for code in ("400", "422"))
+
+
+class TestAdminImportResources:
+    """Tests for POST /api/v1/admin/portfolio/resources/import."""
+
+    _VALID_CSV = (
+        "resource_id,resource_type,resource_subtype,unit,value,state,"
+        "min_price,token,max_duration_seconds,"
+        "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+        'compute-import-001,compute.gpu,rtx5080,count,1,available,'
+        '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+        'RTX 5080,90.0,"California, US",ww1\n'
+    )
+
+    async def test_requires_admin_key(self, client_no_key):
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await client_no_key.admin_import_resources(self._VALID_CSV.encode())
+        assert "403" in str(exc_info.value)
+
+    async def test_imports_valid_csv(self, client):
+        c, db = client
+        result = await c.admin_import_resources(self._VALID_CSV.encode())
+        assert result.imported_count == 1
+        assert result.failed_count == 0
+        assert result.total_rows == 1
+        resources = await db.list_resources()
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-import-001"
+
+    async def test_upserts_when_table_already_populated(self, client):
+        """Import always upserts regardless of existing rows (clobber path)."""
+        c, db = client
+        # Pre-seed one row via the normal DB path.
+        await db.upsert_resource(
+            resource_id="pre-existing-001",
+            resource_type="compute.gpu",
+            state="available",
+        )
+        # Import a different row — both should be present (append-only upsert).
+        result = await c.admin_import_resources(self._VALID_CSV.encode())
+        assert result.imported_count == 1
+        resources = await db.list_resources()
+        assert len(resources) == 2
+
+    async def test_rejects_csv_missing_required_column(self, client):
+        c, _ = client
+        bad_csv = b"resource_id,state\ncompute-bad-001,available\n"
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.admin_import_resources(bad_csv)
+        assert "400" in str(exc_info.value)
+
+    async def test_partial_import_counts_failures(self, client):
+        """Rows with invalid data are counted in failed_count; valid rows still import."""
+        c, _ = client
+        # One valid row + one row with a type that will fail schema validation.
+        mixed_csv = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-good-001,compute.gpu,rtx5080,count,1,available,'
+            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+            # Row with missing resource_id will fail.
+            ',compute.gpu,rtx5080,count,1,available,150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",ww1\n'
+        ).encode()
+        result = await c.admin_import_resources(mixed_csv)
+        assert result.total_rows == 2
+        # The good row should import even if one fails.
+        assert result.imported_count >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -441,3 +458,77 @@ class TestStreamEvents:
         neg_events = await c.get_events(stage="negotiation")
         assert neg_events.count == 1
         assert neg_events.events[0].stage == "negotiation"
+
+
+
+class TestPatchResource:
+    """Tests for PATCH /api/v1/admin/portfolio/resources/{resource_id}."""
+
+    async def _seed_leased_resource(self, db: SQLiteClient, resource_id: str = "compute-patch-001") -> None:
+        # Use resource_type other than compute.gpu or omit vm_host to skip capacity gate
+        await db.upsert_resource(
+            resource_id=resource_id,
+            resource_type="compute.gpu",
+            state="leased",
+            # No attributes.vm_host → capacity gate skipped
+        )
+
+    async def test_requires_admin_key(self, client_no_key):
+        c = client_no_key
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.patch_resource("compute-patch-001", state="available")
+        assert exc_info.value.status_code in (401, 403)
+
+    async def test_patch_state_to_available(self, client):
+        c, db = client
+        await self._seed_leased_resource(db)
+        result = await c.patch_resource("compute-patch-001", state="available")
+        assert result["state"] == "available"
+        assert result["updated"] is True
+
+    async def test_patch_is_idempotent_when_state_unchanged(self, client):
+        c, db = client
+        await self._seed_leased_resource(db)
+        await c.patch_resource("compute-patch-001", state="available")
+        result = await c.patch_resource("compute-patch-001", state="available")
+        assert result["updated"] is False
+
+    async def test_patch_clears_attribute(self, client):
+        c, db = client
+        await db.upsert_resource(
+            resource_id="compute-patch-002",
+            resource_type="compute.gpu",
+            state="leased",
+            attributes={"lease_end_utc": "2025-01-01 00:00"},
+        )
+        result = await c.patch_resource(
+            "compute-patch-002",
+            state="available",
+            attributes={"lease_end_utc": None},
+        )
+        assert result["state"] == "available"
+        assert result["attributes"].get("lease_end_utc") is None
+
+    async def test_patch_nonexistent_returns_404(self, client):
+        c, db = client
+        with pytest.raises(StorefrontClientError) as exc_info:
+            await c.patch_resource("no-such-resource", state="available")
+        assert exc_info.value.status_code == 404
+
+    async def test_patch_preserves_unspecified_fields(self, client):
+        c, db = client
+        await db.upsert_resource(
+            resource_id="compute-patch-003",
+            resource_type="compute.gpu",
+            state="leased",
+            attributes={"gpu_model": "RTX 5080", "lease_end_utc": "2025-01-01 00:00"},
+        )
+        result = await c.patch_resource(
+            "compute-patch-003",
+            attributes={"lease_end_utc": None},
+        )
+        # state not specified → should remain leased
+        assert result["state"] == "leased"
+        # gpu_model not in patch → should be preserved
+        assert result["attributes"].get("gpu_model") == "RTX 5080"
+        assert result["attributes"].get("lease_end_utc") is None

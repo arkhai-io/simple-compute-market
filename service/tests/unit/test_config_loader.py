@@ -74,6 +74,123 @@ def test_load_returns_empty_on_malformed_toml(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
+# Layered config — config.toml + config.secrets.toml merge
+# ---------------------------------------------------------------------------
+
+
+def test_layered_load_merges_base_then_secrets(monkeypatch, tmp_path):
+    """The Secret overlay (config.secrets.toml) merges on top of the
+    ConfigMap base (config.toml). Disjoint tables compose as siblings;
+    same-key conflicts resolve overlay-wins."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.toml").write_text("""
+[wallet]
+ssh_public_key = "ssh-ed25519 AAAA..."
+
+[chain]
+name = "anvil"
+""")
+    (cfg_dir / "config.secrets.toml").write_text("""
+[wallet]
+private_key = "0xkey"
+address = "0xaddr"
+""")
+    cfg = config_loader.load_user_config()
+    # Sibling keys in the [wallet] table merged from both files.
+    assert cfg["wallet"]["ssh_public_key"] == "ssh-ed25519 AAAA..."
+    assert cfg["wallet"]["private_key"] == "0xkey"
+    assert cfg["wallet"]["address"] == "0xaddr"
+    # Disjoint table from the base survives.
+    assert cfg["chain"]["name"] == "anvil"
+
+
+def test_layered_load_secrets_wins_on_conflict(monkeypatch, tmp_path):
+    """If both files set the same scalar key, the secrets file overrides."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.toml").write_text('[seller]\nadmin_api_key = "from-base"\n')
+    (cfg_dir / "config.secrets.toml").write_text('[seller]\nadmin_api_key = "from-secret"\n')
+    cfg = config_loader.load_user_config()
+    assert cfg["seller"]["admin_api_key"] == "from-secret"
+
+
+def test_layered_load_secrets_optional(monkeypatch, tmp_path):
+    """Missing config.secrets.toml is a no-op — base file alone still loads."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.toml").write_text('[chain]\nname = "base_sepolia"\n')
+    cfg = config_loader.load_user_config()
+    assert cfg["chain"]["name"] == "base_sepolia"
+
+
+def test_layered_load_both_missing_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    # Don't create the dir or files.
+    assert config_loader.load_user_config() == {}
+
+
+def test_cli_path_override_skips_secrets_layer(monkeypatch, tmp_path):
+    """``set_user_config_path`` collapses the stack to a single file —
+    secrets-layer auto-discovery does not apply when the override is set."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    # An ambient secrets file in the XDG dir that should be IGNORED.
+    (cfg_dir / "config.secrets.toml").write_text('[wallet]\nprivate_key = "0xshould-not-leak"\n')
+    explicit = tmp_path / "only.toml"
+    explicit.write_text('[chain]\nname = "anvil"\n')
+    config_loader.set_user_config_path(explicit)
+    try:
+        cfg = config_loader.load_user_config()
+        assert cfg == {"chain": {"name": "anvil"}}
+        assert "wallet" not in cfg
+    finally:
+        config_loader.set_user_config_path(None)
+
+
+def test_user_config_files_lists_base_and_secrets(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    files = config_loader.user_config_files()
+    assert files == [
+        tmp_path / "arkhai" / "config.toml",
+        tmp_path / "arkhai" / "config.secrets.toml",
+    ]
+
+
+def test_user_config_files_collapses_to_override(monkeypatch, tmp_path):
+    explicit = tmp_path / "elsewhere.toml"
+    config_loader.set_user_config_path(explicit)
+    try:
+        assert config_loader.user_config_files() == [explicit]
+    finally:
+        config_loader.set_user_config_path(None)
+
+
+def test_deep_merge_recurses_into_nested_tables():
+    base = {
+        "seller": {
+            "agent_id": "bob",
+            "provisioning": {"mode": "mock", "poll_interval": 30},
+        }
+    }
+    overlay = {
+        "seller": {
+            "admin_api_key": "secret",
+            "provisioning": {"poll_interval": 60},
+        }
+    }
+    merged = config_loader._deep_merge(base, overlay)
+    assert merged["seller"]["agent_id"] == "bob"
+    assert merged["seller"]["admin_api_key"] == "secret"
+    assert merged["seller"]["provisioning"]["mode"] == "mock"  # preserved
+    assert merged["seller"]["provisioning"]["poll_interval"] == 60  # overridden
+
+
+# ---------------------------------------------------------------------------
 # get_dotted / set_dotted
 # ---------------------------------------------------------------------------
 

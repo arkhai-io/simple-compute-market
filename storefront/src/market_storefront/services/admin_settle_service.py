@@ -33,12 +33,18 @@ class AdminSettleService:
 
     Args:
         sqlite_client: SQLite client for DB lookups (read-only in this service).
-        config:        Application CONFIG (for chain_rpc_url, chain_name, etc.).
+        alkahest_client: Optional ``AlkahestClient`` used by ``verify_escrow_dry_run``
+            to read the on-chain escrow attestation. May be None on hosts where
+            chain config is incomplete; verify_escrow_dry_run will surface that as
+            ``valid=False, reason="AlkahestClient not configured"`` rather than
+            crash.
     """
 
-    def __init__(self, sqlite_client: Any, config: Any) -> None:
+    def __init__(
+        self, sqlite_client: Any, alkahest_client: Any = None
+    ) -> None:
         self._db = sqlite_client
-        self._config = config
+        self._alkahest = alkahest_client
 
     async def verify_escrow_dry_run(
         self,
@@ -46,7 +52,7 @@ class AdminSettleService:
         escrow_uid: str,
         listing_id: str,
         seller_wallet: str,
-        agreed_price: int,
+        agreed_price: float,
         agreed_duration_seconds: int,
     ) -> dict:
         """Read the escrow from chain and confirm it matches the supplied terms.
@@ -64,6 +70,7 @@ class AdminSettleService:
         if not listing:
             raise ValueError(f"Listing {listing_id!r} not found")
 
+        from market_storefront.utils.config import settings
         try:
             await verify_escrow_for_settlement(
                 escrow_uid=escrow_uid,
@@ -71,9 +78,9 @@ class AdminSettleService:
                 agreed_price=agreed_price,
                 agreed_duration_seconds=agreed_duration_seconds,
                 listing=listing,
-                chain_rpc_url=self._config.chain_rpc_url,
-                chain_name=self._config.chain_name,
-                alkahest_address_config_path=self._config.alkahest_address_config_path,
+                alkahest_client=self._alkahest,
+                chain_name=settings.chain.name,
+                alkahest_address_config_path=settings.chain.alkahest_address_config_path,
             )
         except EscrowVerificationError as exc:
             return {"valid": False, "escrow_uid": escrow_uid, "reason": str(exc)}

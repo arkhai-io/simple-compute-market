@@ -2,9 +2,10 @@
 
 Stage 07 of the full-deal scenario needs an EAS attestation that the
 storefront's pre-settlement verifier (commit 03e47bf) can resolve. A
-placeholder uid would be rejected by ``read_attestation``. So we drive
-alkahest-py against the local Anvil from the buyer's wallet, the same
-way ``buyer.market_buyer.escrow_client.make_create_escrow_fn`` does in
+placeholder uid would be rejected by alkahest's ``get_obligation``
+call. So we drive alkahest-py against the local Anvil from the
+buyer's wallet, the same way
+``buyer.market_buyer.escrow_client.make_create_escrow_fn`` does in
 production — but inlined here because integration-tests doesn't
 depend on the buyer wheel.
 
@@ -93,7 +94,7 @@ def create_buyer_escrow(
     *,
     buyer_private_key: str,
     seller_wallet_address: str,
-    agreed_price: int,
+    agreed_price: float,
     duration_seconds: int,
     token_contract_address: str,
     rpc_url: str = "ws://localhost:8545",
@@ -125,7 +126,7 @@ def create_buyer_escrow(
     )
     demand_bytes = encode_recipient_demand(seller_wallet_address)
 
-    amount_raw = int(agreed_price) * int(max(duration_seconds, 1)) // 3600
+    amount_raw = int(float(agreed_price) * max(duration_seconds, 1) / 3600)
     price_data = {"address": token_contract_address, "value": amount_raw}
     arbiter_data = {"arbiter": arbiter_address, "demand": demand_bytes}
     expiration = int(time.time()) + int(expiration_seconds)

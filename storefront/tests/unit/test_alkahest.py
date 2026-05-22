@@ -106,14 +106,20 @@ def test_python():
     mock_erc20.transfer(env.alice, 90000000000)
     mock_erc20.transfer(env.bob, 90000000000)
 
+    # alkahest-py >= 0.4.0 generates fresh random wallets for env.alice /
+    # env.bob per setup_test_environment call (so the suite can share one
+    # anvil + contract deploy across tests via evm_revert). Use the
+    # corresponding *_private_key fields instead of the legacy hardcoded
+    # anvil-dev keys — those derive deterministic addresses that don't
+    # match the random env.alice / env.bob the MOCK transfers funded.
     alice_py_client = AlkahestClient(
-        private_key="0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+        private_key=env.alice_private_key,
         rpc_url=env.rpc_url,
         address_config=env.addresses,
     )
 
     bob_py_client = AlkahestClient(
-        private_key="0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
+        private_key=env.bob_private_key,
         rpc_url=env.rpc_url,
         address_config=env.addresses,
     )

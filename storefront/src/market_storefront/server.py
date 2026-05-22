@@ -16,16 +16,13 @@ Global pause state
 from __future__ import annotations
 
 import logging
-import socket
-import threading
-import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 import market_storefront.container as _container
-from market_storefront.utils.config import CONFIG
+from market_storefront.utils.config import settings, AGENT_ID
 from market_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
@@ -47,78 +44,15 @@ def _set_globally_paused(value: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auto-publish helpers
-# ---------------------------------------------------------------------------
-
-def _wait_for_port(host: str, port: int, *, timeout: float = 30.0) -> bool:
-    connect_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((connect_host, port), timeout=1.0):
-                return True
-        except OSError:
-            time.sleep(0.5)
-    return False
-
-
-def _spawn_publish_loop(*, host: str, port: int, poll_interval: float) -> threading.Thread | None:
-    from market_storefront.cli_publish import run_watch_loop
-
-    if not CONFIG.default_min_price and not CONFIG.publish_priceless:
-        # Without a global floor and price-less mode disabled, only resources
-        # with per-row min_price in the CSV will publish. Cycles silently
-        # drop everything else — surface the misconfig once at startup so
-        # it's not buried in cycle logs.
-        logger.warning(
-            "[publish-loop] [seller.pricing].default_min_price is not set "
-            "and [seller.pricing].publish_priceless is False. Resources "
-            "without per-row min_price will be skipped. Set default_min_price "
-            "in config.toml, set per-row min_price in resources.csv, or set "
-            "publish_priceless=true to advertise unpriced listings."
-        )
-
-    def _runner() -> None:
-        if not _wait_for_port(host, port, timeout=30.0):
-            logger.warning("[publish-loop] server not reachable within 30s; aborting")
-            return
-        try:
-            run_watch_loop(
-                db_path=CONFIG.agent_db_path,
-                base_url=f"http://127.0.0.1:{port}",
-                wallet_address=CONFIG.agent_wallet_address or "",
-                private_key=CONFIG.agent_priv_key,
-                default_min_price=CONFIG.default_min_price,
-                default_token=CONFIG.default_token,
-                default_max_duration_seconds=CONFIG.default_max_duration_seconds,
-                publish_priceless=CONFIG.publish_priceless,
-                poll_interval=poll_interval,
-                log_silent_cycles=False,
-            )
-        except Exception as exc:
-            logger.exception("[publish-loop] crashed: %r", exc)
-
-    thread = threading.Thread(target=_runner, name="storefront-publish-loop", daemon=True)
-    thread.start()
-    return thread
-
-
 def run_serve(
     host: str = "0.0.0.0",
     port: int | None = None,
-    *,
-    no_publish: bool = False,
-    poll_interval: float = 30.0,
 ) -> None:
     """Launch uvicorn. Called by ``market-storefront serve``."""
     import uvicorn
 
-    resolved_port = port if port is not None else CONFIG.port
-    if not no_publish:
-        _spawn_publish_loop(host=host, port=resolved_port, poll_interval=poll_interval)
-    else:
-        logger.info("[serve] --no-publish flag set; skipping publish loop")
-    uvicorn.run(app, host=host, port=resolved_port)
+    resolved_port = port if port is not None else settings.port
+    uvicorn.run(app, host=host, port=resolved_port, root_path=settings.gateway.root_path)
 
 
 # ---------------------------------------------------------------------------
@@ -135,24 +69,23 @@ async def lifespan(_: FastAPI):
     from market_storefront.services.system_service import SystemService
 
     sqlite_client = get_sqlite_client()
-    alkahest_client = alkahest_service.build_client(CONFIG)
+    alkahest_client = alkahest_service.build_client()
 
     policy_svc = PolicyService(
         sqlite_client=sqlite_client,
         alkahest_client=alkahest_client,
-        config=CONFIG,
-        agent_id=CONFIG.agent_id,
+        agent_id=AGENT_ID,
     )
     listing_svc = ListingService(
         sqlite_client=sqlite_client,
         alkahest_client=alkahest_client,
-        config=CONFIG,
     )
     negotiation_svc = NegotiationService(sqlite_client=sqlite_client)
-    system_svc = SystemService(sqlite_client=sqlite_client, agent_id=CONFIG.agent_id)
+    system_svc = SystemService(sqlite_client=sqlite_client, agent_id=AGENT_ID)
 
     _container.resolved_sqlite_client = sqlite_client
     _container.resolved_alkahest_client = alkahest_client
+    _container.resolved_alkahest_configured = alkahest_client is not None
     _container.resolved_policy_service = policy_svc
     _container.resolved_policy_pipeline_service = policy_svc  # backward compat
     _container.resolved_listing_service = listing_svc
@@ -184,6 +117,7 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
+    root_path=settings.gateway.root_path,
     swagger_ui_parameters={"persistAuthorization": True},
 )
 
@@ -206,6 +140,12 @@ def _custom_openapi():
             "description": "Admin API key — required for all /api/v1/admin/* endpoints.",
         }
     }
+    # Inject the gateway path prefix as the OpenAPI server URL so Swagger UI
+    # generates correct curl examples. The FastAPI app root_path above drives
+    # the docs page's OpenAPI URL; this servers block drives "try it out".
+    root_path = settings.gateway.root_path
+    if root_path:
+        schema["servers"] = [{"url": root_path}]
     app.openapi_schema = schema
     return schema
 
@@ -232,27 +172,3 @@ app.include_router(settle_router)
 app.include_router(admin_settle_router)
 app.include_router(alerts_router)
 app.include_router(identity_router)
-
-# ---------------------------------------------------------------------------
-from fastapi import Request
-from fastapi.responses import RedirectResponse
-
-
-def _redirect_to(new_path: str):
-    async def _handler(request: Request):
-        # Preserve query string
-        qs = request.url.query
-        target = new_path + (f"?{qs}" if qs else "")
-        return RedirectResponse(url=target, status_code=307)
-    return _handler
-
-
-# Admin routes
-app.add_api_route("/admin/pause", _redirect_to("/api/v1/admin/pause"), methods=["POST"])
-app.add_api_route("/admin/resume", _redirect_to("/api/v1/admin/resume"), methods=["POST"])
-app.add_api_route("/admin/status", _redirect_to("/api/v1/admin/status"), methods=["GET"])
-app.add_api_route("/admin/policy/seed", _redirect_to("/api/v1/admin/policy/seed"), methods=["POST"])
-# Listing lifecycle (body-param style → path-param style handled by listings_controller)
-app.add_api_route("/listings/create", _redirect_to("/api/v1/listings/create"), methods=["POST"])
-app.add_api_route("/alerts/resource", _redirect_to("/api/v1/alerts/resource"), methods=["POST"])
-app.add_api_route("/negotiate/new", _redirect_to("/api/v1/negotiate/new"), methods=["POST"])

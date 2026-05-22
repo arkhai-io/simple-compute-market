@@ -25,11 +25,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from service.schemas import EscrowProposal, ProvisionTerms
+
 from ..buy_orchestrator import (
     BuyConfig,
     BuyConstraints,
     extract_seller_min_price,
-    query_registry_for_matches,
+    query_registry_for_matches_multi,
     run_buy,
 )
 from ..buyer_client import ResumeState, negotiate_with_seller
@@ -78,7 +80,7 @@ from ._cli_helpers import resolve_prices_from_matches as _resolve_prices_from_ma
 def _run_resume_from(
     *,
     from_run: str,
-    max_price: Optional[int],
+    max_price: Optional[float],
     buyer_address: Optional[str],
     buyer_private_key: Optional[str],
     ssh_public_key: Optional[str],
@@ -235,14 +237,14 @@ def register(app: typer.Typer) -> None:
 
     @app.command("buy")
     def buy(
-        initial_price: Optional[int] = typer.Option(
+        initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
             help="Opening bid per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, prices are derived from the "
                  "seller's advertised min_price (interactively confirmed "
                  "in TTY runs, derived silently with --yes).",
         ),
-        max_price: Optional[int] = typer.Option(
+        max_price: Optional[float] = typer.Option(
             None, "--max-price",
             help="Ceiling per negotiation (raw token units, per-hour rate). "
                  "Optional — when omitted, derived as min_price × "
@@ -270,18 +272,18 @@ def register(app: typer.Typer) -> None:
         ),
         # Spec filters — slice fields
         gpu_model: Optional[str] = typer.Option(None, "--gpu-model", help="Filter listings by GPU model (e.g., H200)."),
-        gpu_count_min: Optional[int] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
-        vcpu_count_min: Optional[int] = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
-        ram_gb_min: Optional[int] = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
-        disk_gb_min: Optional[int] = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
+        gpu_count_min: Optional[float] = typer.Option(None, "--gpu-count-min", help="Minimum slice GPU count."),
+        vcpu_count_min: Optional[float] = typer.Option(None, "--vcpu-min", help="Minimum slice vCPU count."),
+        ram_gb_min: Optional[float] = typer.Option(None, "--ram-gb-min", help="Minimum slice RAM (GB)."),
+        disk_gb_min: Optional[float] = typer.Option(None, "--disk-gb-min", help="Minimum slice disk (GB)."),
         region: Optional[str] = typer.Option(None, "--region", help="Filter by region."),
         virtualization_type: Optional[str] = typer.Option(
             None, "--virt", help="Virtualization mode (bare_metal|vm|container).",
         ),
         # Spec filters — host context
         cpu_type: Optional[str] = typer.Option(None, "--cpu-type", help="Filter by host CPU model string."),
-        host_cpu_cores_min: Optional[int] = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
-        host_ram_gb_min: Optional[int] = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
+        host_cpu_cores_min: Optional[float] = typer.Option(None, "--host-cores-min", help="Minimum host CPU cores."),
+        host_ram_gb_min: Optional[float] = typer.Option(None, "--host-ram-gb-min", help="Minimum host RAM (GB)."),
         gpu_interconnect: Optional[str] = typer.Option(
             None, "--interconnect", help="GPU interconnect (nvlink|nvswitch|pcie_only|infiniband).",
         ),
@@ -299,9 +301,16 @@ def register(app: typer.Typer) -> None:
                  "appended to so `market logs show <id>` captures the "
                  "full lifecycle.",
         ),
-        registry_url: Optional[str] = typer.Option(
-            None, "--registry-url",
-            help="Registry base URL (default: registry.url from config.toml).",
+        registry_urls: Optional[str] = typer.Option(
+            None, "--registry-urls",
+            help="Comma-separated registry base URLs (default: "
+                 "registry.urls from config.toml). Discovery is the "
+                 "union across all listed registries, deduped by listing_id.",
+        ),
+        discovery_timeout: Optional[float] = typer.Option(
+            None, "--discovery-timeout",
+            help="Per-registry deadline in seconds (default: "
+                 "registry.discovery_timeout from config.toml, fallback 5).",
         ),
         token_contract: Optional[str] = typer.Option(
             None, "--token-contract",
@@ -335,8 +344,9 @@ def register(app: typer.Typer) -> None:
             None, "--aggregate-by",
             help="Across-seller aggregation policy. Default: "
                  "[buyer.aggregation].policy from config.toml, falling "
-                 "back to 'cheapest_first'. Built-ins: cheapest_first, "
-                 "registry_order, random_shuffle, priceless_last.",
+                 "back to 'best_price'. Built-ins: best_price, "
+                 "fastest_agreed, cheapest_first, registry_order, "
+                 "random_shuffle, priceless_last.",
         ),
         max_rounds: int = typer.Option(
             10, "--max-rounds",
@@ -427,11 +437,14 @@ def register(app: typer.Typer) -> None:
         pk = resolve_config_value(
             override=buyer_private_key, toml_path="wallet.private_key",
         )
-        from ..common import resolve_ssh_public_key
-        ssh = resolve_ssh_public_key(override=ssh_public_key)
-        reg = resolve_config_value(
-            override=registry_url, toml_path="registry.url",
+        from ..common import (
+            resolve_ssh_public_key, resolve_indexer_urls,
+            resolve_discovery_timeout, resolve_indexer_auth,
         )
+        ssh = resolve_ssh_public_key(override=ssh_public_key)
+        reg_urls = resolve_indexer_urls(override=registry_urls)
+        deadline = resolve_discovery_timeout(override=discovery_timeout)
+        reg_auth = resolve_indexer_auth()
         rpc = resolve_config_value(
             override=rpc_url, toml_path="chain.rpc_url",
         )
@@ -448,12 +461,12 @@ def register(app: typer.Typer) -> None:
             "buyer_address": "wallet.address",
             "buyer_priv_key": "wallet.private_key",
             "ssh_public_key": "wallet.ssh_public_key",
-            "registry_url": "registry.url",
+            "registry_urls": "registry.urls",
             "rpc_url": "chain.rpc_url",
         }
         missing = [n for n, v in (
             ("buyer_address", addr), ("buyer_priv_key", pk),
-            ("ssh_public_key", ssh), ("registry_url", reg),
+            ("ssh_public_key", ssh), ("registry_urls", reg_urls),
             ("rpc_url", rpc),
         ) if not v]
         if missing:
@@ -469,36 +482,51 @@ def register(app: typer.Typer) -> None:
             )
             raise typer.Exit(2)
 
-        # Resolve token contract if not explicitly given. Deferred import
-        # so users without the token registry file can still pass --token-contract.
         tc = token_contract
         if not tc:
-            from ..common import resolve_default_token
-            symbol = resolve_default_token()
-            try:
-                from service.clients.token import TOKEN_REGISTRY
-                meta = TOKEN_REGISTRY.require(symbol)
-                tc = meta.contract_address
-                token_decimals = meta.decimals
-            except Exception as exc:
+            from ..common import resolve_default_token_address, resolve_chain_id
+            tc = resolve_default_token_address()
+            if not tc:
                 typer.secho(
-                    f"Could not resolve default token {symbol!r} — pass "
-                    f"--token-contract and --token-decimals, or set "
-                    f"[buyer].default_token in config.toml. ({exc})",
+                    "No --token-contract given and [buyer].default_token_address "
+                    "is unset in config.toml.",
+                    err=True, fg=typer.colors.RED,
+                )
+                raise typer.Exit(2)
+            from service.clients.token import resolve_token, TokenResolutionError
+            try:
+                meta = resolve_token(
+                    tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
+                )
+                token_decimals = meta.decimals
+            except (TokenResolutionError, RuntimeError) as exc:
+                typer.secho(
+                    f"Could not resolve token {tc} on chain — pass "
+                    f"--token-decimals or check chain.rpc_url. ({exc})",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
 
-        # Build the escrow hook.
-        from ..escrow_client import make_create_escrow_fn
+        # Build the escrow-terms builder + on-chain submit hook. The
+        # builder materializes the negotiation outcome into EscrowTerms
+        # (today: one buyer-made ERC20 escrow); the hook submits each
+        # buyer-made entry on-chain. Both are env-config-closed at this
+        # layer so the orchestrator doesn't see chain creds.
+        from ..escrow_client import (
+            make_buyer_payment_escrow_terms_fn,
+            make_create_escrow_fn,
+        )
+        # Token + expiration come from the proposal (echoed by the seller).
+        # The closure only needs chain config to resolve on-chain addresses.
+        build_escrow_terms = make_buyer_payment_escrow_terms_fn(
+            chain_name=chain,
+            addr_config_path=addr_cfg or None,
+        )
         create_escrow = make_create_escrow_fn(
             private_key=pk,
             rpc_url=rpc,
             chain_name=chain,
             addr_config_path=addr_cfg or None,
-            token_contract_address=tc,
-            token_decimals=token_decimals,
-            expiration_seconds=expiration_seconds,
         )
 
         # Filter-aware discovery: pre-fetch matches with spec filters applied
@@ -521,7 +549,10 @@ def register(app: typer.Typer) -> None:
         }
         active_filters = {k: v for k, v in spec_filters.items() if v is not None}
         try:
-            matches = query_registry_for_matches(reg, filters=active_filters or None)
+            matches = query_registry_for_matches_multi(
+                reg_urls, timeout=deadline,
+                filters=active_filters or None, auth=reg_auth,
+            )
         except RuntimeError as exc:
             typer.secho(f"Registry query failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
@@ -554,23 +585,53 @@ def register(app: typer.Typer) -> None:
             toml_path="buyer.aggregation.policy",
         ) or None
 
+        # Counter policy is config-only — no CLI flag yet. Strict_echo
+        # default rejects any seller modification to a buyer-pinned field;
+        # operators who want to accept counters set the TOML key.
+        counter_policy = resolve_config_value(
+            toml_path="buyer.counter_policy.policy",
+        ) or None
+
         config = BuyConfig(
-            registry_url=reg,
+            registry_urls=reg_urls,
             buyer_address=addr,
             buyer_private_key=pk,
-            ssh_public_key=ssh,
+            discovery_timeout=deadline,
+            indexer_auth=reg_auth,
             aggregation_policy=aggregation_policy,
+            counter_policy=counter_policy,
         )
         constraints = BuyConstraints(
             max_price=max_price,
             initial_price=initial_price,
+        )
+        provision = ProvisionTerms(
             duration_seconds=duration_seconds,
+            ssh_public_key=ssh,
+        )
+        # Buyer's escrow shape proposal — picks the canonical
+        # ERC20 non-tierable escrow on the configured chain and fills
+        # fields["token"] with the resolved token contract.
+        # The seller validates against its listing's accepted_escrows
+        # set; today that's the same single shape per listing.
+        import time as _time
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
+        _escrow_addr = get_erc20_escrow_obligation_nontierable(
+            chain, config_path=addr_cfg or None,
+        )
+        escrow_proposal = EscrowProposal(
+            chain_name=chain,
+            escrow_address=_escrow_addr,
+            fields={"token": tc},
+            expiration_unix=int(_time.time()) + int(expiration_seconds),
         )
 
         run_log = RunLog.start(
             command="market buy",
             buyer_address=addr,
-            registry_url=reg,
+            registry_urls=reg_urls,
             initial_price=initial_price,
             max_price=max_price,
             duration_seconds=duration_seconds,
@@ -583,7 +644,7 @@ def register(app: typer.Typer) -> None:
         header.add_column(style="bold")
         header.add_column()
         header.add_row("Run ID", run_log.run_id)
-        header.add_row("Registry", reg)
+        header.add_row("Registries", ", ".join(reg_urls))
         header.add_row("Buyer wallet", addr)
         header.add_row("Opening bid / ceiling", f"{initial_price} / {max_price}")
         header.add_row("Max matches", str(max_matches))
@@ -635,10 +696,23 @@ def register(app: typer.Typer) -> None:
                     terms=terms, listing=listing, console=console,
                 )
 
+        # Honor [buyer.negotiation].policy_mode from config (mirrors
+        # `market negotiate`). Without this, the buyer falls through to
+        # the RL strategy default, which needs torch — not installed in
+        # the lean buyer wheel.
+        strategy = None
+        policy_mode = resolve_config_value(toml_path="buyer.negotiation.policy_mode")
+        if policy_mode:
+            from market_policy.negotiation_strategy import load_strategy
+            strategy = load_strategy(policy_mode)
+
         try:
             result = run_buy(
                 config=config,
                 constraints=constraints,
+                provision=provision,
+                escrow_proposal=escrow_proposal,
+                build_escrow_terms=build_escrow_terms,
                 create_escrow=create_escrow,
                 matches=matches,
                 max_matches_to_try=max_matches,
@@ -647,6 +721,7 @@ def register(app: typer.Typer) -> None:
                 settlement_total_timeout=settlement_timeout,
                 on_event=_observe,
                 confirm_settlement=confirm_settlement_cb,
+                strategy=strategy,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))
@@ -659,7 +734,7 @@ def register(app: typer.Typer) -> None:
             negotiation_id=result.negotiation_id,
             agreed_price=result.agreed_price,
             escrow_uid=result.escrow_uid,
-            attestation_uid=result.attestation_uid,
+            fulfillment_uid=result.fulfillment_uid,
             reason=result.reason,
         )
 
@@ -673,7 +748,7 @@ def register(app: typer.Typer) -> None:
             ("Negotiation", result.negotiation_id),
             ("Agreed price", result.agreed_price),
             ("Escrow UID", result.escrow_uid),
-            ("Attestation", result.attestation_uid),
+            ("Fulfillment UID", result.fulfillment_uid),
             ("Reason", result.reason),
         ):
             if val:

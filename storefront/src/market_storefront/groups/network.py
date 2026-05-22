@@ -25,8 +25,8 @@ def network_join(
 ) -> None:
     """Join a ZeroTier network."""
     if not network_id:
-        from ..utils.config import CONFIG
-        network_id = CONFIG.zerotier_network
+        from ..utils.config import settings
+        network_id = settings.zerotier_network
     if not network_id:
         typer.secho(
             "No network_id provided and seller.zerotier_network is not set in config.toml. "

@@ -19,7 +19,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..common import resolve_config_value
-from ..buy_orchestrator import fetch_listing_dict
 from ..buyer_client import ResumeState, negotiate_with_seller
 from ..run_log import RunLog
 from ._cli_helpers import resolve_prices_from_matches
@@ -42,17 +41,24 @@ def register(app: typer.Typer) -> None:
             help="The seller's listing_id. Required for fresh runs; "
                  "resumed runs (--from) read it from the run-log.",
         ),
-        registry_url: Optional[str] = typer.Option(
-            None, "--registry-url",
-            help="Registry base URL (default: registry.url from config.toml). "
-                 "Used to resolve the seller URL and price floor from a listing_id.",
+        registry_urls: Optional[str] = typer.Option(
+            None, "--registry-urls",
+            help="Comma-separated registry base URLs (default: "
+                 "registry.urls from config.toml). Used to resolve the "
+                 "seller URL and price floor from a listing_id; the "
+                 "first registry that knows the listing wins.",
         ),
-        initial_price: Optional[int] = typer.Option(
+        discovery_timeout: Optional[float] = typer.Option(
+            None, "--discovery-timeout",
+            help="Per-registry deadline in seconds (default: "
+                 "registry.discovery_timeout from config.toml, fallback 5).",
+        ),
+        initial_price: Optional[float] = typer.Option(
             None, "--initial-price",
             help="Opening bid in raw token units. Optional — when omitted, "
                  "anchored on the listing's advertised min_price.",
         ),
-        max_price: Optional[int] = typer.Option(
+        max_price: Optional[float] = typer.Option(
             None, "--max-price",
             help="Ceiling — accept any seller counter at or under this. "
                  "Optional — when omitted, derived as min_price * --price-markup. "
@@ -99,7 +105,7 @@ def register(app: typer.Typer) -> None:
             help="Payment token contract address. Logged for downstream "
                  "`market settle` / `escrow create`.",
         ),
-        token_decimals: Optional[int] = typer.Option(
+        token_decimals: Optional[float] = typer.Option(
             None, "--token-decimals",
             help="Payment token decimals. Logged for downstream "
                  "`market settle` / `escrow create`.",
@@ -148,25 +154,32 @@ def register(app: typer.Typer) -> None:
                 rounds_completed=resume_point.rounds_completed,
             )
 
-        # Resolve registry URL once; used to look up the listing if --seller
-        # or prices weren't passed.
-        reg = resolve_config_value(
-            override=registry_url, toml_path="registry.url",
-        ) or "http://localhost:8080"
+        # Resolve registry URLs + per-registry deadline + auth once.
+        from ..common import (
+            resolve_indexer_urls, resolve_discovery_timeout, resolve_indexer_auth,
+        )
+        reg_urls = resolve_indexer_urls(override=registry_urls)
+        deadline = resolve_discovery_timeout(override=discovery_timeout)
+        reg_auth = resolve_indexer_auth()
 
-        # Auto-resolve --seller from the registry given --listing-id.
+        # Auto-resolve --seller from the registries given --listing-id.
+        # First registry that knows the listing wins.
         if listing_id and not seller_url:
+            from ..buy_orchestrator import fetch_listing_dict_multi
             try:
-                listing_dict = fetch_listing_dict(reg, listing_id)
+                listing_dict = fetch_listing_dict_multi(
+                    reg_urls, listing_id, timeout=deadline, auth=reg_auth,
+                )
             except RuntimeError as exc:
                 typer.secho(
-                    f"Could not fetch listing {listing_id} from {reg}: {exc}",
+                    f"Could not fetch listing {listing_id}: {exc}",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
             if not listing_dict:
                 typer.secho(
-                    f"No listing {listing_id!r} on registry {reg}.",
+                    f"No listing {listing_id!r} in any of "
+                    f"{len(reg_urls)} registries.",
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
@@ -285,6 +298,54 @@ def register(app: typer.Typer) -> None:
                 str(reply.get("price", "-")),
             )
 
+        # Build provision + escrow proposal for the negotiate request.
+        # The standalone `market negotiate` subcommand doesn't reach
+        # settlement, so the escrow proposal is largely a formality
+        # (the seller still validates it). Resume mode skips the
+        # round-0 send and these fields are ignored.
+        from service.schemas import EscrowProposal, ProvisionTerms
+        from service.clients.alkahest import (
+            get_erc20_escrow_obligation_nontierable,
+        )
+        import time as _time
+        provision_terms: Optional[ProvisionTerms] = None
+        escrow_proposal: Optional[EscrowProposal] = None
+        if resume_state is None:
+            assert duration_seconds is not None  # gated above
+            provision_terms = ProvisionTerms(
+                duration_seconds=int(duration_seconds),
+                ssh_public_key="",  # negotiate-only flow; settle is a separate command
+            )
+            _chain = resolve_config_value(
+                toml_path="chain.name", default="ethereum_sepolia",
+            )
+            _addr_cfg = resolve_config_value(
+                toml_path="chain.alkahest_address_config_path",
+            )
+            _escrow_addr = get_erc20_escrow_obligation_nontierable(
+                _chain, config_path=_addr_cfg or None,
+            )
+            escrow_proposal = EscrowProposal(
+                chain_name=_chain,
+                escrow_address=_escrow_addr,
+                fields={"token": token_contract or ("0x" + "0" * 40)},
+                expiration_unix=int(_time.time()) + 3600,
+            )
+
+        # Honor an optional [buyer.negotiation].policy_mode override in
+        # config.toml, mirroring the seller's [seller.negotiation]
+        # policy_mode knob. The buyer wheel installs without torch by
+        # default — set "bisection" to avoid the RL self-register path
+        # blowing up. When unset, falls through to negotiate_with_seller's
+        # own DEFAULT_STRATEGY behavior.
+        strategy = None
+        policy_mode = resolve_config_value(
+            toml_path="buyer.negotiation.policy_mode",
+        )
+        if policy_mode:
+            from market_policy.negotiation_strategy import load_strategy
+            strategy = load_strategy(policy_mode)
+
         try:
             outcome = negotiate_with_seller(
                 seller_url=seller_url,
@@ -293,10 +354,12 @@ def register(app: typer.Typer) -> None:
                 listing_id=listing_id,
                 initial_price=initial_price or 0,
                 max_price=max_price,
-                duration_seconds=duration_seconds,
+                provision_terms=provision_terms,
+                escrow_proposal=escrow_proposal,
                 max_rounds=max_rounds,
                 on_round=_observe,
                 resume=resume_state,
+                strategy=strategy,
             )
         except RuntimeError as exc:
             run_log.end("error", error=str(exc))

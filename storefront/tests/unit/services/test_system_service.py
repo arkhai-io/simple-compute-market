@@ -39,14 +39,6 @@ def _make_service(db: SQLiteClient, registry: dict | None = None) -> SystemServi
 
 
 OFFER = {"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"}
-DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 18,
-    },
-    "amount": 10_000,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -134,28 +126,22 @@ class TestGetPolicyStatus:
 OFFER = {
     "gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US",
 }
-DEMAND = {
-    "token": {
-        "symbol": "MOCK",
-        "contract_address": "0x0000000000000000000000000000000000000001",
-        "decimals": 0,
-    },
-    "amount": 5000,
-}
+ACCEPTED_ESCROWS = [{
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": "0x0000000000000000000000000000000000000001"},
+    "price_per_hour": 5000,
+}]
 
 
 def _make_policy_service(db, registry=None):
     from market_policy.registry import CALLABLE_REGISTRY
     from market_storefront.services.policy_service import PolicyService
-    from unittest.mock import MagicMock
-    config = MagicMock()
-    config.base_url_override = ""
-    config.agent_id = "test-agent"
     if registry is not None:
         CALLABLE_REGISTRY.clear()
         CALLABLE_REGISTRY.update(registry)
     return PolicyService(
-        sqlite_client=db, alkahest_client=None, config=config, agent_id="test-agent",
+        sqlite_client=db, alkahest_client=None, agent_id="test-agent",
     )
 
 
@@ -165,7 +151,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         from market_storefront.models.system_models import PolicyEvaluateResponse
         svc = _make_policy_service(db)
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND, policy_components=[],
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS, policy_components=[],
         )
         assert isinstance(result, PolicyEvaluateResponse)
         assert result.action == "no_action"
@@ -177,7 +163,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         from market_storefront.models.system_models import PolicyEvaluateResponse
         svc = _make_policy_service(db, {})  # empty registry
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND,
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS,
             policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)
@@ -190,7 +176,7 @@ class TestEvaluateListingCreatePolicyFromRaw:
         svc = _make_policy_service(db)
         with pytest.raises((ValueError, Exception)):
             await svc.evaluate_listing_create_policy_from_raw(
-                offer_raw={"not_a_valid_resource": True}, demand_raw=DEMAND,
+                offer_raw={"not_a_valid_resource": True}, accepted_escrows=ACCEPTED_ESCROWS,
                 policy_components=["oc.action.make_offer_from_order_create"],
             )
 
@@ -206,14 +192,14 @@ class TestEvaluateListingCreatePolicyFromRaw:
             if isinstance(context.event, ListingCreatedEvent):
                 return DomainAction(
                     action_type=ActionType.MAKE_OFFER,
-                    parameters={"offer": OFFER, "demand": DEMAND,
+                    parameters={"offer": OFFER, "accepted_escrows": ACCEPTED_ESCROWS,
                                 "max_duration_seconds": None, "paused": False},
                 )
             return None
         registry = {"oc.action.make_offer_from_order_create": _fake_make_offer}
         svc = _make_policy_service(db, registry)
         result = await svc.evaluate_listing_create_policy_from_raw(
-            offer_raw=OFFER, demand_raw=DEMAND,
+            offer_raw=OFFER, accepted_escrows=ACCEPTED_ESCROWS,
             policy_components=["oc.action.make_offer_from_order_create"],
         )
         assert isinstance(result, PolicyEvaluateResponse)
@@ -298,7 +284,7 @@ class TestSeedResourcesIfEmpty:
         )
 
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(str(csv_file))
+        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
 
         assert result["seeded"] is False
         # imported_count reflects what was already there, not a new import.
@@ -323,13 +309,13 @@ class TestSeedResourcesIfEmpty:
             "attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
             "attribute.disk_gb,attribute.virtualization_type\n"
             "compute-test-001,compute.gpu,rtx5080,count,1,available,"
-            "150,MOCK,,"
-            "RTX 5080,90.0,\"California, US\","
+            "150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,"
+            'RTX 5080,90.0,"California, US",'
             "ww1,16,256,4000,bare_metal\n"
         )
 
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(str(csv_file))
+        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
 
         assert result["seeded"] is True
         assert result["imported_count"] == 1
@@ -338,10 +324,54 @@ class TestSeedResourcesIfEmpty:
         assert len(resources) == 1
         assert resources[0]["resource_id"] == "compute-test-001"
 
-    async def test_empty_csv_path_returns_not_seeded(self, db):
-        """Empty csv_path string skips seeding and returns seeded=False."""
+    async def test_seeds_from_inline_content(self, db):
+        """When csv_inline is provided, it is imported without touching the filesystem."""
+        csv_content = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
+            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+        )
         svc = _make_service(db)
-        result = await svc.seed_resources_if_empty("")
+        result = await svc.seed_resources_if_empty(csv_inline=csv_content)
+
+        assert result["seeded"] is True
+        assert result["imported_count"] == 1
+        resources = await db.list_resources()
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-inline-001"
+
+    async def test_inline_takes_priority_over_path(self, db, tmp_path):
+        """csv_inline is used when both inline and path are provided."""
+        csv_file = tmp_path / "resources.csv"
+        csv_file.write_text(
+            "resource_id,resource_type,state\n"
+            "compute-path-001,compute.gpu,available\n"
+        )
+        csv_content = (
+            "resource_id,resource_type,resource_subtype,unit,value,state,"
+            "min_price,token,max_duration_seconds,"
+            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
+            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
+            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
+            'RTX 5080,90.0,"California, US",ww1\n'
+        )
+        svc = _make_service(db)
+        result = await svc.seed_resources_if_empty(
+            csv_inline=csv_content, csv_path=str(csv_file)
+        )
+        assert result["seeded"] is True
+        resources = await db.list_resources()
+        # Only the inline row should be present.
+        assert len(resources) == 1
+        assert resources[0]["resource_id"] == "compute-inline-001"
+
+    async def test_empty_csv_path_returns_not_seeded(self, db):
+        """Neither source configured skips seeding and returns seeded=False."""
+        svc = _make_service(db)
+        result = await svc.seed_resources_if_empty()
         assert result["seeded"] is False
         assert result["imported_count"] == 0
 
@@ -349,4 +379,109 @@ class TestSeedResourcesIfEmpty:
         """A configured but missing CSV path raises FileNotFoundError."""
         svc = _make_service(db)
         with pytest.raises(FileNotFoundError):
-            await svc.seed_resources_if_empty("/nonexistent/path/resources.csv")
+            await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")
+
+
+# ---------------------------------------------------------------------------
+# wait_for_registry_agent — transient retry behaviour
+# ---------------------------------------------------------------------------
+
+class TestWaitForRegistryAgent:
+    """Verify that wait_for_registry_agent retries past transient states
+    and exits immediately on definitive states.
+
+    Regression guard: 'timeout' and 'unreachable' were previously treated
+    as definitive, causing the e2e stage 03c to fail with registry_auth='timeout'
+    after a single 2-second HTTP probe that hit a slow registry at startup.
+    """
+
+    def _make_svc(self, db) -> SystemService:
+        return SystemService(
+            sqlite_client=db,
+            agent_id="test-agent",
+            callable_registry={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_returns_ok_immediately_when_check_succeeds(self, db):
+        svc = self._make_svc(db)
+        with patch.object(svc, "registry_auth_check", new=AsyncMock(return_value="ok")):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_retries_past_agent_not_found(self, db):
+        """agent_not_found is the normal indexing-lag state — must be retried."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "agent_not_found"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_retries_past_timeout(self, db):
+        """timeout is a transient network condition — must be retried, not treated as definitive."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "timeout"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_retries_past_unreachable(self, db):
+        """unreachable is a transient connectivity state — must be retried."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "ok" if call_count >= 2 else "unreachable"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "ok"
+        assert call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_exits_immediately_on_owner_mismatch(self, db):
+        """owner_mismatch is definitive — exit without retrying."""
+        svc = self._make_svc(db)
+        call_count = 0
+
+        async def _probe():
+            nonlocal call_count
+            call_count += 1
+            return "owner_mismatch"
+
+        with patch.object(svc, "registry_auth_check", new=_probe):
+            result = await svc.wait_for_registry_agent(timeout=5.0)
+        assert result["ready"] is True
+        assert result["registry_auth"] == "owner_mismatch"
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_ready_false_on_timeout(self, db):
+        """All pending states until timeout → ready=False with last seen value."""
+        svc = self._make_svc(db)
+        with patch.object(svc, "registry_auth_check", new=AsyncMock(return_value="agent_not_found")):
+            result = await svc.wait_for_registry_agent(timeout=0.1)
+        assert result["ready"] is False

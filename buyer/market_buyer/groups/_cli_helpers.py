@@ -59,7 +59,7 @@ def resolve_prices_from_matches(
     # in practice a free listing with non-zero ceiling means the buyer is
     # willing to pay if the seller counters, but won't be surprised by
     # a non-zero accept.
-    derived_max = max(int(round(cheapest * price_markup)), cheapest + 1)
+    derived_max = max(cheapest * price_markup, cheapest + 1)
 
     interactive = (not assume_yes) and os.isatty(0)
     if not interactive:

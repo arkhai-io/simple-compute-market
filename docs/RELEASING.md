@@ -22,13 +22,13 @@ For each package, configure trusted publishing on PyPI:
 2. Go to `https://pypi.org/manage/project/<pkg>/settings/publishing/`.
 3. Add a "GitHub Actions" trusted publisher with:
    - **Owner**: `arkhai-io`
-   - **Repository**: `simple-market-service`
+   - **Repository**: `simple-compute-market`
    - **Workflow**: `publish-pypi.yml`
    - **Environment**: `pypi-<pkg>` — e.g. `pypi-market-service`,
      `pypi-arkhai-storefront-client`, etc. (matches `environment.name`
      in the workflow).
 4. Create the matching environment in this repo at
-   `https://github.com/arkhai-io/simple-market-service/settings/environments`.
+   `https://github.com/arkhai-io/simple-compute-market/settings/environments`.
    Default environment settings are fine — we don't restrict the deployer.
 
 ## Cutting a release

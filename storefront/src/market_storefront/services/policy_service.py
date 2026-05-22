@@ -43,10 +43,13 @@ from market_storefront.models.domain_models import (
     EventType,  # retained for future callers; not used in evaluate path
     ListingClosedEvent,
     ListingCreatedEvent,
+    NegotiationRequestedEvent,
     ResourceAlertRequest,
 )
+from service.schemas import ActionType as DomainActionType
 from market_storefront.models.system_models import PolicyEvaluateResponse
 from market_storefront.policy.seeding import ComputePolicySeeder
+from market_storefront.utils.config import BASE_URL_OVERRIDE
 from market_storefront.utils.action_executor import (
     _sender_id,
     close_order,
@@ -65,10 +68,9 @@ logger = logging.getLogger(__name__)
 class PolicyService:
     """Stateful singleton — constructed once at lifespan startup."""
 
-    def __init__(self, *, sqlite_client, alkahest_client, config, agent_id: str) -> None:
+    def __init__(self, *, sqlite_client, alkahest_client, agent_id: str) -> None:
         self._db = sqlite_client
         self._alkahest = alkahest_client
-        self._config = config
         self._agent_id = agent_id
 
         self._policy_store = PolicyStore(sqlite_client)
@@ -84,7 +86,7 @@ class PolicyService:
         )
         self._policy_manager.initialize()
 
-        base_url = config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         get_thread_store(
             sqlite_client=sqlite_client,
             identity=Identity(agent_url=base_url, agent_id=agent_id),
@@ -97,7 +99,7 @@ class PolicyService:
     async def evaluate_create_listing_policy(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> str:
@@ -105,7 +107,9 @@ class PolicyService:
 
         Returns the action_type string e.g. "make_offer" | "no_action".
         """
-        event = self._build_listing_created_event(offer, demand, max_duration_seconds, paused)
+        event = self._build_listing_created_event(
+            offer, accepted_escrows, max_duration_seconds, paused
+        )
         action = await self._consult_policy(event)
         if not action:
             return "no_action"
@@ -118,7 +122,7 @@ class PolicyService:
     async def execute_create_listing(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> str | None:
@@ -127,7 +131,9 @@ class PolicyService:
         Returns the listing_id on success, or None if creation failed.
         Records the decision for experience learning.
         """
-        event = self._build_listing_created_event(offer, demand, max_duration_seconds, paused)
+        event = self._build_listing_created_event(
+            offer, accepted_escrows, max_duration_seconds, paused
+        )
         action = await self._consult_policy(event)
         if not action:
             logger.warning("[POLICY] No action for create listing event %s", event.event_id)
@@ -174,20 +180,66 @@ class PolicyService:
         return outcome.get("result", {"status": "closed", "listing_id": listing_id})
 
     # ------------------------------------------------------------------
+    # Pre-thread negotiation guards
+    # ------------------------------------------------------------------
+
+    async def consult_pre_negotiation_guards(
+        self,
+        *,
+        listing_id: str,
+        listing: dict[str, Any],
+        proposed_price: float | None,
+        requested_duration_seconds: int | None,
+        escrow_proposal: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Run the seeded negotiate-request policy and return a rejection
+        reason on veto, or ``None`` to let the negotiation proceed.
+
+        Called by ``sync_negotiation`` before any thread state mutates.
+        The policy composite (default ``negotiate_request.default.v1``)
+        chains guard callables; the first one that returns
+        ``REJECT_OFFER`` wins, and its ``parameters["reason"]`` becomes
+        the rejection reason — translated to HTTP 409
+        (``OfferUnfulfillableError``) by the caller.
+
+        Operators who want different gating (e.g. accept all requests
+        for a futures-deal flow, or add per-buyer trust checks) edit the
+        policy composite's components list — no code changes needed.
+        """
+        event = NegotiationRequestedEvent(
+            event_id=f"negotiate_request_{uuid.uuid4()}",
+            source=BASE_URL_OVERRIDE or "",
+            listing_id=listing_id,
+            listing=listing,
+            proposed_price=proposed_price,
+            requested_duration_seconds=requested_duration_seconds,
+            escrow_proposal=escrow_proposal,
+        )
+        action = await self._consult_policy(event)
+        if action is None:
+            return None
+        action_type = action.action_type
+        action_value = action_type.value if hasattr(action_type, "value") else str(action_type)
+        if action_value == DomainActionType.REJECT_OFFER.value:
+            reason = (action.parameters or {}).get("reason")
+            return str(reason) if reason else "rejected"
+        return None
+
+    # ------------------------------------------------------------------
     # Policy dry-run from raw dicts (for /api/v1/system/policy/evaluate)
     # ------------------------------------------------------------------
 
     async def evaluate_listing_create_policy_from_raw(
         self,
         offer_raw: dict,
-        demand_raw: dict,
+        accepted_escrows: list[dict[str, Any]] | None,
         max_duration_seconds: int | None = None,
         policy_components: list[str] | None = None,
     ) -> PolicyEvaluateResponse:
-        """Dry-run a listing creation policy evaluation from raw offer/demand dicts.
+        """Dry-run a listing creation policy evaluation from raw offer + escrows.
 
-        Parses resources, builds the event, checks that every component in
-        ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
+        Parses the offer resource, builds the event, checks that every component
+        in ``policy_components`` is present in ``CALLABLE_REGISTRY``, then runs
         the callable pipeline.  No DB lookup is performed — this is a pure
         data operation.  The caller is responsible for supplying the component
         names (e.g. read from ``GET /api/v1/system/policy`` after seeding).
@@ -205,12 +257,14 @@ class PolicyService:
 
         try:
             offer_resource = parse_resource_from_dict(offer_raw)
-            demand_resource = parse_resource_from_dict(demand_raw)
         except Exception as exc:
-            raise ValueError(f"Invalid offer/demand resource: {exc}") from exc
+            raise ValueError(f"Invalid offer resource: {exc}") from exc
 
         event = self._build_listing_created_event(
-            offer_resource, demand_resource, max_duration_seconds, paused=False
+            offer_resource,
+            list(accepted_escrows or []),
+            max_duration_seconds,
+            paused=False,
         )
 
         unresolvable = [c for c in policy_components if c not in CALLABLE_REGISTRY]
@@ -288,22 +342,22 @@ class PolicyService:
     def _build_listing_created_event(
         self,
         offer: Any,
-        demand: Any,
+        accepted_escrows: list[dict[str, Any]],
         max_duration_seconds: int | None,
         paused: bool,
     ) -> ListingCreatedEvent:
-        base_url = self._config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         return ListingCreatedEvent(
             event_id=f"listing_create_{uuid.uuid4()}",
             source=base_url,
             offer=offer,
-            demand=demand,
+            accepted_escrows=accepted_escrows,
             max_duration_seconds=max_duration_seconds,
             data={"paused": paused},
         )
 
     def _build_listing_closed_event(self, listing_id: str) -> ListingClosedEvent:
-        base_url = self._config.base_url_override or ""
+        base_url = BASE_URL_OVERRIDE or ""
         return ListingClosedEvent(
             event_id=f"listing_close_{uuid.uuid4()}",
             source=base_url,

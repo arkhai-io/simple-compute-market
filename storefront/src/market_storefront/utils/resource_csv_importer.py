@@ -113,6 +113,13 @@ def _build_db_resource_from_csv_row(row: dict[str, Any]) -> dict[str, Any]:
     state_raw = _clean_cell(row.get("state"))
     min_price_raw = _clean_cell(row.get("min_price"))
     token_raw = _clean_cell(row.get("token"))
+    if token_raw:
+        if not token_raw.startswith("0x") or len(token_raw) != 42:
+            raise ValueError(
+                f"Invalid token {token_raw!r} — the `token` column must be "
+                f"a 0x ERC-20 address. Symbol shorthand (e.g. 'USDC') is "
+                f"no longer supported."
+            )
     max_duration_seconds_raw = _clean_cell(row.get("max_duration_seconds"))
 
     value: int | float | None = None
@@ -166,66 +173,91 @@ async def upsert_resources_from_csv(
     if not path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    report = ImportReport(csv_path=str(path), dry_run=dry_run)
-
     with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        fieldnames = set(reader.fieldnames or [])
-        missing = {"resource_type"} - fieldnames
-        if missing:
-            raise ValueError(f"CSV missing required columns: {sorted(missing)}")
+        content = f.read()
 
-        for i, raw_row in enumerate(reader, start=2):
-            report.total_rows += 1
-            row_result = ImportRowResult(
-                row_number=i,
-                resource_id=None,
-                resource_type=None,
-                imported=False,
-                schema_status="invalid",
-            )
-            try:
-                db_resource = _build_db_resource_from_csv_row(raw_row)
-                row_result.resource_id = str(db_resource["resource_id"])
-                row_result.resource_type = str(db_resource["resource_type"])
+    return await upsert_resources_from_csv_content(
+        csv_content=content,
+        source_label=str(path),
+        sqlite_client=sqlite_client,
+        dry_run=dry_run,
+    )
 
-                adapter = get_resource_adapter(str(db_resource["resource_type"]))
-                if adapter is not None:
-                    # Schema recognized: validate by adapting into domain model.
-                    adapter.to_domain_resource(db_resource)
-                    row_result.schema_status = "matched"
-                    report.matched_count += 1
-                else:
-                    # Schema unrecognized: permissive import.
-                    row_result.schema_status = "unrecognized"
-                    row_result.warnings.append(
-                        f"Unrecognized schema for resource_type '{db_resource['resource_type']}'. Imported permissively."
-                    )
-                    report.unrecognized_count += 1
 
-                if not dry_run:
-                    await sqlite_client.upsert_resource(
-                        resource_id=str(db_resource["resource_id"]),
-                        resource_type=str(db_resource["resource_type"]),
-                        resource_subtype=db_resource.get("resource_subtype"),
-                        unit=db_resource.get("unit"),
-                        value=db_resource.get("value"),
-                        state=db_resource.get("state"),
-                        attributes=db_resource.get("attributes"),
-                        min_price=db_resource.get("min_price"),
-                        token=db_resource.get("token"),
-                        max_duration_seconds=db_resource.get("max_duration_seconds"),
-                    )
-                else:
-                    row_result.warnings.append("Dry-run mode: row validated but not persisted.")
-                row_result.imported = True
-                report.imported_count += 1
-            except Exception as exc:
-                row_result.imported = False
-                row_result.schema_status = "invalid"
-                row_result.errors.append(str(exc))
-                report.failed_count += 1
-                report.invalid_count += 1
-            report.rows.append(row_result)
+async def upsert_resources_from_csv_content(
+    *,
+    csv_content: str,
+    source_label: str = "<inline>",
+    sqlite_client: "SQLiteClient",
+    dry_run: bool = False,
+) -> ImportReport:
+    """Import resources from a CSV string and upsert rows into the resources table.
+
+    Counterpart to ``upsert_resources_from_csv`` for content delivered via
+    config injection (e.g. the Helm ``resources_csv_inline`` setting) rather
+    than a file path baked into the container image.
+    """
+    import io
+
+    report = ImportReport(csv_path=source_label, dry_run=dry_run)
+
+    reader = csv.DictReader(io.StringIO(csv_content))
+    fieldnames = set(reader.fieldnames or [])
+    missing = {"resource_type"} - fieldnames
+    if missing:
+        raise ValueError(f"CSV missing required columns: {sorted(missing)}")
+
+    for i, raw_row in enumerate(reader, start=2):
+        report.total_rows += 1
+        row_result = ImportRowResult(
+            row_number=i,
+            resource_id=None,
+            resource_type=None,
+            imported=False,
+            schema_status="invalid",
+        )
+        try:
+            db_resource = _build_db_resource_from_csv_row(raw_row)
+            row_result.resource_id = str(db_resource["resource_id"])
+            row_result.resource_type = str(db_resource["resource_type"])
+
+            adapter = get_resource_adapter(str(db_resource["resource_type"]))
+            if adapter is not None:
+                # Schema recognized: validate by adapting into domain model.
+                adapter.to_domain_resource(db_resource)
+                row_result.schema_status = "matched"
+                report.matched_count += 1
+            else:
+                # Schema unrecognized: permissive import.
+                row_result.schema_status = "unrecognized"
+                row_result.warnings.append(
+                    f"Unrecognized schema for resource_type '{db_resource['resource_type']}'. Imported permissively."
+                )
+                report.unrecognized_count += 1
+
+            if not dry_run:
+                await sqlite_client.upsert_resource(
+                    resource_id=str(db_resource["resource_id"]),
+                    resource_type=str(db_resource["resource_type"]),
+                    resource_subtype=db_resource.get("resource_subtype"),
+                    unit=db_resource.get("unit"),
+                    value=db_resource.get("value"),
+                    state=db_resource.get("state"),
+                    attributes=db_resource.get("attributes"),
+                    min_price=db_resource.get("min_price"),
+                    token=db_resource.get("token"),
+                    max_duration_seconds=db_resource.get("max_duration_seconds"),
+                )
+            else:
+                row_result.warnings.append("Dry-run mode: row validated but not persisted.")
+            row_result.imported = True
+            report.imported_count += 1
+        except Exception as exc:
+            row_result.imported = False
+            row_result.schema_status = "invalid"
+            row_result.errors.append(str(exc))
+            report.failed_count += 1
+            report.invalid_count += 1
+        report.rows.append(row_result)
 
     return report

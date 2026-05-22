@@ -11,7 +11,7 @@ Tests focus on Pydantic validation, routing correctness, and DB interaction.
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -24,6 +24,7 @@ from market_storefront.middleware import buyer_auth
 from storefront_client import StorefrontClient, StorefrontClientError
 
 _BUYER = "0xBuyer00000000000000000000000000000000AB"  # 42 chars
+_TOKEN = "0x0000000000000000000000000000000000000001"
 
 
 @pytest_asyncio.fixture
@@ -39,23 +40,22 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
         offer_resource={"gpu_model": "H200", "gpu_count": 1, "sla": 99.9, "region": "California, US"},
-        demand_resource={
-            "token": {
-                "symbol": "MOCK",
-                "contract_address": "0x0000000000000000000000000000000000000001",
-                "decimals": 0,
-            },
-            "amount": demand_amount,
-        },
+        accepted_escrows=[{
+            "chain_name": "anvil",
+            "escrow_address": "0x" + "11" * 20,
+            "fields": {"token": _TOKEN},
+            "price_per_hour": demand_amount,
+        }],
         fulfillment_resource=None,
         max_duration_seconds=7200,
         seller="http://seller:8001",
     )
     # Seed at least one matching available compute resource so the
-    # seller's "refuse offers I can't fulfill" guard
-    # (sync_negotiation._has_matching_available_inventory) lets the
-    # negotiation start. Tests that want to exercise the refusal path
-    # should call _seed_listing without this fixture, or override.
+    # seller's pre-thread guard composite (default
+    # `negotiate_request.default.v1` → `negotiate.guard.has_matching_inventory`)
+    # lets the negotiation start. Tests that want to exercise the
+    # refusal path should call _seed_listing without this fixture, or
+    # override the composite's components list to drop the inventory guard.
     await db.upsert_resource(
         resource_id=f"res-{listing_id}",
         resource_type="compute.gpu",
@@ -75,13 +75,27 @@ async def _seed_listing(db, listing_id: str, demand_amount: int = 5000) -> None:
 async def client(db):
     import market_policy.negotiation_thread as _nt_module
     from market_policy.identity import Identity
+    from market_storefront.services.policy_service import PolicyService
 
     _nt_module._thread_store = None
     _nt_module.get_thread_store(
         sqlite_client=db,
         identity=Identity(agent_url="http://test-seller:8001"),
     )
+
+    config = MagicMock()
+    config.base_url_override = "http://test-seller:8001"
+    config.base_url_override_raw = "http://test-seller:8001"
+    config.agent_id = "test-agent"
+    config.agent_priv_key = ""
+    config.chain_rpc_url = ""
+
     _container.resolved_sqlite_client = db
+    _container.resolved_policy_service = PolicyService(
+        sqlite_client=db,
+        alkahest_client=None,
+        agent_id="test-agent",
+    )
 
     app = FastAPI()
     app.include_router(negotiate_router)
@@ -96,6 +110,7 @@ async def client(db):
             yield c, db
 
     _container.resolved_sqlite_client = None
+    _container.resolved_policy_service = None
 
 
 class TestNegotiateNew:
@@ -133,6 +148,7 @@ class TestNegotiateNew:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
+            token=_TOKEN,
         )
         assert "negotiation_id" in result
         assert result["action"] in ("accept", "counter", "exit")
@@ -195,14 +211,12 @@ class TestNegotiateNew:
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
-                    "decimals": 0,
-                },
-                "amount": 5000,
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"token": _TOKEN},
+                "price_per_hour": 5000,
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",
@@ -232,14 +246,12 @@ class TestNegotiateNew:
                 "gpu_model": "H200", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
-                    "decimals": 0,
-                },
-                "amount": None,  # hidden-reserve listing (distinct from amount=0 = free)
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"token": _TOKEN},
+                "price_per_hour": None,  # hidden reserve
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",
@@ -262,6 +274,7 @@ class TestNegotiateNew:
                 buyer_address=_BUYER,
                 initial_price=5000,
                 duration_seconds=3600,
+                token=_TOKEN,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -285,14 +298,12 @@ class TestNegotiateNew:
                 "gpu_model": "RTX 4090", "gpu_count": 1, "sla": 99.9,
                 "region": "California, US",
             },
-            demand_resource={
-                "token": {
-                    "symbol": "MOCK",
-                    "contract_address": "0x0000000000000000000000000000000000000001",
-                    "decimals": 0,
-                },
-                "amount": 5000,
-            },
+            accepted_escrows=[{
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"token": _TOKEN},
+                "price_per_hour": 5000,
+            }],
             fulfillment_resource=None,
             max_duration_seconds=7200,
             seller="http://seller:8001",
@@ -342,6 +353,7 @@ class TestNegotiateContinue:
             buyer_address=_BUYER,
             initial_price=5000,
             duration_seconds=3600,
+            token=_TOKEN,
         )
         if "negotiation_id" not in result:
             pytest.skip("Could not start negotiation")

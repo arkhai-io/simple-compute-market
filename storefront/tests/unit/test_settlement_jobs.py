@@ -1,7 +1,7 @@
 """Unit tests for the polling-mode settlement flow.
 
 Covers:
-- settlement_jobs table round-trip through SQLiteClient helpers.
+- escrows table round-trip through SQLiteClient helpers.
 - start_settlement_job: refuses missing thread, non-terminal thread,
   no-agreed-price thread, missing seller order.
 - Idempotence: second start on the same escrow_uid returns existing row.
@@ -12,12 +12,13 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from service.schemas import ProvisionTerms
 
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.utils.settlement_jobs import (
@@ -28,7 +29,7 @@ from market_storefront.utils.settlement_jobs import (
 
 
 # ---------------------------------------------------------------------------
-# SQLiteClient settlement_jobs helpers
+# SQLiteClient escrows helpers
 # ---------------------------------------------------------------------------
 
 
@@ -38,52 +39,85 @@ def client(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_insert_settlement_job_happy_path(client):
-    ok = await client.insert_settlement_job(
+async def test_insert_escrow_happy_path(client):
+    ok = await client.insert_escrow(
         escrow_uid="0xescrow-1",
         negotiation_id="neg-1",
+        chain_name="anvil",
+        escrow_address="0x" + "aa" * 20,
     )
     assert ok is True
-    row = await client.load_settlement_job(escrow_uid="0xescrow-1")
+    row = await client.load_escrow(escrow_uid="0xescrow-1")
     assert row is not None
     assert row["negotiation_id"] == "neg-1"
     assert row["status"] == "provisioning"
-    assert row["attestation_uid"] is None
+    assert row["chain_name"] == "anvil"
+    assert row["escrow_address"] == "0x" + "aa" * 20
+    assert row["is_primary"] is True
+    assert row["fulfillment_uid"] is None
 
 
 @pytest.mark.asyncio
 async def test_insert_is_idempotent_by_primary_key(client):
-    assert await client.insert_settlement_job(
-        escrow_uid="0xescrow-1", negotiation_id="neg-1",
+    assert await client.insert_escrow(
+        escrow_uid="0xescrow-1",
+        negotiation_id="neg-1",
+        chain_name="anvil",
+        escrow_address="0x" + "aa" * 20,
     ) is True
     # Second insert for same escrow returns False, doesn't overwrite.
-    assert await client.insert_settlement_job(
-        escrow_uid="0xescrow-1", negotiation_id="neg-DIFFERENT",
+    assert await client.insert_escrow(
+        escrow_uid="0xescrow-1",
+        negotiation_id="neg-DIFFERENT",
+        chain_name="other",
+        escrow_address="0x" + "bb" * 20,
     ) is False
-    row = await client.load_settlement_job(escrow_uid="0xescrow-1")
+    row = await client.load_escrow(escrow_uid="0xescrow-1")
     assert row["negotiation_id"] == "neg-1"
+    assert row["chain_name"] == "anvil"
 
 
 @pytest.mark.asyncio
-async def test_update_settlement_job_patches_only_provided_fields(client):
-    await client.insert_settlement_job(escrow_uid="0xescrow-1", negotiation_id="neg-1")
-    await client.update_settlement_job(
+async def test_update_escrow_patches_only_provided_fields(client):
+    await client.insert_escrow(
+        escrow_uid="0xescrow-1", negotiation_id="neg-1",
+        chain_name="anvil", escrow_address="0x" + "aa" * 20,
+    )
+    await client.update_escrow(
         escrow_uid="0xescrow-1",
         status="ready",
-        attestation_uid="0xfulfill",
+        fulfillment_uid="0xfulfill",
         connection_details="ssh alice@vm1",
     )
-    row = await client.load_settlement_job(escrow_uid="0xescrow-1")
+    row = await client.load_escrow(escrow_uid="0xescrow-1")
     assert row["status"] == "ready"
-    assert row["attestation_uid"] == "0xfulfill"
+    assert row["fulfillment_uid"] == "0xfulfill"
     assert row["connection_details"] == "ssh alice@vm1"
     # reason left untouched
     assert row["reason"] is None
 
 
 @pytest.mark.asyncio
-async def test_load_missing_settlement_job_returns_none(client):
-    assert await client.load_settlement_job(escrow_uid="0xnope") is None
+async def test_load_missing_escrow_returns_none(client):
+    assert await client.load_escrow(escrow_uid="0xnope") is None
+
+
+@pytest.mark.asyncio
+async def test_load_primary_escrow_for_negotiation(client):
+    await client.insert_escrow(
+        escrow_uid="0xprimary", negotiation_id="neg-1",
+        chain_name="anvil", escrow_address="0x" + "aa" * 20,
+        is_primary=True,
+    )
+    await client.insert_escrow(
+        escrow_uid="0xbond", negotiation_id="neg-1",
+        chain_name="anvil", escrow_address="0x" + "bb" * 20,
+        is_primary=False,
+    )
+    primary = await client.load_primary_escrow_for_negotiation(negotiation_id="neg-1")
+    assert primary is not None
+    assert primary["escrow_uid"] == "0xprimary"
+    assert primary["is_primary"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +131,7 @@ async def _seed_negotiation(
     neg_id: str = "neg-1",
     our_listing_id: str = "seller-ord-1",
     terminal: str | None = "success",
-    agreed_price: int | None = 10**18,
+    agreed_price: float | None = 10**18,
     agreed_duration_seconds: int | None = 3600,
 ) -> None:
     conn = sqlite3.connect(client.db_path)
@@ -128,10 +162,11 @@ async def _seed_seller_order(client: SQLiteClient, listing_id: str = "seller-ord
     try:
         conn.execute(
             """INSERT INTO listings (listing_id, status, created_at, updated_at,
-                                   offer_resource, demand_resource, max_duration_seconds,
-                                   seller, buyer, escrow_uid)
+                                   offer_resource, max_duration_seconds,
+                                   seller, accepted_escrows)
                VALUES (?, 'open', '2026-04-23T00:00:00Z', '2026-04-23T00:00:00Z',
-                       '{}', '{}', 3600, 'http://seller:8001', NULL, NULL)""",
+                       '{}', 3600, 'http://seller:8001',
+                       '[{"chain_name": "anvil", "escrow_address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]')""",
             (listing_id,),
         )
         conn.commit()
@@ -218,15 +253,20 @@ async def test_start_happy_path_inserts_row_and_kicks_off_task(client):
 
     assert result["status"] == "provisioning"
     assert result["escrow_uid"] == "0xescrow"
-    row = await client.load_settlement_job(escrow_uid="0xescrow")
+    row = await client.load_escrow(escrow_uid="0xescrow")
     assert row is not None
     assert row["status"] == "provisioning"
+    # chain_name / escrow_address pinned from the listing's accepted_escrows[0]
+    # when the thread has no buyer_escrow_proposal.
+    assert row["chain_name"] == "anvil"
+    assert row["escrow_address"] == "0x" + "a" * 40
+    assert row["is_primary"] is True
 
 
 @pytest.mark.asyncio
 async def test_start_aborts_when_escrow_verification_rejects(client):
-    """If on-chain verification fails, no settlement_jobs row is inserted
-    and no background task is scheduled — fail-closed."""
+    """If on-chain verification fails, no escrows row is inserted and no
+    background task is scheduled — fail-closed."""
     from market_storefront.utils.escrow_verification import EscrowVerificationError
 
     await _seed_seller_order(client)
@@ -251,7 +291,7 @@ async def test_start_aborts_when_escrow_verification_rejects(client):
             )
 
     # No DB row, no background task.
-    assert await client.load_settlement_job(escrow_uid="0xescrow") is None
+    assert await client.load_escrow(escrow_uid="0xescrow") is None
     bg_mock.assert_not_called()
 
 
@@ -273,9 +313,9 @@ async def test_start_is_idempotent_by_escrow_uid(client):
             sqlite_client=client, alkahest_client=MagicMock(),
         )
         # Flip the existing job to 'ready' to prove the second call reads, not overwrites.
-        await client.update_settlement_job(
+        await client.update_escrow(
             escrow_uid="0xescrow", status="ready",
-            attestation_uid="0xattest", connection_details="ssh bob@vm",
+            fulfillment_uid="0xattest", connection_details="ssh bob@vm",
         )
         second = await start_settlement_job(
             escrow_uid="0xescrow", negotiation_id="neg-1",
@@ -286,17 +326,31 @@ async def test_start_is_idempotent_by_escrow_uid(client):
     assert first["status"] == "provisioning"
     # Second call returned existing row, did not overwrite to provisioning again.
     assert second.get("status") == "ready"
-    assert second.get("attestation_uid") == "0xattest"
+    assert second.get("fulfillment_uid") == "0xattest"
 
 
 # ---------------------------------------------------------------------------
-# _run_settlement_job_bg — patches job row from fulfill_compute_obligation result
+# _run_settlement_job_bg — patches escrow row from fulfill_compute_obligation result
 # ---------------------------------------------------------------------------
+
+
+async def _seed_escrow_provisioning(
+    client: SQLiteClient,
+    *,
+    escrow_uid: str = "0xescrow",
+    negotiation_id: str = "neg-1",
+) -> None:
+    await client.insert_escrow(
+        escrow_uid=escrow_uid,
+        negotiation_id=negotiation_id,
+        chain_name="anvil",
+        escrow_address="0x" + "aa" * 20,
+    )
 
 
 @pytest.mark.asyncio
 async def test_background_task_writes_ready_on_success(client):
-    await client.insert_settlement_job(escrow_uid="0xescrow", negotiation_id="neg-1")
+    await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(return_value={
         "status": "fulfilled",
         "fulfillment_uid": "0xattest",
@@ -310,24 +364,23 @@ async def test_background_task_writes_ready_on_success(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            ssh_public_key="ssh-rsa ...",
+            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
-            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
 
-    row = await client.load_settlement_job(escrow_uid="0xescrow")
+    row = await client.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == "ready"
-    assert row["attestation_uid"] == "0xattest"
+    assert row["fulfillment_uid"] == "0xattest"
     assert row["connection_details"] == "ssh alice@vm1"
     assert json.loads(row["tenant_credentials"]) == {"password": "secret"}
 
 
 @pytest.mark.asyncio
 async def test_background_task_writes_failed_on_exception(client):
-    await client.insert_settlement_job(escrow_uid="0xescrow", negotiation_id="neg-1")
+    await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(side_effect=RuntimeError("vm host unreachable"))
 
     with patch(
@@ -336,15 +389,14 @@ async def test_background_task_writes_failed_on_exception(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            ssh_public_key="ssh-rsa ...",
+            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
-            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
 
-    row = await client.load_settlement_job(escrow_uid="0xescrow")
+    row = await client.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == "failed"
     assert "vm host unreachable" in row["reason"]
 
@@ -352,7 +404,7 @@ async def test_background_task_writes_failed_on_exception(client):
 @pytest.mark.asyncio
 async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     """fulfill_compute_obligation returned a non-exception but non-success result."""
-    await client.insert_settlement_job(escrow_uid="0xescrow", negotiation_id="neg-1")
+    await _seed_escrow_provisioning(client)
     mock_fulfill = AsyncMock(return_value={
         "status": "error",
         "message": "Provisioning failed: No available compute VM",
@@ -364,15 +416,14 @@ async def test_background_task_writes_failed_on_non_fulfilled_status(client):
     ):
         await _run_settlement_job_bg(
             escrow_uid="0xescrow",
-            ssh_public_key="ssh-rsa ...",
+            provision=ProvisionTerms(duration_seconds=3600, ssh_public_key="ssh-rsa ..."),
             listing_id="seller-ord-1",
             order_dict={"listing_id": "seller-ord-1", "max_duration_seconds": 3600},
-            duration_seconds=3600,
             sqlite_client=client,
             alkahest_client=MagicMock(),
         )
 
-    row = await client.load_settlement_job(escrow_uid="0xescrow")
+    row = await client.load_escrow(escrow_uid="0xescrow")
     assert row["status"] == "failed"
     assert "No available compute VM" in row["reason"]
 
@@ -387,7 +438,7 @@ def test_serialize_omits_none_fields():
         "escrow_uid": "0xe",
         "negotiation_id": "neg-1",
         "status": "provisioning",
-        "attestation_uid": None,
+        "fulfillment_uid": None,
         "connection_details": None,
         "tenant_credentials": None,
         "reason": None,
@@ -397,6 +448,7 @@ def test_serialize_omits_none_fields():
     out = serialize_settlement_job(raw)
     assert "reason" not in out
     assert "attestation_uid" not in out
+    assert "fulfillment_uid" not in out
     assert "tenant_credentials" not in out
     assert out["status"] == "provisioning"
 
@@ -406,7 +458,7 @@ def test_serialize_parses_tenant_credentials_json():
         "escrow_uid": "0xe",
         "negotiation_id": "neg-1",
         "status": "ready",
-        "attestation_uid": "0xa",
+        "fulfillment_uid": "0xa",
         "connection_details": "ssh alice@vm",
         "tenant_credentials": json.dumps({"password": "secret"}),
         "reason": None,
@@ -415,3 +467,5 @@ def test_serialize_parses_tenant_credentials_json():
     }
     out = serialize_settlement_job(raw)
     assert out["tenant_credentials"] == {"password": "secret"}
+    assert out["fulfillment_uid"] == "0xa"
+    assert "attestation_uid" not in out

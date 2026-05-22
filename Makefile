@@ -2,7 +2,7 @@ GIT_SUFFIX := $(shell git rev-parse --short HEAD)
 FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 
-.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service
+.PHONY: build build-runtime-images dist dist-storefront-client dist-storefront dist-policy dist-provisioning dist-registry dist-service dist-infra dist-clean init init-prerequisites init-submodules init-dependencies init-zero-tier init-buyer init-storefront init-registry-service push-runtime-artifacts push-images push-helm push-wheels push-cli clobber-wheels
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -61,8 +61,22 @@ dist-infra: ## Build market-infra wheel into .dist/
 	@ls $(DIST_DIR)/market_infra-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: market-infra produced a platform-specific wheel — must build inside Docker" && exit 1)
 
+dist-helm: ## Package helm chart so it's ready for pushing into .dist/
+	helm package helm/ --destination $(DIST_DIR)
+
 dist-clean: ## Remove .dist/ directory
 	rm -rf $(DIST_DIR)
+
+test: test-provisioning test-registry test-storefront
+
+test-provisioning:
+	cd provisioning-service && make reinit && make test
+
+test-registry:
+	cd registry-service && make reinit && make test
+
+test-storefront:
+	cd storefront && make reinit && make test
 
 #Basic flow: build (optional), init (downloads if not built), run
 #Build should construct all deployment and runtime arifacts locally.
@@ -180,6 +194,126 @@ stop:
 stop-compose:
 	docker compose down
 	docker compose rm
+
+# ---------------------------------------------------------------------------
+# Artifact Registry push configuration.
+#
+# AR_PROJECT is the only variable operators need to override when targeting
+# a different environment. All four registry URLs are derived from it.
+#
+# Usage:
+#   make push-runtime-artifacts                          # push to dev (default)
+#   make push-runtime-artifacts AR_PROJECT=compute-market-1-preprod
+#   make push-runtime-artifacts AR_PROJECT=compute-market-1-prod
+#
+# One-time machine setup before first push (covers Docker and Helm OCI):
+#   gcloud auth configure-docker us-central1-docker.pkg.dev
+# ---------------------------------------------------------------------------
+
+AR_PROJECT  ?= compute-market-1-dev
+AR_LOCATION ?= us-central1
+AR_PREFIX   ?= $(AR_PROJECT)
+
+DOCKER_REGISTRY := $(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-docker
+HELM_REGISTRY   := oci://$(AR_LOCATION)-docker.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-helm
+PYTHON_REGISTRY := https://$(AR_LOCATION)-python.pkg.dev/$(AR_PROJECT)/$(AR_PREFIX)-python/
+
+STOREFRONT_CLIENT_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' storefront-client/pyproject.toml | head -1)
+REGISTRY_CLIENT_VERSION   := $(shell sed -n 's/^version = "\(.*\)"/\1/p' registry-client/pyproject.toml | head -1)
+PROVISIONING_VERSION      := $(shell sed -n 's/^version = "\(.*\)"/\1/p' provisioning-service/pyproject.toml | head -1)
+# ---------------------------------------------------------------------------
+# Push — publish built artifacts to Artifact Registry.
+#
+# Prerequisites:
+#   make dist              — wheels must exist in .dist/
+#   make build-runtime-images  — Docker images must be built locally
+#   make build-buyer       — buyer/dist/market binary must exist
+#
+# Targets can be run individually or all at once via push-runtime-artifacts.
+# ---------------------------------------------------------------------------
+
+_require-ar-project:
+ifndef AR_PROJECT
+	$(error AR_PROJECT is required. Usage: make <target> AR_PROJECT=<name>)
+endif
+
+define publish_python_wheel
+	@if gcloud artifacts versions describe "$(2)" \
+	  --project="$(AR_PROJECT)" \
+	  --location="$(AR_LOCATION)" \
+	  --repository="$(AR_PREFIX)-python" \
+	  --package="$(1)" >/dev/null 2>&1; then \
+		echo "Skipping $(1)==$(2): already exists in $(AR_PREFIX)-python"; \
+	else \
+		uv publish \
+		  --publish-url "$(PYTHON_REGISTRY)" \
+		  --username oauth2accesstoken \
+		  --password "$$(gcloud auth print-access-token)" \
+		  "$(3)"; \
+	fi
+endef
+
+define clobber_python_wheel
+	@if gcloud artifacts versions describe "$(2)" \
+	  --project="$(AR_PROJECT)" \
+	  --location="$(AR_LOCATION)" \
+	  --repository="$(AR_PREFIX)-python" \
+	  --package="$(1)" >/dev/null 2>&1; then \
+		echo "Deleting $(1)==$(2) from $(AR_PREFIX)-python"; \
+		gcloud artifacts versions delete "$(2)" \
+		  --project="$(AR_PROJECT)" \
+		  --location="$(AR_LOCATION)" \
+		  --repository="$(AR_PREFIX)-python" \
+		  --package="$(1)" \
+		  --quiet; \
+	else \
+		echo "No existing $(1)==$(2) in $(AR_PREFIX)-python"; \
+	fi; \
+	uv publish \
+	  --publish-url "$(PYTHON_REGISTRY)" \
+	  --username oauth2accesstoken \
+	  --password "$$(gcloud auth print-access-token)" \
+	  "$(3)"
+endef
+
+define push_image
+	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
+	docker tag arkhai:$(2)-$(GIT_SUFFIX) $(DOCKER_REGISTRY)/arkhai:$(1)
+	docker push $(DOCKER_REGISTRY)/arkhai:$(1)-$(GIT_SUFFIX)
+	docker push $(DOCKER_REGISTRY)/arkhai:$(1)
+endef
+
+push-runtime-artifacts: push-images push-charts push-wheels push-cli
+
+push-images: _require-ar-project
+	$(call push_image,registry,registry)
+	$(call push_image,storefront,storefront)
+	$(call push_image,provisioning,provisioning)
+	$(call push_image,test-env,test-env)
+	$(call push_image,integration-tests,integration-tests)
+
+push-charts: _require-ar-project dist-helm
+	helm push $(DIST_DIR)/arkhai-node-operator-*.tgz $(HELM_REGISTRY)
+	rm $(DIST_DIR)/arkhai-node-operator-*.tgz
+
+push-wheels: _require-ar-project
+	$(call publish_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,arkhai-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call publish_python_wheel,provisioning-service,$(PROVISIONING_VERSION),$(DIST_DIR)/provisioning_service-$(PROVISIONING_VERSION)-py3-none-any.whl)
+
+push-cli: _require-ar-project
+	gcloud artifacts generic upload \
+	  --project=$(AR_PROJECT) \
+	  --location=$(AR_LOCATION) \
+	  --repository=$(AR_PREFIX)-cli \
+	  --package=market \
+	  --version=$(GIT_SUFFIX) \
+	  --source=buyer/dist/market
+
+clobber-wheels: _require-ar-project
+	$(call clobber_python_wheel,arkhai-storefront-client,$(STOREFRONT_CLIENT_VERSION),$(DIST_DIR)/arkhai_storefront_client-$(STOREFRONT_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,arkhai-registry-client,$(REGISTRY_CLIENT_VERSION),$(DIST_DIR)/arkhai_registry_client-$(REGISTRY_CLIENT_VERSION)-py3-none-any.whl)
+	$(call clobber_python_wheel,provisioning-service,$(PROVISIONING_VERSION),$(DIST_DIR)/provisioning_service-$(PROVISIONING_VERSION)-py3-none-any.whl)
 
 code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
