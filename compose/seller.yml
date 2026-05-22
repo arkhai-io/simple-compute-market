@@ -1,44 +1,39 @@
 # Seller stack — services a seller (someone with compute to sell) runs in production.
 #
-# Three services:
+# Two services:
 #   1. seller-agent          — storefront HTTP server (arkhai:storefront).
 #                              Publishes offers, negotiates with buyers,
 #                              settles deals on chain.
-#   2. seller-redis          — job queue for the provisioning service.
-#   3. seller-provisioning   — runs ansible to create/destroy VMs on the
+#   2. seller-provisioning   — runs ansible to create/destroy VMs on the
 #                              seller's KVM host (arkhai:provisioning).
 #
 # Operator-provided files (paths overridable via env):
 #   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
-#                              A starter is `market-storefront config init-user`,
-#                              though its template is Anvil-flavored — the
-#                              quickstart's TOML is more directly useful.
+#                              The provisioning service reads `admin_api_key`
+#                              from this same file via the mount on
+#                              seller-provisioning, so the secret lives in
+#                              one place.
 #   ./resources.csv          — inventory CSV. Starter:
 #                              storefront/src/market_storefront/data/resources.sample.csv
 #   ./keys/id_ed25519        — SSH key the provisioning service uses to reach
 #                              the KVM host. Pubkey must be authorized on the
 #                              host for the ansible user.
 #
-# Required images (run `make build-runtime-images` from the repo root):
+# Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront
 #   arkhai:provisioning
 #
-# Registry: not included. Either run your own (see seller-quickstart.md
-# Addendum A) or point [registry] urls in the seller TOML at an external
-# indexer.
+# Registry: not included. Either run your own (see docs/indexer-quickstart.md)
+# or point [registry] urls in the seller TOML at an external indexer.
 #
 # Usage:
-#   STOREFRONT_ADMIN_KEY=$(uuidgen) docker compose -f compose/seller.yml up -d
+#   docker compose -f compose/seller.yml up -d
 #   docker compose -f compose/seller.yml logs -f seller-agent
 #
-# Environment overrides:
-#   STOREFRONT_ADMIN_KEY     — REQUIRED. Must match [seller].admin_api_key in
-#                              the seller TOML. The provisioning service uses
-#                              it to call back on lease expiry.
+# Environment overrides (all optional):
 #   SELLER_CONFIG_PATH       — path to seller TOML (default: ./config.seller.toml)
 #   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ./resources.csv)
 #   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ./keys/id_ed25519)
-#   PROVISIONING_MODE        — "mock" for dry runs, "http" for live KVM (default: http)
 
 services:
   seller-agent:
@@ -53,9 +48,6 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    environment:
-      - XDG_CONFIG_HOME=/etc
-      - ARKHAI_PROVISIONING_MODE=${PROVISIONING_MODE:-http}
     volumes:
       - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - ${SELLER_RESOURCES_CSV:-./resources.csv}:/app/resources.csv:ro
@@ -65,30 +57,17 @@ services:
       - seller
     restart: unless-stopped
 
-  seller-redis:
-    image: redis:7-alpine
-    networks:
-      - seller
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    restart: unless-stopped
-
   seller-provisioning:
     image: arkhai:provisioning
-    depends_on:
-      seller-redis:
-        condition: service_healthy
     ports:
       - "8081:8081"
     environment:
-      - DATABASE_URL=sqlite:////app/data/provisioning.db
-      - REDIS_URL=redis://seller-redis:6379
-      - PROVISIONING_STOREFRONT_URL=http://seller-agent:8001
-      - PROVISIONING_STOREFRONT_ADMIN_KEY=${STOREFRONT_ADMIN_KEY:?STOREFRONT_ADMIN_KEY must be set (matches [seller].admin_api_key in the TOML)}
+      - ACTIVE_PROFILES=seller
     volumes:
+      # Same storefront TOML the seller-agent reads. The provisioning
+      # service reads `admin_api_key` from it so the operator writes the
+      # admin key in exactly one file.
+      - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - ${SELLER_SSH_PRIVKEY:-./keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro
       - seller-provisioning-data:/app/data
     networks:

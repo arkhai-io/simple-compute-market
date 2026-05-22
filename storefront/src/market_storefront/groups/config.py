@@ -143,8 +143,9 @@ _INIT_USER_TEMPLATE = """\
 # resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
                                                 # Mutually exclusive with resources_csv_inline.
 
-# admin_api_key = ""                           # protects /admin/* routes; must match the provisioning
-                                                # service's PROVISIONING_STOREFRONT_ADMIN_KEY env.
+# admin_api_key = ""                           # protects /admin/* routes; the seller-stack
+                                                # provisioning container reads this from the same
+                                                # storefront.toml so the secret lives in one place.
 
 # ---------------------------------------------------------------------------
 # Discovery / lifecycle

@@ -5,7 +5,8 @@ Resolution order (highest priority wins):
   1. PROVISIONING_* environment variables
   2. config-<profile>.yml files (in CONFIG_DIRECTORY, one per ACTIVE_PROFILES entry)
   3. config.yml  (in CONFIG_DIRECTORY)
-  4. settings.toml  (committed defaults / schema documentation)
+  4. storefront-TOML fallback for `storefront_admin_key` (see below)
+  5. settings.toml  (committed defaults / schema documentation)
 
 Profile selection:
   Set CONFIG_DIRECTORY to the directory containing config YAML files.
@@ -21,11 +22,19 @@ Profile selection:
 All includes are optional — missing files are silently skipped.  This means
 a fresh checkout with no config-local.yml and no ACTIVE_PROFILES set will
 load only settings.toml, which provides safe defaults for local development.
+
+storefront_admin_key resolution:
+  The seller compose mounts the storefront's TOML at
+  /etc/arkhai/storefront.toml. When `storefront_admin_key` isn't otherwise
+  set, we read `admin_api_key` from there so the operator writes the value
+  in one place. Override via STOREFRONT_TOML_PATH if your mount is
+  elsewhere.
 """
 
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 from typing import List
 
@@ -63,6 +72,42 @@ _dynaconf = Dynaconf(
     environments=False,   # profiles are used instead of dynaconf environments
     merge_enabled=True,
 )
+
+
+def _resolve_storefront_admin_key_from_mount() -> str:
+    """Read `admin_api_key` from a mounted storefront TOML, if present.
+
+    Returns the value or "" if no candidate file exists or the key is
+    missing. Errors (malformed TOML, permission denied) fall back silently
+    so a misconfigured mount can't crash service startup — the
+    storefront-callback paths already handle empty admin keys.
+    """
+    candidates: List[Path] = []
+    override = os.environ.get("STOREFRONT_TOML_PATH", "").strip()
+    if override:
+        candidates.append(Path(override))
+    candidates.append(Path("/etc/arkhai/storefront.toml"))
+
+    for path in candidates:
+        if not path.is_file():
+            continue
+        try:
+            data = tomllib.loads(path.read_text())
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        key = data.get("admin_api_key")
+        if isinstance(key, str) and key:
+            return key
+    return ""
+
+
+# If no overlay supplied a storefront_admin_key (env, profile, or
+# committed default), try the mounted-TOML fallback. The seller stack
+# uses this; other deploys keep the env/profile path.
+if not str(_dynaconf.get("storefront_admin_key", "") or ""):
+    _fallback_key = _resolve_storefront_admin_key_from_mount()
+    if _fallback_key:
+        _dynaconf.set("storefront_admin_key", _fallback_key)
 
 
 class Settings:

@@ -49,7 +49,7 @@ base_url         = "http://<YOUR_PUBLIC_IP>:8001/"
 
 db_path          = "./src/market_storefront/data/sell-agent/agent.db"
 log_file_path    = "./logs/seller.log"
-admin_api_key    = "<choose-a-secret>"   # must match STOREFRONT_ADMIN_KEY env
+admin_api_key    = "<choose-a-secret>"   # used by the provisioning service for lease-expiry callbacks
 
 [wallet]
 private_key    = "0x<YOUR_SELLER_PRIVATE_KEY>"
@@ -111,8 +111,8 @@ A larger sample is at
 
 ## 4. Bring it up
 
-`compose/seller.yml` bundles the storefront + provisioning + redis. It
-expects three operator-provided files: `config.seller.toml`,
+`compose/seller.yml` bundles the storefront and provisioning services.
+It expects three operator-provided files: `config.seller.toml`,
 `resources.csv`, and (live mode only) `keys/id_ed25519`. Pass absolute
 paths via env to avoid docker compose's relative-path-resolves-from-the-
 compose-file gotcha:
@@ -120,8 +120,6 @@ compose-file gotcha:
 ```bash
 mkdir -p keys && touch keys/id_ed25519 && chmod 600 keys/id_ed25519
 
-STOREFRONT_ADMIN_KEY="<same-as-admin_api_key-in-toml>" \
-PROVISIONING_MODE=http \
 SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
 SELLER_RESOURCES_CSV="$PWD/resources.csv" \
 SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
@@ -129,6 +127,11 @@ docker compose -f compose/seller.yml up -d
 
 docker compose -f compose/seller.yml logs -f seller-agent
 ```
+
+The `admin_api_key` you set in §2 is the only secret — the
+provisioning service reads it from the same mounted TOML, so you
+don't repeat it anywhere else. Likewise `[provisioning].mode` in
+the TOML drives mock-vs-live; no separate env knob.
 
 Wait for `Started heartbeat for eip155:...:<N>` — that's your numeric
 agent ID. **Pin it now** to skip re-registering on every restart:
@@ -163,8 +166,8 @@ simulated VM credentials.
 Mock mode validates the storefront ↔ chain ↔ registry surface without
 touching libvirt. To create real VMs:
 
-1. Set `PROVISIONING_MODE=http` (the default) and confirm
-   `[provisioning].mode = "http"` in the TOML.
+1. Set `[provisioning].mode = "http"` in the TOML (the default for fresh
+   configs).
 
 2. Generate an SSH keypair the provisioning container will use to reach
    your KVM hosts, install the pubkey on each host, and put the privkey
@@ -214,8 +217,8 @@ touching libvirt. To create real VMs:
   start that finds an empty pin re-registers (gas cost).
 - **`[registry.auth]` keys must match `[registry] urls` exactly** —
   scheme, host, port, no trailing slash.
-- **`STOREFRONT_ADMIN_KEY` env must equal `admin_api_key` in the TOML**
-  — provisioning callbacks 403 on mismatch, leases never release.
+- **`admin_api_key` empty or missing** — provisioning service can't
+  call back on lease expiry, leases never release.
 - **`resources.csv` prices are human / whole-token units.** Use
   fractional strings (`"0.50"`) for sub-token rates. `0` is a literal
   free offering.

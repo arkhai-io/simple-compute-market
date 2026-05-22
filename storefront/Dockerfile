@@ -71,6 +71,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 # /app is the WORKDIR; domain/ is copied here. Console-script entry points
 # don't inherit CWD on sys.path, so we set PYTHONPATH explicitly.
 ENV PYTHONPATH="/app"
+# Dynaconf-driven config layering looks for the storefront TOML under
+# $XDG_CONFIG_HOME/arkhai/. Bind-mount the operator's TOML at
+# /etc/arkhai/storefront.toml.
+ENV XDG_CONFIG_HOME="/etc"
 
 # Copy application code. The market_storefront package is shipped at
 # /app/src/market_storefront so it's importable via the venv-installed
