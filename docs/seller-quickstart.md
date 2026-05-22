@@ -44,7 +44,7 @@ Docker works.
 ## 1. Get the code and build images
 
 ```bash
-git clone <this repo>
+git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-runtime-images
 ```

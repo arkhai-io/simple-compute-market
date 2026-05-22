@@ -54,7 +54,7 @@ binary in `~/.local/bin` (or `/usr/local/bin` with `sudo`).
 ### b) Development install from the repo
 
 ```bash
-git clone <this repo>
+git clone https://github.com/arkhai-io/simple-compute-market.git
 cd simple-compute-market
 make build-buyer
 # the wrapper at ./buyer/.venv/bin/market is what `make install-buyer` symlinks
