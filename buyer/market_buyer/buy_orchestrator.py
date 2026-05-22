@@ -314,6 +314,24 @@ def extract_seller_min_price(listing: dict[str, Any]) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 
+# Substrings in the seller's 400 detail that indicate the seller couldn't
+# yet read the just-created escrow from the chain — public RPC nodes
+# (Infura/Alchemy) frequently lag the tx by 5-15s. Retrying the POST
+# resolves it without any user action.
+_PROPAGATION_LAG_HINTS = (
+    "buffer overrun",
+    "ABI decoding",
+    "Failed to read escrow",
+)
+
+
+def _looks_like_propagation_lag(exc: RuntimeError) -> bool:
+    msg = str(exc)
+    if "HTTP 400" not in msg:
+        return False
+    return any(hint in msg for hint in _PROPAGATION_LAG_HINTS)
+
+
 def submit_settlement(
     *,
     seller_url: str,
@@ -323,16 +341,36 @@ def submit_settlement(
     buyer_address: str,
     buyer_private_key: str,
     timeout: float = DEFAULT_HTTP_TIMEOUT,
+    max_attempts: int = 6,
+    retry_backoff: float = 3.0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """POST /api/v1/settle/{escrow_uid} with signed body. Returns the initial job state."""
+    """POST /api/v1/settle/{escrow_uid} with signed body. Returns the initial job state.
+
+    Retries on transient propagation-lag 400s — the seller's
+    ``verify_escrow_for_settlement`` reads the escrow from chain, and
+    public RPC nodes can lag the just-mined create-escrow tx by 5-15s,
+    surfacing as ``"buffer overrun while deserializing"`` / "Failed to
+    read escrow" detail. Non-matching errors bubble up immediately.
+    """
     url = seller_url.rstrip("/") + f"/api/v1/settle/{escrow_uid}"
     body = {
         "negotiation_id": negotiation_id,
         "ssh_public_key": ssh_public_key,
         "buyer_address": buyer_address,
     }
-    sig, ts = _sign(f"settle_escrow:{escrow_uid}", buyer_private_key)
-    return _signed_json(url, body, sig, ts, method="POST", timeout=timeout)
+    last_exc: RuntimeError | None = None
+    for attempt in range(1, max_attempts + 1):
+        sig, ts = _sign(f"settle_escrow:{escrow_uid}", buyer_private_key)
+        try:
+            return _signed_json(url, body, sig, ts, method="POST", timeout=timeout)
+        except RuntimeError as exc:
+            last_exc = exc
+            if not _looks_like_propagation_lag(exc) or attempt == max_attempts:
+                raise
+            sleep(retry_backoff)
+    assert last_exc is not None  # unreachable: loop either returns or raises
+    raise last_exc
 
 
 def poll_settlement_status(

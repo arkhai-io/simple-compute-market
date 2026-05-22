@@ -32,6 +32,7 @@ from market_buyer.buy_orchestrator import (
     BuyConstraints,
     BuyResult,
     run_buy,
+    submit_settlement,
 )
 
 
@@ -610,3 +611,77 @@ def test_to_dict_omits_none_fields():
 def test_to_dict_skips_empty_attempts_list():
     r = BuyResult(status="no_matches")
     assert r.to_dict() == {"status": "no_matches", "rounds": 0}
+
+
+def _settle_kwargs():
+    return dict(
+        seller_url=_SELLER_URL,
+        escrow_uid="0x" + "ff" * 32,
+        negotiation_id="neg-1",
+        ssh_public_key="ssh-rsa AAAA...",
+        buyer_address=_BUYER_ADDR,
+        buyer_private_key=_BUYER_PK,
+    )
+
+
+def test_submit_settlement_retries_on_propagation_lag(monkeypatch):
+    """A 400 with the seller's chain-read-failed detail should retry."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise RuntimeError(
+                "POST .../settle/0xff... -> HTTP 400: "
+                "{\"detail\":\"Failed to read escrow 0xff... from chain: "
+                "ABI decoding failed: buffer overrun while deserializing\"}"
+            )
+        return {"escrow_uid": "0x" + "ff" * 32, "status": "provisioning"}
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    out = submit_settlement(**_settle_kwargs(), sleep=sleeps.append, retry_backoff=0.0)
+
+    assert out["status"] == "provisioning"
+    assert calls["n"] == 3
+    assert sleeps == [0.0, 0.0]
+
+
+def test_submit_settlement_does_not_retry_other_400s(monkeypatch):
+    """A 400 that's not the propagation-lag pattern bubbles up immediately."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError(
+            "POST .../settle/0xff... -> HTTP 400: "
+            "{\"detail\":\"agreed_price mismatch: 1000000 vs 2000000\"}"
+        )
+
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    with pytest.raises(RuntimeError, match="agreed_price mismatch"):
+        submit_settlement(**_settle_kwargs(), sleep=lambda _s: None)
+    assert calls["n"] == 1
+
+
+def test_submit_settlement_gives_up_after_max_attempts(monkeypatch):
+    """Persistent propagation-lag errors eventually raise."""
+    calls = {"n": 0}
+
+    def fake_signed_json(*args, **kwargs):
+        calls["n"] += 1
+        raise RuntimeError(
+            "POST .../settle/0xff... -> HTTP 400: "
+            "{\"detail\":\"Failed to read escrow 0xff... from chain: "
+            "ABI decoding failed: buffer overrun while deserializing\"}"
+        )
+
+    monkeypatch.setattr("market_buyer.buy_orchestrator._signed_json", fake_signed_json)
+    with pytest.raises(RuntimeError, match="buffer overrun"):
+        submit_settlement(
+            **_settle_kwargs(),
+            sleep=lambda _s: None,
+            max_attempts=4,
+            retry_backoff=0.0,
+        )
+    assert calls["n"] == 4

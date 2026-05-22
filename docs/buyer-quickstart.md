@@ -126,12 +126,17 @@ Every `market buy` writes a JSONL run log at
 ```bash
 market logs runs                  # list past runs + last status
 market logs show <run_id>         # full event log for one run
-market settle --from <run_id>     # resume after a crash
+market buy --from <run_id>        # resume from wherever the run stopped
 ```
 
+`buy --from` picks up the same run-log — mid-negotiation, post-escrow,
+or post-submit — and walks it to terminal. `market settle --from` is a
+narrower alias that skips straight to stages 3-5 (escrow.create +
+settle + poll); it assumes the negotiation already agreed.
+
 If `buy` crashed after escrow creation but before settle, **always**
-`settle --from` — re-running `buy` against the same listing creates a
-second escrow and locks more funds.
+resume — re-running a bare `market buy` against the same listing
+creates a second escrow and locks more funds.
 
 ## 6. Tear down
 
@@ -152,7 +157,7 @@ market escrow reclaim <escrow_uid>
   base units.
 - **`market buy` and `settle` are not idempotent on chain.** A buy
   that fails after escrow creation locks funds until `expiration_unix`.
-  Resume with `settle --from <run_id>`, don't re-`buy`.
+  Resume with `market buy --from <run_id>`, don't re-`buy` from scratch.
 - **VM SSH uses `vm_host_ip`, not the alias** the `ssh_command` field
   prints (`tenant<id>@btc1` etc. — the host name is the seller's
   inventory alias, not DNS).
