@@ -4,10 +4,6 @@ How to stand up a storefront on Base Sepolia, register on-chain, publish a
 compute listing, and (optionally) drive real KVM provisioning from the same
 machine. Tested end-to-end on a fresh Ubuntu 24.04 host, May 2026.
 
-This walks the same path as `deploy-base-sepolia/` in the repo — that
-directory is a working reference deployment you can copy/diff against if
-anything below doesn't match what you see.
-
 For the buyer side see [`buyer-quickstart.md`](./buyer-quickstart.md).
 
 ---
@@ -69,8 +65,7 @@ Linux host instead.
 from `$XDG_CONFIG_HOME/arkhai/config.toml`. In the container we set
 `XDG_CONFIG_HOME=/etc` and mount the file at `/etc/arkhai/config.toml`.
 
-Start from this skeleton (`deploy-base-sepolia/config.seller.toml` is the
-working reference):
+Start from this skeleton:
 
 ```toml
 [wallet]
@@ -165,10 +160,8 @@ indexer's `filter-spec.yaml` is the authoritative vocabulary (v2 ships with
 
 ## 4. docker-compose.yml
 
-A minimal seller-side compose looks like this. The full reference is
-[`deploy-base-sepolia/docker-compose.yml`](../deploy-base-sepolia/docker-compose.yml);
-copy from there if you want the production-ish version with healthchecks
-and memory limits.
+A minimal seller-side compose looks like this. Add healthchecks +
+container memory limits as you'd normally do for production.
 
 ```yaml
 services:
