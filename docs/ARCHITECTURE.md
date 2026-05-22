@@ -1,6 +1,8 @@
 # Arkhai Market Stack — Architecture Reference
 
 > **Purpose:** This document is intended to initialize AI-assisted development sessions with accurate, up-to-date context about the repository structure, service responsibilities, data flows, and known problem areas. Treat it as a living document — update it as understanding deepens.
+>
+> **Pending architectural work** lives in [`PLANNED-REWORK.md`](PLANNED-REWORK.md). This file is for current-state context — what the system is and why it's shaped the way it is — not for tracking todos.
 
 ---
 
@@ -934,6 +936,8 @@ All actions are submitted as `ProvisionRequest` jobs with a `vm_action` field. T
 | `lease_remove` | Cancel a previously scheduled `lease_end` | Finds and removes `at` jobs tagged `LEASE:<vm_name>` |
 | `check` | Report host capacity (total/allocated/available vCPUs, RAM, GPUs) | No `vm_target` required |
 
+**`VmActionRequest` — shared optional body:** Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
+
 ---
 
 #### Lease Lifecycle — DB-driven watchdog
@@ -1803,10 +1807,6 @@ See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 - **Negotiation orphans:** The existence of `negotiation_watchdog.py` implies negotiations can get stuck. The trigger conditions and recovery behavior need documentation.
 
-- **SQLite INTEGER overflow for token amounts with `decimals > 0`:** `negotiation_messages` stores `our_price`, `their_price`, and `proposed_price` as `INTEGER` columns (signed 64-bit, max `2**63 - 1 ≈ 9.2 × 10**18`). `accepted_escrows[i].price_per_hour` is stored in uint256-domain (already decimal-scaled at advertisement), and the negotiation pipeline carries those values into `our_price` / `their_price` unchanged. Any token with 18 decimals and a human-readable per-hour price above ~9.2 billion will overflow at the SQLite write. **Workaround in e2e tests:** use `decimals: 0` on the MOCK test token so the advertised `price_per_hour` is already in base units. **Fix:** change `our_price`, `their_price`, `proposed_price` in `negotiation_messages` from `INTEGER` to `TEXT` and parse at read time. The `accepted_escrows` JSON column already serializes `price_per_hour` as a string-of-digits to dodge this on the listing side; the price-tracking columns need the same treatment.
-
-- **`perform_registration` logs "Invalid explicit agent ID" when `ownerOf()` returns a tuple:** On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 2-tuple instead of a plain address string (ABI mismatch). The `except Exception` block in `registration.py` catches this, sets `agent_id = None`, and falls through to blockchain event search which recovers correctly. The `[REGISTRATION] Invalid explicit agent ID N: (addr, addr)` log line is expected and non-fatal. **Fix:** handle tuple returns explicitly in `registration.py` by unpacking `owner = result[0] if isinstance(result, (list, tuple)) else result`.
-
 - **Buyer's initial offer must meet the seller's floor price:** `_extract_initial_price_from_order()` returns `accepted_escrows[0].price_per_hour` (already in uint256-domain base units) as the seller's `our_price`. The `BisectionStrategy` in `maximize` direction exits with `"price_unreasonable"` if `their_price < our_price / 1.5`, and does not counter. If the buyer's `BUYER_INITIAL_PRICE` in the e2e test is below this floor, the seller exits at round 0 and `force-accept` returns 409. **Rule:** `BUYER_INITIAL_PRICE >= accepted_escrows[0].price_per_hour` in the e2e test constants.
 
 - **`wait_for_registry_agent` retries past transient network states:** `"timeout"` and `"unreachable"` returned by `registry_auth_check._probe()` are transient network conditions. The wait loop retries past `"agent_not_found"`, `"timeout"`, and `"unreachable"`. Only definitive states (`"ok"`, `"owner_mismatch"`, `"unconfigured"`, `"owner_unknown"`, `"wallet_unconfigured"`, `"http_*"`) exit the loop immediately.
@@ -1823,91 +1823,31 @@ See the `compute-market-internal-infra` README for full ADC setup instructions.
 
 ---
 
-# Planned Rework
-
-## Registry Service
-
-### 1. Registry as shared marketplace infrastructure (not per-node)
-
-**Status:** Planned.
-
-**Problem:** The `registry-service` is currently deployed as a subchart of the `arkhai-node-operator` Helm chart, implying it is part of every provider node's deployment. In practice the registry is a shared marketplace service — there is one per market, not one per provider. Multiple seller nodes should all register with and publish orders to the same registry instance run by the marketplace operator. Bundling it with the provider chart conflates the marketplace operator role with the provider role.
-
-**Planned fix:** Make `registry` an optional subchart (add `condition: registry.enabled`, default `false`). Provider deployments point at an externally-operated registry via `global.registry.api_url`. Only marketplace operator deployments enable the subchart. Document the two deployment topologies (operator vs. provider) in the Helm `values.yaml` and in this file.
-
----
-
-### 2. Event sync full-history gap
-
-**Status:** Planned.
-
-**Problem:** `EventSyncService.sync_from_start()` only scans the last 1000
-blocks for `Registered`, `MetadataSet`, and `URIUpdated` events. On a live
-chain with registrations months ago this window misses all historical agents.
-The registry's agent count is therefore a function of how recently agents
-registered, not how many are actually on-chain. `REGISTRY_START_BLOCK` env
-(read in `registry-service/src/config.py`) is the current escape hatch: a
-fresh indexer can backfill from a known earlier block — typically the
-IdentityRegistry's deployment block. This brings a new indexer up to date on
-a known chain but leaves the 1000-block sliding window in place for
-steady-state polling.
-
-**Planned fix:** Replace the sliding window with a full enumeration using view
-functions: call `totalSupply()` on the IdentityRegistry to get the count of
-registered agents, then call `ownerOf(id)` and `tokenURI(id)` for each token
-ID from 0 to `totalSupply()-1`. This is a set of pure read calls with no event
-history dependency, works correctly on any RPC provider, and is immune to
-block range limits. The periodic sync can still use event filtering for
-incremental updates after the initial full enumeration.
-
----
-
-#### 1. Golden image configuration (`management-vars.yaml`)
-
-**Problem:** The `golden-image-build` Ansible role writes `management-vars.yaml` to the operator's local machine with root SSH credentials for the golden image. The provisioning service reads these credentials through the standard dynaconf profile system, but the key names in `management-vars.yaml` do not match the names in `settings.toml`.
-
-**What the provisioning service needs from `management-vars.yaml`:**
-- `golden_root_ssh_filename` → maps to `settings.golden_root_ssh_filename`
-- `golden_root_ssh_password` → maps to `settings.golden_root_ssh_password`
-- `golden_image_name` → maps to `settings.golden_image_name`
-- `golden_gcs_bucket` and `golden_gcs_project` → in `settings.toml`
-
-**Decision:** The Ansible role should write `management-vars.yaml` keys using the exact names that dynaconf expects (matching `settings.toml`). The operator then includes the relevant keys in the Helm `values.yaml` `config:` block. No separate loader class or file-format adapter is needed.
-
-> **TODO(management-vars):** Update `golden-image-build.yml` in `compute-provisioning-iac` to write key names matching `settings.toml` (`golden_root_ssh_filename`, `golden_root_ssh_password`, `golden_image_name`). Document the operator workflow for getting `management-vars.yaml` into the Kubernetes Secret in `compute-provisioning-iac/README.md`.
-
-**`VmActionRequest` — shared optional body:**
-
-Simple lifecycle actions (`start`, `shutdown`, `reboot`, `destroy`, `undefine`, `monitor`, `reset-password`, `cancel_expiry`) share one optional body model `VmActionRequest(buyer_agent_id, max_retries)`. The `build_simple_params(action, host, body, vm_name)` helper in `vm_request_model.py` produces `AnsibleJobParams` from path parameters + this body. `CreateVmRequest` and `ScheduleVmExpiryRequest` remain distinct classes with their own fields.
-
-**`HostController.check_capacity` — future:** should eventually accept optional resource filter parameters (`vcpus`, `ram_mb`, `gpu_count`) and return ranked hosts with sufficient capacity — useful for the agent's pre-flight check before a `create` job.
-
-### 2. Lease expiry watchdog
-
-**Architecture in place:**
-- `vm_leases` table tracks active leases; `LeaseStatus`: `pending`→`active`→`releasing`→`released`/`forced`/`cancelled`
-- `LeaseService` — CRUD + lifecycle transitions
-- `LeaseLifecycleService.check_leases()` — per-cycle logic:
-  1. Activate pending leases whose `lease_start_utc` has passed (`list_pending_to_activate`)
-  2. Submit check Ansible job for expired active leases; transition to `releasing` (`list_due` + `begin_releasing`)
-  3. Poll check jobs for `releasing` leases; PATCH storefront resource when confirmed; handle grace period
-- `LeaseWatchdog` — thin asyncio timer that calls `check_leases()` every 60 seconds
-- `POST /api/v1/system/check-leases` — on-demand trigger for operators and tests; returns `{activated, checked, released, forced, skipped}`
-- `POST /api/v1/leases` — storefront calls this after provisioning to register a lease
-- Full CRUD leases API: `GET /api/v1/leases`, `PATCH /api/v1/leases/{id}`, `by-escrow`, `cancel`
-- Storefront `PATCH /api/v1/admin/portfolio/resources/{resource_id}` — general-purpose partial resource update
-- `storefront_url` / `storefront_admin_key` are global provisioning service settings. Helm renders `storefront_url` into the provisioning production config profile and `storefront_admin_key` into the `provisioning-secrets` profile. The default chart topology points the watchdog at the release's `storefront-bob` Service; non-standard topologies override `provisioning.storefront.url`.
-
-**Remaining gap — check job result interpretation:**
-`LeaseLifecycleService._process_releasing_lease` polls the check job status but treats `succeeded` and `failed` uniformly (both proceed to patch the storefront). A future iteration should parse the check job result's `available_gpus` field: if `available_gpus > 0` the VM is confirmed gone and the patch proceeds normally; if `available_gpus == 0` the VM may still be running (late `at` daemon, cleanup race) and the watchdog should wait another cycle before forcing. This requires `AnsibleJobService._build_result_payload` to consistently expose `result.available.gpus` for the `check` action.
-
-The `at`-based scheduling on the KVM host runs in parallel — the check job is a verification step, not a replacement for the `at` cleanup.
-
----
-
 ## Service Design Decisions
 
 This section records design decisions reached through implementation experience. It exists so that the reasoning is available to future sessions without having to re-derive it from code.
+
+---
+
+### Negotiation Strategy Plug-in Surface (Not the Policy Store)
+
+**Context:** During the buyer/storefront split the original plan was to convert the seller's inline `decide_response` function in `sync_negotiation.py` into a registered `@policy_callable` and route `/negotiate/new` and `/negotiate/{neg_id}` through `policy_store.evaluate_policy(...)`. That would have unified per-round negotiation with the rest of the engine-driven actions (resource imbalance, order create/close).
+
+**What shipped instead:** a separate plug-in surface in `market-policy` — `market_policy.negotiation_strategy` exposing `NegotiationStrategy`, `NegotiationRoundInput`, `NegotiationDecision`, plus a `_REGISTRY` and `load_strategy(name, config=...)` factory. Both buyer (`buyer/market_buyer/buyer_client.py`, `groups/negotiate.py`) and storefront (`controllers/negotiate_controller.py` → `start_sync_negotiation` / `continue_sync_negotiation` → `load_strategy`) call this surface directly. The `policy_store` evaluation pipeline is reserved for non-negotiation triggers.
+
+**Why the divergence:** per-round negotiation is a pure function of the current round's inputs — no event-pipeline context, no DecisionContext/InvocationContext, no audit-log side effects required. Forcing it through `evaluate_policy` would have meant building a synthetic `NegotiationRound` event type, a fake `DecisionContext`, and re-deriving the round inputs from DB state on every call. A direct `Strategy.decide(round_input) → Decision` surface is significantly simpler and matches what both buyer (no SQLite) and storefront actually need.
+
+**Discovery:** strategies are discoverable two ways: (1) built-in registrations in `market_policy.negotiation_strategy` (e.g. the bisection strategy), (2) file-based discovery in `sync_negotiation._discover_file_policies` scanning `$XDG_CONFIG_HOME/arkhai/policies/<name>/policy.py` plus `[negotiation] extra_policy_paths` from settings, each exposing a `factory(cfg) -> NegotiationStrategy`. The file path is the local-tuning override UX — drop a folder, restart the storefront, the strategy is picked up.
+
+---
+
+### `market-infra` vs `market-service` Package Boundary
+
+**Context:** The split plan proposed a single `market-infra` package absorbing chain/alkahest/registry-indexer clients, `config_loader.py`, `role.py`, and shared schemas — anything a participant needs to "talk to the shared infra."
+
+**What shipped instead:** the shared-library responsibilities landed in the existing `market-service` wheel (`service/src/service/` — `config_loader.py`, `role.py`, `schemas.py`, `clients/{alkahest, erc8004, indexer, …}`). A separate `market-infra` wheel exists at `infra/`, but its scope is *operator bring-up*: deploy ERC-8004 + Alkahest contracts, run the registry indexer, manage ZeroTier. It's a CLI for the market operator, not a library every participant pulls in.
+
+**Why:** rolling everything into one wheel would have meant the buyer CLI pulling in operator-only deps (terraform/Ansible glue, ZeroTier admin) just to get `config_loader`. Keeping them split lets the buyer wheel stay small and the operator wheel carry whatever it needs. The naming is unfortunate — `market-service` reads like a service binary, but it's the shared-client wheel — and worth revisiting if the wheel gets renamed for the public release.
 
 ---
 
@@ -2505,127 +2445,6 @@ The wheel ships `EvaluateNegotiateResponse`, `SettleResponse`, and
 **`integration-tests/src/agent_client.py`:** a compatibility adapter wrapping `SyncStorefrontClient` from the wheel. Preserves the `AgentClient` interface expected by the smoke tests (constructor-level `agent_wallet_address`, `get_registration_file()`, single-arg `create_order()`). The docstring in that file lists the steps to remove it once the smoke tests are updated to call `SyncStorefrontClient` directly.
 
 **`integration-tests/src/registry_client.py`:** re-exports `SyncRegistryClient as RegistryClient` from the canonical wheel. Preserved for the smoke test import path `from src.registry_client import RegistryClient`. A future task can update the smoke test imports and delete this file.
-
----
-
-## Provisioning Service Planned Rework
-
-This section documents architectural decisions reached for the provisioning service
-multi-provider refactor. Items are sequenced and cross-referenced with the
-`compute-market-internal-infra` ops repo ARCHITECTURE.md planned work section.
-
-### Background: Resource Pool Architecture
-
-The provisioning service is being extended from a single-provider (Ansible/KVM)
-system to a multi-provider, multi-pool system. The driver is GCP deployment: GPU
-workloads on GCE cannot use nested VM provisioning (GPU passthrough from L1 GCE VM
-to L2 nested VM is not a supported GCP configuration), so a GCP Compute API provider
-is needed alongside the existing Ansible provider.
-
-The design uses a `ComputeProvider` abstraction with per-lease pool selection via a
-`PoolSelectorService` (label/tag matching analogous to Kubernetes node selectors). This allows a single provisioning service deployment to route leases to different providers and pool types based on the lease's resource requirements.
-
-**Provider types planned:**
-- `AnsibleProvider` — existing path, SSH into a KVM host and run `virt-install`.
-  Requires pre-provisioned hosts in the `hosts` table.
-- `GCPComputeProvider` — new, calls GCP Compute API directly. No pre-provisioned
-  hosts required. Teardown via Compute API (independent of VM-internal state).
-
-**Pool types:**
-- `kvm_host` — Physical hosts in a data center or VMs acting as KVM hosts, Ansible provider
-- `gce_vm` — GCE VMs as direct-access compute, GCP provider (GPU)
-
-### Data Model Changes
-
-**New table: `resource_pools`**
-```sql
-CREATE TABLE resource_pools (
-    id              TEXT PRIMARY KEY,
-    provider        TEXT NOT NULL,  -- 'ansible' | 'gcp'
-    pool_type       TEXT NOT NULL,  -- 'kvm_host | 'gce_vm'
-	pool_config     TEXT FOREIGN KEY
-    label           TEXT,
-    policy_tags     JSON,           -- used by node selector service to choose a resource pool
-);
-
-CREATE TABLE gcp_pool_configs (
-    id           TEXT PRIMARY KEY,
-    project      TEXT,
-    region       TEXT,
-    zone         TEXT,
-);
-```
-
-**Modified tables (migrations, backwards compatible):**
-- `hosts`: add `pool_id TEXT REFERENCES resource_pools(id)`
-- `vms`: add `pool_id TEXT REFERENCES resource_pools(id)` (nullable; set at VM
-  creation time)
-- `jobs`: add `provider_log_ref TEXT` (nullable; for GCP jobs, stores GCE operation
-  ID for Cloud Logging cross-reference)
-- `leases`: no changes
-
-Initialization pattern for resource_pools and gcp_pool_configs should mirror host inventory seeding (populate on startup from file, admin enabled clobber endpoint for reconcilation). This will require an additional volume mount in the helm chart to support seeding from a file managed in the compute-market-internal-infra repo.
-
-### New Service Classes
-
-**`ComputeProvider` (ABC)** — `create_vm`, `destroy_vm`, `get_capacity`,
-`get_status`. All providers implement this interface.
-
-**`AnsibleProvider(ComputeProvider)`** — extracts existing Ansible job runner logic.
-Behavior identical to current implementation; this is a rename/extraction, not a
-rewrite. Existing tests continue to pass.
-
-**`GCPComputeProvider(ComputeProvider)`** — calls `google-cloud-compute` SDK.
-`create_vm` uses Compute API create with data from lease and gcp_pool_config.
-`destroy_vm` uses Compute API delete (no SSH required — critical security improvement).
-Authenticates via Workload Identity Federation (WIF annotation on provisioning KSA).
-
-**`ResourcePoolService`** — CRUD for resource pools; lookup by ID and tag filter.
-JOIN with gcp_pool_config when provider is gcp
-
-**`PoolSelectorService`** — pool selection given a lease request. v1: priority-ordered tag
-matching. Designed to extend to scoring (cost, utilization) in a future item.
-
-Design intended to mirror Kubernetes node selectors.
-
-**`ProviderRegistry`** — maps `pool.provider` string to `ComputeProvider` instance.
-Constructed in DI container at startup.
-
-### Modified Service Classes
-
-**`LeaseService`** — calls `PoolSelectorService.select_pool(request)` before VM creation,
-then dispatches to the selected pool's provider. All existing Ansible calls route
-through `AnsibleProvider` unchanged.
-
-**`LeaseWatchdog`** — looks up the lease's pool on expiry, dispatches to the pool's
-provider for `destroy_vm`. Replaces hardcoded Ansible teardown dispatch.
-
-**`mockMode` flag** — becomes a `MockProvider` registered in `ProviderRegistry` rather
-than a service-level branch. Helm values flag preserved for backwards compatibility.
-
-### New Pool Controller
-
-All gated by existing admin API key auth.
-
-`POST /api/v1/pools` — create a resource pool. Body: pool table fields.
-
-`GET /api/v1/pools` — list pools with tags and host counts.
-
-### GCP Provider e2e Test Scenario
-
-A new e2e scenario (addition to `integration-tests/tests/e2e/`) validates the GCP
-provider without mock provisioning:
-
-1. `POST /api/v1/pools` — create a `gce_vm` pool.
-2. `POST /system/lease-watchdog/pause` — hold expiry for inspection.
-3. Full storefront → negotiate → settle → provisioning flow (reuse existing helpers).
-4. Poll `GET /api/v1/jobs/{id}` until GCE VM is running (90-second timeout).
-5. Verify SSH credentials returned; attempt SSH to GCE external IP.
-6. `POST /system/lease-watchdog/resume` — trigger expiry.
-7. Poll until lease `expired`; verify GCE instance deleted via Compute API.
-
-This scenario validates the watchdog pause/resume admin endpoints, that GCPComputeProvider
-creates real VMs, and that teardown is Compute-API-based (no SSH key required on the VM).
 
 ---
 
