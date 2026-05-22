@@ -86,6 +86,9 @@ class MultiRegistryClient:
         self._timeout = timeout
         # Per-URL bearer tokens. URLs without an entry get no
         # Authorization header on their underlying RegistryClient.
+        # Look up via the URL-normalizing helper so trailing-slash and
+        # case mismatches between [registry] urls and [registry.auth]
+        # keys don't silently drop the token.
         self._auth: dict[str, str] = dict(auth or {})
 
     @property
@@ -93,8 +96,9 @@ class MultiRegistryClient:
         return list(self._urls)
 
     async def __aenter__(self) -> "MultiRegistryClient":
+        from service.registry_url import lookup_registry_auth
         for url in self._urls:
-            client = RegistryClient(url, api_key=self._auth.get(url))
+            client = RegistryClient(url, api_key=lookup_registry_auth(self._auth, url))
             await client.__aenter__()
             self._clients.append(client)
         return self

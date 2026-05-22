@@ -252,18 +252,28 @@ def verify_registration_signature(
 
 
 def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
-    """Find agent by ID (supports canonical ID format)"""
-    
-    # Try canonical ID (exact match)
+    """Find agent by ID.
+
+    Accepts three input shapes:
+      1. Full ERC-8004 canonical ID (``eip155:<chain>:<registry>:<n>``) —
+         exact match.
+      2. Same canonical shape with a different-cased registry address —
+         re-parsed and looked up by components.
+      3. Bare numeric ``onchain_agent_id`` — composed with the registry's
+         configured ``chain_id`` and ``identity_registry_address`` and
+         looked up by components. This makes URL-encoded canonical IDs
+         optional in the common single-chain-per-registry deployment.
+    """
+
+    # 1. Try canonical ID (exact match)
     agent = db.query(Agent).filter(Agent.agent_id == agent_id).first()
     if agent:
         return agent
-    
-    # Fallback: parse canonical ID and lookup by components
-    # This handles case where canonical ID format differs (e.g., address case)
+
+    # 2. Parse canonical and look up by components — handles address-case
+    # differences between the URL and what's stored.
     try:
         chain_id, identity_registry, onchain_agent_id = parse_erc8004_canonical_id(agent_id)
-        # Normalize identity_registry to lowercase for comparison
         identity_registry_lower = identity_registry.lower()
         agent = db.query(Agent).filter(
             and_(
@@ -272,9 +282,31 @@ def find_agent_by_id(db: Session, agent_id: str) -> Optional[Agent]:
                 Agent.onchain_agent_id == onchain_agent_id
             )
         ).first()
-        return agent
+        if agent:
+            return agent
     except ValueError:
-        return None
+        pass
+
+    # 3. Bare numeric fallback. A registry indexes one (chain, registry)
+    # tuple, so onchain_agent_id alone is effectively unique. Construct
+    # the canonical form from the registry's config and retry.
+    if agent_id.isdigit():
+        try:
+            from src.config import settings  # local import to avoid cycles
+            onchain_agent_id_int = int(agent_id)
+            agent = db.query(Agent).filter(
+                and_(
+                    Agent.chain_id == settings.chain_id,
+                    Agent.identity_registry == settings.identity_registry_address.lower(),
+                    Agent.onchain_agent_id == onchain_agent_id_int,
+                )
+            ).first()
+            if agent:
+                return agent
+        except (ValueError, ImportError):
+            pass
+
+    return None
 
 
 def order_to_dict(listing: Listing) -> dict:

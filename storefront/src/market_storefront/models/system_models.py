@@ -83,11 +83,25 @@ class ReleaseReservationsResponse(BaseModel):
     resource_ids: list[str]
 
 
+class ImportRowError(BaseModel):
+    """One failed CSV row in an /admin/portfolio/resources/import response.
+
+    `row_number` is 1-based and matches what a spreadsheet shows
+    (header = 1, first data row = 2). `errors` is the list of validation
+    messages from the importer for that row.
+    """
+    row_number: int
+    resource_id: str | None = None
+    resource_type: str | None = None
+    errors: list[str]
+
+
 class ImportResourcesResponse(BaseModel):
     """Response for POST /api/v1/admin/portfolio/resources/import."""
     imported_count: int
     failed_count: int
     total_rows: int
+    errors: list[ImportRowError] = []
 
 
 class StageEventResponse(BaseModel):

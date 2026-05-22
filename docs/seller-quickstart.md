@@ -112,17 +112,13 @@ A larger sample is at
 ## 4. Bring it up
 
 `compose/seller.yml` bundles the storefront and provisioning services.
-It expects three operator-provided files: `config.seller.toml`,
-`resources.csv`, and (live mode only) `keys/id_ed25519`. Pass absolute
-paths via env to avoid docker compose's relative-path-resolves-from-the-
-compose-file gotcha:
+For mock mode it needs two operator-provided files: `config.seller.toml`
+and `resources.csv`. Pass absolute paths via env to avoid docker compose's
+relative-path-resolves-from-the-compose-file gotcha:
 
 ```bash
-mkdir -p keys && touch keys/id_ed25519 && chmod 600 keys/id_ed25519
-
 SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
 SELLER_RESOURCES_CSV="$PWD/resources.csv" \
-SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
 docker compose -f compose/seller.yml up -d
 
 docker compose -f compose/seller.yml logs -f seller-agent
@@ -193,19 +189,30 @@ touching libvirt. To create real VMs:
 
    ```bash
    make build-seller
-   docker compose -f compose/seller.yml up -d --force-recreate seller-provisioning
    ```
 
-4. KVM host prerequisites: ansible user has passwordless sudo
+4. Bring the stack up with the live overlay — adds the SSH-key
+   bind-mount that mock mode doesn't need:
+
+   ```bash
+   SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
+   SELLER_RESOURCES_CSV="$PWD/resources.csv" \
+   SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
+   docker compose -f compose/seller.yml -f compose/seller.live.yml \
+     up -d --force-recreate seller-provisioning
+   ```
+
+5. KVM host prerequisites: ansible user has passwordless sudo
    (`sudo -n true && echo ok`), is in the `libvirt` group, and
    `libvirtd` is running. The playbook handles cloud-init, virt-install,
    and SSH port-forward NAT.
 
-5. Smoke-test reachability:
+6. Smoke-test reachability:
 
    ```bash
-   docker compose -f compose/seller.yml exec seller-provisioning \
-     ansible -i /opt/compute-provisioning-iac/ansible/inventory/hosts \
+   docker compose -f compose/seller.yml -f compose/seller.live.yml exec \
+     seller-provisioning ansible \
+     -i /opt/compute-provisioning-iac/ansible/inventory/hosts \
      <your_host_alias> -m ping
    ```
 

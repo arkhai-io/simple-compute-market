@@ -7,6 +7,10 @@
 #   2. seller-provisioning   — runs ansible to create/destroy VMs on the
 #                              seller's KVM host (arkhai:provisioning).
 #
+# This base file works in mock mode (no SSH key needed). For real KVM
+# provisioning add `-f compose/seller.live.yml` which mounts the SSH key
+# the ansible runner uses to reach the host. See docs/seller-quickstart.md §6.
+#
 # Operator-provided files (paths overridable via env):
 #   ./config.seller.toml     — seller config; see docs/seller-quickstart.md.
 #                              The provisioning service reads `admin_api_key`
@@ -15,9 +19,6 @@
 #                              one place.
 #   ./resources.csv          — inventory CSV. Starter:
 #                              storefront/src/market_storefront/data/resources.sample.csv
-#   ./keys/id_ed25519        — SSH key the provisioning service uses to reach
-#                              the KVM host. Pubkey must be authorized on the
-#                              host for the ansible user.
 #
 # Required images (run `make build-seller` from the repo root):
 #   arkhai:storefront
@@ -27,15 +28,37 @@
 # or point [registry] urls in the seller TOML at an external indexer.
 #
 # Usage:
-#   docker compose -f compose/seller.yml up -d
+#   docker compose -f compose/seller.yml up -d                          # mock mode
+#   docker compose -f compose/seller.yml -f compose/seller.live.yml up -d   # live KVM
 #   docker compose -f compose/seller.yml logs -f seller-agent
 #
 # Environment overrides (all optional):
 #   SELLER_CONFIG_PATH       — path to seller TOML (default: ./config.seller.toml)
 #   SELLER_RESOURCES_CSV     — path to inventory CSV (default: ./resources.csv)
-#   SELLER_SSH_PRIVKEY       — path to KVM-host SSH privkey (default: ./keys/id_ed25519)
 
 services:
+  # One-shot init container that chowns the named volumes to the runtime
+  # user (uid 1000, the appuser baked into both images). Docker creates
+  # fresh named volumes as root-owned; without this, the storefront's
+  # first start would crash with `sqlite3.OperationalError: unable to
+  # open database file` and the provisioning service's SQLite would
+  # likewise be unwritable. Exits successfully after one run; the
+  # restart: "no" + depends_on:service_completed_successfully wiring
+  # below makes the runtime services wait for it on every up but it's
+  # idempotent (chown -R is a no-op on already-correct ownership).
+  seller-data-init:
+    image: arkhai:storefront
+    user: "0:0"
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        mkdir -p /agent-data /provisioning-data &&
+        chown -R 1000:1000 /agent-data /provisioning-data
+    volumes:
+      - seller-agent-data:/agent-data
+      - seller-provisioning-data:/provisioning-data
+    restart: "no"
+
   seller-agent:
     image: arkhai:storefront
     ports:
@@ -48,6 +71,9 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
+    depends_on:
+      seller-data-init:
+        condition: service_completed_successfully
     volumes:
       - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
       - ${SELLER_RESOURCES_CSV:-./resources.csv}:/app/resources.csv:ro
@@ -61,6 +87,9 @@ services:
     image: arkhai:provisioning
     ports:
       - "8081:8081"
+    depends_on:
+      seller-data-init:
+        condition: service_completed_successfully
     environment:
       - ACTIVE_PROFILES=seller
     volumes:
@@ -68,7 +97,6 @@ services:
       # service reads `admin_api_key` from it so the operator writes the
       # admin key in exactly one file.
       - ${SELLER_CONFIG_PATH:-./config.seller.toml}:/etc/arkhai/storefront.toml:ro
-      - ${SELLER_SSH_PRIVKEY:-./keys/id_ed25519}:/home/appuser/.ssh/id_ed25519:ro
       - seller-provisioning-data:/app/data
     networks:
       - seller

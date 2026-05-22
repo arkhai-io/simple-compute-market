@@ -26,13 +26,22 @@ reinit: ## Force-reinstall internal wheels without bumping versions. Use after m
 	--reinstall-package arkhai-storefront-client \
 	--reinstall-package arkhai-registry-client
 
-build: reinit build-images
+# build deliberately does NOT depend on reinit. reinit drives a host-side
+# `uv sync` that resolves the [rl] extra (incl. torch) across whatever
+# uv considers "supported platforms" for this project — on x86_64 Linux
+# that decides no torch wheel exists and aborts, blocking the Docker
+# build that doesn't need torch at all (INSTALL_RL_DEPS=false). The
+# Docker build has its own self-contained `uv sync --find-links /dist`
+# inside the builder stage; the host venv isn't on its critical path.
+# Run `make reinit` explicitly when iterating on internal wheels in the
+# local venv.
+build: build-images
 
 build-images:
 	docker build -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 
-build-no-cache: reinit ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
+build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
 	docker build --no-cache -f Dockerfile --build-arg INSTALL_RL_DEPS=false -t ${IMAGE_NAME}:${IMAGE_TAG} ..
 	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
 

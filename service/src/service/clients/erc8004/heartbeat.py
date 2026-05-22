@@ -253,8 +253,12 @@ async def start_agent_heartbeat(config: dict) -> Optional[str]:
         agent_id=agent_id,
     )
 
+    # Look up the per-URL bearer via the URL-normalizing helper so
+    # trailing-slash or case mismatches between [registry] urls and
+    # [registry.auth] keys don't silently drop the token.
+    from service.registry_url import lookup_registry_auth
     for url in indexer_urls:
-        token = indexer_auth.get(url) if isinstance(indexer_auth, dict) else None
+        token = lookup_registry_auth(indexer_auth, url) if isinstance(indexer_auth, dict) else None
         asyncio.create_task(heartbeat_loop(canonical_id, url, agent_priv_key, token))
     logger.info(
         "[HEARTBEAT] Started heartbeat for %s across %d registry/registries: %s",

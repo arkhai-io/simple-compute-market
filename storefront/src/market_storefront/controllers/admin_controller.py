@@ -18,6 +18,7 @@ from market_storefront.middleware.admin_auth import require_admin_key
 from market_storefront.models.system_models import (
     AdminPauseResponse,
     ImportResourcesResponse,
+    ImportRowError,
     ReleaseReservationsResponse,
     ResourcePatchRequest,
     ResourcePatchResponse,
@@ -76,7 +77,9 @@ class AdminController:
 
         The CSV must contain at minimum a ``resource_type`` column. Rows that
         fail schema validation are counted in ``failed_count`` and skipped
-        without rolling back successfully imported rows.
+        without rolling back successfully imported rows. The first failing
+        rows surface via ``errors[]`` (capped at 50) so the caller doesn't
+        have to attach a debugger to see what went wrong.
 
         Example::
 
@@ -102,10 +105,31 @@ class AdminController:
             report.get("total_rows", 0),
             file.filename,
         )
+        # Surface up to 50 per-row failures so operators can see what's
+        # wrong without shell access. The full report.rows[] is also
+        # logged below, capped lower per line.
+        failed_rows = [row for row in report.get("rows") or [] if not row.get("imported")]
+        errors_payload = [
+            ImportRowError(
+                row_number=int(row.get("row_number") or 0),
+                resource_id=row.get("resource_id"),
+                resource_type=row.get("resource_type"),
+                errors=list(row.get("errors") or []),
+            )
+            for row in failed_rows[:50]
+        ]
+        for row in failed_rows[:20]:
+            logger.warning(
+                "[ADMIN] CSV row %s (%s) failed: %s",
+                row.get("row_number"),
+                row.get("resource_id") or "<no id>",
+                "; ".join(row.get("errors") or []),
+            )
         return ImportResourcesResponse(
             imported_count=report.get("imported_count", 0),
             failed_count=report.get("failed_count", 0),
             total_rows=report.get("total_rows", 0),
+            errors=errors_payload,
         )
 
     @router.get(
