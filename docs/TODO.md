@@ -120,14 +120,6 @@ On the local Anvil state, `identityRegistry.ownerOf(agent_id).call()` returns a 
 
 ---
 
-### `market-storefront config init-user` writes to the wrong file
-
-`storefront/src/market_storefront/groups/config.py` imports `user_config_file` from `service.config_loader` and writes its scaffold to `$XDG_CONFIG_HOME/arkhai/config.toml`. But the storefront server's dynaconf loader (`storefront/src/market_storefront/utils/config.py`) reads from `storefront_config_files()` → `$XDG_CONFIG_HOME/arkhai/storefront.toml`. Net effect: the seller-flavored scaffold lands at a path the server never reads, and on a machine that also has the buyer CLI installed, `init-user` would clobber the buyer's `config.toml`.
-
-**Fix:** point the storefront's `init-user` (and `path`/`show`/`set`/`get`) at the first entry of `storefront_config_files()` instead of `user_config_file()`. The buyer's CLI keeps using `user_config_file()` — they're correctly distinct.
-
----
-
 ## Registry Service
 
 ### Shared marketplace infrastructure (not per-node)

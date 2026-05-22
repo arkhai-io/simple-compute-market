@@ -1,7 +1,9 @@
-"""`market-storefront config` — inspect or edit the user config.toml.
+"""`market-storefront config` — inspect or edit the user storefront.toml.
 
 Mirrors the buyer-side `market config` surface: path / show / get /
-set / init-user. The init-user template is seller-flavored.
+set / init-user. Operates on `$XDG_CONFIG_HOME/arkhai/storefront.toml`
+(distinct from the buyer's `config.toml`), so a host that runs both
+buyer and seller keeps its two roles' state separate.
 """
 
 from __future__ import annotations
@@ -12,10 +14,11 @@ import typer
 
 from service.config_loader import (
     get_dotted,
+    load_storefront_config,
     load_user_config,
     set_dotted,
+    storefront_config_file,
     user_config_dir,
-    user_config_file,
     write_user_config,
 )
 
@@ -25,8 +28,8 @@ config_app = typer.Typer(no_args_is_help=True)
 
 @config_app.command("path")
 def config_path() -> None:
-    """Print the path of the user config.toml (whether or not it exists)."""
-    p = user_config_file()
+    """Print the path of the storefront's user storefront.toml."""
+    p = storefront_config_file()
     typer.echo(str(p))
     if not p.exists():
         typer.secho(
@@ -42,15 +45,15 @@ def config_show(
         help="Print the TOML file verbatim instead of the loaded mapping.",
     ),
 ) -> None:
-    """Show the current user config."""
-    p = user_config_file()
+    """Show the current storefront config."""
+    p = storefront_config_file()
     if not p.exists():
-        typer.secho(f"No user config at {p}.", fg=typer.colors.YELLOW)
+        typer.secho(f"No storefront config at {p}.", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     if raw:
         typer.echo(p.read_text())
         return
-    cfg = load_user_config(p)
+    cfg = load_storefront_config()
     typer.echo(json.dumps(cfg, indent=2, sort_keys=True))
 
 
@@ -59,7 +62,7 @@ def config_set(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'seller.port'."),
     value: str = typer.Argument(..., help="Value to assign (coerced to int/float/bool when possible)."),
 ) -> None:
-    """Set a single value in the user config.toml.
+    """Set a single value in the storefront's storefront.toml.
 
     Values are coerced: 'true' / 'false' → bool, integer-looking strings → int,
     float-looking strings → float, otherwise left as strings. Use quotes around
@@ -78,7 +81,7 @@ def config_set(
             except ValueError:
                 coerced = value
 
-    path = user_config_file()
+    path = storefront_config_file()
     doc = load_user_config(path)
     set_dotted(doc, key, coerced)
     written = write_user_config(doc, path)
@@ -89,12 +92,12 @@ def config_set(
 def config_get(
     key: str = typer.Argument(..., help="Dotted config key, e.g. 'seller.port'."),
 ) -> None:
-    """Print the value of a single config key from the user config.toml."""
-    doc = load_user_config()
+    """Print the value of a single config key from the storefront's storefront.toml."""
+    doc = load_storefront_config()
     val = get_dotted(doc, key)
     if val is None:
         typer.secho(
-            f"Key {key!r} not set in {user_config_file()}.",
+            f"Key {key!r} not set in {storefront_config_file()}.",
             fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1)
@@ -184,16 +187,16 @@ _INIT_USER_TEMPLATE = """\
 def config_init_user(
     overwrite: bool = typer.Option(
         False, "--overwrite",
-        help="Replace an existing config.toml instead of refusing.",
+        help="Replace an existing storefront.toml instead of refusing.",
     ),
 ) -> None:
-    """Scaffold the user config.toml with placeholders for every known key.
+    """Scaffold the storefront's storefront.toml with placeholders for every known key.
 
     Writes only the commented-out skeleton so nothing breaks on first
     load. Fill in the values you need; the resolver treats missing keys
     as 'fall back to default', so a partial file is fine.
     """
-    path = user_config_file()
+    path = storefront_config_file()
     if path.exists() and not overwrite:
         typer.secho(
             f"{path} already exists. Pass --overwrite to replace it.",

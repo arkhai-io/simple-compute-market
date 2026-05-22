@@ -119,6 +119,25 @@ def user_config_files() -> list[Path]:
     return [base / "config.toml", base / "config.secrets.toml"]
 
 
+def storefront_config_file() -> Path:
+    """Return the path to the storefront's primary ``storefront.toml``.
+
+    Mirrors :func:`user_config_file` for the storefront's own file pair
+    (``storefront.toml`` + ``storefront.secrets.toml``). The storefront has
+    a separate identity and role-scoped knobs, so it gets its own file
+    rather than reusing the buyer's ``config.toml``. On a host that runs
+    both buyer and seller, this prevents one role's CLI scaffold from
+    clobbering the other's.
+
+    Honours :func:`set_user_config_path` so ``--config PATH`` on the
+    storefront CLI applies here too.
+    """
+    override = _config_path_override
+    if override is not None:
+        return override
+    return user_config_dir() / "storefront.toml"
+
+
 def storefront_config_files() -> list[Path]:
     """Return the ordered list of TOML files the storefront loader merges.
 
@@ -141,6 +160,21 @@ def storefront_config_files() -> list[Path]:
         except (OSError, RuntimeError):
             return []
     return [base / "storefront.toml", base / "storefront.secrets.toml"]
+
+
+def load_storefront_config() -> dict[str, Any]:
+    """Read the storefront's layered TOML config as a single merged dict.
+
+    Mirrors :func:`load_user_config` (no-path form) but walks
+    :func:`storefront_config_files` instead of :func:`user_config_files`.
+    Use this from the storefront's ``config show`` / ``config get`` CLI
+    commands so they reflect what the storefront server actually reads,
+    not the buyer's layered files.
+    """
+    merged: dict[str, Any] = {}
+    for p in storefront_config_files():
+        _deep_merge(merged, _read_one(p))
+    return merged
 
 
 # Set by ``set_user_config_path`` from a CLI ``--config`` callback so

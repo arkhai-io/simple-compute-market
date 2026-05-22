@@ -170,6 +170,54 @@ def test_user_config_files_collapses_to_override(monkeypatch, tmp_path):
         config_loader.set_user_config_path(None)
 
 
+# ---------------------------------------------------------------------------
+# storefront_config_file / load_storefront_config — distinct from the
+# buyer's user_config_file so the two roles' state on one host stays
+# separate. `market-storefront config init-user` previously wrote to
+# config.toml and so was silently scaffolding into the buyer's file.
+# ---------------------------------------------------------------------------
+
+
+def test_storefront_config_file_nests_under_arkhai_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.storefront_config_file() == tmp_path / "arkhai" / "storefront.toml"
+
+
+def test_storefront_config_file_is_distinct_from_buyer(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.storefront_config_file() != config_loader.user_config_file()
+
+
+def test_storefront_config_file_honors_override(tmp_path):
+    explicit = tmp_path / "explicit.toml"
+    config_loader.set_user_config_path(explicit)
+    try:
+        assert config_loader.storefront_config_file() == explicit
+    finally:
+        config_loader.set_user_config_path(None)
+
+
+def test_load_storefront_config_walks_storefront_files(monkeypatch, tmp_path):
+    """`load_storefront_config` reads `storefront.toml` + `storefront.secrets.toml`
+    and ignores the buyer's `config.toml` even when both pairs exist side by side."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cfg_dir = tmp_path / "arkhai"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.toml").write_text('[seller]\nagent_id = "from-buyer-file"\n')
+    (cfg_dir / "storefront.toml").write_text('[seller]\nagent_id = "from-base"\n')
+    (cfg_dir / "storefront.secrets.toml").write_text('[wallet]\nprivate_key = "0xkey"\n')
+
+    cfg = config_loader.load_storefront_config()
+
+    assert cfg["seller"]["agent_id"] == "from-base"        # not "from-buyer-file"
+    assert cfg["wallet"]["private_key"] == "0xkey"          # secrets layer merged
+
+
+def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert config_loader.load_storefront_config() == {}
+
+
 def test_deep_merge_recurses_into_nested_tables():
     base = {
         "seller": {
