@@ -2,7 +2,7 @@
 
 > **Purpose:** This document is intended to initialize AI-assisted development sessions with accurate, up-to-date context about the repository structure, service responsibilities, data flows, and known problem areas. Treat it as a living document — update it as understanding deepens.
 >
-> **Pending architectural work** lives in [`PLANNED-REWORK.md`](PLANNED-REWORK.md). This file is for current-state context — what the system is and why it's shaped the way it is — not for tracking todos.
+> **Pending architectural work** lives in [`TODO.md`](TODO.md). This file is for current-state context — what the system is and why it's shaped the way it is — not for tracking todos.
 
 ---
 
