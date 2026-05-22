@@ -94,8 +94,10 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 [registry]
 # Where to publish listings. One URL = single indexer.
 # Multiple = fan out to several indexers.
-urls                      = ["http://<INDEXER_HOST>:8080"]
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+urls = ["http://<INDEXER_HOST>:8080"]
+# identity_registry_address — defaults to the canonical CREATE2 vanity
+# address for the chain.name above. Set this only if you deployed the
+# ERC-8004 registry to a non-canonical address.
 
 [registry.auth]
 # If the indexer requires API keys (REGISTRY_REQUIRE_API_KEY=true; see
@@ -103,15 +105,16 @@ identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 "http://<INDEXER_HOST>:8080" = "your-shared-token"
 
 [seller]
-agent_id            = "seller_one"             # any Python-identifier string (no dashes!)
-port                = 8001
-base_url            = "http://<PUBLIC_IP>:8001/"
-db_path             = "./src/market_storefront/data/sell-agent/agent.db"
-log_file_path       = "./logs/seller.log"
-resources_csv_path  = "/app/resources.csv"
-admin_api_key       = "rehearsal-admin-key"
-# Pin AFTER your first successful registration — see §5 below.
-# onchain_agent_id  = "5955"
+agent_id      = "seller_one"             # any Python-identifier string (no dashes!)
+port          = 8001
+base_url      = "http://<PUBLIC_IP>:8001/"
+db_path       = "./src/market_storefront/data/sell-agent/agent.db"
+log_file_path = "./logs/seller.log"
+admin_api_key = "rehearsal-admin-key"
+# resources_csv_path — only set if the inventory CSV is mounted somewhere
+# other than the container's /app/resources.csv, which is auto-discovered.
+# Pin onchain_agent_id AFTER your first successful registration — see §5.
+# onchain_agent_id = "5955"
 
 [seller.provisioning]
 service_url   = "http://seller-provisioning:8081"
@@ -153,7 +156,9 @@ A few non-obvious points:
 
 This is what the seller offers. One row = one slice the storefront can
 sell. The compose mounts whatever file you put at `./resources.csv` (or
-the path in `SELLER_RESOURCES_CSV`) into the container at `/app/resources.csv`.
+the path in `SELLER_RESOURCES_CSV`) into the container at `/app/resources.csv`,
+and the storefront auto-seeds from that path on first start — no
+`resources_csv_path` entry needed in your TOML.
 
 A starter with a few example rows is in the tree at
 [`storefront/src/market_storefront/data/resources.sample.csv`](../storefront/src/market_storefront/data/resources.sample.csv);
@@ -452,7 +457,8 @@ In every seller's `[registry]` block:
 ```toml
 [registry]
 urls = ["http://<INDEXER_HOST>:8080"]
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+# identity_registry_address defaults from chain.name; set only for
+# non-canonical deployments.
 
 [registry.auth]
 "http://<INDEXER_HOST>:8080" = "<api_key>"

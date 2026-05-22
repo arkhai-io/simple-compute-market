@@ -128,7 +128,9 @@ _INIT_USER_TEMPLATE = """\
 
 [registry]
 # url = "http://localhost:8080"
-# identity_registry_address = "0x..."          # ERC-8004 registry contract
+# identity_registry_address = "0x..."          # ERC-8004 IdentityRegistry. Auto-defaults from chain.name
+                                                # to the canonical CREATE2 vanity address; set only for
+                                                # non-canonical deployments.
 
 # ---------------------------------------------------------------------------
 # Seller — required to run `market-storefront serve`.

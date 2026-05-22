@@ -373,6 +373,50 @@ def alkahest_address_config_path(flag: Optional[str] = None,
     )
 
 
+# Canonical ERC-8004 v0.1 IdentityRegistry CREATE2 vanity address. The
+# alkahest deployer uses the same salt across every chain it deploys to,
+# so for the canonical deployment this address is the same on every chain.
+# Custom deployments override via ``[registry] identity_registry_address``
+# in the TOML.
+_CANONICAL_IDENTITY_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+KNOWN_IDENTITY_REGISTRY: dict[str, str] = {
+    "base_sepolia":     _CANONICAL_IDENTITY_REGISTRY,
+    "ethereum_sepolia": _CANONICAL_IDENTITY_REGISTRY,
+    "anvil":            _CANONICAL_IDENTITY_REGISTRY,
+}
+
+
+def identity_registry_address(
+    flag: Optional[str] = None,
+    config: Optional[dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolve the ERC-8004 IdentityRegistry contract address.
+
+    Hierarchy: flag > ``IDENTITY_REGISTRY_ADDRESS`` env > TOML
+    ``registry.identity_registry_address`` > per-chain known default
+    (looked up by ``chain.name``).
+
+    The canonical deployment uses a CREATE2 vanity address that's the
+    same on every chain — so for the standard ``base_sepolia`` /
+    ``ethereum_sepolia`` / ``anvil`` setups the user doesn't need to
+    set the address explicitly. Custom deployments override via the
+    TOML key.
+
+    Returns ``None`` only when neither resolution nor chain-name
+    lookup yields an address — callers decide whether that's fatal.
+    """
+    resolved = resolve_value(
+        flag=flag,
+        env_name="IDENTITY_REGISTRY_ADDRESS",
+        toml_path="registry.identity_registry_address",
+        config=config,
+    )
+    if resolved:
+        return resolved
+    chain = chain_name(config=config)
+    return KNOWN_IDENTITY_REGISTRY.get(chain)
+
+
 def registry_urls(
     config: Optional[dict[str, Any]] = None,
 ) -> list[str]:

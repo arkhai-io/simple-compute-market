@@ -33,7 +33,10 @@ from pathlib import Path
 from typing import Any
 
 from dynaconf import Dynaconf
-from service.config_loader import storefront_config_files  # type: ignore[import-not-found]
+from service.config_loader import (  # type: ignore[import-not-found]
+    KNOWN_IDENTITY_REGISTRY,
+    storefront_config_files,
+)
 from service.clients.erc8004.blockchain import (  # type: ignore[import-not-found]
     rpc_url_for_http_provider,
 )
@@ -51,7 +54,7 @@ _DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "settings.toml"
 
 def _build_settings() -> Dynaconf:
     overlays = [str(p) for p in storefront_config_files() if Path(p).exists()]
-    return Dynaconf(
+    s = Dynaconf(
         settings_file=[str(_DEFAULTS_FILE)],
         includes=overlays,
         envvar_prefix="STOREFRONT",
@@ -60,6 +63,16 @@ def _build_settings() -> Dynaconf:
         environments=False,
         merge_enabled=True,
     )
+    # Inject per-chain default for the ERC-8004 IdentityRegistry when the
+    # operator hasn't set one. The canonical CREATE2 deployment uses the
+    # same vanity address on every chain, so for the standard chain.name
+    # values the operator gets a working default with no config required.
+    if not s.get("registry.identity_registry_address"):
+        chain = str(s.get("chain.name", "") or "")
+        default = KNOWN_IDENTITY_REGISTRY.get(chain)
+        if default:
+            s.set("registry.identity_registry_address", default)
+    return s
 
 
 settings: Dynaconf = _build_settings()

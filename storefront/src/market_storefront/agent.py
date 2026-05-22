@@ -308,30 +308,32 @@ async def _startup_tasks():
     # which crashes the startup and surfaces as a clear pod CrashLoopBackOff.
     await _ensure_agent_identity()
 
-    # Seed the resources table on startup if it is empty.
-    # Source priority: inline CSV content (Helm Secret injection) > file path (compose/local).
+    # Seed the resources table on startup if it is empty. Source priority:
+    # inline CSV content (Helm Secret injection) > explicit resources_csv_path
+    # > auto-discovery of /app/resources.csv (compose bind-mount default).
     # Must run before the resource poller so the poller has rows to query.
-    if settings.resources_csv_inline or settings.resources_csv_path:
-        import market_storefront.container as _container
-        try:
-            result = await _container.resolved_system_service.seed_resources_if_empty(
-                csv_inline=settings.resources_csv_inline,
-                csv_path=settings.resources_csv_path,
+    import market_storefront.container as _container
+    try:
+        result = await _container.resolved_system_service.seed_resources_if_empty(
+            csv_inline=settings.resources_csv_inline,
+            csv_path=settings.resources_csv_path,
+        )
+        if result["seeded"]:
+            logger.info(
+                "[STARTUP] Seeded %d resource(s) from %s",
+                result["imported_count"],
+                result["source"],
             )
-            if result["seeded"]:
-                logger.info(
-                    "[STARTUP] Seeded %d resource(s) from %s",
-                    result["imported_count"],
-                    result["source"],
-                )
-            else:
-                logger.info(
-                    "[STARTUP] Resource seeding skipped — %d resource(s) already present",
-                    result["imported_count"],
-                )
-        except Exception as exc:
-            logger.error("[STARTUP] Resource seeding failed: %s", exc)
-            raise
+        elif result["source"] is None:
+            logger.info("[STARTUP] No resource source configured — starting with empty inventory")
+        else:
+            logger.info(
+                "[STARTUP] Resource seeding skipped — %d resource(s) already present",
+                result["imported_count"],
+            )
+    except Exception as exc:
+        logger.error("[STARTUP] Resource seeding failed: %s", exc)
+        raise
 
     # Probe configured contract addresses for bytecode. Logs a warning
     # naming any address that has nothing deployed at it on the

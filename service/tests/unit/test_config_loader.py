@@ -218,6 +218,52 @@ def test_load_storefront_config_returns_empty_when_neither_file_present(monkeypa
     assert config_loader.load_storefront_config() == {}
 
 
+# ---------------------------------------------------------------------------
+# identity_registry_address — chain-name fallback to the canonical CREATE2
+# vanity address. Saves users from having to copy a fixed hex string into
+# every config for the standard chains.
+# ---------------------------------------------------------------------------
+
+
+def test_identity_registry_address_uses_explicit_toml_value():
+    cfg = {"registry": {"identity_registry_address": "0xCUSTOM"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(config=cfg) == "0xCUSTOM"
+
+
+def test_identity_registry_address_falls_back_to_chain_name_default():
+    """No address in config → use canonical CREATE2 vanity for known chain."""
+    cfg = {"chain": {"name": "base_sepolia"}}
+    canonical = config_loader.KNOWN_IDENTITY_REGISTRY["base_sepolia"]
+    assert config_loader.identity_registry_address(config=cfg) == canonical
+
+
+def test_identity_registry_address_known_chains_all_match():
+    """base_sepolia, ethereum_sepolia, and anvil all share the canonical
+    CREATE2 deployment, so the default should be the same address."""
+    addresses = {
+        chain: config_loader.identity_registry_address(config={"chain": {"name": chain}})
+        for chain in ("base_sepolia", "ethereum_sepolia", "anvil")
+    }
+    assert len(set(addresses.values())) == 1
+
+
+def test_identity_registry_address_unknown_chain_returns_none():
+    cfg = {"chain": {"name": "some_random_chain"}}
+    assert config_loader.identity_registry_address(config=cfg) is None
+
+
+def test_identity_registry_address_flag_overrides_everything(monkeypatch):
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
+    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(flag="0xFLAG", config=cfg) == "0xFLAG"
+
+
+def test_identity_registry_address_env_beats_toml(monkeypatch):
+    monkeypatch.setenv("IDENTITY_REGISTRY_ADDRESS", "0xENV")
+    cfg = {"registry": {"identity_registry_address": "0xTOML"}, "chain": {"name": "base_sepolia"}}
+    assert config_loader.identity_registry_address(config=cfg) == "0xENV"
+
+
 def test_deep_merge_recurses_into_nested_tables():
     base = {
         "seller": {

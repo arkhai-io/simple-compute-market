@@ -85,7 +85,7 @@ def _run_resume_from(
     buyer_private_key: Optional[str],
     ssh_public_key: Optional[str],
     token_contract: Optional[str],
-    token_decimals: int,
+    token_decimals: Optional[int],
     rpc_url: Optional[str],
     chain_name: Optional[str],
     alkahest_addr_config: Optional[str],
@@ -317,9 +317,13 @@ def register(app: typer.Typer) -> None:
             help="ERC-20 token contract address used for payment. "
                  "Default: resolve 'MOCK' via the token registry.",
         ),
-        token_decimals: int = typer.Option(
-            18, "--token-decimals",
-            help="ERC-20 token decimals (default 18).",
+        token_decimals: Optional[int] = typer.Option(
+            None, "--token-decimals",
+            help="ERC-20 token decimals override. When omitted, decimals "
+                 "are resolved on chain via the token contract's "
+                 "decimals() view (and cached at "
+                 "$XDG_CACHE_HOME/arkhai/tokens/<chain_id>.json). "
+                 "Pass this only when you want to skip the RPC lookup.",
         ),
         chain_name: Optional[str] = typer.Option(
             None, "--chain-name",
@@ -484,7 +488,7 @@ def register(app: typer.Typer) -> None:
 
         tc = token_contract
         if not tc:
-            from ..common import resolve_default_token_address, resolve_chain_id
+            from ..common import resolve_default_token_address
             tc = resolve_default_token_address()
             if not tc:
                 typer.secho(
@@ -493,6 +497,10 @@ def register(app: typer.Typer) -> None:
                     err=True, fg=typer.colors.RED,
                 )
                 raise typer.Exit(2)
+        if token_decimals is None:
+            # Token resolved either from --token-contract or the config
+            # default; look up decimals on chain unless the user pinned them.
+            from ..common import resolve_chain_id
             from service.clients.token import resolve_token, TokenResolutionError
             try:
                 meta = resolve_token(

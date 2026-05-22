@@ -173,7 +173,7 @@ def resolve_chain_settings(
     chain_name: Optional[str],
     alkahest_addr_config: Optional[str],
     token_contract: Optional[str],
-    token_decimals: int,
+    token_decimals: Optional[int],
     require_ssh: bool = True,
 ) -> ChainSettings:
     """Resolve chain/token flags + config.toml fallbacks.
@@ -225,9 +225,9 @@ def resolve_chain_settings(
         raise typer.Exit(2)
 
     tc = token_contract
-    decimals = token_decimals
+    decimals: Optional[int] = token_decimals
     if not tc:
-        from ..common import resolve_default_token_address, resolve_chain_id
+        from ..common import resolve_default_token_address
         tc = resolve_default_token_address()
         if not tc:
             typer.secho(
@@ -236,14 +236,15 @@ def resolve_chain_settings(
                 err=True, fg=typer.colors.RED,
             )
             raise typer.Exit(2)
+    if decimals is None:
+        # No explicit --token-decimals — resolve on chain.
+        from ..common import resolve_chain_id
         from service.clients.token import resolve_token, TokenResolutionError
         try:
             meta = resolve_token(
                 tc, rpc_url=rpc, chain_id=resolve_chain_id(rpc),
             )
-            # Caller-supplied --token-decimals wins over the chain value.
-            if token_decimals == 18:  # the typer default
-                decimals = meta.decimals
+            decimals = meta.decimals
         except (TokenResolutionError, RuntimeError) as exc:
             typer.secho(
                 f"Could not resolve token {tc} on chain — pass "

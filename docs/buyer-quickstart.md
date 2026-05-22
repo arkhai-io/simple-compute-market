@@ -99,8 +99,10 @@ rpc_url  = "https://base-sepolia.infura.io/v3/<YOUR_KEY>"
 [registry]
 # One or more indexer URLs. The CLI discovers listings by fanning out
 # queries to every URL listed here.
-urls                      = ["http://<INDEXER_HOST>:8080"]
-identity_registry_address = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+urls = ["http://<INDEXER_HOST>:8080"]
+# identity_registry_address — defaults to the canonical CREATE2 vanity
+# address for the chain.name above. Set this only if you deployed the
+# ERC-8004 registry to a non-canonical address.
 
 [registry.auth]
 # Only needed for indexers running with REGISTRY_REQUIRE_API_KEY=true.
